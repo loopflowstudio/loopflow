@@ -36,7 +36,8 @@ fn hand_back_writes_nothing_when_a_claim_lacks_planning_facts() {
                 task.as_str(),
                 machine.as_str(),
             ],
-        ).unwrap();
+        )
+        .unwrap();
     };
     claim(&first);
     let scope = super::super::task_ownership::held_planning_scope_in(&conn, &machine).unwrap();

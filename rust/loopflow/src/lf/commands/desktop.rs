@@ -965,7 +965,9 @@ pub fn saved_layout(
 ) -> Result<serde_json::Value> {
     use loopflow_storage::work::selection::DashboardId;
     let Some(id) = work.strip_prefix("query:") else {
-        bail!("`lf desktop layout` reads a Dashboard (query:<id>); Desktop keeps each Work's panes");
+        bail!(
+            "`lf desktop layout` reads a Dashboard (query:<id>); Desktop keeps each Work's panes"
+        );
     };
     let reader = loopflow_execution::store::read_existing_registry()?
         .ok_or(loopflow_execution::store::StoreError::NotFound)

@@ -1683,6 +1683,29 @@ mod tests {
         rusqlite::Connection::open_in_memory().unwrap()
     }
 
+    /// Every migration before `unused_store_members`, which drops the released
+    /// columns these upgrade checks read back.
+    fn until_unused_store_members() -> &'static [Migration] {
+        let index = MIGRATIONS
+            .iter()
+            .position(|migration| name_of(migration) == "unused_store_members")
+            .expect("unused_store_members is registered");
+        &MIGRATIONS[..index]
+    }
+
+    fn apply_until_unused_store_members(conn: &rusqlite::Connection) {
+        super::_migration_transaction(conn, |conn, guards| {
+            apply_set(
+                &observers(),
+                &build(),
+                conn,
+                until_unused_store_members(),
+                guards,
+            )
+        })
+        .unwrap();
+    }
+
     #[test]
     fn finished_headless_sessions_upgrade_to_history_without_closing_live_runs() {
         let conn = open();
@@ -1980,7 +2003,13 @@ mod tests {
 
     fn apply_project_content_cut(conn: &rusqlite::Connection) -> crate::StoreResult<()> {
         super::_migration_transaction(conn, |conn, guards| {
-            apply_set(&observers(), &build(), conn, MIGRATIONS, guards)?;
+            apply_set(
+                &observers(),
+                &build(),
+                conn,
+                until_unused_store_members(),
+                guards,
+            )?;
             super::validate_persisted_json(conn)
         })
     }
@@ -2554,8 +2583,8 @@ mod tests {
             "/tests/fixtures/migrations/optional_task_pr_held_process.sql"
         )))
         .unwrap();
-        apply_sqlite(&conn).unwrap();
-        apply_pending_migrations(&observers(), &build(), &conn);
+        apply_until_unused_store_members(&conn);
+        apply_until_unused_store_members(&conn);
         assert_eq!(
             conn.query_row(
                 "SELECT planning_completed FROM tasks WHERE id='research'",
@@ -3234,7 +3263,14 @@ mod tests {
             "/tests/fixtures/migrations/native_terminal_input_released.sql"
         )))
         .unwrap();
-        apply_set(&observers(), &build(), &conn, MIGRATIONS, &mut Vec::new()).unwrap();
+        apply_set(
+            &observers(),
+            &build(),
+            &conn,
+            until_unused_store_members(),
+            &mut Vec::new(),
+        )
+        .unwrap();
         let owner: (i64, bool, Option<String>) = conn
             .query_row(
                 "SELECT started_at,viewed,native_input FROM processes WHERE id='retained-owner'",
@@ -3466,7 +3502,7 @@ mod tests {
             "/tests/fixtures/migrations/request_stops_released.sql"
         )))
         .unwrap();
-        apply_pending_migrations(&observers(), &build(), &conn);
+        apply_until_unused_store_members(&conn);
         let stop: (i64, Option<String>, Option<String>) = conn.query_row(
             "SELECT ship_stopped_at,ship_stopped_lf_process_id,ship_stopped_person FROM tasks WHERE issue_identifier='STOP-1'",
             [], |row| Ok((row.get(0)?,row.get(1)?,row.get(2)?)),
@@ -3483,7 +3519,7 @@ mod tests {
             "/tests/fixtures/migrations/task_workspace_teardown_released.sql"
         )))
         .unwrap();
-        apply_pending_migrations(&observers(), &build(), &conn);
+        apply_until_unused_store_members(&conn);
         let mut query = conn
             .prepare(
                 "SELECT id,close_requested FROM desktop_shells WHERE owner IS NOT NULL ORDER BY id",
@@ -3518,8 +3554,8 @@ mod tests {
             "/tests/fixtures/migrations/task_workspace_released.sql"
         )))
         .unwrap();
-        apply_pending_migrations(&observers(), &build(), &conn);
-        apply_pending_migrations(&observers(), &build(), &conn);
+        apply_until_unused_store_members(&conn);
+        apply_until_unused_store_members(&conn);
         let checkout: String = conn
             .query_row(
                 "SELECT worktree FROM tasks WHERE id='task_workspace'",

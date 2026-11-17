@@ -1012,9 +1012,7 @@ impl DesktopCommand {
     pub fn is_read(&self) -> bool {
         matches!(
             self,
-            Self::View { .. }
-                | Self::Portfolio { cmd: None, .. }
-                | Self::Layout { .. }
+            Self::View { .. } | Self::Portfolio { cmd: None, .. } | Self::Layout { .. }
         )
     }
 }

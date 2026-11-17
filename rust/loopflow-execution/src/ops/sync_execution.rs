@@ -4,8 +4,8 @@ use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
 use crate::ops::telemetry::record_ops_metric;
 use crate::ops::{
-    abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync, sync_class_name, sync_strategy_name,
-    sync_with_plan, OpsError, Progress, SyncOptions,
+    abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
+    sync_class_name, sync_strategy_name, sync_with_plan, OpsError, Progress, SyncOptions,
 };
 use crate::prompt::process::{prepare_process_prompt, ContextSourceOverrides, ProcessPromptInput};
 use crate::prompt::Surface;

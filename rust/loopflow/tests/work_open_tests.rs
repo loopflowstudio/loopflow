@@ -108,7 +108,7 @@ fn task_location_uses_the_named_plan_outside_a_checkout() {
     assert_eq!(reading[0]["repository_id"], repository);
     assert_eq!(reading[0]["task_id"], registered.task.id.as_str());
     assert_eq!(reading[0]["request"], "desktop-reconnect");
-    assert_eq!(reading[0]["location"]["state"], "recorded");
+    assert_eq!(reading[0]["location"]["state"], "recorded", "{reading}");
 }
 
 fn folder(path: &Path) -> String {
@@ -398,7 +398,7 @@ fn same_named_repositories_need_a_qualifier_and_change_nothing() {
 }
 
 #[test]
-fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
+fn cmux_launches_a_fresh_task_workspace_with_its_conversation() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -431,8 +431,9 @@ fn cmux_launches_a_fresh_task_workspace_with_its_splits() {
             !call.contains("--group"),
             "a Task joins the caller's window: {call}"
         );
+        // Only the Task's conversation: no workflow view, no shell.
         assert!(
-            call.contains(r"'task' 'view'") && call.contains(r"'-l'"),
+            !call.contains(r"'task' 'view'") && !call.contains(r"'-l'"),
             "{call}"
         );
         assert!(call.contains("resume"), "{call}");
@@ -1183,10 +1184,9 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     assert_eq!(created.lines().count(), 2, "{created}");
     for request in created.lines() {
         assert!(request.contains("resume"));
-        assert_eq!(
-            request.matches("Task & workflow").count(),
-            1,
-            "The builtin layout has one workflow pane beside resume and shell"
+        assert!(
+            !request.contains("Task & workflow"),
+            "Only the Task's conversation opens"
         );
     }
     // Opening neither searches for nor touches an earlier native workspace.
@@ -1292,7 +1292,7 @@ fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
 }
 
 #[test]
-fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
+fn a_released_task_layout_setting_changes_nothing() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -1320,14 +1320,9 @@ fn configured_task_layout_shapes_a_launch_without_a_saved_desktop_layout() {
     ));
     let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
     let request: Value = serde_json::from_str(created.trim()).unwrap();
-    let split = &request["layout"]["split"];
-    let words = |pane: &Value| pane["block"]["options"]["command"].to_string();
-    assert!(words(&split["before"]).contains("\"diff\""), "{request}");
-    assert!(words(&split["after"]).contains("\"-l\""), "{request}");
-    assert!(
-        !created.contains("Task & workflow"),
-        "the template replaced the builtin"
-    );
+    // The released layout hid the conversation and added changes and a shell.
+    assert!(request["layout"]["split"].is_null(), "{request}");
+    assert!(created.contains("resume"), "{request}");
 }
 
 // The peer exposes inventory independently of replies, including writes whose reply is lost.
@@ -1502,90 +1497,6 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
             && workspace.contains(registered.task.id.as_str()),
         "{workspace}"
     );
-}
-
-#[test]
-fn rex_created_shell_opens_in_its_own_session_without_placement_flags() {
-    use std::os::unix::fs::PermissionsExt;
-
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    rex_peer(bin.path());
-    let shell = bin.path().join("fixture-shell");
-    std::fs::write(&shell, format!(
-        "#!/bin/sh\n[ \"$REX_SERVER\" = unix:///fixture/rex.sock ] || exit 91\nexec '{}' workspace --no-focus --json\n", env!("CARGO_BIN_EXE_lf")
-    )).unwrap();
-    std::fs::set_permissions(&shell, std::fs::Permissions::from_mode(0o755)).unwrap();
-    json(&lf_with(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &[("SHELL", shell.to_str().unwrap())],
-        &[
-            "workspace",
-            "--task",
-            "INF-123",
-            "--host",
-            "rex",
-            "--server",
-            "unix:///fixture/rex.sock",
-            "--no-focus",
-            "--json",
-        ],
-    ));
-    let launches = bin.path().join("session.new_window.requests");
-    let created = std::fs::read_to_string(&launches).unwrap();
-    let request: Value = serde_json::from_str(created.trim()).unwrap();
-    let command = request["layout"]["split"]["after"]["split"]["after"]["block"]["options"]
-        ["command"]
-        .as_array()
-        .unwrap();
-    let args = command
-        .iter()
-        .map(|word| word.as_str().unwrap())
-        .collect::<Vec<_>>();
-    // Execute the generated native shell launcher. Rex supplies block/session
-    // identity; the direct shell command must carry the selected server.
-    rex_reply(
-        bin.path(),
-        "session.list",
-        serde_json::json!({"sessions":[{"session_id":"session:fixture"}]}),
-    );
-    rex_reply(
-        bin.path(),
-        "session.view",
-        serde_json::json!({"windows":[{"window_id":"window:fixture","layers":[{"blocks":[{"block_id":"block:shell"}]}]}]}),
-    );
-    let mut launch = Command::new(args[0]);
-    launch
-        .env_clear()
-        .env("HOME", home.path())
-        .env("PATH", format!("{}:/usr/bin:/bin", bin.path().display()))
-        .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-        .env("LF_SETTINGS", "agent: claude")
-        .env("REX_SESSION", "session:fixture")
-        .env("REX_BLOCK", "block:shell")
-        .current_dir(repo.path())
-        .args(&args[1..]);
-    rex_reply(
-        bin.path(),
-        "session.new_window",
-        serde_json::json!({"window_id":"window:again"}),
-    );
-    let reopened = json(&launch.output().unwrap());
-    assert_eq!(reopened["receipts"][0]["destination"], "window:again");
-    let launched = std::fs::read_to_string(launches).unwrap();
-    let again: Value = serde_json::from_str(launched.lines().nth(1).unwrap()).unwrap();
-    assert_eq!(
-        again["session_id"], "session:fixture",
-        "a Task opened inside Rex joins the caller's session"
-    );
-    let containers = std::fs::read_to_string(bin.path().join("session.create.requests")).unwrap();
-    assert_eq!(containers.lines().count(), 1, "{containers}");
-    assert_eq!(sessions(home.path()), 1);
 }
 
 #[test]
@@ -1817,25 +1728,6 @@ fn rex_unavailable_context_never_falls_through_to_desktop() {
     assert_eq!(sessions(home.path()), 1);
 }
 
-// Arrangement tests exercise tools only; conversation execution has its own
-// isolated native test with a stand-in provider in transport_tests.rs.
-fn configure_native_tools(repo: &Path) {
-    std::fs::write(repo.join("lf.config.local.yaml"), r#"task_layout:
-  hidden: [conversation]
-  tree:
-    kind: split
-    axis: vertical
-    ratio: 0.6
-    first: {kind: pane, id: browser, content: {kind: browser, location: null, tabs: [], selected: null}}
-    second:
-      kind: split
-      axis: horizontal
-      ratio: 0.5
-      first: {kind: pane, id: conversation, content: {kind: session, session_id: null, location: null}}
-      second: {kind: pane, id: shell, content: {kind: shell, tabs: [], selected: null}}
-"#).unwrap();
-}
-
 /// Installed-host acceptance stays opt-in; CI and ordinary tests use bounded peers.
 #[test]
 #[ignore = "requires the installed Rex CLI; creates and destroys an isolated local server"]
@@ -1851,7 +1743,6 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     std::fs::create_dir(&home).unwrap();
     let _env = EnvGuard::with_lf_home(&[], &home);
     let registered = register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
-    configure_native_tools(repo.path());
     let bin = root.path().join("bin");
     std::fs::create_dir(&bin).unwrap();
     host(
@@ -2139,7 +2030,6 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[], &home);
     register_task_without_pr(&home, repo.path(), "main", &repo.head_sha());
-    configure_native_tools(repo.path());
     let herdr = std::env::var_os("LOOPFLOW_TEST_HERDR")
         .expect("set LOOPFLOW_TEST_HERDR to the installed Herdr executable");
     let config = root.path().join("c");
@@ -2477,7 +2367,7 @@ fn desktop_workspace_and_default_view_open_arrangements_without_starting_session
 }
 
 #[test]
-fn workspace_attachment_failure_keeps_the_created_tools_and_destination() {
+fn workspace_attachment_failure_keeps_the_created_tab_and_destination() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let bin = tempfile::tempdir().unwrap();
@@ -2509,10 +2399,7 @@ fn workspace_attachment_failure_keeps_the_created_tools_and_destination() {
         "{report}"
     );
     let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
-    assert!(
-        created.contains("Task & workflow") && created.contains("shell"),
-        "{created}"
-    );
+    assert!(created.contains("Conversation"), "{created}");
 }
 
 #[cfg(target_os = "macos")]

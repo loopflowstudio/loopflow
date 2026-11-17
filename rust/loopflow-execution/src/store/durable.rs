@@ -1,8 +1,6 @@
 use crate::durable::AbandonReceipt;
 use crate::steer::Steer;
-use loopflow_model::durable::{
-    Machine, MachineId, TaskId, WorkRef, WorkStatus,
-};
+use loopflow_model::durable::{Machine, MachineId, TaskId, WorkRef, WorkStatus};
 use loopflow_storage::child::ChildRef;
 
 use super::{run_sqlite, Store, StoreResult};

@@ -345,7 +345,8 @@ fn held_scope_batches_ten_thousand_tasks_and_keys_repository_joins() {
              INSERT INTO task_ownership(id,task_id,kind,machine_id,at,ordered_at,writer_machine_id)
              SELECT printf('own_%032x',i),printf('task_%032x',i),'claim',?1,1,1,?1 FROM n",
             [local.as_str()],
-        ).unwrap();
+        )
+        .unwrap();
         tx.commit().unwrap();
     }
     let after = loopflow_storage::query_plans::statements(&store, || {

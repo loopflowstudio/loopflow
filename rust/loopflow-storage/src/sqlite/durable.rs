@@ -8,9 +8,7 @@ use crate::rows::now_unix;
 use crate::work::project::ProjectEventKind;
 use crate::work::task::TaskEventKind;
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::{
-    Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus,
-};
+use loopflow_model::durable::{Author, MachineId, ProjectId, TaskId, WorkRef, WorkStatus};
 use loopflow_model::id::WaveId;
 
 use super::SqliteStore;

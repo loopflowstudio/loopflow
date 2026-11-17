@@ -135,7 +135,14 @@ mod tests {
             .iter()
             .map(|table| format!("CREATE TABLE {table}(id TEXT);"))
             .collect::<String>();
-        for table in ["machines", "processes", "desktop_shells", "task_prs", "task_ownership", "tasks"] {
+        for table in [
+            "machines",
+            "processes",
+            "desktop_shells",
+            "task_prs",
+            "task_ownership",
+            "tasks",
+        ] {
             let columns = super::COLUMNS
                 .iter()
                 .filter(|(owner, _)| *owner == table)

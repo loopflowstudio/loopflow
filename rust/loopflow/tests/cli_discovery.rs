@@ -1600,9 +1600,10 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
     assert_eq!(plan.contents.len(), 1);
-    let layout = invoke(&["desktop", "layout", "repository"]);
-    assert!(layout.status.success());
-    assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
+    // Desktop keeps each Work's panes; the command reads only Dashboards.
+    assert!(!invoke(&["desktop", "layout", "repository"])
+        .status
+        .success());
     assert_eq!(counts(), before_reads);
     let stale = invoke(&[
         "desktop",

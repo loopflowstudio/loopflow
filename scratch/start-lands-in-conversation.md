@@ -420,6 +420,30 @@ Built 2026-11-17 from the concept review answers (questions.md), in order:
   no Graph process; Desktop's `.at(start)` line shows it (`startPosition`).
   Test: `task_create_tests::a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it`.
 
+Concept review of 65891dfff5: 1a and 4a hold. One concept, "the Task took up
+its Graph and never ran it", is spelled three ways: `setup::owed` (Rust,
+store), the `snapshot_task_detail` override in `waves.rs` (no graph record +
+resumable `Failed` + step `start`), and Swift's `RoadmapTask.startingGraph` /
+`unreadPosition` / `startPosition`. Meanwhile `execution_of_latest_graph`'s
+no-Graph branch still answers `Idle` "No Task Graph has run; independent
+Sessions may still be active", so `lf task status` on a Task mid-setup says
+that while Desktop says "Starting code".
+
+Next implement direction:
+- The no-Graph branch of `execution_of_latest_graph` reads the taken-up Graph:
+  never run → `Starting` "Starting <graph>"; latest event a resumable `Failed`
+  → `Blocked` with its error (already "Setup stopped: …" for setup; also
+  covers `lf task run`'s own checkout failure, which writes the same event).
+  `Starting` already exists on the wire (Rust and Swift), so no DTO change.
+- Delete the `waves.rs` override; every execution reader gets the reading.
+- Swift: `startingGraph`, `unreadPosition` and `startPosition` go; the
+  unread position and `.at(start)` read `row.execution.reason` when its state
+  is `.starting`/`.blocked`, else "Reading workflow…" / "Not started".
+- `setup::owed` and the projection share one predicate on (Graph row run,
+  GraphProcess history), so "owes setup" and "Starting" cannot disagree.
+- Test: the stopped-setup test also asserts `lf task status --json` reads
+  `starting` before setup and `blocked` after the stop.
+
 Remaining: slice 5's remote sample and a windowed Start → typing (qa could not reach either: screen locked, no remote Machine).
 
 ## Slices

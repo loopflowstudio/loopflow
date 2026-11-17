@@ -327,13 +327,18 @@ impl Connection {
         }
     }
 
-    /// Start a subscription and return its id once the server confirms it.
-    pub fn subscribe(&mut self, operation: impl serde::Serialize) -> Result<String> {
+    /// Start a subscription keeping only `select` of each reading, and return
+    /// its id once the server confirms it.
+    pub fn subscribe(
+        &mut self,
+        operation: impl serde::Serialize,
+        select: Option<Vec<String>>,
+    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
-            select: None,
+            select,
             resume: None,
             sender: self.carrier.sender(),
         })?;

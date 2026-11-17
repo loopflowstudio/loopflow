@@ -311,6 +311,11 @@ Not done here:
 
 ## Open
 
+- One-shot reads of a Task another Machine runs (`lf task status <issue>`,
+  `--json`, served `task.status` requests) still read this Machine's copy;
+  only `--subscribe` goes there. QA showed the two disagreeing on the title.
+  Answer 5 in `scratch/questions.md` puts them in PR 1.
+
 - No CI suite has run on this branch. #1956 carries `scratch/`, so
   `scratch-clear` defers the matrix (`.github/CI.md`, "Scratch, cancellation
   and macOS path filters"); gate clears scratch and the suites run then.
@@ -334,6 +339,11 @@ Not done here:
 - The 120 s answer bound: unit test of the timed pipe reader only; a silent destination end to end is QA.
 - A stopped destination server started by the entry: QA (`ensure` registers a supervisor job); `scratch/qa.html` from before the `sender` rework.
 - Swift `ServerProtocolTests`/`RegistryQueryTests` (`sender: null`, `task.hold` `reason`): gate/CI.
+
+- QA (2026-11-17, `scratch/qa.html`): the remote `--subscribe` now keeps
+  `--select` and ends when stdin closes;
+  `--test integration a_status_subscription_for_a_task_mini_runs_reads_minis_server`
+  checks both (passed). Clippy on that fix: gate.
 
 ## Done when (PR 1)
 

@@ -173,8 +173,17 @@ This reverses the headless choice above ("The write another Machine sends is a n
   the entry may start the server first. Over the bound a request is
   `outcome_unknown`, a handshake `unavailable`.
 - `lf task status --subscribe` for a Task another Machine runs prints that
-  server's frames and ignores stdin requests (`{"id":…,"args":…}`), which the
-  local `--subscribe` takes.
+  server's frames, keeps `--select`, and ends when stdin closes (after its
+  first reading), as the local one does. It ignores stdin requests
+  (`{"id":…,"args":…}`), which the local `--subscribe` answers: forwarding
+  checkpoints needs a write half of `Connection` beside a blocked read (QA,
+  2026-11-17).
+- QA (2026-11-17): one-shot `lf task status <issue>` and `--json`, and served
+  `task.status` requests, still read this Machine's copy of a Task another
+  Machine runs; only `--subscribe` reads there. Answer 5 ("Reads and
+  `--subscribe` … in this PR") covers them; left for the next implement pass,
+  since the human output is built from the local `TaskStatus`, not the
+  served `task.status` body.
 
 ## Sync onto main #1960 (2026-11-17)
 

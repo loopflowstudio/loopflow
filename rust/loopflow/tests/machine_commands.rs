@@ -4081,7 +4081,14 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
     );
     let mut watching = Child(
         fixture
-            .command(&["task", "status", task.as_str(), "--subscribe"])
+            .command(&[
+                "task",
+                "status",
+                task.as_str(),
+                "--subscribe",
+                "--select",
+                "task.id",
+            ])
             .current_dir(&plan.local_path)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -4094,7 +4101,21 @@ exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
         .read_line(&mut line)
         .unwrap();
     let frame: Value = serde_json::from_str(&line).unwrap();
-    assert_eq!(frame["body"]["task"]["id"], task.as_str(), "{frame}");
+    assert_eq!(
+        frame["body"],
+        serde_json::json!({"task": {"id": task.as_str()}}),
+        "{frame}"
+    );
+    // Its stdin is closed, so it ends after that first reading, as a local one does.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = watching.0.try_wait().unwrap() {
+            break status;
+        }
+        assert!(std::time::Instant::now() < deadline, "still subscribed");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    assert!(status.success(), "{status}");
     let commands = fs::read_to_string(record.join("commands")).unwrap();
     assert!(
         commands

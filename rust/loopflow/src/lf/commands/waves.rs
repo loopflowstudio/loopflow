@@ -946,6 +946,7 @@ pub fn subscribe_task_status(
 pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
     use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
     use std::io::Write as _;
+    use std::sync::atomic::Ordering;
     let Some(route) = loopflow_execution::machine::task::remote_task(issue)? else {
         return Ok(false);
     };
@@ -957,10 +958,27 @@ pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
     };
     let mut connection =
         loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
-    let id = connection.subscribe(super::read::Read::TaskStatus {
-        directory: repo.to_owned(),
-        issue: route.task_id.to_string(),
-    })?;
+    let id = connection.subscribe(
+        super::read::Read::TaskStatus {
+            directory: repo.to_owned(),
+            issue: route.task_id.to_string(),
+        },
+        loopflow_execution::read_stream::selected(),
+    )?;
+    // As here, the subscription ends when stdin closes, after its first
+    // reading; closing this end of the pipe ends it on the other Machine too.
+    let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let (printed, closed) = (printed.clone(), closed.clone());
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            closed.store(true, Ordering::SeqCst);
+            if printed.load(Ordering::SeqCst) {
+                std::process::exit(0);
+            }
+        });
+    }
     let mut stdout = std::io::stdout().lock();
     while let Some(frame) = connection.reading(&id)? {
         serde_json::to_writer(&mut stdout, &frame)?;
@@ -969,6 +987,10 @@ pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
             .and_then(|()| stdout.flush())
             .is_err()
         {
+            break;
+        }
+        printed.store(true, Ordering::SeqCst);
+        if closed.load(Ordering::SeqCst) {
             break;
         }
     }

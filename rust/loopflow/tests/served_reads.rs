@@ -523,7 +523,7 @@ fn observed_git_changes_reach_subscriptions_and_requests_on_the_same_connection(
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
     };
-    let id = connection.subscribe(pane()).unwrap();
+    let id = connection.subscribe(pane(), None).unwrap();
     let frame = connection.reading(&id).unwrap().unwrap();
     assert!(frame["unavailable"].is_null(), "{frame}");
     assert_eq!(
@@ -1192,7 +1192,7 @@ fn server_operations_match_their_lf_commands() {
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
-            let id = connection.subscribe(served.clone()).unwrap();
+            let id = connection.subscribe(served.clone(), None).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let mut served = frame;

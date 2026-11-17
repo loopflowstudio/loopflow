@@ -414,3 +414,13 @@ Must survive:
   (implement; runs locally).
 - The acceptance fixture above (implement; runs locally).
 - A real reboot with three Tasks (qa; a person runs it).
+
+## Docs written ahead (write-docs)
+
+Intended behavior, written before the build; slice 4 checks them against what shipped:
+- `docs/sessions.md`: the interruption table, and "After a kill, a crash or a reboot" (replaces "After a crash or reboot"; anchor updated in `docs/server.md`)
+- `docs/work.md`: quit stays quit, killed comes back
+- `docs/troubleshooting.md`: "What survives" row and the carried-again note
+- `docs/server.md`: logout/reboot line
+- `rust/loopflow/src/server/README.md`: new "Recovery pass" section
+- `rust/loopflow-execution/src/transport/README.md`: holder "Lifetime"

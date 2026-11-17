@@ -222,8 +222,9 @@ its last conversation ends.
 |---|---|---|---|
 | `lf install` | keep running | pause, then continue with what was printed meanwhile | the current screen; older scrollback may be missing |
 | the server crashes or is killed | keep running | pause until the OS restarts the server, then continue | the current screen; older scrollback may be missing |
-| a holder is killed | end, with the conversations it held | say the process is gone and offer resume | `lf resume` continues from provider history |
-| logout or reboot | end | close | [resume from saved history](#after-a-crash-or-reboot) |
+| an agent is killed | that one ends; a Task's starts again from its history | say it ended, then reconnect to the new one | the restarted conversation |
+| a holder is killed | end, with the conversations it held; Task conversations start again | say the process is gone, then reconnect | the restarted conversation |
+| logout or reboot | end; Task conversations start again with the server | close | [the restarted conversation](#after-a-kill-a-crash-or-a-reboot) |
 
 While the server is away a holder keeps the newest 2 MiB of each
 conversation's output, and the agent never waits on it. A new server
@@ -306,23 +307,59 @@ after a lost reply does not stop a newer provider or append the same input again
 An interrupted stop shows **Conversation change unconfirmed** and keeps Inspect
 available. A confirmed result clears its saved submission when it appears.
 
-## After a crash or reboot
+## After a kill, a crash or a reboot
 
 ```bash
-lf resume --task <ID>
+lf task status LOO-12
+# conversation: died 12:01 (exit 137) · started again 12:01
+# run: died at implement 08:57 · carried again 09:14 (attempt 1)
 ```
 
-Open the conversation you want, on the provider and login it was using, with
-its native history. Resuming does not replay a turn cut off by the crash.
-Other conversations stay stopped until opened.
+A Task's conversation that ended without you quitting it comes back on its
+own: killed, crashed, taken down with its holder, or ended by a logout or
+reboot. The server starts it again from its saved thread, in a holder, on the
+provider and login it was using; a Desktop pane on it reconnects. A turn cut
+off by the crash is not replayed. Steers sent meanwhile are delivered at its
+first boundary.
 
-| After a crash… | |
+A conversation you quit stays quit: `/exit`, Ctrl+D or Ctrl+C at the prompt,
+closing it from Desktop, or `lf task interrupt`. Open it again with
+`lf resume --task <ID>`.
+
+```bash
+lf task status LOO-12
+# conversation: quit 12:03 · lf resume --task LOO-12
+```
+
+A Task run whose `lf task run` or `lf ship` died is carried again the same
+way, from the step it reached. A run that was waiting for you at an
+interactive step stops there again; being carried again never approves
+Auto-Ship you had not approved.
+
+After a reboot the server brings work back one start at a time, the most
+recently active Task first. Each start waits a minute after a death, doubling
+to 30 minutes if it keeps dying. After 5 deaths in a row with no finished turn
+or step, lf stops trying and says which command continues:
+
+```bash
+lf task status LOO-12
+# conversation: died 5 times since 09:14 (last: exit 1) · lf resume --task LOO-12
+# run: died 5 times at implement · lf task run LOO-12
+```
+
+A start that cannot happen says why instead of retrying silently, for
+example `no PTY left: 511 in use (kern.tty.ptmx_max)`. `lf machine doctor`
+reports how many PTYs are left.
+
+| After a kill or reboot… | |
 |---|---|
-| interactive conversations | `lf resume --task <ID>` or `lf resume SESSION` |
+| a Task's conversation | starts again unless you quit it |
+| a Task's run | carried again from the step it reached |
+| a Wave's or repository's conversation | stays stopped: `lf resume SESSION` |
+| a conversation from `lf <skill>` in your terminal, or `-b` | stays stopped |
 | only the server crashed | nothing to do: agents kept running and views reconnect |
 | Task worktrees, branches, PRs | untouched |
 | steers and reports | saved; delivered at the agent's next boundary |
-| a headless Graph that died | kept as history; nothing resumes it. `lf task status`, then `lf task run` what remains |
 
 `lf resume` takes interactive Sessions. A headless Session (`-b`, a Graph step),
 running or finished, is refused with a pointer to `lf resume --task <task>`; the

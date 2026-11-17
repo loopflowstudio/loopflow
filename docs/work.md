@@ -23,9 +23,11 @@ carries the child through the parent's updates and squash merge.
 `lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
 conversation in the background when an agent is configured and installed.
 An in-place `lf -i task run` uses its current terminal instead.
-`lf resume` in its worktree reattaches to it. Previously opened conversations
-stay as they are. Every newly checked-out Task can start its conversation;
-there is no background conversation cap.
+`lf resume` in its worktree reattaches to it. A conversation you quit stays
+quit; one that was killed comes back on its own
+([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
+Every checked-out Task can run its conversation; there is no background
+conversation cap.
 A running Graph keeps its conversation alive; abandoning the Task stops its
 unviewed conversation. A conversation you are viewing stays open.
 Preparing a conversation, including Desktop's preload, does not launch an agent.

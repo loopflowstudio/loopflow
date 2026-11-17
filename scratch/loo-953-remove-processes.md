@@ -1,7 +1,35 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-Status 2026-11-17 (later): the Execution renames are built. Next: the
-Session slice.
+Status 2026-11-17 (later): built on this branch: the Execution renames,
+Project activation on `waves.project_activation_{ended_at,exit_code,error}`
+(the activating lf owns its run; `finish_run` writes the Wave), and CI
+repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
+(reserve and handoff write them, settlement clears them; liveness by
+`run_evidence`). `detached::start_lf` returns `Started { id, pid,
+os_started_at }`, so `engine::launch` waits on the child without the store.
+Next: Task-run and ship carriers (below), then the Session slice.
+
+**Carriers, as found 2026-11-17.** `task_state_sql` reads "moving/shipping"
+from the carrier's `processes.completed_at`. Plan: `task_graphs.run_pid,
+run_os_started_at` written by `start_run_in` from the caller's
+`ExecutionStart` (the carrier is the current lf), cleared by a `finish_run`
+arm on `task_graphs.lf_process_id`; the carrier calls `mark_run_owner`.
+Ship events: `task_ship_events_append_only` blocks every UPDATE, so the
+migration replaces it with a launch-columns-immutable trigger (as for Graph
+runs), `revisions.rs:187` special-cases its update, and the `finish_run` arm
+writes `ended_at/exit_code/error` by `task_ship_events_process`. The
+`open_processes` arm of `task_state_sql` stays until the Session slice.
+
+**Correction: foreign keys come off in the expand, not the contract.** Once
+the journal stops writing rows (approach 2), every column still declaring
+`REFERENCES processes` fails a new lf's write (seen in this pass's tests:
+`waves`, `ci_incidents`). So the expand migration rebuilds `waves`,
+`ci_incidents`, `task_graphs`, `agent_sessions`, `desktop_shells`,
+`session_events`, `steer_adapters`, `steer_batches`, `tasks` without those
+keys (a rebuild keeping every column is additive), in the same change that
+stops the journal writer. Until then the two tests above insert the
+journal's row for the referenced id. Slice 6 keeps only the drops of
+`processes`, the bridge triggers and dead columns.
 
 Status 2026-11-17: stacked on LOO-936's branch
 (`jack/loo-936-record-only-what-the-product-reads-apart-from`, PR #1965,

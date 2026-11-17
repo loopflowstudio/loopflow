@@ -131,3 +131,9 @@ order, both env variables, dev-only skew accepted).
 
 - `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`: passed. `sqlite::graph_inventory::` (5), `journal::tests::a_reserved_step_ends_with_the_graph_that_would_start_it`: passed.
 - Call: the plan said "both `RunStart`s"; `ops::task::RunStart` is where a Task run sets out in its Graph, not an execution's start, so it keeps its name.
+
+## Owner slices (2026-11-17)
+
+- Checks: `cargo clippy --all-targets -- -D warnings` passed; `loopflow-storage` `run_owners_carry_their_process_lifecycle_after_upgrade` (activation and repair backfill and bridge), `an_activation_reads_pending_until_its_lf_writes_its_end`, `sqlite::graph_inventory::` (5); `loopflow-execution` `ops::pr_landing::`, `os_process::detached::`, `engine::launch::` (37): passed. Gate: `binary(land_tests)` and `binary(release_tests)` reach CI repair; CI runs them.
+- Call: a ci-fix run that dies unsettled reads dead from its pid and leaves no repair window; before, its Process row's `completed_at` closed the window. Settlement on the next landing check writes `repair_finished_at`.
+- Call: `engine::launch`'s registry-recovery test was deleted with what it tested (report wait reading the store); a dead child reading "ended without a result" from its pid replaces it.

@@ -169,7 +169,6 @@ extension AgentProcess {
         cwd = try values.decodeIfPresent(String.self, forKey: .cwd)
         startedAt = try values.decode(Int64.self, forKey: .startedAt)
         completedAt = try values.decodeIfPresent(Int64.self, forKey: .completedAt)
-        outcome = try values.decodeIfPresent(String.self, forKey: .outcome)
         exitCode = try values.decodeIfPresent(Int32.self, forKey: .exitCode)
         signal = try values.decodeIfPresent(String.self, forKey: .signal)
         error = try values.decodeIfPresent(String.self, forKey: .error)

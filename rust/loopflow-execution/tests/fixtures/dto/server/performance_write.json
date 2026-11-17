@@ -1,0 +1,14 @@
+{
+  "type": "request",
+  "id": "measured-write",
+  "operation": {
+    "kind": "performance.write",
+    "change": {
+      "kind": "session.rename",
+      "directory": "/repo",
+      "id": "session_5e55105e000040008000000000000001",
+      "name": "Focused work"
+    }
+  },
+  "select": null
+}

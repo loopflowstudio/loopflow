@@ -17,7 +17,7 @@ use loopflow_model::id::WaveId;
 
 const PROJECT: &str = "95159066-9098-4d0b-8903-01459dc7ec14";
 
-/// One running `lf … --subscribe`; its frames are `{answers, unavailable, body}`.
+/// One running `lf … --subscribe`; its frames are `{answers, unavailable, body, work}`.
 struct Subscription {
     child: Child,
     stdin: Option<ChildStdin>,
@@ -366,7 +366,8 @@ fn a_frame_is_its_answer_and_body() {
         .expect("no frame");
     let mut keys: Vec<_> = frame.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(keys, ["answers", "body", "unavailable"]);
+    assert_eq!(keys, ["answers", "body", "unavailable", "work"]);
+    assert_eq!(frame["work"], serde_json::Value::Null);
 }
 
 #[test]

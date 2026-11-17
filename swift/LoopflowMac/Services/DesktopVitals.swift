@@ -30,6 +30,7 @@ final class DesktopVitals: @unchecked Sendable {
     private let queue = DispatchQueue(label: "studio.loopflow.desktop-vitals", qos: .utility)
     private var timer: DispatchSourceTimer?
     private var pressure: DispatchSourceMemoryPressure?
+    private var runLoopObserver: CFRunLoopObserver?
 
     init(log: DesktopLog = .home, journal: LaunchJournal = .home) {
         self.log = log
@@ -55,10 +56,34 @@ final class DesktopVitals: @unchecked Sendable {
         pressure.resume()
         self.pressure = pressure
 
+        // The existing watchdog still reports a hang before it finishes. This
+        // observer measures completed busy turns, including sub-second stalls.
+        var activeSince: TimeInterval?
+        let activities: CFRunLoopActivity = [.afterWaiting, .beforeWaiting]
+        let observer = CFRunLoopObserverCreateWithHandler(nil, activities.rawValue, true, 0) { [log] _, activity in
+            MainActor.assumeIsolated {
+                let now = ProcessInfo.processInfo.systemUptime
+                if activity == .afterWaiting { activeSince = now }
+                else if let start = activeSince {
+                    activeSince = nil
+                    Self.completedTurn(milliseconds: (now - start) * 1000, log: log)
+                }
+            }
+        }
+        CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+        runLoopObserver = observer
+
         let watchdog = Thread { [log] in Self.watchMainThread(log: log) }
         watchdog.name = "studio.loopflow.main-thread-watchdog"
         watchdog.qualityOfService = .utility
         watchdog.start()
+    }
+
+    @MainActor
+    static func completedTurn(milliseconds: Double, log: DesktopLog) {
+        guard milliseconds >= 50 else { return }
+        log.info("main thread stalled", ["ms": String(Int(milliseconds))])
+        Perf.stalled(milliseconds: milliseconds)
     }
 
     /// Write one heartbeat for `sample` and the reads in `tally`.

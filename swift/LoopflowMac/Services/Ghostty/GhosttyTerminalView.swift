@@ -32,6 +32,7 @@ enum GhosttyTerminalShortcut: String {
 }
 
 struct GhosttyTerminalView: View {
+    let repository: String?
     let workingDirectory: String
     let argv: [String]
     let env: [String: String]
@@ -44,6 +45,7 @@ struct GhosttyTerminalView: View {
     @ObservedObject var manager: GhosttyManager
 
     init(
+        repository: String? = nil,
         workingDirectory: String,
         argv: [String] = [],
         env: [String: String] = [:],
@@ -55,6 +57,7 @@ struct GhosttyTerminalView: View {
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
+        self.repository = repository
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env
@@ -70,6 +73,7 @@ struct GhosttyTerminalView: View {
     var body: some View {
         GeometryReader { geo in
             GhosttyTerminalRepresentable(
+                repository: repository,
                 workingDirectory: workingDirectory,
                 command: shellCommand,
                 terminal: terminal,
@@ -93,6 +97,7 @@ struct GhosttyTerminalView: View {
 }
 
 struct GhosttyTerminalRepresentable: NSViewRepresentable {
+    let repository: String?
     @Environment(\.isEnabled) private var isEnabled
     let workingDirectory: String
     let command: String?
@@ -125,6 +130,7 @@ struct GhosttyTerminalRepresentable: NSViewRepresentable {
         nsView.recordMountLifecycle("update focused=\(isFocused) enabled=\(isEnabled)", host: mount)
         let enabled = isEnabled
         mount.configure = { nsView in
+            nsView.measurementRepository = repository
             nsView.workingDirectory = workingDirectory
             nsView.command = command
             nsView.onSurfaceCreated = onSurfaceCreated
@@ -322,6 +328,7 @@ final class GhosttySurfacePool {
                 if let record = records.first(where: {
                     $0.id == id && $0.workspace?.machineId == view.terminal.machineId
                 }) {
+                    view.observeSessionForMeasurements(record)
                     view.programStatus.associate(sessionId: id, terminalId: marker,
                         provider: SessionProviderReading(record: record, terminal: marker))
                 }
@@ -331,6 +338,7 @@ final class GhosttySurfacePool {
                 $0.workspace?.machineId == view.terminal.machineId
                     && $0.state == .active && $0.terminalIds.contains(marker)
             }
+            view.observeSessionForMeasurements(matches.count == 1 ? matches[0] : nil)
             view.programStatus.associate(
                 sessionId: matches.count == 1 ? matches[0].id : nil,
                 terminalId: matches.count == 1 ? marker : nil,
@@ -526,6 +534,16 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var onFocus: () -> Void = {}
     weak var pool: GhosttySurfacePool?
     /// Typed into the surface when it starts (`lf desktop run` before the tab is drawn).
+    var measurementRepository: String?
+    private let measurementOwner = UUID()
+    private var responseObservation: ResponseVisibility?
+    private var measuredSession: SessionRecord?
+    private var lastResponseCheck: CFTimeInterval = 0
+
+    func observeSessionForMeasurements(_ record: SessionRecord?) {
+        measuredSession = record
+    }
+
     var pendingInput: String?
     /// Lines `lf desktop run` submitted, and commands the shell reported finished.
     var submitted = 0
@@ -624,6 +642,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }
         if window.firstResponder !== self { window.makeFirstResponder(self) }
         syncSurfaceFocus()
+        recordInputReadiness()
     }
 
     /// Ghostty sees focus only while this view is first responder in the key
@@ -873,6 +892,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !isHiddenOrHasHiddenAncestor,
               window?.occlusionState.contains(.visible) != false
         else { return }
+        if Perf.awaitsTerminal { recordInputReadiness() }
         if let keyToDraw {
             // Ghostty owns its render thread and display link. Forcing a draw
             // every frame serializes Metal work with scrolling on the main
@@ -883,6 +903,10 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             Perf.signposter.endInterval(Perf.terminalKeyToDraw, keyToDraw)
         }
         let now = CACurrentMediaTime()
+        if responseObservation != nil, now - lastResponseCheck >= 0.1 {
+            lastResponseCheck = now
+            observeResponseVisibility()
+        }
         if isShellPane, now - lastCommandBlockRefresh >= 0.1 {
             lastCommandBlockRefresh = now
             refreshCommandBlocks()
@@ -1084,10 +1108,56 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         let accepted = super.becomeFirstResponder()
         if accepted, surface != nil {
             syncSurfaceFocus(firstResponder: true)
-            // The Session pane is visible and accepting input.
-            if case .session(let id, _) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
+            recordInputReadiness()
         }
         return accepted
+    }
+
+    private func recordInputReadiness() {
+        guard let window, window.firstResponder === self, acceptsFirstResponder, connectionAcceptsInput,
+              surface != nil else { return }
+        let ids: [String]
+        switch terminal {
+        case .session(let id, _): ids = [id]
+        case .shell(let id, _):
+            guard let session = programStatus.sessionId, measuredSession?.availability == .available else { return }
+            ids = [id, session]
+        }
+        if Perf.isPending(.coldStart) {
+            Perf.launchVisible(repository: measurementRepository, liveSessions: nil, window: window)
+        }
+        for id in ids {
+            Perf.terminalReady(session: id, window: window) { [weak self] in
+                if let surface = self?.surface { ghostty_surface_draw(surface) }
+            }
+        }
+    }
+
+    private func beginResponseObservation(_ event: NSEvent) {
+        guard event.keyCode == 36 || event.keyCode == 76,
+              event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
+              let record = measuredSession, record.provider == "codex",
+              case .available(let before, _) = try? readText(region: .screen, maxBytes: 16384) else { return }
+        Perf.userAction(.firstWord, scenario: "send_to_response_observed", id: record.id,
+                        repository: measurementRepository, liveSessions: nil, owner: measurementOwner) {
+            if CGPreflightScreenCaptureAccess() {
+                responseObservation = ResponseVisibility(previous: record.preview, before: before,
+                    submittedAt: Int64(Date().timeIntervalSince1970))
+            } else {
+                Perf.finish(.firstWord, id: record.id, owner: measurementOwner, outcome: .unmeasured)
+            }
+            Perf.acknowledged(.firstWord, id: record.id, owner: measurementOwner)
+        }
+    }
+
+    private func observeResponseVisibility() {
+        guard let observation = responseObservation, let record = measuredSession, let preview = record.preview,
+              case .available(let visible, _) = try? readText(region: .screen, maxBytes: 16384),
+              observation.matches(preview, visible: visible) else { return }
+        responseObservation = nil
+        Perf.stateObserved(.firstWord, id: record.id, owner: measurementOwner) { [weak self] in
+            if let surface = self?.surface { ghostty_surface_draw(surface) }
+        }
     }
 
     override func resignFirstResponder() -> Bool {
@@ -1184,6 +1254,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             super.keyDown(with: event)
             return
         }
+        beginResponseObservation(event)
         programStatus.receive(.interaction, incarnation: programStatus.incarnation)
         if case .session(let id, _) = terminal { Perf.agentInput("key_received", session: id) }
         if keyToDraw == nil {
@@ -1819,6 +1890,7 @@ final class GhosttySurfacePool {
 }
 
 struct GhosttyTerminalView: View {
+    let repository: String?
     let workingDirectory: String
     let argv: [String]
     let env: [String: String]
@@ -1831,6 +1903,7 @@ struct GhosttyTerminalView: View {
     @ObservedObject var manager: GhosttyManager
 
     init(
+        repository: String? = nil,
         workingDirectory: String,
         argv: [String] = [],
         env: [String: String] = [:],
@@ -1842,6 +1915,7 @@ struct GhosttyTerminalView: View {
         onFocus: @escaping () -> Void = {},
         manager: GhosttyManager = .shared
     ) {
+        self.repository = repository
         self.workingDirectory = workingDirectory
         self.argv = argv
         self.env = env

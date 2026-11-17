@@ -819,7 +819,7 @@ struct WorkModelStreamTests {
             }
         }
         defer { heartbeats.cancel() }
-        await action.value
+        #expect(await action.value)
         let draft = try #require(model.navigation.taskRunDrafts[found.task.id])
         #expect(!draft.acting)
         #expect(draft.error?.hasPrefix("Task update accepted; refresh not confirmed.") == true)

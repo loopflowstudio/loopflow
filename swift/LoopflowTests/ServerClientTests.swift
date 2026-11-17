@@ -7,6 +7,45 @@ import Testing
 
 @Suite(.serialized)
 struct ServerClientTests {
+    @Test(arguments: ["read", "write", "creation"]) @MainActor
+    func interactionReceivesItsReadResultAndSQLReceiptTogether(operation: String) async throws {
+        let peer = try ServerPeer()
+        peer.serve { message, respond in
+            guard message["type"] as? String == "request" else { return true }
+            respond(["type": "response", "id": message["id"]!, "trace_id": "trace",
+                     "result": ["result": ["id": "home_fixture"], "work": ["id": "evaluation-one", "statements": 13, "rows": 4]]])
+            return true
+        }
+        let interaction = Interaction(name: "start_task", scenario: "new_task_to_typing", input: nil,
+            context: Interaction.Context(thermalState: 0, liveSessions: nil), sink: { _ in })
+        let value = try await InteractionTrace.$current.withValue(interaction) {
+            switch operation {
+            case "write":
+                try await ServerClient.write(.sessionRename(directory: "/repo", id: "session_fixture", name: "Focused"), location: peer.location)
+            case "creation":
+                try await Self.submission(peer: peer)
+            default:
+                try await ServerClient.read(.machineSelf, location: peer.location)
+            }
+        }
+        #expect(try JSONDecoder().decode(JSONValue.self, from: Data(value.utf8)) == .object(["id": .string("home_fixture")]))
+        #expect(interaction.work.snapshot.servedReads == (operation == "read" ? 1 : 0))
+        #expect(interaction.work.snapshot.servedWrites == (operation == "read" ? 0 : 1))
+        #expect(interaction.work.snapshot.sqlStatements == 13)
+        #expect(interaction.work.snapshot.sqlRows == 4)
+        #expect(interaction.work.snapshot.sqlComplete)
+    }
+
+    private static func submission(peer: ServerPeer) async throws -> String {
+        let link = try await ServerLink.open(.unix(path: peer.path))
+        let change = ServedWrite.taskCreate(directory: "/repo", requestID: "creation-one", title: nil,
+            request: "A bounded request", wave: nil, graph: nil, session: nil, run: true)
+        let payload = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(change))
+        let result = try await link.request(.submittedCreation(payload)).printed
+        await link.close()
+        return result
+    }
+
     @Test func admissionBusyWaitsThenCompletesTheWriteOnce() async throws {
         let peer = try ServerPeer()
         let requests = Mutex<Int>(0)
@@ -578,7 +617,7 @@ extension Mutex where Value == Int {
 /// reader thread until the handler closes it or the client disconnects.
 private final class ServerPeer: @unchecked Sendable {
     private let listener: Int32
-    private let path: String
+    let path: String
     let location: ServerLocation
     private let lock = NSLock()
     private var messages: [[String: Any]] = []

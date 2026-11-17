@@ -139,12 +139,14 @@ final class SessionsWorkspace {
         multiplexer.layout.allPanes.contains { $0.sessionId.map(held.contains) == true }
     }
 
+    let performanceOwner = UUID()
+
     func toggleFocus(_ paneId: String) {
-        Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace")
+        Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace", owner: performanceOwner)
         multiplexer.toggleZoom(paneId)
     }
     func setCollapsed(paneId: String, collapsed: Bool) {
-        Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace")
+        Perf.begin(Perf.retainedWorkspaceAction, collapsed ? "collapse" : "expand", id: "workspace", owner: performanceOwner)
         multiplexer.setCollapsed(paneId: paneId, collapsed: collapsed)
     }
 
@@ -343,6 +345,7 @@ final class SessionsWorkspace {
     func files(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
         if let files = taskFiles { return files.store }
         let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
+        files.measurementRepository = persistenceRepo
         taskFiles = (files, execution)
         if let machine = execution?.machineID ?? location?.machineId ?? localMachineId {
             let place = WorkViewPlan.Location(machineID: machine, cwd: cwd)
@@ -1648,7 +1651,7 @@ struct SessionsContentView: View {
                 if navigation.showsNavigator {
                     SidebarColumn(navigation: navigation, availableWidth: geometry.size.width) {
                         WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
-                            Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
+                            newTaskSessionFromInput(id)
                         })
                         .equatable()
                     }
@@ -1686,7 +1689,7 @@ struct SessionsContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
                         newConversation: {
-                            Task { do { try await newTaskSession(id) } catch { launchError = error.localizedDescription } }
+                            newTaskSessionFromInput(id)
                         }, openSession: openSession)
                 }.padding(12).onExitCommand { actionTaskID = nil }
             }
@@ -1921,6 +1924,21 @@ struct SessionsContentView: View {
     /// An independent conversation with Task context in the Task's checkout.
     /// Resolving the checkout prepares Task Work only; it never starts a
     /// Graph or replaces another Session.
+    private func newTaskSessionFromInput(_ taskId: String) {
+        let owner = navigation.performanceOwner
+        Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: taskId,
+                        repository: store.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
+            Perf.acknowledged(.newConversation, id: taskId, owner: owner)
+            Task {
+                do { try await newTaskSession(taskId) }
+                catch {
+                    Perf.finish(.newConversation, id: taskId, owner: owner, outcome: .failed)
+                    launchError = error.localizedDescription
+                }
+            }
+        }
+    }
+
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
@@ -1940,7 +1958,10 @@ struct SessionsContentView: View {
         guard checkout.machineId == machineId else { throw RegistryQueryError("Open a conversation on its owning Machine") }
         entry.presentation.content = .terminals
         entry.location = checkout
-        entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: lf), location: checkout)
+        if let pane = entry.multiplexer.newShell(command: TaskConversationLaunch(task: issue).arguments(lf: lf), location: checkout),
+           let tab = pane.content.selectedShell {
+            Perf.retarget(.newConversation, from: taskId, to: tab.id, owner: origin.performanceOwner)
+        }
     }
 
     /// Sessions attached to the focused pane: a Session pane's own record, or

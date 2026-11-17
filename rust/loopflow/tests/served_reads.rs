@@ -1182,8 +1182,11 @@ fn server_operations_match_their_lf_commands() {
             let id = connection.subscribe(served.clone()).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
-        let served = frame;
+        let mut served = frame;
         assert!(served["unavailable"].is_null(), "{argv:?}: {served}");
+        let work: loopflow_storage::instrumentation::SqlReceipt =
+            serde_json::from_value(served["work"].take()).unwrap();
+        assert!(!work.id.is_empty());
         let printed = first_frame(repo.path(), home.path(), &argv);
         assert_eq!(without_clock(served), without_clock(printed), "{argv:?}");
     }

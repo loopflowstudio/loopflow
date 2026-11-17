@@ -274,6 +274,10 @@ final class WorkModel {
         }
         for key in warm {
             guard let workspace = registry.retained(key), !workspace.conversationClosed else { continue }
+            if key.kind == .task, let record = records.first(where: { $0.taskPrimary && $0.names(task: key.id) }) {
+                Perf.retarget(.startTask, from: key.id, to: record.id, owner: navigation.performanceOwner)
+                Perf.retarget(.taskWorkspaceReady, from: key.id, to: record.id, owner: navigation.performanceOwner)
+            }
             startPersistence(workspace)
             if workspace.multiplexer.sessionPane?.sessionId == nil,
                let record = records.first(where: { record in
@@ -553,6 +557,8 @@ final class WorkModel {
                 executionIdentity = navigation.preparedTaskWorktrees[task.id] ?? task.reference.workspace?.identity
             }
         }
+        Perf.retarget(.startTask, from: task.id, to: sessionID, owner: navigation.performanceOwner)
+        Perf.retarget(.taskWorkspaceReady, from: task.id, to: sessionID, owner: navigation.performanceOwner)
         var records: [SessionRecord] = []
         if let preparation {
             // Preparation already returned this Session's authoritative reading.
@@ -627,8 +633,13 @@ final class WorkModel {
 
     /// Exact contextual links share the same synchronous pane placement as Task entry.
     func openSession(_ record: SessionRecord, store: SessionsStore) {
-        guard let workspace = placeExactSession(record, store: store) else { return }
-        Task { await store.select(record.id, intent: workspace.conversationIntent) }
+        let owner = navigation.performanceOwner
+        Perf.userAction(.taskWorkspaceReady, scenario: "session", id: record.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            guard let workspace = placeExactSession(record, store: store) else { return }
+            Perf.acknowledged(.taskWorkspaceReady, id: record.id, owner: owner)
+            Task { await store.select(record.id, intent: workspace.conversationIntent) }
+        }
     }
 
     private func placeExactSession(_ record: SessionRecord, store: SessionsStore) -> SessionsWorkspace? {
@@ -654,7 +665,7 @@ final class WorkModel {
     private func placeSession(_ record: SessionRecord, in target: SessionsWorkspace,
                               store: SessionsStore, registry: SessionsWorkspaceRegistry,
                               navigating: Bool = true) -> SessionsWorkspace {
-        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id)
+        Perf.begin(Perf.taskWorkspaceReady, "session", id: record.id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         let workspace: SessionsWorkspace
         if case .shell(let id, let machine) = store.localTerminal(for: record),
            let key = registry.key(containingShell: id, machineId: machine),
@@ -1155,7 +1166,9 @@ final class WorkModel {
     }
 
     var projection: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
+        Perf.project(owner: navigation.performanceOwner) {
+            WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: sessions.value ?? [])
+        }
     }
     /// Built from the whole projection, so it is computed once per change to
     /// what it reads, not on each of the several reads per window render.
@@ -1198,7 +1211,9 @@ final class WorkModel {
     }
 
     var visibleWork: WorkProjection {
-        WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
+        Perf.project(owner: navigation.performanceOwner) {
+            WorkProjection(roadmaps: visibleRoadmaps, inventory: visibleTasks, sessions: visibleSessions)
+        }
     }
 
     private(set) var roadmap: WorkReading<RoadmapSnapshot> = .loading {
@@ -1237,9 +1252,14 @@ final class WorkModel {
         set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
     private var peerPlanningGeneration = 0
+    @ObservationIgnored private(set) var liveSessionCount: Int?
     private(set) var sessions: WorkReading<[SessionRecord]> {
         get { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
-        set { sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
+        set {
+            sessionReadings[repositoryReadingKey(repoPath ?? "")] = newValue
+            liveSessionCount = newValue.value.map { $0.filter { $0.state == .active }.count }
+            navigation.liveSessionCount = liveSessionCount
+        }
     }
     private(set) var workActivity: WorkReading<WorkActivitySnapshot> = .loading
     /// Selectable Graphs per repository, read once on demand; never per repaint.
@@ -2256,10 +2276,10 @@ final class WorkModel {
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
-            Perf.begin(Perf.workflowReady, "task", id: requested.id)
+            Perf.begin(Perf.workflowReady, "task", id: requested.id, owner: navigation.performanceOwner)
         }
         if let requested, requested.kind != .project {
-            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id)
+            Perf.begin(Perf.taskWorkspaceReady, requested.kind == .task ? "task" : "wave", id: requested.id, repository: repoPath, liveSessions: liveSessionCount, owner: navigation.performanceOwner)
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {
@@ -2280,6 +2300,7 @@ final class WorkModel {
         }
         if navigation.showsSelection { workspaceRegistry?.clearPresentation() }
         setSelection(selection)
+        if let selection { Perf.acknowledged(Perf.taskWorkspaceReady, id: selection.id, owner: navigation.performanceOwner) }
         if selection == nil { navigation.sidebarWaveID = nil }
         if let selection, selection.kind == .wave {
             navigation.sidebarWaveID = selection.id
@@ -2471,7 +2492,22 @@ final class WorkModel {
     /// after the step the Task waits at, taking up its Wave's or repository's default first.
     /// The outcome settles only the Task and repository that started it; a
     /// refusal is kept on that Task's draft and changes nothing else.
-    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async {
+    func startTaskFromInput(_ graph: String?, from step: String? = nil, task: RoadmapTask) {
+        let owner = navigation.performanceOwner
+        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            Perf.acknowledged(.startTask, id: task.id, owner: owner)
+            Task {
+                let accepted = await startTask(graph, from: step, task: task)
+                if !accepted {
+                    Perf.finish(.startTask, id: task.id, owner: owner, outcome: .failed)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask) async -> Bool {
         await performTaskAction(task.id) {
             try await query.runTask(issue: task.task.identifier, graph: graph, from: from,
                                     cwd: WaveOrigin.resolve(task.task.repo))
@@ -2498,12 +2534,14 @@ final class WorkModel {
     /// request as the first turn; this window then shows that conversation.
     /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = UUID().uuidString
+        let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
         let owner = navigation
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         do {
             let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
+            Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
+                          owner: owner.performanceOwner)
             CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
             if owner.paletteGeneration == presentation {
                 owner.palette = nil
@@ -2513,6 +2551,7 @@ final class WorkModel {
             }
             try? await confirmWorkUpdate()
         } catch is SubmittedCreationError {
+            Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
             if owner.paletteGeneration == presentation { owner.palette = nil }
@@ -2596,9 +2635,26 @@ final class WorkModel {
         }
     }
 
-    func completeTask(_ task: RoadmapTask) async {
-        await performTaskAction(task.id) {
+    func completeTaskFromInput(_ task: RoadmapTask) {
+        let owner = navigation.performanceOwner
+        Perf.userAction(.completeTask, scenario: "complete_to_row_gone", id: task.id,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+            Perf.acknowledged(.completeTask, id: task.id, owner: owner)
+            Task {
+                let accepted = await completeTask(task)
+                if !accepted {
+                    Perf.finish(.completeTask, id: task.id, owner: owner, outcome: .failed)
+                }
+            }
+        }
+    }
+
+    @discardableResult
+    func completeTask(_ task: RoadmapTask) async -> Bool {
+        let owner = navigation.performanceOwner
+        return await performTaskAction(task.id) {
             try await query.completeTask(issue: task.task.identifier, cwd: WaveOrigin.resolve(task.task.repo))
+            Perf.completionAccepted(id: task.id, owner: owner)
         }
     }
 

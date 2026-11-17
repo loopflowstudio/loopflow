@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import sqlite3
@@ -585,6 +586,7 @@ time.sleep(60)
         performance, "_prepare_native_fixture", lambda output, cli: output / "fixture"
     )
 
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     with pytest.raises(KeyError, match="pid"):
         performance._run_native(
             tmp_path, {}, samples=1, soak_seconds=1, cli=tmp_path / "unused-cli"
@@ -625,6 +627,7 @@ def test_sandbox_paths_do_not_change_test_binary_hash_or_comparison_command(
             str(executable),
         ],
     )
+    monkeypatch.setattr(performance, "_measurement_preflight", lambda *_: True)
     receipts = []
     for name in ("before", "after"):
         output = tmp_path / name
@@ -798,3 +801,103 @@ def test_changed_repository_inputs_and_failed_git_cannot_compare(tmp_path: Path)
     current["metadata"]["repository_inputs_unchanged"] = True
     current["metadata"]["git_observations_complete"] = False
     assert not performance._comparison(current, baseline)["available"]
+
+
+def test_host_load_reports_cores_without_retaining_process_arguments() -> None:
+    load = performance._host_load(
+        "100.0 /usr/bin/python3\n"
+        " 7.5 /Applications/Example App.app/Contents/MacOS/Example App\n"
+        "not-a-number /usr/bin/no\nnan /usr/bin/no\n"
+    )
+    assert load["cpu_percent"] == 107.5
+    assert load["top"] == [
+        {"cpu_percent": 100.0, "executable": "python3"},
+        {"cpu_percent": 7.5, "executable": "Example App"},
+    ]
+
+
+def test_preflight_retains_contamination_and_does_not_launch_native_probe(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        performance.subprocess, "check_output", lambda *args, **kwargs: "125.0 /usr/bin/python3\n"
+    )
+    monkeypatch.setattr(performance.platform, "platform", lambda: "fixture")
+    result = performance._preflight(tmp_path / "trial")
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert result == 1
+    assert report["status"] == "rejected"
+    assert report["samples"][0]["cpu_percent"] == 125
+    assert report["native"] is None
+
+
+def test_cli_volume_separates_sql_profile_time_from_process_wall_time(tmp_path: Path) -> None:
+    base = dict(
+        event="start", pid=1, time=1, elapsed_ms=0, connections=0, statements=0, rows=0, sql_ms=0
+    )
+    end = dict(
+        base, event="end", time=2, elapsed_ms=1000, connections=1, statements=10, rows=1, sql_ms=12
+    )
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    report = performance._cli_volume(tmp_path)
+    assert report["sql_profile_ms"] == 12
+    del base["sql_ms"]
+    del end["sql_ms"]
+    (tmp_path / "lf-1.jsonl").write_text(json.dumps(base) + "\n" + json.dumps(end) + "\n")
+    assert performance._cli_volume(tmp_path)["sql_profile_ms"] is None
+
+
+def test_missing_host_observation_retains_a_rejected_report(tmp_path, monkeypatch) -> None:
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("ps")
+
+    monkeypatch.setattr(performance.subprocess, "check_output", unavailable)
+    assert performance._preflight(tmp_path / "trial") == 1
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert report["status"] == "rejected"
+    assert report["samples"] == []
+    assert report["native"] is None
+
+
+def test_short_quiet_sample_cannot_qualify_a_host(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(performance.subprocess, "check_output", lambda *a, **k: "0.0 fixture\n")
+    assert performance._preflight(tmp_path / "trial", seconds=1) == 1
+    report = json.loads((tmp_path / "trial/preflight.json").read_text())
+    assert report["status"] == "rejected"
+    assert "fewer than 60" in report["reason"]
+    assert report["native"] is None
+
+
+def test_native_write_fixture_uses_normalized_tasks_and_keeps_repository_identity() -> None:
+    # Exercise the SQL the native runner actually sends against the released
+    # normalized Task schema, without needing a display to discover stale columns.
+    migration = (
+        performance.REPO / "rust/loopflow-storage/src/migrations/0.14.6.001_release.sql"
+    ).read_text()
+    schema = re.search(r"CREATE TABLE tasks_migration \(.*?;", migration, re.S).group()
+    source = (performance.REPO / "swift/LoopflowTests/DesktopPerformanceTests.swift").read_text()
+    rename = re.search(r"UPDATE tasks SET issue_title=.*?;", source).group()
+    create = re.search(r"INSERT INTO tasks\(id,repository_id.*?;", source, re.S).group()
+    replacements = {
+        r"\(template.name.sqlQuoted)": "O''Brien",
+        r"\(template.id.sqlQuoted)": "source",
+        r"\(task)": "probe",
+        r"\(attempt)": "1",
+        r"\(fresh)": "Fresh O''Brien",
+    }
+    for marker, value in replacements.items():
+        rename = rename.replace(marker, value)
+        create = create.replace(marker, value)
+    with sqlite3.connect(":memory:") as database:
+        database.executescript(schema + "ALTER TABLE tasks_migration RENAME TO tasks;")
+        database.execute(
+            "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,issue_title) "
+            "VALUES('source','repo','FIX-1',1,'Original')"
+        )
+        database.executescript(rename + create)
+        assert database.execute("SELECT issue_title FROM tasks WHERE id='source'").fetchone() == (
+            "O'Brien",
+        )
+        assert database.execute(
+            "SELECT issue_title,repository_id,planning_state FROM tasks WHERE id='probe'"
+        ).fetchone() == ("Fresh O'Brien", "repo", "unstarted")

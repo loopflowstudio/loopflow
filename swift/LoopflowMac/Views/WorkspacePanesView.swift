@@ -50,7 +50,7 @@ struct WorkspacePanesView: View {
     }
 
     private func endWorkspaceAction() {
-        Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+        Perf.stateObserved(Perf.retainedWorkspaceAction, id: "workspace", owner: workspace.performanceOwner)
     }
 }
 
@@ -519,9 +519,15 @@ struct SessionPaneView: View {
                     help: "Reconnect this pane to the existing conversation.",
                     disabled: changingSession) {
                     changingSession = true
-                    Task { @MainActor in
-                        defer { changingSession = false }
-                        await sessions.refresh(item.id)
+                    Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
+                                    repository: sessions.repoPath, liveSessions: sessions.sessions.count,
+                                    owner: workspace.performanceOwner) {
+                        Perf.acknowledged(.reconnect, id: item.id, owner: workspace.performanceOwner)
+                        Task { @MainActor in
+                            defer { changingSession = false }
+                            await sessions.refresh(item.id)
+                            Perf.reconnected(id: item.id, owner: workspace.performanceOwner)
+                        }
                     }
                 }
             }
@@ -800,6 +806,7 @@ struct SessionPaneView: View {
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
+                repository: sessions.repoPath,
                             workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
@@ -922,11 +929,16 @@ struct SessionPaneView: View {
         if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
             let retry = item.error != nil && item.record.launchRetry == nil
             Button(retry ? "Retry" : action.label) {
-                sessions.beginPaneLoad(item.id)
-                Task { @MainActor in
-                    if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
-                    else if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.start(item.id) }
+                Perf.userAction(.taskWorkspaceReady, scenario: "session", id: item.id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                owner: workspace.performanceOwner) {
+                    sessions.beginPaneLoad(item.id)
+                    Perf.acknowledged(.taskWorkspaceReady, id: item.id, owner: workspace.performanceOwner)
+                    Task { @MainActor in
+                        if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
+                        else if action.kind == .moveHere { await sessions.moveHere(item.id) }
+                        else { await sessions.start(item.id) }
+                    }
                 }
             }
             .buttonStyle(.bordered)
@@ -978,6 +990,7 @@ struct SessionPaneView: View {
         if let location = pane.content.location, surface.workspace?.identity == location,
            let terminal = pane.terminal {
             GhosttyTerminalView(
+                repository: sessions.repoPath,
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
                 argv: item.launchArguments,
                 terminal: terminal,

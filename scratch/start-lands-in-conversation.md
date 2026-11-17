@@ -175,7 +175,8 @@ kind (local, remote) on `start_task`; the report splits by it.
   `prepareTaskSession` and the `startOffer` `lf session resume --explain`
   fallback for it; `Perf.retarget(.startTask, from: "new-task", …)` (key by
   request ID from the click).
-- Phone: `createdTask`'s view-plan read before navigation.
+- Phone: `createdTask`'s view-plan read before navigation (done for a first
+  Start; kept for a request recovered after a restart, whose receipt has no Session).
 
 Behavior that must survive: `lf task run` on an existing Task (still starts the
 conversation beside its Graph), `-b`/approve creation (no Session; keeps
@@ -270,13 +271,11 @@ Start's log is `task.create` alone and the opening names the answer's Session
 
 Concept review of 4d6ec717da: the phone model holds (`MobileTask` is the one
 value both Start and the Task list open; recovery alone reads `task:<id>`).
-The Desktop rule from the previous review is still unbuilt: `createTask`'s
-generic `catch` (`WorkModel.swift:2583`) still takes a throw from
-`openCreatedTask` and sets `startingTask.error`, so Try again files a second
-Task. It is the next implement pass.
 
 Remaining, in order:
-1. **Desktop: after the answer, no Try again.** Split `createTask`'s `do`:
+1. **Desktop: after the answer, no Try again** (from the review of
+   149dbbfae3, still unbuilt: `WorkModel.swift:2582`'s generic `catch` sets
+   `startingTask.error` for a throw from `openCreatedTask`). Split `createTask`'s `do`:
    `query.createTask` failures (before filing) keep `startingTask.error` and
    Try again; once `created` exists, clear `startingTask`, select the Task
    (`openTaskDestination`) and put the error on its workspace
@@ -290,10 +289,10 @@ Remaining, in order:
    Task…" for recovery.
 2. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
    click (slice 5).
-3. Checkout without network for a new branch: `fetch_task_refs`, the base
-   fetch and `assert_assignee` still run inside setup (off the answer path,
-   on the typing path); with slice 3.
-4. Slices 3–5.
+3. Slice 3, including checkout without network for a new branch:
+   `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
+   setup (off the answer path, on the typing path).
+4. Slices 4–5.
 
 ## Slices
 

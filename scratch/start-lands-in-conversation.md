@@ -76,9 +76,9 @@ cannot appear and no row-ranking fix is needed for it.
 
 Then the server starts the held conversation (`transport::start_held` of
 `lf session resume <id> --task X`) and replies. The answer carries the receipt,
-the prepared `SessionRecord` (with `open_argv`) and the Task's `TaskOverview`
-reading taken after commit; a repeat reads both again, the stored receipt does
-not hold them.
+the prepared `SessionRecord` (with `open_argv`) and the Task's row
+(`RoadmapTask`) read after commit; a repeat reads both again, the stored
+receipt does not hold them.
 
 After replying, a server continuation on `journal::request::spawn_blocking`
 under the request's trace runs `planning_sync::acquire_repository`,
@@ -91,8 +91,8 @@ per step into the terminal:
    `git worktree add` from local `origin/<default>`. No fetch, no PR lookup (a
    new branch has none), no Linear. Then `admit_session_workspace`.
 2. **Graph**: when the Task's Graph is taken up and has no run, start it the way
-   `start_task_run` does (`lf --task X graph run`, detached, not awaited). The
-   Graph's own `launch::report` moves the receipt to `started`.
+   `start_task_run` does (detached `lf task run X`, not awaited). The receipt
+   stays `admitted`.
 3. **Provider**: runs in this process; no exec into `lf -i`.
 
 Each step reads recorded state first, so a restarted conversation resumes setup
@@ -114,8 +114,8 @@ of the last background fetch; the Task's first sync catches up.
 
 **Desktop**: the sheet closes on click into the Task workspace, showing the
 words (`StartingTaskView` shape from LOO-906, keyed by request ID, no
-`PendingOperation`). On the answer, seed `taskWork[id]` from its reading, place
-the pane from its `SessionRecord`, and skip `plan.list` ×2, the `session.resume`
+`PendingOperation`). On the answer, select from its row, place the pane from
+its `SessionRecord`, and skip `plan.list` ×2, the `session.resume`
 prepare and the `desktop.layout` read for a Task this window created
 (`CreationRecovery.shared.requests(for: .task(id))` is non-empty). The pane's
 relay attaches to the already-held terminal.
@@ -200,9 +200,8 @@ the CLI joins). The held `lf session resume` prints the request,
 `Checkout ready  N s`, `Graph <name> started`, then execs the provider.
 Differences from the approach above:
 - Setup launches `lf task run <ID>` detached (the carrier that retries and
-  settles completion), not `lf graph run`, and records it with
-  `record_setup_launch` (`admitted` → `started`). It finds its creation via
-  `admitted_task_creation(session)` (migration `creation_receipt_sessions.sql`).
+  settles completion), not `lf graph run`. Whether setup is owed is
+  `setup::owed` (below), not the receipt.
 - The conversation is held even with no agent selected: setup needs none.
 - A viewer of a held terminal (`connect`, `held_elsewhere`) skips setup.
 - `-b` creation keeps `run_requested` + `start_creation` (no conversation).
@@ -210,9 +209,6 @@ Differences from the approach above:
   conversation (`task_conversation`) chosen inside the transaction.
 - A released `filed`+run row for a conversation-admitting create answers
   `outcome_unknown` instead of continuing.
-- Setup's "start the Graph" obligation lives on the receipt (`admitted` +
-  `session_id`). Nothing prunes `creation_receipts`; whatever later expires
-  request IDs must keep `admitted` rows.
 
 Concept review of dde1d32a15: the model holds (one transaction; a crash after
 commit and before `hold_conversation` repeats as Complete and the conversation
@@ -444,7 +440,13 @@ Next implement direction:
 - Test: the stopped-setup test also asserts `lf task status --json` reads
   `starting` before setup and `blocked` after the stop.
 
-Remaining: slice 5's remote sample and a windowed Start → typing (qa could not reach either: screen locked, no remote Machine).
+Remaining:
+- The "Next implement direction" above (not built at 3612f3a7d4:
+  `ops/task_execution.rs:70` still answers `Idle` "No Task Graph has run…";
+  `waves.rs`'s override and Swift's `startingGraph`/`unreadPosition`/
+  `startPosition` in `WaveWorkMap.swift` remain).
+- Slice 5's remote sample and a windowed Start → typing (qa could not reach
+  either: screen locked, no remote Machine).
 
 ## Slices
 

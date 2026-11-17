@@ -91,3 +91,22 @@ history and Process reads (`bin/lf.rs:2698-2718`):
 
 Holders are `setsid` processes, one per build, each with its own lock and
 `holder-<sha12>.sock`. They die at logout and reboot.
+
+## Slice 1 (implement, 2026-11-17)
+
+- `agent_stopped_at` was not added: no lf command a person runs ends a held
+  Task conversation's agent (no server stop operation, no Desktop close that
+  ends one; `lf task interrupt` stops Graphs). Quit is read from exit 0/130.
+- A conversation that died long ago still comes back on the first pass. This
+  Machine has 7: one exit 137, five exit 1, one with no end since 2026-10-22.
+  Passed over: ignoring deaths older than some age. That would be a second
+  rule; the give-up after 5 starts already bounds a conversation that cannot
+  start.
+- Two branch migrations while stacked (`process_rows_on_owners.sql` from
+  LOO-953, `task_conversation_recovery.sql` here). `new_migration.py` would
+  have printed LOO-953's, so this one was created by hand; unmerged ones order
+  by name, so it applies after LOO-953's.
+- A person's `lf resume --task` racing the pass's start: both go through the
+  holder, and the pass skips a Session with a live or pending terminal. A
+  start in the same instant is not guarded beyond the attachment claim; not
+  tested.

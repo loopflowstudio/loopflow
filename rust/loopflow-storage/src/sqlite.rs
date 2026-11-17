@@ -53,6 +53,7 @@ mod revisions;
 pub mod scope_defaults;
 pub mod selections;
 mod session_events;
+pub mod session_recovery;
 pub mod sessions;
 pub use sessions::SessionCaller;
 pub mod task_ownership;

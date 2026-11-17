@@ -162,32 +162,26 @@ No new registry. The pass reads three things:
 
 ### Killed vs quit
 
-A Session's agent ended **by the person** when either:
-- its exit code is 0 or 130 (`/exit`, ctrl-D, ctrl-C at the prompt); or
-- `agent_sessions.agent_stopped_at` is set. lf writes it before it signals, on
-  any command a person runs that ends a Session's agent: Desktop close of a
-  conversation's terminal (if close ends the provider rather than detaching),
-  `lf task interrupt` when it stops the conversation, and `lf session stop` if
-  it exists. It belongs to the agent generation, like LOO-953's other
-  `agent_*` columns, and is cleared when the next agent starts; a Session-wide
-  `stopped_at` would make every later death of a restarted agent read as a
-  quit.
+A Session's agent ended **by the person** when its launcher's exit code is 0
+or 130 (`/exit`, ctrl-D, ctrl-C at the prompt). Everything else counts as
+**died**: exit 137 or any other non-zero code, an end with no exit (the holder
+died, a reboot), or an unfinished agent row whose recorded process is gone.
 
-Everything else counts as **died**: exit 137 or any other non-zero code, an
-end with no exit (the holder died, a reboot), or a provider crash.
+Slice 1 found no lf command a person runs that ends a held Task
+conversation's agent: the server has no stop operation, Desktop has no close
+that ends one, and `lf task interrupt` stops Graphs only. A move completes the
+Session, which the pass skips. So `agent_stopped_at` has no writer and was not
+added. The exit code needs no new writer, so a released lf that settles an end
+during upgrade skew still records a quit correctly. If a stop command is ever
+added, it writes a per-agent-generation marker then.
 
-The exit-code half needs no new writer, so a released lf that settles an end
-during upgrade skew still records a quit correctly. Slice 1 lists every stop
-command; grep starts from `os_process.rs:170` (terminate group) and `desktop.rs:1787`.
-
-Counterexample to check in slice 1: at logout or shutdown, launchd sends
-SIGTERM to every process. The holder has no handler and dies at once, so
-the end is usually settled with no exit (died). A provider that catches
-SIGTERM and exits 0 before its holder goes would read as a quit, and the
-conversation would stay down after a reboot. Slice 1 sends SIGTERM to a
-stand-in holder's process group and reads what `exit.json` records. If an
-exit 0 can land, the holder records that it was itself told to stop
-(`exit.json` `holder_stopping`), and an exit after that counts as died.
+Open counterexample (acceptance check 5, not yet run): at logout or shutdown,
+launchd sends SIGTERM to every process. A provider that catches SIGTERM and
+exits 0 before its holder goes would read as a quit, and the conversation
+would stay down after a reboot. Send SIGTERM to a stand-in holder's process
+group and read what `exit.json` records. If an exit 0 can land, the holder
+records that it was itself told to stop (`exit.json` `holder_stopping`), and an
+exit after that counts as died.
 
 ### The recovery pass
 
@@ -210,9 +204,10 @@ clock per Session. Each reading:
 
    Such a Session is started with `session.continue`'s own path:
    `continuing()` (`server/service.rs:907`) followed by `Registry::start`. The
-   request id is `recover:<session>:<ended agent generation id>`. The
-   registry dedupes on the request id, including after a restart (`readopt`
-   re-inserts `meta.request`), so one death never starts two providers.
+   request id is `recover:<session>:<ended agent>:<attempt>`. The store
+   counts the start first and the backoff holds the next one, and the
+   registry answers a repeated request with its terminal, so one death never
+   starts two providers, across a server restart too.
 3. **Task runs whose carrier died.** `restart_ships` becomes `restart_runs`,
    one loop over this Machine's open, claimed Tasks whose carrier is dead:
    - shipping: `lf --task <ID> ship` again, as today;
@@ -373,22 +368,41 @@ Must survive:
 
 ## Slices
 
-1. **A killed Task conversation comes back** (the slice that can prove this
-   wrong). Pieces:
-   - the migration for `agent_sessions.agent_stopped_at`, `recovery_attempts`
-     and `recovered_at`, and `task_graphs.restarts`;
-   - the killed-vs-quit predicate;
-   - the recovery watcher thread with step 2 only, starting through
-     `continuing()` with the deterministic request id;
-   - `conversation` in `lf task status --json`.
+1. **A killed Task conversation comes back.** Built:
+   - migration `task_conversation_recovery.sql`: `agent_sessions.recovery_attempts`
+     and `recovered_at` (no `agent_stopped_at`, see Killed vs quit);
+   - `SqliteStore::recoverable_task_conversations` (storage
+     `sqlite/session_recovery.rs`): open Task, primary Session, cwd is the
+     Task's checkout here, not completed or moved, launcher exit not 0/130,
+     fewer than 5 starts. Index-driven; 24 ms on this Machine's store (54 rows,
+     47 of them live agents);
+   - `ops::recovery::due_task_conversations`: died (ended, or unfinished with a
+     dead identity), backoff passed (`repair_backoff` from `recovered_at`; the
+     first start after a death is immediate), claimed here;
+   - `server/recovery.rs`: the watcher thread, started beside the registry. It
+     reads on a planning/sessions/processes revision change or every 60 s,
+     skips Sessions with a live or pending terminal, counts the start
+     (`record_recovery_start`, guarded on the same ended agent), then starts
+     `continuing()` with request `recover:<session>:<agent>:<attempt>`.
+     Starts run one at a time; each blocks until the holder reports a pid.
+   - Tests: `server::recovery::tests::` (killed starts once per backoff, quit
+     stays quit, gone-without-end counts as died, a held terminal is not
+     started or counted, abandoned or out of starts is not started).
 
-   Shows: acceptance checks 1–3 and 5, the kill half of the demo, whether
-   the registry's request dedupe really holds across a server restart (if
-   not, the dedupe moves into the store), and what a shutdown SIGTERM leaves
-   in `exit.json`.
+   Taught: request dedupe lives in the store (attempt count plus backoff), not
+   only the registry's in-memory map, so a restart cannot double-start. On this
+   Machine the first pass would start 7 conversations that died earlier (one
+   137, five exit 1, one with no end recorded since 2026-10-22).
+
+   Left from slice 1:
+   - `conversation` in `lf task status --json` (moves to slice 4 with the DTOs);
+   - acceptance checks 1–3 and 5 as a `MachineServer` fixture;
+   - a finished turn resetting `recovery_attempts`. Without it a conversation
+     gives up after 5 deaths over its whole life. Check first whether a resumed
+     provider records `yielded` at startup, which would reset it every start.
 2. **Restart and reboot.** Pieces:
-   - pacing and ordering;
-   - backoff and give-up;
+   - the attempt reset on a finished turn (above);
+   - pacing: wait for the held terminal to run or 3 seconds between starts;
    - launch failures recorded with their reason;
    - `recover()` moved into the pass and its read hook deleted;
    - `start_in_background` deleted.
@@ -396,17 +410,21 @@ Must survive:
    Shows: the reboot half of the demo on a real Machine restart.
 3. **Task runs.** Pieces:
    - `restart_ships` → `restart_runs`, covering moving Tasks;
-   - `task_graphs.restarts` and its reset on a finished step;
+   - `task_graphs.restarts` (added to `task_conversation_recovery.sql`) and its
+     reset on a finished step;
    - the died line in the Task run reading;
    - the `exit_of` signal split.
 
    Shows: acceptance check 4.
 4. **Surfaces.** Pieces:
-   - the Session and Task status DTO fields and fixtures;
+   - the Session and Task status DTO fields and fixtures, and `conversation`
+     in `lf task status --json`;
    - the Desktop line;
    - PTY headroom in `lf machine doctor`;
-   - docs (`docs/sessions.md`, `server/README.md` "Logout/reboot",
-     `transport/README.md`).
+   - docs. `docs/sessions.md` says closing from Desktop or `lf task interrupt`
+     makes a quit; neither ends a conversation today, so that sentence goes.
+     It also says each start waits a minute after a death; the first start is
+     immediate.
 
 ## Checks
 

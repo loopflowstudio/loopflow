@@ -6,6 +6,11 @@ Jack, 2026-11-17, quoting the review: "Two product ideas still lack one owner in
 the code: whether a launch is managed, and which agent was chosen." / "this
 seems worth fixing". Both go in this PR.
 
+Status at `f07616744f`: sections 1 and 2, the review answers, the four names
+and the glossary are built (the Rust in sections 1 and the review answers still
+says `Bare(Mode)`/`Managed`, which "Next implement" renames). Remaining: "Next
+implement", then gate and demo.
+
 ## 1. Bare or managed, interactive or headless
 
 Design note with prior art and every quote: `scratch/launch-states.html`.
@@ -195,9 +200,9 @@ Jack answered `scratch/concept-review.html` with "1c 2b 3c -- give info to the
   - managed: the server is told about each turn. A managed launch that is
     interactive is a conversation in a held terminal; one that is headless
     is a worker and runs detached.
-  Keep `Run { Bare(Mode), Managed, Worker }` as built, or make `Worker` a
-  named constructor over managed + headless if that reads truer; either way
-  no code may give Worker a behavior that "managed and headless" doesn't
+  Concept review then chose four variants named for the cells (see "Next
+  implement"; choice in `scratch/questions.md`); either way no code may give
+  Worker a behavior that "managed and headless" doesn't
   explain. Say the definition once in `harness/README.md` and use it in
   `transport/README.md`, `server/README.md`, `docs/sessions.md` and
   `AGENTS.md`; the docs should not describe three independent states.
@@ -257,9 +262,9 @@ READMEs; three places still speak an older vocabulary. No behavior changes.
    `matches!(run, Run::Bare(_))` becomes `!run.is_managed()`;
    `ThreadNaming { bare, reporting }` becomes `{ bare, managed }`. The
    `harness/README.md` table then maps each name to the variant of the same
-   name and can shrink to a sentence. At `55416284eb`: 27 `Run::Managed`, 52
-   `Run::Bare(Mode::Headless)`, 6 `Run::Bare(Mode::Interactive)`, 8
-   `Run::Worker`, 13 `reports_turns()`.
+   name and can shrink to a sentence. At `f07616744f`: 27 `Run::Managed`,
+   11 `Bare(Mode::…)` plus 7 `Bare(input.mode())`/`Bare(mode)`/`Bare(_)`
+   sites, 8 `Run::Worker`, 11 `reports_turns()`.
 
 2. **Managed and bare are defined by turn reports alone.** That is the
    definition quoted under review answer 1. The glossary rows add a lifetime
@@ -320,8 +325,8 @@ link to:
 
 ## Implementation checks, 2026-11-17
 
-The review changes and glossary vocabulary are implemented. `Run` keeps its
-existing variants; `Recording` replaces the launch attachment type. The
+The review changes and glossary vocabulary are implemented. At `55416284eb`
+`Run` still had `Bare(Mode)`, `Managed`, `Worker`; "Next implement" renames them; `Recording` replaces the launch attachment type. The
 production parsing audit and its retained call sites are in [PR #1966](https://github.com/loopflowstudio/loopflow/pull/1966).
 Broader configuration/transport/performance checks remain with gate; live
 steering and viewer lifetime remain with demo.

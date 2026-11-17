@@ -92,6 +92,11 @@ name launch kinds rather than places or lifetimes.
 
 ## Remaining checks
 
+Concept review of `275a936bbb`: the delete list is gone from `rust/` and `docs/`,
+`Delegation::Here` carries `LaunchKind`, and nothing in the design is left to
+build. Next: gate.
+
+
 Gate owns the broader transport, configuration and Task performance checks.
 QA on 2026-11-17 drove both demo checks live with a stand-in Claude
 (`scratch/qa.html`): a batch in a Task checkout received `lf steer` after its

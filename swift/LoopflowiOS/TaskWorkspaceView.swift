@@ -5,12 +5,40 @@ import SwiftUI
 /// Desktop shows beside it open over it.
 struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
+    let feed: TaskFeed
     let task: WorkViewPlan.Content
     let theme: ThemeDefinition
     @Binding var draft: String
     @State private var showsChanges = false
 
     var body: some View {
+        content
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) { action.disabled(!feed.pendingChanges.acceptsChanges) }
+            }
+            .overlay { NoticeView(center: feed.notices) }
+    }
+
+    /// Start a Task not started, Auto-Ship a Working one, stop an Autonomous one.
+    @ViewBuilder private var action: some View {
+        if task.states.contains(.autonomous) {
+            Button("Stop Auto-Ship", systemImage: "pause.circle") {
+                feed.request("Stop Auto-Ship", task) { .taskHold(directory: $0, issue: $1) }
+            }
+        } else if task.states.contains(.unstarted) {
+            Button("Start", systemImage: "play.fill") {
+                feed.request("Start", task) {
+                    .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
+                }
+            }
+        } else if task.states.contains(.working) {
+            Button("Auto-Ship", systemImage: "paperplane") {
+                feed.request("Auto-Ship", task) { .taskShip(directory: $0, issue: $1) }
+            }
+        }
+    }
+
+    @ViewBuilder private var content: some View {
         if task.primarySession == nil {
             TaskChangesView(client: client, task: task, theme: theme)
                 .navigationTitle(task.title)

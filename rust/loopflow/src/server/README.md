@@ -34,7 +34,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revisions 5–6
+## Local protocol, revision 7
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -92,9 +92,9 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":5,"server_revision":5,"min_revision":5,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
-→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null}
+→ {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":7,"server_revision":7,"min_revision":7,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
 ← {"type":"response","id":"b","trace_id":"…","result":null}
@@ -102,7 +102,7 @@ by a test and every server fixture must decode.
 → {"type":"checkpoint","id":"b","checkpoint":3}
 ← {"type":"reading","id":"b","checkpoint":"opaque-reading-token","frame":{"answers":3,…}}
 → {"type":"cancel","id":"b"}
-→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null}
+→ {"type":"request","id":"c","operation":{"kind":"task.run","directory":"/repo","issue":"LOO-1","graph":null,"from":null,"agent":null,"approve":false},"select":null,"request_id":null}
 ← {"type":"response","id":"c","trace_id":"…","result":{"state":"running","issue":"LOO-1","run":"code from start","ships":false,"graph_process":"…","log":"…"}}
 → {"type":"subscribe","id":"d","operation":{"kind":"task.wait","issue":"LOO-1","until":"submitted"},"select":null,"resume":null}
 ← {"type":"reading","id":"d","checkpoint":"another-token","frame":{"answers":null,"unavailable":null,"body":{"reached":true,"task":{…}}}}
@@ -117,14 +117,31 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revisions 5–6; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 7; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
 
+Revision 7 answers each write once it has committed, with `revisions`: the
+store domains it advanced and their value after the commit. Planning sync and
+a claim's Linear assignee run after the answer. Each `reading` frame carries
+`read_at`, the revisions of the snapshot it read, so a client holding a change
+on screen drops it at the first reading at or past the write's `revisions`. A
+write may carry `request_id`; for a day a repeat under that ID gets the first
+answer and runs nothing, and a different operation under it is `invalid`. An
+`error`'s `revisions`, when not null, are the domains that advanced while the
+write ran: other writes, such as an earlier write's planning sync, land in the
+same window, so they do not say the failed write took effect. Older clients
+must update.
+
+```text
+→ {"type":"request","id":"c-1","operation":{"kind":"task.complete","directory":"/repo","issue":"LOO-2"},"select":null,"request_id":"6f1c…"}
+← {"type":"response","id":"c-1","trace_id":"…","result":{…},"revisions":{"planning":412}}
+← {"type":"reading","id":"tasks","checkpoint":"…","frame":{"answers":null,"unavailable":null,"body":[…],"work":null,"read_at":{"planning":412,"sessions":90,…}}}
+```
+
 Revision 6 adds per-request SQL receipts (`performance.read`, `performance.write`) and subscription
-SQL evaluation IDs. Revision 5 clients retain ordinary reads without attributed
-SQL receipts.
+SQL evaluation IDs.
 
 Revision 5 combines bulk/upload tickets, mobile access, shared subscription
 readers and typed events. Control messages are limited to 1 MiB; ticketed
@@ -183,7 +200,7 @@ error; anything else a read returns is `unavailable`.
 After editing a Task's checkout, request its changed files on the same connection:
 
 ```json
-{"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null}
+{"type":"request","id":"changes","operation":{"kind":"task.changes","issue":"LOO-1","base":"parent","head":null},"select":null,"request_id":null}
 ```
 
 The response uses the server's latest observed Git state. Served requests and
@@ -463,11 +480,11 @@ The [attachment contract above](#terminal-attachment) applies over the remote
 carrier (`lf server mobile`), with these transport differences.
 
 Connect to the host's `/v1/machine` WebSocket, complete
-[`hello`/`welcome`](#local-protocol-revision-5), and request `session.attach`
+[`hello`/`welcome`](#local-protocol-revision-7), and request `session.attach`
 with a Session ID from `session.list`:
 
 ```text
-→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null},"select":null}
+→ {"type":"request","id":"attach-1","operation":{"kind":"session.attach","session":"<session ID>","terminal_id":null},"select":null,"request_id":null}
 ← {"type":"response","id":"attach-1","trace_id":"<trace ID>","result":{"ticket":"<ticket>","terminal_id":"<terminal ID>","expires_in_ms":60000}}
 ```
 
@@ -536,9 +553,9 @@ OpenCode plugin and the Pi extension send the same request from inside the
 provider ([below](#opencode-and-pi-report-from-inside-the-provider)):
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
+→ {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"hook","platform":"macos","name":"lf __context-block","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null}
+→ {"type":"request","id":"stop","operation":{"kind":"session.boundary","moment":"stop","delivery":"/Users/me/.lf/context-deliveries/0b9f….json","adapter":{…},"callback":{"hook_event_name":"Stop","session_id":"5f1c…","prompt_id":"p-12",…},"gap":null,"printed":[],"inbox":"/Users/me/.claude/sessions/4242.9c1d….key"},"select":null,"request_id":null}
 ← {"type":"response","id":"stop","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
@@ -681,9 +698,9 @@ the `hello` a hook sends, makes one request and closes the connection when the
 answer arrives:
 
 ```text
-→ {"type":"hello","revision":5,"min_revision":5,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
+→ {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"plugin","platform":"macos","name":"lf pi extension","version":"0.15.1"}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"boundary","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[],"inbox":null},"select":null}
+→ {"type":"request","id":"boundary","operation":{"kind":"session.boundary","moment":"event","delivery":"…","adapter":{…},"callback":{"type":"tool_execution_end","turn":"7d0e…",…},"gap":null,"printed":[],"inbox":null},"select":null,"request_id":null}
 ← {"type":"response","id":"boundary","trace_id":"…","result":{"steers":null,"update":null,"waiting":false}}
 ```
 
@@ -866,7 +883,7 @@ selecting fields out of any typed response can make it undecodable. Request
 the screen read when a typed client needs a smaller payload. Desktop's
 outline continues to use `plan.list` for its richer runtime data.
 
-Handle failures through the [protocol error codes](#local-protocol-revision-5).
+Handle failures through the [protocol error codes](#local-protocol-revision-7).
 Check the named Task or Session when it cannot be found. If the host cannot
 answer, retain any previous display as stale and retry the read after recovery;
 an unavailable Session card does not establish that the Session ended.

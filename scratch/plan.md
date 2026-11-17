@@ -11,8 +11,8 @@ selectors, the `move` words) are each decided before they are built.
 `lf steer SESSION 'text'` reaches a Session whether or not its agent is
 running. Running, it reads the steer at its next boundary, as today. Idle and
 held by the server, the server wakes it, as today. Stopped, the Machine server
-starts it again in a held terminal, the way the phone's Continue does, and
-then wakes it like any idle held conversation. `lf resume S` afterwards
+starts it again in a held terminal, the way the phone's Continue does, and the
+resumed conversation takes its unread steers as its first input. `lf resume S` afterwards
 attaches to that terminal and shows the answer. `lf resume` loses `--message`
 and only connects.
 
@@ -23,8 +23,8 @@ correction uses it.
 Who a steer wakes:
 
 - a steer naming a Session wakes that Session;
-- `lf steer TASK 'text'` wakes the Task's primary conversation and its worker,
-  as a steer naming each would: "steering a task should behave like steering
+- `lf steer TASK 'text'` wakes the Task's primary conversation (and a running
+  worker reads it at its next boundary), as a steer naming each would: "steering a task should behave like steering
   both the worker session and the main task session", "i mean it WAKES
   those". Every running Session of the Task still reads it at its next
   boundary; the Task's other stopped Sessions are not woken;
@@ -85,8 +85,9 @@ case: an interactive Session with an undelivered steer that wakes it and no
 live AgentProcess is started with `session.continue`'s launch
 (`server/service.rs` `continuing` → `Registry::start`), which runs `lf
 session resume -- S` in a held terminal in its recorded directory, refusing
-through `run_refusal` a Session that is already running. Once the resumed
-conversation yields, the existing idle path delivers the steer. The steering
+through `run_refusal` a Session that is already running. A resumed provider
+never yields without input, so the resume hands the conversation its unread
+steers as its first input (`take_steers_to_start`). The steering
 command (`engine::session::steer`, so `lf steer` and Desktop's served
 `session.steer` alike) only saves.
 
@@ -96,14 +97,11 @@ a second copy of something the watcher has: one reader of news, `run_refusal`
 against a second process, and a reread when a turn ends (`wake::after_turn`).
 
 **Each steer starts at most one process.** The watcher's first reading after
-a server start wakes everything with news ("A server restart forgets
-nothing"). With stopped Sessions in scope, a Machine restart would start every
-interactive Session holding an old undelivered steer. So a start is recorded
-per steer: the held start's `request` is the steer ID, and the steer row
-records that it started its Session once (new nullable column, one migration).
-A steer that already started its Session once waits for a normal boundary.
-The migration marks every existing undelivered steer as already started, so
-upgrading wakes nothing old.
+a server start wakes everything with news, so a start is recorded once per
+steer: `steer_wake_reading` is a one-row cursor over `steers.seq`
+(`read_steer_wakes` reads the range past it), so nothing is stamped on
+`steers`, whose triggers move the planning revision. The migration sets the
+cursor past every existing steer, so upgrading wakes nothing old.
 
 **Without a server.** The steer is saved and visible in `lf session steers`;
 the server's first reading starts the Session. `lf steer` says which of three
@@ -118,20 +116,17 @@ Graph step, both from `transport::delegate_current`), same harness-switch
 continuation, same `--output-schema`. The prompt carries each steer's
 attribution line and **complete** text, not the hook's 400-byte excerpt
 (`steer::render`): the Graph correction includes `output.instructions()`. The
-steer is saved already claimed by this process (one store write), so the
-watcher never sees it as news and starts no held terminal beside it; it is
-marked delivered when the turn starts. Steers saved during the turn arrive
+steer is saved and every unread one marked delivered in one write
+(`take_session_steers`), so the watcher starts no held terminal beside it and
+the turn's hooks print nothing twice. Steers saved during the turn arrive
 through hooks at its boundaries; one saved after the last boundary is news
 for the watcher once the process exits. `-b steer` to a running Session saves
 and returns: there is no turn of its own to wait for.
 
-**One process per Session.** `lock_session_process` is held only through
-workspace admission (`lf/commands/session.rs` `resume`). The foreground turn
-takes it and checks `run_refusal` under it before launching, like
-`continuing` does, so a held start and a foreground turn can't both launch.
-Verify in slice 1 that the AgentProcess identity is recorded before the lock
-is released; if not, recording it inside the lock is the fix, and it also
-closes the same race for two `lf resume` calls.
+**One process per Session.** `-b steer` holds `lock_session_process` for the
+whole turn and checks `run_refusal` under it, like `continuing`, so a held
+start and a foreground turn can't both launch; a concurrent `lf resume` waits
+30 s, then fails as busy.
 
 **A woken Session beside a live Graph step.** An interactive Session bound to
 a Task shares its checkout with that Task's Graph steps. `lf resume` of that
@@ -215,8 +210,12 @@ Remaining:
    reports) keeps its captured first turn, so the steer is not its first
    input; it is taken only on the other path. Codex in a held terminal is
    unproven; see Open below.
-3. **Docs and help** across the files above; `.lf/qa/provider-switching.md`
-   drives `steer` in place of `resume --message`.
+3. **Docs and help.** *Done* inside write-docs and slice 2: `lf steer`'s Clap
+   help names the server start and `-b`; `.lf/qa/provider-switching.md` drives
+   `lf -b steer`.
+
+Nothing remains to build. For gate: the Codex question below, and `-b steer`
+to a running Session (saves and returns) has no test.
 
 ## Excluded
 
@@ -230,8 +229,9 @@ runs wherever the command already runs; no new routing.
 and crash tables), `docs/agent-api.md` (Steer), `docs/config.md`,
 `docs/dev/execution.md`, `docs/dev/planning.md`, `docs/dev/reference-models.md`,
 `rust/loopflow/src/server/README.md` (Starting a stopped conversation),
-`.lf/qa/provider-switching.md`. `lf steer`'s Clap help is still to change in
-slice 3 with the code.
+`.lf/qa/provider-switching.md`. `docs/sessions.md`'s table says a started
+Session "reads the steer first"; for Codex that holds only if the Open
+question below resolves yes.
 
 Open: the first input rides `Launch::terminal_input`, which every harness's
 `open` uses, so Pi and OpenCode take it the same way as Claude (untested).

@@ -1,8 +1,11 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
 Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
-(Graph runs and steps) is built and merged with main. LOO-936 is still moving
-(at `qa` after concept-review loop 1 pass 3, no PR, 2026-11-16 late) on `processes.rs`, `sessions.rs`,
+(Graph runs and steps) is built, merged with main and passed QA
+(`scratch/qa.html`); the QA fixes (`lf graph show <RUN_ID>`, step `error` in
+its JSON, Process lines labelled by `RunResult::of`) are committed. LOO-936 is
+still moving (at `qa`, no PR, origin/main `4852348e5c` has no LOO-936 commit,
+2026-11-16 late) on `processes.rs`, `sessions.rs`,
 `session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
 activation slices wait for it to merge. The renames under "Concept review
 after slice 2a" are built: `Run`, `GraphRun`, `GraphStep`, `record_graph(…,

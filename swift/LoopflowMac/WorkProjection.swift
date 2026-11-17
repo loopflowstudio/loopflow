@@ -298,7 +298,6 @@ final class WorkNavigation {
     /// The window's one Notice: refusals, requested changes and failed reads.
     let notices = NoticeCenter()
     var startingTaskSessions: Set<String> = []
-    var taskSessionErrors: [String: String] = [:]
     /// Successful `task prepare` receipts, available before the next roadmap read.
     var preparedTaskWorktrees: [String: WorkspaceIdentity] = [:]
     /// Tasks whose Comments are expanded; a presentation fact, not a reading.

@@ -277,6 +277,22 @@ struct PendingChangesTests {
         #expect(center.current == nil)
     }
 
+    @Test func aFailureThatOutlastsALostLinkPostsOnceItReturns() {
+        let center = NoticeCenter()
+        center.read("sessions", "Sessions", from: nil, to: "offline", link: .away)
+        center.read("sessions", "Sessions", from: "offline", to: "offline", link: .away)
+        #expect(center.current == nil)
+        center.read("sessions", "Sessions", from: "offline", to: "still offline", link: .connected)
+        #expect(center.current?.text == "Sessions couldn't be read: still offline")
+        let posted = center.posted
+        center.read("sessions", "Sessions", from: "still offline", to: "still offline", link: .connected)
+        #expect(center.posted == posted)
+        center.read("sessions", "Sessions", from: "still offline", to: nil, link: .connected)
+        #expect(center.current == nil)
+        center.read("sessions", "Sessions", from: nil, to: nil, link: .connected)
+        #expect(center.posted == posted)
+    }
+
     @Test func aConditionStandsUnderEventsUntilItEnds() {
         let center = NoticeCenter()
         center.post(Notice("The Machine is away", key: "away", kind: .condition))

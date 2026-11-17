@@ -59,8 +59,6 @@ struct RoadmapView: View {
     @Environment(\.palette) private var palette
     private let model: WorkModel
     @State private var lens: WorkLens = .now
-    @State private var controlError: String?
-    @State private var activeControlId: String?
 
     /// Renders the window's model; that window keeps it current.
     init(
@@ -90,9 +88,6 @@ struct RoadmapView: View {
                     .padding(.bottom, Spacing.sm)
             }
             Divider()
-            if let controlError {
-                evidenceBanner(title: "Control failed", detail: controlError)
-            }
             content
         }
         .background(palette.background)
@@ -178,7 +173,6 @@ struct RoadmapView: View {
                     ForEach(nowSectionsList) { section in
                         NowSectionView(
                             section: section,
-                            activeControlId: activeControlId,
                             onSelect: { row in
                                 onOpenTask(row.task.task.repo, row.task.id)
                             },
@@ -215,7 +209,6 @@ struct RoadmapView: View {
     private func waveCard(_ roadmap: WaveRoadmap) -> some View {
         RoadmapWaveCard(
             roadmap: roadmap,
-            activeControlId: activeControlId,
             onOpenWave: { onOpenWave(roadmap.wave) },
             onOpenTask: { onOpenTask(roadmap.wave.repo, $0) },
             onTaskAction: { task, action in
@@ -223,26 +216,6 @@ struct RoadmapView: View {
             },
             onOpenWorktree: openWorktree
         )
-    }
-
-    private func evidenceBanner(title: String, detail: String) -> some View {
-        HStack(alignment: .top, spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(palette.warning)
-            VStack(alignment: .leading, spacing: Spacing.xxs) {
-                Text(title)
-                    .font(Typography.caption(11).weight(.semibold))
-                    .foregroundStyle(palette.text)
-                Text(detail)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, Spacing.xl)
-        .padding(.vertical, Spacing.sm)
-        .background(palette.warning.opacity(0.12))
     }
 
     @MainActor
@@ -257,22 +230,7 @@ struct RoadmapView: View {
                 NSWorkspace.shared.open(github.url)
             }
         case .run:
-            let controlId = "task:\(task.id)"
-            activeControlId = controlId
-            controlError = nil
-            Task {
-                do {
-                    let repo = task.task.repo
-                    let issue = task.task.identifier
-                    try await LocalWaveAgentLauncher.runTask(repoPath: repo, issue: issue)
-                    try await model.confirmWorkUpdate()
-                } catch {
-                    controlError = error.localizedDescription
-                }
-                if activeControlId == controlId {
-                    activeControlId = nil
-                }
-            }
+            model.startTask(nil, task: task)
         }
     }
 
@@ -283,16 +241,14 @@ struct RoadmapView: View {
         components.path = "/new_window"
         components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
         guard let url = components.url, NSWorkspace.shared.open(url) else {
-            controlError = "Warp could not open \(workspace.worktree)."
+            model.navigation.notices.post(Notice("Warp could not open \(workspace.worktree)."))
             return
         }
-        controlError = nil
     }
 }
 
 private struct RoadmapWaveCard: View {
     let roadmap: WaveRoadmap
-    let activeControlId: String?
     let onOpenWave: () -> Void
     let onOpenTask: (String) -> Void
     let onTaskAction: (RoadmapTask, RoadmapTaskAction) -> Void
@@ -336,8 +292,7 @@ private struct RoadmapWaveCard: View {
             case .available(let tasks, let truncated):
                 if tasks.isEmpty { Text("No Tasks in this Project.").foregroundStyle(palette.textSecondary) }
                 ForEach(tasks) { task in
-                    RoadmapTaskRow(task: task,
-                        activeControlId: activeControlId, onSelect: { onOpenTask(task.id) },
+                    RoadmapTaskRow(task: task, onSelect: { onOpenTask(task.id) },
                         onAction: { action in onTaskAction(task, action) }, onOpenWorktree: onOpenWorktree)
                 }
                 if truncated { Text("Older Tasks are truncated.").foregroundStyle(palette.warning) }
@@ -359,14 +314,11 @@ private struct RoadmapWaveCard: View {
 
 struct RoadmapTaskRow: View {
     let task: RoadmapTask
-    let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
     @Environment(\.palette) private var palette
-
-    private var isActing: Bool { activeControlId == "task:\(task.id)" }
 
     var body: some View {
         HStack(alignment: .top, spacing: Spacing.sm) {
@@ -401,8 +353,6 @@ struct RoadmapTaskRow: View {
                 WorkChannelChips(task: task)
                 TaskActionCluster(
                     task: task,
-                    isActing: isActing,
-                    controlsDisabled: activeControlId != nil,
                     onAction: onAction,
                     onOpenWorktree: onOpenWorktree
                 )
@@ -453,8 +403,6 @@ struct WorkChannelChips: View {
 /// audited lifecycle verbs.
 struct TaskActionCluster: View {
     let task: RoadmapTask
-    let isActing: Bool
-    let controlsDisabled: Bool
     let onAction: (RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
 
@@ -464,7 +412,6 @@ struct TaskActionCluster: View {
                 Button(action.label) { onAction(action) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
-                    .disabled(controlsDisabled)
             }
             if let workspace = task.reference.workspace {
                 Button("Worktree") { onOpenWorktree(workspace) }
@@ -475,16 +422,12 @@ struct TaskActionCluster: View {
                 Link("PR #\(github.number)", destination: github.url)
                     .font(Typography.caption(10))
             }
-            if isActing {
-                ProgressView().controlSize(.small)
-            }
         }
     }
 }
 
 struct NowSectionView: View {
     let section: NowSection
-    let activeControlId: String?
     let onSelect: (NowRow) -> Void
     let onTaskAction: (NowRow, RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
@@ -509,7 +452,6 @@ struct NowSectionView: View {
             ForEach(section.rows) { row in
                 NowRowView(
                     row: row,
-                    activeControlId: activeControlId,
                     onSelect: { onSelect(row) },
                     onAction: { action in onTaskAction(row, action) },
                     onOpenWorktree: onOpenWorktree
@@ -522,7 +464,6 @@ struct NowSectionView: View {
 
 private struct NowRowView: View {
     let row: NowRow
-    let activeControlId: String?
     let onSelect: () -> Void
     let onAction: (RoadmapTaskAction) -> Void
     let onOpenWorktree: (TaskWorktreeSnapshot) -> Void
@@ -530,8 +471,6 @@ private struct NowRowView: View {
     @Environment(\.palette) private var palette
 
     private var task: RoadmapTask { row.task }
-    private var isActing: Bool { activeControlId == "task:\(task.id)" }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xxs) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.xs) {
@@ -561,8 +500,6 @@ private struct NowRowView: View {
             WorkChannelChips(task: task)
             TaskActionCluster(
                 task: task,
-                isActing: isActing,
-                controlsDisabled: activeControlId != nil,
                 onAction: onAction,
                 onOpenWorktree: onOpenWorktree
             )

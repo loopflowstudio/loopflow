@@ -36,9 +36,10 @@
   the Notice carries the message; the next reading shows what happened.
 - Read failures left inline, each outside a `WorkModel` reading: the Graph
   step's on-demand history (`GraphRunStep`, no model) and the telemetry
-  window's doctor read. Action errors (`controlError`, `taskSessionErrors`)
-  move to the Notice (concept review pass 3, item 2); `conversationError`
-  stays as the conversation pane's content.
+  window's doctor read. Action errors (Warp open, New session) post Notice
+  events; `conversationError` stays as the conversation pane's content.
+- New session failure text: "<ID> New session failed: <reason>", keyed per
+  Task, so a second Task's failure replaces the first in the one event slot.
 - `WaveDetailReading.failure` is now read only by its tests and the mock
   Wave fixture; delete with that fixture.
 - A failed read no longer disables Task controls; only away and a saved,

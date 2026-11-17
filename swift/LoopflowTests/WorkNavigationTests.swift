@@ -803,25 +803,20 @@ struct WorkNavigationTests {
         await gate.release()
         try await waitForAttempt("Failed preparation")
         #expect(owner.startingTaskSessions.isEmpty)
-        #expect(other.taskSessionErrors.isEmpty)
+        #expect(other.notices.current?.text.contains("New session failed") != true)
         model.setRepoPath("/src/loopflow")
-        model.select(.task(id: "issue-available"))
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(text: "Preparation failed for the original Task")
-        }
+        // The failure is the asking window's Notice, with "Try again".
+        let failure = try #require(owner.notices.current)
+        #expect(failure.text.contains("Preparation failed for the original Task"))
+        #expect(failure.action?.title == "Try again")
         model.select(.task(id: "issue-review"))
-        #expect(throws: Never.self) {
-            try view.inspect().find(text: "Preparation failed for the original Task")
-        }
         #expect(try !view.inspect().find(button: "New session").isDisabled())
         // A retry clears only this Task's prior failure and settles normally.
         let retry = WorkSurfaceView(model: model, onNewSession: { _ in })
         try retry.inspect().find(button: "New session").tap()
-        #expect(throws: (any Error).self) {
-            try retry.inspect().find(text: "Preparation failed for the original Task")
-        }
+        #expect(owner.notices.current?.key != failure.key)
         try await waitForAttempt("Retry")
-        #expect(owner.taskSessionErrors.isEmpty)
+        #expect(owner.notices.current?.key != failure.key)
         #expect(owner.startingTaskSessions.isEmpty)
     }
 

@@ -134,15 +134,6 @@ struct TaskWorkflowHeader: View {
                     .textSelection(.enabled)
                     .accessibilityIdentifier("task-completion-pending")
             }
-            if let error = model.navigation.taskSessionErrors[task.id] {
-                Text(error)
-                    .foregroundStyle(palette.failure)
-                    .lineLimit(3)
-                    .textSelection(.enabled)
-                    .accessibilityIdentifier("task-workflow-error")
-                Button("Refresh readings") { model.rescanWork() }
-                    .accessibilityIdentifier("task-refresh-readings")
-            }
         }
         .confirmationDialog("Abandon \(task.task.identifier)?", isPresented: $confirmingAbandon) {
             Button("Abandon Task", role: .destructive) {

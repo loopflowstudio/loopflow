@@ -264,6 +264,21 @@ Checks (third pass): `scripts/test_desktop.sh --filter 'PendingChangesTests|Work
 `documented_commands::` 4 passed; fmt and clippy clean; acceptance rg no matches.
 `TaskHistoryProofTests` (display) edited for the Notice, not run here: gate/CI.
 
+Fourth pass (concept review pass 3, built): Roadmap's Run calls
+`model.startTask(nil, task:)`; `LocalWaveAgentLauncher.runTask`,
+`activeControlId`/`isActing`/`controlsDisabled` and both `evidenceBanner`
+"Control failed" uses are gone; Warp open failures post a Notice.
+`taskSessionErrors` and "Refresh readings" are gone; New session failure posts
+`new-session-<task>` with "Try again" to the asking window, cleared on retry.
+`NoticeCenter.read` keeps `heldFailures` for parts that failed while the link
+was lost and posts once when it returns.
+Checks: `scripts/test_desktop.sh --filter 'PendingChangesTests|WorkModelTests|WorkNavigationTests|TaskSessionLaunchProofTests'`
+110 passed (incl. `aFailureThatOutlastsALostLinkPostsOnceItReturns`); `rg -n
+'taskSessionErrors|controlError|LocalWaveAgentLauncher.runTask' swift` and the
+acceptance rg no matches. `TaskSessionLaunchProofTests` (display,
+`LOOPFLOW_NATIVE_TESTS=1`) fails at its first `find(task-new-session)` here,
+identically on 86841cc327: pre-existing, left to demo/CI.
+
 ## Next implement direction (concept review, pass 3)
 
 1. **Roadmap's Run is Start.** `RoadmapView`'s `.run` control calls

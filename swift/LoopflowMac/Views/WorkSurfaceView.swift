@@ -12,25 +12,15 @@ struct WorkSurfaceView: View {
     var onNewSession: ((String) async throws -> Void)?
 
     @Environment(\.palette) private var palette
-    @State private var controlError: String?
     @State private var editingTask: RoadmapTask?
 
     private var snapshot: RoadmapSnapshot? { model.roadmap.value }
     private var visibleWaves: [WaveRoadmap] { model.visibleRoadmaps }
 
     var body: some View {
-        VStack(spacing: 0) {
-            if let controlError {
-                evidenceBanner(title: "Control failed", detail: controlError)
-            }
-            if let selection = model.selection, selection.kind == .task,
-               let error = model.navigation.taskSessionErrors[selection.id] {
-                evidenceBanner(title: "New session failed", detail: error)
-            }
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        }
-        .background(palette.background)
+        content
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(palette.background)
         .sheet(item: $editingTask) { task in
             TaskDirectiveEditor(model: model, task: task)
         }
@@ -108,22 +98,7 @@ struct WorkSurfaceView: View {
                         Spacer(minLength: Spacing.sm)
                         if let onNewSession {
                             Button {
-                                let navigation = model.navigation
-                                guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
-                                navigation.taskSessionErrors[task.id] = nil
-                                Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: task.id,
-                                                repository: model.repoPath, liveSessions: model.liveSessionCount,
-                                                owner: navigation.performanceOwner) {
-                                    Perf.acknowledged(.newConversation, id: task.id, owner: navigation.performanceOwner)
-                                    Task {
-                                        defer { navigation.startingTaskSessions.remove(task.id) }
-                                        do { try await onNewSession(task.id) }
-                                        catch {
-                                            Perf.finish(.newConversation, id: task.id, owner: navigation.performanceOwner, outcome: .failed)
-                                            navigation.taskSessionErrors[task.id] = error.localizedDescription
-                                        }
-                                    }
-                                }
+                                Self.startSession(task, model: model, onNewSession: onNewSession)
                             } label: {
                                 Label("New session", systemImage: "plus.bubble")
                             }
@@ -253,6 +228,32 @@ struct WorkSurfaceView: View {
 
     // MARK: - Controls
 
+    /// A failure posts to the window that asked, with "Try again".
+    private static func startSession(_ task: RoadmapTask, model: WorkModel,
+                                     onNewSession: @escaping (String) async throws -> Void) {
+        let navigation = model.navigation
+        guard navigation.startingTaskSessions.insert(task.id).inserted else { return }
+        let key = "new-session-\(task.id)"
+        navigation.notices.clear(key: key)
+        Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: task.id,
+                        repository: model.repoPath, liveSessions: model.liveSessionCount,
+                        owner: navigation.performanceOwner) {
+            Perf.acknowledged(.newConversation, id: task.id, owner: navigation.performanceOwner)
+            Task {
+                defer { navigation.startingTaskSessions.remove(task.id) }
+                do { try await onNewSession(task.id) }
+                catch {
+                    Perf.finish(.newConversation, id: task.id, owner: navigation.performanceOwner, outcome: .failed)
+                    navigation.notices.post(Notice(
+                        "\(task.task.identifier) New session failed: \(error.localizedDescription)", key: key,
+                        action: Notice.Action("Try again") {
+                            startSession(task, model: model, onNewSession: onNewSession)
+                        }))
+                }
+            }
+        }
+    }
+
     private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
         var components = URLComponents()
         components.scheme = "warp"
@@ -260,10 +261,9 @@ struct WorkSurfaceView: View {
         components.path = "/new_window"
         components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
         guard let url = components.url, NSWorkspace.shared.open(url) else {
-            controlError = "Warp could not open \(workspace.worktree)."
+            model.navigation.notices.post(Notice("Warp could not open \(workspace.worktree)."))
             return
         }
-        controlError = nil
     }
 }
 

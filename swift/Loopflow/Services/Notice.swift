@@ -78,20 +78,24 @@ public final class NoticeCenter {
 
     /// Every reading an app shows reports here, by its failure. One turning into a
     /// failure posts one event keyed by its part, and its return clears it. A lost
-    /// link posts nothing: the away condition says it once.
+    /// link posts nothing: the away condition says it once. A part whose failure
+    /// was held back then posts its first failing reading once the link is back.
     public func read(_ part: String, _ what: String, from previous: String?, to next: String?,
                      link: PendingChanges.Link, action: Notice.Action? = nil) {
         let key = "read-\(part)"
-        switch (previous, next) {
-        case (nil, let reason?):
-            guard link == .connected else { return }
-            post(Notice("\(what) couldn't be read: \(reason)", key: key, action: action))
-        case (_?, nil):
-            clear(key: key)
-        default:
-            break
+        guard let reason = next else {
+            heldFailures.remove(part)
+            if previous != nil { clear(key: key) }
+            return
         }
+        guard previous == nil || heldFailures.contains(part) else { return }
+        guard link == .connected else { heldFailures.insert(part); return }
+        heldFailures.remove(part)
+        post(Notice("\(what) couldn't be read: \(reason)", key: key, action: action))
     }
+
+    /// Parts whose failure began while the link was lost and has not been posted.
+    @ObservationIgnored private var heldFailures: Set<String> = []
 
     /// Put away what is shown: the event, else the newest condition.
     public func dismiss() {

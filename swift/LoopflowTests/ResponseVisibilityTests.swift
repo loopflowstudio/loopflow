@@ -16,5 +16,13 @@ struct ResponseVisibilityTests {
         let stale = ResponseVisibility(previous: old, before: "", submittedAt: 101)
         #expect(!stale.matches(answer, visible: "Tungsten is the answer"))
     }
+    @Test func nativeTranscriptResponseStillRequiresTheVisibleAssistantText() {
+        let observation = ResponseVisibility(previous: nil, before: "Element 74?", submittedAt: 100)
+        let answer = SessionPreview(providerThread: "thread", providerTurn: "new", observedAt: 100,
+            source: "codex_transcript", text: "Tungsten")
+        #expect(!observation.matches(answer, visible: "Working…"))
+        #expect(observation.matches(answer, visible: "• Tungsten"))
+    }
+
 }
 #endif

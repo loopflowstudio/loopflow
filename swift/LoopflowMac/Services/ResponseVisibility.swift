@@ -9,7 +9,7 @@ struct ResponseVisibility {
     let submittedAt: Int64
 
     func matches(_ preview: SessionPreview, visible: String) -> Bool {
-        guard preview.source == "codex", !preview.providerTurn.isEmpty,
+        guard ["codex", "codex_transcript"].contains(preview.source), !preview.providerTurn.isEmpty,
               preview.providerTurn != previous?.providerTurn,
               previous == nil || preview.providerThread == previous?.providerThread,
               preview.observedAt >= submittedAt else { return false }

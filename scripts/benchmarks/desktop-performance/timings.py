@@ -574,7 +574,8 @@ def render_html(report: dict) -> str:
             "process_start_to_typing": "App process start → typing",
             "new_session_to_typing": "New conversation → typing",
             "refresh_to_typing": "Refresh → typing",
-            "file_to_editor": "Open file → editor ready",
+            "file_to_editor": "Open file → focused editor (two actions)",
+            "file_to_visible_editor": "Open file → contents usable",
             "send_to_response_observed": "Send → response observed",
         }.get(scenario, title)
         bars = []

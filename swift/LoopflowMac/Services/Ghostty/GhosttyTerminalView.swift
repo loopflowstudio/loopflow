@@ -1122,7 +1122,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private func beginResponseObservation(_ event: NSEvent) {
         guard event.keyCode == 36 || event.keyCode == 76,
               event.modifierFlags.intersection([.command, .control, .option, .shift]).isEmpty,
-              let record = measuredSession, record.provider == "codex", record.availability == .available,
+              let record = measuredSession, record.provider == "codex",
               case .available(let before, _) = try? readText(region: .screen, maxBytes: 16384) else { return }
         Perf.userAction(.firstWord, scenario: "send_to_response_observed", id: record.id,
                         repository: measurementRepository, liveSessions: nil, owner: measurementOwner) {

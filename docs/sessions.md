@@ -148,8 +148,8 @@ exits, `lf` reads its transcript, records usage and completion in
 | Closing the terminal | ends the agent, as it would plain `claude` |
 | Coming back | `lf resume <session>` continues its thread from history |
 | `lf install` meanwhile | leaves it running; the next launch uses the new build |
-| Steers | arrive when it is next started or resumed, not mid-turn |
-| Run in a Task's checkout | counts toward that Task's cost; it is still not the Task's conversation |
+| Steers | its Task's steers arrive at the next provider boundary, as for every Session |
+| Run for a Task | in its checkout, with `--task` or under `LF_AS`: counts toward that Task's cost and takes its steers; it is still not the Task's conversation |
 
 This covers bare interactive conversations typed at a terminal, a Desktop
 shell included: `lf <skill>`, `lf -i`, bare `lf` and bare Graphs. A
@@ -177,11 +177,12 @@ Graph. Nothing hosts either: no server, no holder.
 | Output | `lf -b <skill>` prints to its caller; a Graph writes `~/.lf/logs/graph-<process>.log` |
 | The caller exits or is killed | `lf -b <skill>` ends with it, like any child process; a Graph, landing watcher or `lf ship` keeps running and its log has the rest |
 | The start is never acknowledged | the command says delivery is unknown and starts nothing again; `lf task status` shows whether it ran |
-| Steers | reach a Graph's steps through the Task; plain `lf -b <skill>` takes none |
+| Steers | reach a Graph's steps and `lf -b <skill>` run for a Task through that Task |
 
-`lf task run` started by an agent, a script or Desktop behaves the same way
-whether or not a terminal is attached; only a person's interactive step opens
-in a holder.
+A step of `lf task run` is a Worker: headless, viewed by nobody, its turns
+recorded by the server. `lf task run` started by an agent, a script or Desktop
+behaves the same way whether or not a terminal is attached; only a person's
+interactive step opens in a holder.
 
 ## Keep working through an update
 
@@ -206,11 +207,11 @@ holder once.
 
 | Opened with | Runs in |
 |---|---|
-| `lf task run`, `lf ship`, `lf resume --task`, a Wave session command | the holder |
+| a person's interactive step of `lf task run` or `lf ship`, `lf resume --task`, a Wave session command | the holder |
 | a Desktop pane | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
 | a Desktop Task shell | the holder |
-| `lf <skill>`, `lf -i`, bare Graphs, even in a Task's checkout | [your terminal](#run-one-in-your-terminal) |
+| `lf <skill>`, `lf -i`, bare Graphs, even in a Task's checkout, with `--task` or under `LF_AS` | [your terminal](#run-one-in-your-terminal) |
 | anything with `-b`, a pipe or `--json`, and every Graph runner | [its own process](#run-one-headless) |
 
 A holder keeps the build it started with. After an install, conversations
@@ -404,10 +405,10 @@ A raw conversation open in a Task's checkout lists under that Task:
 A transcript caught halfway through writing a line is read up to its last
 complete line.
 
-For managed launches and interactive conversations lf starts, turn-end hooks
-ask the Machine server to record finished turns' usage from the transcript.
+For Managed conversations (the ones a holder keeps) and Task and Wave Workers,
+turn-end hooks ask the Machine server to record finished turns' usage from the transcript.
 The hooks open no store; if the server cannot answer, the conversation continues.
-Bare headless runs have no turn-end hook. The launching process reads the
+Bare runs, at a terminal or headless, have no turn-end hook. The launching process reads the
 transcript at exit to record usage and missing completions, without needing
 the server. Raw conversations are displayed without recording those rows.
 See [Telemetry](telemetry.md#what-it-cost) for the recorded totals.

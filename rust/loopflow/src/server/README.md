@@ -517,7 +517,8 @@ reported, never started by an attachment attempt.
 ## Turn and tool boundaries
 
 `transport::delegate` returns one launch state in `Launch::run`:
-`Bare(Mode)` for direct skill and Graph commands and `lf resume <ID> 'message'`,
+`Bare(Mode)` for direct skill and Graph commands and `lf resume <ID> 'message'`
+(except a Graph's correction turn in a Task run, which is the step's Worker),
 `Managed` for interactive Task, Wave, repository and bound conversations, and
 `Worker` for headless runs lf starts for a Task or Wave: `lf task run` steps,
 the `ci-fix` run landing starts, and Discord answers for a Wave. The command decides this state. The checkout, `--task` and

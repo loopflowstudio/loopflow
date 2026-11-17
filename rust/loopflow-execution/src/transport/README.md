@@ -26,7 +26,7 @@ records, queued input, the child's control requests and exit settlement.
 | Command | Run | Lifetime |
 |---|---|---|
 | `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | `Bare(Mode)` | its caller or terminal |
-| `lf resume <ID> 'message'` | `Bare(Headless)` | one turn, then exits |
+| `lf resume <ID> 'message'` | `Bare(Headless)`; a Graph's correction turn inside a Task run is a `Worker` | one turn, then exits |
 | Resume a Bare Session with no message | `Bare(Interactive)` | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | `Managed` | held interactive terminal, independent of its viewer |
 | `lf task run` steps, the `ci-fix` run landing starts, a Discord answer for a Wave | `Worker` | headless until its run ends; nobody views it, the server records its turns |

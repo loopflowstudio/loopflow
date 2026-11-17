@@ -135,7 +135,8 @@ for a Task or Wave that nobody views and whose turns the server records:
 `lf task run` steps, the `ci-fix` run `pr_landing.rs` starts
 (`LF_GRAPH_STEP=worker`), and `run::answer_bound` for Discord Wave answers,
 the one `Run` chosen outside `delegate` that isn't Bare (commented in
-`lf/commands/run.rs`). `lf -b resume <ID> --message` is `Bare(Headless)`; with no
+`lf/commands/run.rs`). `lf -b resume <ID> --message` is `Bare(Headless)`, except a Graph's
+correction turn in a Task run, which is the step's Worker; with no
 message, resume keeps the Session's state. The transport, harness and server READMEs say so.
 
 Resume now reads the Session's binding and primary scope once in `delegate`,
@@ -166,45 +167,33 @@ lint results: `cd0977a62f:scratch/plan.md`. Current resume checks follow below.
 ## Next implement: from concept review of `42a2b8c33d`
 
 The three states and the resume rule hold on the normal path, on an unreadable
-store and on reopen. Four places still say or carry the older model.
+store and on reopen. Realign brought the words over: `docs/sessions.md` now
+names Bare, Managed and Worker where a person meets them (Task steers reach a
+Bare run; `--task`/`LF_AS` launches run in your terminal; only an interactive
+`lf task run` step opens in the holder; Bare runs report no turn ends), and the
+transport and server READMEs say a Graph's correction turn
+(`graph.rs` `resume ID --message` under `LF_GRAPH_STEP=worker`, through
+`delegate_current`) is the step's Worker. Two code changes remain:
 
-1. **`docs/sessions.md` describes main.** It is the page people read and this
-   branch has not touched it.
-   - line 151, a Bare conversation: "Steers | arrive when it is next started
-     or resumed, not mid-turn". Line 180: "plain `lf -b <skill>` takes none".
-     Both contradict `a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server`
-     (already on main) and the page's own "Each Session receives a steer at
-     its next supported provider boundary".
-   - the "Opened with / Runs in" table (lines 207-214) has no row for
-     `lf <skill> --task X` or `LF_AS`, which moved from the holder to your
-     terminal on purpose. Say it in the Bare row. Check the `lf task run` cell
-     in the holder row against `delegate_current`: its steps are Workers in a
-     process of their own.
-   - line 407 "managed launches and interactive conversations lf starts"
-     report turn ends; a Bare interactive one does not.
-   Use the three words once each where a person meets the difference; don't
-   add a glossary.
-2. **`--task` beside a Session ID on resume does nothing, and the code says
+1. **`--task` beside a Session ID on resume does nothing, and the code says
    otherwise.** `SessionTarget::from_selectors` lets the ID win and `delegate`
-   reads the row, so `lf resume BARE_ID --task X` reopens Bare (table row
-   above corrected). `SessionConnectionArgs::work_flag` ("Naming one makes the
-   resume managed") and the append to `open_argv` in `session::prepared` are
-   the last of `named_work`. Confirm `open_argv` already names the Session id,
-   then delete both; `a_prepared_task_resume_opens_managed…` and
+   reads the row, so `lf resume BARE_ID --task X` reopens Bare. Delete
+   `SessionConnectionArgs::work_flag` (`lf/mod.rs`, doc "Naming one makes the
+   resume managed") and its append to `open_argv` in `session::prepared`
+   (`lf/commands/session.rs`), after confirming `open_argv` already names the
+   Session id. Its assertion in `lf/mod.rs` tests (`work_flag(&cli).is_some()`)
+   goes; the comment in `session_launch_contract.rs` ("a Task or Wave only
+   makes the resume managed") becomes "the id still selects".
+   `a_prepared_task_resume_opens_managed…` and
    `a_task_pane_reopened_by_session_id…` assert on the id, not the trailing
    flag. Whether the flag should be refused beside an ID is question 5 on
    `scratch/concept-review.html`, not this PR.
-3. **`delegate(Run::Managed, …)` means "classify this resume".** Three callers
-   pass Managed and may get `Bare(Interactive)` back. Have `delegate_session`
-   and `delegate_prepared_session` read the row into `Run` (one small
-   function, same recording gap) and hand `delegate` the final value, so
-   `delegate` only carries out a `Run`.
-4. **A Graph's correction turn is a Worker.** `graph.rs` spawns
-   `lf --batch … session resume ID --message` with `LF_GRAPH_STEP=worker` in a
-   Task run, so `delegate_current` returns `Worker`, which is right: it is the
-   step's next turn. The transport, harness and server READMEs say
-   `resume … 'message'` is `Bare(Headless)` without that exception; add the
-   clause.
+2. **`delegate(Run::Managed, …)` means "classify this resume".**
+   `delegate_session` and `delegate_prepared_session` pass Managed and may get
+   `Bare(Interactive)` back from the row read inside `delegate`
+   (`transport.rs`, the `is_bare` block with its `RecordingGap`). Move that
+   read into one small function both call, keeping the same gap, and hand
+   `delegate` the final `Run`, so `delegate` only carries out a `Run`.
 
 `scratch/concept-review.html` now reviews every Session command and ends in six
 unanswered questions. None changes this PR: `--message` keeps main's behavior

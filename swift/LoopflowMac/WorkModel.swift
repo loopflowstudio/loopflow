@@ -2588,14 +2588,13 @@ final class WorkModel {
     }
 
     /// Install a created Task's conversation from the answer: its row selects the
-    /// Task (retained evidence until planning lists it), its overview seeds the
-    /// Task's reading and its Session opens as prepared. Nothing saved can exist
+    /// Task (retained evidence until planning lists it) and its Session opens as
+    /// prepared. Nothing saved can exist
     /// for a new Task, so its layout starts empty instead of being read. An
     /// opening failure is its workspace's `conversationError`.
     private func openCreatedTask(_ created: TaskCreated) async {
         let row = created.row
         let found = task(id: row.id) ?? (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
-        if taskWork[found.task.id].value == nil { taskWork.values[found.task.id] = .available(created.overview) }
         guard let record = created.session, let registry = workspaceRegistry, let repository = workspaceRepository else {
             openTaskDestination(wave: found.wave, task: found.task)
             return

@@ -74,7 +74,7 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 } else {
                     Text(work.errorMessage.map { "Workflow could not be read: \($0)" }
-                         ?? "Reading workflow…")
+                         ?? task.unreadPosition)
                         .foregroundStyle(palette.textSecondary)
                     Spacer()
                 }
@@ -438,7 +438,7 @@ struct TaskWorkflowBar: View {
     private var position: String {
         guard let workflow = work.value?.graph else {
             if let error = work.errorMessage { return "Workflow could not be read: \(error)" }
-            if work.value == nil { return "Reading workflow…" }
+            if work.value == nil { return task.unreadPosition }
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
@@ -718,7 +718,7 @@ struct GraphProcessLog: View {
                         TaskRunPosition(workflow: work.graph,
                                         execution: readsWindow ? task?.execution : captured?.row?.execution)
                     } else {
-                        Text("Reading workflow…")
+                        Text(task?.unreadPosition ?? "Reading workflow…")
                     }
                     Spacer()
                     if let openFiles { Button("Files", action: openFiles) }

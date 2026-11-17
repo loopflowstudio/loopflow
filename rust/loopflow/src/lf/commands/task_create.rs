@@ -9,28 +9,38 @@ use crate::lf::TaskCommand;
 use loopflow_execution::command::CommandIo;
 use loopflow_execution::engine::creation::{self, TaskCreation};
 
-/// `task.create`'s answer: its receipt, the primary conversation's record, the
-/// Task's overview and its row in the Work projection's shape, all read when
-/// answering, so a client selects the Task and opens the conversation before
-/// its planning subscription lists it. The stored receipt holds none of them.
+/// `task.create`'s answer: its receipt, the primary conversation's record and
+/// the Task's row in the Work projection's shape, read when answering, so a
+/// client selects the Task and opens the conversation before its planning
+/// subscription lists it. The stored receipt holds neither.
 #[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskCreateAnswer {
+pub struct TaskCreated {
     #[serde(flatten)]
-    pub created: creation::TaskCreated,
+    pub receipt: creation::TaskCreateReceipt,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub session: Option<loopflow_execution::ops::human_session::SessionRecord>,
     pub row: super::waves::RoadmapTask,
 }
 
 /// Read the created Task's row after its commit and join it to the answer, as
 /// the `row` step of request `id`'s creation.
-pub(crate) fn answer(id: &str, created: creation::TaskCreated) -> Result<TaskCreateAnswer> {
+pub(crate) fn answer(
+    id: &str,
+    receipt: creation::TaskCreateReceipt,
+    session: Option<loopflow_execution::ops::human_session::SessionRecord>,
+) -> Result<TaskCreated> {
     let _creation = tracing::info_span!(target: loopflow_execution::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
     creation::step("row", || {
         tokio::runtime::Runtime::new()?.block_on(async {
             let store = loopflow_execution::store::read_existing_registry()?
                 .map(std::sync::Arc::new)
                 .context("no Loopflow store exists on this Machine")?;
-            let row = super::waves::task_row(&store, &created.receipt.task).await?;
-            Ok(TaskCreateAnswer { created, row })
+            let row = super::waves::task_row(&store, &receipt.task).await?;
+            Ok(TaskCreated {
+                receipt,
+                session,
+                row,
+            })
         })
     })
 }
@@ -80,8 +90,12 @@ pub fn create(
             approve,
         },
     );
-    let (answer, after) = match created {
-        Ok(created) => (created.answer, created.after),
+    let creation::Created {
+        receipt,
+        session,
+        after,
+    } = match created {
+        Ok(created) => created,
         Err(error) => {
             if *json {
                 if let Some(result) = creation::lookup(&id).ok().flatten().and_then(|r| r.result) {
@@ -91,7 +105,6 @@ pub fn create(
             return Err(error);
         }
     };
-    let receipt = &answer.receipt;
     if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
         .planning_transport()
         .remote_name()
@@ -105,7 +118,7 @@ pub fn create(
         )?;
     }
     if *json {
-        let answer = self::answer(&id, answer.clone())?;
+        let answer = self::answer(&id, receipt.clone(), session)?;
         writeln!(io.output, "{}", serde_json::to_string_pretty(&answer)?)?;
     } else {
         writeln!(

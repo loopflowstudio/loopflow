@@ -78,8 +78,11 @@ writes! {
         graph: Option<String>,
         session: Option<String>,
         run: bool,
-    } => super::task_create::TaskCreateAnswer;
-    { request_id, title, request, wave, graph, session, run, .. } => super::task_create::answer(request_id, loopflow_execution::engine::creation::create(
+    } => super::task_create::TaskCreated;
+    { request_id, title, request, wave, graph, session, run, .. } => {
+    // The server lets planning exchange finish after the answer: dropping
+    // `after` detaches it.
+    let created = loopflow_execution::engine::creation::create(
         request_id,
         loopflow_execution::engine::creation::TaskCreation {
             directory: directory.to_path_buf(),
@@ -93,9 +96,9 @@ writes! {
             agent: None,
             approve: false,
         },
-    )?
-    // The server lets planning exchange finish after the answer.
-    .answer)?,
+    )?;
+    super::task_create::answer(request_id, created.receipt, created.session)?
+    },
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]

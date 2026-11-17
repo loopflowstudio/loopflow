@@ -245,6 +245,17 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// The Graph a started Task is setting out on, from the row alone: started
+    /// and never run. Its position reads this until the Task's reading arrives.
+    public var startingGraph: String? {
+        awaitsStart || latestGraphProcess != nil ? nil : graphName
+    }
+
+    /// The Task's position before its reading arrives.
+    public var unreadPosition: String {
+        startingGraph.map { "Starting \($0)" } ?? "Reading workflow…"
+    }
+
     /// Completion dates may be unknown even when the lifecycle is settled.
     public var historyLabel: String {
         lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label

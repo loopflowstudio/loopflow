@@ -88,33 +88,24 @@ pub fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
         })
 }
 
-/// A created Task's receipt, the primary conversation's record and the Task's
-/// overview, read when answering. The application adds the Task's row to make
-/// `task.create`'s answer.
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct TaskCreated {
-    #[serde(flatten)]
-    pub receipt: TaskCreateReceipt,
-    #[serde(deserialize_with = "Option::deserialize")]
-    pub session: Option<crate::ops::human_session::SessionRecord>,
-    pub overview: crate::task_work::TaskOverview,
-}
-
-/// A created Task, and for a conversation-admitting `run` the planning
-/// exchange still running after the answer.
+/// A created Task's receipt and, for a conversation-admitting `run`, its
+/// primary conversation's record read when answering, with the planning
+/// exchange still running after the answer. The application adds the Task's
+/// row to make `task.create`'s answer.
 #[derive(Debug)]
 pub struct Created {
-    pub answer: TaskCreated,
+    pub receipt: TaskCreateReceipt,
+    pub session: Option<crate::ops::human_session::SessionRecord>,
     pub after: Option<After>,
 }
 
-fn answer(
+fn answered(
     store: &crate::store::SharedStore,
     runtime: &tokio::runtime::Runtime,
     receipt: TaskCreateReceipt,
-) -> Result<TaskCreated> {
-    step("read_answer", || {
-        let session = receipt
+) -> Result<Created> {
+    let session = step("read_session", || {
+        receipt
             .session_id
             .as_ref()
             .map(|id| {
@@ -123,14 +114,12 @@ fn answer(
                     id.as_str(),
                 ))
             })
-            .transpose()?;
-        let (overview, _) =
-            crate::store::task_work::task_overview(&store.sqlite, &receipt.task.id)?;
-        Ok(TaskCreated {
-            receipt,
-            session,
-            overview,
-        })
+            .transpose()
+    })?;
+    Ok(Created {
+        receipt,
+        session,
+        after: None,
     })
 }
 
@@ -237,12 +226,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
         RecoveryDisposition::Complete if filed && admits => {
             return start_conversation(&input, &store, runtime, receipt)
         }
-        RecoveryDisposition::Complete => {
-            return Ok(Created {
-                answer: answer(&store, &runtime, receipt)?,
-                after: None,
-            })
-        }
+        RecoveryDisposition::Complete => return answered(&store, &runtime, receipt),
         RecoveryDisposition::Continue if !admits => {}
         _ => return Err(unknown(&recorded).into()),
     }
@@ -276,10 +260,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
         )?;
         Ok(())
     })?;
-    Ok(Created {
-        answer: answer(&store, &runtime, receipt)?,
-        after: None,
-    })
+    answered(&store, &runtime, receipt)
 }
 
 /// Start the admitted conversation held and answer. The conversation makes
@@ -314,7 +295,7 @@ fn start_conversation(
             }
         }
     });
-    let answer = answer(store, &runtime, receipt)?;
+    let mut created = answered(store, &runtime, receipt)?;
     let main = crate::git::worktrees::main_repo_root(&input.directory)?;
     let handle = {
         let _runtime = runtime.enter();
@@ -324,13 +305,11 @@ fn start_conversation(
             })
         })
     };
-    Ok(Created {
-        answer,
-        after: Some(After {
-            runtime: Some(runtime),
-            handle: Some(handle),
-        }),
-    })
+    created.after = Some(After {
+        runtime: Some(runtime),
+        handle: Some(handle),
+    });
+    Ok(created)
 }
 
 pub fn unknown(receipt: &CreationReceipt) -> Error {

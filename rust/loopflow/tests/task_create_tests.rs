@@ -229,8 +229,8 @@ fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
         .as_array()
         .unwrap()
         .is_empty());
-    assert_eq!(answer["overview"]["graph"]["name"], "feature");
-    assert_eq!(answer["overview"]["sessions"][0]["id"], session.as_str());
+    assert_eq!(answer["row"]["graph_name"], "feature");
+    assert_eq!(answer["row"]["section"], "working");
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let graphs = || -> i64 {
         db.query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
@@ -292,7 +292,7 @@ fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
                 && line.contains("elapsed_ms=")
         })
     };
-    for step in ["file_task", "hold_conversation", "read_answer"] {
+    for step in ["file_task", "hold_conversation", "read_session", "row"] {
         assert!(timed("creation_step", step), "no {step} timing:\n{log}");
     }
     for step in ["checkout", "graph"] {
@@ -942,10 +942,9 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let loopflow::lf::commands::task_create::TaskCreateAnswer {
-        created: answer,
-        row,
-    } = serde_json::from_slice(&created.stdout).unwrap();
+    let answer: loopflow::lf::commands::task_create::TaskCreated =
+        serde_json::from_slice(&created.stdout).unwrap();
+    let row = &answer.row;
     assert_eq!(answer.receipt.graph.as_deref(), Some("feature"));
     // The answer's row is the plan's: started, never "Not started".
     assert_eq!(row.task.id, answer.receipt.task.id.as_str());
@@ -957,7 +956,7 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         answer.session.map(|session| session.id),
         answer.receipt.session_id
     );
-    assert_eq!(answer.overview.graph.unwrap().name, "feature");
+    assert_eq!(row.graph_name.as_deref(), Some("feature"));
     task.wait_for_graphs();
 
     let failed = task.run(&[
@@ -978,15 +977,9 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
 }
 
 /// An answer's stored receipt: a repeat reads the conversation record and the
-/// Task's overview again, so only the receipt repeats exactly.
-/// The stored receipt: an answer's conversation record, overview and row are
-/// read when answering.
+/// Task's row again, so only the receipt repeats exactly.
 fn receipt(mut answer: serde_json::Value) -> serde_json::Value {
     let fields = answer.as_object_mut().unwrap();
-    assert!(
-        fields.remove("session").is_some()
-            && fields.remove("overview").is_some()
-            && fields.remove("row").is_some()
-    );
+    assert!(fields.remove("session").is_some() && fields.remove("row").is_some());
     answer
 }

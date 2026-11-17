@@ -224,8 +224,8 @@ struct WorkDestinationTests {
         #expect(Array(submitted.dropFirst(4)) == ["--run", "--json", "--", "fix the flaky retry test"])
         #expect(model.selection == .task(id: task.id))
         #expect(installedSession(model, registry)?.id == record.id)
-        // None of "Reading workflow", "Restoring workspace" or "Not started".
-        #expect(model.taskWork[task.id].value != nil)
+        // Neither "Restoring workspace" nor "Not started"; the row's position
+        // stands in for "Reading workflow" (`NewTaskTests`).
         let workspace = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
         #expect(!workspace.isRestoringIntent)
         #expect(model.task(id: task.id)?.task.awaitsStart == false)
@@ -2502,7 +2502,7 @@ struct WorkDestinationTests {
         let answer: [String: Any] = [
             "task": ["id": task.task.id, "identifier": task.task.identifier, "title": task.task.name],
             "graph": "code", "session_id": record.id, "milestone": "admitted", "session": session,
-            "overview": ["sessions": [], "graph_processes": [], "graph": NSNull()], "row": row,
+            "row": row,
         ]
         return String(decoding: try JSONSerialization.data(withJSONObject: answer), as: UTF8.self)
     }

@@ -1078,11 +1078,11 @@ without age-based pruning; an old ID never becomes a new creation because time
 passed or its resource was removed.
 
 Task creation returns `{task, graph, session_id, milestone}` with or without
-`run`, plus the primary Session's record (with `open_argv`), the Task's overview
-and its `row` in the Work projection's shape, read after commit, so a client
-selects the Task and opens the conversation without another read. An admitted
-Task's row is already started (Working when claimed). A repeat reads them again;
-the receipt does not store them.
+`run`, plus the primary Session's record (with `open_argv`) and the Task's `row`
+in the Work projection's shape, read after commit, so a client selects the Task
+and opens the conversation without another read. An admitted Task's row is
+already started (Working when claimed). A repeat reads them again; the receipt
+does not store them.
 
 | Milestone | Means | Repeat |
 | --- | --- | --- |

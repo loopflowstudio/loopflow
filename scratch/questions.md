@@ -35,10 +35,10 @@
 - `outcome_unknown` without revisions counts as refused: the row returns and
   the Notice carries the message; the next reading shows what happened.
 - Read failures left inline, each outside a `WorkModel` reading: the Graph
-  step's on-demand history (`GraphRunStep`, no model), the telemetry window's
-  doctor read, and action errors (`controlError` "Control failed",
-  `taskSessionErrors`, `conversationError`). Planned: leave; they are not
-  readings of a part. Moving them is one `model.reported` call each.
+  step's on-demand history (`GraphRunStep`, no model) and the telemetry
+  window's doctor read. Action errors (`controlError`, `taskSessionErrors`)
+  move to the Notice (concept review pass 3, item 2); `conversationError`
+  stays as the conversation pane's content.
 - `WaveDetailReading.failure` is now read only by its tests and the mock
   Wave fixture; delete with that fixture.
 - A failed read no longer disables Task controls; only away and a saved,

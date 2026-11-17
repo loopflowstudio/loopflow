@@ -264,6 +264,33 @@ Checks (third pass): `scripts/test_desktop.sh --filter 'PendingChangesTests|Work
 `documented_commands::` 4 passed; fmt and clippy clean; acceptance rg no matches.
 `TaskHistoryProofTests` (display) edited for the Notice, not run here: gate/CI.
 
+## Next implement direction (concept review, pass 3)
+
+1. **Roadmap's Run is Start.** `RoadmapView`'s `.run` control calls
+   `LocalWaveAgentLauncher.runTask`, awaits it and `confirmWorkUpdate`, and
+   shows a "Control failed" banner: a second Start path with no request ID,
+   no "requested" Notice and its own error string. It becomes
+   `model.startTask(nil, task:)`. `activeControlId` gating for it goes, and so
+   does `LocalWaveAgentLauncher.runTask` if nothing else calls it.
+2. **Action failures post the Notice.** The remaining per-view error strings
+   for things a person did go to `navigation.notices` as events, and their
+   state goes: `controlError` and its `evidenceBanner` in `RoadmapView` and
+   `WorkSurfaceView` (Warp couldn't open the worktree), and
+   `WorkNavigation.taskSessionErrors` with its text and "Refresh readings"
+   button in `TaskWorkView` (New session failed; Notice action "Try again").
+   `conversationError` stays: it is the conversation pane's own content, with
+   its retry in place. `completionPending` stays: it is a fact of the Task's
+   row, not an action's answer. This supersedes the questions.md entry that
+   left them inline.
+3. **A failure that outlasts a lost link reports once.** `NoticeCenter.read`
+   drops a transition into failure while the link is lost, and a reading that
+   is still failing after the link returns makes no transition, so it never
+   posts: the content stays empty or stale with nothing saying why. The center
+   remembers parts whose failure it held back during a lost link and posts the
+   first failing reading of each once the link is connected; recovery clears
+   the memory. Test: away, a part fails, the link returns, the part still
+   fails → one Notice for it; the part recovers → none.
+
 ## Acceptance at gate (headless)
 
 - `cargo test -p loopflow --lib server::` — held planning sync, request-ID

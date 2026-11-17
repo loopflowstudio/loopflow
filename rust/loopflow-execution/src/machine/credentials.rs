@@ -45,7 +45,6 @@ const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS
 pub async fn connect(
     machine: &Machine,
     provider: Provider,
-    email: Option<&str>,
     chrome_profile: Option<&str>,
     batch: bool,
 ) -> Result<()> {
@@ -55,9 +54,6 @@ pub async fn connect(
         Provider::GitHub => {
             let token = gh_token()?;
             let login = github_login(token.expose_secret()).await?;
-            if email.is_some_and(|expected| !expected.eq_ignore_ascii_case(&login)) {
-                bail!("GitHub login does not match the requested account");
-            }
             if remote_has(machine, provider, &login)? {
                 return Ok(());
             }
@@ -95,15 +91,6 @@ pub async fn connect(
                 .to_string();
             let oauth = active["value"]["type"] == "oauth";
             let account_email = active["value"]["metadata"]["email"].as_str();
-            match (email, account_email) {
-                (Some(_), None) => bail!(
-                    "OpenCode's active login is an API key, which names no email; connect without one"
-                ),
-                (Some(expected), Some(actual)) if !expected.eq_ignore_ascii_case(actual) => {
-                    bail!("OpenCode login does not match the requested account")
-                }
-                _ => {}
-            }
             if !oauth {
                 zen_check(opencode_token(active)).await?;
             }
@@ -147,7 +134,7 @@ pub async fn connect(
     eprintln!(
         "Connected {} on {}{verified}",
         provider.display_name(),
-        machine_name(machine)
+        crate::machine::login::name(machine)
     );
     Ok(())
 }
@@ -179,12 +166,8 @@ fn connecting(machine: &Machine, provider: Provider, login: &str) {
     eprintln!(
         "Connecting {} {login} on {}",
         provider.display_name(),
-        machine_name(machine)
+        crate::machine::login::name(machine)
     );
-}
-
-fn machine_name(machine: &Machine) -> &str {
-    machine.label.as_deref().unwrap_or(&machine.route)
 }
 
 fn foreground(batch: bool) -> bool {
@@ -194,9 +177,9 @@ fn foreground(batch: bool) -> bool {
     !batch && std::io::stdin().is_terminal() && foreground
 }
 
-fn require_foreground(batch: bool) -> Result<()> {
+pub(crate) fn require_foreground(batch: bool) -> Result<()> {
     if !foreground(batch) {
-        bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine connect <machine> <provider> [email]` there first");
+        bail!("a missing machine login needs a foreground terminal without --batch; run `lf machine login <provider> <machine>` there first");
     }
     Ok(())
 }
@@ -250,7 +233,7 @@ fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Res
             .unwrap_or_else(|| crate::os_process::exit_reason(&stderr));
         bail!(
             "machine credential command failed on {}{}",
-            machine_name(machine),
+            crate::machine::login::name(machine),
             if reason.is_empty() {
                 format!(" ({})", output.status)
             } else {
@@ -361,7 +344,7 @@ async fn install(store: &SharedStore, credential: Credential) -> Result<()> {
                 .stderr(Stdio::null())
                 .spawn()
                 .map_err(|error| match error.kind() {
-                    std::io::ErrorKind::NotFound => anyhow!("GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine connect` again"),
+                    std::io::ErrorKind::NotFound => anyhow!("GitHub CLI (gh) is not installed on this machine; install it (https://cli.github.com) and run `lf machine login github` again"),
                     _ => error.into(),
                 })?;
             child

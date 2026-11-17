@@ -1431,7 +1431,7 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
-            Self::Connect { .. }
+            Self::Login { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -2989,14 +2989,19 @@ pub enum ConfigCommand {
 /// Name and connect to machines.
 #[derive(Debug, Subcommand)]
 pub enum MachineCommand {
-    /// Install a separate login on an added machine using this laptop's browser.
-    Connect {
-        target: String,
-        /// github, opencode or linear
+    /// Sign Machines in through each provider's own login, approved in this
+    /// Machine's browser; with no Machine named, this one
+    Login {
+        /// claude, codex, github, linear, asana, notion, doppler or opencode
         provider: loopflow_execution::provider_auth::Provider,
-        email: Option<String>,
+        /// Added Machines to sign in
+        machines: Vec<String>,
+        /// Open the approval page in this Chrome profile, by name or directory
         #[arg(long)]
         chrome_profile: Option<String>,
+        /// Store an API key from the environment instead (OpenCode, this Machine)
+        #[arg(long, conflicts_with = "machines")]
+        api_key: bool,
     },
     /// Inspect or receive service credentials (credential bytes use stdin only).
     Credentials {

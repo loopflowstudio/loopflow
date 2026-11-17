@@ -315,7 +315,7 @@ pub async fn local_store() -> Result<SharedStore> {
 }
 
 #[cfg(all(target_os = "macos", not(test)))]
-fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
+pub(crate) fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
     let chrome = Path::new("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome");
     if !chrome.is_file() {
         return Err(anyhow!("Google Chrome is not installed in /Applications"));
@@ -332,14 +332,14 @@ fn open_chrome_profile(profile: &LocalChromeProfile, url: &str) -> Result<()> {
 }
 
 #[cfg(all(not(target_os = "macos"), not(test)))]
-fn open_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
+pub(crate) fn open_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
     Err(anyhow!(
         "opening a selected Chrome profile is currently supported on macOS only"
     ))
 }
 
 #[cfg(test)]
-fn open_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
+pub(crate) fn open_chrome_profile(_profile: &LocalChromeProfile, _url: &str) -> Result<()> {
     Ok(())
 }
 

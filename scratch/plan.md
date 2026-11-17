@@ -272,6 +272,19 @@ checks on both ends; LOO-913's fallback and wait rules.
    remote and never appears in lf's output or logs. This is the slice that
    could prove the plan wrong: no PTY, stdin pass-through over
    `bounded_ssh_args`, and a real sign-in against mini done by a person at gate.
+   **Built (2026-11-17).** `machine/login.rs`: `login::login(machine, provider, …)`
+   where a Machine with route `local` is this one, so here and there share
+   `Login` (child or one `bounded_ssh_args` exchange, `BROWSER=true`).
+   `lf machine connect` is gone; `lf machine login <provider> [<machine>…]`
+   takes Claude here or remote, services remote through `credentials::connect`
+   (its `email` parameter deleted) and here through `connect_target`, `--api-key`
+   here only. `Approver` has `Browser` and `Chrome`. `claude_status` is the
+   probe slices 2–3 reuse. Fixture: `machine_commands::claude_login_*` (the
+   PTY helper now makes the terminal controlling and captures what it shows).
+   Taught: stdin pass-through over a PTY-less SSH exchange works; the error
+   line must come from stderr, since stdout's unterminated paste prompt flushes
+   last. Codex still errors with "not built yet" until slice 2.
+   Remaining for a person at gate: a real `lf machine login claude mini`.
 2. **Codex, the command approver, this Machine as target.** Device auth on
    either target; `approvers` setting and `LF_APPROVE_*` contract; `machine
    logins`. Remove `auth_browsers` and the access-profile code.

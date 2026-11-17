@@ -74,22 +74,20 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
 
 async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
     match cmd {
-        MachineCommand::Connect {
-            target,
+        MachineCommand::Login {
             provider,
-            email,
+            machines,
             chrome_profile,
+            api_key,
         } => {
-            let machine =
-                loopflow_execution::machine::connection::resolve_target(target, false).await?;
-            return loopflow_execution::machine::credentials::connect(
-                &machine,
+            return login(
                 *provider,
-                email.as_deref(),
+                machines,
                 chrome_profile.as_deref(),
+                *api_key,
                 batch,
             )
-            .await;
+            .await
         }
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
@@ -280,7 +278,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             store.remove_machine(label).await?;
             println!("Removed {label}");
         }
-        MachineCommand::Connect { .. }
+        MachineCommand::Login { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
         | MachineCommand::Doctor { .. } => {
@@ -293,6 +291,39 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         | MachineCommand::Ondemand { .. } => {
             unreachable!("machine end, pool and ondemand dispatch before the store opens")
         }
+    }
+    Ok(())
+}
+
+/// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
+async fn login(
+    provider: loopflow_execution::provider_auth::Provider,
+    targets: &[String],
+    chrome_profile: Option<&str>,
+    api_key: bool,
+    batch: bool,
+) -> anyhow::Result<()> {
+    use loopflow_execution::machine::{connection::resolve_target, login};
+    if targets.is_empty() {
+        let machine = local_machine().await?;
+        return login::login(&machine, provider, chrome_profile, api_key, batch).await;
+    }
+    let mut failed = Vec::new();
+    for target in targets {
+        let result = match resolve_target(target, false).await {
+            Ok(machine) => login::login(&machine, provider, chrome_profile, api_key, batch).await,
+            Err(error) => Err(error),
+        };
+        if let Err(error) = result {
+            if targets.len() == 1 {
+                return Err(error);
+            }
+            eprintln!("{target}: {error:#}");
+            failed.push(target.as_str());
+        }
+    }
+    if !failed.is_empty() {
+        return Err(anyhow!("not signed in: {}", failed.join(", ")));
     }
     Ok(())
 }

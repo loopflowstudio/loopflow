@@ -35,3 +35,9 @@ Choices made headless for review; the plan says what each passed over.
   over: a `logins` config key beside the store template.
 - Docs: `LF_APPROVE_CODE` is passed whenever the page asks for a device code
   (Codex, GitHub, OpenCode). Passed over: Codex only.
+- Slice 1: the pasted Claude code echoes in the terminal (no raw-mode read).
+  It is a one-time PKCE code useless without the target's verifier, and a
+  no-echo read leaves the terminal silent after Ctrl-C. Passed over: termios
+  echo off with a restore guard.
+- Slice 1: `lf machine login <provider> a b` tries every Machine and fails at
+  the end naming those not signed in. Passed over: stop at the first failure.

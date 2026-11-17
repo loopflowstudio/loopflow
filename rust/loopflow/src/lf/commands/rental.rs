@@ -262,7 +262,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
+                        "Next: `lf machine login github {label}`; launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -732,7 +732,6 @@ fn prepare(
         &machine,
         Login::GitHub,
         None,
-        None,
         batch,
     ))?;
     let planning = loopflow_execution::config::load_config(Some(repo))?
@@ -745,7 +744,6 @@ fn prepare(
         runtime.block_on(loopflow_execution::machine::credentials::connect(
             &machine,
             Login::Linear,
-            None,
             None,
             batch,
         ))?;

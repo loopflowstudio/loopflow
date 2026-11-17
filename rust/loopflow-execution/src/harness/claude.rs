@@ -1566,7 +1566,6 @@ impl super::Harness for Claude {
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Assigned },
-            same_turn_input: true,
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: true,
@@ -1579,9 +1578,8 @@ impl super::Harness for Claude {
         &self,
         launch: &super::Launch<'_>,
         events: mpsc::UnboundedSender<ConversationEvent>,
-        approval: super::ApprovalPolicy,
+        _approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
-        let _ = approval;
         Box::new(Driver::new(launch, events))
     }
     fn title_args(&self, name: &str) -> Vec<String> {
@@ -1589,7 +1587,7 @@ impl super::Harness for Claude {
     }
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let mut client = super::native_session::NativeClient::new("claude", launch)?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
         let (mut args, input) = launch.terminal_input()?;
         let (_, model) = crate::config::parse_agent(&launch.config.resolved_agent()?);
         args.extend(crate::agent::claude_options(

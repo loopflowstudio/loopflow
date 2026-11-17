@@ -377,7 +377,6 @@ impl ThreadNaming {
 #[derive(Debug, Clone, Copy)]
 pub struct Capabilities {
     pub thread: ThreadNaming,
-    pub same_turn_input: bool,
     pub initial_prompt_on_resume: bool,
     pub supports_execution_boundary: bool,
     pub classifies_failures: bool,
@@ -394,7 +393,11 @@ pub enum Start<'a> {
     Resume { thread: &'a AgentSessionId },
 }
 
-impl Start<'_> {
+impl<'a> Start<'a> {
+    pub fn from_thread(thread: Option<&'a AgentSessionId>) -> Self {
+        thread.map_or(Self::New, |thread| Self::Resume { thread })
+    }
+
     pub fn thread(self) -> Option<AgentSessionId> {
         match self {
             Self::New => None,
@@ -415,15 +418,12 @@ pub struct Launch<'a> {
 
 impl Launch<'_> {
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
-        match self.start {
-            Start::Resume { thread } => Ok(Some(thread.clone())),
-            Start::New
-                if self.harness.capabilities().thread.for_holder(self.holder)
-                    == ThreadName::Assigned =>
-            {
+        let naming = self.harness.capabilities().thread;
+        match self.start.thread() {
+            None if naming.for_holder(self.holder) == ThreadName::Assigned => {
                 self.admitted.assigned_thread().map(Some)
             }
-            Start::New => Ok(None),
+            thread => Ok(thread),
         }
     }
 
@@ -629,10 +629,7 @@ pub fn launch_for_test<'a>(
         admitted,
         harness: kind.harness(),
         holder: Holder::Caller,
-        start: config
-            .resume_token
-            .as_ref()
-            .map_or(Start::New, |thread| Start::Resume { thread }),
+        start: Start::from_thread(config.resume_token.as_ref()),
         context_file: None,
     }
 }
@@ -691,21 +688,15 @@ mod tests {
     #[tokio::test]
     async fn current_send_is_decided_from_the_active_turn() {
         let (tx, _rx) = mpsc::unbounded_channel();
-        for name in ["codex", "claude", "opencode", "pi"] {
+        for kind in HarnessKind::ALL {
+            let name = kind.as_str();
             let config = AgentConfig {
                 agent: Some(name.into()),
                 ..Default::default()
             };
             let home = tempfile::tempdir().unwrap();
             let admitted = admit_for_test(home.path());
-            let launch = Launch {
-                config: &config,
-                harness: HarnessKind::parse(name).unwrap().harness(),
-                holder: Holder::Caller,
-                admitted: &admitted,
-                start: Start::New,
-                context_file: None,
-            };
+            let launch = launch_for_test(kind, &config, &admitted);
             let mut harness =
                 launch
                     .harness

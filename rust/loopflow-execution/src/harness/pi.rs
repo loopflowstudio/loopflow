@@ -285,9 +285,9 @@ impl Driver {
             .as_str()
             .filter(|f| Path::new(f).is_absolute())
             .ok_or_else(|| anyhow!("Pi did not report a persistent conversation file"))?;
-        if let Some(expected) = self.session.as_ref() {
+        if let Some(expected) = &resumed {
             anyhow::ensure!(
-                file == expected.as_str(),
+                Path::new(file) == expected,
                 "Pi opened a different conversation than requested"
             );
         }
@@ -710,7 +710,6 @@ impl super::Harness for Pi {
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Reported },
-            same_turn_input: true,
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: false,
@@ -723,14 +722,13 @@ impl super::Harness for Pi {
         &self,
         launch: &super::Launch<'_>,
         events: mpsc::UnboundedSender<ConversationEvent>,
-        approval: super::ApprovalPolicy,
+        _approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
-        let _ = approval;
         Box::new(Driver::new(launch, events))
     }
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let mut client = super::native_session::NativeClient::new("pi", launch)?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
         let (mut args, input) = launch.terminal_input()?;
         args.extend(options(launch.config, launch.context_file)?);
         match launch.start {

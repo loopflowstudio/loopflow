@@ -59,7 +59,8 @@ impl Drop for Companion {
 }
 
 impl NativeClient {
-    pub(crate) fn new(program: &str, launch: &Launch<'_>) -> Result<Self> {
+    pub(crate) fn new(launch: &Launch<'_>) -> Result<Self> {
+        let program = launch.harness.kind().as_str();
         let cwd = launch
             .config
             .cwd
@@ -90,16 +91,20 @@ impl NativeClient {
     }
 }
 
+fn session_harness(config: &AgentConfig) -> Result<&'static dyn super::Harness> {
+    let (name, _) = crate::config::parse_agent(config.agent()?);
+    Ok(super::HarnessKind::parse(&name)
+        .ok_or_else(|| anyhow!("unsupported session harness: {name}"))?
+        .harness())
+}
+
 pub fn launch_session(
     config: &AgentConfig,
     holder: Holder,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let (name, _) = crate::config::parse_agent(config.agent()?);
-    let harness = super::HarnessKind::parse(&name)
-        .ok_or_else(|| anyhow::anyhow!("unsupported session harness: {name}"))?
-        .harness();
+    let harness = session_harness(config)?;
     let cwd = config
         .cwd
         .clone()
@@ -166,23 +171,21 @@ pub fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
-    let (name, _) = crate::config::parse_agent(config.agent()?);
-    let harness = super::HarnessKind::parse(&name)
-        .ok_or_else(|| anyhow::anyhow!("unsupported session harness: {name}"))?
-        .harness();
+    let harness = session_harness(&config)?;
     // Reopening a conversation recorded as Task, Wave or repository work is
     // Work whatever command reopened it.
     let holder = crate::transport::holder(store.is_work(named_work, Some(&session))?, None);
     anyhow::ensure!(
-        session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
+        session.provider.as_deref() == Some(harness.kind().as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
         config.agent()?,
         config.agent()?,
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
-    let held_codex = harness.capabilities().initial_prompt_on_resume && holder != Holder::Caller;
-    if provider_session.is_some() && !held_codex {
+    let sends_first_turn =
+        harness.capabilities().initial_prompt_on_resume && holder != Holder::Caller;
+    if provider_session.is_some() && !sends_first_turn {
         config.task_prompt.clear();
     }
     config.env.extend(extra_environment.clone());
@@ -210,9 +213,7 @@ pub fn resume_session_with_env(
                 harness,
                 holder,
                 admitted: &admitted,
-                start: provider_session.map_or(Start::New, |provider| Start::Resume {
-                    thread: &provider.agent_session,
-                }),
+                start: Start::from_thread(provider_session.map(|provider| &provider.agent_session)),
                 context_file: context_file.as_deref(),
             },
             launch_lock,
@@ -1019,7 +1020,7 @@ mod tests {
                 start: Start::New,
                 context_file: None,
             };
-            let mut command = NativeClient::new("claude", &launch)?;
+            let mut command = NativeClient::new(&launch)?;
             command.process = Command::new(program);
             command
                 .process
@@ -1443,7 +1444,7 @@ mod tests {
                 start: Start::New,
                 context_file: None,
             };
-            let mut command = NativeClient::new("claude", &launch)?;
+            let mut command = NativeClient::new(&launch)?;
             command.process = Command::new("/usr/bin/true");
             command.process.current_dir(home).envs(&environment);
             command.remote = Some(endpoint.clone());
@@ -1547,7 +1548,7 @@ mod tests {
                 start: Start::New,
                 context_file: None,
             };
-            let mut command = NativeClient::new("claude", &launch)?;
+            let mut command = NativeClient::new(&launch)?;
             command.process = Command::new("/bin/sleep");
             command
                 .process

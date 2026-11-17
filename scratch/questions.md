@@ -48,3 +48,11 @@
   "only place a harness name is compared" is read as launch and transcript
   decisions, not named settings. Simpler option taken; a settings change
   that moves them into the harness would be its own Task.
+
+- QA (2026-11-16, headless): a bare `lf -i -a pi` Session records no
+  `agent_sessions.provider_thread` (base 4852348e5 too); a headless resume finds
+  the thread through the current capture's observation. One failed headless
+  resume replaces that capture, and the next resume silently starts a new Pi
+  conversation (base answered "NONE"). The trigger here, Pi's resume comparing
+  its reported file to the bare id, is fixed in `pi.rs`; the orphaning itself
+  sits in Session thread resolution, outside this Task, and is left as it is.

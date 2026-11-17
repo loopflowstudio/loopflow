@@ -20,11 +20,11 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
         .enable_all()
         .build()
         .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
-    let result = executor.block_on(async {
+    executor.block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
-        let launch_value = Launch { config: &config, ..*launch };
-        let mut harness = launch_value.harness
-            .driver(&launch_value, event_tx, ApprovalPolicy::AutoApprove);
+        let launch = Launch { config: &config, ..*launch };
+        let mut harness = launch.harness
+            .driver(&launch, event_tx, ApprovalPolicy::AutoApprove);
         harness.set_runtime(process.runtime.clone());
         harness
             .start()
@@ -129,7 +129,5 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
         harness.stop().await
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
         result
-    });
-
-    result
+    })
 }

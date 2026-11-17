@@ -116,6 +116,34 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
     pi.stop().await.unwrap();
 }
 
+// An interactive Pi records the id lf gave it; a headless turn resumes
+// that conversation by the file Pi keeps under the id.
+#[tokio::test]
+async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
+    let mut config = AgentConfig::default();
+    let (ledger, _env, admitted) = fixture(&mut config);
+    let _dir = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
+    std::env::set_var("PI_CODING_AGENT_DIR", ledger.home());
+    let id: loopflow_model::id::AgentSessionId = "cac985ee-d62a-4ce9-abba-f3e66d053410".into();
+    let project = ledger.home().join("sessions").join("--repo--");
+    std::fs::create_dir_all(&project).unwrap();
+    let file = project.join(format!("2026-11-17T07-26-34-224Z_{id}.jsonl"));
+    std::fs::write(&file, format!("{{\"type\":\"session\",\"id\":\"{id}\"}}\n")).unwrap();
+    config.resume_token = Some(id);
+    let (tx, mut rx) = mpsc::unbounded_channel();
+
+    let mut pi = PiDriver::new(
+        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &admitted),
+        tx,
+    );
+    pi.start().await.unwrap();
+    assert_eq!(pi.agent_session(), Some(file.display().to_string().into()));
+    pi.send_input("again").await.unwrap();
+    let events = completed(&mut rx).await;
+    assert!(events.iter().any(|e| matches!(e, ConversationEvent::TextDelta { content, .. } if content == "answer 1: again")));
+    pi.stop().await.unwrap();
+}
+
 #[tokio::test]
 async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_success() {
     let mut config = AgentConfig::default();
@@ -596,13 +624,15 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
         cwd: Some(agent_dir.path().into()),
         ..Default::default()
     };
-    let id: loopflow_model::id::AgentSessionId = "8f0c5e2a-0000-4000-8000-944455556666".into();
+    // A bare Pi's thread is the one its admission assigned.
+    let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+    let id = admitted.assigned_thread().unwrap();
     let start = crate::harness::HarnessKind::Pi
         .harness()
         .open(&crate::harness::Launch {
             harness: crate::harness::HarnessKind::Pi.harness(),
             config: &config,
-            admitted: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            admitted: &admitted,
             holder: crate::session::Holder::Caller,
             start: crate::harness::Start::New,
             context_file: None,

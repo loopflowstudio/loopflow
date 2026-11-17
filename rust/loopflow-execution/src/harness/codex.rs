@@ -1302,11 +1302,14 @@ mod tests {
             .spawn()
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
+        // Stopping signals the group only under the admitted attachment, so
+        // its ledger outlives the driver.
+        let home = tempfile::tempdir().unwrap();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
                 &AgentConfig::default(),
-                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+                &crate::harness::admit_for_test(home.path()),
             ),
             tx,
             ApprovalPolicy::AutoApprove,
@@ -1784,7 +1787,6 @@ impl super::Harness for Codex {
                 caller: super::ThreadName::Reported,
                 server: super::ThreadName::Reported,
             },
-            same_turn_input: true,
             initial_prompt_on_resume: true,
             supports_execution_boundary: true,
             classifies_failures: true,
@@ -1802,7 +1804,6 @@ impl super::Harness for Codex {
         events: mpsc::UnboundedSender<ConversationEvent>,
         approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
-        let _ = approval;
         Box::new(Driver::new(launch, events, approval))
     }
     fn title_args(&self, _name: &str) -> Vec<String> {
@@ -1810,7 +1811,7 @@ impl super::Harness for Codex {
     }
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let (mut args, input) = launch.terminal_input()?;
-        let mut client = super::native_session::NativeClient::new("codex", launch)?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
         if launch.holder == Holder::Caller {
             args.extend(crate::agent::codex_terminal_options(
                 launch.config,
@@ -1883,9 +1884,7 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
     let saved = launch.start.thread().or(store.session_thread(session)?);
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let launch_value = super::Launch {
-        start: saved
-            .as_ref()
-            .map_or(super::Start::New, |thread| super::Start::Resume { thread }),
+        start: super::Start::from_thread(saved.as_ref()),
         ..*launch
     };
     let mut harness = Driver::new(&launch_value, events, ApprovalPolicy::NativeClient);

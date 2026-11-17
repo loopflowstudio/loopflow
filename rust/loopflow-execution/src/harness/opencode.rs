@@ -1386,7 +1386,6 @@ impl super::Harness for OpenCode {
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Reported, server: super::ThreadName::Reported },
-            same_turn_input: true,
             initial_prompt_on_resume: false,
             supports_execution_boundary: false,
             classifies_failures: false,
@@ -1401,7 +1400,6 @@ impl super::Harness for OpenCode {
         events: mpsc::UnboundedSender<ConversationEvent>,
         approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
-        let _ = approval;
         Box::new(Driver::new(launch, events, approval))
     }
     fn validate_model(&self, model: &str) -> Result<()> {
@@ -1478,7 +1476,7 @@ fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::Nati
     }
     let (endpoint, password, id) =
         ready.map_err(|_| anyhow!("OpenCode private server failed to start"))?;
-    let mut client = super::native_session::NativeClient::new("opencode", launch)?;
+    let mut client = super::native_session::NativeClient::new(launch)?;
     client.process.env("OPENCODE_PASSWORD", password).args([
         "--server",
         &endpoint,

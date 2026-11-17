@@ -921,13 +921,11 @@ fn run_admitted_agent(
         .expect("resolved harness")
         .harness()
         .capabilities();
-    {
-        if launch.max_turns.is_some() && !capabilities.turn_limit {
-            eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
-        }
-        if launch.output_schema.is_some() && !capabilities.output_schema {
-            eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Graph output validation still applies)");
-        }
+    if launch.max_turns.is_some() && !capabilities.turn_limit {
+        eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
+    }
+    if launch.output_schema.is_some() && !capabilities.output_schema {
+        eprintln!("warning: Loopflow native response-schema enforcement is Claude-specific; using ordinary provider output (Graph output validation still applies)");
     }
     if launch.resume_token.is_none() {
         if let Some(runtime) = &process.runtime {
@@ -1402,12 +1400,7 @@ fn _run_harness_once(
             .harness(),
         holder,
         admitted: &admitted,
-        start: launch
-            .resume_token
-            .as_ref()
-            .map_or(crate::harness::Start::New, |thread| {
-                crate::harness::Start::Resume { thread }
-            }),
+        start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
         context_file: None,
     };
     crate::harness::drive::run(&value, process)

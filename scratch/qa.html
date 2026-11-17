@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-924 QA — one launch type per harness</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:980px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem}
+table{border-collapse:collapse;width:100%;margin:.5rem 0}td,th{border:1px solid #ddd;padding:.35rem .5rem;text-align:left;vertical-align:top}
+th{background:#f5f5f7}.ok{color:#1a7f37;font-weight:600}.bad{color:#b42318;font-weight:600}.pre{color:#9a6700;font-weight:600}
+code,pre{font:12.5px ui-monospace,Menlo,monospace;background:#f5f5f7}pre{padding:.6rem;overflow-x:auto;white-space:pre-wrap}
+</style></head><body>
+<h1>LOO-924 QA: one launch type per harness</h1>
+<p>Branch build <code>lf 0.16.0+cee19d50a.dirty</code> (the compress diff on top of cee19d50a), against real provider logins:
+Claude Code 2.1.326, codex-cli 0.169.0, Pi 1.3.0, OpenCode 2.0.32. Real <code>HOME</code>, private
+<code>LF_HOME=/tmp/lf-qa-924/home</code>, inherited <code>LF_*</code>/<code>REX_*</code> cleared, disposable Git repository.
+Interactive runs went through a Python PTY driver that answers <code>ESC[6n</code>/<code>ESC[5n</code> and types like a person.
+For comparison, the same steps ran on the installed <code>lf 0.16.0+4852348e5</code>, which is this branch's base, in its own private home.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>Command</th><th>Claude</th><th>Codex</th><th>Pi</th><th>OpenCode</th></tr>
+<tr><td>Headless launch</td><td><code>lf -b -a H : 'Reply only with QA_OK_H'</code></td>
+<td class="ok">QA_OK_claude</td><td class="ok">QA_OK_codex</td><td class="ok">QA_OK_pi</td><td class="ok">QA_OK_opencode</td></tr>
+<tr><td>Bare interactive launch (Caller)</td><td><code>lf -i -a H : '…product of 6 and 7…ZZ'</code></td>
+<td class="ok">42ZZ; thread = admission UUID, same as Claude's "Resume this session" ID</td>
+<td class="ok">42ZZ; thread reported by start hook</td>
+<td class="ok">42ZZ; Pi started with <code>--session-id</code> = admission UUID</td>
+<td class="ok">42ZZ; <code>ses_…</code> thread via private server</td></tr>
+<tr><td>Native resume by Session ID</td><td><code>lf -i session resume S</code>, then "repeat, append YY"</td>
+<td class="ok">42ZZYY, same thread</td><td class="ok">42ZZYY; first turn not resent</td><td class="ok">42ZZYY via <code>--session &lt;file&gt;</code></td><td>not run</td></tr>
+<tr><td>Headless resume of an interactive Session</td><td><code>lf -b session resume S --message '…append RR'</code></td>
+<td class="ok">42ZZRR</td><td class="ok">42ZZRR, same thread</td><td><span class="bad">failed</span> → <span class="ok">fixed</span>: 91ZZRR in the same file</td><td class="ok">42ZZRR, same thread</td></tr>
+<tr><td>Headless resume of a Run</td><td>same, on a <code>lf -b</code> Session</td>
+<td colspan="4" class="ok">Refused with "is a Run (finished); `lf resume` takes only Sessions" (documented behavior)</td></tr>
+<tr><td>Managed interactive launch (Server holder)</td><td><code>lf -i --task T -a H : …</code> in the Task checkout, branch server running</td>
+<td class="ok">42ZZ; held, admission thread</td>
+<td class="ok">42ZZ; <code>--remote unix://…/agent.sock</code> app-server client, endpoint recorded</td>
+<td class="ok">42ZZ; thread = file reported by extension</td>
+<td class="ok">42ZZ; endpoint <code>http://127.0.0.1:…</code>, observer companion alive under the holder</td></tr>
+<tr><td>Reattach held conversation</td><td><code>lf -i session resume S</code> after closing the PTY</td>
+<td></td><td class="ok">Same provider PID 71023 (started 23:42:24); screen replayed, no new launch</td><td></td><td></td></tr>
+</table>
+<p>Recorded rows (private store, <code>agent_sessions</code> joined to <code>processes.endpoint</code>, managed runs):</p>
+<pre>codex    | 01a1e875-0649-7283-bfdc-33b316539488 | declared | /var/folders/…/.tmprCcLWo/agent.sock
+pi       | ~/.pi/agent/sessions/--private-tmp-lf-qa-924-repo.qa--/…_01a1e876-….jsonl | declared |
+claude   | 2ee7d2d1-d838-405c-96ea-aa6a126a654a | declared |
+opencode | ses_e1786bb96ffearsGp2bD1Vq37v | declared | http://127.0.0.1:58101</pre>
+<p>These match the plan's table: Codex Server goes through the app-server, Pi Server takes its thread from the extension, Claude takes the admission's thread.</p>
+
+<h2>Fixed: headless Pi resume of an interactive Pi Session</h2>
+<pre>$ lf -b session resume session_52489c5d… --message 'Repeat your first reply…'
+Error: execution failed: Pi opened a different conversation than requested</pre>
+<p>Base 4852348e5 fails the same way, so the branch did not cause it. A bare <code>lf -i -a pi</code> records the id lf gave Pi
+(<code>cac985ee-…</code>). The headless driver resolved that id to Pi's file and passed <code>--session &lt;file&gt;</code>. It then compared the file Pi reported
+with the bare id, which can never match. The driver now compares against the file it resolved (<code>harness/pi.rs</code>, <code>start_process</code>).
+New fixture test <code>pi_tests::pi_headless_resumes_a_conversation_recorded_by_its_id</code> fails with the old comparison
+and passes with the fix. After rebuilding, a fresh interactive Pi Session (91ZZ) resumed headless as <code>91ZZRR</code> and appended to the same
+<code>…_5dd116c8-….jsonl</code>. No second file was created.</p>
+
+<h2>Checks</h2>
+<pre>cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::conformance_tests::) | test(harness::native_session::tests::) | test(harness::tests::) | test(harness::pi_tests::) | test(harness::codex::) | test(transcript::watch::tests::) | test(transcript::raw::tests::) | test(ops::human_session::provider_conversation::tests::) | test(skills::invocation::) | test(transcript::facts::) | test(harness::agent_process::)'
+  → 100 passed
+cargo clippy -p loopflow-execution --all-targets -- -D warnings  → passed
+cargo fmt --all -- --check; git diff --check                       → passed</pre>
+
+<h2>Left behind / cleanup</h2>
+<p>Stopped the private server (PID 61708), its holder, and the held Claude, Codex, Pi and OpenCode processes and their companions. Afterwards no process had a cwd under
+<code>/tmp/lf-qa-924</code>. No launchd job was registered for the private home: there is no <code>server.plist</code>. Codex had added
+<code>[projects."/private/tmp/lf-qa-924/repo"] trust_level = "trusted"</code> to the real <code>~/.codex/config.toml</code>. lf does not write that stanza. It has been removed, and a backup is at
+<code>/tmp/lf-qa-924/codex-config.backup</code>.</p>
+
+<h2>Result</h2>
+<p><b>Works now:</b> every harness launches headless and interactive and records the expected thread, holder and endpoint. Each resumes by Session ID in both modes,
+and the held Codex reattaches to the same provider.</p>
+<p><b>Not reached:</b> headless Graph steps inside a Task (they need a managed login fixture; the launch matrix covers them), Desktop panes, Rex and Herdr openings,
+held-terminal exec after an install swap, and native OpenCode resume. Gate and CI own the application launch/resume suites.</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li class="pre">Pre-existing, outside this Task: one failed headless resume of a bare interactive Pi Session orphans the conversation. The next resume silently starts
+a new Pi conversation. Base answered "NONE" to "repeat your first reply", and the branch's transition row reads <code>from_provider_session: null</code>. A bare Pi
+Session writes no <code>agent_sessions.provider_thread</code>, so resume falls back to the current capture's observation, and the failed attempt replaced that capture.
+The fix above removes this trigger. The orphaning itself is in Session thread resolution. It is noted in <code>scratch/questions.md</code>.</li>
+<li>Cosmetic, OpenCode's own TUI: the session title repeats across the header row ("Arithmetic response instructi •" ×N) at 120 columns, on unmanaged and managed runs alike.</li>
+</ol>
+</body></html>

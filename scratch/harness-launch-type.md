@@ -29,7 +29,8 @@ context-file path. Mode selects the native or headless runner; it is not a field
 `Admitted` retains the store, Session and exact `SessionAttachment`. Assigned
 native thread IDs come from the admission's capture UUID; callers do not name
 them. Capabilities include a Caller/Server thread-naming pair, native skill
-dialect, same-turn input, turn limits, schemas, respawn behavior and install copy.
+dialect, turn limits, schemas, respawn behavior and install copy. Same-turn input
+is an outcome (`SendCurrentOutcome`), not a capability: the flag had no reader.
 
 ### Two runners (implementation choice, 2026-11-16)
 
@@ -153,6 +154,8 @@ The surviving paths replace these; their coverage belongs on Harness/Launch:
 - `default_create_harness`, `canonical_harness`, terminal-error string table;
 - context native_args table, title-argument match, skill native-name tables,
   raw process-name table, settings OpenCode model rule and install-hint match;
+- `Capabilities::same_turn_input`, `NativeClient::new`'s program argument and
+  hand-built `Start` from an optional thread (`Start::from_thread`);
 - `Launch::mode`, `Launch::harness()`, `Driver::set_agent_session`, driver
   config resume copies, separate boolean capability methods, watch-root table
   and provider-to-kind fallback;
@@ -189,6 +192,8 @@ matrix prints waited rows; it does not claim held-terminal exec coverage.
 - `cargo clippy --all-targets -- -D warnings` — passed.
 - `cargo fmt --all -- --check` and `git diff --check` — passed.
 - Realign (2026-11-16): `cargo nextest run -p loopflow-execution --lib -E 'test(transcript::raw::tests::) | test(ops::human_session::provider_conversation::tests::) | test(harness::claude::)'` after sharing START_SLACK — 20 passed.
+- Compress (2026-11-16): `cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::conformance_tests::) | test(harness::native_session::tests::) | test(harness::tests::) | test(harness::pi_tests::) | test(harness::codex::)'` — 52 of 54 passed; `pi_tests::bare_pi_names_its_thread_and_resumes_it_by_that_id` and `codex::tests::failed_startup_retains_the_group_until_stop` failed, at cee19d50a0 too. Both fixtures predated required admission: Pi asserted a caller-named thread, Codex dropped its ledger's directory before `stop`. Repaired; the two rerun alone passed. Clippy on both crates passed. Gate/CI reruns the suite.
+- QA (2026-11-16): branch `lf` on real Claude, Codex, Pi and OpenCode logins with a private `LF_HOME` — headless launch, bare interactive launch, native resume by Session ID, headless resume of an interactive Session and managed `--task` interactive launches all answered; held Codex reattached to the same provider. Headless resume of an interactive Pi Session failed ("Pi opened a different conversation than requested", base too): the driver compared Pi's file to the bare id. Fixed; `pi_tests::pi_headless_resumes_a_conversation_recorded_by_its_id` fails without it. Focused filter (plan's plus `harness::tests`, `pi_tests`, `codex`, `native_session::tests`) — 100 passed; execution clippy passed. Report: `scratch/qa.html`.
 - Slice 7 deletion sweep — only retained named settings, credential JSON and warning-label lines; removed symbols absent.
 
 Unchanged mode/holder decision checks reuse the six passing launch-policy rows

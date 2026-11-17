@@ -23,7 +23,7 @@ uv run python scripts/check_architecture.py
 | Execution | `rust/loopflow-execution/src/{agent,graph,prompt,skills,harness}/` | Skill/Graph discovery, prompts, provider processes and streams |
 | Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and planning-provider models |
 | Persistence | `rust/loopflow-storage/src/`, `rust/loopflow-execution/src/{store,journal}/` | Synchronous records and SQL; acquisition and command/conversation history |
-| Provider accounts | `rust/loopflow-execution/src/{provider_auth,provider_account}/` | Login, encrypted tokens, account homes and routes |
+| Authentication and history | `rust/loopflow-execution/src/{provider_auth,transcript}/` | Service authentication, native homes and transcript adoption |
 | Installation | `rust/loopflow-execution/src/installation{.rs,/}` | Selected artifacts, server registration, update and rollback |
 | Native app | `swift/Loopflow/`, `swift/LoopflowMac/` | Shared DTOs/services and macOS presentation |
 | Tests | Rust, Python and Swift test roots | Cross-module, wire, migration, CLI and app checks |
@@ -40,7 +40,7 @@ subprocess edge to one concept.
 | command parsing | [`lf/mod.rs`](../../rust/loopflow/src/lf/mod.rs) | command args and launch context |
 | Skill/Graph discovery | [`definition/mod.rs`](../../rust/loopflow-execution/src/definition/mod.rs) | selected Skill or Graph |
 | prompt assembly | [`prompt/mod.rs`](../../rust/loopflow-execution/src/prompt/mod.rs) | system/task prompt pair |
-| provider routing | [`provider_account.rs`](../../rust/loopflow-execution/src/provider_account.rs) | selected account route |
+| model/harness fallback | [`agent/`](../../rust/loopflow-execution/src/agent) | configured headless continuation order |
 | invocation resources | [`process/runtime.rs`](../../rust/loopflow-execution/src/process/runtime.rs) | current attachment, retry state and cleanup under the existing `LfProcess` |
 | provider streams | [`harness/`](../../rust/loopflow-execution/src/harness) | normalized conversation and usage |
 | Session capture evidence | [`session_record.rs`](../../rust/loopflow-execution/src/session_record.rs) | manifest, append events, terminal receipt |
@@ -77,7 +77,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf process list`, `process top`, `process prune`, `machine doctor` | local OS and command-journal observation |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
-| `lf account` | provider credential and account authority |
+| `lf account` | service authentication and browser consent |
 | `lf install`, `release` | Artifact selection, server registration/update and release workflow |
 
 Argument-level behavior belongs in the [`lf` reference](../lf-reference.md). Wire DTOs
@@ -117,12 +117,11 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 Follow the same composition order as a provider launch:
 
-1. Add the provider kind and credential behavior under `provider_auth/`.
-2. Add account routing and health semantics under `provider_account/`.
-3. Add one harness adapter that maps native output to the common stream.
-4. Preserve native session ids, cumulative usage, omissions, and finality.
-5. Add conformance fixtures for normal, tool, error, and retry output.
-6. Map the new edge in the checked architecture reference.
+1. Add the provider kind and let its native client own authentication.
+2. Add one harness adapter that maps native output to the common stream.
+3. Preserve native session ids, cumulative usage, omissions, and finality.
+4. Add conformance fixtures for normal, tool, error, and retry output.
+5. Map the new edge in the checked architecture reference.
 
 Do not add a collector daemon, mandatory telemetry store, or synthetic final
 usage receipt.

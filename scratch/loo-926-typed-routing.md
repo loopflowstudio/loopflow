@@ -66,290 +66,203 @@ the code at `470da475a1` showed it is worse than the brief:
     (`server/schema.rs`), and `ServerProtocolTests.swift` only checks field
     sets against it.
 
+## The concept (concept review, 2026-11-17)
+
+`scratch/concept-review.html` has the review; `scratch/questions.md` has every
+answer word for word. What they settle:
+
+- There is one protocol (`machine/wire.rs`, revision 5) and one executor of
+  it on a Machine: its resident server. A client opens a **connection to a
+  Machine's server** and sends operations.
+- A connection has a **carrier**. The local socket (`machine.sock`) for this
+  Machine, SSH for every other Machine, the tailnet WebSocket for the phone.
+  The Mac gets no WebSocket client: with SSH a pipe to the server it would be
+  a second route with no new ability.
+- Over SSH, the entry on the destination is a **pipe** to that Machine's
+  `machine.sock`. It runs nothing itself. It starts the server when it is not
+  running.
+- Work sent to another Machine therefore needs that Machine's server. This
+  drops the brief's "SSH routing needs no resident API server on the
+  destination". Commands run on a Machine itself still need no server, and
+  `ssh <machine> lf …` typed by hand is the way in when a server cannot run.
+- Named logins and per-run secrets travel with the SSH carrier. LOO-957
+  redesigns what they are; this Task only keeps one place that delivers them.
+- The stack stopped at PR #1956 for this redesign.
+
 ## Demo
 
 Machine `mini` is added, and Task LOO-123 executes there.
 
 ```bash
-lf task hold LOO-123 --json            # answer comes from mini
-lf --machine mini session history list # mini shows one `lf server stdio` Process: task.hold
+lf task hold LOO-123 --json             # one ssh; mini's server answers
+lf task status LOO-123 --subscribe      # live lines from mini's server, same route
+ssh mini lf server status               # the one connected client is this laptop
 ```
 
-With a stub `ssh` that records its input, the remote command is
-`exec 'lf' 'server' 'stdio' …`. Stdin is two JSON lines, `hello` and
-`{"type":"request","operation":{"kind":"task.hold",…}}`, and argv carries no
-Task words.
+Stop mini's server and repeat the hold: it answers after the entry starts the
+server. Make the server unstartable: the hold fails naming mini, the reason
+and `ssh mini lf server status`.
 
-Against a destination built before this change, the call fails and names the
-destination's version and the update command. It does not exit 0 silently.
+## Design
 
-## Chosen approach
+### One client
 
-Docker's shape: the CLI and the daemon share one API, and remote is a
-different address, not a different code path. Tailscale's: the CLI is a thin
-client of one typed request.
+`machine::client::Connection` is the protocol's client, over a `UnixStream`
+today. It becomes generic over its carrier's two byte streams:
 
-### One typed entry: `lf server stdio`
+```rust
+Connection::open()              // machine.sock, as today
+Connection::open_on(&machine)   // child `ssh … lf server connect`, piped
+```
 
-- **Protocol.** `lf server stdio` speaks the socket protocol on stdin/stdout
-  for one connection. The client sends `hello`; the entry answers `welcome`,
-  or `error incompatible` on a revision mismatch (the same check as
-  `service.rs:392–408`). Each `request` gets one `response` or `error`.
-- **Refused here.** `subscribe` and every `ServerOperation` (session.start,
-  attach, mobile.*, upload, boundary) get `error invalid` naming the resident
-  server. No new `ErrorCode`, so PR 1 changes no wire type.
-- **Nothing resident.** It is an ordinary `lf` Process on the destination,
-  admitted and recorded, so the destination's history shows the call. It is not
-  the shared server, so it doesn't run under `request::isolate` / `served`.
-- **Why visible, not `__op`.** `bin/lf.rs:1756,1780` exit 0 for any `__*`
-  they can't parse. An older destination would turn `lf __op` into silent
-  success with empty output. `lf server stdio` on an older `lf` is a Clap
-  error (exit 2). The sender turns exit 2, or a stdout with no `welcome`, into
-  "mini runs lf <version>; update with <cmd>", using the version that
-  `connection::probe` already reads.
-- **Identity.** `LF_EXPECTED_MACHINE_ID` stays in the preamble, checked by
-  `validate_expected_machine_process` before admission. `machines.md:47–52`
-  requires every receiving invocation to check it, and env is safe here:
-  there is one caller per process.
+`request`, `subscribe`, `receive` and `checkpoint` are unchanged. #1956's
+`machine::ssh::call` builds `hello` and one `request` by hand; it is a second
+client and is deleted.
 
-### One executor, one route (as built in PR 1)
+### The SSH entry is a pipe
 
-No `dispatch` module yet. `Write::run` routes and `Write::run_here` runs here
-(`write.rs:64`); the server calls `run`, `lf server stdio` calls `run_here` or
-`Read::read`. PR 2's CLI dispatcher is where a shared `execute` earns a name.
+Named `lf server connect` here; #1956 called it `lf server stdio`. On the
+destination it:
 
-- **Route.** `Write::remote` (`write.rs:1144`) covers
-  task.run/ship/hold/claim/unassign, reading `remote_task` and
-  `remote_ownership_writer`, and session.resume, through `work_route::forward`,
-  whose `Forward` carries the Wave and repository it resolved. It returns one
-  `Remote` (resolved `Machine`, repository, the write naming exact Work);
-  `execute` asks it only when routed, and `prepare_session` adds only
-  `move_session` before `Remote::call` and `prepared_remotely` after.
-  `session.new` never forwards, so it never routes.
-- **Engine.** `engine::task::{run, ship, hold, ownership}` are local-only;
-  `remote`, `remote_on`, `RemoteTaskOperation` are deleted.
-- **No re-forwarding.** An operation that arrived on `lf server stdio` runs
-  here, never re-routed.
+1. checks `LF_EXPECTED_MACHINE_ID` before anything else, as every receiving
+   invocation must (`machines.md:47–52`);
+2. ensures the server is running (`installation::server::ensure`, the path a
+   held launch already takes);
+3. connects to `machine.sock` and copies bytes both ways until either side
+   closes.
 
-### One SSH launch
+It parses nothing after step 1, so every message the protocol has or gains
+works over SSH: requests, `subscribe`, `session.start`, attach. A ticketed
+connection (terminal bytes, bulk messages) is a second `lf server connect
+--ticket`, the same pipe to the socket's ticket entrance.
 
-`machine::ssh::call(target, repo, messages) -> Vec<ServerMessage>` in
-`loopflow-execution`, generic over JSON:
+An `lf` too old for the entry exits 2, which becomes "mini runs lf
+<version>; update it with …" (built in #1956). A server on an older protocol
+answers `incompatible` itself.
 
-- `resolve_target`, no up-front probe: the destination checks
-  `LF_EXPECTED_MACHINE_ID`, and the version is read only after exit 2;
-- `forwarding_environment`;
-- `build_preamble(["lf", "--repo-id", id, "server", "stdio"])`;
-- `run_ssh_io` with the messages on stdin;
-- stderr lines become `journal::request::diagnostic`, and exit 2 becomes the
-  skew error.
+`server.md:113` forbids forwarding the trusted local socket for the phone,
+whose proxy would lend it another user's authority. An SSH login is the same
+OS user the socket already trusts.
 
-`run_remote`, `Write::prepare_session`'s SSH half and the "destination said"
-copies fold into it. `prepare_launch` stays in `Write::remote` (run,
-ship) and the CLI's `ssh::run`; LOO-913 (#1953) deletes both, see Decisions.
+### What the server must learn
 
-### Directory on the destination
+Today's SSH preamble and `--repo-id` give the destination `lf` its context.
+A pipe gives the server none, so the context moves into the protocol:
 
-`Read`/`Write` variants carry `directory: PathBuf`, the sender's path. The
-entry takes `--repo-id` as today, resolves it with
-`work_route::repository_path`, and runs `operation.at(path)`, one method that
-replaces the `directory` field. That method stays until PR 2 moves selection
-to the request (see Slices). The Task source (`LF_TASK_SOURCE`, prepared by
-`resolve_task_source`) stays in the preamble in PR 1. In PR 2 it becomes a
-field of the request.
+- **This connection came from another Machine.** `hello`'s client identity
+  already has a `kind`; `machine` marks it. The server runs such a
+  connection's writes with `Write::run_here` and never routes them onward.
+- **Which repository.** Operations carry `directory`, the sender's path.
+  The request needs the repository's id, which the server resolves to its
+  own checkout (`work_route::repository_path`). This is the first field of
+  the `Selection` the earlier plan put in PR 3.
+- **Who is asking and their settings.** The preamble's profile, user name,
+  Task source and agent override become fields of the same selection.
+- **Per-run secrets for a launch.** A served `task.run` starts a detached
+  `lf` from the server, which has no forwarded environment. Open below.
 
-## Alternatives considered
+### One way to open SSH to a Machine
 
-- **`lf __op` hidden entry.** Blocked: silent exit 0 on an older destination
-  (above).
-- **Host the full server over stdio** (proxy to `service.rs` connection
-  handling). This brings subscriptions, limits and tickets to a process that
-  answers one request. Deferred: nothing needs a remote subscription yet.
-- **Move `Read`/`Write` into `loopflow-execution`** so the engine can send
-  them. That is the largest diff, and it makes execution depend on every
-  application handler. Moving the route decision up to the caller removes the
-  engine's need to forward at all.
-- **Selection in `Hello`** (expected Machine, repository). Hello is per
-  connection; a socket connection's requests span repositories. Selection
-  belongs on `Request` (PR 2).
+`machine::ssh::open(machine)` runs `ssh … lf server connect` and hands its
+pipes to `Connection`. SSH multiplexes already (`machine_route.rs:46`), so
+further connections cost no handshake. The plain-command launch
+(`ssh::run_with_io`) remains for `install`, sign-in flows and commands with
+no `Operation`. Nothing else starts `ssh`: `machine::task::run_remote`,
+`Write::prepare_session`'s SSH half and `ssh::call` go in this Task;
+`ssh::request` and `credentials::remote_command` go when their callers
+become operations.
 
 ## Slices
 
-The Task brief says "Large enough to stack: the typed remote entry first, then
-the Rust argv tables, then Swift." Each PR below is its own Task. The later
-two are filed when this one publishes.
+Each PR is its own Task. This Task is PR 1.
 
-### PR 1, this Task: typed remote entry and one route
+### PR 1, this Task: SSH is a pipe to the destination's server
 
-Deletions first:
+Rework #1956 on `main`:
 
-1. Delete `engine::task::{remote, remote_on, RemoteTaskOperation}`,
-   `machine::task::run_remote`, `Write::cli()`, the SSH half of
-   `Write::prepare_session`, the served branches of `work_route::forward`
-   (:285,373,436), and the test `routed_writes_spell_the_command_ssh_runs`
-   (`write.rs:1428`).
-2. Add `machine::ssh::call` and `lf server stdio` (`ServerCommand::Stdio`;
-   help in Clap, `docs/dev/machines.md` and `docs/dev/server.md` updated).
-3. `Write::run` routes (`Write::remote`, `prepare_session`) and
-   `Write::run_here` executes; `Operation::at` rewrites `directory` on the
-   stdio entry.
-4. Tests (`tests/machine_commands.rs`), all present:
-   - `served_ownership_routes_to_its_writer_and_never_falls_back_locally`
-     passes unchanged.
-   - `a_hold_for_a_task_mini_runs_travels_as_the_typed_operation`: argv
-     `lf --repo-id … server stdio`, stdin `hello` + `request{kind:"task.hold"}`,
-     one stdio Process recorded on mini.
-   - `an_lf_without_the_typed_entry_names_its_version_and_update`: exit 2
-     yields the skew error with the update command.
-   - `a_served_run_for_a_task_mini_runs_starts_it_there`: served `task.run`
-     to a `preview_machines()` peer returns the peer's answer, and nothing
-     starts here. Mini's stdio is stubbed; a real Graph on mini's stdio entry
-     runs in the move-continuation tests.
-   - `a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operation`.
+- `Connection` over a carrier; `ssh::open`; `lf server connect`.
+- `hello` kind `machine` makes the server run writes here; the request
+  carries the repository id.
+- Delete `ssh::call`, the request executor in `server/stdio.rs`, and every
+  `prepare_launch` call (LOO-913 deleted the function).
+- Kept from #1956: `Write::run` routes and `Write::run_here` runs; engine
+  `remote`/`remote_on`/`RemoteTaskOperation`, `run_remote` and
+  `Write::cli()` deleted; the skew, crash and unreachable errors.
+- `docs/dev/machines.md:79` and `docs/dev/server.md` say the new rule: work
+  sent to another Machine runs in its server.
 
-Still argv in PR 1:
+### PR 2: conversations and live updates over it
 
-- `lf --machine` and `work_route::forward` from the CLI (`mutation.rs`,
-  `dispatch` arms);
-- detached `launch::start`;
-- `transport::delegate_current`;
-- Swift `onMachine`;
-- `machine::ssh::request` (Session move, Task location, workspace arrival).
+- `lf --machine mini resume S`, Task conversations and Desktop shells on
+  another Machine open with `session.attach` and a ticket over the pipe.
+- The SSH relay to `held.sock` is deleted once nothing older needs it.
+- `lf task status --subscribe` for a Task on another Machine.
 
-Each one goes in a named PR below.
+### PR 3: Clap produces an `Invocation`; one dispatcher
 
-### PR 2: Clap produces an `Invocation`; one dispatcher
+As the first plan had it. `--machine` sends the operation over
+`Connection::open_on`; a command with no `Operation` takes the plain-command
+launch. The rest of `Selection` moves onto `Request` and the preamble's
+environment goes. `mutation.rs`, CLI `work_route::forward`, `Read::argv`,
+`aliases.rs`, the extra parses and the group A served guards are deleted;
+`transport::delegate_current` and the detached launch send an operation;
+`ssh::request`'s callers get kinds; the Clap → `Invocation` table is
+snapshot-tested.
 
-- `Cli` → `Invocation { selection: Selection { directory, repository, wave, task, machine }, action }`
-  in one parse. `action` is an `Operation`, or a terminal-local command
-  (install, holder, hooks, desktop shell, attach). `Selection` moves to
-  `ClientMessage::Request` as a required nullable field. Every DTO fixture
-  changes, along with Swift encoding. The per-variant `directory` fields and
-  `Operation::at` are deleted.
-- The CLI calls `dispatch::route` + `execute`, then renders the typed result.
-  Deleted:
-  - `mutation.rs` (all of it);
-  - CLI `work_route::forward`/`Forward`;
-  - `ssh::run_with_io`'s argv rewriting (`resident_args`, `parse_remote_command`,
-    `runs_here`, `navigation::machine_invocation`);
-  - config dispatch at `bin/lf.rs:2863` and its `unreachable!`;
-  - the extra parses;
-  - `Read::argv` and `session_filter`'s re-parse (Clap's defaults become
-    `SessionListArgs → Read` construction).
-  - Group A served guards: `work/wave/context.rs:21,31,280`, `ops/run.rs:320`,
-    `ops/task/remote.rs:69`. Resolvers take the selection, and env is read once
-    at the Clap boundary.
-  - `EnvGuard` for `WAVE_ID_ENV` and `WORK_DECLARATION_ENV`, and `CwdGuard`
-    except where a child agent inherits cwd.
-  - The CLI and served config/session writes converge on one function each.
-- `--machine` sends the `Invocation`'s operation through `machine::ssh::call`.
-  A command with no `Operation` fails, naming `ssh <machine> lf …`
-  (Decisions).
-- The detached launch passes the typed operation on the child's stdin
-  (`lf server stdio`, carried with `LF_LAUNCH_REPORT`). Deleted: `spell_run`,
-  `spell_task` and the `launch::start(directory, &[String])` argv form.
-- `session send`/`receive`, `task location` and workspace arrival get
-  Read/Write kinds and go through `machine::ssh::call`; `ssh::request` is
-  deleted.
-- `aliases.rs` is deleted (52 moved spellings, "delete after 0.15").
-  `transport::delegate_current` sends the operation, not `std::env::args()`.
-- Snapshot-test the Clap → `Invocation` table, one line per command, in the
-  manner of Jujutsu's CLI snapshot tests.
-- Route once, in `Write::run`: `remote()` → `Remote::call::<$output>` →
-  `WriteResult`, else `run_here`. The six `match remote { Some … None … }`
-  arms in `writes!` become local-only, and the CLI's last hand-routed copy
-  (`mutation.rs` hold, which carries a reason the write lacks) becomes a call
-  to the dispatcher. session.resume's `move_session` before and
-  `prepared_remotely` after move into that one routed path. `ContinueRun`
-  stays while execution cannot name `Write`; every caller passes `run_task`.
+### PR 4: Swift
 
-### PR 3: Swift
+- `onMachine` keeps `serve`/`write` and names the Machine in the request's
+  selection. The local server holds a `Connection` to that Machine, so its
+  Tasks update live in Desktop.
+- Delete every `argv` in `ServedRead`/`ServedWrite` and the no-server
+  fallback (`RegistryQuery.swift:826–840`).
 
-- `onMachine` keeps `serve`/`write` and sets `Request.selection.machine`; the
-  local server routes it through `dispatch::route`.
-- Delete every `argv` in `ServedRead`/`ServedWrite` and the no-server argv
-  fallback (`RegistryQuery.swift:826–840`). The Mac app talks to the server
-  it bundles.
-- Replace the direct argv calls (`config repo`, `task location`,
-  `session resume --explain`, `task watch-files`, `taskGet --subscribe`) with
-  their reads or subscriptions. `watch-files` stays a process if it has no
-  operation.
+### Order with LOO-957
 
-## Decisions (reversible; recorded in `scratch/questions.md`)
+LOO-957 (sign-in, based on `main`, running) retires `lf account` and changes
+what is delivered to a Machine. It touches the two `forward::deliver` call
+sites and the CLI entry code PR 3 rewrites.
 
-- **LOO-913 order.** #1953 is open, and its branch has not synced past
-  `606c13c2d7` (before the crate split in #1952 and #1954). PR 1 builds on
-  `main`; the one remaining `prepare_launch` call sits in `machine::ssh::call`.
-  If #1953 lands first, rebase onto it and drop that call. Before merging
-  either one, check with `merge-base --stat` for the stale-parent revert.
-- **`--machine` without an `Operation` (PR 2)** fails, naming the ssh spelling.
-  Documented remote commands checked against the Read/Write kinds:
-  - covered: `task list`, `session history list`, `skill run`, `graph run`,
-    `wave-operate` (skill);
-  - not covered: `lf --machine X install server` (`docs/troubleshooting.md:166`),
-    which becomes `ssh X lf install server`. PR 2 lists the rest from its
-    snapshot table.
+### State of the branch
 
-## PR 1 as built (2026-11-16)
+`main` at `528ccd8eda` (LOO-913) is merged in, conflicts resolved, and the
+branch does not compile: `lf/commands/write.rs:13,1098–1118` still calls
+`credentials::prepare_launch` and `AccountSelection`, both deleted by
+LOO-913, and passes a `selection` on to `Remote::new`. PR 1's rework deletes
+that code; fix it there, not separately. `main` has moved on since; sync
+again before building. #1956's QA note on typed writes moved to
+`.lf/qa/machine-moves.md`, since `main` split `.lf/skills/qa.md`.
 
-Departures not covered above:
+## Open
 
-- **CLI `lf task hold <id>`** routes typed: the engine used to route it, and
-  CLI `work_route` never did.
-- A served `task.run` to a peer starts detached there and returns at
-  registration; the argv path ran `lf -b task run` in the SSH session.
-- `Write::cli` became `Write::session_spelling`: local Session preparation
-  still reads Clap's arguments until PR 2. `ssh::run_with_io` keeps its IO
-  for `mutation::run`'s CLI forward.
-- Two CLI paths had routed only through the deleted engine `remote_on`, and
-  now call `Write::run`: `lf task claim/unassign` for a Task whose move from
-  here was sent (mini answers whether it arrived), and the Graph a move
-  continues on arrival. `ops::session_move::{move_task, move_session}` take
-  the application's `write::run_task` as a `ContinueRun` function pointer,
-  since execution cannot name `Write`.
+- How a served launch on the destination gets per-run secrets
+  (`forward.env`), now that no forwarded process environment reaches the
+  server. Candidates: an `env` field on the launch operations, as
+  `session.start` has; or the one-time file `forward::deliver` already
+  writes, named in the request and read by the launch. LOO-957 decides where
+  logins sit; this is about the rest.
+- Whether PR 1 adds the repository id to `Request` (a wire change across the
+  DTO fixtures and Swift) or the entry rewrites `directory` per request as
+  #1956 does, which makes it more than a pipe until PR 3.
+- The entry's name.
+- PR #1956 stays open and unmerged. CI on it reported every check SKIPPED,
+  including `rust-test`. Not investigated.
 
-## Remaining for PR 1
+## Built in #1956 (2026-11-16), before the redesign
 
-Nothing known; gate next.
-
-A fourth lf-to-lf channel the inventory missed: `machine::ssh::request`
-(`loopflow-execution/src/machine/ssh.rs:45`) launches `lf <argv>` with its own
-preamble beside `ssh::call`. Callers: `session_move.rs` (`session send`,
-`session receive` with a stdin body, `--planning-key`), `task_location.rs`
-(`task location --request --json`), `open/workspace.rs:636` (`--arrive-task`,
-`--into`). None has an `Operation` kind, so typing them changes the wire:
-PR 2, listed there.
-
-## Done when
-
-- A Task write whose Task runs on another Machine (run, ship, hold, claim,
-  unassign) reaches it as typed JSON. So does a session.resume that
-  belongs to another Machine (`session.new` never forwards).
-- An older destination fails with its version and the update command.
-- `rg 'fn run_remote|fn remote_on|RemoteTaskOperation|\.cli\(\)' rust/*/src`
-  finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).
-- (PR 2/3) `rg 'ssh::request' rust` finds nothing, and
-  `rg 'fn argv|mutation::|aliases::' rust/loopflow/src` and
-  `rg 'argv' swift/Loopflow/Services/RegistryQuery.swift` find nothing.
-
-## Docs (PR 1, written)
-
-- `docs/dev/machines.md`: routing table row, and the typed write, its
-  example and the skew error after it.
-- `docs/dev/server.md`: boundary diagram line, `lf server stdio` under Commands.
-- `rust/loopflow/src/server/README.md`: the stdio carrier, after the remote
-  carrier paragraph.
-
-The skew message in the docs reads ``mini runs lf 0.15.2, which cannot take
-this operation; update it with `ssh -- mini 'lf install'` ``. Implement
-matches it, or changes the docs with it.
-
-## Checks
-
-- `cargo test -p loopflow --test integration machine_commands::`: 59 pass after compress, including `a_served_run_for_a_task_mini_runs_starts_it_there` (stub mini stdio) and the move continuation's real Graph on mini (implement).
-- `cargo test -p loopflow --lib server::stdio:: lf::commands::write::tests:: adapter_tests:: lf::tests::`; `-p loopflow-execution --lib engine::task:: machine::ssh::`: pass (implement).
-- `documented_commands::`, `cli_discovery::`, `served_reads server_operations_match_their_lf_commands`: pass (implement).
-- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(lf::commands::write::tests::) | test(adapter_tests::) | test(session_move::)'`: 15 pass (implement).
-- `cargo clippy --all-targets -- -D warnings`: clean (implement); gate reruns.
+- `cargo test -p loopflow --test integration machine_commands::`: 60 pass
+  after the QA fixes; `--lib server::` 87; `machine::ssh::` 4; clippy clean.
+- QA (two private Machines, stand-in ssh; `scratch/qa.html`): typed
+  hold/claim/unassign/run/ship reach mini; older lf, older protocol, crashing
+  and unreachable mini each name the cause.
 - Loopback sshd (`tests/transport/ssh_shells.rs`): CI.
-- QA (two private Machines, stand-in ssh; `scratch/qa.html`): typed hold/claim/unassign/run/ship reach mini; older lf, older protocol, crashing and unreachable mini each name the cause. After the QA fixes: `machine_commands::` 60 pass, `--lib server::` 87, `machine::ssh::` 4, clippy clean.
+
+## Done when (PR 1)
+
+- A Task or Session write for another Machine travels as a typed request on
+  a `Connection` over SSH and is run by that Machine's server.
+- With the destination's server stopped, the same write succeeds after the
+  entry starts it.
+- `rg 'prepare_launch|fn run_remote|fn remote_on|ssh::call|\.cli\(\)' rust/*/src`
+  finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).
+- An older destination fails with its version and the update command.

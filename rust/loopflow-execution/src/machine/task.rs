@@ -10,14 +10,12 @@ pub fn resident_args(
     args: &[String],
     task: Option<&String>,
     path_selected: bool,
-    account_flags: usize,
     routed: bool,
     source: Option<&TaskSource>,
 ) -> Vec<String> {
     // Automatic Work routing carries the resolved plan, not a path on this Machine.
     let task_flag = task.map(|task| format!("--task={task}"));
     let mut remove_repo = routed && path_selected;
-    let mut remaining = account_flags;
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -31,13 +29,6 @@ pub fn resident_args(
             remove_repo = false;
         } else if remove_repo && arg.starts_with("--repo=") {
             remove_repo = false;
-        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
-            iter.next();
-            remaining -= 1;
-        } else if remaining > 0
-            && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
-        {
-            remaining -= 1;
         } else if let Some(source) = source.filter(|_| {
             (arg == "--task" && iter.as_slice().first() == task) || task_flag.as_ref() == Some(arg)
         }) {
@@ -124,7 +115,6 @@ pub fn current_repository(
 pub fn forwarding_environment(
     directory: &Path,
     target: &Machine,
-    selection: Option<&str>,
     source: Option<&TaskSource>,
 ) -> Result<Vec<(String, String)>> {
     let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
@@ -142,12 +132,6 @@ pub fn forwarding_environment(
         ),
         (crate::config::USER_NAME_ENV.into(), user_name),
     ];
-    if let Some(selection) = selection {
-        environment.push((
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV.into(),
-            selection.into(),
-        ));
-    }
     for name in [crate::config::AGENT_OVERRIDE_ENV, "LF_SETTINGS"] {
         if let Ok(value) = std::env::var(name) {
             environment.push((name.into(), value));

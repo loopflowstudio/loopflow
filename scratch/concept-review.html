@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transport concept review</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1c1b19; --muted: #625f58; --line: #dcd8cf; --card: #ffffff;
+  --yes: #1f7a4a; --no: #b3261e; --part: #8a6100; --prop: #2c5fb3; --propbg: #eef3fc;
+  --code: #f1eee7;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #161514; --fg: #ece9e3; --muted: #a39f96; --line: #37342f; --card: #1e1d1b;
+    --yes: #6fcf97; --no: #f2867f; --part: #e0b252; --prop: #8fb4f5; --propbg: #1b2433;
+    --code: #262421;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg);
+  font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 40px 20px 80px; }
+h1 { font-size: 30px; line-height: 1.2; margin: 0 0 10px; }
+h2 { font-size: 21px; margin: 48px 0 12px; }
+h3 { font-size: 16px; margin: 22px 0 6px; }
+p { margin: 0 0 12px; max-width: 72ch; }
+.lede { font-size: 18px; color: var(--muted); }
+code { font: 13.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--code); padding: 1px 5px; border-radius: 4px; }
+.wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; min-width: 720px; background: var(--card);
+  border: 1px solid var(--line); border-radius: 8px; }
+th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); font-size: 14.5px; }
+th { font-weight: 600; }
+tr:last-child td { border-bottom: 0; }
+.yes { color: var(--yes); font-weight: 600; }
+.no { color: var(--no); font-weight: 600; }
+.part { color: var(--part); font-weight: 600; }
+.chain { background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+  padding: 12px 14px; margin: 8px 0; }
+.chain b { display: block; margin-bottom: 6px; }
+.hops { display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.hop { border: 1px solid var(--line); border-radius: 6px; padding: 3px 8px; background: var(--code); }
+.arrow { color: var(--muted); }
+.note { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.proposed { border: 1.5px dashed var(--prop); background: var(--propbg); }
+.proposed .hop { border-color: var(--prop); background: transparent; }
+.tag { display: inline-block; font-size: 13px; color: var(--prop); border: 1px dashed var(--prop);
+  border-radius: 10px; padding: 0 8px; margin-left: 6px; font-weight: 500; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+.box h3 { margin-top: 0; }
+ul { margin: 0 0 12px; padding-left: 20px; max-width: 72ch; }
+li { margin-bottom: 5px; }
+ol.q > li { margin-bottom: 18px; }
+ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+.rec { color: var(--prop); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>How things reach a Machine</h1>
+<p class="lede">The area taken: every way one part of Loopflow reaches another, on one Machine and between Machines. LOO-926 changes one of those ways, and the question "is this the phone's protocol, without SSH?" can only be answered against all of them.</p>
+<p>Nothing here changes code or the plan. Solid boxes exist today (the branch counts as today where marked). Dashed blue boxes are proposed.</p>
+
+<h2>One interaction, three clients</h2>
+<p>A Task lives on <code>mini</code>. From somewhere else, put it on hold, then open its conversation.</p>
+
+<div class="chain">
+  <b>From the laptop's terminal, on <code>main</code></b>
+  <div class="hops">
+    <span class="hop">lf task hold T</span><span class="arrow">→</span>
+    <span class="hop">Clap, then re-spelled as a command line</span><span class="arrow">→</span>
+    <span class="hop">ssh: version probe</span><span class="arrow">→</span>
+    <span class="hop">ssh: credential delivery (launches only)</span><span class="arrow">→</span>
+    <span class="hop">ssh: env preamble + lf task hold T</span><span class="arrow">→</span>
+    <span class="hop">mini's lf parses again, writes its store</span>
+  </div>
+  <div class="note">The conversation: <code>lf --machine mini resume S</code> → ssh → a relay on mini → mini's server at <code>held.sock</code> → holder → PTY. This half needs mini's server; the hold does not.</div>
+</div>
+
+<div class="chain">
+  <b>From the laptop's terminal, on the LOO-926 branch</b>
+  <div class="hops">
+    <span class="hop">lf task hold T</span><span class="arrow">→</span>
+    <span class="hop">ssh: env preamble + lf server stdio</span><span class="arrow">→</span>
+    <span class="hop">hello, {"kind":"task.hold"} on stdin</span><span class="arrow">→</span>
+    <span class="hop">mini runs the operation, answers, exits</span>
+  </div>
+  <div class="note">Same typed message the phone sends. One request per SSH connection; <code>subscribe</code>, <code>session.start</code> and attach are refused, "naming the resident server". The conversation still takes the relay path above.</div>
+</div>
+
+<div class="chain">
+  <b>From Desktop on the laptop</b>
+  <div class="hops">
+    <span class="hop">Desktop</span><span class="arrow">→</span>
+    <span class="hop">laptop's server, machine.sock</span><span class="arrow">→</span>
+    <span class="hop">command line prefixed --machine mini --repo-id R</span><span class="arrow">→</span>
+    <span class="hop">a local lf</span><span class="arrow">→</span>
+    <span class="hop">the terminal path above</span>
+  </div>
+  <div class="note"><code>RegistryQuery.onMachine</code> builds the prefix. It carries a guard that throws "Live Task observation is unavailable on this transport"; whether Desktop's remote path hits it today was not checked.</div>
+</div>
+
+<div class="chain">
+  <b>From the phone</b>
+  <div class="hops">
+    <span class="hop">phone</span><span class="arrow">→</span>
+    <span class="hop">WebSocket to mini's server, /v1/machine</span><span class="arrow">→</span>
+    <span class="hop">hello, {"kind":"task.hold"}</span><span class="arrow">→</span>
+    <span class="hop">mini's server runs it</span>
+  </div>
+  <div class="note">One lasting connection. Live subscriptions work. The conversation opens on a ticketed connection at <code>/v1/ticket</code>. Admission is Tailscale: mini asks <code>tailscale whois</code> and admits its owner's other devices. Needs mini's server, and carries no credentials.</div>
+</div>
+
+<h3>When it goes wrong</h3>
+<ul>
+  <li><b>mini's server is down.</b> The phone can do nothing. The laptop can still hold the Task, but cannot open the conversation ("Loopflow server is not running").</li>
+  <li><b>mini runs an older lf.</b> Phone: <code>incompatible</code>. Branch: "mini runs lf 0.16.0…; update it with <code>ssh -- 'mini' 'lf install'</code>". Main: the probe's "lf versions differ" line.</li>
+  <li><b>mini's lf dies mid-write.</b> All paths end at "outcome unknown; inspect the affected work before retrying". No path can retry safely.</li>
+  <li><b>Recovery of a view</b> is the one thing that works the same everywhere: the holder keeps a ring of output and a view reconnects at the byte it had reached.</li>
+</ul>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<div class="wrap">
+<table>
+<tr><th style="width:22%">What a person knows</th><th style="width:38%">What the code has</th><th style="width:9%">Line up?</th><th>What is wrong</th></tr>
+<tr>
+  <td>A Machine: a computer with its own checkouts, store and logins</td>
+  <td><code>Machine</code> in <code>durable.rs</code>; stable identity, replaceable route</td>
+  <td class="yes">yes</td><td></td>
+</tr>
+<tr>
+  <td>Do this on that Machine</td>
+  <td>Phone: a typed <code>Operation</code>. Laptop: a command line. Four places decide to forward (<code>--machine</code> in <code>bin/lf.rs</code>, <code>work_route::forward</code>, <code>engine::task::remote</code>, <code>transport::delegate_current</code>). Six functions start <code>ssh</code>: <code>ssh::run_with_io</code>, <code>machine::task::run_remote</code>, <code>machine::ssh::request</code>, <code>machine::ssh::call</code> (branch), <code>forward::deliver</code>, <code>connection::probe</code></td>
+  <td class="no">no</td><td>One action, no single owner, two payloads. The branch gives Task and Session writes the typed payload and leaves everything else as it was.</td>
+</tr>
+<tr>
+  <td>Watch that Machine live</td>
+  <td><code>subscribe</code> on <code>machine.sock</code> and on the WebSocket. Nothing over SSH</td>
+  <td class="no">no</td><td>What you can see depends on which device you hold. The phone gets live updates from mini; the laptop gets one answer per command.</td>
+</tr>
+<tr>
+  <td>Open a conversation from anywhere</td>
+  <td>Terminal view: <code>held.sock</code>. Desktop pane: <code>session.attach</code> ticket on <code>machine.sock</code>. Phone: <code>/v1/ticket</code>. Another Mac: ssh → relay → <code>held.sock</code></td>
+  <td class="part">partly</td><td>One view protocol and one recovery rule, which is the part that matters. Four ways in.</td>
+</tr>
+<tr>
+  <td>My logins go with my work</td>
+  <td><code>forward.env</code> / <code>forward.files</code>, read by <code>forward::read</code> and sent by <code>forward::deliver</code> from two SSH sequences. The branch's typed call still names <code>prepare_launch</code>, deleted by LOO-913. The WebSocket carries none</td>
+  <td class="part">partly</td><td>Forwarding belongs to "an SSH launch", and there is more than one of those.</td>
+</tr>
+<tr>
+  <td>(nothing: a person never sees this)</td>
+  <td>The SSH preamble's environment: profile, expected Machine id, user name, Task source, agent override, <code>LF_SETTINGS</code></td>
+  <td class="no">no</td><td>A second request header, spelled as environment variables. The typed protocol's <code>hello</code> and request already have a place for who is asking and what they selected.</td>
+</tr>
+<tr>
+  <td>The server: ideally nothing to know</td>
+  <td><code>docs/dev/machines.md:79</code>: "SSH command routing needs no resident API server." Held work "fails rather than fall back" without it, including over SSH</td>
+  <td class="no">no</td><td>One flag, <code>--machine</code>, with two guarantees. Reads, writes and headless runs work without mini's server. Conversations do not.</td>
+</tr>
+<tr>
+  <td>(nothing)</td>
+  <td>The holder and its socket</td>
+  <td class="yes">yes</td><td>Hidden on purpose, and it is why an upgrade ends nothing. Leave it alone.</td>
+</tr>
+</table>
+</div>
+
+<h2>The biggest mismatch</h2>
+<p>"Reach a Machine" is one idea with two complete implementations that cannot do the same things.</p>
+
+<div class="wrap">
+<table>
+<tr><th></th><th>Phone's way (WebSocket)</th><th>Laptop's way (SSH)</th></tr>
+<tr><td>What travels</td><td>typed <code>Operation</code></td><td>a command line plus environment (the branch: typed, for writes)</td></tr>
+<tr><td>Who is let in</td><td>the owner's Tailscale devices</td><td>anyone with the SSH login</td></tr>
+<tr><td>Needs a server there</td><td>yes</td><td>only for conversations</td></tr>
+<tr><td>Live updates</td><td>yes</td><td>no</td></tr>
+<tr><td>Carries your logins</td><td>no</td><td>yes</td></tr>
+<tr><td>Works on a rental or a Machine with nothing installed</td><td>no</td><td>yes</td></tr>
+</table>
+</div>
+
+<p style="margin-top:14px">So the WebSocket cannot replace SSH. A rental is not on the tailnet, <code>lf install</code> has to get there somehow, and a login has to arrive before an agent can start. What can change is what SSH is: today it is a second API; it could be a third way to carry the first one.</p>
+
+<div class="two" style="margin-top:14px">
+  <div class="box">
+    <h3>Today</h3>
+    <ul>
+      <li><b>Protocol A</b>, revision 5: <code>machine.sock</code>, WebSocket.</li>
+      <li><b>Protocol B</b>: command lines and environment over SSH, assembled in several places.</li>
+      <li><b>Branch:</b> one request of Protocol A, inside Protocol B's launch.</li>
+    </ul>
+  </div>
+  <div class="box proposed">
+    <h3>Proposed <span class="tag">not built</span></h3>
+    <ul>
+      <li><b>One protocol.</b> A client opens a connection to a Machine and sends operations.</li>
+      <li><b>Three carriers</b> for that connection: the local socket, the tailnet WebSocket, SSH stdio.</li>
+      <li><b>One thing outside it:</b> getting <code>lf</code> onto a Machine (<code>install</code>), which is a plain SSH command by nature.</li>
+    </ul>
+  </div>
+</div>
+
+<div class="chain proposed" style="margin-top:14px">
+  <b>The same interaction, proposed <span class="tag">not built</span></b>
+  <div class="hops">
+    <span class="hop">terminal, Desktop or phone</span><span class="arrow">→</span>
+    <span class="hop">a connection to mini (socket, WebSocket or ssh stdio)</span><span class="arrow">→</span>
+    <span class="hop">hello: who is asking, which Machine they expect</span><span class="arrow">→</span>
+    <span class="hop">task.hold · subscribe · session.attach</span>
+  </div>
+  <div class="note">Over SSH, <code>lf server stdio</code> hands the connection to mini's resident server when one is running, so subscriptions and conversations work, and answers reads and writes itself when none is. The SSH login is the same user, so this is not the forwarded-socket case <code>server.md:113</code> forbids for the phone; the view relay over SSH already does it for <code>held.sock</code>.</div>
+</div>
+
+<h3>Tested against the hard cases</h3>
+<ul>
+  <li><b>Normal:</b> <code>lf task hold T</code> is one SSH connection and one parse. Desktop's remote Tasks update live because the laptop's server can keep a connection to mini open.</li>
+  <li><b>mini's server is down:</b> reads and writes still answer, as the docs promise today. Conversations say the server is not running, as today. Nothing gets worse.</li>
+  <li><b>Recovery:</b> views keep the holder's byte-offset reconnect. Writes keep "outcome unknown". A lasting connection that drops is reopened by the client, as the phone does now.</li>
+  <li><b>Counterexample, credentials:</b> a lasting server must not hold secrets handed to it by a connection. So forwarding stays with the SSH carrier, sent once when the connection opens, and a Machine reached by WebSocket uses its own logins. The proposal survives, but "three equal carriers" is not quite true: SSH is the one that can bring logins.</li>
+  <li><b>Counterexample, commands with no operation:</b> <code>lf --machine mini install server</code> cannot be an <code>Operation</code>; there may be no lf there to receive one. The command-line launch over SSH survives for that. It shrinks to bootstrap; it does not disappear.</li>
+  <li><b>Counterexample, interactive agent commands:</b> <code>lf --machine mini --wave product wave-operate</code> is a <code>session.start</code> plus a view, both already in the protocol, so it fits once stdio can reach the resident server. Until then it needs the command-line launch too.</li>
+</ul>
+
+<h2>What this says about LOO-926</h2>
+<ul>
+  <li><b>PR #1956 points the right way.</b> It is the first time SSH carries the protocol instead of a command line.</li>
+  <li><b>It stops one step short of the idea.</b> <code>lf server stdio</code> is documented as "answers requests, nothing more". As a carrier it would be a connection, and the single SSH launch the Task promises would be "open a connection to a Machine", with credential delivery inside it.</li>
+  <li><b>The environment preamble is the leftover.</b> The brief already says selection should be "a field of the request, not environment". The preamble is the same problem on the SSH side.</li>
+  <li><b>Recorded on 2026-11-16, in <code>scratch/questions.md</code>:</b> "This was supposed to also do credential forwarding".</li>
+</ul>
+
+<h3>Larger than this Task</h3>
+<ul>
+  <li>Live remote Tasks in Desktop: the laptop's server keeps a connection to each of your Machines. Takes stdio reaching the resident server, and <code>subscribe</code> over it.</li>
+  <li>One way into a conversation: every view redeems a <code>session.attach</code> ticket; <code>held.sock</code> and the SSH relay path go. Takes care: relays from older builds recover through <code>held.sock</code> today.</li>
+  <li>Mac to Mac over the tailnet WebSocket. mini's admission already lets in its owner's other devices, so this is mostly a client. It adds a carrier; it removes nothing.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>What is SSH, in this product?
+    <ol>
+      <li><span class="rec">A carrier for the one protocol</span>, plus plain commands for install. Recommended.</li>
+      <li>What it is on the branch: a one-request typed call for writes, command lines for the rest.</li>
+      <li>Only the way to install lf; all Machine-to-Machine work moves to the WebSocket. Rentals would need Tailscale and a running server before their first Task.</li>
+    </ol>
+  </li>
+  <li>When mini's server is running, may <code>lf server stdio</code> hand its connection to it?
+    <ol>
+      <li><span class="rec">Yes</span>: the laptop gets subscriptions and conversations over SSH, the same as the phone gets over WebSocket. Recommended.</li>
+      <li>No: stdio stays one request, one answer, and live remote work waits for a Mac WebSocket client.</li>
+    </ol>
+  </li>
+  <li>Should work on another Machine require its server?
+    <ol>
+      <li><span class="rec">No for reads, writes and headless runs; yes for conversations</span>, as today, and say so in one place. Recommended.</li>
+      <li>Yes for everything except install. Simpler to explain; a stopped server then blocks <code>lf task hold</code> on that Machine.</li>
+    </ol>
+  </li>
+  <li>Where do forwarded logins travel?
+    <ol>
+      <li><span class="rec">With the SSH carrier only</span>, once per connection. A Machine reached by WebSocket uses its own logins. Recommended.</li>
+      <li>As an operation any carrier can send, which means the resident server receives secrets.</li>
+    </ol>
+  </li>
+  <li>How much of this belongs in LOO-926?
+    <ol>
+      <li><span class="rec">Reshape PR 1 only as far as naming:</span> one "open a connection to a Machine" that delivers credentials, with stdio still answering one request. Everything under "Larger than this Task" becomes its own Task. Recommended.</li>
+      <li>Land #1956 as built after the LOO-913 merge, and take the carrier idea up afterwards.</li>
+      <li>Stop the stack here and redesign around the carrier first.</li>
+    </ol>
+  </li>
+</ol>
+
+<h2>Answers, 2026-11-17</h2>
+<p>"1a 2a 3a 4a 5c". The redesign is in <code>scratch/loo-926-typed-routing.md</code>.</p>
+
+<h2>The next question</h2>
+<ol class="q" start="6">
+  <li>When mini's server is running, what does <code>lf server stdio</code> do with an ordinary read or write?
+    <ol>
+      <li><span class="rec">Runs it itself, always.</span> Only what needs the server (subscriptions, conversations, tickets) is passed to it. A write behaves the same whether mini's server is up or down, and forwarded environment stays in the process SSH started. Recommended, and what the redesign assumes.</li>
+      <li>Pipes the whole connection to the server when one is up, and runs requests itself only when none is. Anything the protocol grows works over SSH for free. A write then has two behaviors, the request needs a "do not forward again" mark and its repository as a field, and forwarded environment has to be handed to the server.</li>
+    </ol>
+  </li>
+</ol>
+
+<h2>Logins on a Machine</h2>
+<p>Added 2026-11-17, after: "agent provider credentials are the most important [and most complicated to get right + legal] and should be the most" … "most supported", and "i guess we maybe want to join in the lf machine connect logic into this concept review". Read from <code>origin/main</code> after LOO-913, not from a run.</p>
+
+<h3>One interaction</h3>
+<p>Get <code>mini</code> ready to run agents on your Tasks, then do the same for a rental.</p>
+<div class="chain">
+  <b>Today, on a Machine you own</b>
+  <div class="hops">
+    <span class="hop">lf machine connect mini github</span><span class="arrow">·</span>
+    <span class="hop">lf machine connect mini linear</span><span class="arrow">·</span>
+    <span class="hop">ssh mini, then sign in to claude and codex by hand</span>
+  </div>
+  <div class="note">Or skip the last step and name <code>forward.env</code> / <code>forward.files</code>, which then travel on every launch.</div>
+</div>
+<div class="chain">
+  <b>Today, on a rental</b>
+  <div class="hops">
+    <span class="hop">GitHub and Linear: installed for you at rent time</span><span class="arrow">·</span>
+    <span class="hop">Claude and Codex: refused unless forward names a login</span>
+  </div>
+</div>
+<ul>
+  <li><b>Failure:</b> on a Machine you own with no Claude login, nothing says so before the run. The native client's error appears inside the remote agent.</li>
+  <li><b>Recovery:</b> a login forwarded as a variable is gone when the agent quits; reopening the conversation starts a signed-out agent (from a code comment, not traced end to end). A login forwarded as a file stays.</li>
+</ul>
+
+<h3>Two systems for one idea</h3>
+<div class="wrap">
+<table>
+<tr><th></th><th><code>lf machine connect</code> (<code>credentials.rs</code>, 591 lines)</th><th><code>forward</code> (<code>forward.rs</code>, 293 lines)</th></tr>
+<tr><td>Covers</td><td>GitHub, Linear, OpenCode</td><td>anything you name; in practice Claude and Codex</td></tr>
+<tr><td>What travels</td><td>a typed <code>Credential</code>, as JSON on stdin of <code>ssh … lf machine credentials receive</code></td><td>named variables and home files; a shell script with names and lengths, values on stdin</td></tr>
+<tr><td>Knows whose login it is</td><td>yes: checks the account on both ends, "identity mismatch" otherwise</td><td>no</td></tr>
+<tr><td>Skips when already there</td><td>yes (<code>remote_has</code>)</td><td>files only; variables are re-sent every launch</td></tr>
+<tr><td>Avoids sharing a refresh grant</td><td>yes. Linear: a fresh access token, the grant stays home. OpenCode: "A copied login would share the laptop's refresh grant; mint a fresh one."</td><td>no. The documented example copies <code>~/.codex/auth.json</code>, and the docs warn that refreshing one copy can sign another out</td></tr>
+<tr><td>Stays on the Machine</td><td>yes</td><td>files yes, variables no</td></tr>
+<tr><td>When</td><td>once, by a person; automatically for rentals</td><td>every launch that may start an agent</td></tr>
+<tr><td>Its own SSH launch</td><td>yes: <code>credentials::remote_command</code>, a seventh place that starts <code>ssh</code></td><td>yes: <code>forward::deliver</code></td></tr>
+</table>
+</div>
+
+<h3>Do the concepts line up?</h3>
+<div class="wrap">
+<table>
+<tr><th style="width:24%">What a person knows</th><th style="width:38%">What the code has</th><th style="width:9%">Line up?</th><th>What is wrong</th></tr>
+<tr><td>mini is signed in to a service, as someone</td><td>Per service: <code>gh</code>'s own storage, lf's encrypted store (Linear), OpenCode's file, Claude's and Codex's own files. <code>machine credentials inspect</code> answers for three of the five</td><td class="no">no</td><td>No one place says what mini is signed in to. The two that every agent run needs are the two it cannot answer for.</td></tr>
+<tr><td>Sign mini in</td><td><code>machine connect</code> for three services; "ssh there and do it by hand" or <code>forward</code> for two</td><td class="no">no</td><td>One action, two mechanisms, split by service. The careful mechanism serves the less important services.</td></tr>
+<tr><td>This run brings a secret with it</td><td><code>forward.env</code></td><td class="yes">yes</td><td>Right for API keys and other per-run secrets. It was stretched to cover logins.</td></tr>
+<tr><td>(nothing)</td><td><code>forward.rs</code>: "lf does not know what they are", beside <code>AGENT_LOGIN_ENV</code> and <code>AGENT_LOGIN_FILES</code>, which list the four names that are a Claude or Codex login</td><td class="no">no</td><td>lf knows, in one function, for rentals only.</td></tr>
+<tr><td>A rental is ready when it starts</td><td>GitHub and Linear through <code>connect</code>; Claude and Codex through <code>forward</code>, checked by <code>read_for_rental</code></td><td class="part">partly</td><td>It works, by calling both systems.</td></tr>
+</table>
+</div>
+
+<h3>The mismatch, and a simpler shape</h3>
+<p>There are only three ways a login can come to be on a Machine, and they are the same three for every service. Today the code has them, but only names them for some services.</p>
+<div class="wrap">
+<table>
+<tr><th>How the login got there</th><th>Shared with the laptop?</th><th>Exists today for</th></tr>
+<tr><td><b>Its own:</b> someone signed in on that Machine</td><td>no</td><td>Claude, Codex (by hand over ssh)</td></tr>
+<tr><td><b>Issued for it:</b> the laptop asks the service for a separate grant and installs that</td><td>no</td><td>Linear (access token), OpenCode (device grant). <code>claude setup-token</code> looks like this kind for Claude; not confirmed against Anthropic's terms</td></tr>
+<tr><td><b>Copied:</b> the laptop's own credential, duplicated</td><td>yes</td><td>GitHub token, OpenCode API key, <code>~/.codex/auth.json</code>, <code>~/.claude/.credentials.json</code></td></tr>
+</table>
+</div>
+
+<div class="two" style="margin-top:14px">
+  <div class="box">
+    <h3>Today</h3>
+    <ul>
+      <li><code>machine connect</code>: three services, typed, checked.</li>
+      <li><code>forward</code>: everything else, unchecked, including the two agent logins.</li>
+      <li>No view of what a Machine is signed in to.</li>
+    </ul>
+  </div>
+  <div class="box proposed">
+    <h3>Proposed <span class="tag">not built</span></h3>
+    <ul>
+      <li><b>One action:</b> <code>lf machine connect mini claude</code> and <code>… codex</code> join the other three. For a Machine you own it runs the service's own sign-in on that Machine, in your terminal. lf copies nothing and stores nothing.</li>
+      <li><b>One view:</b> each Machine lists its five services: signed in or not, as whom, and which of the three ways.</li>
+      <li><b>One check:</b> before any remote launch, not only a rental's: "mini has no Claude login; <code>lf machine connect mini claude</code>".</li>
+      <li><b><code>forward</code> keeps one job:</b> per-run secrets. A login named there still works, and the launch says it is a copy.</li>
+    </ul>
+  </div>
+</div>
+
+<h3>Tested against the hard cases</h3>
+<ul>
+  <li><b>A rental nobody is watching.</b> No one is there to sign in, so "its own" is impossible. It needs "issued for it" (a Claude setup token) or "copied" (the Codex file). This is where <code>forward</code>'s login path has to survive, or where lf would have to hold a token to install, which LOO-913 just removed. The proposal does not make this case simpler; it only names it.</li>
+  <li><b>Reopen after the agent quit.</b> With its own login on the Machine the problem is gone. With a forwarded variable it remains, unless a reopen that starts an agent counts as a launch (PR 2 can do that).</li>
+  <li><b>Does lf become an account manager again?</b> Not for owned Machines: connect only runs the native sign-in, and the view only reads whether a login exists. Reading <em>as whom</em> for Claude and Codex means reading their files, which LOO-913 chose to stop doing ("Loopflow does not choose a login, interpret those files or refresh them").</li>
+  <li><b>Transport.</b> <code>machine credentials receive</code> is already a typed message on SSH stdin. On the carrier it becomes an ordinary request the stdio process runs itself, and <code>credentials::remote_command</code> goes. Sent over WebSocket it would reach the resident server, so it stays an SSH-carrier request (answer 4a).</li>
+  <li><b>Legal.</b> Not judged here. What the design can do is keep the three ways distinct and visible, so a copy is never made silently.</li>
+</ul>
+
+<h2>Questions on logins</h2>
+<ol class="q" start="7">
+  <li>Should Claude and Codex join <code>lf machine connect</code>?
+    <ol>
+      <li><span class="rec">Yes, as "sign in on that Machine":</span> lf opens the service's own sign-in there and copies nothing. Recommended.</li>
+      <li>Yes, and it may also install a token you give it (a Claude setup token), stored on that Machine by lf. Covers unattended Machines; lf holds an agent credential again.</li>
+      <li>No. Native login and <code>forward</code> stay the whole story.</li>
+    </ol>
+  </li>
+  <li>Should lf check for an agent login before every remote launch?
+    <ol>
+      <li><span class="rec">Yes:</span> existence only, with the command that fixes it. Recommended.</li>
+      <li>Rentals only, as today.</li>
+    </ol>
+  </li>
+  <li>A copied login file (<code>~/.codex/auth.json</code>): what should lf do when <code>forward.files</code> names one?
+    <ol>
+      <li><span class="rec">Carry it and say it is a copy</span> that shares the laptop's refresh grant. Recommended.</li>
+      <li>Carry it silently, as today.</li>
+      <li>Refuse it; only issued tokens and native logins are supported.</li>
+    </ol>
+  </li>
+  <li>Does a reopened conversation that has to start a new agent carry <code>forward</code> values?
+    <ol>
+      <li><span class="rec">Yes:</span> it is a launch. Recommended.</li>
+      <li>No: only a first launch forwards.</li>
+    </ol>
+  </li>
+  <li>Where does this land?
+    <ol>
+      <li><span class="rec">Its own Task</span>, after PR 1. PR 1 only makes sure <code>forward</code> and <code>machine credentials receive</code> both travel on the one SSH open. Recommended.</li>
+      <li>Inside LOO-926, as a fifth PR.</li>
+      <li>First, before any transport PR.</li>
+    </ol>
+  </li>
+</ol>
+
+<h2>What the providers document for sandboxes</h2>
+<p>Added 2026-11-17, after: "using an agent inside a sandbox is an extremely common use case. i am confident the providers are ok with that. we should figure out how people are doing this with companies like daytona and do the normal thing + make it as convenient and automatic as we can without claerly crossing some sort of TOS line", and "its ok if it works differently on a per-provider basis". Read from the providers' pages on 2026-11-17. This is a reading of public docs, not legal advice.</p>
+
+<h3>Claude</h3>
+<ul>
+  <li><b>Hosting Claude Code in a sandbox is expressly allowed.</b> The legal page has a section "Can customers offer Claude Code in their products?" covering "hosted sandboxes or other agent infrastructure". Conditions: the binary is unmodified, no sign-in method is removed, and "Each end user must authenticate with their own Anthropic API key, Claude subscription plan credentials, or 3P inference provider credential". <a href="https://code.claude.com/docs/en/legal-and-compliance">legal-and-compliance</a></li>
+  <li><b>The line.</b> "Anthropic does not permit third-party developers to offer Claude.ai login into their own applications, or to route requests through Free, Pro, Max, or Ultra plan credentials on behalf of their users. Moreover, developers may not collect, store, or intermediate Claude.ai credentials or session tokens — sign-in to a Claude account must complete through Anthropic's own flow." And: "Nor does it prevent an end user from signing in to the unmodified Claude Code binary with their own Claude subscription, including where a platform hosts Claude Code".</li>
+  <li><b>The documented unattended path.</b> "For CI pipelines, scripts, or other environments where interactive browser login isn't available, generate a one-year OAuth token with <code>claude setup-token</code>"; "It does not save the token anywhere; copy it and set it as the <code>CLAUDE_CODE_OAUTH_TOKEN</code> environment variable wherever you want to authenticate". It "can only make model requests": no Remote Control, no claude.ai connectors. Bare mode does not read it. <a href="https://code.claude.com/docs/en/authentication">authentication</a></li>
+  <li><b>The documented attended path.</b> <code>claude auth login</code> in a shell; with no browser it prints a URL and takes a pasted code. Daytona's guide does exactly this over SSH. <a href="https://www.daytona.io/docs/en/guides/claude/claude-code-run-cli-sandbox/">Daytona guide</a></li>
+  <li><b>What the sandbox vendors show.</b> Daytona's SDK examples and E2B pass <code>ANTHROPIC_API_KEY</code>. Docker's cloud sandboxes say "For Claude Code, use an Anthropic API key", injected by a proxy so the sandbox holds a placeholder. None of them documents carrying a subscription login file. <a href="https://docs.e2b.dev/agents/claude-code">E2B</a> · <a href="https://docs.docker.com/ai/sandboxes/cloud/credentials/">Docker</a></li>
+  <li><b>Unconfirmed:</b> community issue reports of 401s from setup tokens in containers; "Advertised usage limits … assume ordinary, individual usage" and how many parallel sandboxes that covers.</li>
+</ul>
+
+<h3>Codex</h3>
+<ul>
+  <li><b>Preferred for headless:</b> "prefer device code authentication (beta)": <code>codex login --device-auth</code>, after enabling device code login in ChatGPT security settings. <a href="https://learn.chatgpt.com/docs/auth">auth</a></li>
+  <li><b>Documented fallback:</b> "copy your cached credentials to the headless machine", with SSH and Docker commands. "Treat <code>~/.codex/auth.json</code> like a password".</li>
+  <li><b>The rule for copies.</b> The CI guide: "Do not share the same file across concurrent jobs or multiple machines." One file per runner. An ephemeral runner restores the file, runs, then writes the <em>updated</em> file back. Reseed when "another machine or concurrent job rotated the token first". It calls itself "an advanced workflow for enterprise and other trusted private automation" and says "API keys are still the recommended default for automation." <a href="https://learn.chatgpt.com/docs/auth/ci-cd-auth">ci-cd-auth</a></li>
+  <li><b>Access tokens:</b> "intended for trusted scripts, schedulers, and private CI runners", given with <code>codex login --with-access-token</code>. Who can mint one, and how long it lasts, was not found.</li>
+  <li><b>Docker</b> offers Codex "OpenAI OAuth at account scope" beside API keys, held in its secret store.</li>
+</ul>
+
+<h3>Where lf stands against that</h3>
+<div class="wrap">
+<table>
+<tr><th>What lf does today</th><th>Against the documented way</th></tr>
+<tr><td>Forwards <code>CLAUDE_CODE_OAUTH_TOKEN</code> from your environment or Doppler into a remote launch</td><td class="yes">This is the documented unattended path.</td></tr>
+<tr><td>Lists <code>~/.claude/.credentials.json</code> as an agent login a rental may carry (<code>AGENT_LOGIN_FILES</code>)</td><td class="no">That file is the interactive session's tokens. No provider or vendor page documents copying it, and the legal page's wording on session tokens points away from it.</td></tr>
+<tr><td>Copies the laptop's own <code>~/.codex/auth.json</code> to a Machine while the laptop keeps using it</td><td class="no">Copying is documented; sharing one file across machines is the thing the guide says not to do. This is the sign-out the docs warn about.</td></tr>
+<tr><td>Never writes a rental's refreshed <code>auth.json</code> back</td><td class="no">The ephemeral-runner recipe requires the write-back.</td></tr>
+<tr><td>Has no <code>lf machine connect mini claude</code> or <code>… codex</code></td><td class="part">The attended paths exist in both clients; lf leaves them to "ssh there and do it by hand".</td></tr>
+<tr><td>Strips <code>ANTHROPIC_API_KEY</code>, <code>OPENAI_API_KEY</code>, <code>CODEX_API_KEY</code> from launches</td><td class="yes">Matches Claude's precedence order, where a key outranks the subscription token.</td></tr>
+</table>
+</div>
+<p style="margin-top:12px">lf's position is simpler than a hosting product's: one person, their own subscription, their own Machines, and nothing Loopflow operates ever sees a credential. The lines that keep it that way: sign-in always completes in the provider's own flow; the binary is unmodified; no credential reaches a Loopflow-run service; no login is shared between people.</p>
+
+<h3>Proposed, per provider <span class="tag">not built</span></h3>
+<div class="two">
+  <div class="box proposed">
+    <h3>Claude</h3>
+    <ul>
+      <li><b>A Machine you own:</b> <code>lf machine connect mini claude</code> runs <code>claude auth login</code> there in your terminal. You approve in the browser. Its own login, refreshed by Claude.</li>
+      <li><b>Rentals and anything unattended:</b> one setup token. <code>lf account connect claude</code> runs <code>claude setup-token</code> here, in Anthropic's flow, and you keep the token in your own secret store (Doppler today). Every remote launch that finds no login on the Machine sets <code>CLAUDE_CODE_OAUTH_TOKEN</code> from it. No <code>forward.env</code> line to write.</li>
+      <li><b>Dropped:</b> <code>~/.claude/.credentials.json</code> as something lf will carry.</li>
+    </ul>
+  </div>
+  <div class="box proposed">
+    <h3>Codex</h3>
+    <ul>
+      <li><b>A Machine you own:</b> <code>lf machine connect mini codex</code> runs <code>codex login --device-auth</code> there. You enter one code. Its own login.</li>
+      <li><b>A rental while you are there:</b> the same, at rent time: lf shows the code, you approve once.</li>
+      <li><b>A rental nobody is watching:</b> a login kept only for rentals (<code>CODEX_HOME=… codex login</code>, separate from the laptop's), restored to one rental at a time and written back when the rental is given back, as the CI guide describes.</li>
+      <li><b>Dropped:</b> copying the laptop's live <code>~/.codex/auth.json</code>.</li>
+    </ul>
+  </div>
+</div>
+<ul style="margin-top:12px">
+  <li><b>Counterexample, five rentals at once.</b> Claude's one token serves all of them. Codex's rule is one file per machine, so five unattended rentals need five rental logins, or an API key, or an access token if those turn out to be obtainable.</li>
+  <li><b>Counterexample, lf holding the Claude token.</b> If lf itself stored the setup token it would be "collect, store" in the page's words, even on your own Machine. Keeping it in your secret store, read at launch, is the same posture as an API key "in a development environment, secrets manager, or machine image", which the page allows by name for keys. The page does not say the same sentence about setup tokens.</li>
+</ul>
+
+<h2>Questions on provider logins</h2>
+<p>These replace question 7.</p>
+<ol class="q" start="12">
+  <li>Claude on rentals: where does the setup token live?
+    <ol>
+      <li><span class="rec">In your secret store (Doppler), found by name without a <code>forward.env</code> line.</span> lf runs <code>claude setup-token</code> for you and tells you the one command that saves it. Recommended.</li>
+      <li>In lf's own encrypted store, like the Linear grant. One step fewer; lf stores a Claude credential.</li>
+      <li>As today: you run setup-token, save it, and write the <code>forward.env</code> line.</li>
+    </ol>
+  </li>
+  <li>Codex on unattended rentals?
+    <ol>
+      <li><span class="rec">A rental-only login, one rental at a time, written back at give-back.</span> More than one at once falls back to an API key or waits. Recommended.</li>
+      <li>Device code at rent time only; unattended rentals do not run Codex on a subscription.</li>
+      <li>As today: copy the laptop's file and accept the sign-out risk.</li>
+    </ol>
+  </li>
+  <li>Should lf stop carrying <code>~/.claude/.credentials.json</code>?
+    <ol>
+      <li><span class="rec">Yes.</span> A launch that names it says to use a setup token. Recommended.</li>
+      <li>No, carry whatever is named.</li>
+    </ol>
+  </li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -599,20 +599,18 @@ pub fn schedule(frequency: Option<InstallFrequency>) -> Result<()> {
     if cfg!(target_os = "macos") {
         launchd_schedule(&home, &binary, &logs, frequency)?;
         launchd_cleanup(&home, &binary, &logs)?;
-        launchd_renewal(&home, &binary, &logs)
+        retire_launchd(&home, RETIRED_RENEWAL_LABEL)
     } else if cfg!(target_os = "linux") {
-        cron_schedule(&home, &binary, &logs, frequency)?;
-        cron_renewal(&home, &binary, &logs)
+        cron_schedule(&home, &binary, &logs, frequency)
     } else {
         bail!("automatic cleanup needs launchd on macOS or cron on Linux")
     }
 }
 
-/// Rental Claude logins renew every 2 hours: an access token lasts about 8,
-/// and is resent once within 2 of expiry.
-const RENEWAL_SECONDS: u32 = 2 * 60 * 60;
-const RENEWAL_LABEL: &str = "com.loopflow.rental-renewal";
-const RENEWAL_CRON_MARKER: &str = "# loopflow rental renewal";
+/// Earlier installs renewed rental Claude logins every 2 hours with the
+/// since-deleted `lf machine credentials renew`; scheduling removes that job.
+const RETIRED_RENEWAL_LABEL: &str = "com.loopflow.rental-renewal";
+const RETIRED_RENEWAL_CRON_MARKER: &str = "# loopflow rental renewal";
 
 /// The frequency whose rendered schedule is already installed, else daily.
 fn installed_frequency(installed: impl Fn(InstallFrequency) -> bool) -> InstallFrequency {
@@ -707,6 +705,38 @@ fn install_launchd(home: &Path, name: &str, payload: &str) -> Result<bool> {
     Ok(true)
 }
 
+/// Unload and delete the LaunchAgent `name` when an earlier install left it.
+fn retire_launchd(home: &Path, name: &str) -> Result<()> {
+    let path = home.join(format!("Library/LaunchAgents/{name}.plist"));
+    if !path.exists() {
+        return Ok(());
+    }
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .context("read launchd user")?;
+    if !uid.status.success() {
+        bail!("cannot determine launchd user");
+    }
+    let label = format!("gui/{}/{name}", String::from_utf8_lossy(&uid.stdout).trim());
+    let loaded = Command::new("launchctl")
+        .args(["print", &label])
+        .output()?
+        .status
+        .success();
+    if loaded
+        && !Command::new("launchctl")
+            .args(["bootout", &label])
+            .status()?
+            .success()
+    {
+        bail!("could not unload the retired {name} job; rerun `lf install schedule`");
+    }
+    fs::remove_file(&path)?;
+    println!("Removed the retired {name} job");
+    Ok(())
+}
+
 /// `lf task retire` every minute, separate from the update schedule.
 fn launchd_cleanup(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
     let payload = cleanup_plist(home, binary, logs);
@@ -717,30 +747,6 @@ fn launchd_cleanup(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
         );
     }
     Ok(())
-}
-
-/// `lf machine credentials renew` every 2 hours. The rental logins are files
-/// under `~/.lf/accounts`, so the job reads no Keychain item.
-fn launchd_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
-    let payload = renewal_plist(home, binary, logs);
-    if install_launchd(home, RENEWAL_LABEL, &payload)? {
-        println!(
-            "Rental logins renew every 2 hours; logs: {}",
-            logs.join("rental-renewal.log").display()
-        );
-    }
-    Ok(())
-}
-
-fn renewal_plist(home: &Path, binary: &Path, logs: &Path) -> String {
-    launch_agent_plist(
-        RENEWAL_LABEL,
-        home,
-        binary,
-        &["machine", "credentials", "renew"],
-        &logs.join("rental-renewal.log"),
-        &format!("<key>StartInterval</key><integer>{RENEWAL_SECONDS}</integer>"),
-    )
 }
 
 const CLEANUP_CRON_MARKER: &str = "# loopflow cleanup schedule";
@@ -799,7 +805,7 @@ fn cron_schedule(
     });
     let table = cron_table(
         &cron_table(
-            &current,
+            &cron_without(&current, RETIRED_RENEWAL_CRON_MARKER),
             CRON_MARKER,
             &cron_line(home, binary, logs, frequency),
         ),
@@ -845,34 +851,6 @@ fn write_crontab(table: &str) -> Result<()> {
         bail!("could not install the schedules; rerun `lf install schedule`");
     }
     Ok(())
-}
-
-fn cron_renewal(home: &Path, binary: &Path, logs: &Path) -> Result<()> {
-    let current = read_crontab()?;
-    let table = cron_table(
-        &current,
-        RENEWAL_CRON_MARKER,
-        &renewal_cron_line(home, binary, logs),
-    );
-    if table != current {
-        write_crontab(&table)?;
-        println!(
-            "Rental logins renew every 2 hours in your crontab; logs: {}",
-            logs.join("rental-renewal.log").display()
-        );
-    }
-    Ok(())
-}
-
-fn renewal_cron_line(home: &Path, binary: &Path, logs: &Path) -> String {
-    cron_entry(
-        "0 */2 * * *",
-        home,
-        binary,
-        "machine credentials renew",
-        &logs.join("rental-renewal.log"),
-        RENEWAL_CRON_MARKER,
-    )
 }
 
 fn cron_line(home: &Path, binary: &Path, logs: &Path, frequency: InstallFrequency) -> String {
@@ -921,13 +899,18 @@ fn cron_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\"'\"'")).replace('%', "\\%")
 }
 
-/// `current` with its `marker` line replaced by `line`; other entries stay.
-fn cron_table(current: &str, marker: &str, line: &str) -> String {
-    let mut table: String = current
+/// `current` without its `marker` line; other entries stay.
+fn cron_without(current: &str, marker: &str) -> String {
+    current
         .lines()
         .filter(|entry| !entry.ends_with(marker))
         .map(|entry| format!("{entry}\n"))
-        .collect();
+        .collect()
+}
+
+/// `current` with its `marker` line replaced by `line`; other entries stay.
+fn cron_table(current: &str, marker: &str, line: &str) -> String {
+    let mut table = cron_without(current, marker);
     table.push_str(line);
     table.push('\n');
     table
@@ -1003,11 +986,11 @@ fn launch_agent_plist(
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "macos")]
-    use super::{checked, launchd_schedule, DiskImage};
+    use super::{checked, launchd_schedule, DiskImage, RETIRED_RENEWAL_LABEL};
     use super::{
-        cron_table, is_current, newest_release, newest_run, package_target, record_stream,
-        recorded_stream, release_tag, run_verified_installer, InstallFrequency, Stream,
-        CRON_MARKER,
+        cron_table, cron_without, is_current, newest_release, newest_run, package_target,
+        record_stream, recorded_stream, release_tag, run_verified_installer, InstallFrequency,
+        Stream, CRON_MARKER, RETIRED_RENEWAL_CRON_MARKER,
     };
     use sha2::{Digest, Sha256};
     use std::fs;
@@ -1119,36 +1102,6 @@ mod tests {
             super::launchd_schedule(temp.path(), &binary, temp.path(), None).unwrap();
             assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), modified);
         }
-    }
-
-    #[cfg(target_os = "macos")]
-    #[test]
-    fn schedule_renews_rental_logins_every_two_hours() {
-        let _lock = loopflow_execution::journal::test_env_lock();
-        let _restore = crate::test_ambient::EnvGuard::clear(&["PATH"]);
-        let temp = tempfile::tempdir().unwrap();
-        let bin = temp.path().join("bin");
-        fs::create_dir(&bin).unwrap();
-        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
-        let launchctl = bin.join("launchctl");
-        fs::write(&launchctl, "#!/bin/sh\nexit 0\n").unwrap();
-        fs::set_permissions(&launchctl, fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("PATH", &bin);
-        let agents = temp.path().join("Library/LaunchAgents");
-        fs::create_dir_all(&agents).unwrap();
-        super::launchd_renewal(temp.path(), &bin.join("lf"), temp.path()).unwrap();
-        let output = Command::new("/usr/bin/plutil")
-            .args(["-convert", "json", "-o", "-"])
-            .arg(agents.join("com.loopflow.rental-renewal.plist"))
-            .output()
-            .unwrap();
-        assert!(output.status.success());
-        let plist: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(plist["StartInterval"], 7200);
-        assert_eq!(
-            plist["ProgramArguments"],
-            serde_json::json!([bin.join("lf"), "machine", "credentials", "renew"])
-        );
     }
 
     #[cfg(target_os = "macos")]
@@ -1583,17 +1536,41 @@ printf updated > "$LF_APPLICATIONS_DIR/Loopflow.app/Contents/MacOS/lf"
             format!("MAILTO=me\n*/10 * * * * backup\n{daily}\n")
         );
         assert_eq!(cron_table("", CRON_MARKER, &daily), format!("{daily}\n"));
-        let renewal = super::renewal_cron_line(
-            Path::new("/home/me"),
-            Path::new("/home/me/.local/bin/lf"),
-            Path::new("/home/me/.lf/logs"),
-        );
-        assert!(renewal.starts_with("0 */2 * * * "), "{renewal}");
-        assert!(renewal.contains("'/home/me/.local/bin/lf' machine credentials renew"));
+        // An earlier install's rental renewal line goes; the rest stays.
+        let renewal =
+            format!("0 */2 * * * lf machine credentials renew {RETIRED_RENEWAL_CRON_MARKER}");
         assert_eq!(
-            cron_table(&format!("{daily}\n"), super::RENEWAL_CRON_MARKER, &renewal),
-            format!("{daily}\n{renewal}\n")
+            cron_without(
+                &format!("{daily}\n{renewal}\n"),
+                RETIRED_RENEWAL_CRON_MARKER
+            ),
+            format!("{daily}\n")
         );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn scheduling_removes_the_retired_rental_renewal_job() {
+        use loopflow_execution::config::environment::EnvVarGuard;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let bin = home.path().join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        std::os::unix::fs::symlink("/usr/bin/id", bin.join("id")).unwrap();
+        fs::write(bin.join("launchctl"), "#!/bin/sh\ncase $1 in\nprint) test -f \"$HOME/loaded\";;\nbootout) /bin/rm \"$HOME/loaded\";;\nesac\n").unwrap();
+        fs::set_permissions(bin.join("launchctl"), fs::Permissions::from_mode(0o755)).unwrap();
+        let _home = EnvVarGuard::set("HOME", home.path().to_str().unwrap());
+        let _path = EnvVarGuard::set("PATH", bin.to_str().unwrap());
+        // Nothing installed: nothing to do.
+        super::retire_launchd(home.path(), RETIRED_RENEWAL_LABEL).unwrap();
+        let agents = home.path().join("Library/LaunchAgents");
+        fs::create_dir_all(&agents).unwrap();
+        let plist = agents.join(format!("{RETIRED_RENEWAL_LABEL}.plist"));
+        fs::write(&plist, "<plist/>").unwrap();
+        fs::write(home.path().join("loaded"), "").unwrap();
+        super::retire_launchd(home.path(), RETIRED_RENEWAL_LABEL).unwrap();
+        assert!(!plist.exists());
+        assert!(!home.path().join("loaded").exists(), "the job stays loaded");
     }
 
     #[test]

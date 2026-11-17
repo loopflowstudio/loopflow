@@ -13,6 +13,10 @@ Name the Rust modules and integration binaries the diff can reach before
 building anything: the changed module's own tests, its direct callers, and any
 boundary check its owner README names (see below).
 
+After changing `Cargo.lock`, run `uv run python scripts/third_party.py refresh`
+and review the generated notices and inventory. Check them with
+`uv run pytest python/tests/test_third_party.py` before publishing.
+
 Provider fixtures that launch a Task conversation beside a Graph must signal
 readiness for the process the test exercises. A shared marker can arrive from
 the conversation before the Graph's provider starts.

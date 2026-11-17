@@ -12,8 +12,6 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::{anyhow, Context, Result};
 use serde_json::{Map, Value};
 
-use crate::provider_account::launch_env;
-
 const TRUST_FIELD: &str = "hasTrustDialogAccepted";
 // Matches proper-lockfile's default staleness, which Claude uses for this lock.
 const LOCK_STALE: Duration = Duration::from_secs(10);
@@ -177,6 +175,16 @@ fn _stale(lock: &Path) -> bool {
         .ok()
         .and_then(|modified| SystemTime::now().duration_since(modified).ok())
         .is_some_and(|age| age > LOCK_STALE)
+}
+
+fn launch_env(command: &Command, name: &str) -> Option<std::ffi::OsString> {
+    match command
+        .get_envs()
+        .find(|(key, _)| *key == std::ffi::OsStr::new(name))
+    {
+        Some((_, value)) => value.map(std::ffi::OsString::from),
+        None => std::env::var_os(name),
+    }
 }
 
 #[cfg(test)]

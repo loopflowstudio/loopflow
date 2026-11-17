@@ -677,10 +677,7 @@ mod tests {
         assert_eq!(minutes(&handoff), 30);
 
         let failed_at = loopflow_storage::rows::now_unix();
-        let failure = (
-            failed_at,
-            "no eligible managed claude account.\ncaused by".into(),
-        );
+        let failure = (failed_at, "provider usage limit.\ncaused by".into());
         let read = |failure| {
             shipping_snapshot(
                 None,
@@ -696,7 +693,7 @@ mod tests {
         assert_eq!(failed.state, ShippingState::Restarting);
         assert_eq!(
             failed.reason,
-            "Ship failed: no eligible managed claude account; retrying in 30 min"
+            "Ship failed: provider usage limit; retrying in 30 min"
         );
         // A process that ended without failing restarts on the next read.
         assert!(read(None).reason.starts_with("Ship process exited"));
@@ -713,14 +710,14 @@ mod tests {
         };
         assert_eq!(at("start"), ShipStep::Run { from: None });
         assert_eq!(
-            at("demo"),
+            at("concept-review"),
             ShipStep::Run {
-                from: Some("demo".into())
+                from: Some("concept-review".into())
             }
         );
         assert_eq!(at("end"), ShipStep::Finished);
         let stopped = feature_at(TaskGraphPosition::Run {
-            step: "demo".into(),
+            step: "concept-review".into(),
             at: "implement".into(),
             lf_process_id: "gone".into(),
             running: false,
@@ -740,7 +737,7 @@ mod tests {
     fn shipping_reads_what_happens_now_and_never_waits_on_a_person() {
         let repo = tempfile::tempdir().unwrap();
         let graph = feature_at(TaskGraphPosition::At {
-            step: "demo".into(),
+            step: "concept-review".into(),
         });
         let handoff = TaskShipping {
             shipped_at: 5,
@@ -754,7 +751,7 @@ mod tests {
         let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
         assert_eq!(building.state, ShippingState::Building);
-        assert_eq!(building.reason, "demo (stand-in)");
+        assert_eq!(building.reason, "concept-review (stand-in)");
         // Unknown liveness is not a dead process.
         assert_eq!(
             read(TaskState::Shipping, ProcessIdentityEvidence::Unknown, None).state,

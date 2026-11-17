@@ -4,7 +4,6 @@ use std::fs;
 use std::io::Write;
 use std::os::fd::FromRawFd;
 use std::os::unix::fs::PermissionsExt;
-use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Output, Stdio};
 
@@ -149,45 +148,6 @@ INSTALLER
                 self.root.path().join("installed").display()
             ),
         );
-    }
-
-    fn foreground(&self, args: &[&str]) -> Output {
-        let mut master = -1;
-        let mut slave = -1;
-        // SAFETY: valid output pointers; null selects default terminal settings.
-        assert_eq!(
-            unsafe {
-                libc::openpty(
-                    &mut master,
-                    &mut slave,
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                    std::ptr::null_mut(),
-                )
-            },
-            0
-        );
-        // SAFETY: openpty returned two fresh owned descriptors.
-        let _master = unsafe { fs::File::from_raw_fd(master) };
-        // SAFETY: slave is the other fresh owned descriptor from openpty.
-        let slave = unsafe { fs::File::from_raw_fd(slave) };
-        let mut command = self.command(args);
-        command.stdin(Stdio::from(slave));
-        // SAFETY: the child only calls async-signal-safe OS functions before exec.
-        unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() == -1 || libc::ioctl(0, libc::TIOCSCTTY as _, 0) == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::tcgetpgrp(0) != libc::getpgrp() {
-                    return Err(std::io::Error::other(
-                        "fixture needs the foreground terminal",
-                    ));
-                }
-                Ok(())
-            });
-        }
-        command.output().unwrap()
     }
 
     fn json(&self, args: &[&str]) -> Value {
@@ -646,7 +606,7 @@ fn selecting_the_current_machine_executes_locally() {
 fn remote_task_promotion_needs_no_provider_account() {
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let prefix = ["--machine", "mini", "--account", "codex=unavailable@"];
+    let prefix = ["--machine", "mini"];
     for operation in [
         vec![
             "task",
@@ -665,131 +625,6 @@ fn remote_task_promotion_needs_no_provider_account() {
         for arg in operation {
             assert!(stdout.contains(&format!("argument: {arg}\n")), "{stdout}");
         }
-    }
-    let output = fixture.run(
-        &[
-            prefix.as_slice(),
-            &["task", "create", "--title", "Prototype", "--run"],
-        ]
-        .concat(),
-    );
-    assert!(!output.status.success());
-    assert!(String::from_utf8_lossy(&output.stderr).contains("unavailable@"));
-}
-
-#[test]
-fn selected_machine_login_stays_restricted_and_missing_login_stops_headless() {
-    use base64::prelude::*;
-
-    let fixture = Machines::new();
-    assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let db = rusqlite::Connection::open(fixture.root.path().join("local/loopflow.db")).unwrap();
-    db.execute(
-        "INSERT INTO provider_accounts (provider, account_id, credential_state, created_at, updated_at) VALUES ('codex', 'person', 'connected', 0, 0)",
-        [],
-    ).unwrap();
-    assert_success(&fixture.run(&[
-        "set",
-        "--global",
-        "accounts.codex.person.login_email",
-        "person@example.com",
-    ]));
-    let remote = fixture.root.path().join("remote");
-    fs::write(remote.join("connected"), "true").unwrap();
-    executable(
-        &remote.join(".local/bin/lf"),
-        &format!(
-            r#"#!/bin/sh
-case "$1 $2 $3" in
-"--version  ") echo 'lf {}';;
-"machine id ") echo 'home_11111111111111111111111111111111';;
-"machine credentials inspect") cat "$HOME/connected";;
-*) printf 'selection: %s\n' "$LF_ACCOUNT_SELECTION"; printf 'argument: %s\n' "$@";;
-esac
-"#,
-            loopflow::build_info::BUILD_VERSION
-        ),
-    );
-    let args = [
-        "--machine",
-        "mini",
-        "--account",
-        "codex=person@",
-        "skill",
-        "implement",
-        "--",
-        "--account=other@",
-        "--shared",
-    ];
-    let after_skill = [
-        "--machine",
-        "mini",
-        "implement",
-        "--account",
-        "codex=person@",
-        "--",
-        "--account=other@",
-        "--shared",
-    ];
-    for args in [args.as_slice(), after_skill.as_slice()] {
-        fs::write(remote.join("connected"), "true").unwrap();
-        let output = fixture.run(args);
-        assert_success(&output);
-        let stdout = String::from_utf8(output.stdout).unwrap();
-        let selection = stdout
-            .lines()
-            .find_map(|line| line.strip_prefix("selection: "))
-            .unwrap();
-        let selection: Value =
-            serde_json::from_slice(&BASE64_URL_SAFE_NO_PAD.decode(selection).unwrap()).unwrap();
-        assert_eq!(
-            selection,
-            serde_json::json!({"Restrict": [{"provider": "codex", "account": "person@example.com"}]})
-        );
-        assert!(
-            stdout.contains("argument: --\nargument: --account=other@\nargument: --shared\n"),
-            "{stdout}"
-        );
-        assert!(!stdout.contains("argument: codex=person@"), "{stdout}");
-
-        fs::write(remote.join("connected"), "false").unwrap();
-        let output = fixture.run(args);
-        assert!(!output.status.success());
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(stderr.contains("foreground terminal"), "{stderr}");
-        assert!(stderr.contains("lf machine connect"), "{stderr}");
-        assert!(!String::from_utf8_lossy(&output.stdout).contains("argument:"));
-    }
-
-    for args in [
-        vec![
-            "-b",
-            "machine",
-            "connect",
-            "mini",
-            "codex",
-            "person@example.com",
-        ],
-        vec![
-            "--machine",
-            "mini",
-            "-b",
-            "--account",
-            "codex=person@",
-            "implement",
-        ],
-    ] {
-        fs::write(remote.join("connected"), "false").unwrap();
-        let output = fixture.foreground(&args);
-        assert!(!output.status.success());
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains("foreground terminal without --batch"),
-            "{stderr}"
-        );
-        assert!(!String::from_utf8_lossy(&output.stdout).contains("argument:"));
-        fs::write(remote.join("connected"), "true").unwrap();
-        assert_success(&fixture.foreground(&args));
     }
 }
 
@@ -949,8 +784,6 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
                 "mini",
                 "--repo",
                 selector,
-                "--account",
-                "unconnected@example.invalid",
                 "skill",
                 "probe",
                 "literal 'draft'; $(false)",
@@ -958,8 +791,6 @@ fn remote_preview_resolves_repository_on_selected_machine_without_launch_effects
                 "--explain",
                 "--json",
             ])
-            // Preview must not decode or prepare the caller's account environment.
-            .env("LF_ACCOUNT_SELECTION", "not a launch selection")
             .output()
             .unwrap();
         assert_success(&output);

@@ -6,6 +6,10 @@ use crate::graph::runner::SkillOutcome;
 use crate::graph::transitions::{GraphDecision, GraphVerdict};
 use crate::graph::ConcreteStep;
 
+/// What every loop decision means, so a skill placed on a loop edge needs no
+/// loop instructions of its own.
+const DECISION_CRITERIA: &str = "\n\nThis step also decides a loop. Do the step's work first, then judge from results, not from confidence or the number of passes:\n\n- advance when what this step requires is done. Later obligations belong to later steps.\n- iterate when the last pass made real progress and you can name the next action and the result it should produce, inside the scope already set. The loop finishes the work; it never grows it.\n- blocked when the last pass made no real progress, repeated a failure with nothing learned, or needs an input you can't supply.\n\nA check that can't run here belongs to gate, CI or a person later and blocks nothing; never report it as passed. Carry the next action and the paths it needs in the summary.";
+
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GraphOutput {
@@ -33,6 +37,9 @@ impl GraphOutput {
     pub fn for_step_instructions(step: &ConcreteStep) -> Option<String> {
         let output = Self::for_step(step)?;
         let mut instructions = output.instructions();
+        if output == Self::Decision {
+            instructions.push_str(DECISION_CRITERIA);
+        }
         if let ConcreteStep::Xor(branch) = step {
             instructions.push_str("\n\n");
             instructions.push_str(&crate::graph::build_xor_routing_suffix(branch));

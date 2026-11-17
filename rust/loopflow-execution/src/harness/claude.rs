@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -13,13 +13,11 @@ use tokio::task::JoinHandle;
 use crate::agent::{build_session_command, AgentConfig, ProviderInvocation};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::harness::claude_decode::ClaudeDecoder;
-use crate::harness::common::{spawn_stderr_logger, TurnInProgressGuard};
+use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::{Harness, HarnessError, SendCurrentOutcome};
-use crate::provider_account::{resolve_provider_account_exact, ProviderAccountRoute};
 use crate::provider_auth::Provider;
-use crate::store::ProviderAccountId;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -54,8 +52,6 @@ pub struct ClaudeHarness {
     /// Vendor session id captured from the first turn's `system` event; a
     /// respawn (after interrupt/crash) resumes it via `--resume`.
     agent_session: Arc<Mutex<Option<AgentSessionId>>>,
-    account_route: Option<ProviderAccountRoute>,
-    requested_account_id: Option<ProviderAccountId>,
     turn_in_progress: Arc<AtomicBool>,
     /// Provider results still owed for the current runner turn: 1 for the seed,
     /// plus 1 per accepted `send_current`. The reader emits `TurnCompleted` only
@@ -71,7 +67,6 @@ pub struct ClaudeHarness {
     child: Option<Child>,
     stdin: Option<ChildStdin>,
     reader_task: Option<JoinHandle<()>>,
-    stderr_task: Option<JoinHandle<()>>,
     shutdown_requested: Arc<AtomicBool>,
     interrupt_requested: Arc<AtomicBool>,
 }
@@ -100,8 +95,6 @@ impl ClaudeHarness {
             should_seed_task_prompt: true,
             skill_input: None,
             agent_session: Arc::new(Mutex::new(None)),
-            account_route: None,
-            requested_account_id: None,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             pending_results: Arc::new(AtomicI64::new(0)),
             current_turn_id: Arc::new(Mutex::new(None)),
@@ -110,7 +103,6 @@ impl ClaudeHarness {
             child: None,
             stdin: None,
             reader_task: None,
-            stderr_task: None,
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             interrupt_requested: Arc::new(AtomicBool::new(false)),
         }
@@ -180,10 +172,6 @@ impl ClaudeHarness {
         if let Some(context) = &config.conversation_context {
             context.configure_hooks(cmd.as_std_mut())?;
         }
-        let activation = match &self.account_route {
-            Some(route) => route.launch_as(cmd.as_std_mut()).await?,
-            None => None,
-        };
         cmd.stdin(std::process::Stdio::piped());
         cmd.stdout(std::process::Stdio::piped());
         cmd.stderr(std::process::Stdio::piped());
@@ -196,7 +184,6 @@ impl ClaudeHarness {
 
         let owner = self.owner()?;
         let mut child = super::agent_process::spawn(cmd, None, &owner, holder)?;
-        drop(activation);
         let stdin = child
             .stdin
             .take()
@@ -214,15 +201,9 @@ impl ClaudeHarness {
         self.decoder = Arc::new(Mutex::new(ClaudeDecoder::default()));
         self.spawn_reader(
             stdout,
-            FactWriter::new(
-                store,
-                session,
-                Some(attachment),
-                self.account_route.clone(),
-                self.requests.clone(),
-            ),
+            stderr,
+            FactWriter::new(store, session, Some(attachment), self.requests.clone()),
         );
-        self.stderr_task = Some(spawn_stderr_logger(stderr, "claude_harness"));
         self.stdin = Some(stdin);
         self.child = Some(child);
         Ok(())
@@ -230,7 +211,12 @@ impl ClaudeHarness {
 
     /// The persistent NDJSON reader: maps events for the whole process lifetime
     /// and emits one `TurnCompleted` per coalesced runner turn.
-    fn spawn_reader(&mut self, stdout: tokio::process::ChildStdout, mut writer: FactWriter) {
+    fn spawn_reader(
+        &mut self,
+        stdout: tokio::process::ChildStdout,
+        stderr: tokio::process::ChildStderr,
+        mut writer: FactWriter,
+    ) {
         let events = self.events.clone();
         let turn_in_progress = self.turn_in_progress.clone();
         let pending_results = self.pending_results.clone();
@@ -238,11 +224,13 @@ impl ClaudeHarness {
         let shutdown = self.shutdown_requested.clone();
         let interrupted = self.interrupt_requested.clone();
         let session_slot = self.agent_session.clone();
-        let fails_on_limit = self.account_route.is_some();
         let decoder = self.decoder.clone();
         self.reader_task = Some(tokio::spawn(async move {
             let reader = BufReader::new(stdout);
             let mut lines = reader.lines();
+            let mut stderr = BufReader::new(stderr).lines();
+            let mut stderr_open = true;
+            let mut diagnostics = VecDeque::new();
             let turn_id = || {
                 current_turn_id
                     .lock()
@@ -251,7 +239,20 @@ impl ClaudeHarness {
                     .unwrap_or_default()
             };
 
-            while let Ok(Some(line)) = lines.next_line().await {
+            loop {
+                let line = tokio::select! {
+                    line = lines.next_line() => line,
+                    line = stderr.next_line(), if stderr_open => {
+                        match line {
+                            Ok(Some(line)) => remember_stderr(&mut diagnostics, line),
+                            _ => stderr_open = false,
+                        }
+                        continue;
+                    }
+                };
+                let Ok(Some(line)) = line else {
+                    break;
+                };
                 if shutdown.load(Ordering::Relaxed) {
                     break;
                 }
@@ -264,7 +265,7 @@ impl ClaudeHarness {
                     .expect("claude decoder lock poisoned")
                     .decode(&line, &turn_id());
                 let written = match decoded {
-                    Ok(decoded) => writer.write(&decoded).await.map(|()| decoded),
+                    Ok(decoded) => writer.write(&decoded).map(|()| decoded),
                     Err(error) => Err(error),
                 };
                 let decoded = match written {
@@ -289,28 +290,21 @@ impl ClaudeHarness {
                                 .expect("claude provider session id lock poisoned") =
                                 Some(session_id);
                         }
-                        Decoded::Fact(ProviderFact::RateLimit(signal))
-                            if signal.limited && fails_on_limit =>
+                        Decoded::Fact(ProviderFact::TurnRejected { reason })
+                            if turn_in_progress.load(Ordering::SeqCst) =>
                         {
                             let _ = events.send(ConversationEvent::Error {
                                 code: "provider_rate_limited".to_string(),
-                                message: signal.reason,
+                                message: reason,
                                 evidence: None,
                             });
-                            pending_results.store(0, Ordering::SeqCst);
-                            let _ = events.send(ConversationEvent::TurnCompleted {
-                                turn_id: turn_id(),
-                                status: Lifecycle::Failed,
-                            });
-                            turn_in_progress.store(false, Ordering::SeqCst);
-                            decoder
-                                .lock()
-                                .expect("claude decoder lock poisoned")
-                                .reset_turn();
+                            // The result still carries the provider's refusal
+                            // and reset instructions. Let it finish the turn.
                         }
                         // One provider turn ended. Only close the runner turn
                         // once every queued steer turn has also drained.
                         Decoded::Fact(ProviderFact::TurnCompleted { status, .. }) => {
+                            diagnostics.clear();
                             if pending_results.fetch_sub(1, Ordering::SeqCst) <= 1 {
                                 pending_results.store(0, Ordering::SeqCst);
                                 let _ = events.send(ConversationEvent::TurnCompleted {
@@ -328,10 +322,29 @@ impl ClaudeHarness {
             // The process ended. If a turn was open (interrupt or crash), close
             // it so the runner is never left waiting.
             if turn_in_progress.load(Ordering::SeqCst) && !shutdown.load(Ordering::Relaxed) {
+                // Read the failed client's final stderr. A descendant retaining
+                // the pipe must not hold the exit indefinitely.
+                let _ = tokio::time::timeout(Duration::from_secs(1), async {
+                    while let Ok(Some(line)) = stderr.next_line().await {
+                        remember_stderr(&mut diagnostics, line);
+                    }
+                })
+                .await;
+
                 let status = if interrupted.load(Ordering::SeqCst) {
                     Lifecycle::Interrupted
                 } else {
                     tracing::warn!("claude stream ended without a final result");
+                    let _ = events.send(ConversationEvent::Error {
+                        code: "claude_exit".into(),
+                        message: format!(
+                            "Claude exited without a final result{}",
+                            crate::os_process::exit_reason(
+                                &diagnostics.iter().cloned().collect::<Vec<_>>().join("\n")
+                            )
+                        ),
+                        evidence: None,
+                    });
                     Lifecycle::Failed
                 };
                 let open = decoder
@@ -374,9 +387,6 @@ impl ClaudeHarness {
                 task.abort();
                 let _ = task.await;
             }
-        }
-        if let Some(task) = self.stderr_task.take() {
-            task.abort();
         }
         self.pending_results.store(0, Ordering::SeqCst);
         self.turn_in_progress.store(false, Ordering::SeqCst);
@@ -430,17 +440,9 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned")
             .clone();
-        let model = crate::config::parse_agent(&config.resolved_agent()?).1;
-        let account_route = resolve_provider_account_exact(
-            Provider::Claude,
-            requested_session.as_ref(),
-            self.requested_account_id.as_ref(),
-            crate::work::wave::context::ambient_wave_id().as_ref(),
-            model.as_deref(),
-            config.cwd.as_deref(),
-        )
-        .await?;
-        self.account_route = account_route;
+        if let Some(thread) = requested_session.as_ref() {
+            crate::transcript::adopt_native(Provider::Claude, thread)?;
+        }
 
         // Validate claude binary on PATH.
         let mut version_command = Command::new("claude");
@@ -619,16 +621,14 @@ impl Harness for ClaudeHarness {
             .lock()
             .expect("claude provider session id lock poisoned") = agent_session;
     }
+}
 
-    fn set_provider_account_id(&mut self, account_id: Option<ProviderAccountId>) {
-        self.requested_account_id = account_id;
+fn remember_stderr(lines: &mut VecDeque<String>, line: String) {
+    tracing::debug!(stderr_target = "claude_harness", "{line}");
+    if lines.len() == 32 {
+        lines.pop_front();
     }
-
-    fn provider_account_id(&self) -> Option<ProviderAccountId> {
-        self.account_route
-            .as_ref()
-            .map(|route| route.account_id().clone())
-    }
+    lines.push_back(line);
 }
 
 #[cfg(test)]

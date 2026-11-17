@@ -12,7 +12,6 @@ ACTIONS = {
     "implement": "Edit the requested implementation.",
     "verify": "Run focused checks for the requested change.",
     "write_scratch": "Keep the current plan or proposed changes in scratch.",
-    "load_work_guidance": "Read the Work skill before using Work APIs.",
     "inspect_work": "Read Task or Wave state for the requested scope.",
     "create_task": "Create a new Task.",
     "select_workflow": "Select or start a Task Workflow.",
@@ -52,8 +51,6 @@ def render_case(case: dict, renderer: Path) -> dict:
             HOME=str(home), LF_HOME=str(home / ".lf"), LF_USER_NAME="Evaluation Participant"
         )
         argv = [str(renderer), "--repo", str(repo), "--surface", "headless"]
-        if case["work_task"]:
-            argv += ["--work-task", case["work_task"]]
         if case["skill"]:
             argv += ["--skill", case["skill"]]
         if case["no_loopflow"]:

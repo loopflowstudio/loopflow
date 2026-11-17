@@ -47,15 +47,15 @@ agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
 before dispatch. Every receiving invocation validates identity through read-only
 storage before help, repository lookup or Process admission; no shell-side identity
-probe duplicates that check. Launch retains its sender probe and credential
+probe duplicates that check. Launch retains its sender probe and service credential
 preparation. `--context`/`--explain` skip both, and neither side admits a Process.
 Names and paths resolve at the destination. Missing or changed identity fails without
-initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
-login through SSH stdin: a fresh login the Machine refreshes itself, or, on a
-rental, a Claude access token the laptop refreshes from a login it keeps for
-rentals. An access token cannot refresh, so no machine rotates another's login;
-the rental registers the identity the sender asserts. Account-selected launches
-connect missing or expiring logins in the foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
+initialization, repair or local fallback.
+
+`lf machine connect mini <provider>` installs supported service credentials
+through SSH stdin. Claude and Codex instead use native authentication established
+on the destination. Personal `forward` settings can send named variables and home
+files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
@@ -318,8 +318,8 @@ not restarted.
 on a Machine that has none and takes the Task in from planning. A personal Git
 plan (`planning: {provider: git, personal: true}`) is read under the laptop's
 planning key, which a Machine without one adopts; a Machine already planning
-under another key fails the check. A provider login mini lacks is asked for in
-the foreground, as account-selected launches do. Both Machines need an `lf` that
+under another key fails the check. Authenticate the native provider on mini
+before moving work; a missing login produces the native client's error. Both Machines need an `lf` that
 knows how to take a Task in; an older one fails the check, and nothing moves.
 
 **The laptop afterwards.**
@@ -422,8 +422,8 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, then the price from the provider's published per-second rates), writes
 the rental as `requested` with its sandbox name `lf-<id>` before the create,
 creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
-and installs each Claude account's rental access token (and, when the repository
-plans in Linear, a freshly refreshed Linear access token), clones and binds the
+and, when the repository plans in Linear, installs a freshly refreshed Linear
+access token, clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,
 since it has no route) or the create's window passes (`lost`); it is never

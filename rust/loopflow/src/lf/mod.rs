@@ -92,28 +92,6 @@ pub struct Cli {
     #[arg(skip)]
     pub resolved_invocation: Option<loopflow_execution::skills::invocation::SkillInvocation>,
 
-    /// Prefer this managed provider login before the normal route. Repeat to
-    /// select provider-qualified preferences such as `claude=jack@`.
-    /// Logins spend; a profile is only the Chrome venue accounts log in
-    /// through, so it is never a run-time selector.
-    #[arg(
-        id = "preferred_provider_account",
-        long = "account",
-        value_name = "SELECTOR",
-        conflicts_with = "restricted_provider_account"
-    )]
-    pub account: Vec<String>,
-
-    /// Restrict this invocation and its children to exactly these managed
-    /// provider logins. Providers without a selection are unavailable.
-    #[arg(
-        id = "restricted_provider_account",
-        long = "only-account",
-        value_name = "SELECTOR",
-        conflicts_with = "preferred_provider_account"
-    )]
-    pub only_account: Vec<String>,
-
     /// Skip permission prompts
     #[arg(long)]
     pub yolo: bool,
@@ -348,16 +326,8 @@ impl Cli {
             return Err(clap::Error::raw(clap::error::ErrorKind::ArgumentConflict,
                 "root --json requires --context or --explain; use the command's own --json when available\n"));
         }
-        if let Some(Commands::Account {
-            cmd,
-            target,
-            cached,
-            json,
-        }) = &self.command
-        {
-            if let Some(misuse) =
-                AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *cached || *json)
-            {
+        if let Some(Commands::Account { cmd, target, json }) = &self.command {
+            if let Some(misuse) = AccountCommand::misuse(cmd.as_ref(), target.as_deref(), *json) {
                 return Err(clap::Error::raw(
                     clap::error::ErrorKind::ArgumentConflict,
                     format!("{misuse}\n"),
@@ -383,12 +353,7 @@ impl Cli {
                 args.push(flag.to_string());
             }
         }
-        for (flag, values) in [
-            ("--setting", &self.settings),
-            ("--docs", &self.docs),
-            ("--account", &self.account),
-            ("--only-account", &self.only_account),
-        ] {
+        for (flag, values) in [("--setting", &self.settings), ("--docs", &self.docs)] {
             for value in values {
                 args.extend([flag.to_string(), value.clone()]);
             }
@@ -435,8 +400,6 @@ impl Cli {
             skill_input: self.skill_input.clone(),
             output_schema: self.output_schema.clone(),
             resolved_invocation: self.resolved_invocation.clone(),
-            account: self.account.clone(),
-            only_account: self.only_account.clone(),
             yolo: self.yolo,
             interactive: self.interactive,
             batch: self.batch,
@@ -581,6 +544,9 @@ pub enum Commands {
         /// Print what the commit left
         #[arg(long)]
         json: bool,
+        /// Commit everything a finished skill step left, titled `lf <SKILL>: …`, and push
+        #[arg(long, value_name = "SKILL", conflicts_with_all = ["message", "no_add", "push", "paths", "json"])]
+        step: Option<String>,
     },
     /// Merge upstream into the current branch (default: main or stack parent)
     Sync(SyncArgs),
@@ -604,22 +570,16 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: MachineCommand,
     },
-    /// Every login, its weekly room and what needs fixing; name a login or
-    /// provider for every window, source and browser choice
+    /// Service authentication; native Claude and Codex logins belong to their clients
     #[command(
-        after_help = "lf account                  # one row per login; stale rows refresh\n\
-                            lf account work@            # every window, its age and source\n\
-                            lf account next             # which login the next launch takes, and why"
+        after_help = "lf account linear --json\nlf account connect linear --chrome-profile Work"
     )]
     Account {
         #[command(subcommand)]
         cmd: Option<AccountCommand>,
-        /// A login (`work@`, `claude=work@`) or a provider
-        #[arg(value_parser = parse_account_target)]
+        /// A service provider
+        #[arg(value_parser = parse_service_provider)]
         target: Option<String>,
-        /// Read cached evidence without contacting providers
-        #[arg(long)]
-        cached: bool,
         /// Emit the accounts as one JSON document
         #[arg(long)]
         json: bool,
@@ -661,7 +621,7 @@ pub enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Show memory and scratch size targets, their sources, and current usage
+    /// Show Wave memory size targets, their sources, and current usage
     Context {
         #[arg(long)]
         json: bool,
@@ -1180,7 +1140,7 @@ impl Commands {
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
-            Self::Account { cmd, cached, .. } => account_changes_work(cmd.as_ref(), *cached),
+            Self::Account { cmd, .. } => cmd.is_some(),
             // Another Machine's typed operation is recorded like its command.
             Self::Server { cmd } => matches!(cmd, ServerCommand::Stdio),
             Self::Holder { .. } => false,
@@ -1389,23 +1349,6 @@ fn pr_changes_work(cmd: Option<&PrCommand>) -> bool {
     }
 }
 
-/// Bare `lf account` refreshes stale readings unless it reads the cache.
-fn account_changes_work(cmd: Option<&AccountCommand>, cached: bool) -> bool {
-    match cmd {
-        None => !cached,
-        Some(AccountCommand::Next { .. }) => false,
-        Some(
-            AccountCommand::Disconnect { .. }
-            | AccountCommand::Connect { .. }
-            | AccountCommand::Set { .. }
-            | AccountCommand::RedeemReset { .. }
-            | AccountCommand::Use { .. }
-            | AccountCommand::Pause { .. }
-            | AccountCommand::Unpause { .. },
-        ) => true,
-    }
-}
-
 impl ReleaseCommand {
     pub fn changes_work(&self) -> bool {
         match self {
@@ -1477,7 +1420,7 @@ impl MachineCommand {
             }
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
-                MachineCredentialCommand::Receive | MachineCredentialCommand::Renew => true,
+                MachineCredentialCommand::Receive => true,
             },
             Self::Pool { cmd } => match cmd {
                 PoolCommand::List { .. } => false,
@@ -1569,9 +1512,14 @@ pub struct DesktopWindowArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum SkillCommand {
-    /// Print the repository file that defines a skill, creating
-    /// it from the builtin when the repository has none
-    Customize { name: String },
+    /// Print the repository file that defines a skill. When the repository
+    /// has none, write one that extends the builtin with its own section
+    Customize {
+        name: String,
+        /// Write the builtin's whole text instead, replacing it here
+        #[arg(long)]
+        full: bool,
+    },
     #[command(external_subcommand)]
     External(Vec<String>),
 }
@@ -1774,11 +1722,8 @@ pub struct SessionListArgs {
 /// same flags is the preview.
 #[derive(Args, Debug, Clone, Default)]
 pub struct SessionSelectorArgs {
-    /// Sessions whose next message would fail: their login cannot take their model now
-    #[arg(long)]
-    pub blocked: bool,
-    /// Sessions using this login (work@, claude=work@) or on this agent (harness[:model])
-    #[arg(long, value_name = "ACCOUNT|AGENT")]
+    /// Sessions on this harness, optionally narrowed to a model
+    #[arg(long, value_name = "AGENT")]
     pub on: Option<String>,
 }
 
@@ -1789,7 +1734,7 @@ pub enum SessionCommand {
     /// Move the selected open Sessions to another agent (-a harness[:model]);
     /// `lf session list` with the same flags previews them
     #[command(
-        after_help = "Idle Sessions move now; a busy one moves after its turn. Logins are the Machine's: every open Claude follows the active one, which `lf account use <login>` switches; a running Codex keeps its login until `lf --account codex=<login> resume <session>`. Nothing is written to your preferences.\n  lf session list --blocked                    preview\n  lf session move --blocked -a claude:opus     continue them on Opus"
+        after_help = "Idle Sessions move now; a busy one moves after its turn.\n  lf session list --on claude\n  lf session move --on claude -a codex"
     )]
     Move {
         #[command(flatten)]
@@ -1864,7 +1809,7 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --blocked -a claude:opus continue blocked Sessions on Opus\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID; beside
@@ -2660,7 +2605,7 @@ pub enum InstallCommand {
     /// Reconcile the selected installation's local server for a client.
     #[command(hide = true)]
     Server,
-    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux), and renew rental logins every 2 hours
+    /// Run `lf install` on your stream on a schedule (launchd, also at login; cron on Linux),
     Schedule {
         /// Weekly: Monday 09:00; daily: 09:00; otherwise on clock boundaries (local time).
         /// Defaults to the installed schedule's, else daily.
@@ -3052,17 +2997,13 @@ pub enum MachineCommand {
     /// Install a separate login on an added machine using this laptop's browser.
     Connect {
         target: String,
-        /// github, claude, codex, opencode or linear
+        /// github, opencode or linear
         provider: loopflow_execution::provider_auth::Provider,
         email: Option<String>,
         #[arg(long)]
         chrome_profile: Option<String>,
-        /// Give a rental its own fresh Claude login, which runs without the
-        /// laptop, in place of the laptop's access token
-        #[arg(long)]
-        owned: bool,
     },
-    /// Inspect, receive or renew machine credentials (credential bytes use stdin only).
+    /// Inspect or receive service credentials (credential bytes use stdin only).
     Credentials {
         #[command(subcommand)]
         cmd: MachineCredentialCommand,
@@ -3214,185 +3155,46 @@ pub enum MachineCredentialCommand {
     Inspect {
         provider: loopflow_execution::provider_auth::Provider,
         login: String,
-        /// Count only a Claude login this Machine refreshes itself
-        #[arg(long)]
-        full: bool,
     },
     /// Receive a fresh login as JSON on stdin; preserve existing accounts.
     Receive,
-    /// Send each live rental its next Claude access token when the one it
-    /// holds is near expiry; nothing when no rental is live. `lf install
-    /// schedule` runs it every 2 hours.
-    Renew,
 }
 
-/// A login is its email or an unambiguous prefix (`work@`); `claude=work@`
-/// names the provider when both have one.
+/// Service credentials. Claude and Codex authenticate in their native clients.
 #[derive(Debug, Subcommand)]
 pub enum AccountCommand {
-    /// Which login each provider's next launch takes, and why. Exits 2 when
-    /// none can launch now, 3 when a login is needed. Use -a claude:<model>
-    /// to check that model; otherwise any scoped hold blocks the login
-    Next {
-        #[arg(long, conflicts_with = "default")]
-        repo: Option<String>,
-        /// Ignore repository and Wave orders
-        #[arg(long)]
-        default: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Switch this Machine to a login and keep launches there until it fills
-    /// up; `auto` hands them back to routing. Exits 2 when the login has no
-    /// room or names nothing stored, 3 when it needs a login
-    #[command(
-        after_help = "lf account use work@          # every launch takes work@ until it is full\n\
-                            lf account use auto           # back to the login with the most to spend\n\
-                            lf account use codex=auto     # one provider"
-    )]
-    Use {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Take a login out of rotation; when it is active, the Machine switches
-    /// off it now. It still launches when named with `--account`
-    Pause {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Put a paused login back in rotation
-    Unpause {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-    },
-    /// Add or renew a login (`claude=a@example.com`), or a service's local
-    /// credentials (`claude`, `linear`), through a remembered browser
+    /// Connect a service
     Connect {
-        #[arg(value_parser = parse_account_target)]
+        #[arg(value_parser = parse_service_provider)]
         target: String,
-        #[arg(long, conflicts_with_all = ["import", "api_key"])]
+        #[arg(long, conflicts_with = "api_key")]
         chrome_profile: Option<String>,
-        /// Adopt the ambient Claude login as this login
-        #[arg(long = "import", conflicts_with = "api_key")]
-        import: bool,
-        /// Read the provider's API key environment variable
         #[arg(long)]
         api_key: bool,
     },
-    /// Disconnect a login, or a service's local credentials
+    /// Disconnect a service
     Disconnect {
-        #[arg(value_parser = parse_account_target)]
+        #[arg(value_parser = parse_service_provider)]
         target: String,
-    },
-    /// Edit a login's plan, billing and expected email, or the browsers a
-    /// login or service connects through
-    Set {
-        #[arg(value_parser = parse_account_target)]
-        target: String,
-        #[arg(long)]
-        login_email: Option<String>,
-        #[arg(long, conflicts_with = "clear_plan")]
-        plan: Option<String>,
-        #[arg(long)]
-        clear_plan: bool,
-        #[arg(long, conflicts_with = "clear_paid_through")]
-        paid_through: Option<String>,
-        #[arg(long)]
-        clear_paid_through: bool,
-        #[arg(long)]
-        /// Release all recorded account and window holds, retaining usage readings
-        clear_cooldown: bool,
-        /// Replace the ordered browser choices (repeat for fallback profiles)
-        #[arg(long, conflicts_with = "clear_chrome_profiles")]
-        chrome_profile: Vec<String>,
-        #[arg(long)]
-        clear_chrome_profiles: bool,
-    },
-    /// Spend one banked Codex reset for this login
-    RedeemReset {
-        #[arg(value_parser = parse_account_target)]
-        login: String,
-        /// Reuse this key when retrying the same redemption
-        #[arg(long)]
-        idempotency_key: Option<String>,
-        /// Opaque credit ID returned by live status (otherwise the service chooses)
-        #[arg(long)]
-        credit_id: Option<String>,
-        #[arg(long)]
-        json: bool,
     },
 }
-
-/// A provider, a login (`work@`, `a@example.com`, `claude=work@`) or `auto`:
-/// anything else is a mistyped verb, refused before anything runs.
-fn parse_account_target(raw: &str) -> Result<String, String> {
-    let named = raw.contains('@')
-        || raw.contains('=')
-        || raw == "auto"
-        || raw
-            .parse::<loopflow_execution::provider_auth::Provider>()
-            .is_ok();
-    if named {
-        Ok(raw.to_string())
-    } else {
-        Err(format!(
-            "'{raw}' is not a provider or a login; a login is its email or a prefix through @ (`work@`)"
-        ))
+fn parse_service_provider(raw: &str) -> Result<String, String> {
+    match raw.parse::<loopflow_execution::provider_auth::Provider>() {
+        Ok(loopflow_execution::provider_auth::Provider::Claude) => {
+            Err("Claude signs in natively: run `claude`, then /login".to_owned())
+        }
+        Ok(loopflow_execution::provider_auth::Provider::Codex) => {
+            Err("Codex signs in natively: run `codex login`".to_owned())
+        }
+        Ok(_) => Ok(raw.to_owned()),
+        Err(error) => Err(error.to_string()),
     }
 }
-
 impl AccountCommand {
-    /// A login or overview flag before a verb belongs to bare `lf account`;
-    /// `Cli::checked` rejects it. The old `lf account claude use jack@`
-    /// spelling is answered with the current one, `lf account use claude=jack@`.
     fn misuse(cmd: Option<&Self>, target: Option<&str>, overview: bool) -> Option<String> {
-        let cmd = cmd?;
-        if let Some(target) = target {
-            let spelling = match cmd.login() {
-                Some(login)
-                    if !login.contains('=')
-                        && target
-                            .parse::<loopflow_execution::provider_auth::Provider>()
-                            .is_ok() =>
-                {
-                    format!("lf account {} {target}={login}", cmd.verb())
-                }
-                Some(login) => format!("lf account {} {login}", cmd.verb()),
-                None => format!("lf account {}", cmd.verb()),
-            };
-            return Some(format!(
-                "the verb comes first and the provider goes with the login: {spelling}"
-            ));
-        }
-        overview
-            .then(|| "--cached and --json before a verb apply to `lf account` alone".to_string())
-    }
-
-    fn verb(&self) -> &'static str {
-        match self {
-            Self::Next { .. } => "next",
-            Self::Use { .. } => "use",
-            Self::Pause { .. } => "pause",
-            Self::Unpause { .. } => "unpause",
-            Self::Connect { .. } => "connect",
-            Self::Disconnect { .. } => "disconnect",
-            Self::Set { .. } => "set",
-            Self::RedeemReset { .. } => "redeem-reset",
-        }
-    }
-
-    /// The login or provider the verb acts on.
-    fn login(&self) -> Option<&str> {
-        match self {
-            Self::Next { .. } => None,
-            Self::Use { login }
-            | Self::Pause { login }
-            | Self::Unpause { login }
-            | Self::RedeemReset { login, .. } => Some(login),
-            Self::Connect { target, .. }
-            | Self::Disconnect { target }
-            | Self::Set { target, .. } => Some(target),
-        }
+        cmd?;
+        (target.is_some() || overview)
+            .then(|| "put service arguments after the account verb".to_owned())
     }
 }
 
@@ -3569,6 +3371,33 @@ mod tests {
     use clap::CommandFactory;
 
     #[test]
+    fn native_login_controls_are_absent_and_service_auth_remains() {
+        for args in [
+            vec!["lf", "--account", "claude=old@", "implement"],
+            vec!["lf", "--only-account", "codex=old@", "implement"],
+            vec!["lf", "account", "next"],
+            vec!["lf", "account", "use", "old@"],
+            vec!["lf", "account", "pause", "old@"],
+            vec!["lf", "account", "redeem-reset", "old@"],
+            vec!["lf", "session", "list", "--blocked"],
+            vec!["lf", "machine", "credentials", "renew"],
+        ] {
+            assert!(Cli::try_parse_from(&args).is_err(), "{args:?}");
+        }
+        for (provider, login) in [("claude", "/login"), ("codex", "codex login")] {
+            let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
+            assert!(error.to_string().contains(login), "{error}");
+        }
+        for service in ["github", "linear", "asana", "notion", "doppler", "opencode"] {
+            assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
+            assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
+        }
+        assert!(
+            Cli::try_parse_from(["lf", "session", "move", "--on", "claude", "-a", "codex"]).is_ok()
+        );
+    }
+
+    #[test]
     fn conversation_modes_and_workspace_options_have_separate_commands() {
         for flags in [
             ["--here", "--tab"],
@@ -3741,52 +3570,6 @@ mod tests {
     }
 
     #[test]
-    fn account_commands_printed_by_errors_parse() {
-        let sources = [
-            include_str!("commands/account.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/operations.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/account_status.rs"),
-            include_str!("commands/account_status.rs"),
-            include_str!("../../../loopflow-execution/src/machine/credentials.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/activation.rs"),
-            include_str!("../../../loopflow-execution/src/provider_account/identity.rs"),
-        ];
-        let printed =
-            regex::Regex::new(r#"lf account (?:connect|disconnect|set|use) [^`"\n;(),…]+"#)
-                .unwrap();
-        let placeholder = regex::Regex::new(r"\{[^}]*\}|<[^>]*>").unwrap();
-        let commands = sources
-            .iter()
-            .flat_map(|source| printed.find_iter(source))
-            .map(|command| {
-                let command = command.as_str().replace("{provider}{login}", "claude=a@");
-                placeholder
-                    .replace_all(&command, |found: &regex::Captures| {
-                        let end = found.get(0).unwrap().end();
-                        match &found[0] {
-                            _ if command[end..].starts_with('=') => "claude",
-                            "{provider}" | "<provider>" => "claude",
-                            "<profile>" => "Work",
-                            _ => "a@example.com",
-                        }
-                    })
-                    .into_owned()
-            })
-            .collect::<Vec<_>>();
-        let parse = |command: &str| {
-            let args = command.split_whitespace().map(String::from).collect();
-            Cli::try_parse_from(crate::lf::navigation::normalize_args(args)?)
-        };
-        assert!(commands.len() > 10, "{commands:?}");
-        for command in commands {
-            let parsed = parse(&command);
-            assert!(parsed.is_ok(), "{command}: {:?}", parsed.err());
-        }
-        assert!(parse("lf account connect claude a@").is_err());
-    }
-
-    #[test]
     fn consolidated_commands_parse_without_old_namespaces() {
         use clap::CommandFactory;
         let command = Cli::command();
@@ -3845,7 +3628,7 @@ mod tests {
             vec![
                 "lf", "--wave", "product", "config", "set", "machine", "mini",
             ],
-            vec!["lf", "config", "unset", "account.claude", "--global"],
+            vec!["lf", "config", "unset", "agent", "--global"],
             vec!["lf", "discord", "serve", "product"],
             vec!["lf", "machine", "doctor", "--plan", "--json"],
             vec!["lf", "wave", "sync", "product"],
@@ -4057,48 +3840,6 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn account_preference_and_restriction_are_distinct_repeatable_flags() {
-        let preferred = Cli::try_parse_from([
-            "lf",
-            "--account",
-            "claude=personal",
-            "--account",
-            "codex=reserve",
-            "skill",
-            "implement",
-        ])
-        .expect("parse account preferences");
-        assert_eq!(preferred.account, vec!["claude=personal", "codex=reserve"]);
-        assert!(preferred.only_account.is_empty());
-
-        let restricted = Cli::try_parse_from([
-            "lf",
-            "--only-account",
-            "claude=personal",
-            "--only-account",
-            "codex=reserve",
-            "skill",
-            "implement",
-        ])
-        .expect("parse account restrictions");
-        assert_eq!(
-            restricted.only_account,
-            vec!["claude=personal", "codex=reserve"]
-        );
-
-        assert!(Cli::try_parse_from([
-            "lf",
-            "--account",
-            "reserve",
-            "--only-account",
-            "reserve",
-            "skill",
-            "implement",
-        ])
-        .is_err());
-    }
-
     /// A provider running across an lf upgrade keeps the Stop hook an older lf
     /// declared, so that spelling still reaches the turn-end boundary.
     #[test]
@@ -4141,209 +3882,6 @@ mod tests {
             .map(|arg| arg.get_id().to_string())
             .collect::<Vec<_>>();
         assert!(hidden_flags.is_empty(), "{hidden_flags:?}");
-    }
-
-    #[test]
-    fn account_verbs_come_first_and_a_login_alone_is_its_detail() {
-        let cli = Cli::try_parse_from(["lf", "account", "use", "codex=jack@"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Use { login }),
-            target: None,
-            ..
-        }) if login == "codex=jack@"));
-        let cli = Cli::try_parse_from(["lf", "account", "jack@"]).unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: None,
-            target: Some(target),
-            ..
-        }) if target == "jack@"));
-        for verb in ["next", "pause", "unpause"] {
-            let args: &[&str] = if verb == "next" {
-                &["lf", "account", "next"]
-            } else {
-                &["lf", "account", verb, "jack@"]
-            };
-            assert!(Cli::try_parse_from(args).is_ok(), "{verb}");
-        }
-        let old_spelling = Cli::try_parse_from(["lf", "account", "codex", "use", "jack@"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            old_spelling.contains("lf account use codex=jack@"),
-            "{old_spelling}"
-        );
-        // A login before the verb is not a provider to fold into the login.
-        let login_first = Cli::try_parse_from(["lf", "account", "alice@", "use", "bob@"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(login_first.contains("lf account use bob@"), "{login_first}");
-        let flags_first = Cli::try_parse_from(["lf", "account", "--json", "next"])
-            .and_then(Cli::checked)
-            .unwrap_err()
-            .to_string();
-        assert!(
-            flags_first.contains("apply to `lf account` alone"),
-            "{flags_first}"
-        );
-        for old in [
-            vec!["lf", "account", "--details"],
-            vec![
-                "lf",
-                "account",
-                "set",
-                "claude=a@",
-                "--routing",
-                "automatic",
-            ],
-        ] {
-            assert!(Cli::try_parse_from(&old).is_err(), "{old:?}");
-        }
-    }
-
-    #[test]
-    fn session_move_takes_the_selector_and_the_global_agent() {
-        let cli = Cli::try_parse_from(["lf", "session", "move", "--blocked", "-a", "claude:opus"])
-            .unwrap();
-        assert_eq!(cli.agent.as_deref(), Some("claude:opus"));
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::Move {
-                    selector: SessionSelectorArgs {
-                        blocked: true,
-                        on: None
-                    },
-                    ..
-                }
-            })
-        ));
-        let cli =
-            Cli::try_parse_from(["lf", "session", "list", "--on", "jack@example.com"]).unwrap();
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Session {
-                cmd: SessionCommand::List(SessionListArgs {
-                    selector: SessionSelectorArgs {
-                        blocked: false,
-                        on: Some(_)
-                    },
-                    ..
-                })
-            })
-        ));
-    }
-
-    #[test]
-    fn auth_set_accepts_ordered_service_profiles() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "set",
-            "linear",
-            "--chrome-profile",
-            "Work",
-            "--chrome-profile",
-            "Personal",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Set { target, chrome_profile, .. }), ..
-        }) if target == "linear" && chrome_profile == ["Work", "Personal"]));
-    }
-
-    #[test]
-    fn account_connect_names_a_login_or_a_service() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "claude=operator@",
-            "--chrome-profile",
-            "Profile 9",
-        ])
-        .expect("parse account connection");
-        assert!(cli.account.is_empty());
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Account {
-                cmd: Some(AccountCommand::Connect {
-                    target,
-                    chrome_profile: Some(chrome_profile),
-                    ..
-                }), ..
-            }) if target == "claude=operator@" && chrome_profile == "Profile 9"
-        ));
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "linear",
-            "--chrome-profile",
-            "Work",
-        ])
-        .unwrap();
-        assert!(matches!(cli.command, Some(Commands::Account {
-            cmd: Some(AccountCommand::Connect { target, chrome_profile: Some(profile), .. }), ..
-        }) if target == "linear" && profile == "Work"));
-        // The old provider-then-login spelling is gone.
-        assert!(
-            Cli::try_parse_from(["lf", "account", "connect", "claude", "a@example.com"]).is_err()
-        );
-        assert!(Cli::try_parse_from([
-            "lf",
-            "account",
-            "connect",
-            "claude=a@example.com",
-            "--import"
-        ])
-        .is_ok());
-        for flags in [
-            vec!["--import", "--api-key"],
-            vec!["--import", "--chrome-profile", "Work"],
-        ] {
-            assert!(Cli::try_parse_from(
-                ["lf", "account", "connect", "claude=a@example.com"]
-                    .into_iter()
-                    .chain(flags)
-            )
-            .is_err());
-        }
-    }
-
-    #[test]
-    fn account_set_takes_a_login_and_its_billing() {
-        let cli = Cli::try_parse_from([
-            "lf",
-            "account",
-            "set",
-            "codex=loopflow-eng@",
-            "--login-email",
-            "engineering@example.com",
-            "--plan",
-            "max",
-            "--paid-through",
-            "2026-08-14",
-        ])
-        .expect("parse provider account lifecycle");
-        assert!(matches!(
-            cli.command,
-            Some(Commands::Account {
-                cmd: Some(AccountCommand::Set {
-                    target,
-                    login_email: Some(login_email),
-                    plan: Some(plan),
-                    paid_through: Some(paid_through),
-                    clear_plan: false,
-                    clear_paid_through: false,
-                    ..
-                }), ..
-            }) if target == "codex=loopflow-eng@"
-                && login_email == "engineering@example.com"
-                && plan == "max"
-                && paid_through == "2026-08-14"
-        ));
     }
 
     #[test]

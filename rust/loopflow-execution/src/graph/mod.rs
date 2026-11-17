@@ -49,6 +49,13 @@ impl Skill {
         }
     }
 
+    /// Which text this is: the SHA-256 of the resolved source, so runs of one
+    /// skill group by the version they ran.
+    pub fn version(&self) -> String {
+        use sha2::{Digest, Sha256};
+        hex::encode(Sha256::digest(self.source_text()))
+    }
+
     pub fn named(name: &str) -> Self {
         Self {
             name: name.to_string(),
@@ -513,6 +520,9 @@ impl<'a> DefinitionLoader<'a> {
                             Some(occurrence_address(step.id.as_deref(), &position));
                         skill.occurrence = Some(Box::new(occurrence));
                     }
+                    Target::Loop(block) => {
+                        retain_origin(block, graph, layer, source_path, &position)?;
+                    }
                     Target::Xor(branch) => {
                         for (name, path) in &mut branch.paths {
                             retain_origin(
@@ -886,6 +896,14 @@ fn parse_graph_mapping(
     loader: &mut DefinitionLoader<'_>,
 ) -> Result<Step, LoadError> {
     if let Some(target) = map.get(key("loop")) {
+        if target.is_sequence() {
+            if map.len() != 1 {
+                return Err(LoadError::InvalidGraph(
+                    "a loop block takes only its steps; its last step decides".to_string(),
+                ));
+            }
+            return Ok(Step::new(Target::Loop(parse_graph_items(target, loader)?)));
+        }
         return parse_loop(map, target);
     }
     if let Some(skill_value) = map.get(key("step")) {
@@ -945,9 +963,10 @@ fn parse_command_value(value: &Value) -> Result<Step, LoadError> {
     )))
 }
 
-/// `loop: <target>` runs a deciding skill last, `step`, `interactive` or
-/// `loop-or-next`, which advances, returns to the target or stops blocked. An
-/// interactive decider is an interactive step: the person there decides.
+/// The released form, `loop: <target>` after the work: a deciding skill
+/// (`step`, `interactive` or `loop-or-next`) returns to the named earlier step.
+/// Repository Graphs the released `lf` also reads still use it; it goes once
+/// they are written as `loop:` blocks.
 fn parse_loop(map: &serde_yaml_ng::Mapping, target: &Value) -> Result<Step, LoadError> {
     let target = target
         .as_str()
@@ -1232,10 +1251,14 @@ fn compile_with_sources(
                     )));
                 }
             }
-            if let Target::Xor(branch) = &step.target {
-                for path in branch.paths.values() {
-                    validate_ids(&path.steps, ids, name)?;
+            match &step.target {
+                Target::Xor(branch) => {
+                    for path in branch.paths.values() {
+                        validate_ids(&path.steps, ids, name)?;
+                    }
                 }
+                Target::Loop(block) => validate_ids(block, ids, name)?,
+                _ => {}
             }
         }
         Ok(())
@@ -1305,6 +1328,21 @@ fn compile_steps(
                 sources: sources.to_vec(),
             })),
             Target::Xor(branch) => items.push(compile_branch(branch, catalog, sources)?),
+            Target::Loop(block) => {
+                let mut body = compile_steps(block, catalog, sources)?;
+                let back = flatten_resolved(&body).len().saturating_sub(1);
+                match body.last_mut() {
+                    Some(ResolvedGraphItem::Skill(decider)) if back > 0 => {
+                        decider.returns = Some(back);
+                    }
+                    _ => {
+                        return Err(LoadError::InvalidGraph(
+                            "a loop's last step decides whether to run it again: end the block with a skill, after the work it repeats".into(),
+                        ))
+                    }
+                }
+                items.extend(body);
+            }
         }
     }
     Ok(items)
@@ -1565,10 +1603,30 @@ mod tests {
         assert_eq!(
             edges(&pursue),
             [
-                ("loop-or-next".to_string(), 4),
-                ("loop-or-next".to_string(), 7)
+                ("realign".to_string(), 2),
+                ("concept-review".to_string(), 5)
             ]
         );
+
+        // A block's last step returns to its first; nesting needs no names.
+        let nested = compile(
+            "- kickoff\n- loop:\n    - loop:\n        - implement\n        - cmd: sync\n        - realign\n    - qa\n    - concept-review\n- pr-publish\n",
+        )
+        .unwrap();
+        assert_eq!(
+            edges(&nested),
+            [
+                ("realign".to_string(), 2),
+                ("concept-review".to_string(), 4)
+            ]
+        );
+        for body in [
+            "- loop:\n    - implement\n",
+            "- loop:\n    - implement\n    - cmd: sync\n",
+        ] {
+            let error = compile(body).unwrap_err().to_string();
+            assert!(error.contains("last step decides"), "{body}: {error}");
+        }
 
         // A unique skill name is enough; repeated skills need one occurrence name.
         let named = compile(
@@ -2497,9 +2555,9 @@ Design the feature.
         let tmp = TempDir::new().unwrap();
         let graph = load_graph("deliver", tmp.path()).unwrap();
         let items = compile_graph(&graph, tmp.path()).unwrap();
-        assert_eq!(items.len(), 2);
+        assert_eq!(items.len(), 3);
         assert!(
-            matches!(&items[1], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
+            matches!(&items[2], ConcreteStep::Command(command) if command.item.display_name() == "land --wait-and-fix")
         );
         assert!(load_graph("deploy", tmp.path()).is_err());
         assert!(load_graph("ship", tmp.path()).is_err());

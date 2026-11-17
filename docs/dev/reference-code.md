@@ -16,7 +16,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow-execution/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
 | Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
-| Provider authority | `provider_auth/`, `provider_account/` | 7,500 | Login, encrypted tokens, account homes, routes and leases |
+| Authentication and history | `provider_auth/`, `transcript/` | — | Service authentication, native homes and transcript adoption; native clients own subscription credentials |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifact switching, repository identity, subscriptions |
 | Migration SQL | `store/migrations/*.sql` | 4,900 | Immutable released batches and merged slug migrations, plus a branch's unmerged one |
 | Swift app production | `swift/Loopflow/`, `swift/LoopflowMac/` | 18,200 | Shared DTOs/services and macOS UI |
@@ -56,7 +56,7 @@ kernel locks                 live local exclusion authority
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Rental | `ondemands`, `pools`, `pool_machines`, `rentals`, `machine_records` | Creation receipts, owned machine commitments with their cost and expiry, admitted rentals with caps and deadlines, and records copied back before a machine is given back; templates, availability and admission limits live in personal configuration |
-| Machine and provider authority | `machines`, `access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_session_accounts`, `provider_tokens` | Machine identity (id, public name, person) and browser identities, credentials, observed limits, shared-home account switches and delivery receipts; declared routes and browser selection live in personal configuration |
+| Machine and provider authority | `machines`, `access_profiles`, `provider_accounts`, `provider_account_limits`, `provider_account_switches`, `provider_session_accounts`, `provider_tokens` | Machine identity (id, public name, person) and service browser identities and credentials, retained historical limits, account switches and delivery receipts; historical account rows do not select native launch credentials |
 | Local observation/cache | `blob_tokens`, `github_people` | Deterministic Git-blob token counts and the GitHub user behind each Task owner's email |
 | Change observation | `store_revisions` | One counter per displayed domain (`planning`, `sessions`, `graphs`, `processes`, `usage`), bumped by schema triggers inside each writer's transaction. Derived, never authored: usage moves only `usage`, and every other Session history row moves `sessions`. GraphProcess rows move `graphs`, a Task's graph and step `planning`, and a Session's stream reading `sessions` when availability or reported detail could change; quiet arriving is the reader's clock, not a write. Every `--subscribe` read compares it to decide whether to read again |
 | Schema | `schema_migrations` | Applied migration identity and checksum frontier |

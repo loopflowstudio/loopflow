@@ -128,3 +128,9 @@ tables and whether Process rows are needed are in LOO-953's
   busy timeout, retried by SQLite's WAL path; measured 2026-11-16, second QA
   pass). Kept at 2 s; 0.5 s would cost about 1.7 s and still cover a 0.7 s
   prune batch. One constant, `journals.rs` `BUSY`.
+
+## After the PR was published, 2026-11-17
+
+- Claude's `cleanupPeriodDays`: Jack Heart: "Lets set this to 90 on my machine". Set in `~/.claude/settings.json` (was unset, default 30).
+- On why `history.db` and `usage.db` are separate files: Jack Heart asked "Why are these separate dbs"; after the per-row breakdown of one turn (one `usage.db` row, six `history.db` rows, four of them repeating the turn row): "ok. seems ok". Not a decision to merge the files or to keep each turn's final answer in lf's files; both remain open.
+- Observed: for an ordinary turn, `provider_attempt_started`, `provider_attempt_finished`, `terminal.json` and the `conversation` turn-completed row repeat the turn row; the manifest and the transition do not.

@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-958 concept review: who wakes a Session</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5f5b54; --line: #dedad2; --card: #ffffff;
+  --yes: #1f7a4d; --yes-bg: #e6f4ec; --no: #b3361f; --no-bg: #fbe9e4;
+  --prop: #2f5fb3; --prop-bg: #e8effb; --code: #f1eee8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
+    --yes: #6fcf9b; --yes-bg: #17301f; --no: #f08a73; --no-bg: #3a1d16;
+    --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
+  --yes: #6fcf9b; --yes-bg: #17301f; --no: #f08a73; --no-bg: #3a1d16;
+  --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 1.7rem; margin: 0 0 6px; }
+h2 { font-size: 1.25rem; margin: 40px 0 10px; }
+p.lede { color: var(--muted); margin-top: 0; }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.5; margin: 8px 0; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.94rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; }
+.wrap { overflow-x: auto; }
+.tag { display: inline-block; font-weight: 600; padding: 1px 8px; border-radius: 999px; font-size: 0.85rem; white-space: nowrap; }
+.yes { color: var(--yes); background: var(--yes-bg); }
+.no { color: var(--no); background: var(--no-bg); }
+.prop { color: var(--prop); background: var(--prop-bg); }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+.box.proposed { border-left: 4px solid var(--prop); }
+.box.existing { border-left: 4px solid var(--muted); }
+.box.big { border-left: 4px solid var(--no); }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+@media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
+.muted { color: var(--muted); }
+ol.q > li { margin-bottom: 14px; }
+ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Who wakes a Session?</h1>
+<p class="lede">The area: everything that gets text to an existing Session and makes it act on it — <code>lf steer</code> at every scope, the server's wake watcher, <code>session.continue</code>, <code>lf resume</code>, and the Graph correction loop — as it would stand with LOO-958's plan built. Reviewed before implement, against the two direction lines that arrived after kickoff: "the machine server manageds the terminal" and "i mean it WAKES those".</p>
+
+<div class="box big">
+<strong>Biggest mismatch.</strong> The kickoff plan gave "wake" a second owner. The Machine server's watcher (<code>server/wake.rs</code>) already reads every saved steer and wakes idle held conversations. The plan added a detached <code>lf -b session wake ID</code> started by the steering command, with its own lock file and its own run-again loop, for the stopped case. Same news, same reader's job, two places. And the server already knows how to start a stopped Session in a held terminal: that is <code>session.continue</code>, the phone's Continue.
+</div>
+
+<h2>One interaction</h2>
+<ol>
+<li>A person quits <code>lf :</code> after saying "remember the word mango". Session S is stopped: interactive, no live AgentProcess.</li>
+<li>From another terminal: <code>lf steer S 'what word did I give you?'</code>. The steer is saved; the command returns.</li>
+<li><span class="tag prop">proposed</span> The watcher sees news for a stopped interactive Session it should wake. It runs <code>continuing(S, request = steer id)</code> → <code>Registry::start</code>: <code>lf session resume -- S</code> in a held terminal, in S's directory. <code>run_refusal</code> refuses if S came back meanwhile.</li>
+<li>S yields idle. The watcher's existing path (Claude inbox, Codex app-server) delivers the steer. S answers "mango".</li>
+<li><code>lf resume S</code> attaches to that held terminal. The answer is on screen. "resume connects to existing sessions" — and now there is always one to connect to.</li>
+</ol>
+<p><strong>Failure.</strong> The held start fails (provider won't launch). The server logs it to <code>logs/lf.log</code>; the steer stays undelivered in <code>lf session steers S</code>. It has used its one start, so it doesn't loop.</p>
+<p><strong>Recovery.</strong> The person runs <code>lf resume S</code>; the resumed conversation reads the steer at its first boundary. Nothing was lost.</p>
+<p><strong>Counterexample, kept.</strong> Machine restart. The watcher's first reading wakes everything with news. With stopped Sessions in scope, every interactive Session holding an old undelivered steer would start at boot. Hence: each steer starts its Session at most once, recorded on the steer; the migration marks existing undelivered steers as already started.</p>
+
+<h2>Product concepts and code concepts</h2>
+<div class="wrap">
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>What's wrong</th></tr>
+<tr><td>A Session</td><td><code>agent_sessions</code>, <code>LfSession</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>A Graph step's conversation (a Run)</td><td><code>interactive = 0</code>, <code>harness::Run</code>, <code>caller_graph</code> exception in <code>run::resume</code></td><td><span class="tag yes">yes</span></td><td>Only its Graph continues it; the plan keeps that.</td></tr>
+<tr><td>"It's stopped"</td><td>derived: no live AgentProcess (<code>run_refusal</code>)</td><td><span class="tag yes">yes</span></td><td>Derived, not stored. Right.</td></tr>
+<tr><td>Send it text: <code>lf steer</code></td><td><code>engine::session::steer</code>, <code>SteerScope</code>, <code>save_session_steer</code></td><td><span class="tag yes">yes</span></td><td>One command at every scope.</td></tr>
+<tr><td>"It'll read it" — someone wakes it</td><td>existing: <code>server/wake.rs</code> watcher, <code>IdleReach::{Claude, Codex}</code><br>kickoff plan: + detached <code>lf -b session wake</code>, + wake lock, + run-again loop</td><td><span class="tag no">no</span></td><td>One action, two owners. <span class="tag prop">proposed</span> the watcher owns every wake; a stopped Session is started with <code>session.continue</code>'s launch.</td></tr>
+<tr><td>Who a steer wakes</td><td>nothing; scope only says who <em>reads</em></td><td><span class="tag no">no</span></td><td>Reading and waking are different sets now: a Task steer is read by every running Session of the Task but wakes only the primary conversation and the worker. <span class="tag prop">proposed</span> derive the wake set in the watcher's query from scope; record only "this steer has started its Session".</td></tr>
+<tr><td>The Task's conversation</td><td>primary conversation (server resolves it for <code>session.attach</code>)</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td>The Task's worker</td><td>the live Graph step's Session; nothing when no step runs</td><td><span class="tag no">no</span></td><td>No name for "no worker". <span class="tag prop">chosen for review</span> none: the primary conversation is woken and decides.</td></tr>
+<tr><td>"Send and wait for the reply": <code>lf -b steer</code></td><td><code>run::resume</code> in the caller's process</td><td><span class="tag yes">yes</span></td><td>Same meaning as <code>lf -b task run</code>: run it here, headless. Saved already claimed, so the watcher can't start a second process beside it.</td></tr>
+<tr><td>Get back to it: <code>lf resume</code></td><td><code>session::resume</code> with <code>--message</code> branch</td><td><span class="tag no">no</span> → <span class="tag yes">yes</span></td><td>The plan deletes <code>--message</code>. With server-started Sessions held, resume attaches to them.</td></tr>
+<tr><td>"Only one of it runs"</td><td><code>lock_session_process</code> (admission only) + <code>run_refusal</code>; kickoff: + new wake lock</td><td><span class="tag no">no</span></td><td><span class="tag prop">proposed</span> no new lock: <code>run_refusal</code> under the existing launch lock, with the AgentProcess recorded before it releases.</td></tr>
+</table>
+</div>
+
+<h2>Before and after</h2>
+<div class="cols">
+<div class="box existing">
+<strong>Kickoff plan</strong>
+<pre><code>lf steer S  ─ save ─┬─ running: hook at next tool call
+                    ├─ idle held: server watcher → inbox
+                    └─ stopped: start_lf("-b session wake S")
+                                  ├─ own wake lock
+                                  ├─ claim, headless turn
+                                  └─ loop while unread, recheck
+lf steer TASK ─ save ─ wakes nothing stopped</code></pre>
+<p class="muted">Woken Session runs headless; <code>lf resume S</code> later has nothing to attach to.</p>
+</div>
+<div class="box proposed">
+<strong>Proposed</strong>
+<pre><code>lf steer S|TASK ─ save. That's all.
+
+server watcher, on news:
+  running          → hook at next boundary
+  idle, held       → inbox / app-server   (today)
+  stopped, wakes   → session.continue launch, once per steer
+                     → yields → inbox / app-server
+
+lf -b steer S ─ save claimed ─ turn here ─ print</code></pre>
+<p class="muted">Deleted from the plan: hidden <code>session wake</code>, the wake lock, the loop, the steering command's detached start.</p>
+</div>
+</div>
+
+<h2>What could break it</h2>
+<ul>
+<li><strong>A resumed conversation with no viewer may not yield as idle.</strong> Claude in a held terminal at its prompt must report <code>yielded</code> for the inbox wake. Slice 2 checks this first; if not, the held start passes the steer as the first input instead.</li>
+<li><strong>No server.</strong> Nothing starts S until one runs; the steer waits, visible. <code>lf steer</code> says so. Tests already require a <code>MachineServer</code> for managed launches.</li>
+<li><strong>A person's bare Session becomes held.</strong> After a wake, S lives in a server terminal rather than the one it was quit from. That is what "the machine server manageds the terminal" describes; it changes where S runs, on purpose.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Who starts a stopped Session for a steer?
+  <ol><li>The Machine server's watcher, in a held terminal (this plan).</li><li>The steering command, detached and headless (kickoff).</li></ol></li>
+<li>A Task steer with no Graph step running:
+  <ol><li>Wakes only the primary conversation (this plan).</li><li>Also held for the next step's first boundary, as today.</li><li>Also wakes the last finished step.</li></ol></li>
+<li>An old undelivered steer after a Machine restart:
+  <ol><li>Starts its Session at most once ever; the upgrade marks old ones started (this plan).</li><li>Starts it whenever the Session is stopped and the steer unread.</li></ol></li>
+<li><code>lf -b steer</code> to a running Session:
+  <ol><li>Saves and returns (this plan).</li><li>Waits until the running agent has read it.</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

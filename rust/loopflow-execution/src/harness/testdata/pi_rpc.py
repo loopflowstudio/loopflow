@@ -132,6 +132,7 @@ if "--mode" not in args:
                     "inbox": None,
                 },
                 "select": None,
+                "request_id": None,
             }
         )
 

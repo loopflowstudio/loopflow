@@ -137,9 +137,6 @@ struct WaveStandupTests {
         model.navigation.boardSections[.wave(roadmap.wave.id)] = .done
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-section-done")
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-done-days")
-        for notice in roadmap.unavailableTasks {
-            _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-\(notice.taskId)")
-        }
         if let project = roadmap.currentProject {
             #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project").text().string()
                 .hasPrefix(project.name))

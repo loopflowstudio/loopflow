@@ -253,6 +253,7 @@ impl Connection {
             operation: serde_json::to_value(operation)?,
             select: None,
             sender: sender.cloned(),
+            request_id: None,
         })?;
         if line.len() <= MAX_MESSAGE {
             self.socket.write(&line)?;

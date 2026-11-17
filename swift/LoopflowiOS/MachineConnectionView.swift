@@ -30,7 +30,7 @@ struct MachineConnectionView: View {
     var body: some View {
         Group {
             if let savedMachine {
-                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine), onForget: forget,
+                TaskListView(client: RemoteMobileClient(savedMachine: savedMachine, endpoint: .machine(savedMachine.endpoint)), onForget: forget,
                     onChangeAddress: { changingAddress = true })
                     .id(savedMachine.endpoint)
             } else {

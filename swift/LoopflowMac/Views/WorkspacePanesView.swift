@@ -104,7 +104,7 @@ struct ConversationPlaceholder: View {
         if let start = workspace.conversationStart { return start.help }
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
         if model.showsSavedWork { return WorkCache.savedReason }
-        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
+        return "Show the recorded conversation."
     }
 }
 
@@ -410,7 +410,6 @@ struct SplitDivider: View {
 
 struct SessionPaneView: View {
     @Environment(\.theme) private var theme
-    @State private var shellError: String?
     @State private var changingSession = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
@@ -466,11 +465,6 @@ struct SessionPaneView: View {
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
-        .alert("Could not change pane", isPresented: Binding(
-            get: { shellError != nil }, set: { if !$0 { shellError = nil } }
-        )) {
-            Button("OK") { shellError = nil }
-        } message: { Text(shellError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -627,7 +621,7 @@ struct SessionPaneView: View {
                     do {
                         let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
                         files.page = page
-                    } catch { shellError = error.localizedDescription }
+                    } catch { paneFailed(error) }
                 }
             }
             Button("Task & workflow", systemImage: "list.bullet") {
@@ -643,7 +637,7 @@ struct SessionPaneView: View {
         if workspace.key.kind == .task {
             Button("Shell", systemImage: "terminal") {
                 if let shell = store.shellPane, shell.content.selectedShell != nil { store.setFocusedPane(shell.id) }
-                else { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                else { do { try workspace.newShell() } catch { paneFailed(error) } }
             }
         }
     }
@@ -665,6 +659,7 @@ struct SessionPaneView: View {
 
     private func changeSession(_ session: SessionItem, agent: String?) {
         changingSession = true
+        let notices = model.navigation.notices
         Task { @MainActor in
             defer { changingSession = false }
             do {
@@ -685,8 +680,13 @@ struct SessionPaneView: View {
                 if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
                     model.navigation.selectedSessionId = record.id
                 }
-            } catch { shellError = error.localizedDescription }
+            } catch { paneFailed(error, in: notices) }
         }
+    }
+
+    /// The asking window's Notice; a late reply keeps the window it started in.
+    private func paneFailed(_ error: Error, in notices: NoticeCenter? = nil) {
+        (notices ?? model.navigation.notices).post(Notice("Could not change pane: \(error.localizedDescription)"))
     }
 
     @ViewBuilder
@@ -752,7 +752,7 @@ struct SessionPaneView: View {
                             .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
                                         in: RoundedRectangle(cornerRadius: 4))
                     }
-                    Button { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                    Button { do { try workspace.newShell() } catch { paneFailed(error) } }
                         label: { Image(systemName: "plus") }
                         .accessibilityLabel("New shell tab")
                 }.buttonStyle(.plain).font(Typography.code(11))
@@ -802,7 +802,7 @@ struct SessionPaneView: View {
                             }
                             Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
                             Button("Reconnect") { workspace.reconnectShell(tab) }
-                            Button("New Shell") { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                            Button("New Shell") { do { try workspace.newShell() } catch { paneFailed(error) } }
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(

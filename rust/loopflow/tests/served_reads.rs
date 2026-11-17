@@ -430,7 +430,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     assert_eq!(receive().unwrap()["type"], "welcome");
 
     write(
-        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "sender": null}),
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let answer = receive().unwrap();
@@ -472,7 +472,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
-        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "sender": null}),
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "sender": null, "request_id": null}),
         false,
     );
     let refused = loop {
@@ -491,7 +491,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let after = loop {
@@ -2939,7 +2939,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     // Deliberately do not read the answer. Admission is observed in the receipt.
@@ -3167,7 +3167,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);

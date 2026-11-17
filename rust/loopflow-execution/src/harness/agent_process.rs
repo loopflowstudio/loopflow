@@ -1362,7 +1362,7 @@ mod tests {
             assert!(process.completed_at.is_some());
             let current = store.session_attachment(&session.id).unwrap().unwrap();
             assert_eq!(current.lf_process_id.is_none(), ended);
-            // An exit with nowhere to go is the Process's outcome, not history.
+            // An exit with nowhere to go leaves no history.
             let history = store.session_history(&session.id, 0, 0).unwrap();
             assert!(!history
                 .iter()

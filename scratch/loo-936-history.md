@@ -1,7 +1,9 @@
 # LOO-936: record only what the product reads, history apart from state
 
 Status: 2026-11-16, slices 1–4 committed (slice 4: "Turn table as built"; reviewed, see "Concept review after slice 4");
-merged with main through #1953 (`319bf49c30`). Remaining: slice 5. Process rows are LOO-953 ("Remove Process rows:
+merged with main through #1962 (`4a7c949b9e`). Remaining: slice 5. Since #1955
+an agent Process records no outcome, so a departure-less attachment exit now
+leaves nothing (no history row, no `processes.outcome`). Process rows are LOO-953 ("Remove Process rows:
 liveness on Sessions and Graph runs", its own worktree); nothing here moves
 them.
 
@@ -268,17 +270,11 @@ result carried (`"reason": null`); `GraphOutput::decode` counts non-null
 fields, so both decode alike. Codex rollouts end a turn with
 `event_msg`/`task_complete` carrying `last_agent_message`.
 
-Remaining from slice 3 (slice 5):
-- Session History subscriptions do not wake on history writes yet:
-  `changed()` ignores `history`, and no read declares it. Until slice 5 a
-  Desktop view of a running turn refreshes only on other domains' changes.
-- History-file statistics: nothing analyzes `history.db`.
-- Move pass for rows a released lf leaves in `loopflow.db` (they are
-  invisible meanwhile), retention by age, the server's prune clock, docs check.
-- `opencode_disconnect_after_tool_preserves_unknown_native_completion` now
-  expects one `completed` row with status `interrupted` (lf reads the turn
-  OpenCode's store left open, as it does for a crashed Pi turn). Whether
-  "interrupted" is right for an unknown completion is a product call.
+Until slice 5 declares the `history`/`turns` revisions, a Desktop view of a
+running turn refreshes only on other domains' changes.
+`opencode_disconnect_after_tool_preserves_unknown_native_completion` expects
+status `interrupted` for the turn OpenCode's store left open, as for a crashed
+Pi turn; whether that is right for an unknown completion is a product call.
 
 Check results: `cargo nextest run -p loopflow-storage -p loopflow-execution
 --lib`: 2438 passed, 2 failed; the two were
@@ -443,12 +439,8 @@ Execution modules reached (`transcript`, `store::*` lifecycle and history,
 conformance_tests,pi_tests,claude,codex}`, `read_stream`, `ops::task::tests`):
 214 passed after fixes.
 
-Remaining from slice 4 (gate or slice 5):
-- `store::query_plans` coverage for the `usage.turns` reads at load size, and
-  `ANALYZE` of `usage.db`.
-- Swift has no reader of turns; its `SessionEvent` kinds narrowed to
-  `captured`/`observed` and its fixture test reads `events`.
-- Turn rows have no retention (questions.md).
+Swift has no reader of turns; its `SessionEvent` kinds narrowed to
+`captured`/`observed` and its fixture test reads `events`.
 
 ## Concept review after slice 4 (2026-11-16, headless)
 

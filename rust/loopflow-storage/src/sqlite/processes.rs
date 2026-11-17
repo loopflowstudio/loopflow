@@ -185,7 +185,7 @@ impl SessionTransfer<'_> {
         }
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
         // Only a departure has a reader: the next attachment asks where the
-        // conversation went. An exit without one is the Process's own outcome.
+        // conversation went. An exit without one leaves no history.
         let exit = departure
             .map(|departure| -> StoreResult<crate::history::Row> {
                 let payload = serde_json::json!({

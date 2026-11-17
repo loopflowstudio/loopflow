@@ -128,9 +128,8 @@ here". Asked what `lf open --wave product` shows, the answer picked:
 Done: `lf workspace` and `WorkspaceArgs` are gone; `OpenArgs` carries
 `--workspace`, `--available`, `--no-focus` and the hidden follower/remote flags,
 and `run` dispatches overviews to `run_workspace`. Followers and remote Machines
-are invoked as `lf open --workspace …`. `--workspace --task X` still opens the
-Task's tab (remote routing and arrivals use it) until the next step removes it; docs show only Wave/repository
-overviews. `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
+are invoked as `lf open --workspace …`. `--workspace --task X` widens to the
+Task's Wave or repository (next section). `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
 PR body, User interface changes: removed `lf workspace`; added `lf open
 --workspace`, `--available`, `--no-focus`.
 

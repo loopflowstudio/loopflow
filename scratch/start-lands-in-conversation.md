@@ -165,8 +165,8 @@ kind (local, remote) on `start_task`; the report splits by it.
 - `run_requested` writes (`advance_creation(id, "run_requested")`) and
   `record_creation_launch`'s `WHERE milestone='run_requested'` gate (gate on
   `admitted`); the Inspect text stays for released rows.
-- `serve_locked`'s exec, `pass_launch_lock`/`LAUNCH_LOCK_ENV` inheritance and
-  `carry_across_exec` if this is their only use.
+- `serve_locked`'s exec and its carriers (exact list under Status, concept
+  review of 3d582e361b).
 - Network steps inside creation's checkout: `fetch_task_refs` and the base fetch
   in `resolve_upstream_base` for a new branch, `assert_assignee` inside
   `prepare_task` on this path.
@@ -329,7 +329,7 @@ Exec cost, one Start on a scratch home (debug build, load ≈ 50): checkout
 `prompt_begin` 0.58 s; prompt build 1.49 s; prompt end → provider exec 0.84 s.
 Slice 4 removes the 0.58 s; prompt build is the larger cost.
 
-Remaining, in order: slice 4; slice 5's remote sample.
+Remaining, in order: one timing target; slice 4 (as settled below); slice 5's remote sample.
 
 Slice 4's reset check (read in `bin/lf.rs` main, not built): the exec'd `lf -i`
 redoes per-process startup that an in-process launch must do itself or drop:
@@ -376,6 +376,45 @@ which runs it through its own `-i` entry in-process; `pass_launch_lock`,
 the provider relies on (`HUMAN_SESSION_ENV`/`PREPARED_CAPTURE_ENV` read from
 process env, `journal::finish_before_exec`, the `lf session resume`
 LfProcess becoming the launcher's).
+
+Concept review of 1122563065 and 3d582e361b: `-a` and the spans hold. Settled
+for the next implement pass, in this order:
+- **One timing target.** lf.log's filter now lists three module paths
+  (`lf::commands::task_create`, `engine::creation`, `human_session::setup`); a
+  module move silently drops Start's timings. `creation_step` and
+  `conversation_setup` events take one explicit target, as
+  `journal::request` does with `loopflow::server::request`, and the filter
+  names that one target. Setup runs in the conversation's process, so the
+  target is not under `loopflow::server`.
+- **Slice 4: the launch is a value, not an argv.** `serve_locked` builds
+  `lf -i --agent … --cwd … [--task X] : <turn>` plus two env vars only because
+  it execs. In-process, it returns a typed launch (agent, cwd, Work selector,
+  skill or `:`, first turn, `HumanSessionToken`, prepared capture key, the held
+  launch lock) to the application's `session resume` handler, which hands it to
+  the `-i` entry in `lf/commands/run.rs` without a Clap re-parse or `set_var`.
+  `active_session_token`/`prepared_artifact_key` take it from the launch on
+  this path; `run_native_session` already takes `launch_lock: Option<File>`, so
+  the lock goes there directly.
+- **One LfProcess.** The exec kept the PID and recorded two LfProcesses for it
+  (`finish_before_exec` closed the resume's, the `-i` admitted another). In
+  process, the held `session resume` LfProcess is the launcher;
+  `finish_before_exec` (its only caller) goes with the exec.
+- **The agent reselect is the one reset that must happen.** `INVOCATION` is a
+  thread-local and the exec'd `-i` selected it from `--agent`. The in-process
+  launch selects its agent on the thread that runs the provider, and setup's
+  `start_graph` reads the creation's agent from the same launch value instead
+  of `invocation_values()` inside an async fn (a worker thread reads Null).
+- **What the delete list removes exactly:** `pass_launch_lock`,
+  `LAUNCH_LOCK_ENV` and its `env_remove`s (`transport.rs` start_held,
+  `os_process/detached.rs`), `inherited_launch_lock` and its fallback in
+  `run_native_session`, `finish_before_exec`, and `serve_locked`'s
+  `transport::carry_across_exec` call. `transport::carry_across_exec` and
+  `journal::carry_across_exec` stay: the relay exec and `installation.rs` use
+  them.
+- **Test both resumes.** `serve_locked` serves every fresh `session resume`,
+  not only creation's. The parent-is-the-held-`session resume` check runs on a
+  creation Start and on a plain `lf session resume` of a prepared Session; the
+  `-a` fixture stays green (the Graph's provider is X).
 
 ## Slices
 

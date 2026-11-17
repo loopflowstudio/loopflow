@@ -262,7 +262,8 @@ failure clause. The Done-when `rg` finds nothing.
 - `cargo nextest run -p loopflow --test integration -E 'test(served_ownership_routes_to_its_writer) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(an_lf_without_the_entry) | test(an_lf_that_dies_before) | test(a_served_resume_opens_the_session_on_your)'`: 6 pass; the three SSH-entry ones rerun after the status hint, pass (mini's real server answers the hold and the claim).
 - `--lib` `machine::forward:: | machine::client:: | machine::ssh:: | server::schema:: | server::wire:: | lf::commands::write:: | lf::tests::`, `documented_commands::`: pass; clippy clean on both crates.
 - compress (2026-11-17): `Socket`'s far end is one `End` enum; `Write::execute` takes the `Option<Remote>` it routes to. `machine::client::` 5, `lf::commands::write::` 3, the three SSH-entry tests: pass; clippy clean.
-- A stopped destination server started by the entry: QA, not automated (`ensure` registers a supervisor job).
+- A stopped destination server started by the entry: QA, not automated (`ensure` registers a supervisor job). QA 2026-11-17 (`scratch/qa.html`): started (3.3 s), unstartable, replaced after an upgrade, older lf, unreachable, wrong Machine; served claim/hold/unassign/run/session.resume.
+- `machine_commands::an_unreachable_destination_names_the_ssh_check_not_its_server` plus the six above: 7 pass; `--lib machine::` 16; clippy clean.
 - Swift `ServerProtocolTests` against the regenerated schema: gate/CI.
 
 ## Done when (PR 1)

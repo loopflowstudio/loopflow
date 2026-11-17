@@ -1,61 +1,82 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-926 QA: typed operations between Machines</title>
+<meta charset="utf-8">
+<title>LOO-926 QA: SSH is a pipe to the destination's server</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#222}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:940px;margin:2rem auto;padding:0 1rem;color:#222}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd}
-pre{background:#f6f6f4;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:4px}
+pre{background:#f6f6f4;padding:.7rem;overflow-x:auto;font-size:12.5px;border-radius:4px;white-space:pre-wrap}
 table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35rem .5rem;vertical-align:top;text-align:left}
 .ok{color:#17703a}.fixed{color:#8a5a00}.open{color:#a3271f}
-</style></head><body>
-<h1>LOO-926 QA: Task writes reach their Machine as typed operations</h1>
-<p>Branch <code>d90e0d9439</code> plus the fixes below, built with <code>cargo build -p loopflow --bin lf</code>.
-Two private Machines in <code>/tmp/lfqa926</code>: <b>laptop</b> and <b>mini</b>, each with its own <code>HOME</code> and <code>LF_HOME</code>.
-A stand-in <code>ssh</code> runs the remote command under the target's homes and <code>tee</code>s its stdin.
-Planning is a personal git plan on a local bare origin. Mini's <code>~/.local/bin/lf</code> is a symlink, swapped per scenario.
-The laptop's own <code>lf server run</code> answered the served scenarios over its Unix socket (Python newline-JSON client).</p>
+</style>
+<h1>LOO-926 QA: SSH is a pipe to the destination's server</h1>
+<p>Branch <code>fd5f9cde99</code> plus the fixes below, <code>cargo build -p loopflow --bin lf</code>.
+Two private Machines in <code>/tmp/lfqa9b</code>, <em>laptop</em> and <em>mini</em>, each with its own <code>HOME</code> and <code>LF_HOME</code>;
+a stand-in <code>ssh</code> runs the remote command under the target's homes and records argv and stdin.
+Planning is a personal git plan on a local bare origin, Graph <code>qa-normal</code> (<code>- cmd: help</code>).
+Tasks were placed on mini with the real <code>lf task move --machine mini</code>.
+(The earlier <code>qa.html</code> covered #1956's <code>server stdio</code> executor, which this redesign deleted.)</p>
 
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
-<tr><td>Typed hold (demo)</td><td><code>lf task move T --machine mini</code>, then <code>lf task hold T --json</code> and in plain text</td>
-<td class="ok">Answer from mini; argv <code>exec 'lf' '--repo-id' 'repo_…' 'server' 'stdio'</code>, no Task words; stdin <code>hello</code> + <code>{"kind":"task.hold",…}</code>. Mini's <code>processes</code> holds two <code>server stdio</code> rows, cwd mini's checkout; <code>lf --machine mini session history list</code> lists them.</td></tr>
-<tr><td>Served claim, hold</td><td><code>task.claim</code>, <code>task.hold</code> over the laptop socket</td><td class="ok">Both sent to mini typed; the response is mini's ownership log (writer = mini).</td></tr>
-<tr><td>Served run</td><td><code>task.run</code> with <code>graph: qa-normal</code> (<code>- cmd: help</code>)</td><td class="ok">Mini returned <code>state: running</code> with its own Graph log path; the Graph ran and completed there (no interactive step, so Auto-Ship). Nothing started on the laptop.</td></tr>
-<tr><td>Served ship</td><td><code>task.ship</code> for a Task with no checkout on mini</td><td class="ok">Mini's refusal came back with its code. The code is <code>outcome_unknown</code>, and the laptop's own server says the same for a local Task, so the branch didn't introduce it (see Still wrong).</td></tr>
-<tr><td>Older mini</td><td>mini → installed <code>lf 0.16.0+470da475a</code></td><td class="ok"><code>Error: mini runs lf 0.16.0+470da475a, which cannot take this operation; update it with `ssh -- 'mini' 'lf install'`</code>, exit 1, CLI and served (<code>code: incompatible</code>). This is the docs' wording.</td></tr>
-<tr><td>Older protocol on mini</td><td>wrapper raises the hello's revision to 9 before mini's stdio reads it</td><td class="fixed">Was: mini's raw refusal, "…older than this request's 9–9; run `lf install` on it". Now: the same "mini runs lf …; update it with …" line.</td></tr>
-<tr><td>Mini's lf dies</td><td>wrapper prints "panicked at QA" and exits 101</td><td class="fixed">Was: <b>no output, exit 101</b>. Now: <code>Error: the destination said: panicked at QA / Caused by: lf on mini exited with status 101 before answering; inspect the affected work before retrying</code>, exit 1.</td></tr>
-<tr><td>Mini unreachable</td><td>stand-in ssh exits 255 "Connection refused"</td><td class="ok">Names the SSH error and the <code>ssh -o ControlPath=none</code> check; served code <code>outcome_unknown</code>.</td></tr>
-<tr><td>Move sent, not arrived</td><td>mini's <code>session receive</code> fails; then <code>lf task claim</code></td><td class="ok">Laptop asks mini (<code>session receive --arrived</code>), takes it back locally.</td></tr>
-<tr><td>Move arrived, answer lost</td><td>mini receives then exits 255; then <code>lf task unassign --json</code></td><td class="ok">Mini says arrived, so <code>task.unassign</code> goes to mini typed and mini shows Unowned. <span class="fixed">The move error used to read "Machine command unavailable: " with nothing after the colon; it now says <code>ssh exit status: 255</code>.</span> A retried move carried on and arrived.</td></tr>
-<tr><td><code>lf server stdio</code> by hand</td><td>empty stdin, newer/older hello, request before hello, garbage, subscribe, <code>mobile.status</code>, unknown kind, missing field, then a read</td><td class="ok">Each line got one answer and the read still ran afterwards. <span class="fixed">Unknown kinds and missing fields used to get serde's "data did not match any variant of untagged enum Operation". They now get the resident server's own wording ("this server has no operation `x`…", "task.hold: missing field `directory`").</span></td></tr>
+<tr><td class="ok">Demo: hold</td><td><code>lf task hold a7ab16 --json</code> for a Task on mini</td>
+<td><code>{"issue":…,"stopped":false}</code>. One ssh, remote command exactly
+<pre>export LF_EXPECTED_MACHINE_ID='home_ef70…'
+exec 'lf' 'server' 'connect'</pre>
+stdin: <code>hello</code> (kind <code>machine</code>, revision 6) then one <code>machine.write</code> with <code>repository</code>, <code>environment</code> (<code>LF_EXPECTED_MACHINE_ID</code>, <code>LF_PERSONAL_PROFILE</code>, <code>LF_USER_NAME</code>), <code>forwarded</code>, <code>change: task.hold</code>. Mini's store has <code>ship_stop</code> by QA; mini's <code>lf.log</code> shows its resident server running the request.</td></tr>
+<tr><td class="ok">Demo: who is connected</td><td>held a pipe open, ran <code>ssh mini lf server status</code></td>
+<td>One client, <code>{"kind":"machine","platform":"macos","name":"lf"}</code>, from the laptop.</td></tr>
+<tr><td class="ok">Demo: mini's server stopped</td><td>killed mini's server, repeated the hold</td>
+<td>Succeeded in 3.3 s; <code>server connect</code> registered <code>com.loopflow.server.aa085a…</code> and mini answered.</td></tr>
+<tr><td class="fixed">Demo: server unstartable</td><td>booted the job out, mini's <code>lf</code> a wrapper exiting 1 on <code>server run</code></td>
+<td>Was: <code>…the destination said: Error: Loopflow server unavailable: Loopflow server unavailable; check `lf server status` and the selected installation; check `ssh mini lf server status`</code>.<br>
+Now (11 s): <code>Error: lf on mini exited with status 1 before answering; the destination said: Error: Loopflow server did not start within 10s; check `ssh mini lf server status`</code></td></tr>
+<tr><td class="ok">Mini upgraded under a live server</td><td>server under launchd, then mini's <code>lf</code> swapped for a distinct re-signed build; hold</td>
+<td>The entry replaced the stale server and the hold succeeded (7.6 s).</td></tr>
+<tr><td class="ok">Older mini</td><td>mini's <code>lf</code> → installed 0.16.0+e66b21801</td>
+<td><code>Error: mini runs lf 0.16.0+e66b21801, which cannot take this operation; update it with `ssh -- 'mini' 'lf install'`</code></td></tr>
+<tr><td class="fixed">Mini unreachable</td><td>stand-in ssh exits 255, "Connection refused"</td>
+<td>Was: <code>could not reach mini over SSH; the destination said: ssh: connect … refused; check `ssh mini lf server status`</code>: ssh's words credited to mini, and a check that can't run.<br>
+Now: <code>Error: machine "mini": unreachable: run `ssh -o ControlPath=none -- 'mini'` to check the address, network and SSH service; ssh: connect to host mini port 22: Connection refused</code></td></tr>
+<tr><td class="ok">Wrong Machine</td><td><code>lf server connect</code> with another Machine's id; with a malformed id</td>
+<td><code>refusing Machine-addressed command: expected Machine home_9cd4…, local Machine is home_ef70…</code>, exit 1; malformed id refused before the server is touched.</td></tr>
+<tr><td class="ok">Served claim, hold, unassign</td><td>typed requests over the laptop's socket</td>
+<td>Each went out as <code>machine.write</code> over <code>server connect</code>; claim's ownership log has <code>writer_machine_id</code> = mini for every entry after the move.</td></tr>
+<tr><td class="ok">Served run</td><td><code>task.run</code> over the laptop's socket</td>
+<td><code>state: running</code>, Graph log under mini's <code>LF_HOME</code>; mini's status later <code>done</code>. Nothing started on the laptop.</td></tr>
+<tr><td class="ok">Served Session preparation</td><td><code>session.resume</code> (task, no id) over the laptop's socket</td>
+<td>Prepared on mini: <code>cwd</code> mini's checkout <code>origin.6a0f41-second-on-mini</code>, <code>open_argv</code> = <code>lf session attach -- ssh … mini … session resume &lt;id&gt; --task …</code> (PR 2 moves this to <code>session.attach</code>).</td></tr>
+<tr><td class="ok">Two at once</td><td>two CLI holds in parallel</td><td>Both answered, exit 0.</td></tr>
+<tr><td class="ok">Pipe by hand</td><td>empty stdin, garbage, request before hello</td>
+<td>Empty: exits 0. Garbage and request-before-hello: the resident server's own <code>invalid</code> errors, passed through unchanged.</td></tr>
+<tr><td class="ok">Left behind</td><td><code>ps</code>, <code>launchctl list</code> after the walkthrough</td>
+<td>Only the two servers; no providers. Both stopped, mini's label booted out.</td></tr>
 </table>
 
 <h2>Fixed</h2>
 <ul>
-<li><code>machine::ssh::call</code>: a remote exit other than 2 used to be passed through as <code>CommandExit</code>, which <code>lf</code>'s <code>main</code> exits on silently. It is now an <code>outcome_unknown</code> error that keeps the destination's stderr. Test: <code>machine_commands::an_lf_that_dies_before_answering_says_so_and_what_it_printed</code>.</li>
-<li><code>machine::ssh::call</code>: a hello refused because the receiver is older now gives the same message as an <code>lf</code> without <code>server stdio</code>.</li>
-<li><code>server::stdio</code>: undecodable operations go through <code>service::refused_request</code>, which the resident server's refusal now also uses. Assertion added to the stdio unit test.</li>
-<li><code>machine::ssh::request</code>: an empty stderr names the ssh exit status.</li>
+<li><code>machine::ssh::Pipe::ended</code>: an SSH failure (255 or signal) goes through <code>connection::transport_failure</code>, which classifies ssh's stderr (unreachable, sign-in, host key) and names the <code>ssh -o ControlPath=none</code> check; the <code>lf server status</code> hint is only for an <code>lf</code> that ran and failed. Test: <code>machine_commands::an_unreachable_destination_names_the_ssh_check_not_its_server</code>.</li>
+<li><code>installation::server::ensure</code>: a server that never comes up says "did not start within 10s" once, adding the status error only when a socket listened.</li>
+<li><code>.lf/qa/machine-moves.md</code>: the stand-in <code>ssh</code> must end when the remote command ends; a <code>tee | bash</code> pipeline hangs the sender whenever mini's <code>lf</code> exits without answering.</li>
 </ul>
 
 <h2>Checks</h2>
-<pre>cargo test -p loopflow --test integration machine_commands::   60 passed
-cargo test -p loopflow --lib server::                          87 passed
-cargo test -p loopflow-execution --lib machine::ssh::          4 passed
-cargo clippy --all-targets -p loopflow -p loopflow-execution -- -D warnings   clean</pre>
+<pre>cargo nextest run -p loopflow --test integration -E 'test(an_unreachable_destination) | test(an_lf_that_dies_before) | test(an_lf_without_the_entry) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(served_ownership_routes_to_its_writer) | test(a_served_resume_opens_the_session_on_your)'   7 passed
+cargo test -p loopflow-execution --lib machine::   16 passed
+cargo clippy --all-targets -p loopflow-execution -p loopflow -- -D warnings   clean</pre>
+<p>The first nextest run timed out at 300 s: these fixtures <code>cargo build</code> their own <code>lf</code>, and touching <code>loopflow-execution</code> rebuilt it on a loaded Machine (528 s). Warm, they take 14–24 s.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Served <code>session.resume</code> to the session Machine: covered only by <code>a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operation</code>. A real one needs a provider conversation living on mini.</li>
-<li>A move continuing a live Graph on arrival: integration tests only. It needs a held skill step.</li>
-<li>Real SSH: the loopback sshd suite runs in CI.</li>
+<li><code>lf task status --subscribe</code> from mini (demo line 2): PR 2.</li>
+<li>Real SSH: loopback sshd suite in CI.</li>
+<li>A wrong-Machine refusal as the sender sees it; checked only at the entry.</li>
 </ul>
 
 <h2>Still wrong (worst first)</h2>
-<ol>
-<li class="open">CLI <code>lf task unassign</code> for an arrived Task goes over the argv forward, which PR 1 leaves alone. Afterwards the laptop's <code>lf task status</code> still says "Owner: QA on mini" while mini says Unowned. The laptop's view of a moved Task's ownership stays stale.</li>
-<li class="open"><code>task.ship</code>'s "has no checkout" refusal is classified <code>outcome_unknown</code> and gains "inspect the affected work before retrying", locally and remotely. Nothing ran, so <code>invalid</code> fits.</li>
-<li class="open">CLI <code>lf task run</code> for a mini Task still forwards argv (<code>exec 'lf' … 'task' 'run' …</code>), as planned for PR 2.</li>
-</ol>
-</body></html>
+<ul>
+<li class="open">CLI <code>lf task claim</code>, <code>unassign</code> and <code>run</code> for a mini Task still go as argv (<code>exec 'lf' '--repo-id' … 'task' 'claim' …</code>) through <code>work_route::forward</code>; only CLI <code>hold</code> and served writes use the pipe. The plan deletes that forward in PR 3, but the Done-when line ("A Task or Session write for another Machine travels as a typed request") reads as if every Task write does in PR 1.</li>
+<li class="open">After a claim forwarded to mini, the laptop's <code>lf task status</code> still says "Owner: QA on mini" while mini's says the laptop host; the laptop's view of a moved Task's ownership stays stale.</li>
+<li class="open"><code>machine.write</code>'s <code>environment</code> sends the laptop's <code>LF_PERSONAL_PROFILE</code> with laptop paths (<code>global_path</code>, <code>repository_path</code>) to mini. Planned to go with PR 3's <code>Selection</code>.</li>
+<li class="open"><code>lf … | head</code> panics with "failed printing to stdout: Broken pipe" (not this branch).</li>
+</ul>

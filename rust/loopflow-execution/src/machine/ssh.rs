@@ -153,29 +153,32 @@ impl Pipe {
             .and_then(|said| said.join().ok())
             .unwrap_or_default();
         let said = String::from_utf8_lossy(&said);
+        let said = said.trim();
         let name = self.machine.name();
-        let status = status.map(|status| status.code());
-        let reason = match status {
+        let destination = |reason: String| match said {
+            "" => reason,
+            said => format!("{reason}; the destination said: {said}"),
+        };
+        let message = match status.map(|status| status.code()) {
             // Clap's usage error: this `lf` has no `server connect`.
             Ok(Some(2)) => {
                 return Error::new(ErrorCode::Incompatible, outdated(&self.machine)).into()
             }
-            Ok(Some(255) | None) => format!("could not reach {name} over SSH"),
-            Ok(Some(0)) => format!("{name} closed the connection before answering"),
-            Ok(Some(code)) => format!("lf on {name} exited with status {code} before answering"),
-            Err(ref error) => format!("ssh to {name} did not exit: {error}"),
-        };
-        let mut message = match said.trim() {
-            "" => reason,
-            said => format!("{reason}; the destination said: {said}"),
-        };
-        // The destination's `lf` ran and failed, most often starting its server.
-        if matches!(status, Ok(Some(code)) if code != 0) {
-            message.push_str(&format!(
-                "; check `ssh {} lf server status`",
+            // SSH's own failure: no `lf` ran, and what SSH said names the check.
+            Ok(Some(255) | None) => {
+                super::connection::transport_failure(&self.machine.route, said).to_string()
+            }
+            Ok(Some(0)) => destination(format!("{name} closed the connection before answering")),
+            // The destination's `lf` ran and failed, most often starting its server.
+            Ok(Some(code)) => format!(
+                "{}; check `ssh {} lf server status`",
+                destination(format!(
+                    "lf on {name} exited with status {code} before answering"
+                )),
                 self.machine.route
-            ));
-        }
+            ),
+            Err(error) => destination(format!("ssh to {name} did not exit: {error}")),
+        };
         match code {
             ErrorCode::OutcomeUnknown => Error::outcome_unknown(&anyhow::anyhow!(message)),
             code => Error::new(code, message),

@@ -4168,6 +4168,33 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
 }
 
 #[test]
+fn an_unreachable_destination_names_the_ssh_check_not_its_server() {
+    let fixture = preview_machines();
+    let (_plan, task) = task_on_mini(&fixture);
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "exec ",
+            "case \"$*\" in *\"server connect\"*) echo 'ssh: connect to host mini port 22: Connection refused' >&2; exit 255;; esac\nexec ",
+            1,
+        ),
+    );
+    let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
+    assert_eq!(output.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        error.contains(
+            "unreachable: run `ssh -o ControlPath=none -- 'mini'` to check the address, network and SSH service; ssh: connect to host mini port 22: Connection refused"
+        ),
+        "{error}"
+    );
+    assert!(!error.contains("destination said"), "{error}");
+    assert!(!error.contains("lf server status"), "{error}");
+}
+
+#[test]
 fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operation() {
     use loopflow::lf::commands::write::Write as Mutation;
     use loopflow::server::wire::Operation;

@@ -410,7 +410,7 @@ fn write_manifest(repo_root: &Path, manifest: &str) -> Result<PathBuf, CoreError
         return Ok(path);
     }
     fs::create_dir_all(&prompts)?;
-    crate::prompt::ensure_gitignore_entry(repo_root, ".lf/prompts/")?;
+    crate::git::exclude(repo_root, ".lf/prompts/")?;
     let mut file = tempfile::NamedTempFile::new_in(&prompts)?;
     std::io::Write::write_all(&mut file, manifest.as_bytes())?;
     file.persist(&path).map_err(|error| error.error)?;

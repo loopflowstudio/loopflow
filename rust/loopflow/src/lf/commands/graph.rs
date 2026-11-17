@@ -1006,7 +1006,7 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
 
 impl RunningGraph<'_> {
     /// Every skill step's edits become one commit, written and pushed by a
-    /// child `lf commit --step`, so its message-writing agent is a Process of
+    /// child `lf commit --step`, which also pushes commits the skill made, so its message-writing agent is a Process of
     /// this Graph like any other step. A Graph contributing to a Task that
     /// another run carries leaves the checkout's edits to that run.
     /// Best-effort: the next step runs either way.
@@ -1017,7 +1017,7 @@ impl RunningGraph<'_> {
                 loopflow_execution::git::intervention_state(self.cwd),
                 Ok(None)
             )
-            || loopflow_execution::git::is_clean(self.cwd).unwrap_or(true)
+            || !loopflow_execution::ops::step_commit_pending(self.cwd)
         {
             return;
         }

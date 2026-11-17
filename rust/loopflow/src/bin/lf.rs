@@ -493,7 +493,7 @@ fn execute_target(
                         && loopflow_execution::repo::discover_repo_root(&repo_root)?.is_some()
                     {
                         // Best-effort: the skill ran whether or not its edits commit.
-                        if !loopflow_execution::git::is_clean(&repo_root).unwrap_or(true) {
+                        if loopflow_execution::ops::step_commit_pending(&repo_root) {
                             commit_skill_step(&repo_root, name);
                         }
                     }

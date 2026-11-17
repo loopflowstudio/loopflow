@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use loopflow_execution::ops::{
-    commit_selected, commit_step, commit_workflow, CommitOptions, NullProgress,
+    commit_selected, commit_step, commit_workflow, step_commit_pending, CommitOptions, NullProgress,
 };
 use loopflow_test_support::TestRepo;
 use support::EnvGuard;
@@ -217,6 +217,23 @@ fn step_commit_without_an_agent_checkpoints_once_and_keeps_the_default_branch_un
         before.trim().parse::<u32>().unwrap() + 1
     );
     assert_eq!(repo.bare_head_sha(), published);
+}
+
+#[test]
+fn a_step_that_committed_its_own_work_still_pushes_its_branch() {
+    let _env = EnvGuard::new(&[]);
+    let repo = TestRepo::new();
+    repo.create_branch("feature");
+    repo.create_file("notes.md", "what the skill committed\n");
+    repo.stage_all();
+    repo.commit("Skill's own commit");
+    assert!(step_commit_pending(repo.path()));
+
+    assert!(!commit_step(repo.path(), "implement", None, &NullProgress).unwrap());
+    let head = git_output(repo.path(), &["rev-parse", "HEAD"]);
+    let remote = git_output(repo.path(), &["ls-remote", "origin", "refs/heads/feature"]);
+    assert!(remote.starts_with(head.trim()), "{remote}");
+    assert!(!step_commit_pending(repo.path()));
 }
 
 #[test]

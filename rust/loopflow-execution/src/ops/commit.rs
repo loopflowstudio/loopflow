@@ -172,9 +172,9 @@ impl CommitMessage {
 }
 
 /// Commit what a skill left as `lf <step>: <what changed>` with a body, and
-/// push it unless this is the default branch. The `commit-message` skill
-/// writes the message on its own configured agents; without an answer the
-/// title is `lf <step>: checkpoint`.
+/// push the branch unless it is the default branch, including commits the
+/// skill made itself. The `commit-message` skill writes the message on its
+/// own configured agents; without an answer the title is `lf <step>: checkpoint`.
 ///
 /// # Errors
 /// Returns the Git failure when staging, committing or pushing fails.
@@ -184,34 +184,50 @@ pub fn commit_step(
     agent: Option<&str>,
     progress: &impl Progress,
 ) -> OpsResult<bool> {
-    if is_clean(repo)? {
-        return Ok(false);
+    let mut message = format!("lf {step}: checkpoint");
+    if !is_clean(repo)? {
+        stage_all(repo, &|_| {})?;
+        if !git_stdout(repo, &["diff", "--cached", "--name-only"])?
+            .trim()
+            .is_empty()
+        {
+            progress.status("Writing the commit message...");
+            let written = generate_commit_message(repo, agent)
+                .inspect_err(|error| progress.error(&error.to_string()));
+            message = step_commit_message(step, written.ok().as_ref());
+        }
     }
-    stage_all(repo, &|_| {})?;
-    if git_stdout(repo, &["diff", "--cached", "--name-only"])?
-        .trim()
-        .is_empty()
-    {
-        return Ok(false);
-    }
-    progress.status("Writing the commit message...");
-    let written = generate_commit_message(repo, agent).map_err(|error| {
-        progress.error(&error.to_string());
-        error
-    });
-    let message = step_commit_message(step, written.ok().as_ref());
-    let default_branch = crate::git::get_default_branch(repo)?;
-    let push = crate::git::current_branch(repo)?.is_some_and(|branch| branch != default_branch);
     commit_workflow(
         repo,
         &CommitOptions {
-            push,
+            push: off_default_branch(repo)?,
             message: Some(message),
             ..CommitOptions::for_task(step)
         },
         progress,
         &|_| {},
     )
+}
+
+/// Whether a finished skill step left work for [`commit_step`]: edits to
+/// commit, or commits a branch other than the default hasn't pushed. A
+/// checkout Git can't read has nothing to commit.
+pub fn step_commit_pending(repo: &Path) -> bool {
+    let unpushed = || -> OpsResult<bool> {
+        if !off_default_branch(repo)? {
+            return Ok(false);
+        }
+        Ok(match crate::git::rev_parse(repo, "@{upstream}") {
+            Ok(upstream) => upstream != crate::git::rev_parse(repo, "HEAD")?,
+            Err(_) => true,
+        })
+    };
+    !is_clean(repo).unwrap_or(true) || unpushed().unwrap_or(false)
+}
+
+fn off_default_branch(repo: &Path) -> OpsResult<bool> {
+    let default_branch = crate::git::get_default_branch(repo)?;
+    Ok(current_branch(repo)?.is_some_and(|branch| branch != default_branch))
 }
 
 fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {

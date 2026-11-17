@@ -146,37 +146,48 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 
 #[test]
 fn an_interrupted_paste_ends_before_the_next_view_types() {
+    let ledger = TestLedgerGuard::new();
+    let place = holder();
+    let mut registry = Registry::open(BUILD).unwrap();
     for interruption in ["disconnect", "replace", "restart"] {
-        let _ledger = TestLedgerGuard::new();
-        let place = holder();
-        let mut registry = Registry::open(BUILD).unwrap();
-        let terminal = registry
-            .start(shell(
-                None,
-                "interrupted-paste",
-                "stty raw -echo; printf '\\r\\nready\\r\\n'; dd bs=1 count=9 2>/dev/null | od -An -tx1; printf '\\r\\nprefix\\r\\n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf '\\r\\nclosed\\r\\n'; read line; printf '\\r\\nreply:%s\\r\\n' \"$line\"",
-            ))
-            .unwrap();
+        let end = ledger.home().join(interruption);
+        let script = r#"stty raw -echo
+printf 'ready\r\n'
+dd bs=1 count=9 of=/dev/null 2>/dev/null
+printf 'prefix\r\n'
+dd bs=1 count=6 of="$PASTE_END" 2>/dev/null
+read line
+printf 'reply:%s\r\n' "$line""#;
+        let mut start = shell(None, interruption, script);
+        start
+            .env
+            .push(("PASTE_END".into(), end.display().to_string()));
+        let terminal = registry.start(start).unwrap();
         let mut first = View::attach(&terminal);
         first.wait_for("ready");
         first.type_in(b"\x1b[200~abc");
         first.wait_for("prefix");
+        let wait_for_end = || {
+            wait_until("child to receive the paste end", || {
+                end.metadata().is_ok_and(|metadata| metadata.len() == 6)
+            });
+            assert_eq!(std::fs::read(&end).unwrap(), b"\x1b[201~", "{interruption}");
+        };
         let mut next = if interruption == "replace" {
-            View::attach(&terminal)
+            let next = View::attach(&terminal);
+            wait_for_end();
+            next
         } else {
             if interruption == "restart" {
                 registry.close();
-                registry = Registry::open(BUILD).unwrap();
             }
             drop(first);
+            wait_for_end();
+            if interruption == "restart" {
+                registry = Registry::open(BUILD).unwrap();
+            }
             View::attach(&terminal)
         };
-        next.wait_for("closed");
-        assert!(String::from_utf8_lossy(&next.seen)
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .contains("1b 5b 32 30 31 7e"));
         next.type_in(b"next\n");
         next.wait_for("reply:next");
         wait_until("paste child exit receipt", || {
@@ -184,8 +195,8 @@ fn an_interrupted_paste_ends_before_the_next_view_types() {
                 .unwrap()
                 .is_some()
         });
-        registry.close();
     }
+    registry.close();
 }
 
 #[test]

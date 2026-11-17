@@ -823,8 +823,7 @@ mod tests {
     use std::process::{Command, Stdio};
 
     /// The live LOO-643 shape: an ended agent reserved under an lf whose
-    /// start receipt never landed, still attached to that unrecorded lf. The
-    /// Session is a Task's: a bare one resumes beside its old attachment.
+    /// start receipt never landed, still attached to that unrecorded lf.
     fn unrecorded_ancestry_fixture(
         store: &SqliteStore,
         sql: &rusqlite::Connection,
@@ -837,7 +836,7 @@ mod tests {
         sql.execute_batch(&format!(
             "UPDATE processes SET trace_id=id,completed_at=2 WHERE id='{agent}';
              DELETE FROM processes WHERE id='{ghost}';
-             UPDATE agent_sessions SET provider_thread='thread-1',work_source='declared' WHERE id='{session}';",
+             UPDATE agent_sessions SET provider_thread='thread-1' WHERE id='{session}';",
             agent = attachment.agent_process_id,
             session = session.id,
         ))
@@ -854,11 +853,19 @@ mod tests {
 
     #[test]
     fn prune_releases_unrecorded_ancestry_and_the_session_resumes() {
-        let home = tempfile::tempdir().unwrap();
-        let database = home.path().join("db");
-        let store = crate::store::opening::open_ephemeral(&database).unwrap();
-        let sql = rusqlite::Connection::open(&database).unwrap();
+        let (home, store, task) = loopflow_storage::test_fixture::store_with_task();
+        let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
+        let saved = store.session(&session).unwrap().unwrap();
+        store
+            .bind_session_prepared(
+                &session,
+                saved.captured,
+                &task,
+                &saved.cwd,
+                &crate::store::sessions::session_caller().unwrap(),
+            )
+            .unwrap();
         let events = |sql: &rusqlite::Connection| -> i64 {
             sql.query_row(
                 "SELECT count(*) FROM session_events WHERE session_id=?1",
@@ -1663,7 +1670,7 @@ mod tests {
         let (server, bare) = output.split_once('\n').unwrap();
         assert_eq!(server, "");
         let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
-        assert_eq!(adapter.session, "Caller");
+        assert_eq!(adapter.session, "Batch");
     }
 
     #[test]

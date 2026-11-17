@@ -479,8 +479,8 @@ fn append_in(
     let ordered_at = journal_order_in(conn, task, planning_connected)?;
     conn.execute(
         "INSERT INTO task_ownership(id,task_id,kind,person,person_key,machine_id,machine_label,
-             at,ordered_at,writer_machine_id,person_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             at,ordered_at,writer_machine_id,written_here,person_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -626,8 +626,8 @@ pub(super) fn ingest_marker_in(
     }
     let inserted = conn.execute(
         "INSERT OR IGNORE INTO task_ownership(id,task_id,kind,person,person_key,machine_id,
-             machine_label,at,ordered_at,writer_machine_id,person_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+             machine_label,at,ordered_at,writer_machine_id,written_here,person_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,0,?11)",
         params![
             entry.id.as_str(),
             task.as_str(),
@@ -1117,8 +1117,8 @@ mod tests {
         // An earlier lf wrote the move as `handoff`, which reads as a claim.
         for (id, kind) in [("own_zzzz", "claim"), ("own_aaaa", "handoff")] {
             conn.execute(
-                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at)
-                 VALUES(?1,?2,?3,'Jack',?4,1,NULL)",
+                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
+                 VALUES(?1,?2,?3,'Jack',?4,1,NULL,1)",
                 rusqlite::params![id, task.as_str(), kind, MachineId::new().as_str()],
             )
             .unwrap();

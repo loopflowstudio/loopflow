@@ -12,6 +12,6 @@ INSERT INTO task_checkouts(task_id,worktree) VALUES('task_2222222222222222222222
 
 INSERT INTO task_events(task_id,kind_json,created_at)
 SELECT id,'{"kind":"started"}',1 FROM tasks WHERE issue_identifier IN ('FIX-1','FIX-2','FIX-4');
-INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id)
-SELECT 'own_'||substr(id,6),id,'recorded',NULL,NULL,1,1000,(SELECT id FROM machines WHERE is_local=1) FROM tasks WHERE issue_identifier IN ('FIX-1','FIX-2','FIX-4');
+INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+SELECT 'own_'||substr(id,6),id,'recorded',NULL,NULL,1,1000,(SELECT id FROM machines WHERE is_local=1),1 FROM tasks WHERE issue_identifier IN ('FIX-1','FIX-2','FIX-4');
 UPDATE tasks SET issue_description='',workspace_slug='';

@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: implemented on this branch; next is gate.
+Status: split implemented (additive migration, marks → LOO-954); next is gate.
 
 ## Demo
 
@@ -16,18 +16,28 @@ lf open --task <ID> --host rex                   # one tab: the Task's conversat
 storage file (probe 2026-11-16: a Haiku `claude -p` read of
 `rust/loopflow-storage/Cargo.toml` quoted the nested file from hook output).
 
-## The special case
+## Split (2026-11-16)
 
 Jack Heart, 2026-11-16: "You can drop everything old in this task as a special
-case". So `unused_store_members.sql` is a contract that drops now, without an
-aged expand step. `check_migrations.py` exempts that file alone
-(`UNSTAGED_CONTRACT`, comment cites LOO-935); it still needs `-- exports:`.
-The preflight (`migration_exports.rs`) writes every non-empty dropped table, and
-each dropped column's values other than its default, to `<lf home>/exports/unused-store-members.json` before the SQL runs.
-Released lf (0.16.0 and older) fails on the statement that names a dropped
-member; the rest of the store answers.
+case". Then, after reading that released lf 0.16.0 still queries
+`task_deletions` and the old `tasks` checkout columns: "lets split the PR".
 
-Dropped: `tool_responses`, `pm_project_name_cutover`, `project_transition_items`,
+Done: `unused_store_members.sql` is additive. It marks each member below
+`-- leaving: <member> LOO-954`, rebuilds `pool_machines` without its FK to
+`pools` (nothing writes `pools` now), and drops the dashboard planning
+triggers. The `UNSTAGED_CONTRACT` exemption, `migration_exports.rs` and the
+`until_unused_store_members` test helpers are gone. `task_ownership.written_here`
+is written again (1 here, 0 ingested), as base did; base already wrote none of
+the `tasks` checkout, primary Session or `ship_*` columns, so nothing else
+needed restoring. Indexes on leaving `tasks` columns stay (released lf queries
+by them).
+
+LOO-954 (filed 2026-11-16; LOO-943 is abandoned and `lf task reopen` refuses
+abandoned Tasks) carries the contract: `-- expand: unused_store_members`,
+`-- exports:`, drops only marked members. Its brief points at 8d18764018 for the
+finished draft of the drops, the exporter and the upgrade test helpers.
+
+Leaving → LOO-954: `tool_responses`, `pm_project_name_cutover`, `project_transition_items`,
 `task_issue_identities`, `task_deletions`, `task_pr_repair_incidents`,
 `project_binding_imports`, `work_pane_layouts`, `session_steers`,
 `steer_batches`, `steer_deliveries`, `pools`, `ondemands`; columns
@@ -35,8 +45,10 @@ Dropped: `tool_responses`, `pm_project_name_cutover`, `project_transition_items`
 `desktop_shells.close_requested`, `task_prs.repair_tracking_complete`,
 `task_ownership.written_here`, and on `tasks`: `worktree`, `branch`,
 `base_commit`, `parent_pr_id`, `checkout_machine_id`, `primary_session_id` and
-the six `ship_*`. `pool_machines` is rebuilt without its FK to `pools`.
-Dashboard triggers no longer wake planning.
+the six `ship_*`.
+
+PR body: numbers "after this PR" (tables/columns unchanged, fewer reads) and
+"after the contract"; no "Upgrade limits" section.
 
 Done here for other Tasks (not edited): LOO-891 (steer tables), LOO-840
 (`native_input`, `close_requested`), LOO-877 (every column `task_machine_local`
@@ -53,7 +65,6 @@ disk), `session_moves` (`lf session move --blocked`), `pm_issue_changes`
 `dashboard_arrangements` (`lf desktop dashboard`), `provider_tokens` (GitHub,
 Linear, API keys). The PR body lists these.
 
-LOO-943 (filed for marked members) was abandoned once everything dropped here.
 LOO-946 removes the retired `task_layout` catalog key after release.
 
 ## lf open
@@ -79,16 +90,13 @@ state; the file is not rewritten.
 
 ## Numbers (`model_size.py`)
 
-| | Before (470da475a1) | After |
-|---|---|---|
-| tables | 87 | 74 |
-| columns | 723 | 645 |
-| storage `pub fn` (non-test) | 1050 | 1007 (after merging main) |
-| SQL call sites outside storage | 35 in 8 files | 35 in 8 files |
-| store (copy of this Machine's, after VACUUM) | 991 MB | 897 MB |
-
-Upgrade of that copy with the branch: applied, `foreign_key_check` clean,
-26 MB export.
+| | Before (470da475a1) | After this PR | After LOO-954 (measured on the pre-split draft) |
+|---|---|---|---|
+| tables | 87 | 87 | 74 |
+| columns | 723 | 723 | 645 |
+| storage `pub fn` (non-test) | 1050 | 1006 | — |
+| SQL call sites outside storage | 35 in 8 files | 35 in 8 files | — |
+| store (copy of this Machine's, after VACUUM) | 991 MB | — | 897 MB |
 
 ## Checks
 
@@ -100,4 +108,5 @@ Upgrade of that copy with the branch: applied, `foreign_key_check` clean,
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
 - Compress (after merging main): `cargo clippy -p loopflow --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (30), `check_migrations.py`: pass; `schema_page.py --check` was stale from main's "Provider authentication" rename, regenerated.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
+- Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. `check_migrations.py` fails until origin/main's `task_summaries.sql` is merged in (gate syncs).
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

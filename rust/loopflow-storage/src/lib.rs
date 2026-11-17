@@ -17,7 +17,6 @@ pub mod metric;
 #[cfg(test)]
 pub mod migration_build;
 pub mod migration_catalog;
-mod migration_exports;
 pub mod migration_runner;
 pub mod migration_schema;
 pub mod peer_records;

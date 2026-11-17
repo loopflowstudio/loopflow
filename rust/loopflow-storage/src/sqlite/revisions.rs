@@ -140,6 +140,15 @@ mod tests {
         "task_update_readings",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",
+        // Leaving (LOO-954): nothing reads or writes these.
+        "ondemands",
+        "pm_project_name_cutover",
+        "pools",
+        "project_binding_imports",
+        "session_steers",
+        "steer_batches",
+        "steer_deliveries",
+        "tool_responses",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {

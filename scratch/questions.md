@@ -6,8 +6,12 @@
 - Jack Heart: "we can drop the thing where lf open does anything other than
   just open the task session in other surfaces."
 - Jack Heart: "we dont need to try to copy our desktop layouts".
+- Jack Heart: "lets split the PR" (drops move to a staged contract; see the Split section of loo-935-store-reduction.md).
 
 ## Picks made headless
+
+- **The contract Task is LOO-954, not LOO-943**: `lf task reopen LOO-943` answered "An abandoned Task cannot be reopened". LOO-943 stays abandoned.
+- **Indexes on leaving `tasks` columns stay** until LOO-954: released lf filters by them.
 
 - **Desktop layouts live in `$LF_HOME/desktop-cache/`, not Application Support.**
   The Mac app has no Application Support directory; `workspace.json` and its

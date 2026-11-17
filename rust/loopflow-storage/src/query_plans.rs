@@ -40,7 +40,7 @@ const GROWING: [&str; 16] = [
 /// `task_checkouts` retains the November 12 measurement of 838 checkouts;
 /// `tasks_abandoned` counts that store's 259 abandoned Tasks, and
 /// `task_checkouts_parent_pr` its 11 parent PRs;
-/// `task_primary_sessions` takes the 319 primaries that store had.
+/// `task_primary_sessions` takes the 319 primaries `tasks_primary_session` counted.
 /// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
@@ -137,9 +137,17 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('tasks','idx_tasks_project','1219 20 1'),
          ('tasks','idx_tasks_repository','1219 134 22 2'),
          ('tasks','idx_tasks_updated','1219 2'),
+         ('tasks','idx_tasks_worktree','1219 10'),
          ('tasks','sqlite_autoindex_tasks_1','1219 1'),
          ('tasks','sqlite_autoindex_tasks_2','1219 1'),
          ('tasks','tasks_abandoned','259 1'),
+         ('tasks','tasks_abandoned_checkout','179 179'),
+         ('tasks','tasks_branch','1219 10'),
+         ('tasks','tasks_checkout_machine','1224 612'),
+         ('tasks','tasks_checkout_root','858 401 1'),
+         ('tasks','tasks_parent_pr','11 2'),
+         ('tasks','tasks_primary_session','319 1'),
+         ('tasks','tasks_ship_process','168 1'),
          ('waves','idx_waves_active_locator','61 2 2 1'),
          ('waves','idx_waves_parent','61 61'),
          ('waves','idx_waves_superseded_by','0 0'),

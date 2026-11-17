@@ -211,9 +211,9 @@ fn owned_unstarted_task_is_open_but_excluded_from_working_queries() {
     let (_dir, store, repo) = fixture();
     let task = "task_33333333333333333333333333333333";
     store.conn.lock().unwrap().execute(
-        "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id)
+        "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
          VALUES('own_33333333333333333333333333333333',?1,'recorded',NULL,NULL,2,2000,
-             (SELECT id FROM machines WHERE is_local=1))",
+             (SELECT id FROM machines WHERE is_local=1),1)",
         [task],
     ).unwrap();
     for expression in [
@@ -293,7 +293,7 @@ fn one_task_order_reorders_working_tasks_and_every_plan_and_arrivals_append() {
         .lock()
         .unwrap()
         .execute_batch(&format!(
-            "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1)); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
+            "INSERT INTO task_events(task_id,kind_json,created_at) VALUES('{three}','{{\"kind\":\"started\"}}',2); INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here) VALUES('own_33333333333333333333333333333333','{three}','recorded',NULL,NULL,2,2000,(SELECT id FROM machines WHERE is_local=1),1); INSERT INTO task_checkouts(task_id,worktree) VALUES('{three}','/repo/fix-3');"
         ))
         .unwrap();
     assert_eq!(

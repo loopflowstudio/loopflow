@@ -27,3 +27,15 @@ Answer on `lf -a X task create --run` (Jack Heart, 2026-11-16): "ok, check it".
   Checked: the conversation ran X (its Session row's provider); the Graph did not. Fixed for the CLI. Desktop's served `task.create` carries no agent; adding one waits for a picker that sends it.
 - Slice 4 removes about 0.58 s (debug, loaded Machine) of exec between setup and the `-i` launch; the prompt build after it costs 1.49 s. Order kept as planned (slice 4 next); prompt build is a candidate for its own Task.
 - Phone Start records no Machine kind; every phone Machine is remote to the phone.
+
+## Concept review answers (scratch/concept-review.html, 2026-11-17)
+
+Jack Heart: "1a 2 -- not sure but we shoudl only ever have one graph running as THE worker grapph / 3a i guess 4 no idea 5 no idea"
+
+To build:
+- 1a. Setup is owed by the Task, not the receipt. A conversation opening on a Task with no checkout, or whose taken-up Graph has never run (no GraphProcess history), runs setup. Delete `admitted_task_creation`, `record_setup_launch` and the `started` milestone on the conversation path; the receipt only answers repeats and may expire. The held argv carries the request ID for spans. Released `filed`+run rows still answer `outcome_unknown`; `-b` keeps `run_requested`.
+- 2. One worker Graph per Task is already structural: `start_task_graph_run` compares the Graph row, so a racing second launch fails "moved on graph … while this run was starting". Setup must treat that loss as the Graph already running (print `Graph <name> started`, not a failure). Add a test where `lf task run` and setup race.
+- 3a. A failed setup step is recorded on the Session as an observation; the Task's position reads "Setup stopped: <step> failed" on Desktop and in `lf task status`; reopening the conversation retries.
+- 4a, first: one Task shape in the answer. Jack Heart: "i care more about unifying htis Three shapes of one Task in the answer ... And having simple code than i do about perfect edge/race condition checks right now (though i do still value that some)". The answer becomes receipt + session + `row` (`RoadmapTask`); Desktop fills `taskWork` from the row (extend the row only if it truly lacks a field), `overview` goes, and `TaskCreated`/`TaskCreateAnswer` become one type built where the row is read. The receipt's stored `task` stays only if the CLI's printed answer needs it.
+- Priority: 4a, then 1a, then 3a. Prefer the simpler code over extra race handling; no dedicated race test for 2 unless it falls out cheaply.
+- 5: no change in this Task (revisions belong to the sibling that builds pending changes).

@@ -60,3 +60,19 @@ Choices made headless for review; the plan says what each passed over.
 - Slice 3: the launch probe deadline is 2 s; a slower client launches anyway.
 - Slice 3: `lf ondemand rent` (by hand) signs nothing in; its hint names
   `lf machine login <provider> <label>`. Only `--rent` placement prepares.
+- Slice 4: `--refused` counts any `agent_limit_recoveries` row as a refusal
+  (usage limit, revoked or missing login, model unavailable, a stop) and any
+  later agent process of that provider as the answer, started, not
+  necessarily successful. A refused Machine stays selected until a launch
+  there, so two `--refused` runs sign it in twice. Passed over: recording a
+  sign-in time.
+- Slice 4: `--refused` covers every added Machine, rentals included; one that
+  cannot answer is reported and fails the run.
+- Slice 4: `logins` reads GitHub from gh's `hosts.yml` `user` wherever gh keeps
+  the token, so the transfer pre-check skips a keyring-backed gh for the same
+  user that it used to replace with a file-backed token. OpenCode's row is the
+  active export entry with no Zen check, so a same-account entry Zen rejects
+  is skipped too. Linear's pre-check compares the target's stored login with
+  the viewer id; a mismatch renews and sends, and the receiving end decides.
+- Slice 4: `lf account …` now reads as a skill name ("skill or graph not
+  found: account"); no moved-command hint names `lf machine login`.

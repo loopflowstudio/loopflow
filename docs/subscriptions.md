@@ -131,7 +131,7 @@ mini has no Codex login; run `lf machine login codex mini`
 ```
 
 An unknown answer launches anyway. To sign in again wherever a provider is
-signed out, or refused with no successful launch since:
+signed out, or refused a launch with none of that provider since:
 
 ```bash
 lf machine login claude --refused

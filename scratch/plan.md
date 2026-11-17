@@ -332,9 +332,33 @@ checks on both ends; LOO-913's fallback and wait rules.
    (remote and here), and the forward test now carries a generic per-run secret
    (`forwarded_secrets_reach_a_remote_launch_only_by_name`). Not tested: rental
    prepare's sign-in loop end to end (no rental fixture reaches prepare).
-4. **Retire `lf account`.** Services through `lf machine login`, `logout`,
-   `--refused`; delete the command family, routes, fixtures, Swift cases;
-   docs and builtin skills.
+4. **Retire `lf account`.** **Built (2026-11-17)**, on the `match` (#1966
+   open). `lf machine logout <provider> [<machine>…]`: Claude and Codex run
+   their own logout here or over SSH and the probe must then read signed out;
+   services here go through `operations::disconnect`, remotely through the
+   target's own `lf machine logout`. `LoginRow.refused` is
+   `SqliteStore::unanswered_refusal`: the provider's latest
+   `agent_limit_recoveries` row with no `kind='agent'` process of it started
+   since (range scan on `processes_recent`). `--refused` reads every added
+   Machine's `logins --json` and signs in those reading signed out or refused;
+   no sign-in time is recorded, so a refused Machine stays selected until a
+   launch there. `logins` service rows read the client's own record first
+   (gh's `hosts.yml` user, OpenCode's active export entry), else the store;
+   service transfers' pre-check reads the target's `logins --json`, and
+   `lf machine credentials inspect` is gone (the receiving end keeps its
+   identity checks). Deleted: `Commands::Account`, `AccountCommand`,
+   `parse_service_provider`, navigation's leading-value case,
+   `commands/account.rs`, `engine/account.rs`, `account_status.rs`,
+   `operations::served`/`narrate!`, `cached_status`, the `account.*` served
+   routes and five DTO fixtures, Swift `accountList/Connect/Disconnect`.
+   `operations::connect`/`disconnect` take a `Provider`. Fixtures:
+   `machine_commands::refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch`,
+   `auth_tests::service_auth_survives_subscription_removal` (now through
+   `machine login --api-key`/`logout`/`logins`), storage
+   `a_refusal_stands_until_its_provider_launches_again`.
+   `rg 'lf account' docs rust swift` finds nothing. Not run here: Swift
+   `ServerProtocolTests` (CI); a real `lf machine login claude mini` and
+   `codex mini` (a person at gate).
 
 ## Done when
 

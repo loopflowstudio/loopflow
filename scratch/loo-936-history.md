@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–5 built (slice 5: "Slice 5 as built");
+Status: 2026-11-16, slices 1–5 built and two QA fixes ("QA fixes");
 merged with main through #1962 (`4a7c949b9e`). Remaining: gate. Since #1955
 an agent Process records no outcome, so a departure-less attachment exit now
 leaves nothing (no history row, no `processes.outcome`). Process rows are LOO-953 ("Remove Process rows:
@@ -528,3 +528,22 @@ carries only the columns an observation sets; prune shares one history writer;
 loopflow-execution -p loopflow --lib` on `turns`, `journals`, `retention`,
 `read_stream`, `provider_transitions`, `session_events`, `doctor`: 34 passed;
 clippy clean.
+
+## QA fixes (2026-11-16)
+
+From `scratch/qa.html` (cf50b7e904), against "a recording failure is a gap,
+never a failed turn":
+
+- A held journal lock cost each turn ~60 s (71 s vs ~8 s): every write waited
+  out `BUSY`. `JournalFile::write` now waits only while no gap is open; the
+  first successful write closes the gap and restores the wait.
+- `--final` after a gap failed "not settled". `input_answered_turn` now
+  returns the input's captured thread with `turn: None` when `usage.db` kept no
+  completed turn (unless a later input continued that thread), and
+  `input_final_answer` answers with the transcript's last ended turn begun
+  since capture. A missing transcript still fails naming it.
+
+Checks: `journals::` 3 passed (the gap test fails without the fix: 20 gapped
+writes > 5×`BUSY`); `transcript::answer::` 4 passed; `session_events::` 7
+passed; clippy on storage+execution clean. Gate: rerun the locked-journals QA
+scenario on a real turn; `test(graph::)` routing after a gap.

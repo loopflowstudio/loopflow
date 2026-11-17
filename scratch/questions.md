@@ -116,3 +116,11 @@ tables and whether Process rows are needed are in LOO-953's
 - `Watch::Journals` for the Session list, `lf history` and the Task
   view/status; everything else `Watch::State`. A journal write wakes a
   watching subscription within the 1 s revision check, not by file event.
+
+## Follow-ups after QA (2026-11-16)
+
+- Headless Claude turns record no duration (`started_at = ended_at`); the
+  released build does the same. Needed for "time by skill".
+- A gapped journal writer stops waiting for the lock, so while one gap is open
+  an ordinary moment of contention also misses its write; the gap closes at
+  the first uncontended write.

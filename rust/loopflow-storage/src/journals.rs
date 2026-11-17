@@ -239,6 +239,8 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
 
 /// A journal write waits this long for another writer of the same file, then
 /// becomes a gap: a turn boundary does not queue behind history or usage.
+/// While a gap is open the next write does not wait at all, so a held lock
+/// costs a turn one wait, not one per write.
 #[cfg(not(test))]
 const BUSY: Duration = Duration::from_secs(2);
 #[cfg(test)]
@@ -300,7 +302,12 @@ impl JournalFile {
             );
             return None;
         };
-        let result = commit(&mut state.conn, self.journal, store, write);
+        let busy = if state.gap.span().is_some() {
+            Duration::ZERO
+        } else {
+            BUSY
+        };
+        let result = commit(&mut state.conn, self.journal, store, busy, write);
         match result {
             Ok(value) => {
                 state.gap.recovered();
@@ -325,12 +332,14 @@ fn commit<T>(
     conn: &mut Option<Connection>,
     journal: &Journal,
     store: &Path,
+    busy: Duration,
     write: impl FnOnce(&Transaction<'_>) -> StoreResult<T>,
 ) -> StoreResult<T> {
     if conn.is_none() {
         *conn = Some(open_writer(journal, store)?);
     }
     let conn = conn.as_mut().expect("journal connection was just opened");
+    conn.busy_timeout(busy)?;
     let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
     let value = write(&tx)?;
     tx.commit()?;
@@ -499,6 +508,13 @@ mod tests {
             .unwrap();
         assert_eq!(append(&store, "missed"), None);
         assert!(store.history.gap_open());
+        // With the gap open, later writes fail at once instead of each
+        // waiting out the busy timeout.
+        let started = Instant::now();
+        for _ in 0..20 {
+            assert_eq!(append(&store, "missed again"), None);
+        }
+        assert!(started.elapsed() < super::BUSY * 5);
         // The store itself keeps answering writes while history is gapped.
         store
             .conn

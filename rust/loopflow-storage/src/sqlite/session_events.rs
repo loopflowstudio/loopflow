@@ -14,7 +14,12 @@ pub struct AnsweredTurn {
     pub session_id: String,
     pub provider: Option<String>,
     pub thread: AgentSessionId,
-    pub turn: String,
+    /// `None` when `usage.db` kept no completed turn for the input (a
+    /// recording gap): its answer is then the thread's last turn begun since
+    /// `captured_at`.
+    pub turn: Option<String>,
+    /// Unix seconds when the input was captured.
+    pub captured_at: i64,
     pub cwd: std::path::PathBuf,
 }
 
@@ -265,15 +270,21 @@ impl SqliteStore {
 
     /// The provider turn that last answered `input`: the newest turn it
     /// started that completed. Its text is in the provider's transcript.
+    /// Without a turn row, the input's own thread, unless a later input
+    /// continued it: that thread's last turn may answer someone else.
     pub fn input_answered_turn(&self, input: &str) -> StoreResult<Option<AnsweredTurn>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
                 "SELECT c.session_id,COALESCE(json_extract(c.payload,'$.provider'),s.provider),
-                        t.provider_thread,t.provider_turn,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
+                        COALESCE(t.provider_thread,c.provider_thread),t.provider_turn,
+                        c.observed_at,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
                  FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
-                 CROSS JOIN usage.turns t ON t.captured_event=c.seq AND t.status='completed'
+                 LEFT JOIN usage.turns t ON t.captured_event=c.seq AND t.status='completed'
                  WHERE c.kind='captured' AND c.receipt_key=?1
+                   AND (t.id IS NOT NULL OR (c.provider_thread IS NOT NULL AND NOT EXISTS(
+                     SELECT 1 FROM session_events later WHERE later.kind='captured'
+                       AND later.provider_thread=c.provider_thread AND later.seq>c.seq)))
                  ORDER BY t.ended_at DESC,t.id DESC LIMIT 1",
                 [input],
                 |row| {
@@ -282,7 +293,8 @@ impl SqliteStore {
                         provider: row.get(1)?,
                         thread: row.get(2)?,
                         turn: row.get(3)?,
-                        cwd: row.get::<_, String>(4)?.into(),
+                        captured_at: row.get(4)?,
+                        cwd: row.get::<_, String>(5)?.into(),
                     })
                 },
             )
@@ -841,7 +853,7 @@ mod tests {
             store
                 .input_answered_turn(&input)
                 .unwrap()
-                .map(|turn| turn.turn),
+                .and_then(|turn| turn.turn),
             Some("new".to_owned())
         );
     }

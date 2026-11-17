@@ -6,6 +6,7 @@ use anyhow::{anyhow, Context, Result};
 use loopflow_model::chat::types::ConversationItem;
 use loopflow_storage::sqlite::SqliteStore;
 
+use super::live::TurnState;
 use super::{json_lines, locate, read, Gap, Located, Source, Turn};
 use crate::harness::HarnessKind;
 
@@ -39,7 +40,11 @@ pub fn input_final_answer(store: &SqliteStore, input: &str) -> Result<Option<Str
             return Err(error);
         }
     };
-    last_assistant_message(harness, &source, &answered.turn)
+    let answer = match &answered.turn {
+        Some(turn) => last_assistant_message(harness, &source, turn),
+        None => unrecorded_answer(harness, &source, answered.captured_at),
+    };
+    answer
         .with_context(|| {
             format!(
                 "read the final answer of {input} from {}",
@@ -83,6 +88,22 @@ pub fn last_assistant_message(
         .or_else(|| turns.last().filter(|_| harness == HarnessKind::Pi))
         .ok_or_else(|| anyhow!("it has no turn {turn}"))?;
     Ok(final_message(found))
+}
+
+/// The answer of a turn lf failed to record: the transcript's last turn, when
+/// it began after the input was captured and has ended. `None` while it runs
+/// or before it begins.
+fn unrecorded_answer(
+    harness: HarnessKind,
+    source: &Source,
+    captured_at: i64,
+) -> Result<Option<String>> {
+    let turns = read(harness, source)?;
+    Ok(turns
+        .last()
+        .filter(|turn| turn.state == TurnState::Ended)
+        .filter(|turn| turn.at().is_some_and(|at| at >= captured_at))
+        .and_then(final_message))
 }
 
 /// The agent's last message in `turn`, or the object a structured answer
@@ -205,6 +226,111 @@ mod tests {
         assert!(
             gone.contains("thread") && gone.contains("is gone"),
             "{gone}"
+        );
+    }
+
+    #[test]
+    fn a_turn_lf_failed_to_record_answers_from_its_transcript() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let input = crate::session_record::new_artifact_key();
+        let session = store.test_session("conversation", &input);
+        let thread = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+        let account = home.path().join("claude-home");
+        {
+            let conn = store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET provider='claude',cwd='/work/repo' WHERE id=?1",
+                [&session.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE session_events SET provider_thread=?2
+                 WHERE kind='captured' AND session_id=?1",
+                rusqlite::params![session.id, thread],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT INTO provider_accounts(provider,account_id,home,credential_state,created_at,updated_at)
+                 VALUES('claude','fixture',?1,'missing',1,1)",
+                [account.to_str().unwrap()],
+            )
+            .unwrap();
+        }
+        store.record_account_home_conversation(
+            crate::provider_auth::Provider::Claude,
+            thread,
+            "fixture",
+        );
+        // No transcript and no turn row: the gap is named, never an answer.
+        let gone = format!("{:#}", input_final_answer(&store, &input).unwrap_err());
+        assert!(gone.contains(thread) && gone.contains("is gone"), "{gone}");
+
+        let captured_at: i64 = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT observed_at FROM session_events WHERE kind='captured' AND session_id=?1",
+                [&session.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let at = |offset: i64| {
+            chrono::DateTime::from_timestamp(captured_at + offset, 0)
+                .unwrap()
+                .to_rfc3339()
+        };
+        let project = crate::transcript::live::claude_project(&account, Path::new("/work/repo"));
+        std::fs::create_dir_all(&project).unwrap();
+        let row = |kind: &str, at: &str, content: serde_json::Value| {
+            serde_json::json!({"type":kind,"uuid":format!("{kind}-{at}"),"timestamp":at,
+                "message":{"id":at,"role":kind,"stop_reason":"end_turn","content":content}})
+        };
+        // An earlier input's turn in the same thread is not this input's answer.
+        transcript(
+            &project,
+            &[
+                row("user", &at(-60), serde_json::json!("before")),
+                row(
+                    "assistant",
+                    &at(-59),
+                    serde_json::json!([{"type":"text","text":"Earlier answer."}]),
+                ),
+            ],
+        );
+        std::fs::rename(
+            project.join("conversation.jsonl"),
+            project.join(format!("{thread}.jsonl")),
+        )
+        .unwrap();
+        assert_eq!(input_final_answer(&store, &input).unwrap(), None);
+
+        transcript(
+            &project,
+            &[
+                row("user", &at(-60), serde_json::json!("before")),
+                row(
+                    "assistant",
+                    &at(-59),
+                    serde_json::json!([{"type":"text","text":"Earlier answer."}]),
+                ),
+                row("user", &at(1), serde_json::json!("go")),
+                row(
+                    "assistant",
+                    &at(5),
+                    serde_json::json!([{"type":"text","text":"Unrecorded answer."}]),
+                ),
+            ],
+        );
+        std::fs::rename(
+            project.join("conversation.jsonl"),
+            project.join(format!("{thread}.jsonl")),
+        )
+        .unwrap();
+        assert_eq!(
+            input_final_answer(&store, &input).unwrap(),
+            Some("Unrecorded answer.".into())
         );
     }
 }

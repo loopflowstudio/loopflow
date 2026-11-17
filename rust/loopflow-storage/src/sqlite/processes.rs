@@ -328,6 +328,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM usage.turns WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
@@ -493,8 +494,8 @@ fn process_query(
         // another Process's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
-            SELECT lf_process_id FROM history.session_history
-            WHERE kind='started' AND {column}={value} AND lf_process_id IS NOT NULL
+            SELECT lf_process_id FROM usage.turns
+            WHERE {column}={value} AND lf_process_id IS NOT NULL
             UNION
             SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
             JOIN tasks tw ON {tasks}{value}{close}
@@ -2044,19 +2045,19 @@ mod discovery_tests {
                     &format!("session-{index}"),
                     &format!("run_{index:032x}"),
                 );
-                store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
-                    VALUES(?1,'thread','work','started','',?2,?3,?4,1,'unreadable payload')",
+                store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+                    VALUES(?1,'thread','work',?2,?3,?4,1)",
                     params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
             }
             // Same Process drove both Tasks, two turns and a mechanical boundary.
-            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
-                VALUES('session-0','thread','retry','started','',?1,?2,?3,2,'{}')",params![shared,first.as_str(),wave]).unwrap();
+            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+                VALUES('session-0','thread','retry',?1,?2,?3,2)",params![shared,first.as_str(),wave]).unwrap();
             // Session is bound now; the earlier turn remains unassigned.
-            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,observed_at,payload)
-                VALUES('session-0','thread','before-bind','started','',?1,1,'{}')",[&unbound]).unwrap();
+            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
+                VALUES('session-0','thread','before-bind',?1,1)",[&unbound]).unwrap();
             // Known Task, unknown original process: neither current attachment nor observer is its owner.
-            store.execute_history("INSERT INTO session_history(session_id,provider_thread,provider_turn,kind,receipt_key,task_id,wave_id,observed_at,payload)
-                VALUES('session-0','thread','unmapped','started','',?1,?2,1,'{}')",params![first.as_str(),wave]).unwrap();
+            store.execute_usage("INSERT INTO turns(session_id,provider_thread,provider_turn,task_id,wave_id,started_at)
+                VALUES('session-0','thread','unmapped',?1,?2,1)",params![first.as_str(),wave]).unwrap();
 
             conn.execute(
                 "UPDATE processes SET caller_session_id='session-0',via_agent=1 WHERE id=?1",

@@ -11,57 +11,36 @@ use crate::session_record::{
 use loopflow_model::chat::types::{ConversationEvent, TurnUsage};
 
 #[test]
-fn native_usage_reads_each_providers_counter_once_by_its_shape() {
-    use crate::session::SessionEventKind::{Started, Usage};
-    let event = |seq, thread: &str, kind, payload| crate::session::SessionEvent {
-        seq,
-        session_id: "session".into(),
-        agent_session: Some(loopflow_model::id::AgentSessionId::from(thread)),
-        provider_turn: Some("turn".into()),
-        kind,
-        agent_process_id: None,
-        lf_process_id: None,
-        task_id: None,
-        wave_id: None,
-        observed_at: 1,
-        payload,
+fn a_usage_reading_resolves_to_one_turns_counts_by_its_shape() {
+    use crate::session_record::resolve_usage;
+    let read = |reading: serde_json::Value| {
+        let usage = resolve_usage(&reading, None, 1).unwrap();
+        (
+            usage.usage.input_tokens,
+            usage.usage.output_tokens,
+            usage.final_reading,
+            usage.partial,
+        )
     };
-    let tokens = |id: &str, input: u64, output: u64| {
-        serde_json::json!({"provider":"opencode","message":{"id":id,
-            "tokens":{"input":input,"output":output,"reasoning":0,"cache":{"read":0,"write":0}}}})
-    };
+    assert_eq!(
+        read(
+            serde_json::json!({"provider":"pi","usage":{"input_tokens":20,"output_tokens":6},"final":true})
+        ),
+        (Some(20), Some(6), true, false)
+    );
+    assert_eq!(
+        read(
+            serde_json::json!({"provider":"opencode","message":{"id":"m1",
+            "tokens":{"input":3,"output":1,"reasoning":0,"cache":{"read":0,"write":0}}}})
+        ),
+        (Some(3), Some(1), true, false)
+    );
     let codex = serde_json::json!({"inputTokens":30,"outputTokens":5,"cachedInputTokens":0,"reasoningOutputTokens":0});
-    let history = vec![
-        event(1, "pi", Started, serde_json::json!({})),
-        event(
-            2,
-            "pi",
-            Usage,
-            serde_json::json!({"provider":"pi","usage":{"input_tokens":10},"final":false}),
-        ),
-        event(
-            3,
-            "pi",
-            Usage,
-            serde_json::json!({"provider":"pi","usage":{"input_tokens":20,"output_tokens":6},"final":true}),
-        ),
-        event(4, "opencode", Started, serde_json::json!({})),
-        event(5, "opencode", Usage, tokens("m1", 3, 1)),
-        event(6, "opencode", Usage, tokens("m2", 4, 2)),
-        event(7, "codex", Started, serde_json::json!({})),
-        event(
-            8,
-            "codex",
-            Usage,
-            serde_json::json!({"total":codex,"last":codex}),
-        ),
-    ];
-    let (readings, unread) = crate::session_record::native_usage(&history);
-    assert_eq!(unread, 0);
-    let usage = crate::session_record::reduce_usage(&readings);
-    assert_eq!((usage.streams, usage.final_streams, usage.gaps), (4, 3, 0));
-    assert_eq!(usage.input_tokens, Some(20 + 3 + 4 + 30));
-    assert_eq!(usage.output_tokens, Some(6 + 1 + 2 + 5));
+    assert_eq!(
+        read(serde_json::json!({"total":codex,"last":codex})),
+        (Some(30), Some(5), false, false)
+    );
+    assert!(resolve_usage(&serde_json::json!({"input": 20}), None, 1).is_none());
 }
 
 #[test]
@@ -1034,16 +1013,7 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
             .unwrap()
             .lf_process_id
             .is_none());
-        assert!(!store
-            .session_history(&session.id, 0, 0)?
-            .iter()
-            .any(|event| {
-                matches!(
-                    event.kind,
-                    crate::session::SessionEventKind::Started
-                        | crate::session::SessionEventKind::Completed
-                )
-            }));
+        assert!(store.session_turns(&session.id)?.is_empty());
         Ok(())
     })
     .unwrap();

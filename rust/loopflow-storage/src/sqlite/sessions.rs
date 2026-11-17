@@ -671,6 +671,7 @@ pub struct HistoryInput {
     pub session: crate::session::HistoryCapture,
     pub artifact_key: Option<String>,
     pub events: Vec<crate::session::SessionEvent>,
+    pub turns: Vec<crate::session::Turn>,
     pub names: (Option<String>, Option<String>),
 }
 
@@ -804,6 +805,7 @@ impl SqliteStore {
                      WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
                  UNION ALL SELECT session_id FROM session_events WHERE lf_process_id=?1
                  UNION ALL SELECT session_id FROM history.session_history WHERE lf_process_id=?1
+                 UNION ALL SELECT session_id FROM usage.turns WHERE lf_process_id=?1
                  LIMIT 1",
                 [process],
                 |row| row.get(0),
@@ -1079,8 +1081,7 @@ impl SqliteStore {
             // `windowed` holds every capture that could start or end in the
             // window, read by range from the window indexes; the exact filters
             // below decide. A Task drill's window is the Task: its arm reads every
-            // row naming the resolved Task id (capture, manifest, `started`
-            // origin) and turns the time arms off. With no lower bound the
+            // row naming the resolved Task id (capture, manifest, turn origin) and turns the time arms off. With no lower bound the
             // capture and turn arms already read everything, so the others stay
             // off. Each arm is one source of `started` or `ended`: a new source
             // below needs its own arm here, or inputs it places in the window
@@ -1093,31 +1094,30 @@ impl SqliteStore {
                 SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?7
                 UNION SELECT seq FROM session_events WHERE ?7 IS NULL AND task_id=?3 AND kind='captured'
                 UNION SELECT captured_event FROM history.session_history
-                    WHERE ?7 IS NULL AND task_id=?3 AND kind IN ('observed','started')
+                    WHERE ?7 IS NULL AND task_id=?3 AND kind='observed'
+                UNION SELECT captured_event FROM usage.turns WHERE ?7 IS NULL AND task_id=?3
                 UNION SELECT +seq FROM session_events WHERE ?7 IS NULL AND ?3 IS NULL AND kind='captured' AND observed_at>=?5
                 UNION SELECT +c.seq FROM history.session_history o CROSS JOIN session_events c ON c.kind='captured'
                     AND c.receipt_key=substr(o.receipt_key,1,length(o.receipt_key)-14)
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND o.kind='observed' AND substr(o.receipt_key,-14) IN (':manifest.json',':terminal.json')
                     AND o.observed_at>=?5 AND (?6 OR substr(o.receipt_key,-14)=':manifest.json')
-                UNION SELECT origin.captured_event FROM history.session_history completion CROSS JOIN history.session_history origin
-                    ON origin.session_id=completion.session_id AND origin.provider_thread=completion.provider_thread
-                    AND origin.provider_turn=completion.provider_turn AND origin.kind='started'
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed')
-                    AND completion.kind='completed' AND completion.observed_at>=?5 AND +origin.captured_event IS NOT NULL
+                UNION SELECT +captured_event FROM usage.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND ended_at>=?5 AND +captured_event IS NOT NULL
                 UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='captured'
-                UNION SELECT +ran.captured_event FROM processes exited CROSS JOIN history.session_history ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started'),
-            -- A native turn starts in the window only if all its events fall in it;
-            -- one its Process completed in the window may have started earlier.
-            turns(session_id,provider_thread,provider_turn) AS (
-                SELECT +session_id,+provider_thread,+provider_turn FROM history.session_history
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed') AND observed_at>=?5
-                UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
-                    FROM processes exited CROSS JOIN history.session_history ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
-                UNION SELECT +session_id,+provider_thread,+provider_turn FROM history.session_history
-                    WHERE ?7 IS NULL AND task_id=?3 AND kind='started' AND captured_event IS NULL),
+                UNION SELECT +ran.captured_event FROM processes exited CROSS JOIN usage.turns ran ON ran.lf_process_id=exited.id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5),
+            -- Turns no input started: one that started or ended in the window,
+            -- or whose Process completed in it, though it started earlier.
+            turns(id) AS (
+                SELECT id FROM usage.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND started_at>=?5 AND +captured_event IS NULL
+                UNION SELECT id FROM usage.turns
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ended_at>=?5 AND +captured_event IS NULL
+                UNION SELECT +ran.id FROM processes exited CROSS JOIN usage.turns ran ON ran.lf_process_id=exited.id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.captured_event IS NULL
+                UNION SELECT id FROM usage.turns
+                    WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             inputs AS (
                 SELECT i.seq AS captured,i.receipt_key AS input_id,i.session_id,json_extract(i.payload,'$.caller_key') AS caller_input_id,
                     COALESCE(m.observed_at,i.observed_at) AS started,
@@ -1129,28 +1129,22 @@ impl SqliteStore {
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
                         AND unixepoch(json_extract(terminal.payload,'$.evidence.ended_at')) IS NOT NULL ELSE 0 END
                     ) THEN NULL WHEN EXISTS (
-                        SELECT 1 FROM history.session_history origin WHERE origin.session_id=s.id
-                        AND origin.captured_event=i.seq AND origin.kind='started' AND NOT EXISTS (
-                            SELECT 1 FROM history.session_history done WHERE done.session_id=origin.session_id
-                            AND done.provider_thread=origin.provider_thread AND done.provider_turn=origin.provider_turn
-                            AND done.kind='completed')
+                        SELECT 1 FROM usage.turns origin WHERE origin.session_id=s.id
+                        AND origin.captured_event=i.seq AND origin.ended_at IS NULL
                         ) THEN NULL ELSE
                         COALESCE(terminal.observed_at,(
-                            SELECT MAX(done.observed_at) FROM history.session_history origin JOIN history.session_history done
-                            ON done.session_id=origin.session_id AND done.provider_thread=origin.provider_thread
-                            AND done.provider_turn=origin.provider_turn AND done.kind='completed'
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started')) END AS ended, NULL AS thread, NULL AS turn,
+                            SELECT MAX(origin.ended_at) FROM usage.turns origin
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq)) END AS ended, NULL AS thread, NULL AS turn,
                     MAX(i.observed_at,COALESCE(m.observed_at,0),
                         COALESCE((SELECT MAX(o.observed_at) FROM history.session_history o WHERE o.captured_event=i.seq),0),
-                        COALESCE((SELECT MAX(d.observed_at) FROM history.session_history origin JOIN history.session_history d
-                            ON d.session_id=origin.session_id AND d.provider_thread=origin.provider_thread
-                            AND d.provider_turn=origin.provider_turn
-                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq AND origin.kind='started'),0)) AS latest
+                        COALESCE((SELECT MAX(MAX(COALESCE(origin.started_at,0),COALESCE(origin.usage_at,0),
+                            COALESCE(origin.ended_at,0))) FROM usage.turns origin
+                            WHERE origin.session_id=s.id AND origin.captured_event=i.seq),0)) AS latest
                 FROM windowed CROSS JOIN session_events i ON i.seq=windowed.seq JOIN agent_sessions s ON s.id=i.session_id
-                LEFT JOIN history.session_history latest_turn ON latest_turn.seq=(
-                    SELECT origin.seq FROM history.session_history origin WHERE origin.session_id=i.session_id
-                    AND origin.captured_event=i.seq AND origin.kind='started' ORDER BY origin.seq DESC LIMIT 1)
-                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.seq IS NULL
+                LEFT JOIN usage.turns latest_turn ON latest_turn.id=(
+                    SELECT origin.id FROM usage.turns origin WHERE origin.session_id=i.session_id
+                    AND origin.captured_event=i.seq ORDER BY origin.id DESC LIMIT 1)
+                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.id IS NULL
                     THEN i.lf_process_id ELSE latest_turn.lf_process_id END
                 LEFT JOIN history.session_history m ON m.session_id=s.id AND m.kind='observed'
                     AND m.receipt_key=i.receipt_key||':manifest.json'
@@ -1162,43 +1156,33 @@ impl SqliteStore {
                     AND (?6 OR COALESCE(m.observed_at,i.observed_at)>=?5) AND
                     (?7 IS NOT NULL OR m.seq IS NOT NULL
                     OR (i.receipt_key=(SELECT receipt_key FROM session_events WHERE seq=s.current_capture) AND s.input_published=1)
-                    OR EXISTS(SELECT 1 FROM history.session_history origin WHERE origin.session_id=i.session_id
-                        AND origin.captured_event=i.seq AND origin.kind='started'))
+                    OR EXISTS(SELECT 1 FROM usage.turns origin WHERE origin.session_id=i.session_id
+                        AND origin.captured_event=i.seq))
                 UNION ALL
-                SELECT NULL,NULL,e.session_id,NULL,e.started,origin.task_id,origin.wave_id,
-                    COALESCE(MAX(attached.completed_at),e.completed),e.provider_thread,e.provider_turn,e.latest
-                FROM (SELECT turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn,
-                        MIN(observed_at) AS started,
-                        MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed,
-                        MAX(observed_at) AS latest
-                    FROM turns CROSS JOIN history.session_history turn_event USING (session_id,provider_thread,provider_turn)
-                    WHERE turn_event.kind IN ('started','usage','completed') AND turn_event.captured_event IS NULL
-                    GROUP BY turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn
-                    HAVING ?6 OR MIN(observed_at)>=?5) e
-                LEFT JOIN history.session_history origin
-                    ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
-                    AND origin.provider_turn=e.provider_turn AND origin.kind='started'
-                LEFT JOIN processes attached ON attached.id=origin.lf_process_id
-                WHERE origin.captured_event IS NULL
-                GROUP BY e.session_id,e.provider_thread,e.provider_turn)
+                SELECT NULL,NULL,t.session_id,NULL,COALESCE(t.started_at,t.usage_at,t.ended_at),t.task_id,t.wave_id,
+                    COALESCE(attached.completed_at,t.ended_at),t.provider_thread,t.provider_turn,
+                    MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
+                FROM turns CROSS JOIN usage.turns t ON t.id=turns.id
+                LEFT JOIN processes attached ON attached.id=t.lf_process_id
+                WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
                     ROW_NUMBER() OVER (PARTITION BY ended IS NULL ORDER BY started DESC,input_id DESC,session_id,thread,turn) AS ordinal,
                     COUNT(*) OVER () AS total
                 FROM inputs
                 WHERE (?1 IS NULL OR wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)
-                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM usage.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?1)))
                 AND (?2 IS NULL OR task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                     WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)
-                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM usage.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
                             WHERE p.id=?10 OR p.project_slug=?2 OR p.external_project_id=?11)))
                 AND (?3 IS NULL OR task_id=?3
-                    OR EXISTS (SELECT 1 FROM history.session_history origin WHERE origin.session_id=inputs.session_id
-                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured AND origin.kind='started'
+                    OR EXISTS (SELECT 1 FROM usage.turns origin WHERE origin.session_id=inputs.session_id
+                        AND inputs.captured IS NOT NULL AND origin.captured_event=inputs.captured
                         AND origin.task_id=?3))
                 AND (?4 IS NULL OR caller_input_id=?4 OR caller_input_id IN (SELECT receipt_key FROM session_events WHERE kind='captured' AND session_id=?12))
                 AND (started>=?5 OR (?6 AND ended>=?5)))
@@ -1347,14 +1331,19 @@ impl SqliteStore {
         };
         let history = match input.as_deref() {
             Some(input) => self.summary_for_input_matching(&session_id, input, scope)?,
-            None => {
-                self.orphaned_native_history(&session_id, scope, thread.as_ref(), turn.as_deref())?
-            }
+            None => Vec::new(),
         };
+        let turns = self.turns_matching(
+            &session_id,
+            input.as_deref(),
+            (thread.as_ref(), turn.as_deref()),
+            scope,
+        )?;
         Ok(HistoryInput {
             session,
             artifact_key: input,
             events: history,
+            turns,
             names,
         })
     }

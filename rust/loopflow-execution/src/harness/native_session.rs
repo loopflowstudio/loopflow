@@ -1692,9 +1692,8 @@ mod tests {
                 args: vec!["60".into()],
                 cwd: home.into(),
             };
-            let error =
-                session_command_status_with_env(&command, &environment, None, None, None)
-                    .unwrap_err();
+            let error = session_command_status_with_env(&command, &environment, None, None, None)
+                .unwrap_err();
             assert!(
                 error
                     .to_string()

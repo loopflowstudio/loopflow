@@ -93,3 +93,15 @@ tables and whether Process rows are needed are in LOO-953's
   end" as the direction said; the two differ only for a bind made mid-turn.
   Still open: whether reports default to these frozen values or follow later
   binds through the Session id.
+
+## Turn table choices (2026-11-16, headless, reversible)
+
+- Graph and step are frozen as the Graph's name and the step's compiled
+  `label` (`graph_processes.compiled.steps[key=node].label`), read through the
+  captured input's `lf_process_id`.
+- A conflicting second usage reading or completion status is a recording gap
+  that keeps the first, as receipts did; at TurnEnd a Claude transcript read
+  before its last assistant row could keep a short count (the old code kept
+  the first row too).
+- `NativeTurn.start_seq`/`completion_seq` now hold the turn row's id, so
+  Desktop's DTO keeps its shape; both are opaque.

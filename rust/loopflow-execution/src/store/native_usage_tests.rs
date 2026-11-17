@@ -1,6 +1,5 @@
 //! Native usage attribution through application attachment and input replacement.
 use crate::process::attachment;
-use loopflow_storage::session::SessionEventKind;
 use serde_json::json;
 #[test]
 fn native_usage_survives_attachment_and_input_replacement_without_double_counting() {
@@ -49,35 +48,32 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
         .unwrap();
     // The replacement AgentProcess observes the first one's surviving turn.
     store
-        .record_session_event(
+        .record_turn_usage(
             &session.id,
             &"thread".into(),
             "turn",
-            SessionEventKind::Usage,
+            2,
             &json!({"total":counts(20,5),"last":counts(20,5)}),
         )
         .unwrap();
     store
-        .record_session_event(
+        .record_turn_completion(
             &session.id,
             &"thread".into(),
             "turn",
-            SessionEventKind::Completed,
+            2,
             &json!({"status":"completed"}),
         )
         .unwrap();
-    // Start, usage and completion.
-    let history: Vec<_> = store
-        .session_history(&session.id, 0, 0)
-        .unwrap()
-        .into_iter()
-        .filter(|event| event.provider_turn.as_deref() == Some("turn"))
-        .collect();
-    assert_eq!(history.len(), 3);
-    assert!(history.iter().all(
-        |event| event.lf_process_id.as_deref() == Some(first.as_str())
-            && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
-    ));
+    // Start, usage and completion are one turn, attributed at its start.
+    let turns = store.session_turns(&session.id).unwrap();
+    assert_eq!(turns.len(), 1);
+    assert!(turns
+        .iter()
+        .all(|turn| turn.lf_process_id.as_deref() == Some(first.as_str())
+            && turn.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
+            && turn.usage.is_some()
+            && turn.ended_at.is_some()));
     let current =
         crate::store::sessions::input_history(&store, replacement.input_key().unwrap()).unwrap();
     assert_eq!(current.usage.input_tokens, None);
@@ -114,11 +110,11 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     assert_eq!(old.usage.final_streams, 0);
     // An unobserved start cannot borrow the replacement's input or attribution.
     store
-        .record_session_event(
+        .record_turn_usage(
             &session.id,
             &"thread".into(),
             "unknown",
-            SessionEventKind::Usage,
+            2,
             &json!({"total":counts(100,50),"last":counts(10,5)}),
         )
         .unwrap();
@@ -128,7 +124,7 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
     assert_eq!(current.usage.output_tokens, None);
     assert_eq!(
         store
-            .session_history(&session.id, 0, 0)
+            .session_turns(&session.id)
             .unwrap()
             .last()
             .unwrap()
@@ -145,11 +141,11 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
         )
         .unwrap();
     store
-        .record_session_event(
+        .record_turn_usage(
             &session.id,
             &"thread".into(),
             "partial",
-            SessionEventKind::Usage,
+            2,
             &json!({"total":counts(100,50),"last":counts(10,5)}),
         )
         .unwrap();

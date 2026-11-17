@@ -1,7 +1,7 @@
-//! A conversation's per-turn usage and completion, written to the store from
-//! its transcript. The transcript is the only writer of `usage` rows: one per
-//! turn id, with the turn's tokens and model, written when the turn ends and
-//! again when the provider exits. A turn that has a row keeps it.
+//! A conversation's per-turn usage and completion, written to `usage.turns`
+//! from its transcript. The transcript is the only writer of a turn's usage:
+//! its tokens and model, written when the turn ends and again when the
+//! provider exits. A turn that has a reading keeps it.
 //!
 //! At exit a last turn the transcript leaves open was cut off: its usage is
 //! written as it stands, and it is completed as `interrupted` at the
@@ -172,7 +172,6 @@ fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i6
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::SessionEventKind;
     use std::path::{Path, PathBuf};
 
     fn fixture(name: &str) -> PathBuf {
@@ -188,20 +187,32 @@ mod tests {
         (home, store)
     }
 
-    fn rows(store: &SqliteStore, kind: SessionEventKind) -> Vec<(String, i64, Value)> {
+    /// Each turn with usage: its id, when the usage was read, and the turn.
+    fn usage(store: &SqliteStore) -> Vec<(String, i64, crate::session::Turn)> {
+        turns(store, |turn| {
+            turn.usage.as_ref().map(|usage| usage.observed_at)
+        })
+    }
+
+    /// Each turn that ended: its id, when, and the turn.
+    fn finished(store: &SqliteStore) -> Vec<(String, i64, crate::session::Turn)> {
+        turns(store, |turn| turn.ended_at)
+    }
+
+    fn turns(
+        store: &SqliteStore,
+        at: impl Fn(&crate::session::Turn) -> Option<i64>,
+    ) -> Vec<(String, i64, crate::session::Turn)> {
         store
-            .session_history("conversation", 0, 0)
+            .session_turns("conversation")
             .unwrap()
             .into_iter()
-            .filter(|event| event.kind == kind)
-            .map(|event| {
-                (
-                    event.provider_turn.unwrap(),
-                    event.observed_at,
-                    event.payload,
-                )
-            })
+            .filter_map(|turn| Some((turn.turn.clone(), at(&turn)?, turn)))
             .collect()
+    }
+
+    fn reading(turn: &crate::session::Turn) -> &loopflow_model::chat::types::TurnUsage {
+        &turn.usage.as_ref().unwrap().usage
     }
 
     #[test]
@@ -221,22 +232,32 @@ mod tests {
         assert_eq!(record().unwrap(), 1);
         assert_eq!(record().unwrap(), 0);
 
-        let usage = rows(&store, SessionEventKind::Usage);
+        let usage = usage(&store);
         assert_eq!(usage.len(), 1);
         assert_eq!((usage[0].0.as_str(), usage[0].1), ("u1", 1_794_328_071));
+        let turn = &usage[0].2;
         assert_eq!(
-            usage[0].2,
-            json!({"provider":"claude","final":true,"usage":{
-                "input_tokens":4,"output_tokens":1100,"total_input_tokens":41200,
-                "cache_read_tokens":38000,"cache_write_tokens":3196,"model":"claude-opus-5-5"}})
+            *reading(turn),
+            loopflow_model::chat::types::TurnUsage {
+                input_tokens: Some(4),
+                output_tokens: Some(1100),
+                total_input_tokens: Some(41200),
+                cache_read_tokens: Some(38000),
+                cache_write_tokens: Some(3196),
+                model: Some("claude-opus-5-5".into()),
+                ..Default::default()
+            }
         );
-        let reading: loopflow_model::chat::types::TurnUsage =
-            serde_json::from_value(usage[0].2["usage"].clone()).unwrap();
-        assert_eq!(reading.cost_usd, None);
+        assert!(turn.usage.as_ref().unwrap().final_reading);
+        assert_eq!(turn.provider.as_deref(), Some("claude"));
         assert_eq!(
-            rows(&store, SessionEventKind::Completed)[0].2,
-            json!({"status":"completed","started_at":1_794_327_937,"completed_at":1_794_328_071,
-                "duration_ms":134_000,"result_id":null,"subtype":null,"errors":null})
+            (
+                turn.ended_at,
+                turn.status.as_deref(),
+                turn.duration_ms,
+                &turn.error
+            ),
+            (Some(1_794_328_071), Some("completed"), Some(134_000), &None)
         );
     }
 
@@ -264,10 +285,13 @@ mod tests {
         std::fs::write(&path, &whole).unwrap();
         assert_eq!(ended(&path).unwrap(), 1);
         assert_eq!(ended(&path).unwrap(), 0);
-        let usage = rows(&store, SessionEventKind::Usage);
-        assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].2["usage"]["model"], "claude-opus-5-5");
-        assert!(rows(&store, SessionEventKind::Completed).is_empty());
+        let read = usage(&store);
+        assert_eq!(read.len(), 1);
+        assert_eq!(
+            reading(&read[0].2).model.as_deref(),
+            Some("claude-opus-5-5")
+        );
+        assert!(finished(&store).is_empty());
 
         // The exit read finds the row and adds only the completion nothing recorded.
         assert_eq!(
@@ -281,8 +305,8 @@ mod tests {
             .unwrap(),
             1
         );
-        assert_eq!(rows(&store, SessionEventKind::Usage).len(), 1);
-        assert_eq!(rows(&store, SessionEventKind::Completed).len(), 1);
+        assert_eq!(usage(&store).len(), 1);
+        assert_eq!(finished(&store).len(), 1);
     }
 
     #[test]
@@ -304,14 +328,14 @@ mod tests {
             )
         };
         assert_eq!(ended().unwrap(), 1);
-        assert_eq!(rows(&store, SessionEventKind::Usage)[0].0, "turn-1");
+        assert_eq!(usage(&store)[0].0, "turn-1");
         std::fs::write(&path, &whole).unwrap();
         assert_eq!(ended().unwrap(), 1);
-        assert_eq!(rows(&store, SessionEventKind::Usage)[1].0, "turn-2");
+        assert_eq!(usage(&store)[1].0, "turn-2");
     }
 
     #[test]
-    fn a_codex_rollout_writes_each_turn_with_its_baseline() {
+    fn a_codex_rollout_writes_each_turn_as_its_own_counts() {
         let (_home, store) = store();
         let thread = AgentSessionId::from("0199a213-81c0-7800-8aa1-bbab2a035a53");
         let written = record(
@@ -323,14 +347,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written, 2);
-        let usage = rows(&store, SessionEventKind::Usage);
+        let usage = usage(&store);
         assert_eq!(usage[1].0, "turn-2");
-        assert_eq!(usage[1].2["baseline"]["inputTokens"], 20000);
-        assert_eq!(usage[1].2["total"]["cachedInputTokens"], 30000);
-        assert_eq!(usage[1].2["last"]["reasoningOutputTokens"], 100);
-        assert_eq!(usage[1].2["peakInputTokens"], 25000);
-        let completed = rows(&store, SessionEventKind::Completed);
-        assert_eq!(completed[0].2["status"], "completed");
+        // The thread's totals less where the second turn began.
+        let second = reading(&usage[1].2);
+        assert_eq!(second.total_input_tokens, Some(25000));
+        assert_eq!(second.cache_read_tokens, Some(18000));
+        assert_eq!(second.input_tokens, Some(7000));
+        assert_eq!(second.output_tokens, Some(500));
+        assert_eq!(second.reasoning_tokens, Some(100));
+        assert_eq!(second.peak_input_tokens, Some(25000));
+        assert!(!usage[1].2.usage.as_ref().unwrap().partial);
+        let completed = finished(&store);
+        assert_eq!(completed[0].2.status.as_deref(), Some("completed"));
         assert_eq!(completed[1].1, 1_794_327_909);
     }
 
@@ -357,14 +386,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(written, 2);
-        let turns = |kind| {
-            rows(&store, kind)
-                .into_iter()
-                .map(|(turn, ..)| turn)
-                .collect::<Vec<_>>()
+        let ids = |read: Vec<(String, i64, crate::session::Turn)>| {
+            read.into_iter().map(|(turn, ..)| turn).collect::<Vec<_>>()
         };
-        assert_eq!(turns(SessionEventKind::Usage), ["turn-1", "turn-2"]);
-        assert_eq!(turns(SessionEventKind::Completed), ["turn-1", "turn-2"]);
+        assert_eq!(ids(usage(&store)), ["turn-1", "turn-2"]);
+        assert_eq!(ids(finished(&store)), ["turn-1", "turn-2"]);
+        // The live end stands; the transcript did not end it again.
+        assert_eq!(finished(&store)[0].1, 1_794_327_609);
     }
 
     #[test]
@@ -414,14 +442,14 @@ mod tests {
         assert_eq!(record().unwrap(), 1);
         assert_eq!(record().unwrap(), 0);
 
-        let usage = rows(&store, SessionEventKind::Usage);
-        assert_eq!(usage.len(), 1);
-        assert_eq!((usage[0].0.as_str(), usage[0].1), ("u1", 1_794_326_430));
-        assert_eq!(usage[0].2["usage"]["output_tokens"], 40);
-        let completed = rows(&store, SessionEventKind::Completed);
+        let read = usage(&store);
+        assert_eq!(read.len(), 1);
+        assert_eq!((read[0].0.as_str(), read[0].1), ("u1", 1_794_326_430));
+        assert_eq!(reading(&read[0].2).output_tokens, Some(40));
+        let completed = finished(&store);
         assert_eq!(completed.len(), 1);
-        assert_eq!(completed[0].2["status"], "interrupted");
-        assert_eq!(completed[0].2["completed_at"], 1_794_326_430);
+        assert_eq!(completed[0].2.status.as_deref(), Some("interrupted"));
+        assert_eq!(completed[0].1, 1_794_326_430);
 
         // Resumed: the next request ends that turn and starts another.
         lines.push(row(
@@ -436,15 +464,15 @@ mod tests {
         ));
         std::fs::write(&path, lines.join("\n")).unwrap();
         assert_eq!(record().unwrap(), 1);
-        let completed = rows(&store, SessionEventKind::Completed);
+        let completed = finished(&store);
         assert_eq!(
             completed
                 .iter()
-                .map(|(turn, _, detail)| (turn.as_str(), detail["status"].as_str().unwrap()))
+                .map(|(turn, _, read)| (turn.as_str(), read.status.as_deref().unwrap()))
                 .collect::<Vec<_>>(),
             [("u1", "interrupted"), ("u2", "completed")]
         );
-        assert_eq!(rows(&store, SessionEventKind::Usage).len(), 2);
+        assert_eq!(usage(&store).len(), 2);
     }
 
     #[test]
@@ -496,13 +524,12 @@ mod tests {
         let record = || record(&store, "conversation", HarnessKind::Pi, &thread, &source);
         assert_eq!(record().unwrap(), 1);
         assert_eq!(record().unwrap(), 0);
-        let usage = rows(&store, SessionEventKind::Usage);
+        let usage = usage(&store);
         assert_eq!((usage[0].0.as_str(), usage[0].1), ("u1", 1_794_327_909));
-        assert_eq!(usage[0].2["provider"], "pi");
-        assert_eq!(usage[0].2["usage"]["cost_usd"], 0.25);
-        assert_eq!(usage[0].2["usage"]["total_input_tokens"], 100);
-        let completed = rows(&store, SessionEventKind::Completed);
-        assert_eq!(completed[0].2["status"], "completed");
-        assert_eq!(completed[0].2["started_at"], 1_794_327_900);
+        assert_eq!(usage[0].2.provider.as_deref(), Some("pi"));
+        assert_eq!(reading(&usage[0].2).cost_usd, Some(0.25));
+        assert_eq!(reading(&usage[0].2).total_input_tokens, Some(100));
+        let completed = finished(&store);
+        assert_eq!(completed[0].2.status.as_deref(), Some("completed"));
     }
 }

@@ -1044,10 +1044,10 @@ mod tests {
         /// How many provider turns were recorded complete for a Session.
         fn completions(&self, id: &str) -> usize {
             self.store
-                .session_history(id, 0, 0)
+                .session_turns(id)
                 .unwrap()
                 .into_iter()
-                .filter(|event| event.kind == crate::session::SessionEventKind::Completed)
+                .filter(|turn| turn.ended_at.is_some())
                 .count()
         }
     }

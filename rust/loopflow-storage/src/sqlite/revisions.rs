@@ -35,9 +35,12 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub graphs: i64,
     pub processes: i64,
-    /// Session and Process history in `history.db`. Moves with every turn;
-    /// only a read that names `history.*` waits on it.
+    /// Session history in `history.db`; only a read that names `history.*`
+    /// waits on it.
     pub history: i64,
+    /// Provider turns in `usage.db`. Moves at every turn's start and end;
+    /// only a read that names `usage.*` waits on it.
+    pub turns: i64,
 }
 
 impl SqliteStore {
@@ -75,6 +78,7 @@ impl SqliteStore {
             graphs: 0,
             processes: 0,
             history: 0,
+            turns: 0,
         };
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
         let mut rows = query.query([])?;
@@ -90,6 +94,10 @@ impl SqliteStore {
         }
         revisions.history =
             conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
+                row.get(0)
+            })?;
+        revisions.turns =
+            conn.query_row("SELECT revision FROM usage.turns_revision", [], |row| {
                 row.get(0)
             })?;
         Ok(revisions)
@@ -482,31 +490,36 @@ mod tests {
     }
 
     #[test]
-    fn history_moves_only_its_own_revision() {
+    fn history_and_turns_move_only_their_own_revisions() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        for kind in ["usage", "started", "completed", "observed"] {
-            store
-                .record_session_event(
-                    "conversation",
-                    &"thread".into(),
-                    kind,
-                    match kind {
-                        "usage" => crate::session::SessionEventKind::Usage,
-                        "started" => crate::session::SessionEventKind::Started,
-                        "completed" => crate::session::SessionEventKind::Completed,
-                        _ => crate::session::SessionEventKind::Observed,
-                    },
-                    &serde_json::json!({}),
-                )
-                .unwrap();
-        }
+        store.record_turn_start("conversation", &"thread".into(), "turn", 1);
+        store
+            .record_turn_completion(
+                "conversation",
+                &"thread".into(),
+                "turn",
+                2,
+                &serde_json::json!({"status": "completed"}),
+            )
+            .unwrap();
+        store.append_history(
+            "observation",
+            &[crate::history::Row::observed(
+                "conversation",
+                "store-gap:1:2".into(),
+                None,
+                1,
+                "{}".into(),
+            )],
+        );
         let after = store.revisions().unwrap();
         assert_eq!(
             after,
             StoreRevisions {
-                history: before.history + 4,
+                history: before.history + 1,
+                turns: before.turns + 2,
                 ..before
             }
         );

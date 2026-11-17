@@ -1352,10 +1352,10 @@ mod tests {
             Some("saved-thread".into())
         );
         assert!(store
-            .session_history("saved", 0, 100)
+            .session_turns("saved")
             .unwrap()
             .iter()
-            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
+            .all(|turn| turn.ended_at.is_none()));
     }
 
     #[test]

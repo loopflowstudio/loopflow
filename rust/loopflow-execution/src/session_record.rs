@@ -936,6 +936,7 @@ pub(crate) fn project_input_history(
     session: &loopflow_storage::session::HistoryCapture,
     artifact_key: Option<&str>,
     history: &[loopflow_storage::session::SessionEvent],
+    turns: &[loopflow_storage::session::Turn],
     names: (Option<String>, Option<String>),
 ) -> std::io::Result<SessionHistory> {
     let mut facts = Vec::new();
@@ -964,11 +965,10 @@ pub(crate) fn project_input_history(
         }
     }
     facts.sort_by_key(|fact| fact.seq);
-    let (readings, unread) = native_usage(history);
     let providers =
-        project_provider_history(session.captured, artifact_key, &facts, &readings, history)?;
-    let usage = reduce_usage(&readings);
-    gaps += unread + usage.gaps + usize::from(manifest.is_none());
+        project_provider_history(session.captured, artifact_key, &facts, turns, history)?;
+    let usage = reduce_usage(turns);
+    gaps += usage.gaps + usize::from(manifest.is_none());
     let current = session.captured.is_some() && session.current_capture == session.captured;
     Ok(SessionHistory {
         session_id: session.id.clone(),
@@ -1004,7 +1004,7 @@ pub(crate) fn project_input_history(
             .as_ref()
             .map(|receipt| receipt.ended_at.unix_timestamp()),
         observed_at: session.observed_at,
-        first_provider_attempt_at: providers_first_start(history)
+        first_provider_attempt_at: providers_first_start(turns)
             .into_iter()
             .chain(facts.iter().find_map(|fact| {
                 matches!(fact.fact, CaptureFact::ProviderAttemptStarted { .. })

@@ -125,6 +125,7 @@ pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> Sto
         {relocated}
         UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
         UNION SELECT h.lf_process_id FROM history.session_history h WHERE h.session_id IN (SELECT id FROM members) AND h.lf_process_id IS NOT NULL
+        UNION SELECT t.lf_process_id FROM usage.turns t WHERE t.session_id IN (SELECT id FROM members) AND t.lf_process_id IS NOT NULL
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
         session_ids(selector), tasks(selector)))
@@ -144,6 +145,7 @@ pub(super) fn task_of_process(
                     SELECT session_id AS id FROM session_events INDEXED BY session_events_process
                         WHERE lf_process_id=?1
                     UNION SELECT session_id FROM history.session_history WHERE lf_process_id=?1
+                    UNION SELECT session_id FROM usage.turns WHERE lf_process_id=?1
                     UNION SELECT agent_session_id FROM processes
                         WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
                  SELECT tw.id FROM ({TASK_CHECKOUTS}) tw JOIN processes e ON e.id=?1
@@ -653,6 +655,7 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
         sessions AS (SELECT DISTINCT se.lf_process_id AS process,se.session_id AS session
             FROM open CROSS JOIN session_events se ON se.lf_process_id=open.id
             UNION SELECT h.lf_process_id,h.session_id FROM open CROSS JOIN history.session_history h ON h.lf_process_id=open.id
+            UNION SELECT t.lf_process_id,t.session_id FROM open CROSS JOIN usage.turns t ON t.lf_process_id=open.id
             UNION SELECT p.attached_lf_process_id,p.agent_session_id FROM open CROSS JOIN processes p INDEXED BY agent_process_attachment ON p.attached_lf_process_id=open.id WHERE p.kind='agent'
             UNION SELECT id,agent_session_id FROM open WHERE agent_session_id IS NOT NULL)
         SELECT tw.id AS task_id,open.id AS process FROM open JOIN task_scope tw ON {}
@@ -1223,8 +1226,8 @@ mod tests {
              UPDATE processes SET cwd='/repo/task' WHERE id='00000000-0000-4000-8000-000000000001';
              UPDATE processes SET cwd='/repo/task/sub' WHERE id='00000000-0000-4000-8000-000000000002';
              UPDATE processes SET cwd='/repo/task-other' WHERE id='00000000-0000-4000-8000-000000000003';
-             INSERT INTO history.session_history(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
-             VALUES('member','started','history','00000000-0000-4000-8000-000000000004',1,'{}');
+             INSERT INTO usage.turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
+             VALUES('member','thread','turn','00000000-0000-4000-8000-000000000004',1);
              UPDATE processes SET agent_session_id='member',attached_lf_process_id='00000000-0000-4000-8000-000000000005'
                 WHERE id='00000000-0000-4000-8000-000000001001';
              INSERT INTO relocated_task_processes(task_id,process_id)

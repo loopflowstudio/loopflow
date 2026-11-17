@@ -61,21 +61,15 @@ impl SqliteStore {
         let mut threads: Vec<ThreadFacts> = Vec::new();
         {
             let mut query = conn.prepare(
-                "SELECT e.provider_thread,e.provider_turn,e.kind,e.observed_at,e.payload,
+                "SELECT t.provider_thread,t.provider_turn,t.started_at,t.ended_at,t.status,
                         json_extract(c.payload,'$.provider')
-                 FROM history.session_history e
-                 LEFT JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured'
-                 WHERE e.session_id=?1 AND e.kind IN ('started','completed')
-                   AND e.provider_thread IS NOT NULL
-                 ORDER BY e.seq",
+                 FROM usage.turns t
+                 LEFT JOIN session_events c ON c.seq=t.captured_event AND c.kind='captured'
+                 WHERE t.session_id=?1 ORDER BY t.id",
             )?;
             let mut rows = query.query([session])?;
             while let Some(row) = rows.next()? {
                 let thread: String = row.get(0)?;
-                let turn: Option<String> = row.get(1)?;
-                let kind: String = row.get(2)?;
-                let at: i64 = row.get(3)?;
-                let payload: Value = serde_json::from_str(&row.get::<_, String>(4)?)?;
                 let harness: Option<String> = row.get(5)?;
                 let index = match threads.iter().position(|t| t.thread.as_str() == thread) {
                     Some(index) => index,
@@ -93,26 +87,12 @@ impl SqliteStore {
                 if facts.harness.is_none() {
                     facts.harness = harness;
                 }
-                let turn = turn.unwrap_or_default();
-                let position = match facts.turns.iter().position(|t| t.turn == turn) {
-                    Some(position) => position,
-                    None => {
-                        facts.turns.push(TurnFacts {
-                            turn,
-                            started_at: None,
-                            settled_at: None,
-                            status: None,
-                        });
-                        facts.turns.len() - 1
-                    }
-                };
-                let entry = &mut facts.turns[position];
-                if kind == "started" {
-                    entry.started_at = Some(at);
-                } else {
-                    entry.settled_at = Some(at);
-                    entry.status = payload["status"].as_str().map(str::to_owned);
-                }
+                facts.turns.push(TurnFacts {
+                    turn: row.get(1)?,
+                    started_at: row.get(2)?,
+                    settled_at: row.get(3)?,
+                    status: row.get(4)?,
+                });
             }
         }
         let (current, provider): (Option<String>, Option<String>) = conn
@@ -177,21 +157,15 @@ impl SqliteStore {
         turn: &str,
     ) -> StoreResult<Option<(i64, Option<String>)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let end = conn
+        Ok(conn
             .query_row(
-                "SELECT observed_at,payload FROM history.session_history
+                "SELECT ended_at,status FROM usage.turns
                  WHERE session_id=?1 AND provider_thread=?2 AND provider_turn=?3
-                   AND kind='completed'
-                 ORDER BY seq DESC LIMIT 1",
+                   AND ended_at IS NOT NULL",
                 params![session, thread, turn],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
-            .optional()?;
-        end.map(|(at, payload)| {
-            let payload: Value = serde_json::from_str(&payload)?;
-            Ok((at, payload["status"].as_str().map(str::to_owned)))
-        })
-        .transpose()
+            .optional()?)
     }
 
     /// The newest Session whose current provider conversation each of
@@ -278,21 +252,15 @@ impl SqliteStore {
         input: &str,
     ) -> StoreResult<Vec<Option<crate::session::TurnContext>>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT json_extract(done.payload,'$.context') FROM history.session_history start
-             JOIN history.session_history done ON done.session_id=start.session_id
-               AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
-               AND done.kind='completed'
-             WHERE start.kind='started' AND start.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)
-             ORDER BY done.seq",
-        )?;
-        let rows = query.query_map([input], |row| row.get::<_, Option<String>>(0))?;
-        rows.map(|row| {
-            row?.map(|context| serde_json::from_str(&context))
-                .transpose()
-                .map_err(Into::into)
-        })
-        .collect()
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM usage.turns t
+             WHERE t.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1)
+               AND t.ended_at IS NOT NULL
+             ORDER BY t.ended_at,t.id",
+            super::turns::turn_columns("t")
+        ))?;
+        let rows = query.query_map([input], super::turns::read_turn)?;
+        rows.map(|row| Ok(row??.context)).collect()
     }
 
     /// The provider turn that last answered `input`: the newest turn it
@@ -302,14 +270,11 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 "SELECT c.session_id,COALESCE(json_extract(c.payload,'$.provider'),s.provider),
-                        start.provider_thread,start.provider_turn,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
+                        t.provider_thread,t.provider_turn,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
                  FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
-                 CROSS JOIN history.session_history start ON start.captured_event=c.seq AND start.kind='started'
-                 JOIN history.session_history done ON done.session_id=start.session_id
-                   AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
-                   AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'
+                 CROSS JOIN usage.turns t ON t.captured_event=c.seq AND t.status='completed'
                  WHERE c.kind='captured' AND c.receipt_key=?1
-                 ORDER BY done.seq DESC LIMIT 1",
+                 ORDER BY t.ended_at DESC,t.id DESC LIMIT 1",
                 [input],
                 |row| {
                     Ok(AnsweredTurn {
@@ -460,29 +425,7 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Retain a provider observation even when its attachment has
-    /// changed. Observation grants neither native write nor Graph authority.
-    pub fn record_session_event(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-        turn: &str,
-        kind: SessionEventKind,
-        payload: &Value,
-    ) -> StoreResult<()> {
-        let row = native_row(
-            session,
-            thread,
-            turn,
-            kind,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-            serde_json::to_string(payload)?,
-        );
-        self.append_history("provider turn", &[row]);
-        Ok(())
-    }
-
-    /// Whether the turn's completion is already retained; a provider snapshot
+    /// Whether the turn's completion is already kept; a provider snapshot
     /// replays completions of turns it has finished before.
     pub fn session_turn_completed(
         &self,
@@ -493,9 +436,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT 1 FROM history.session_history WHERE session_id=?1 AND provider_thread=?2
-                 AND provider_turn=?3 AND kind=?4",
-                params![session, thread, turn, SessionEventKind::Completed.as_str()],
+                "SELECT 1 FROM usage.turns WHERE session_id=?1 AND provider_thread=?2
+                 AND provider_turn=?3 AND ended_at IS NOT NULL",
+                params![session, thread, turn],
                 |_| Ok(()),
             )
             .optional()?
@@ -510,68 +453,13 @@ impl SqliteStore {
     ) -> StoreResult<Vec<(String, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare_cached(
-            "SELECT provider_turn,observed_at FROM history.session_history
-             WHERE session_id=?1 AND provider_thread=?2 AND kind='completed'
-               AND provider_turn IS NOT NULL",
+            "SELECT provider_turn,ended_at FROM usage.turns
+             WHERE session_id=?1 AND provider_thread=?2 AND ended_at IS NOT NULL",
         )?;
         let rows = query.query_map(params![session, thread], |row| {
             Ok((row.get(0)?, row.get(1)?))
         })?;
         rows.map(|row| row.map_err(StoreError::from)).collect()
-    }
-
-    /// Record `turn`'s usage as its provider's transcript shows it, dated
-    /// `at`. A turn keeps the usage row it has; returns whether one was written.
-    pub fn record_turn_usage(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-        turn: &str,
-        at: i64,
-        usage: &Value,
-    ) -> StoreResult<bool> {
-        let usage = serde_json::to_string(usage)?;
-        Ok(self
-            .write_history("turn usage", |tx| {
-                let kept = tx
-                    .query_row(
-                        "SELECT 1 FROM session_history WHERE session_id=?1 AND provider_thread=?2
-                         AND provider_turn=?3 AND kind='usage'",
-                        params![session, thread, turn],
-                        |_| Ok(()),
-                    )
-                    .optional()?
-                    .is_some();
-                if kept {
-                    return Ok(false);
-                }
-                let row = native_row(session, thread, turn, SessionEventKind::Usage, at, usage);
-                crate::history::append_in(tx, &row)?;
-                Ok(true)
-            })
-            .unwrap_or(false))
-    }
-
-    /// Record `turn`'s completion as its provider's transcript shows it,
-    /// dated `at`, when the turn ended.
-    pub fn record_turn_completion(
-        &self,
-        session: &str,
-        thread: &AgentSessionId,
-        turn: &str,
-        at: i64,
-        completed: &Value,
-    ) -> StoreResult<()> {
-        let row = native_row(
-            session,
-            thread,
-            turn,
-            SessionEventKind::Completed,
-            at,
-            serde_json::to_string(completed)?,
-        );
-        self.append_history("turn completion", &[row]);
-        Ok(())
     }
 
     /// Freeze the request's attribution while its attachment still owns dispatch.
@@ -585,7 +473,16 @@ impl SqliteStore {
         })?;
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT s.task_id,s.wave_id,s.current_capture FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+            "SELECT s.task_id,s.wave_id,s.current_capture,t.project_id,s.repo,
+                    COALESCE(json_extract(c.payload,'$.skill'),s.skill),
+                    COALESCE(json_extract(c.payload,'$.provider'),s.provider),g.graph,
+                    (SELECT json_extract(step.value,'$.label') FROM json_each(g.compiled,'$.steps') step
+                     WHERE json_extract(step.value,'$.key')=gs.node)
+             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             LEFT JOIN tasks t ON t.id=s.task_id
+             LEFT JOIN session_events c ON c.seq=s.current_capture
+             LEFT JOIN graph_process_steps gs ON gs.lf_process_id=c.lf_process_id
+             LEFT JOIN graph_processes g ON g.lf_process_id=gs.graph_lf_process_id
              WHERE s.id=?1 AND p.attachment_token=?2 AND p.attached_lf_process_id=?3
                AND p.id=?4",
             params![
@@ -602,65 +499,17 @@ impl SqliteStore {
                     task_id: row.get(0)?,
                     wave_id: row.get(1)?,
                     captured_event: row.get(2)?,
+                    project_id: row.get(3)?,
+                    repository: row.get(4)?,
+                    skill: row.get(5)?,
+                    provider: row.get(6)?,
+                    graph: row.get(7)?,
+                    step: row.get(8)?,
                 })
             },
         )
         .optional()?
         .ok_or_else(|| StoreError::InvalidAuthority("Session attachment changed".into()))
-    }
-
-    /// Retain correlated origin after takeover without reading current
-    /// assignment. An uncorrelated start acquires its origin once; repeated
-    /// evidence must match every field, including an explicitly absent bind.
-    pub fn record_session_turn_origin(
-        &self,
-        thread: &AgentSessionId,
-        turn: &str,
-        origin: &crate::session::SessionTurnOrigin,
-    ) -> StoreResult<()> {
-        let started = native_row(
-            &origin.session_id,
-            thread,
-            turn,
-            SessionEventKind::Started,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-            "{}".into(),
-        );
-        self.write_history("turn origin", |tx| {
-            let seq = crate::history::append_in(tx, &started)?;
-            let values = params![
-                seq,
-                origin.lf_process_id,
-                origin.agent_process_id,
-                origin.task_id,
-                origin.wave_id,
-                origin.captured_event
-            ];
-            let matches: Option<bool> = tx
-                .query_row(
-                    "SELECT lf_process_id IS ?2 AND agent_process_id IS ?3
-                        AND task_id IS ?4 AND wave_id IS ?5 AND captured_event IS ?6
-                     FROM session_history WHERE seq=?1 AND lf_process_id IS NOT NULL",
-                    values,
-                    |row| row.get(0),
-                )
-                .optional()?;
-            match matches {
-                Some(true) => Ok(()),
-                Some(false) => Err(StoreError::InvalidData(
-                    "Native turn has different initiating evidence".into(),
-                )),
-                None => {
-                    tx.execute(
-                        "UPDATE session_history SET lf_process_id=?2,agent_process_id=?3,
-                            task_id=?4,wave_id=?5,captured_event=?6 WHERE seq=?1",
-                        values,
-                    )?;
-                    Ok(())
-                }
-            }
-        });
-        Ok(())
     }
 
     pub fn session_history(
@@ -669,27 +518,64 @@ impl SqliteStore {
         after: i64,
         limit: usize,
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, after, limit, None, (None, None, None), None)
+        self.read_history(session, after, limit, None, (None, None, None))
     }
 
-    /// Keep usage, provenance and unknown evidence; transcript payloads belong to detail.
+    /// Keep provenance and unknown evidence; transcript payloads belong to detail.
     pub(super) fn summary_for_input_matching(
         &self,
         session: &str,
         input: &str,
         scope: (Option<&str>, Option<&str>, Option<&str>),
     ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, Some(input), scope, None)
+        self.read_history(session, 0, 0, Some(input), scope)
     }
 
-    pub(super) fn orphaned_native_history(
+    /// The turns of `session` the scope selects: those `input` started, or
+    /// with no input, the one unattributed turn `orphan` names.
+    pub(super) fn turns_matching(
         &self,
         session: &str,
+        input: Option<&str>,
+        orphan: (Option<&AgentSessionId>, Option<&str>),
         scope: (Option<&str>, Option<&str>, Option<&str>),
-        thread: Option<&AgentSessionId>,
-        turn: Option<&str>,
-    ) -> StoreResult<Vec<SessionEvent>> {
-        self.read_history(session, 0, 0, None, scope, Some((thread, turn)))
+    ) -> StoreResult<Vec<crate::session::Turn>> {
+        let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(&format!(
+            "SELECT {} FROM usage.turns t
+             WHERE t.session_id=?1
+             AND CASE WHEN ?2 IS NULL THEN t.captured_event IS NULL
+                     AND t.provider_thread IS ?3 AND t.provider_turn IS ?4
+                 ELSE t.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?2) END
+             AND (?5 IS NULL OR t.wave_id IN (SELECT id FROM wave_addresses WHERE id=?8 OR slug=?5))
+             AND (?6 IS NULL OR t.task_id IN (SELECT tk.id FROM projects p CROSS JOIN tasks tk ON tk.project_id=p.id
+                 WHERE p.id=?9 OR p.project_slug=?6 OR p.external_project_id=?10))
+             AND (?7 IS NULL OR t.task_id IN (SELECT id FROM tasks WHERE id=?11 OR issue_identifier=?12 OR external_issue_id=?13))
+             ORDER BY t.id",
+            super::turns::turn_columns("t")
+        ))?;
+        let rows = query.query_map(
+            params![
+                loopflow_model::id::canonical_session(session),
+                input,
+                orphan.0,
+                orphan.1,
+                scope.0,
+                scope.1,
+                scope.2,
+                scope.0.map(loopflow_model::id::canonical_uuid),
+                scope
+                    .1
+                    .map(|project| loopflow_model::id::canonical_prefixed(project, "proj_")),
+                scope.1.map(loopflow_model::id::canonical_uuid),
+                task.as_ref().map(|task| &task.id),
+                task.as_ref().map(|task| &task.label),
+                task.as_ref().map(|task| &task.external),
+            ],
+            super::turns::read_turn,
+        )?;
+        rows.map(|row| row?).collect()
     }
 
     fn read_history(
@@ -699,34 +585,22 @@ impl SqliteStore {
         limit: usize,
         input: Option<&str>,
         scope: (Option<&str>, Option<&str>, Option<&str>),
-        orphaned: Option<(Option<&AgentSessionId>, Option<&str>)>,
     ) -> StoreResult<Vec<SessionEvent>> {
         let task = scope.2.map(loopflow_model::id::TaskSelector::parse);
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // History rows answer to their own scope, provider turn rows to their
-        // turn's origin. Inputs are Session state in the store, not history.
+        // Observations answer to their own scope. Inputs are Session state in
+        // the store and turns are in `usage.turns`, not history.
         let mut query = conn.prepare(
-            "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,e.kind,
-                    CASE WHEN e.kind='observed' THEN e.agent_process_id ELSE origin.agent_process_id END,
-                    CASE WHEN e.kind='observed' THEN e.lf_process_id ELSE origin.lf_process_id END,
-                    CASE WHEN e.kind='observed' THEN e.task_id ELSE origin.task_id END,
-                    CASE WHEN e.kind='observed' THEN e.wave_id ELSE origin.wave_id END,e.observed_at,e.payload
-             FROM history.session_history e LEFT JOIN history.session_history origin
-               ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
-               AND origin.provider_turn=e.provider_turn AND origin.kind='started'
-             WHERE e.session_id=?11 AND e.seq>?2
-             AND (NOT ?8 OR (e.kind IN ('started','usage','completed') AND COALESCE(origin.captured_event,e.captured_event) IS NULL
-                  AND e.provider_thread IS ?9 AND e.provider_turn IS ?10))
-             AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
-                  OR (e.kind!='observed' AND COALESCE(origin.captured_event,e.captured_event)=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?4)))
-             AND ((e.kind='observed' AND CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json')) OR (
-                 (?5 IS NULL OR (CASE WHEN e.kind='observed' THEN e.wave_id ELSE origin.wave_id END)
-                     IN (SELECT id FROM wave_addresses WHERE id=?12 OR slug=?5))
-                 AND (?6 IS NULL OR (CASE WHEN e.kind='observed' THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
-                         WHERE p.id=?13 OR p.project_slug=?6 OR p.external_project_id=?14))
-                 AND (?7 IS NULL OR (CASE WHEN e.kind='observed' THEN e.task_id ELSE origin.task_id END)
-                     IN (SELECT id FROM tasks WHERE id=?15 OR issue_identifier=?16 OR external_issue_id=?17))))
+            "SELECT e.seq,e.session_id,e.provider_thread,e.provider_turn,
+                    e.agent_process_id,e.lf_process_id,e.task_id,e.wave_id,e.observed_at,e.payload
+             FROM history.session_history e
+             WHERE e.session_id=?8 AND e.seq>?2 AND e.kind='observed'
+             AND (?4 IS NULL OR substr(e.receipt_key,1,length(?4)+1)=?4||':')
+             AND (CASE WHEN json_valid(e.payload) THEN json_extract(e.payload,'$.source') END IN ('manifest.json','runs','terminal.json') OR (
+                 (?5 IS NULL OR e.wave_id IN (SELECT id FROM wave_addresses WHERE id=?9 OR slug=?5))
+                 AND (?6 IS NULL OR e.task_id IN (SELECT t.id FROM projects p CROSS JOIN tasks t ON t.project_id=p.id
+                         WHERE p.id=?10 OR p.project_slug=?6 OR p.external_project_id=?11))
+                 AND (?7 IS NULL OR e.task_id IN (SELECT id FROM tasks WHERE id=?12 OR issue_identifier=?13 OR external_issue_id=?14))))
              ORDER BY e.seq LIMIT ?3",
         )?;
         let rows = query.query_map(
@@ -738,9 +612,6 @@ impl SqliteStore {
                 scope.0,
                 scope.1,
                 scope.2,
-                orphaned.is_some(),
-                orphaned.and_then(|(thread, _)| thread),
-                orphaned.and_then(|(_, turn)| turn),
                 loopflow_model::id::canonical_session(session),
                 scope.0.map(loopflow_model::id::canonical_uuid),
                 scope
@@ -757,13 +628,12 @@ impl SqliteStore {
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<AgentSessionId>>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, String>(4)?,
+                    row.get::<_, Option<String>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
                     row.get::<_, Option<String>>(7)?,
-                    row.get::<_, Option<String>>(8)?,
-                    row.get::<_, i64>(9)?,
-                    row.get::<_, String>(10)?,
+                    row.get::<_, i64>(8)?,
+                    row.get::<_, String>(9)?,
                 ))
             },
         )?;
@@ -773,7 +643,6 @@ impl SqliteStore {
                 session_id,
                 agent_session,
                 provider_turn,
-                kind,
                 agent_process_id,
                 lf_process_id,
                 task_id,
@@ -786,17 +655,7 @@ impl SqliteStore {
                 session_id: session_id.into(),
                 agent_session,
                 provider_turn,
-                kind: match kind.as_str() {
-                    "started" => SessionEventKind::Started,
-                    "usage" => SessionEventKind::Usage,
-                    "completed" => SessionEventKind::Completed,
-                    "observed" => SessionEventKind::Observed,
-                    _ => {
-                        return Err(StoreError::InvalidData(format!(
-                            "Unknown Session event {kind}"
-                        )))
-                    }
-                },
+                kind: SessionEventKind::Observed,
                 agent_process_id,
                 lf_process_id,
                 task_id,
@@ -806,27 +665,6 @@ impl SqliteStore {
             })
         })
         .collect()
-    }
-}
-
-/// A provider turn's row: its receipt is the turn and kind.
-fn native_row(
-    session: &str,
-    thread: &AgentSessionId,
-    turn: &str,
-    kind: SessionEventKind,
-    observed_at: i64,
-    payload: String,
-) -> crate::history::Row {
-    crate::history::Row {
-        session_id: session.into(),
-        provider_thread: Some(thread.as_str().into()),
-        provider_turn: Some(turn.into()),
-        kind: kind.as_str(),
-        receipt_key: String::new(),
-        observed_at,
-        payload,
-        ..Default::default()
     }
 }
 
@@ -840,48 +678,40 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn a_replayed_provider_receipt_keeps_one_history_row() {
+    fn a_replayed_completion_keeps_one_turn() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let record = |turn: &str, text: &str| {
+        let record = |turn: &str, status: &str| {
             store
-                .record_session_event(
+                .record_turn_completion(
                     "conversation",
                     &"Provider-Thread".into(),
                     turn,
-                    SessionEventKind::Completed,
-                    &json!({ "text": text }),
+                    1,
+                    &json!({ "status": status }),
                 )
                 .unwrap()
         };
         for turn in 0..100 {
-            record(&turn.to_string(), "done");
-            record(&turn.to_string(), "done");
+            record(&turn.to_string(), "completed");
+            record(&turn.to_string(), "completed");
         }
-        // A receipt that says something else is a gap, never a second answer.
-        record("0", "other");
-        let events = store.session_history("conversation", 0, 0).unwrap();
-        let completions: Vec<_> = events
+        // A completion that says something else is a gap, never a second end.
+        record("0", "failed");
+        let turns = store.session_turns("conversation").unwrap();
+        assert_eq!(turns.len(), 100);
+        assert!(turns
             .iter()
-            .filter(|event| event.kind == SessionEventKind::Completed)
-            .collect();
-        assert_eq!(completions.len(), 100);
-        assert!(completions
-            .iter()
-            .all(|event| event.payload["text"] == "done"));
-        // Provider turns live only in the history file.
-        let kept: i64 = store
-            .conn
-            .lock()
-            .unwrap()
-            .query_row(
-                "SELECT COUNT(*) FROM session_events WHERE kind!='captured'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(kept, 0);
+            .all(|turn| turn.status.as_deref() == Some("completed")));
+        // Provider turns live in neither the store nor Session history.
+        let conn = store.conn.lock().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |row| row.get(0)).unwrap() };
+        assert_eq!(
+            count("SELECT COUNT(*) FROM session_events WHERE kind!='captured'"),
+            0
+        );
+        assert_eq!(count("SELECT COUNT(*) FROM history.session_history"), 0);
     }
 
     /// Every Session history kind is read from `history.db` only: rows an
@@ -970,17 +800,24 @@ mod tests {
                 .unwrap();
         }
         crate::test_fixture::record_captured_start(&store, "conversation", "new");
-        for (kind, payload) in [
-            (
-                SessionEventKind::Usage,
-                json!({"total": {"inputTokens": 1}}),
-            ),
-            (SessionEventKind::Completed, json!({"status": "completed"})),
-        ] {
-            store
-                .record_session_event("conversation", &old, "new", kind, &payload)
-                .unwrap();
-        }
+        store
+            .record_turn_usage(
+                "conversation",
+                &old,
+                "new",
+                2,
+                &json!({"total": {"inputTokens": 1}}),
+            )
+            .unwrap();
+        store
+            .record_turn_completion(
+                "conversation",
+                &old,
+                "new",
+                3,
+                &json!({"status": "completed"}),
+            )
+            .unwrap();
         assert_eq!(left_in_store(), 7);
         let kinds: Vec<SessionEventKind> = store
             .session_history("conversation", 0, 0)
@@ -990,14 +827,11 @@ mod tests {
             .collect();
         assert_eq!(
             kinds,
-            [
-                SessionEventKind::Observed,
-                SessionEventKind::Observed,
-                SessionEventKind::Started,
-                SessionEventKind::Usage,
-                SessionEventKind::Completed
-            ]
+            [SessionEventKind::Observed, SessionEventKind::Observed]
         );
+        let turns = store.session_turns("conversation").unwrap();
+        assert_eq!(turns.len(), 1);
+        assert_eq!(turns[0].turn, "new");
         assert_eq!(store.input_events(&input).unwrap().len(), 1);
         assert_eq!(store.input_silences(&input).unwrap(), [(1, 5)]);
         assert!(store
@@ -1198,40 +1032,43 @@ mod tests {
             .unwrap();
         for turn in ["turn", "unknown"] {
             store
-                .record_session_event(
+                .record_turn_usage(
                     &session.id,
                     &"thread".into(),
                     turn,
-                    SessionEventKind::Usage,
+                    2,
                     &json!({"total":{"inputTokens":20,"outputTokens":5}}),
                 )
                 .unwrap();
         }
-        let events = store
-            .summary_for_input_matching(&session.id, &input, (None, None, None))
+        let none = (None, None);
+        let turns = store
+            .turns_matching(&session.id, Some(&input), none, (None, None, None))
             .unwrap();
-        assert_eq!(events.len(), 2);
-        assert!(events.iter().all(
-            |event| event.lf_process_id.as_deref() == Some(owner.as_str())
-                && event.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())
-        ));
+        assert_eq!(turns.len(), 1);
+        assert!(turns
+            .iter()
+            .all(|turn| turn.lf_process_id.as_deref() == Some(owner.as_str())
+                && turn.agent_process_id.as_deref() == Some(attachment.agent_process_id.as_str())));
         assert!(store
-            .summary_for_input_matching(
+            .turns_matching(
                 &session.id,
-                replacement.input_key().unwrap(),
+                Some(replacement.input_key().unwrap()),
+                none,
                 (None, None, None)
             )
             .unwrap()
             .is_empty());
-        assert_eq!(
-            store
-                .session_history(&session.id, 0, 0)
-                .unwrap()
-                .last()
-                .unwrap()
-                .lf_process_id,
-            None
-        );
+        let unknown = store
+            .turns_matching(
+                &session.id,
+                None,
+                (Some(&"thread".into()), Some("unknown")),
+                (None, None, None),
+            )
+            .unwrap();
+        assert_eq!(unknown.len(), 1);
+        assert_eq!(unknown[0].lf_process_id, None);
     }
 
     #[test]

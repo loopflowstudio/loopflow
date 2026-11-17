@@ -218,7 +218,6 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
 mod tests {
     use super::*;
     use crate::provider_auth::Provider;
-    use crate::session::SessionEventKind;
     use crate::transcript::session_transcript;
     use std::fs;
     use std::time::{Duration, SystemTime};
@@ -271,20 +270,14 @@ mod tests {
         };
         // It ran in the account's own home, before every launch shared one.
         store.record_account_home_conversation(route, thread, provider);
-        for (kind, payload) in [
-            (SessionEventKind::Started, serde_json::json!({})),
-            (
-                SessionEventKind::Completed,
-                serde_json::json!({"status":"completed"}),
-            ),
-        ] {
-            store
-                .record_session_event(id, &thread.into(), "turn-1", kind, &payload)
-                .unwrap();
-        }
-        store.execute_history(
-"UPDATE session_history SET observed_at=?2 WHERE session_id=?1 AND kind<>'captured'",
-                rusqlite::params![id, at],
+        store.record_turn_start(id, &thread.into(), "turn-1", at);
+        store
+            .record_turn_completion(
+                id,
+                &thread.into(),
+                "turn-1",
+                at,
+                &serde_json::json!({"status":"completed"}),
             )
             .unwrap();
     }

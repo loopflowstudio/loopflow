@@ -589,22 +589,14 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     assert_eq!(store.session("orphan").unwrap(), Some(replacement.clone()));
     let elsewhere = open("elsewhere", Some(other_wave));
     let old_runs = store.session_inputs("orphan").unwrap();
+    store.record_turn_start("orphan", &"thread".into(), "active", 1);
     store
-        .record_session_event(
+        .record_turn_usage(
             "orphan",
             &"thread".into(),
             "active",
-            crate::session::SessionEventKind::Started,
-            &serde_json::json!({}),
-        )
-        .unwrap();
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Usage,
-            &serde_json::json!({"input": 20}),
+            2,
+            &serde_json::json!({"usage": {"input_tokens": 20}}),
         )
         .unwrap();
     let earlier = store.session_history("orphan", 0, 0).unwrap();
@@ -631,11 +623,11 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     );
     // A late observation belongs to the old turn, never the new bind.
     store
-        .record_session_event(
+        .record_turn_completion(
             "orphan",
             &"thread".into(),
             "active",
-            crate::session::SessionEventKind::Completed,
+            3,
             &serde_json::json!({"status": "completed"}),
         )
         .unwrap();
@@ -657,14 +649,10 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         .record_session_turn_origin(&"thread".into(), "future", &origin)
         .unwrap();
     let events = store.session_history("orphan", 0, 0).unwrap();
-    assert!(events
-        .iter()
-        .filter(|event| event.provider_turn.as_deref() == Some("active"))
-        .all(|event| event.task_id.is_none()));
-    assert_eq!(
-        events.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    let turns = store.session_turns("orphan").unwrap();
+    let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();
+    assert_eq!(turn("active").task_id, None);
+    assert_eq!(turn("future").task_id.as_deref(), Some(task_id.as_str()));
     let future = crate::store::sessions::replace_session_input(
         &store,
         replacement.captured,

@@ -1,8 +1,7 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–3 committed and merged with main through #1953
-(`319bf49c30`). Remaining: the turn table (`usage.turns`, "Turns, settled in
-concept review") and slice 5. Process rows are LOO-953 ("Remove Process rows:
+Status: 2026-11-16, slices 1–4 committed (slice 4: "Turn table as built");
+merged with main through #1953 (`319bf49c30`). Remaining: slice 5. Process rows are LOO-953 ("Remove Process rows:
 liveness on Sessions and Graph runs", its own worktree); nothing here moves
 them.
 
@@ -162,11 +161,12 @@ sqlite3 -readonly ~/.lf/usage.db "select skill, sum(output_tokens), sum(ended_at
    `task_update_session_events_*` narrowed.
 2. **Done.** `history.rs`: writer, read-only attachment, gap.
 3. **Done**, see "Slice 3 as built".
-4. **Turn table**: `usage.db`, `usage.turns`, readers repointed, `started`/
-   `usage`/`completed` no longer written to `history.db`.
-5. Retention on the server's clock, move-and-convert pass, `history`/`turns`
-   revisions declared by their reads, `history.db` statistics, measurements,
-   docs check (`data.md` "Loopflow keeps no copy of the stream").
+4. **Done**, see "Turn table as built".
+5. Retention on the server's clock, the move pass for observation rows a
+   released lf leaves in main (turn rows already convert, see below),
+   `history`/`turns` revisions declared by their reads, `history.db` and
+   `usage.db` statistics, measurements, docs check (`data.md` "Loopflow keeps
+   no copy of the stream"; add `usage.db` everywhere `history.db` is named).
 
 ## Delete — do not maintain
 
@@ -384,3 +384,59 @@ turn's cumulative reading is stored as its own delta; the backfill converts a
 seeded Session's three rows into one turn and `pending_inputs` reads the same
 before and after; a locked `usage.db` makes a gap, not a failed turn.
 
+
+## Turn table as built (2026-11-16)
+
+- `history.rs` describes each file as a `Journal` (name, alias, schema,
+  `user_version`); `HistoryFile` is the one writer, opened per journal.
+  `SqliteStore` holds `history` and `usage` writers; every store connection
+  attaches both read-only (`history`, `usage`), each with an empty in-memory
+  stand-in when unreachable. `history.db` is `user_version` 2: fresh files
+  CHECK `kind='observed'`; a version-1 file keeps its wider CHECK and its two
+  turn indexes (a journal only adds), and its turn rows convert.
+- `usage.turns` (`sqlite/turns.rs`): one row per (Session, thread, turn).
+  `record_turn_start`, `record_session_turn_origin` (freezes Task, Wave,
+  Project, repository, skill, provider, Graph and step label at dispatch),
+  `record_turn_usage` (resolves the reading with `resolve_usage` before the
+  write), `record_turn_completion` (status, duration, error, context columns).
+  First reading kept; a different second usage or completion status is a gap.
+  `record_session_event` and the `Started`/`Usage`/`Completed` kinds are gone.
+- `resolve_usage` replaces `native_usage`/`UsageReading`: a `usage` object is
+  the turn's; Codex `total` less `baseline` (else the prior turn's total, else
+  `total − last`); OpenCode `message.tokens` one call. Codex transcript
+  readings now carry `"partial": true` when counted from the first report.
+  `reduce_usage` sums turns; a gap is a turn with no start or a partial reading.
+- Readers on `usage.turns` only: `pending_inputs` (window arms, ended/latest,
+  scope filters), `turns_matching` (input and orphan turns for
+  `read_history_input`), `session_turn_facts`, `recorded_turn_end`,
+  `session_turn_completed`, `session_completions`, `input_turn_context`,
+  `input_answered_turn`, `session_turns`, Process membership
+  (`processes.rs` performed-work arm, `task_work.rs` three arms,
+  `process_session`, `FORGETTABLE`). `read_history` reads observations only.
+- `lf session history <id> --json` is `{"turns": [...], "events": [...]}`;
+  text prints turns first. `ProviderHistoryReference::NativeTurn` keeps its
+  shape: `start_seq`/`completion_seq` hold the turn's id when started/ended.
+- `StoreRevisions.turns` reads `usage.turns_revision`; `changed()` ignores it
+  like `history` (no read declares either yet: slice 5).
+- `convert_turn_rows` (run by `lf process prune`, reported as
+  `converted_turns`) turns `started`/`usage`/`completed` rows from main and
+  `history.db` into turn rows per Session thread, then deletes them.
+- Not kept from old completion payloads: `result_id`, `subtype`,
+  `total_cost_usd`, `started_at`/`completed_at` in the payload (no reader).
+
+Check results (2026-11-16, load average ~140): storage modules touched
+(`turns`, `session_events`, `revisions`, `history`, `sessions`, `processes`,
+`task_work`, `query_plans`, `retention`, `provider_transitions`,
+`task_retirement`): 79 passed; `process_membership_does_not_read_events_that_name_no_process`
+timed out at 300 s in the run and passed alone in 250 s (load; gate/CI).
+Execution modules reached (`transcript`, `store::*` lifecycle and history,
+`session_record::capture_tests`, `harness::{fact_writer,dispatch_tests,
+conformance_tests,pi_tests,claude,codex}`, `read_stream`, `ops::task::tests`):
+214 passed after fixes.
+
+Remaining from slice 4 (gate or slice 5):
+- `store::query_plans` coverage for the `usage.turns` reads at load size, and
+  `ANALYZE` of `usage.db`.
+- Swift has no reader of turns; its `SessionEvent` kinds narrowed to
+  `captured`/`observed` and its fixture test reads `events`.
+- Turn rows have no retention (questions.md).

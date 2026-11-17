@@ -193,11 +193,11 @@ mod tests {
             .unwrap();
         loopflow_storage::test_fixture::record_captured_start(&store, &session.id, "turn");
         store
-            .record_session_event(
+            .record_turn_completion(
                 &session.id,
                 &"thread".into(),
                 "turn",
-                crate::session::SessionEventKind::Completed,
+                1,
                 &serde_json::json!({"status":"completed"}),
             )
             .unwrap();

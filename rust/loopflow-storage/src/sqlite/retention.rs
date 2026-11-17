@@ -21,6 +21,8 @@ const BUSY_TIMEOUT: Duration = Duration::from_secs(15);
 pub struct RetentionReport {
     pub closed_processes: u64,
     pub forgotten_processes: u64,
+    /// Turns an earlier lf kept as three rows, now one row in `usage.turns`.
+    pub converted_turns: u64,
     pub vacuumed: bool,
 }
 
@@ -42,6 +44,7 @@ pub fn prune(
     Ok(RetentionReport {
         closed_processes,
         forgotten_processes: forget_processes(&conn)?,
+        converted_turns: super::turns::convert_turn_rows(database)?,
         vacuumed: reclaim(&conn)?,
     })
 }

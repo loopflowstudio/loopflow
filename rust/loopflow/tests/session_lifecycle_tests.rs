@@ -199,13 +199,20 @@ impl Fixture {
         }
     }
 
-    /// The store, with Session history attached as `history`.
+    /// The store, with Session history attached as `history` and turns as `usage`.
     fn db(&self) -> rusqlite::Connection {
         let store = self.home.path().join("loopflow.db");
         let db = rusqlite::Connection::open(&store).unwrap();
         db.execute(
             "ATTACH ?1 AS history",
             [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db.execute(
+            "ATTACH ?1 AS usage",
+            [loopflow_storage::history::usage_path(&store)
                 .to_string_lossy()
                 .as_ref()],
         )
@@ -2056,7 +2063,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         let starts: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM history.session_history WHERE kind='started'",
+                "SELECT count(*) FROM usage.turns WHERE started_at IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
@@ -2377,7 +2384,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     let starts: i64 = fixture
         .db()
         .query_row(
-            "SELECT count(*) FROM history.session_history WHERE kind='started'",
+            "SELECT count(*) FROM usage.turns WHERE started_at IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -2387,7 +2394,7 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     // reads as a turn that finished.
     let endings: Vec<String> = fixture
         .db()
-        .prepare("SELECT json_extract(payload,'$.status') FROM history.session_history WHERE kind='completed'")
+        .prepare("SELECT status FROM usage.turns WHERE ended_at IS NOT NULL")
         .unwrap()
         .query_map([], |row| row.get(0))
         .unwrap()

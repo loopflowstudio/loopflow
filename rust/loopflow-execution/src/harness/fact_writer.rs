@@ -15,11 +15,9 @@ use std::sync::{Arc, Mutex};
 use anyhow::Result;
 use serde_json::json;
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use super::fact::{Decoded, ProviderFact, Signal};
 use crate::process::SessionAttachment;
-use crate::session::{
-    SessionActivity, SessionEventKind, SessionPreview, SessionTurnOrigin, TurnContext,
-};
+use crate::session::{SessionActivity, SessionPreview, SessionTurnOrigin, TurnContext};
 use crate::store::{RecordingGap, StoreResult};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem};
 use loopflow_model::id::AgentSessionId;
@@ -121,13 +119,11 @@ impl FactWriter {
     }
 
     fn record_fact(&mut self, fact: &ProviderFact) -> StoreResult<()> {
-        let event = |turn: &ProviderTurn, kind, payload| {
-            self.store
-                .record_session_event(&self.session, &turn.thread, &turn.turn, kind, payload)
-        };
+        let now = || time::OffsetDateTime::now_utc().unix_timestamp();
         match fact {
             ProviderFact::TurnStarted { turn } => {
-                event(turn, SessionEventKind::Started, &json!({}))?;
+                self.store
+                    .record_turn_start(&self.session, &turn.thread, &turn.turn, now());
             }
             ProviderFact::TurnAnswered { turn, request } => {
                 // Input the provider's own client submitted has no frozen
@@ -164,7 +160,13 @@ impl FactWriter {
                 if let Some(turn) = turn {
                     let mut detail = detail.clone();
                     detail["context"] = json!(context);
-                    event(turn, SessionEventKind::Completed, &detail)?;
+                    self.store.record_turn_completion(
+                        &self.session,
+                        &turn.thread,
+                        &turn.turn,
+                        now(),
+                        &detail,
+                    )?;
                 }
             }
             &ProviderFact::AvailabilityReading {
@@ -383,7 +385,6 @@ mod tests {
     use crate::harness::fact::{trace, Decoded, ProviderFact, ProviderTurn, Signal};
     use crate::harness::opencode_decode::OpenCodeDecoder;
     use crate::process::SessionAttachment;
-    use crate::session::SessionEventKind;
     use loopflow_model::chat::types::Lifecycle;
     use loopflow_model::id::LfProcessId;
     use loopflow_storage::sqlite::SqliteStore;
@@ -745,19 +746,9 @@ mod tests {
         );
     }
 
-    /// Session receipts other than capture bookkeeping.
-    fn receipts(store: &SqliteStore) -> Vec<crate::session::SessionEvent> {
-        store
-            .session_history("conversation", 0, 0)
-            .unwrap()
-            .into_iter()
-            .filter(|event| {
-                !matches!(
-                    event.kind,
-                    SessionEventKind::Captured | SessionEventKind::Observed
-                )
-            })
-            .collect()
+    /// The provider turns the Session recorded.
+    fn receipts(store: &SqliteStore) -> Vec<crate::session::Turn> {
+        store.session_turns("conversation").unwrap()
     }
 
     #[test]
@@ -801,27 +792,26 @@ mod tests {
             json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value}),
         );
         // The answer stays in Claude's transcript; the store keeps the turn.
-        let events = receipts(&store);
-        assert_eq!(events.len(), 2);
-        assert!(events
-            .iter()
-            .all(|e| e.provider_turn.as_deref() == Some("request")));
+        let turns = receipts(&store);
+        assert_eq!(turns.len(), 1);
+        let turn = &turns[0];
+        assert_eq!(turn.turn, "request");
+        assert!(turn.started_at.is_some());
         assert_eq!(
-            events[1].payload,
-            json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
-                "total_cost_usd":null,
-                "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
-                    "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
+            (turn.status.as_deref(), &turn.error),
+            (Some("completed"), &None)
         );
+        assert_eq!(turn.context, Some(Default::default()));
     }
 
-    /// The `context` each completed receipt retained, in order.
+    /// The `context` each ended turn retained, in order.
     fn contexts(store: &SqliteStore) -> Vec<Value> {
-        receipts(store)
+        let mut turns: Vec<_> = receipts(store)
             .into_iter()
-            .filter(|event| event.kind == SessionEventKind::Completed)
-            .map(|event| event.payload["context"].clone())
-            .collect()
+            .filter(|turn| turn.ended_at.is_some())
+            .collect();
+        turns.sort_by_key(|turn| (turn.ended_at, turn.id));
+        turns.into_iter().map(|turn| json!(turn.context)).collect()
     }
 
     /// Feed a Claude stream after Loopflow's request `request` was echoed.
@@ -1114,13 +1104,25 @@ mod tests {
             };
             for message in messages {
                 hear(&mut decoder, &mut writer_for(&first), message);
-                assert_eq!(store.conn.lock().unwrap().query_row("SELECT count(*) FROM history.session_history WHERE kind='started' AND captured_event=?1", [next.captured], |row| row.get::<_,i64>(0)).unwrap(),0);
+                assert_eq!(
+                    store
+                        .conn
+                        .lock()
+                        .unwrap()
+                        .query_row(
+                            "SELECT count(*) FROM usage.turns WHERE captured_event=?1",
+                            [next.captured],
+                            |row| row.get::<_, i64>(0)
+                        )
+                        .unwrap(),
+                    0
+                );
             }
-            let before = store.session_history("conversation", 0, 0).unwrap();
+            let before = store.session_turns("conversation").unwrap();
             for message in [json!({"id":2,"result":{"turn":{"id":"late"}}}), start] {
                 hear(&mut decoder, &mut writer_for(&current), message);
             }
-            assert_eq!(store.session_history("conversation", 0, 0).unwrap(), before);
+            assert_eq!(store.session_turns("conversation").unwrap(), before);
             // The turn's usage row comes from its rollout, under the same id.
             store
                 .record_turn_usage(
@@ -1137,15 +1139,14 @@ mod tests {
                 json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"late","status":"completed"}}}),
             );
             let retained = store
-                .session_history("conversation", 0, 0)
+                .session_turns("conversation")
                 .unwrap()
                 .into_iter()
-                .filter(|event| event.provider_turn.as_deref() == Some("late"))
+                .filter(|turn| turn.turn == "late")
                 .collect::<Vec<_>>();
-            assert_eq!(retained.len(), 3);
-            assert!(retained
-                .iter()
-                .all(|event| event.lf_process_id.as_deref() == Some(a.as_str())));
+            assert_eq!(retained.len(), 1);
+            assert!(retained[0].usage.is_some() && retained[0].ended_at.is_some());
+            assert_eq!(retained[0].lf_process_id.as_deref(), Some(a.as_str()));
             assert_eq!(
                 crate::store::sessions::input_history(&store, original.input_key().unwrap())
                     .unwrap()
@@ -1170,14 +1171,7 @@ mod tests {
     #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
-        let turns = || {
-            store
-                .session_history("conversation", 0, 0)
-                .unwrap()
-                .into_iter()
-                .filter(|event| event.provider_turn.is_some())
-                .collect::<Vec<_>>()
-        };
+        let turns = || store.session_turns("conversation").unwrap();
         for (turn, reply_first) in [("notification-first", false), ("reply-first", true)] {
             let mut writer = writer(&store, &attachment);
             let mut decoder = CodexDecoder::default();
@@ -1241,12 +1235,9 @@ mod tests {
             &mut writer,
             json!({"id":3,"result":{"turn":{"id":"unknown"}}}),
         );
-        let events = store.session_history("conversation", 0, 0).unwrap();
-        let unknown = events
-            .iter()
-            .find(|event| event.provider_turn.as_deref() == Some("unknown"))
-            .unwrap();
-        assert_eq!(unknown.kind, SessionEventKind::Started);
+        let turns = store.session_turns("conversation").unwrap();
+        let unknown = turns.iter().find(|turn| turn.turn == "unknown").unwrap();
+        assert!(unknown.started_at.is_some());
         assert_eq!(unknown.lf_process_id, None);
         assert_eq!(unknown.agent_process_id, None);
     }
@@ -1295,18 +1286,16 @@ mod tests {
         for _ in 0..2 {
             writer.record(&decoder.messages(&messages).decoded).unwrap();
         }
-        let completion: String = store
+        let completion: (String, Option<String>) = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT payload FROM history.session_history WHERE kind='completed' AND provider_turn=?1",
+                "SELECT status,error FROM usage.turns WHERE ended_at IS NOT NULL AND provider_turn=?1",
                 [&request],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        let completion: Value = serde_json::from_str(&completion).unwrap();
-        assert_eq!(completion["status"], "completed");
-        assert!(completion["error"].is_null());
+        assert_eq!(completion, ("completed".to_owned(), None));
     }
 }

@@ -8,11 +8,11 @@ fn session_history_reads_plan_by_window() {
     let input = crate::session_record::new_artifact_key();
     store.test_session("history", &input);
     store
-        .record_session_event(
+        .record_turn_completion(
             "history",
             &"thread".into(),
             "turn",
-            crate::session::SessionEventKind::Completed,
+            1,
             &serde_json::json!({"status":"completed"}),
         )
         .unwrap();

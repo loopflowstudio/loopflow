@@ -13,6 +13,57 @@ pub struct SessionTurnOrigin {
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    /// The Graph and step the input was dispatched for.
+    pub graph: Option<String>,
+    pub step: Option<String>,
+}
+
+/// One provider turn as `usage.turns` keeps it: inserted when it starts,
+/// completed in place when it ends. Its grouping is what it was dispatched
+/// for; a bind made while it ran does not move it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Turn {
+    pub id: i64,
+    pub session_id: LfSessionId,
+    pub thread: AgentSessionId,
+    pub turn: String,
+    pub captured_event: Option<i64>,
+    pub lf_process_id: Option<String>,
+    pub agent_process_id: Option<String>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub graph: Option<String>,
+    pub step: Option<String>,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// How the provider says it ended: `completed`, `failed`, `interrupted`.
+    pub status: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// The provider's error or errors, as it reported them.
+    pub error: Option<serde_json::Value>,
+    pub provider: Option<String>,
+    pub usage: Option<RecordedUsage>,
+    pub context: Option<TurnContext>,
+}
+
+/// One turn's tokens, resolved from its provider's reading before they are
+/// kept: a sum over turns needs no counter logic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordedUsage {
+    pub observed_at: i64,
+    /// The provider marked the reading as its last for the turn.
+    #[serde(rename = "final")]
+    pub final_reading: bool,
+    /// Counted from the first report seen, not from the turn's start.
+    pub partial: bool,
+    pub usage: loopflow_model::chat::types::TurnUsage,
 }
 
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
@@ -36,11 +87,9 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEventKind {
+    /// An input, kept in the store as Session state.
     Captured,
-    Started,
-    Usage,
-    Completed,
-    /// Evidence without an exact native turn; cannot settle a Graph.
+    /// Session history; provider turns are in `usage.turns`.
     Observed,
 }
 
@@ -59,9 +108,6 @@ impl SessionEventKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Captured => "captured",
-            Self::Started => "started",
-            Self::Usage => "usage",
-            Self::Completed => "completed",
             Self::Observed => "observed",
         }
     }

@@ -21,8 +21,8 @@ required in the type; a fifth harness is one file.
 LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
 merged into this branch. Add no account selection back.
 
-Main is merged through ffb29c6b29 (#1959, #1961; neither touches harness,
-transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
+Main is merged through f38dbf4223 (#1959, #1961, #1962; they touch only
+`graph/`, not harness, transport or agent code). #1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
 uses main's `Result<()>` body with `&Admitted`; native interruption no longer
 reads a stored AgentProcess outcome. Main also supplies `PromptBuild::skill_version`.
 Earlier merge analysis is in b9542ecef5:scratch/harness-launch-type.md.
@@ -372,8 +372,10 @@ Remaining work:
    previews use `LaunchInput::mode` without delegation. `transport::holder`
    consumes the caller's Work fact and is the only `Holder::of` caller. Place
    still reads named Work independently; inherited `LF_AS` stays here + Server.
-   Next (3b, fifth pass): `execute_command` and `run::resume` lose their
-   `Mode` parameter; no `Mode::Headless` literal remains in `bin/lf.rs`.
+   Next (3b, fifth pass; not started at 842abad8a6, two literals remain at
+   `bin/lf.rs` `dispatch` and the planning-read `execute_command` call):
+   `execute_command` and `run::resume` lose their `Mode` parameter; no
+   `Mode::Headless` literal remains in `bin/lf.rs`.
    Still remove `AgentConfig::holder` and `Holder: Default` with slice 4 so
    reporting ownership travels on `Launch`, through native commands and drivers.
    Focused: `--lib transport::launch_mode_tests::` and
@@ -407,7 +409,7 @@ behave exactly as before.
   harnesses. The launch matrix passes and names each cell.
 - This prints only `HarnessKind::parse`/`as_str` and `#[cfg(test)]` code:
   `rg -n --type rust '(==|!=|=>)\s*"(claude|codex|opencode|pi)"|"(claude|codex|opencode|pi)"\s*(==|!=|=>|\|)' rust/*/src -g '!*test*'`
-  (83 non-test comparisons at 470da475a1; 79 at 2100785981).
+  (83 non-test comparisons at 470da475a1; 79 at 842abad8a6).
 - `rg -n 'fn run_interactive|ProviderInvocation|SessionCommand\b|session_attachment: Option|holder: crate::session::Holder' rust/loopflow-execution/` prints nothing.
   The unrelated Clap `loopflow::lf::SessionCommand` remains.
 - `docs/dev/codebase.md` "Add a provider" says: add `<name>.rs`

@@ -89,15 +89,11 @@ name launch kinds rather than places or lifetimes.
 ## Remaining checks
 
 Gate owns the broader transport, configuration and Task performance checks.
-Demo owns live steers and terminal lifetime.
-
-1. Start `lf -b research '...'` in a Task checkout, then send a steer with
-   `lf steer <TASK> 'note'`. The batch prints it after its next tool call,
-   and the Task's usage includes the batch. A worker of that Task can read
-   the same steer.
-2. Quit `lf research` at a terminal and reopen it with `lf resume`. It runs
-   in the same terminal. Close the viewer of `lf resume --task <TASK>`
-   and reattach to the work session still running in its holder.
+QA on 2026-11-17 drove both demo checks live with a stand-in Claude
+(`scratch/qa.html`): a batch in a Task checkout received `lf steer` after its
+tool call and lists under the Task in `lf usage`, a worker received the same
+kind of steer, a chat reopened in its terminal, and a work session reattached to
+its held provider after the viewer closed. Codex, OpenCode and Pi were not run live.
 
 Earlier local checks are in `81925194af:scratch/plan.md`. The launch matrix now
 specifies each launch kind's expected mode and turn reporting independently and

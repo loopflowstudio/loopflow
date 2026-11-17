@@ -1,0 +1,41 @@
+<!doctype html><meta charset="utf-8"><title>LOO-924 QA: launch kinds</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:60em;margin:2em auto;padding:0 1em}table{border-collapse:collapse;width:100%}td,th{border:1px solid #ccc;padding:.35em .5em;vertical-align:top;text-align:left}code,pre{font:13px ui-monospace,monospace}pre{background:#f5f5f5;padding:.6em;overflow-x:auto}.ok{color:#11702a}.no{color:#a33}</style>
+<h1>LOO-924 QA: four launch kinds, 2026-11-17</h1>
+<p>Branch <code>lf</code> at <code>cabfa94507</code>, private world from <code>lf-world build one-task</code> under <code>/tmp/lf-qa-924</code>, its own <code>lf server run</code>, <code>LF_*</code>/<code>REX_*</code> unset. A recording stand-in <code>claude</code> logged argv, parent, <code>LF_*</code> env and its <code>--settings</code>, ran each installed hook with Claude's callback JSON (honoring matchers), and answered interactively on its terminal or as stream-json under <code>-p</code>. A Python PTY driver typed the lines and answered <code>ESC[6n</code>/<code>ESC[5n</code>.</p>
+
+<h2>What each launch got</h2>
+<table>
+<tr><th>Scenario</th><th>Command</th><th>Parent of provider</th><th><code>Stop</code> hook / inbox</th><th>Env</th><th>Result</th></tr>
+<tr><td>Chat</td><td><code>lf -i -a claude : 'QA chat opening'</code> in repo</td><td><code>lf -i …</code></td><td>no / none</td><td><code>LF_BARE_STEER</code></td><td class=ok>replied; quit ended it</td></tr>
+<tr><td>Chat resume</td><td><code>lf resume session_924c…</code></td><td><code>lf resume …</code> (same terminal)</td><td>no / none</td><td>bare</td><td class=ok>same thread, <code>--resume fca8b4a7…</code></td></tr>
+<tr><td>Chat with <code>--task</code></td><td><code>lf -i --task 50f0bf …</code></td><td><code>lf -i …</code></td><td>no / none</td><td>bare + <code>LF_STEER_TASK</code></td><td class=ok>Session <code>task_id</code> set, <code>work_source=declared</code>; resume stayed in terminal</td></tr>
+<tr><td>Batch</td><td><code>lf -b -a claude : …</code> in repo</td><td><code>lf -b …</code></td><td>no / none</td><td>bare</td><td class=ok>printed <code>QA batch answer</code>, rc 0</td></tr>
+<tr><td>Batch in Task checkout + steer</td><td><code>lf -b …</code> in <code>repo.45a724-…</code>, then <code>lf steer 45a724 'QA steer to the batch'</code> while held before its tool call</td><td><code>lf -b …</code></td><td>no / none</td><td>bare + <code>LF_STEER_TASK</code></td><td class=ok>PostToolUse hook returned the steer in <code>&lt;lf:steers&gt;</code>; <code>lf session steers</code> shows it delivered; <code>lf usage --task</code> lists the batch under <code>task/45a724</code></td></tr>
+<tr><td>Work session</td><td><code>lf checkout 50f0bf</code> (fresh Task)</td><td><code>lf holder run</code></td><td><b>yes / accept</b></td><td><code>LF_PROVIDER_CONTEXT</code></td><td class=ok>SessionStart, UserPromptSubmit, Stop hooks all exit 0</td></tr>
+<tr><td>Attach, quit, reopen</td><td><code>lf resume --task 50f0bf</code>; <code>quit</code>; again</td><td>holder</td><td>yes / accept</td><td>managed</td><td class=ok>attach reached PID 8523 with no relaunch; after quit, reopen launched <code>--resume f8168f62…</code> under the holder with full managed settings</td></tr>
+<tr><td>Close viewer, reattach</td><td>closed PTY, then <code>lf resume 3ab2ae97…</code> (the printed hint) from <code>/tmp</code></td><td>holder</td><td>—</td><td>—</td><td class=ok>same PID 41580, no new launch, reply on same thread</td></tr>
+<tr><td>Worker + steer</td><td><code>lf -b task run 50f0bf qa-worker</code> (one <code>research</code> step), steer while held</td><td><code>lf --batch --skill-input … --task …</code></td><td><b>yes / accept</b></td><td><code>LF_PROVIDER_CONTEXT</code>, <code>LF_GRAPH_ID</code></td><td class=ok>steer delivered after the tool call</td></tr>
+<tr><td>Graph commit message</td><td>after step 1</td><td><code>lf commit --step research</code></td><td>no / none</td><td>bare</td><td class=ok>batch, as the plan says</td></tr>
+</table>
+
+<h2>Noticed, not branch bugs</h2>
+<ul>
+<li>The world's seeded primary Session (<code>session_a4114180…</code>) resumes with no <code>--settings</code>: its manifest has <code>exec: null</code>, so there is no saved <code>conversation_context</code>. A Task's real primary conversation from <code>lf checkout</code> carries it. Recorded in <code>.lf/qa/hooks.md</code>.</li>
+<li>The Graph's second step (<code>research [interactive]</code> under <code>-b</code>) failed 3× with "structured output validation exhausted": the stand-in returns no structured decision. Its launch was correctly a worker.</li>
+<li>A previous QA run at 10:35 on the same <code>/tmp/lf-qa-924</code> path had left its <code>lf server run</code>, holder and stand-in running; <code>lf server status</code> answered "uses another executable" until they were stopped (verified by <code>LF_HOME</code> in <code>ps eww</code>).</li>
+<li><code>lf session bind</code> refuses a finished chat ("Select an unfinished interactive Session"), so bound-chat → work-session reopen was not reached live; the prepared/primary path was.</li>
+</ul>
+
+<h2>Fixed</h2>
+<p>No product code changed. <code>.lf/qa/hooks.md</code> said <code>--task</code>/<code>--wave</code> made a launch managed; it now describes the four kinds as observed, the matcher trap for stand-ins, and the lf-world seeded Session.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>Codex, OpenCode and Pi live: Claude stand-in only. The launch matrix test covers all four harnesses with stand-ins.</li>
+<li>Unreadable-store fallback to a work session on resume.</li>
+<li>Discord Wave answers as workers.</li>
+<li>Real usage token counts: the stand-in's result <code>usage</code> did not show in <code>lf usage</code> columns (they read provider-authored transcript usage); attribution to the Task did.</li>
+<li>Desktop panes.</li>
+</ul>
+<h2>Still wrong</h2>
+<p>Nothing found in the launch path.</p>

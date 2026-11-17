@@ -279,36 +279,48 @@ acceptance rg no matches. `TaskSessionLaunchProofTests` (display,
 `LOOPFLOW_NATIVE_TESTS=1`) fails at its first `find(task-new-session)` here,
 identically on 86841cc327: pre-existing, left to demo/CI.
 
-## Next implement direction (concept review, pass 3)
+## Next implement direction (concept review, pass 4)
 
-1. **Roadmap's Run is Start.** `RoadmapView`'s `.run` control calls
-   `LocalWaveAgentLauncher.runTask`, awaits it and `confirmWorkUpdate`, and
-   shows a "Control failed" banner: a second Start path with no request ID,
-   no "requested" Notice and its own error string. It becomes
-   `model.startTask(nil, task:)`. `activeControlId` gating for it goes, and so
-   does `LocalWaveAgentLauncher.runTask` (`MacLocalWaveAgentLauncher.swift:16`;
-   `RoadmapView` is its only caller).
-2. **Action failures post the Notice.** The remaining per-view error strings
-   for things a person did go to `navigation.notices` as events, and their
-   state goes: `controlError` and its `evidenceBanner` in `RoadmapView` and
-   `WorkSurfaceView` (Warp couldn't open the worktree), and
-   `WorkNavigation.taskSessionErrors` with its text and "Refresh readings"
-   button in `TaskWorkView` (New session failed; Notice action "Try again").
-   `conversationError` stays: it is the conversation pane's own content, with
-   its retry in place. `completionPending` stays: it is a fact of the Task's
-   row, not an action's answer; so is `WorkSurfaceView`'s "Retained Task ·
-   planning unavailable" banner (that Task's own `unavailableTasks` reason,
-   beside the Wave's condition Notice). `taskSessionErrors` assertions in
-   `WorkNavigationTests` and `TaskSessionLaunchProofTests` move to the
-   Notice. This supersedes the questions.md entry that left them inline.
-3. **A failure that outlasts a lost link reports once.** `NoticeCenter.read`
-   drops a transition into failure while the link is lost, and a reading that
-   is still failing after the link returns makes no transition, so it never
-   posts: the content stays empty or stale with nothing saying why. The center
-   remembers parts whose failure it held back during a lost link and posts the
-   first failing reading of each once the link is connected; recovery clears
-   the memory. Test: away, a part fails, the link returns, the part still
-   fails → one Notice for it; the part recovers → none.
+Pass 3's three directions are built (`66067dc588`). Its text is in
+`86841cc327`. The same rule, that an action's failure posts one event Notice
+and no view keeps its own error string, still misses four places:
+
+1. **One New session path.** The sidebar's New session
+   (`SessionsView.newTaskSessionFromInput`, `SessionsView.swift:1985`) reports
+   failure in the `launchError` modal alert, while `WorkSurfaceView`'s button
+   posts `new-session-<task>` with "Try again". The same click fails two ways.
+   Both call one function, which owns `startingTaskSessions`, the `Perf`
+   bracket and the Notice. It lives on `WorkModel`, takes the `newTaskSession`
+   closure, and is deleted from `WorkSurfaceView`.
+2. **`SessionsView` alert failures post the Notice.** "Could not prepare
+   checkout", "Could not complete the action" (`actionFailed`) and "Could not
+   move blocked Sessions" become event Notices. The "Blocked Sessions" result
+   keeps its alert, because it is a multi-line report of outcomes rather than
+   a failure. `launchErrorTitle` goes.
+3. **`SessionPaneView.shellError`** (`WorkspacePanesView.swift:413`, the
+   New Shell, Files and session-replace failures) is an alert. It becomes an
+   event Notice and the state goes.
+4. **`WorkMachineControl`** (`WorkNavigator.swift:461`) puts its `error` in
+   the menu and swaps in a warning icon. A failed "Run on …" posts an event
+   Notice. The Machines list read reports through
+   `model.reported("machines", "Machines", …)`. `error` goes.
+
+Also merge the two copies of `openWorktree` (Warp URL and Notice) in
+`RoadmapView` and `WorkSurfaceView` into one function.
+
+These stay: `conversationError`, `completionPending`, the retained-Task
+banner, sheet input validation (`saveError`, `CreateWaveSheet`,
+`NewWaveRow`), the "Workspace unavailable" content view (it is the page),
+and the on-demand reads that have no `WorkModel` (`ProjectHistoryView`,
+`GraphRunStep`, telemetry).
+
+Done looks like this:
+- `rg -n 'launchError|shellError' swift` finds nothing.
+- `WorkMachineControl` has no `error` state.
+- One `openWorktree`.
+- The pass-3 Desktop filter passes.
+- A WorkNavigationTests case covers a sidebar New session failure: one Notice
+  with "Try again" in the asking window, and no alert.
 
 ## Acceptance at gate (headless)
 

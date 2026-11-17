@@ -48,3 +48,6 @@
   connections open, which `TaskFeedTests` replace with a stand-in carrier.
 - `viewer` takes the display name from `participant_name()` as the claim does
   (the server's cwd), not `participant_name_in(repo)`.
+- "Blocked Sessions" result stays an alert (multi-line report of outcomes,
+  not a failure); only its failure moves to the Notice. `ProjectHistoryView`'s
+  read failure stays inline with the other model-less on-demand reads.

@@ -78,6 +78,8 @@
       "source": "codex",
       "text": "Current provider output"
     },
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "recovery": null
   }
 ]

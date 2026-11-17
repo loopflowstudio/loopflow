@@ -83,15 +83,22 @@ pub fn due_task_conversations(
                 crate::journal::process_identity_evidence(pid, start)
                     == ProcessIdentityEvidence::Dead
             });
-        let waited = match (conversation.recovery_attempts, conversation.recovered_at) {
-            (0, _) | (_, None) => true,
-            (attempts, Some(at)) => at + crate::ops::pr_landing::repair_backoff(attempts) <= now,
-        };
+        let waited = next_start_at(conversation.recovery_attempts, conversation.recovered_at)
+            .is_none_or(|at| at <= now);
         if died && waited && store.task_claimed_here(&conversation.task)? {
             due.push(conversation);
         }
     }
     Ok(due)
+}
+
+/// When a Task conversation that died, started `attempts` times since its
+/// last finished turn, last at `recovered_at`, may start again; `None`: at once.
+pub fn next_start_at(attempts: u32, recovered_at: Option<i64>) -> Option<i64> {
+    match (attempts, recovered_at) {
+        (0, _) | (_, None) => None,
+        (attempts, Some(at)) => Some(at + crate::ops::pr_landing::repair_backoff(attempts)),
+    }
 }
 
 #[cfg(test)]

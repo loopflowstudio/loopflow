@@ -646,7 +646,7 @@ fn unix_seconds(timestamp: &Value) -> Option<i64> {
     Some(at.unix_timestamp())
 }
 
-fn rfc3339(at: i64) -> Option<String> {
+pub(crate) fn rfc3339(at: i64) -> Option<String> {
     time::OffsetDateTime::from_unix_timestamp(at)
         .ok()?
         .format(&time::format_description::well_known::Rfc3339)

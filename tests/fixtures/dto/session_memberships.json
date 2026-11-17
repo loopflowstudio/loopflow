@@ -71,7 +71,9 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "recovery": null
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -145,7 +147,13 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "by": "person",
+      "exit_code": 0
+    },
+    "recovery": null
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -211,7 +219,9 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "recovery": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -272,7 +282,19 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "by": "died",
+      "exit_code": 137
+    },
+    "recovery": {
+      "attempts": 1,
+      "started_at": "2026-11-17T12:01:02Z",
+      "next_at": "2026-11-17T12:02:02Z",
+      "gave_up": false,
+      "failure": "claude is not installed on this Machine's PATH"
+    }
   },
   {
     "id": "run_00000000000000000000000000000006",
@@ -343,7 +365,13 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": {
+      "at": "2026-11-17T12:01:00Z",
+      "by": "died",
+      "exit_code": null
+    },
+    "recovery": null
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -409,7 +437,9 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "recovery": null
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -482,6 +512,8 @@
     "program_status": null,
     "agent_process_id": "44444444-4444-4444-8444-444444444444",
     "preview": null,
-    "transition": null
+    "transition": null,
+    "ended": null,
+    "recovery": null
   }
 ]

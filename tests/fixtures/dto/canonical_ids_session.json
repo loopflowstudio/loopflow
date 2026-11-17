@@ -70,5 +70,7 @@
   },
   "transition": null,
   "turn": null,
-  "raw": false
+  "raw": false,
+  "ended": null,
+  "recovery": null
 }

@@ -934,6 +934,28 @@ struct DTOFixtureTests {
         #expect(decoded == sessions)
     }
 
+    @Test("A Session says how its agent ended and whether the server starts it again; both keys are required")
+    func sessionEndingFixture() throws {
+        let data = try loadFixtureData("session_memberships.json")
+        let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
+        #expect(sessions[1].ended?.by == .person)
+        #expect(sessions[1].recoveryLine == "Quit")
+        #expect(sessions[3].ended?.exitCode == 137)
+        #expect(sessions[3].recovery?.attempts == 1)
+        #expect(sessions[3].recoveryLine
+            == "Died (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH")
+        #expect(sessions[4].ended?.exitCode == nil)
+        #expect(sessions[0].recoveryLine == nil)
+        let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
+        for key in ["ended", "recovery"] {
+            var value = objects[3]
+            value.removeValue(forKey: key)
+            #expect(throws: DecodingError.self) {
+                try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: value))
+            }
+        }
+    }
+
     @Test("canonical_ids: structured Session IDs decode canonically; native bytes stay exact")
     func canonicalIdsSessionWire() throws {
         let session = try JSONDecoder().decode(SessionRecord.self, from: loadFixtureData("canonical_ids_session.json"))

@@ -343,6 +343,15 @@ pub struct SessionSummary {
     pub held: bool,
     pub primary_scope: Option<String>,
     pub agent_process_evidence: crate::ProcessIdentityEvidence,
+    /// When its current agent's end was recorded, and how; `None` while it
+    /// runs, before the first, or when nobody recorded the end.
+    pub agent_end: Option<AgentEnd>,
+    /// Starts by the server's recovery pass since it last finished a turn.
+    pub recovery_attempts: u32,
+    /// When the pass last started it.
+    pub recovered_at: Option<i64>,
+    /// Why the pass's last start failed; `None` once one succeeded.
+    pub recovery_failure: Option<String>,
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<loopflow_model::program_status::Records>,
@@ -379,6 +388,23 @@ pub struct SessionSummary {
     pub independent: bool,
     pub wave_name: Option<String>,
     pub task_identifier: Option<String>,
+}
+
+/// An agent's recorded end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AgentEnd {
+    pub at: i64,
+    /// The provider's exit, as its launcher recorded it; `None` when nobody
+    /// saw it: the holder died, or the Machine restarted.
+    pub exit_code: Option<i32>,
+}
+
+impl AgentEnd {
+    /// The person quit: `/exit` or Ctrl+D (0), or Ctrl+C at the prompt (130).
+    /// Every other end is a death.
+    pub fn by_person(&self) -> bool {
+        matches!(self.exit_code, Some(0 | 130))
+    }
 }
 
 /// A Graph as its Graph process records it; Current says nothing about a live process.

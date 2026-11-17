@@ -148,6 +148,13 @@ struct WorkSurfaceView: View {
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .accessibilityIdentifier("task-debug")
+                // A Task conversation that died says so, and whether the server is starting it again.
+                if let line = (sessions ?? []).first(where: \.taskPrimary)?.recoveryLine {
+                    Label(line, systemImage: "arrow.clockwise")
+                        .font(Typography.body(12.5))
+                        .foregroundStyle(palette.textSecondary)
+                        .accessibilityIdentifier("task-conversation-recovery")
+                }
                 // Exact Available links preserve access to secondary conversations
                 // needing input without restoring a Session inventory.
                 ForEach((sessions ?? []).filter { $0.availability == .available }) { session in

@@ -393,9 +393,12 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
                      AND json_extract(history.payload,'$.evidence.type')='provider_session_observed'))
             AND json_extract(history.payload,'$.evidence.schema_version')=1
             AND length(json_extract(history.payload,'$.evidence.provider_session_id'))>0 END),
-        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
+        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
+        COALESCE(p.completed_at,launcher.completed_at),launcher.exit_code,
+        a.recovery_attempts,a.recovered_at,a.recovery_failure
         FROM page s JOIN agent_sessions a ON a.id=s.id
         LEFT JOIN processes p ON p.id=a.agent_process_id
+        LEFT JOIN processes launcher ON launcher.id=p.parent_lf_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
@@ -468,6 +471,13 @@ fn read_summary(
                 .filter(|_| live && !unviewed),
             unviewed,
             held: live && row.get(37)?,
+            agent_end: row
+                .get::<_, Option<i64>>(38)?
+                .map(|at| row.get(39).map(|exit_code| crate::session::AgentEnd { at, exit_code }))
+                .transpose()?,
+            recovery_attempts: row.get(40)?,
+            recovered_at: row.get(41)?,
+            recovery_failure: row.get(42)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(25)?)?,
             primary_scope: row.get(26)?,
             agent_process_evidence,

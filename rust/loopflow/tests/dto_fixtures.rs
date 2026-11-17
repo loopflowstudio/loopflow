@@ -388,6 +388,25 @@ fn task_detail_says_each_fact_once() {
         detail.task.graph.as_ref().unwrap().step.as_deref(),
         Some("demo")
     );
+    let conversation = detail
+        .sessions
+        .iter()
+        .find(|session| Some(&session.id) == detail.conversation.as_ref())
+        .unwrap();
+    let next = time::OffsetDateTime::parse(
+        conversation.recovery.as_ref().unwrap().next_at.as_deref().unwrap(),
+        &time::format_description::well_known::Rfc3339,
+    )
+    .unwrap()
+    .unix_timestamp();
+    let line = conversation.conversation_line("LOO-2", next);
+    assert!(
+        line.starts_with("died ") && line.ends_with("(exit 137) · starting again"),
+        "{line}"
+    );
+    assert!(conversation
+        .conversation_line("LOO-2", next - 1)
+        .contains("· starts again "));
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

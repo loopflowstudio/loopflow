@@ -20,6 +20,28 @@
   },
   "sessions": [
     {
+      "id": "session_5e55105e000040008000000000000002",
+      "title": "LOO-2 conversation",
+      "provider": "claude",
+      "interactive": true,
+      "state": "closed",
+      "available": false,
+      "cwd": "/src/loopflow.loo-2",
+      "agent_process_id": "44444444-4444-4444-8444-444444444444",
+      "ended": {
+        "at": "2026-11-17T12:01:00Z",
+        "by": "died",
+        "exit_code": 137
+      },
+      "recovery": {
+        "attempts": 1,
+        "started_at": "2026-11-17T12:01:02Z",
+        "next_at": "2026-11-17T12:02:02Z",
+        "gave_up": false,
+        "failure": null
+      }
+    },
+    {
       "id": "manual",
       "title": "Checkout conversation",
       "provider": "claude",
@@ -27,9 +49,12 @@
       "state": "closed",
       "available": false,
       "cwd": "/src/loopflow.loo-2",
-      "agent_process_id": null
+      "agent_process_id": null,
+      "ended": null,
+      "recovery": null
     }
   ],
+  "conversation": "session_5e55105e000040008000000000000002",
   "graph_processes": [
     {
       "id": "00000005-0000-4000-8000-000000000000",

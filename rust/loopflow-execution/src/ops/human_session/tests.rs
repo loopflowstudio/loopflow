@@ -217,11 +217,9 @@ fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
     );
 }
 
-#[test]
-fn session_metadata_keeps_unknown_position_visible() {
-    let task = TaskId::new();
-    let wave = loopflow_model::id::WaveId::new();
-    let mut summary = crate::session::SessionSummary {
+/// A retained interactive Session of Task `task` in Wave `wave`, at an earlier Graph step.
+fn retained_summary(task: &TaskId, wave: &loopflow_model::id::WaveId) -> crate::session::SessionSummary {
+    crate::session::SessionSummary {
         transition: None,
         preview: None,
         has_provider_history: true,
@@ -229,6 +227,10 @@ fn session_metadata_keeps_unknown_position_visible() {
         agent_process_id: None,
         primary_scope: None,
         agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
+        agent_end: None,
+        recovery_attempts: 0,
+        recovered_at: None,
+        recovery_failure: None,
         available: false,
         terminal_id: None,
         unviewed: false,
@@ -266,7 +268,79 @@ fn session_metadata_keeps_unknown_position_visible() {
         independent: false,
         wave_name: Some("Infrastructure".into()),
         task_identifier: Some("INF-123".into()),
-    };
+    }
+}
+
+/// A Task conversation that died says how and when the server starts it
+/// again; one the person quit has no recovery; after the last start it is the
+/// person's; once it runs again its attempts stay visible until a turn ends.
+#[test]
+fn a_task_conversation_says_how_it_ended_and_what_recovery_does() {
+    use super::{SessionEndedBy, SessionState};
+    let task = TaskId::new();
+    let wave = loopflow_model::id::WaveId::new();
+    let mut summary = retained_summary(&task, &wave);
+    summary.task_primary = true;
+    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Dead;
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 1_000,
+        exit_code: Some(137),
+    });
+
+    let row = super::summary_surface(&summary);
+    assert_eq!(row.state, SessionState::Closed);
+    let ended = row.ended.unwrap();
+    assert_eq!((ended.by, ended.exit_code), (SessionEndedBy::Died, Some(137)));
+    let recovery = row.recovery.unwrap();
+    assert_eq!(recovery.attempts, 0);
+    assert_eq!(recovery.next_at, Some(ended.at), "the first start is immediate");
+    assert!(!recovery.gave_up);
+
+    summary.recovery_attempts = 2;
+    summary.recovered_at = Some(2_000);
+    let recovery = super::summary_surface(&summary).recovery.unwrap();
+    assert_eq!(
+        recovery.next_at,
+        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2))
+    );
+
+    summary.recovery_attempts = loopflow_storage::sqlite::session_recovery::RECOVERY_ATTEMPTS;
+    let recovery = super::summary_surface(&summary).recovery.unwrap();
+    assert!(recovery.gave_up);
+    assert_eq!(recovery.next_at, None);
+
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 3_000,
+        exit_code: Some(0),
+    });
+    let row = super::summary_surface(&summary);
+    assert_eq!(row.ended.unwrap().by, SessionEndedBy::Person);
+    assert_eq!(row.recovery, None, "a quit conversation stays quit");
+
+    summary.agent_end = None;
+    summary.recovery_attempts = 1;
+    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Live;
+    let row = super::summary_surface(&summary);
+    assert_eq!(row.ended, None);
+    let recovery = row.recovery.unwrap();
+    assert_eq!((recovery.attempts, recovery.next_at), (1, None));
+
+    summary.task_primary = false;
+    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Dead;
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 4_000,
+        exit_code: None,
+    });
+    let row = super::summary_surface(&summary);
+    assert_eq!(row.ended.unwrap().by, SessionEndedBy::Died);
+    assert_eq!(row.recovery, None, "only a Task's conversation comes back");
+}
+
+#[test]
+fn session_metadata_keeps_unknown_position_visible() {
+    let task = TaskId::new();
+    let wave = loopflow_model::id::WaveId::new();
+    let mut summary = retained_summary(&task, &wave);
     let row = super::summary_surface(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));

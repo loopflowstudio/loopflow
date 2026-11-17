@@ -8,7 +8,9 @@ use serde::{Deserialize, Serialize};
 use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
-use loopflow_execution::ops::human_session::{SessionRecord, SessionState};
+use loopflow_execution::ops::human_session::{
+    SessionEnd, SessionEndedBy, SessionRecord, SessionRecovery, SessionState,
+};
 use loopflow_execution::session::SessionOpenIntent;
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
@@ -397,6 +399,12 @@ pub struct SessionFacts {
     pub cwd: String,
     /// The provider's current AgentProcess, as `lf ps` lists it.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
+    /// How its last agent ended, as `lf session list` reads it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ended: Option<SessionEnd>,
+    /// The server starting it again after a death.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub recovery: Option<SessionRecovery>,
 }
 
 impl SessionFacts {
@@ -410,8 +418,78 @@ impl SessionFacts {
             available: session.availability.is_some(),
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
+            ended: session.ended,
+            recovery: session.recovery,
         }
     }
+
+    /// `lf task status`'s line for the Task's conversation: running, died and
+    /// coming back, or quit, with the command that opens it.
+    pub fn conversation_line(&self, task: &str, now: i64) -> String {
+        let resume = format!("`lf resume --task {task}` opens it");
+        let running = matches!(self.state, SessionState::Active | SessionState::Detached);
+        let recovery = self.recovery.as_ref();
+        if running {
+            return match recovery.and_then(|recovery| {
+                Some((recovery.attempts, recovery.started_at.as_deref()?))
+            }) {
+                Some((attempts, at)) if attempts > 0 => {
+                    format!("running (started again {}, attempt {attempts})", clock(at))
+                }
+                _ => "running".to_string(),
+            };
+        }
+        let ending = match &self.ended {
+            Some(SessionEnd {
+                at,
+                by: SessionEndedBy::Person,
+                ..
+            }) => return format!("quit {}; {resume}", clock(at)),
+            Some(SessionEnd {
+                at,
+                by: SessionEndedBy::Died,
+                exit_code,
+            }) => format!(
+                "died {} ({})",
+                clock(at),
+                exit_code.map_or("no exit recorded".to_string(), |code| format!(
+                    "exit {code}"
+                ))
+            ),
+            None if self.state == SessionState::Unknown => return "unknown".to_string(),
+            None => "closed".to_string(),
+        };
+        let Some(recovery) = recovery else {
+            return format!("{ending}; {resume}");
+        };
+        let mut line = if recovery.gave_up {
+            format!("{ending} · started {} times; {resume}", recovery.attempts)
+        } else {
+            match recovery.next_at.as_deref() {
+                Some(at) if seconds(at).is_some_and(|at| at > now) => {
+                    format!("{ending} · starts again {}", clock(at))
+                }
+                _ => format!("{ending} · starting again"),
+            }
+        };
+        if let Some(failure) = &recovery.failure {
+            line.push_str(&format!(" · last start failed: {failure}"));
+        }
+        line
+    }
+}
+
+fn seconds(rfc3339: &str) -> Option<i64> {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .ok()
+        .map(|at| at.timestamp())
+}
+
+/// Local `HH:MM` for an RFC 3339 time.
+fn clock(rfc3339: &str) -> String {
+    chrono::DateTime::parse_from_rfc3339(rfc3339)
+        .map(|at| at.with_timezone(&chrono::Local).format("%H:%M").to_string())
+        .unwrap_or_else(|_| rfc3339.to_string())
 }
 
 /// `lf session list`.
@@ -1164,4 +1242,78 @@ pub(super) fn mutate(
             _ => unreachable!("is_mutation selects Session mutations"),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SessionEnd, SessionEndedBy, SessionFacts, SessionRecovery, SessionState};
+
+    fn conversation(
+        state: SessionState,
+        ended: Option<SessionEnd>,
+        recovery: Option<SessionRecovery>,
+    ) -> SessionFacts {
+        SessionFacts {
+            id: "conversation".into(),
+            title: "LOO-9 conversation".into(),
+            provider: Some("claude".into()),
+            interactive: true,
+            state,
+            available: false,
+            cwd: "/src/loopflow.loo-9".into(),
+            agent_process_id: None,
+            ended,
+            recovery,
+        }
+    }
+
+    fn end(by: SessionEndedBy, exit_code: Option<i32>) -> Option<SessionEnd> {
+        Some(SessionEnd {
+            at: "2026-11-17T12:01:00Z".into(),
+            by,
+            exit_code,
+        })
+    }
+
+    fn recovery(attempts: u32, gave_up: bool) -> Option<SessionRecovery> {
+        Some(SessionRecovery {
+            attempts,
+            started_at: Some("2026-11-17T12:01:02Z".into()),
+            next_at: None,
+            gave_up,
+            failure: None,
+        })
+    }
+
+    /// Running, quit and given up each say what a person does next, if anything.
+    #[test]
+    fn the_conversation_line_says_running_quit_or_how_it_comes_back() {
+        assert_eq!(
+            conversation(SessionState::Active, None, None).conversation_line("LOO-9", 0),
+            "running"
+        );
+        assert!(conversation(SessionState::Active, None, recovery(1, false))
+            .conversation_line("LOO-9", 0)
+            .starts_with("running (started again "));
+        let quit = conversation(
+            SessionState::Closed,
+            end(SessionEndedBy::Person, Some(0)),
+            None,
+        )
+        .conversation_line("LOO-9", 0);
+        assert!(quit.starts_with("quit "), "{quit}");
+        assert!(quit.ends_with("; `lf resume --task LOO-9` opens it"), "{quit}");
+        let gave_up = conversation(
+            SessionState::Closed,
+            end(SessionEndedBy::Died, None),
+            recovery(5, true),
+        )
+        .conversation_line("LOO-9", 0);
+        assert!(
+            gave_up.ends_with(
+                "(no exit recorded) · started 5 times; `lf resume --task LOO-9` opens it"
+            ),
+            "{gave_up}"
+        );
+    }
 }

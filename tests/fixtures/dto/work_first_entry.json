@@ -65,7 +65,9 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "recovery": null
   },
   "reopened": {
     "actions": [
@@ -124,7 +126,9 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "recovery": null
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -354,7 +358,9 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "recovery": null
     },
     {
       "actions": [
@@ -418,7 +424,9 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "recovery": null
     },
     {
       "actions": [
@@ -476,7 +484,9 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "recovery": null
     }
   ],
   "task_primary": {
@@ -541,6 +551,8 @@
     "preview": null,
     "transition": null,
     "turn": null,
-    "raw": false
+    "raw": false,
+    "ended": null,
+    "recovery": null
   }
 }

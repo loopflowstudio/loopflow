@@ -208,6 +208,8 @@ fn record(
         terminal_ids: Vec::new(),
         turn,
         raw: true,
+        ended: None,
+        recovery: None,
     }
 }
 

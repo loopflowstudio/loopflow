@@ -65,7 +65,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -130,7 +132,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -193,7 +197,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -258,7 +264,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -321,7 +329,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       }
     ],
     "tasks": [
@@ -804,7 +814,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -869,7 +881,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -932,7 +946,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -997,7 +1013,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -1060,7 +1078,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       }
     ],
     "tasks": [
@@ -1552,7 +1572,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -1617,7 +1639,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -1680,7 +1704,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -1745,7 +1771,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -1808,7 +1836,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       }
     ],
     "tasks": [
@@ -2291,7 +2321,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -2356,7 +2388,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -2419,7 +2453,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -2484,7 +2520,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -2547,7 +2585,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       }
     ],
     "tasks": [
@@ -3041,7 +3081,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -3106,7 +3148,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -3169,7 +3213,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -3234,7 +3280,9 @@
           "task_id": "task_22222222222222222222222222222222",
           "unavailable": "Task checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       },
       {
         "account": null,
@@ -3297,7 +3345,9 @@
           "task_id": null,
           "unavailable": "Persistent checkout is unavailable",
           "worktree": "/repo/fix-2"
-        }
+        },
+        "ended": null,
+        "recovery": null
       }
     ],
     "tasks": [

@@ -464,6 +464,103 @@ pub struct SessionRecord {
     /// A conversation open here that Loopflow never launched; `id` is the
     /// provider's conversation ID and no Session records it.
     pub raw: bool,
+    /// How its last agent ended, while none runs; `null` for a headless
+    /// Session, before a first start, or when nobody recorded the end.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub ended: Option<SessionEnd>,
+    /// The server starting a Task's conversation again after it died; `null`
+    /// when nothing was or will be started.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub recovery: Option<SessionRecovery>,
+}
+
+/// A conversation's last agent end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionEnd {
+    /// RFC 3339.
+    pub at: String,
+    pub by: SessionEndedBy,
+    /// The provider's exit; `null` when nobody saw it (the holder died, or
+    /// the Machine restarted).
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionEndedBy {
+    /// `/exit`, Ctrl+D or Ctrl+C at the prompt (exit 0 or 130). It stays quit.
+    Person,
+    /// Killed, crashed, or gone with its holder or the Machine.
+    Died,
+}
+
+/// What the server's recovery pass did and will do for a Task conversation.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct SessionRecovery {
+    /// Starts since it last finished a turn.
+    pub attempts: u32,
+    /// RFC 3339: the pass's last start; `null` before its first.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub started_at: Option<String>,
+    /// RFC 3339: when the next start is due, while it is down and the pass
+    /// has starts left; `null` otherwise.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub next_at: Option<String>,
+    /// The pass made its last start; `lf resume --task <ID>` continues it.
+    pub gave_up: bool,
+    /// Why the last start failed; `null` once one succeeded.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub failure: Option<String>,
+}
+
+/// How an interactive Session's agent ended, and what the recovery pass does
+/// about a Task conversation that died. A quit conversation has no recovery.
+fn session_ending(
+    session: &crate::session::SessionSummary,
+    state: SessionState,
+) -> (Option<SessionEnd>, Option<SessionRecovery>) {
+    if !session.interactive {
+        return (None, None);
+    }
+    let ended = session
+        .agent_end
+        .filter(|_| state == SessionState::Closed)
+        .and_then(|end| {
+            Some(SessionEnd {
+                at: crate::transcript::rfc3339(end.at)?,
+                by: if end.by_person() {
+                    SessionEndedBy::Person
+                } else {
+                    SessionEndedBy::Died
+                },
+                exit_code: end.exit_code,
+            })
+        });
+    let quit = ended
+        .as_ref()
+        .is_some_and(|end| end.by == SessionEndedBy::Person);
+    let died = ended.is_some() && !quit;
+    let recovering = session.recovery_attempts > 0 || session.recovery_failure.is_some();
+    if !session.task_primary || session.task_terminal || quit || !(died || recovering) {
+        return (ended, None);
+    }
+    let attempts = session.recovery_attempts;
+    let gave_up = attempts >= loopflow_storage::sqlite::session_recovery::RECOVERY_ATTEMPTS;
+    let down = state == SessionState::Closed;
+    let next_at = (down && !gave_up).then(|| {
+        crate::ops::recovery::next_start_at(attempts, session.recovered_at)
+            .or(session.agent_end.map(|end| end.at))
+            .and_then(crate::transcript::rfc3339)
+    });
+    let recovery = SessionRecovery {
+        attempts,
+        started_at: session.recovered_at.and_then(crate::transcript::rfc3339),
+        next_at: next_at.flatten(),
+        gave_up: down && gave_up,
+        failure: session.recovery_failure.clone(),
+    };
+    (ended, Some(recovery))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -737,6 +834,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
+    let (ended, recovery) = session_ending(session, state);
     let mut actions = projected_actions(session);
     let open_argv = match human_session_argv(&session.id) {
         Ok(argv) => argv,
@@ -785,6 +883,8 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
         turn: None,
         raw: false,
+        ended,
+        recovery,
     }
 }
 
@@ -1700,6 +1800,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
     let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
+    let (ended, recovery) = session_ending(&metadata, state);
     let actions = projected_actions(&metadata);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
@@ -1752,6 +1853,8 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         open_argv,
         turn: None,
         raw: false,
+        ended,
+        recovery,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;

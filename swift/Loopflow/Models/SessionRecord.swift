@@ -248,6 +248,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let turn: SessionTurn?
     /// Open here but never launched by Loopflow; `id` is the provider's conversation ID.
     public let raw: Bool
+    /// How its last agent ended, while none runs; nil for a headless Session or before a first start.
+    public let ended: SessionEnd?
+    /// The server starting a Task's conversation again after it died.
+    public let recovery: SessionRecovery?
 
     /// One word for a row: Available for a person wins over what its client is doing.
     public var statusLabel: String {
@@ -294,7 +298,99 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
-        case turn, raw
+        case turn, raw, ended, recovery
+    }
+}
+
+/// A conversation's last agent end.
+public struct SessionEnd: Codable, Sendable, Hashable {
+    public enum By: String, Codable, Sendable, Hashable {
+        /// `/exit`, Ctrl+D or Ctrl+C at the prompt. It stays quit.
+        case person
+        /// Killed, crashed, or gone with its holder or the Machine.
+        case died
+    }
+
+    /// RFC 3339.
+    public let at: String
+    public let by: By
+    public let exitCode: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case at, by
+        case exitCode = "exit_code"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(at, forKey: .at)
+        try values.encode(by, forKey: .by)
+        try values.encode(exitCode, forKey: .exitCode)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        at = try values.decode(String.self, forKey: .at)
+        by = try values.decode(By.self, forKey: .by)
+        exitCode = try values.decode(Int?.self, forKey: .exitCode)
+    }
+}
+
+/// What the server's recovery pass did and will do for a Task conversation.
+public struct SessionRecovery: Codable, Sendable, Hashable {
+    /// Starts since it last finished a turn.
+    public let attempts: Int
+    /// RFC 3339: the pass's last start.
+    public let startedAt: String?
+    /// RFC 3339: when the next start is due, while it is down.
+    public let nextAt: String?
+    /// The pass made its last start; resuming it is the person's.
+    public let gaveUp: Bool
+    /// Why the last start failed.
+    public let failure: String?
+
+    enum CodingKeys: String, CodingKey {
+        case attempts, failure
+        case startedAt = "started_at"
+        case nextAt = "next_at"
+        case gaveUp = "gave_up"
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(attempts, forKey: .attempts)
+        try values.encode(startedAt, forKey: .startedAt)
+        try values.encode(nextAt, forKey: .nextAt)
+        try values.encode(gaveUp, forKey: .gaveUp)
+        try values.encode(failure, forKey: .failure)
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attempts = try values.decode(Int.self, forKey: .attempts)
+        startedAt = try values.decode(String?.self, forKey: .startedAt)
+        nextAt = try values.decode(String?.self, forKey: .nextAt)
+        gaveUp = try values.decode(Bool.self, forKey: .gaveUp)
+        failure = try values.decode(String?.self, forKey: .failure)
+    }
+}
+
+extension SessionRecord {
+    /// One line for a Task conversation that is down or coming back: "Died (exit 137) · starting again".
+    /// Nil while it runs normally, and for a Session that is not a Task's conversation.
+    public var recoveryLine: String? {
+        let exit = ended.map { end in end.exitCode.map { "exit \($0)" } ?? "no exit recorded" }
+        if state == .active || state == .detached {
+            guard let recovery, recovery.attempts > 0 else { return nil }
+            return "Started again after it died (attempt \(recovery.attempts))"
+        }
+        guard let recovery else {
+            return ended?.by == .person ? "Quit" : nil
+        }
+        var line = "Died" + (exit.map { " (\($0))" } ?? "")
+        line += recovery.gaveUp ? " · started \(recovery.attempts) times; open it to continue" : " · starting again"
+        if let failure = recovery.failure { line += " · last start failed: \(failure)" }
+        return line
     }
 }
 
@@ -431,6 +527,8 @@ extension SessionRecord {
         try values.encode(terminalIds, forKey: .terminalIds)
         try values.encode(turn, forKey: .turn)
         try values.encode(raw, forKey: .raw)
+        try values.encode(ended, forKey: .ended)
+        try values.encode(recovery, forKey: .recovery)
     }
 
     public init(from decoder: Decoder) throws {
@@ -464,5 +562,7 @@ extension SessionRecord {
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
         turn = try values.decode(SessionTurn?.self, forKey: .turn)
         raw = try values.decode(Bool.self, forKey: .raw)
+        ended = try values.decode(SessionEnd?.self, forKey: .ended)
+        recovery = try values.decode(SessionRecovery?.self, forKey: .recovery)
     }
 }

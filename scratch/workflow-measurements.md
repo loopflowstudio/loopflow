@@ -74,3 +74,19 @@ Dev UI reads work again. A fresh 45-byte file is visibly open; DA297AFE-4EEF-4AD
 DABA9273-6BAB-4260-A810-7D716C08FA11 is rejected by sidecar: its launch was interrupted by the service experiment, prolonged idle time and later manual reconnect. Keep raw records. The earlier 131.43 s launch remains valid.
 
 A normal app update concurrently selected 528ccd8ed; 470da475a continued owning the socket. Supported install-server reconciliation failed on that mismatch. Verified the old PID 58063 was now in the superseded bundle, then sent TERM to that process and kickstarted the registered job. Current status is ready=true/listening=true/error=null, instance 34e0a6e7-3c60-4b9e-b136-882ddbd99979, protocol 5, Desktop reconnected. No additional override. This supersedes the earlier restored identity.
+
+“are tou going to generate the data or how do we get to landing” — Jack Heart.
+Fresh report still has 7/10 categories with completed samples; return_session,
+new_conversation and first_word have none. Regenerated /tmp/loopflow-performance.html.
+The current server status listens but reports a selected-executable mismatch;
+no restart or override attempted. CUA reports cgWindowNotFound for the installed
+Dev app; requested reopening its window, without workflow clicks. The app inventory
+contains several bundles sharing the Dev identifier, so full installed path is
+required. Added original-event capture to the ordinary Session Open here/Retry
+button and removed the duplicate reconnect wrapper. Focused build/check running
+in /tmp/loo916-final-entry-check.log. PR #1950 is open and mergeable; current
+notes-only head skips the substantive CI suites, so that is not a new validation
+of these edits. No shipping approval or Graph launch.
+The entry-point repair compiled successfully; `scripts/test_desktop.sh --filter
+'InteractionTests|ResponseVisibilityTests|LaunchReadinessTests'` passed 12 tests
+in 2 suites. No new live measurements were produced by these tests.

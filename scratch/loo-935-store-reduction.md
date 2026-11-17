@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged; next is gate.
+Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged, compressed; next is gate.
 
 ## Demo
 
@@ -111,6 +111,7 @@ state; the file is not rewritten.
 - Swift (before it): `scripts/test_desktop.sh --skip-build --filter 'WorkSelectionTests|ToolTabTests|DashboardWorkspaceTests|MultiplexerStoreTests|DTOFixtureTests'`: 90 pass (subagent run); a wider 14-suite filter, 195 pass.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
 - Compress (after merging main): `cargo clippy -p loopflow --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (30), `check_migrations.py`: pass; `schema_page.py --check` was stale from main's "Provider authentication" rename, regenerated.
+- QA report of the pre-split upgrade (drops, export file): `git show 8d18764018:scratch/qa.html`.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
 - Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

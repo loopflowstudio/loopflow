@@ -157,3 +157,23 @@ worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
 - `lf process prune --dry-run` had no replacement: there is no way to preview
   what the pass will settle. `lf machine doctor`'s lineage line still counts
   repairable ancestry.
+
+## Slice 4 (implement, 2026-11-17)
+
+- The concept-review answers "1) a 2) a 3) b" were applied as the steer read
+  them (1 naming, 2 carrier count, 3 wait for LOO-953). In
+  `scratch/concept-review.html` question 2 is what resets the attempt count;
+  the reset was left as built (any `yielded`), so its counterexample still
+  stands: if a resumed provider yields at startup, the 5-start limit never
+  binds.
+- `ended` describes the current agent only, so a conversation running again
+  after a death shows `start.attempts` but not the earlier exit code.
+- `start` is computed for any open Task's primary Session, not only one
+  checked out here; a Task checked out elsewhere could read "starting again"
+  that no pass here will do.
+- A ship carrier's restarts now count on `task_graphs.restarts`; a shipping
+  Task that later stops shipping keeps that count until a step finishes, so it
+  could read "died 5 times" sooner. Ships themselves still never give up.
+- `next_at` with no prior start is the death time (immediate), so a death the
+  pass is about to start reads "starting again" even while the pass waits for
+  the dying terminal to clear.

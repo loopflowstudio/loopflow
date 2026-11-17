@@ -243,11 +243,11 @@ than one Session's start.
 finishing a turn waits; after 5 deaths with no finished turn the pass stops
 and the Task shows "died 5 times since 09:14 (last: exit 1); `lf resume --task
 LOO-x`". The count is `agent_sessions.starts_since_turn` plus `last_started_at`;
-a finished turn resets it. A carrier counts restarts in a row as ship
-restarts do today (`count_ship_restart`); a moving Task's carrier gets the
-same counter on `task_graphs` (`restarts`), reset by a finished step
-(`ship_progressed`'s rule). After 5, the Task shows "died 5 times at
-implement; `lf task run LOO-x`".
+a finished turn resets it. A carrier's restarts, shipping or moving, are one
+count on `task_graphs` (`restarts`), reset by a finished step
+(`ship_progressed`'s rule). After 5, a moving Task shows "died 5 times at
+implement; `lf task run LOO-x`"; a ship keeps restarting on the longest
+backoff, as before.
 
 **Never starts:**
 - bare Sessions: chats and batches (`lf <skill>` at a terminal, `lf -b`);
@@ -279,10 +279,10 @@ The facts go on the records they describe, not into a new Task-level state.
 - **Session.** `SessionState` (`unknown · active · detached · closed`,
   `ops/human_session.rs:241`) stays the one answer to "is it running". A
   closed Session gains `ended: {at, by: person | died, exit_code}` and
-  `recovery: {attempts, next_at, gave_up, failure}`, null when nothing is
-  pending. `failure` carries a launch failure's reason ("no PTY left: 511 in
+  `start: {attempts, last_started_at, next_at, gave_up, failure}`, null when
+  nothing is pending. `failure` carries a launch failure's reason ("no PTY left: 511 in
   use (kern.tty.ptmx_max)"). A Session being started again reads `closed`
-  with `recovery.next_at` due, until its agent is live.
+  with `start.next_at` due, until its agent is live.
 - **Task run.** The Task's run line, already derived by
   `execution_of_latest_graph`, shows a dead carrier as `died at <step> {at}`
   with `restarts` and `next_at`, or the `lf task run` command after giving up.
@@ -324,7 +324,8 @@ A headless fixture with a `MachineServer` and a stand-in provider:
 1. Start a Task, then SIGKILL its conversation's provider. Within one pass, a
    new held terminal runs `lf session resume` of the same Session, and
    `lf task status --json` gives the primary Session `active` with
-   `recovery.attempts` 1 and the earlier end `by: died`, `exit_code` 137.
+   `start.attempts` 1 (the earlier end is not on the Session while the new
+   agent runs; see slice 4).
 2. The stand-in exits 0. After a pass, no new terminal starts; the Session is
    `closed` with `ended.by` `person` and `recovery` null.
 3. Stop the server, kill the holder, then start the server. The conversation
@@ -396,8 +397,8 @@ Must survive:
 
    After merging base `e66b21801c`, `server::recovery::tests::` still pass (5).
 
-   Left from slice 1: `conversation` in `lf task status --json` (slice 4,
-   with the DTOs); acceptance check 5.
+   Left from slice 1: acceptance check 5. (`conversation` in
+   `lf task status --json` shipped in slice 4.)
 2. **Restart and reboot.** Built:
    - a finished turn (the Stop hook's `yielded`, `record_native_turn`) resets
      `starts_since_turn`. A resumed provider records no `yielded` at startup
@@ -487,21 +488,55 @@ Must survive:
      `harness::agent_process::tests::failed_sampling_reaps_nothing_and_reports_why`
      (non-macOS only; runs in CI).
 
-4. **Surfaces.** Pieces:
-   - the Session and Task status DTO fields and fixtures, and `conversation`
-     in `lf task status --json`;
-   - the Desktop line;
-   - PTY headroom in `lf machine doctor`;
-   - docs use the four launch names chosen in LOO-924: managed+typing is a
-     work session, managed+headless a worker, bare+typing a chat,
-     bare+headless a batch. Only work sessions come back on their own; the
-     recovery docs this Task wrote (`docs/sessions.md` "After a kill, a crash
-     or a reboot", `docs/work.md`, `docs/troubleshooting.md`, server README)
-     say so in those words.
-   - docs. `docs/sessions.md` says closing from Desktop or `lf task interrupt`
-     makes a quit; neither ends a conversation today, so that sentence goes.
-     It also says each start waits a minute after a death; the first start is
-     immediate.
+4. **Surfaces.** Built:
+   - `SessionRecord` gains `ended {at, by: person|died, exit_code}` (interactive
+     Sessions, while no agent runs) and `start {attempts, last_started_at,
+     next_at, gave_up, failure}` (a Task's conversation that died or whose
+     start failed; null once quit). Read by `summary_query` from the agent
+     row and its launcher's exit (the two `processes` joins LOO-953 replaces)
+     and the three `agent_sessions` counters. `next_at` comes from
+     `ops::recovery::next_start_at`, the same rule the pass waits on.
+   - `lf task status --json`: `conversation` names which of `sessions` is the
+     Task's (added to `sessions` when the overview lacks it); `SessionFacts`
+     carries `ended` and `start`. The text form prints `Conversation: running`,
+     `died 12:01 (exit 137) · starting again`, `quit 12:03; \`lf resume --task
+     X\` opens it`, or `… · started 5 times; …`.
+   - Desktop: the Task page shows the primary Session's `conversationLine`
+     (`swift/LoopflowMac/Views/WorkSurfaceView.swift`).
+   - `lf machine doctor` `ptys`: in use against `kern.tty.ptmx_max`
+     (`kernel.pty.max` on Linux), warns under 32 left. 178 of 511 here.
+   - Steers from the concept review (`scratch/concept-review.html`, Jack "1) a
+     2) a 3) b"): columns renamed `starts_since_turn`, `last_started_at`,
+     `start_failure`; types `ConversationToStart`, `conversations_to_start`,
+     `record_conversation_start`, `record_start_failure`,
+     `CONVERSATION_STARTS`; the wire field is `start`. One restart count:
+     `task_graphs.restarts` for shipping and moving runs, reset by a finished
+     step and by `ship_progressed`; `count_ship_restart`,
+     `reset_ship_restarts`, `SHIP_RESTARTS_COUNTED` and the ship log's
+     restart count are gone (`restarted` rows a released lf writes are
+     ignored).
+   - Docs in the LOO-924 names; the Desktop-close and `lf task interrupt`
+     quit sentence is gone; the first start after a death is immediate.
+   - Tests: `human_session::tests::a_task_conversation_says_how_it_ended_and_when_it_starts_again`,
+     `lf::commands::session::tests::`, `dto_fixtures::task_detail_says_each_fact_once`,
+     `doctor::tests::pty_headroom_…`, Swift `DTOFixtureTests.sessionEndingFixture`,
+     and `context_launch_tests::a_killed_task_conversation_…` now reads
+     `lf task status --json` (running with `start.attempts` 1; quit with
+     `ended.by` person, exit 0, `start` null).
+
+   Taught: while a restarted conversation runs, `ended` describes the current
+   agent (none), so acceptance check 1's "the earlier end `by: died`" is not
+   readable; `start.attempts` 1 and `last_started_at` say it came back. The
+   earlier agent's end is in provider transitions if anyone needs it.
+
+   **Delivery waits on LOO-953's Session columns** (`agent_sessions.agent_pid`,
+   `agent_os_started_at`, `agent_ended_at`, `agent_exit_code`). When they land
+   on its branch, sync onto it and rewrite both reads that join `processes`
+   for the agent's end: `conversations_to_start` (storage
+   `sqlite/session_recovery.rs`) and `summary_query`'s `agent_end` columns
+   (`sqlite/sessions.rs`). Not added here (steer acfa763f).
+
+   Left: acceptance check 5 (SIGTERM to a holder's group), the real reboot (qa).
 
 ## Checks
 
@@ -521,6 +556,16 @@ Must survive:
 - Gate: `test(performance_tests::)` and `test(store::query_plans::tests::)` (new
   `local_task_runs` read over `task_graphs`), `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
   `test(process_ownership_tests::)` and `test(documented_commands::)` (docs edited).
+- Slice 4 (implement): `human_session::tests::` (29), `lf::commands::session::tests::`,
+  `dto_fixtures::`, `server::schema::tests::` (fixture regenerated), `server::recovery::tests::`,
+  `steers_tests::`, `server::wire::`, `id_tests::`, `screens::` (113 pass);
+  `sqlite::task_work::`, `query_plans::tests::`, `ship::tests::`, `task_graph_launch_tests::task_ship_`,
+  `…::a_task_run_whose_carrier_died`, `…::a_killed_graph_…` (40 pass);
+  `doctor::tests::` (6); `context_launch_tests::a_killed_task_conversation` (1);
+  `documented_commands::` (4); clippy clean.
+- Gate: `scripts/test_desktop.sh --filter 'DTOFixtureTests'` plus every Swift suite with an inline
+  Session fixture (keys `ended`/`start` added to 13 files), `binary(session_lifecycle_tests)`
+  (`work_first_entry.json`), `test(performance_tests::)` (`summary_query` gained one PK join).
 - A real reboot with three Tasks (qa; a person runs it).
 
 ## Docs written ahead (write-docs)

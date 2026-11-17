@@ -604,6 +604,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
         unavailable: Some("gone".into()),
         body: None,
         work: None,
+        read_at: None,
     })
     .unwrap();
     for entry in &entries {

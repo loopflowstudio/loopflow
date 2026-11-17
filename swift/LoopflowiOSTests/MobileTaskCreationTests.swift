@@ -561,7 +561,7 @@ private final class CreationClient: MobileTaskCreationClient {
 
     init() async throws {
         let url = try XCTUnwrap(Bundle(for: MobileTaskCreationTests.self).url(forResource: "task-reading", withExtension: "json"))
-        guard case .response(_, _, let result) = try ServerMessage(line: Data(contentsOf: url)) else {
+        guard case .response(_, _, let result, _) = try ServerMessage(line: Data(contentsOf: url)) else {
             throw RegistryQueryError("task-reading.json is not a response")
         }
         let plan = try result.decode(WorkViewPlan.self)

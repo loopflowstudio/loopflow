@@ -1543,3 +1543,18 @@ fn a_task_order_changed_after_preparation_keeps_the_new_order() {
         .unwrap();
     assert_eq!(retained, later);
 }
+
+#[test]
+fn a_view_plan_names_who_a_claim_here_would_make_owner() {
+    let (_dir, store, repo) = fixture();
+    let plan = selections::view_plan(&store, &repo, None).unwrap();
+    let viewer = plan.viewer.expect("the test home has a Git identity");
+    assert_eq!(
+        viewer.person_key,
+        crate::config::participant_email(std::path::Path::new(&plan.repo_path))
+    );
+    assert_eq!(
+        viewer.machine.id,
+        Some(store.saved_local_machine().unwrap().id)
+    );
+}

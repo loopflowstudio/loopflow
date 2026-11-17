@@ -224,6 +224,8 @@
       }
     },
     "repo": "repo_fixture",
-    "repo_path": "/Users/dev/src/loopflow"
-  }
+    "repo_path": "/Users/dev/src/loopflow",
+    "viewer": null
+  },
+  "revisions": null
 }

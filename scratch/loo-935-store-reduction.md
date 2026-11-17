@@ -338,7 +338,31 @@ invocation. Counterexample fixed: an admitted agent of Unknown liveness lists
 resuming beside it (`opening_an_admitted_holder_of_unknown_liveness_takes_it_over`).
 Checks: `cargo test -p loopflow-execution --lib ops::human_session::` (47),
 `--test integration dto_fixtures::session_ session_cli_uses_one_truthful_resolution_contract` (5),
-clippy execution: pass. Next: gate.
+clippy execution: pass.
+
+Concept review (2026-11-17): `open` still has two launchers for one intent.
+Its tail (`NativeSession::of`, `require_provider_session_process`,
+`stop_session_agent`, `native_session::resume_session`) resumes without the
+launch lock (released when `admit_workspace` returns) and without
+`LF_HUMAN_SESSION`, while `open_waiting` → `resume_native_session` resumes the
+same history under the lock with the token, and also covers Codex's failed
+bootstrap. Which one runs depends on `captured.is_none()` and
+`input_provider_session`, reads beside the summary. TakeOver with no capture
+yet goes to `open_waiting` without stopping the holder.
+
+Next implement pass:
+- `open` keeps the launch lock from `lock_session_process` through the launch.
+  TakeOver calls `stop_session_agent` (with its diagnostic) under that lock;
+  TakeOver, Resume and Start then all call `open_waiting_locked` with the lock
+  and the admitted Session. Delete `open`'s tail and its `captured.is_none()`
+  / `input_provider_session` branches; `open_waiting` keeps its other caller.
+- `surface` is taken before launching, on every path.
+- `native_session::resume_session` stays for `ops/run.rs`.
+- Test: in ops::human_session:: tests, a Resume-intent `lf resume` launches
+  with `LF_HUMAN_SESSION` set (the path that lacked it). Existing open/resume
+  tests and the Unknown-liveness take-over test stay unchanged.
+
+Then gate.
 
 Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig
 resume do what it should do. and then we can talk about what opens does".

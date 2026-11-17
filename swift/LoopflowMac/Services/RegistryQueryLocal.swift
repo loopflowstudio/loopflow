@@ -24,6 +24,8 @@ enum RegistryQueryLocal {
             } catch { throw SubmittedCreationError(requestID: requestID, cause: error) }
         default: return try await ServerClient.write(change)
         }
+    }, change: { change, requestID in
+        try await ServerClient.change(change, requestID: requestID)
     }, watchFiles: { args, cwd in
         // Only a remote Task's files: `lf --machine … task watch-files` over SSH.
         try await Task.detached(priority: .userInitiated) {

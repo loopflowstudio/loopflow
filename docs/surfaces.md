@@ -117,6 +117,43 @@ Queries take `wave:`, `task:`, `kind:task|wave` and
 `state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
 whitespace means AND, and `or` and parentheses compose.
 
+### Changes show at once
+
+Click **Complete** on the selected Task: its row is gone in that frame, the next
+Task down (else the one above, else the empty state) is selected, and the Wave
+count drops by one. The same holds on a remote Machine and on the phone.
+
+| Change | What you see in the click |
+|---|---|
+| Complete, Abandon | the row leaves every list except Done; selection moves on |
+| Reopen | the Task returns to Working if it is owned and started, else Backlog |
+| Claim | your name as owner; a started Task moves to Working |
+| Unassign | no owner; the Task moves to Backlog |
+| Move | the Task leaves one Wave's list and joins the other |
+| Rename a Session | the new title |
+| Start, Auto-Ship, Stop Auto-Ship | a Notice: "LOO-5 Auto-Ship requested" |
+
+The Machine's next reading replaces what the click showed. If the Machine
+refuses, the row comes back and one Notice says why:
+
+```text
+LOO-4 couldn't be completed: its PR #12 is open · Show
+```
+
+A Notice is one line at the bottom of the window with at most one action. A new
+one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
+**Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
+and the view keeps what it last showed. Some Notices stand until what they say
+ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
+a new Task saved before its Machine answered. They wait under the six-second
+ones.
+
+If the Machine stops answering for a few seconds, keep working: changes still
+show at once and go out when it answers, each sent once. After about ten
+seconds the change controls grey out and lists read as last read until the
+Machine is back; changes made before that go out then. Quitting Desktop drops
+changes the Machine has not answered.
+
 ### Connection recovery
 
 Desktop uses the local Loopflow server to read Work and attach Session terminals.

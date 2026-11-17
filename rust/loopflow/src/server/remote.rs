@@ -693,6 +693,7 @@ mod tests {
                     select: None,
                     id: id.into(),
                     operation,
+                    request_id: None,
                 }))
                 .await
                 .unwrap();
@@ -711,6 +712,7 @@ mod tests {
                     session: loopflow_model::id::LfSessionId::from("session_missing"),
                     terminal_id: None,
                 }),
+                request_id: None,
             }))
             .await
             .unwrap();
@@ -737,6 +739,7 @@ mod tests {
             id: "file".into(),
             trace_id: loopflow_model::id::TraceId::default(),
             result: serde_json::Value::String("x".repeat(2 * MAX_MESSAGE)),
+            revisions: None,
         })
         .unwrap();
         let ticket = tickets.issue(phone.clone(), download(big.clone()));

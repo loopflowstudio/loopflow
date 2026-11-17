@@ -64,8 +64,18 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
             }
         }
         let repository = super::task::repository_for_task(&store, &task)?;
-        assert_assignee(&store.sqlite, &repository, &task.id).await;
-        super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
+        // The assignee and its sync run after a served answer, as one job.
+        let (repo, id) = (repository.clone(), task.id.clone());
+        let now = crate::journal::request::after_reply(move || {
+            super::planning_sync::after_reply(|store| async move {
+                assert_assignee(&store.sqlite, &repo, &id).await;
+                super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
+            })
+        });
+        if now.is_some() {
+            assert_assignee(&store.sqlite, &repository, &task.id).await;
+            super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
+        }
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)
     })
 }

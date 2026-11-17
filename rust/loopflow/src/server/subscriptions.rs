@@ -259,6 +259,7 @@ impl Delivery {
                         id: id.into(),
                         trace_id: loopflow_model::id::TraceId::default(),
                         result: Value::Null,
+                        revisions: None,
                     },
                 )
                 .await?;

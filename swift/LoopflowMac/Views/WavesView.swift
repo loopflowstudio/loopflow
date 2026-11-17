@@ -91,7 +91,8 @@ struct WavesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(palette.background)
-        .safeAreaInset(edge: .bottom) { CreationRecoveryView() }
+        .overlay(alignment: .bottom) { NoticeView(center: model.navigation.notices).zIndex(ZIndex.toast) }
+        .modifier(CreationNotices(notices: model.navigation.notices))
         .task { await model.keepWorkCurrent() }
         .task { await model.keepPlanningCurrent() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in

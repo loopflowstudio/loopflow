@@ -40,10 +40,6 @@ enum MockWaveFixture {
         return raw.flatMap(DetailState.init(rawValue:)) ?? .loading
     }
 
-    /// The failure a mock `error` state reports — a plausible offline reason,
-    /// never a raw stack. `WaveDetailReading` frames it as the disclosed footer.
-    static let refreshError = RegistryQueryError("the local registry is unreachable")
-
     /// The stable list, one Wave per lens state: green (a live body), red
     /// (stopped with active work), black (off and clean), plus a child Wave
     /// (parent set) to exercise future-ancestry row indentation.
@@ -94,15 +90,7 @@ enum MockWaveFixture {
     /// affordance stays on screen only while awaiting). Pure so the screenshot
     /// states are covered without launching the app.
     static func detailReading(state: DetailState) -> (reading: WaveDetailReading, awaitingFirstRead: Bool) {
-        var reading = WaveDetailReading()
-        switch state {
-        case .loading:
-            reading.clear()
-            return (reading, true)
-        case .error:
-            reading.recordFailure(refreshError)
-            return (reading, false)
-        }
+        (WaveDetailReading(), state == .loading)
     }
 
     static let detailJSON = #"""

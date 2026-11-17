@@ -266,7 +266,7 @@ pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> 
     )
 }
 
-/// Reopen a recorded Session, retaining its bare or managed lifetime. Only
+/// Reopen a recorded Session as a chat or a work session. Only
 /// an interactive Session has a last screen to preview.
 pub(crate) fn delegate_session(
     id: &str,
@@ -300,7 +300,8 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
     )
 }
 
-/// Retain the recorded lifetime; a held child keeps its parent's decision.
+/// Chats reopen as chats; bound and primary Sessions as work sessions. A held
+/// child keeps its parent's choice.
 fn session_run(id: &str) -> crate::harness::Run {
     use crate::harness::Run;
 

@@ -48,7 +48,7 @@ resume.
 
 ### Launch lifetime and Task membership
 
-A command chooses the state; the checkout, `--task` and `LF_AS` choose which
+A command chooses the launch kind; the checkout, `--task` and `LF_AS` choose which
 Task it belongs to. Every launch belonging to a Task counts toward its usage
 and receives its steers. Work sessions and workers report turn
 boundaries to the Machine server; chats and batches read their steers directly.

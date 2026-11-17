@@ -1,7 +1,4 @@
 import Foundation
-#if os(macOS)
-import AppKit
-#endif
 
 /// Seconds on the platform event clock, including time queued before dispatch.
 public struct InteractionInput: Sendable, Equatable {
@@ -12,20 +9,6 @@ public struct InteractionInput: Sendable, Equatable {
     public init(uptime: TimeInterval, source: Source) {
         self.uptime = uptime
         self.source = source
-    }
-
-    @MainActor
-    public static var current: InteractionInput? {
-        #if os(macOS)
-        guard let event = NSApp?.currentEvent else { return nil }
-        switch event.type {
-        case .leftMouseDown, .leftMouseUp, .rightMouseDown, .rightMouseUp, .keyDown, .scrollWheel:
-            return InteractionInput(uptime: event.timestamp, source: .appKitEvent)
-        default: return nil
-        }
-        #else
-        return InteractionTrace.input
-        #endif
     }
 }
 

@@ -1,47 +1,19 @@
-import Foundation
-#if os(macOS)
-import AppKit
-import ScreenCaptureKit
-#elseif os(iOS)
-import UIKit
-import ReplayKit
 import CoreMedia
+import Foundation
+import Loopflow
 import Observation
 import OSLog
-#endif
+import ReplayKit
+import UIKit
 
-/// A native screen-frame observation. Desktop includes capture acquisition cost;
-/// phone uses the next ReplayKit video frame, never an offscreen view snapshot.
+/// Phone capture observes the next composited ReplayKit video frame.
 @MainActor
-public enum InteractionFrame {
-    #if os(macOS)
-    public static func requestAccess() { _ = CGRequestScreenCaptureAccess() }
+enum InteractionFrame {
+    static var isEnabled: Bool { ScreenRecorder.shared.enabled }
+    static func enableCapture() async throws { try await ScreenRecorder.shared.start() }
+    static func disableCapture() async { await ScreenRecorder.shared.stop() }
 
-    public static func capture(window: NSWindow?, prepare: @MainActor () -> Void = {}) async -> TimeInterval? {
-        guard let window, window.isVisible, window.occlusionState.contains(.visible),
-              CGPreflightScreenCaptureAccess() else { return nil }
-        prepare()
-        window.displayIfNeeded()
-        do {
-            let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: true)
-            guard let source = content.windows.first(where: { $0.windowID == CGWindowID(window.windowNumber) }) else { return nil }
-            let filter = SCContentFilter(desktopIndependentWindow: source)
-            let configuration = SCStreamConfiguration()
-            configuration.width = max(1, Int(window.frame.width * (window.screen?.backingScaleFactor ?? 1)))
-            configuration.height = max(1, Int(window.frame.height * (window.screen?.backingScaleFactor ?? 1)))
-            configuration.showsCursor = false
-            let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: configuration)
-            guard image.width > 0, image.height > 0, window.isVisible,
-                  window.occlusionState.contains(.visible) else { return nil }
-            return ProcessInfo.processInfo.systemUptime
-        } catch { return nil }
-    }
-    #elseif os(iOS)
-    public static var isEnabled: Bool { ScreenRecorder.shared.enabled }
-    public static func enableCapture() async throws { try await ScreenRecorder.shared.start() }
-    public static func disableCapture() async { await ScreenRecorder.shared.stop() }
-
-    public static func capture(window: UIWindow?, prepare: @MainActor () -> Void = {}) async -> TimeInterval? {
+    static func capture(window: UIWindow?, prepare: @MainActor () -> Void = {}) async -> TimeInterval? {
         guard let window, !window.isHidden, window.windowScene?.activationState == .foregroundActive,
               ScreenRecorder.shared.enabled else { return nil }
         prepare()
@@ -51,10 +23,8 @@ public enum InteractionFrame {
         guard !window.isHidden, window.windowScene?.activationState == .foregroundActive else { return nil }
         return time
     }
-    #endif
 }
 
-#if os(iOS)
 /// ReplayKit observes composited app frames. It runs only during an explicitly
 /// enabled visual-timing session; no audio, images or movie are retained.
 @Observable @MainActor
@@ -108,4 +78,3 @@ private final class ScreenRecorder {
         }
     }
 }
-#endif

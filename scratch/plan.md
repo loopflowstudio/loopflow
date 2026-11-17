@@ -35,8 +35,8 @@ never decides the state below. `WorkSource` variants stop changing behavior;
 delete `WorkSource::is_managed`, and delete the variants too if nothing else
 reads them.
 
-**Who keeps it running?** Decided by the command alone, in
-`transport::delegate`, and returned as one value:
+**Who keeps it running?** Transport reads the command before delegation and
+returns one value:
 
 ```rust
 enum Run { Bare(Mode), Managed, Worker }   // replaces Holder x Place x Mode
@@ -86,7 +86,7 @@ no viewer, not in what is recorded.
   Task, Wave or repository conversation reopens Managed. Jack, 2026-11-17:
   "resume connects to existing sessions". The first pass made every reopen
   Managed and deleted `SqliteStore::is_bare`; undo that. The Session row is
-  the one place this is read, inside `delegate`, into `Run`.
+  the one place this is read, before `delegate`, into `Run`.
 - `lf -b resume <ID> --message TEXT` keeps main's behavior in this PR: one
   headless turn. Jack: "lf resume shouldnt take messages, i dont think?" /
   "that seems like a mixed API". Taking the message off `resume` and giving
@@ -139,7 +139,7 @@ the one `Run` chosen outside `delegate` that isn't Bare (commented in
 correction turn in a Task run, which is the step's Worker; with no
 message, resume keeps the Session's state. The transport, harness and server READMEs say so.
 
-Resume now reads the Session's binding and primary scope once in `delegate`,
+Resume reads the Session's binding and primary scope once before `delegate`,
 then carries the resulting `Run` through native launch. A held child keeps the
 parent's Managed decision without rereading it. `SqliteStore::is_bare`
 uses `bound_at` and primary scope, not attribution provenance: a declared Bare
@@ -148,9 +148,6 @@ gap and retains the Managed fallback. `runs_in_its_terminal` shares the same
 classification so a managed conversation cannot be treated as an independent
 terminal launch while its held terminal is absent.
 
-Gate owns the broader transport, configuration and Task performance suites;
-demo owns live provider steering and the two resume lifetimes.
-
 Managed native fixtures use a real Task binding and open through `resume`,
 retaining their selected cwd and configuration; direct skills remain Bare
 with Task attribution. WorkSource remains for context provenance and primary
@@ -158,49 +155,28 @@ selection, with no launch-lifetime authority. Fresh resume carries invocation
 settings and a literal inline-prompt delimiter across exec.
 
 Earlier build, launch matrix, agent fallback, steering, native launch/resume and
-lint results: `cd0977a62f:scratch/plan.md`. Current resume checks follow below.
+lint results: `6797c65b41:scratch/plan.md` (also links prior checks).
 
-- `cargo nextest run -p loopflow -p loopflow-execution --lib --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(terminal_launch_and_resume_use_current_policy_and_preserve_native_identity) | test(pi_native_callbacks_retain_identity_final_output_and_usage)'`: 7 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned about `__eh_frame` size and succeeded.
-- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed in the combined native/docs selection, 2026-11-17, inherited `LF_*` cleared.
-- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
+- `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(lf::tests::) | test(a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server) | test(a_task_pane_reopened_by_session_id_fails_naming_a_missing_server) | test(session_cli_uses_one_truthful_resolution_contract) | test(contextual_resume_uses_scope_and_recovers_unassociated_checkouts) | test(documented_commands::)'`: 51 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned and succeeded.
+- `cargo fmt --check`, `git diff --check` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
 
-## Next implement: from concept review of `42a2b8c33d`
+## Remaining verification
 
-The three states and the resume rule hold on the normal path, on an unreadable
-store and on reopen. Realign brought the words over: `docs/sessions.md` now
-names Bare, Managed and Worker where a person meets them (Task steers reach a
-Bare run; `--task`/`LF_AS` launches run in your terminal; only an interactive
-`lf task run` step opens in the holder; Bare runs report no turn ends), and the
-transport and server READMEs say a Graph's correction turn
-(`graph.rs` `resume ID --message` under `LF_GRAPH_STEP=worker`, through
-`delegate_current`) is the step's Worker. Two code changes remain:
+The accepted follow-through from `42a2b8c33d` removes
+`SessionConnectionArgs::work_flag` and its append to prepared `open_argv`:
+the Session ID already selects the conversation and its lifetime. Resume's
+shared `session_run` classifies the row before either resume entry point calls
+`delegate`; delegation receives the final `Run`. Missing rows keep the Managed
+fallback; unreadable stores also log a recording gap. The Session command review's six
+open questions remain outside this PR (`scratch/concept-review.html`).
 
-1. **`--task` beside a Session ID on resume does nothing, and the code says
-   otherwise.** `SessionTarget::from_selectors` lets the ID win and `delegate`
-   reads the row, so `lf resume BARE_ID --task X` reopens Bare. Delete
-   `SessionConnectionArgs::work_flag` (`lf/mod.rs`, doc "Naming one makes the
-   resume managed") and its append to `open_argv` in `session::prepared`
-   (`lf/commands/session.rs`), after confirming `open_argv` already names the
-   Session id. Its assertion in `lf/mod.rs` tests (`work_flag(&cli).is_some()`)
-   goes; the comment in `session_launch_contract.rs` ("a Task or Wave only
-   makes the resume managed") becomes "the id still selects".
-   `a_prepared_task_resume_opens_managed…` and
-   `a_task_pane_reopened_by_session_id…` assert on the id, not the trailing
-   flag. Whether the flag should be refused beside an ID is question 5 on
-   `scratch/concept-review.html`, not this PR.
-2. **`delegate(Run::Managed, …)` means "classify this resume".**
-   `delegate_session` and `delegate_prepared_session` pass Managed and may get
-   `Bare(Interactive)` back from the row read inside `delegate`
-   (`transport.rs`, the `is_bare` block with its `RecordingGap`). Move that
-   read into one small function both call, keeping the same gap, and hand
-   `delegate` the final `Run`, so `delegate` only carries out a `Run`.
-
-`scratch/concept-review.html` now reviews every Session command and ends in six
-unanswered questions. None changes this PR: `--message` keeps main's behavior
-here, as above.
+Gate owns broader transport, configuration and Task performance checks;
+demo owns live steering and terminal lifetime checks.
 
 ## Delete — do not maintain
 
+- `SessionConnectionArgs::work_flag` and prepared-command work flag forwarding; the selected Session ID owns resume identity.
+- Resume row classification inside `delegate`; both resume entry points use `session_run` before delegation.
 - `Holder`, `Place`, `transport::holder` and its independent Work reads/tests; `Run` from delegation owns the answer.
 - String agent parsing in launch consumers and `AgentConfig::resolved_agent`; typed selections own harness and model. Keep strings at config, CLI and persistence boundaries.
 

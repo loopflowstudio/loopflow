@@ -524,7 +524,7 @@ reported, never started by an attachment attempt.
 the `ci-fix` run landing starts, and Discord answers for a Wave. The command decides this state. The checkout, `--task` and
 `LF_AS` only decide Task membership: accounting and Task steers always travel
 together. Resume retains a Session's Bare or Managed lifetime, reading its
-binding and primary scope once during delegation; attribution alone leaves it
+binding and primary scope once before delegation; attribution alone leaves it
 Bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
 Bare launches report no boundaries. Managed conversations and Workers report
 the same turn boundaries to the Machine server.

@@ -910,14 +910,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let mut record =
-                    reopen(&store, directory, target, connection, *fork, false).await?;
-                // The opening terminal resumes this Session by id, managed
-                // when the prepare named its Work.
-                if let Some(flag) = connection.work_flag(cli) {
-                    record.open_argv.extend(flag.map(str::to_string));
-                }
-                Ok(record)
+                reopen(&store, directory, target, connection, *fork, false).await
             }
             SessionCommand::New {
                 id,

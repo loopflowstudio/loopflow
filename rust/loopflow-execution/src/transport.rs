@@ -278,7 +278,7 @@ pub(crate) fn delegate_session(
         argv.retain(|arg| arg != "--json");
     }
     delegate(
-        crate::harness::Run::Managed,
+        session_run(preview_session),
         json_session,
         preview_session,
         argv,
@@ -290,7 +290,7 @@ pub(crate) fn delegate_session(
 /// repeating the command that prepared it.
 pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        crate::harness::Run::Managed,
+        session_run(Some(id)),
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
@@ -298,8 +298,40 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
     )
 }
 
-/// Resolve lifetime before admission or provider effects. Only conversations
-/// use held terminals; direct commands keep their caller and Graphs use workers.
+/// Retain the recorded lifetime; a held child keeps its parent's decision.
+fn session_run(id: Option<&str>) -> crate::harness::Run {
+    use crate::harness::{Mode, Run};
+
+    let Some(id) = id.filter(|_| current().is_none()) else {
+        return Run::Managed;
+    };
+    static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
+    let bare = crate::journal::process_ledger().and_then(|store| {
+        store
+            .session(id)?
+            .map(|session| store.is_bare(&session))
+            .transpose()
+    });
+    let mut gap = GAP.lock().expect("resume gap lock poisoned");
+    match bare {
+        Ok(Some(true)) => {
+            gap.recovered();
+            Run::Bare(Mode::Interactive)
+        }
+        Ok(_) => {
+            gap.recovered();
+            Run::Managed
+        }
+        Err(error) => {
+            gap.note("resume lifetime", &error);
+            Run::Managed
+        }
+    }
+}
+
+/// Carry out the selected lifetime before admission or provider effects.
+/// Conversations use held terminals; direct commands keep their caller and
+/// Graphs use workers.
 fn delegate(
     run: crate::harness::Run,
     json_session: Option<&str>,
@@ -307,38 +339,6 @@ fn delegate(
     mut argv: Vec<String>,
     replace: bool,
 ) -> Result<Delegation> {
-    // A held child already took up the parent's Managed decision.
-    let run = if current().is_none() && run == crate::harness::Run::Managed {
-        if let Some(id) = preview_session {
-            static GAP: LazyLock<Mutex<crate::store::RecordingGap>> =
-                LazyLock::new(Default::default);
-            let bare = crate::journal::process_ledger().and_then(|store| {
-                store
-                    .session(id)?
-                    .map(|session| store.is_bare(&session))
-                    .transpose()
-            });
-            let mut gap = GAP.lock().expect("resume gap lock poisoned");
-            match bare {
-                Ok(Some(true)) => {
-                    gap.recovered();
-                    crate::harness::Run::Bare(crate::harness::Mode::Interactive)
-                }
-                Ok(_) => {
-                    gap.recovered();
-                    run
-                }
-                Err(error) => {
-                    gap.note("resume lifetime", &error);
-                    run
-                }
-            }
-        } else {
-            run
-        }
-    } else {
-        run
-    };
     if cfg!(test)
         || current().is_some()
         || crate::os_process::detached::launched()
@@ -2972,16 +2972,14 @@ mod launch_mode_tests {
                     )
                     .unwrap();
                 assert_eq!(
-                    super::delegate(
-                        Run::Managed,
-                        None,
-                        Some(session.id.as_str()),
-                        Vec::new(),
-                        true
-                    )
-                    .unwrap(),
+                    super::delegate_session(None, Some(session.id.as_str()), true).unwrap(),
                     super::Delegation::Here { run: expected },
                     "source={source:?}, bound={bound}, primary={primary}",
+                );
+                assert_eq!(
+                    super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
+                    super::Delegation::Here { run: expected },
+                    "prepared: source={source:?}, bound={bound}, primary={primary}",
                 );
                 assert_eq!(
                     store.runs_in_its_terminal(&session.id).unwrap(),
@@ -3000,14 +2998,7 @@ mod launch_mode_tests {
         std::fs::write(&database, "not a database").unwrap();
         ledger.set_db_path(database);
         assert_eq!(
-            super::delegate(
-                crate::harness::Run::Managed,
-                None,
-                Some("unreadable-session"),
-                Vec::new(),
-                true
-            )
-            .unwrap(),
+            super::delegate_prepared_session("unreadable-session", false).unwrap(),
             super::Delegation::Here {
                 run: crate::harness::Run::Managed
             }

@@ -21,7 +21,7 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-`transport::delegate` chooses `Run` once:
+Transport selects `Run` before `delegate` carries it out:
 
 | Command | Run | Lifetime |
 |---|---|---|
@@ -54,7 +54,7 @@ boundaries to the Machine server; Bare launches read their steers directly.
 launches choose a mode: `--batch` selects headless; otherwise `--interactive`,
 a terminal or no prompt selects interactive. Managed conversations always run
 interactive, Workers headless. Reopening a Session with no message reads its
-binding and primary scope once in `delegate`: Bare stays Bare; bound and primary
+binding and primary scope once before `delegate`: Bare stays Bare; bound and primary
 conversations reopen Managed. An unreadable store keeps the Managed fallback
 and logs a recording gap.
 

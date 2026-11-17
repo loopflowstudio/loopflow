@@ -22,13 +22,13 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-`transport::delegate` decides `Run` once. `Bare(Mode)` follows its caller,
-`Managed` is an interactive conversation in a held terminal, and `Worker` is a
-headless run lf starts for a Task or Wave, which nobody views and whose turns the
+Transport selects `Run` once before `delegate` carries it out. `Bare(Mode)`
+follows its caller; `Managed` is an interactive conversation in a held terminal.
+`Worker` is a headless run lf starts for a Task or Wave, which nobody views and whose turns the
 server records: `lf task run` steps, the `ci-fix` run landing starts, and each
 Discord answer for a Wave. In-process callers such as commit messages, PR text
 and replay use `Bare(Headless)`. Task attribution never changes this choice.
-Resume reads the Session's binding and primary scope in delegation: Bare
+Resume reads the Session's binding and primary scope before delegation: Bare
 conversations reopen Bare; bound and primary conversations reopen Managed.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.

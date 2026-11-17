@@ -382,9 +382,9 @@ fn an_interactive_task_resume_with_no_machine_server_fails_naming_it() {
 #[test]
 fn a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server() {
     let task = InteractiveTask::launched_then_stopped();
-    let (_, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
+    let (id, argv) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&["--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));
@@ -399,7 +399,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
     let (id, _) = task.prepared(&["session", "resume", "--task", "INF-123"]);
     let (_, argv) = task.prepared(&["session", "resume", &id, "--task", "INF-123"]);
     assert!(
-        argv.ends_with(&[id.clone(), "--task".into(), "INF-123".into()]),
+        argv.ends_with(&["session".into(), "resume".into(), id]),
         "{argv:?}"
     );
     assert_names_missing_server(&task.run_program(&argv[0], &argv[1..]));

@@ -887,11 +887,12 @@ pub fn prepared_artifact_key() -> Result<Option<String>> {
     )?))
 }
 
-/// `lf resume`: open a Session here. A live held terminal gains a view; an
-/// ended one resumes its provider from history; a provider running in a client
-/// lf can't share ends and continues here. With `fork`, the holder keeps it and
-/// a new Session continues from its log. A Run is refused; it is never taken
-/// over or resumed. Without `resume`, nothing launches.
+/// `lf resume`: open a Session here, doing what `resume_intent` says. A live
+/// held terminal gains a view; a provider running in a client lf can't share
+/// ends and continues here; an ended one resumes its provider from history.
+/// With `fork`, the holder keeps it and a new Session continues from its log.
+/// A Run is refused; it is never taken over or resumed. Without `resume`,
+/// nothing launches.
 pub async fn open(
     store: &SharedStore,
     directory: &Path,
@@ -901,6 +902,7 @@ pub async fn open(
     json: bool,
     named_work: bool,
 ) -> Result<SessionRecord> {
+    use SessionResumeIntent::{NewThread, Resume, Start, TakeOver, View};
     crate::agent_input_timing::record("connect_begin", session_id);
     let progress = resume.then(|| crate::startup::Startup::new("Preparing conversation"));
     let target = match find_session(store, session_id, true).await? {
@@ -910,39 +912,41 @@ pub async fn open(
             .await?
             .ok_or_else(|| session_not_found(session_id))?,
     };
-    let session = &target;
-    if let Some(refusal) = run_refusal(&store.sqlite, session)? {
+    if let Some(refusal) = run_refusal(&store.sqlite, &target)? {
         bail!(refusal);
     }
     if fork {
         drop(progress);
-        return self::fork(store, session, resume, json).await;
+        return self::fork(store, &target, resume, json).await;
     }
-    let running = || -> Result<bool> {
-        Ok(store
-            .sqlite
-            .session_attachment(&session.id)?
-            .is_some_and(|attachment| {
-                crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
-                    == crate::journal::ProcessIdentityEvidence::Live
-            }))
-    };
-    if resume {
-        end_earlier_owner(&store.sqlite, &session.id, progress.as_ref())?;
+    if !resume {
+        if invocation_intent(&target, &current_summary(store, &target.id)?, false, false)
+            == NewThread
+        {
+            conversation_log::read(&store.sqlite, &target)?;
+        }
+        return surface(store, &target).await;
     }
-    let provider_session = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?,
-        None => None,
+    end_earlier_owner(&store.sqlite, &target.id, progress.as_ref())?;
+    let session = {
+        let id = target.id.clone();
+        let _launch =
+            crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
+        primary::admit_workspace(store, target).await?
     };
-    if let Some(agent) = provider_session.as_ref().and(handoff_agent(session)) {
-        if !resume {
-            conversation_log::read(&store.sqlite, session)?;
-        } else {
-            drop(progress);
+    let intent = invocation_intent(
+        &session,
+        &current_summary(store, &session.id)?,
+        false,
+        false,
+    );
+    drop(progress);
+    match intent {
+        NewThread => {
             new_thread(
                 store,
                 &session.id,
-                Some(&agent),
+                handoff_agent(&session).as_deref(),
                 true,
                 json,
                 &uuid::Uuid::new_v4().to_string(),
@@ -954,22 +958,9 @@ pub async fn open(
                 .ok_or_else(|| session_not_found(&session.id))?;
             return surface(store, &session).await;
         }
-    }
-    let admitted;
-    let session = if resume {
-        let id = session.id.clone();
-        let _launch =
-            crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
-        admitted = primary::admit_workspace(store, session.clone()).await?;
-        &admitted
-    } else {
-        session
-    };
-    drop(progress);
-    if resume {
-        if session.interactive {
-            // A held terminal is attached while its child runs, answering or
-            // not: a stopped server never means a second agent for the Session.
+        // A held terminal is attached while its child runs, answering or
+        // not: a stopped server never means a second agent for the Session.
+        View => {
             if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
                 if crate::transport::current() != Some(&terminal) {
                     // The newest view shows where the conversation runs,
@@ -988,57 +979,79 @@ pub async fn open(
                         Some(&session.id),
                         json.then_some(session.id.as_str()),
                     )?;
-                    return surface(store, session).await;
                 }
+                return surface(store, &session).await;
             }
         }
-        if crate::transport::delegate_session(
-            json.then_some(session.id.as_str()),
-            session.interactive.then_some(session.id.as_str()),
-            named_work,
-        )? {
-            return surface(store, session).await;
-        }
+        TakeOver | Resume | Start => {}
     }
-    if session.captured.is_none() {
-        if resume {
-            open_waiting(store, &session.id, named_work).await?;
-        }
-        return surface(store, session).await;
+    if crate::transport::delegate_session(
+        json.then_some(session.id.as_str()),
+        session.interactive.then_some(session.id.as_str()),
+        named_work,
+    )? {
+        return surface(store, &session).await;
     }
-    let native = NativeSession::of(session)?;
-    if resume {
-        crate::harness::native_session::require_provider_session_process(&native.dir)?;
+    if intent == Start || session.captured.is_none() {
+        open_waiting(store, &session.id, named_work).await?;
+        return surface(store, &session).await;
     }
-    let Some(provider_session) = provider_session else {
-        let surface = surface(store, session).await?;
-        if resume {
-            open_waiting(store, &session.id, named_work).await?;
-        }
-        return Ok(surface);
-    };
-    let result = surface(store, session).await?;
-    if resume {
-        // Opening takes over a client lf can't share, `lf <skill>`'s own
-        // terminal included.
-        if running()? {
-            crate::harness::agent_process::stop_session_agent(
-                &store.sqlite,
-                &session.id,
-                departure_here(),
-            )?;
-            crate::journal::request::diagnostic(format_args!(
-                "Stopped the {} client that had this conversation; continuing here.",
-                session.provider.as_deref().unwrap_or("provider")
-            ));
-        }
-        crate::harness::native_session::resume_session(
+    let native = NativeSession::of(&session)?;
+    crate::harness::native_session::require_provider_session_process(&native.dir)?;
+    // Opening takes over a client lf can't share, `lf <skill>`'s own
+    // terminal included, and a held terminal whose view ended under it.
+    if intent != Resume {
+        crate::harness::agent_process::stop_session_agent(
+            &store.sqlite,
+            &session.id,
+            departure_here(),
+        )?;
+        crate::journal::request::diagnostic(format_args!(
+            "Stopped the {} client that had this conversation; continuing here.",
+            session.provider.as_deref().unwrap_or("provider")
+        ));
+    }
+    let result = surface(store, &session).await?;
+    match store.sqlite.input_provider_session(session.input_key()?)? {
+        Some(provider_session) => crate::harness::native_session::resume_session(
             session.input_key()?,
             &provider_session,
             named_work,
-        )?;
+        )?,
+        None => open_waiting(store, &session.id, named_work).await?,
     }
     Ok(result)
+}
+
+fn current_summary(store: &SharedStore, id: &str) -> Result<crate::session::SessionSummary> {
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    session_projection::session_summary(&store.sqlite, id, now)?
+        .ok_or_else(|| session_not_found(id))
+}
+
+/// What this invocation of `lf resume` does with `session`: another harness
+/// starts a new thread from its log, and preparation alone launches nothing,
+/// so it never views or takes over a running holder.
+pub(super) fn invocation_intent(
+    session: &LfSession,
+    summary: &crate::session::SessionSummary,
+    fork: bool,
+    prepare_only: bool,
+) -> SessionResumeIntent {
+    let intent = resume_intent(summary);
+    if !fork && !prepare_only && summary.has_provider_history && handoff_agent(session).is_some() {
+        return SessionResumeIntent::NewThread;
+    }
+    match intent {
+        SessionResumeIntent::View | SessionResumeIntent::TakeOver if prepare_only => {
+            if summary.has_provider_history {
+                SessionResumeIntent::Resume
+            } else {
+                SessionResumeIntent::Start
+            }
+        }
+        intent => intent,
+    }
 }
 
 /// A new conversation in the same Work, seeded with `source`'s log. The

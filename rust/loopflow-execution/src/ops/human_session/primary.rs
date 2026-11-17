@@ -331,14 +331,8 @@ async fn prepare(store: &SharedStore, id: &str) -> Result<SessionRecord> {
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
-    if store.sqlite.session_terminal(&session.id)?.is_some()
-        || session
-            .artifact_key
-            .as_deref()
-            .map(|key| store.sqlite.input_provider_session(key))
-            .transpose()?
-            .flatten()
-            .is_some()
+    if super::resume_intent(&super::current_summary(store, &session.id)?)
+        != super::SessionResumeIntent::Start
     {
         // Retained work is attached when shown, never started from here.
         let mut record = surface(store, &session).await?;

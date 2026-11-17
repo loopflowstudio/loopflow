@@ -803,6 +803,66 @@ fn one_decision_reads_a_sessions_holder_process_and_history() {
 }
 
 #[test]
+fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
+    let _lock = crate::journal::test_env_lock();
+    let home = SessionHome::new();
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        let store = home.store().await;
+        let repo = loopflow_test_support::TestRepo::new();
+        let _claude = crate::config::settings::select_invocation(
+            serde_yaml_ng::from_str("agent: claude").unwrap(),
+        );
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
+            .await
+            .unwrap();
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        let session = super::append_input(&store, session).await.unwrap();
+        let observation = crate::session_record::provider_session_observation(
+            &session,
+            session.input_key().unwrap(),
+            &"claude-thread".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&session, &observation)
+            .unwrap();
+        // A launcher still running that has not recorded its provider's pid.
+        let launcher = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(home.home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,?2)",
+                rusqlite::params![&launcher, loopflow_storage::rows::now_unix()],
+            )
+            .unwrap();
+        let holder =
+            attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)
+                .unwrap();
+        let summary = super::current_summary(&store, &session.id).unwrap();
+        assert_eq!(
+            summary.agent_process_evidence,
+            crate::journal::ProcessIdentityEvidence::Unknown
+        );
+        assert_eq!(
+            listed_session(&store, &session.id).action.unwrap().label,
+            "Take over"
+        );
+
+        let opened = super::open(&store, repo.path(), &session.id, false, true, false, false).await;
+        let message = opened.unwrap_err().to_string();
+        assert!(
+            message.contains("resume was not started"),
+            "opening resumed beside a holder it could not stop: {message}"
+        );
+        assert_eq!(
+            store.sqlite.session_attachment(&session.id).unwrap(),
+            Some(holder)
+        );
+    });
+}
+
+#[test]
 fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();

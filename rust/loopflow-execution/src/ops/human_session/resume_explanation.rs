@@ -206,15 +206,6 @@ async fn read_resume(
         report.unavailable.push(format!("Session {selector} is not recorded; provider-conversation admission is not performed by explanation"));
         return Ok(());
     };
-    let provider = session
-        .artifact_key
-        .as_deref()
-        .map(|key| store.sqlite.input_provider_session(key))
-        .transpose()?
-        .flatten();
-    // Opening checks the harness before any holder: another agent never
-    // takes over the running one, it starts a thread from the log.
-    let handoff = provider.as_ref().and(super::handoff_agent(&session));
     // Opening refuses a Run whatever the flags, so nothing would happen.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
     // Explanation and opening use the same recorded Process evidence; a
@@ -225,17 +216,7 @@ async fn read_resume(
         report.resolution.observed_at,
     )?
     .ok_or_else(|| super::session_not_found(&session.id))?;
-    let intent = match super::resume_intent(&metadata) {
-        _ if !fork && !prepare_only && handoff.is_some() => SessionResumeIntent::NewThread,
-        SessionResumeIntent::View | SessionResumeIntent::TakeOver if prepare_only => {
-            if metadata.has_provider_history {
-                SessionResumeIntent::Resume
-            } else {
-                SessionResumeIntent::Start
-            }
-        }
-        intent => intent,
-    };
+    let intent = super::invocation_intent(&session, &metadata, fork, prepare_only);
     match refusal {
         Some(refusal) => report.impediments.push(refusal),
         None => {
@@ -261,7 +242,7 @@ async fn read_resume(
                 ));
             }
         }
-        if provider.is_some() {
+        if metadata.has_provider_history {
             if let Err(error) =
                 crate::harness::native_session::require_session_task(&store.sqlite, &session)
             {

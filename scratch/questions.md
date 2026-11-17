@@ -92,3 +92,7 @@
 
 - **TakeOver reads an admitted holder nothing says ended** (process recorded, evidence not Dead), as listing did; `--explain` previously required Live evidence and said Resume for unknown evidence.
 - **`--explain` reads `held` from the summary** instead of a separate `session_terminal` query, and Start/Resume from `has_provider_history` instead of `input_provider_session`.
+- **Take over of a held terminal whose agent's liveness is Unknown** stops it (`held` needs Live evidence), where `open` used to attach any running held terminal. `stop_session_agent` refuses an identity it cannot verify, so nothing starts beside it either way.
+- **`lf resume` from inside the held terminal it would view** returns the record and does nothing; it used to fall through to resume.
+- **Handoff to another harness is decided from `has_provider_history`** (the summary) rather than `input_provider_session`, and now runs after `admit_workspace`.
+- **`lf resume --prepare` no longer validates the native capture** (`NativeSession::of`); it reads the log only for a handoff, as before.

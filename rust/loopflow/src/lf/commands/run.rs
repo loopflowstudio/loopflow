@@ -106,8 +106,8 @@ pub(crate) fn preview_prompt(
 }
 
 /// Whether this process is the Graph that ran `session` as its step: a Graph
-/// corrects its own step's answer in that step's Run, and nobody else
-/// continues a Run.
+/// corrects its own step's answer in that step's worker, and nobody else
+/// continues a worker.
 pub(crate) fn continues_own_step(
     store: &loopflow_execution::store::sqlite::SqliteStore,
     session: &loopflow_execution::session::LfSession,

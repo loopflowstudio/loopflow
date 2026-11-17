@@ -226,6 +226,17 @@ Checks run 2026-11-17 (realign): `cargo test -p loopflow-storage --lib
 steers` 21 passed; `cargo test -p loopflow --lib
 steers_start_a_stopped_session_once` passed. CI runs the suites at gate.
 
+5. **Launch names in refusals (steer 474316e8).** *Built.* `lf resume` of a
+   headless Session says "ID is a worker (…)" or "a batch (…)"; `lf resume`
+   opens only work sessions and chats (`human_session::headless_kind`, from
+   `graph_lf_process_id`). `lf steer`'s reader line says "a finished worker"
+   or "a finished batch". Docs: `docs/dev/execution.md`, the server README,
+   `docs/dev/reference-cutover.md`. Item 2 (`is_bare` reopening a work session
+   as a chat) needs LOO-924's code; reading in `scratch/questions.md`.
+   Checked: `cargo test -p loopflow-execution --lib ops::human_session::tests::`
+   28 passed. Gate runs `test(transport_tests)`'s worker refusal and
+   `documented_commands::`.
+
 Next: gate. For gate: the Codex question below, and `-b steer` to a running
 Session (saves and returns) has no test.
 

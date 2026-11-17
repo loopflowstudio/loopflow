@@ -236,7 +236,7 @@ async fn read_resume(
     // Opening checks the harness before any holder: another agent never
     // takes over the running one, it starts a thread from the log.
     let handoff = provider.as_ref().and(super::handoff_agent(&session));
-    // Opening refuses a Run whatever the flags, so nothing would happen.
+    // Opening refuses a worker or a batch whatever the flags, so nothing would happen.
     let refusal = super::run_refusal(&store.sqlite, &session)?;
     let intent = if !fork && !prepare_only && handoff.is_some() {
         SessionResumeIntent::NewThread

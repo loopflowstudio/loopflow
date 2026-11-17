@@ -269,7 +269,8 @@ const NO_PROVIDER_HISTORY: &str = "No saved provider history; start this convers
 const LAUNCH_ENDED: &str =
     "The previous launch ended before the provider saved any history; Try again repeats its request";
 
-/// A Run opens nowhere: `lf resume` takes only Sessions. A consumed first launch
+/// A headless Session opens nowhere: `lf resume` opens only work sessions and
+/// chats. A consumed first launch
 /// has nothing to open: MoveHere, without Open, is the click that repeats it.
 pub(crate) fn session_actions(
     state: SessionState,
@@ -1338,8 +1339,18 @@ pub fn agent_running(store: &SqliteStore, session: &LfSession) -> Result<bool> {
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live)
 }
 
-/// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
-/// step), running or finished: it takes only Sessions. None for a Session.
+/// What a headless Session is called: a worker runs a Graph step, a batch
+/// runs alone (`lf -b`).
+pub fn headless_kind(session: &LfSession) -> &'static str {
+    if session.graph_lf_process_id.is_some() {
+        "worker"
+    } else {
+        "batch"
+    }
+}
+
+/// Why `lf resume` refuses a worker or a batch, running or finished: it opens
+/// only work sessions and chats. None for an interactive Session.
 pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<String>> {
     if session.interactive {
         return Ok(None);
@@ -1361,8 +1372,9 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
         None => "`lf resume` opens this checkout's Session".to_string(),
     };
     Ok(Some(format!(
-        "{} is a Run ({}); `lf resume` takes only Sessions. {pointer}.",
+        "{} is a {} ({}); `lf resume` opens only work sessions and chats. {pointer}.",
         session.id,
+        headless_kind(session),
         what.join(" · ")
     )))
 }

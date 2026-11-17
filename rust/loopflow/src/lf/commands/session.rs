@@ -134,9 +134,9 @@ fn steer_reader(
         } else if session.interactive {
             format!("the Machine server starts {id} to read it")
         } else if session.graph_lf_process_id.is_some() {
-            format!("{id} is a finished Run; nothing reads it until its Graph continues it")
+            format!("{id} is a finished worker; nothing reads it until its Graph continues it")
         } else {
-            format!("{id} is a finished Run outside any Graph; nothing reads it")
+            format!("{id} is a finished batch; nothing reads it")
         },
     )
 }
@@ -144,7 +144,7 @@ fn steer_reader(
 /// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
 /// unread steers, this one last, in one headless turn here, and the reply
 /// prints. False when there is no turn to run here: a running Session reads
-/// the steer at its next boundary, and a finished Run only when its own Graph
+/// the steer at its next boundary, and a finished worker only when its own Graph
 /// continues it, so the caller only saves it.
 fn steer_turn(
     cli: &crate::lf::Cli,

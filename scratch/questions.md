@@ -32,10 +32,9 @@
   past too, so if that Session quits before reading it, nothing starts it.
 - Steer 119ddcde (2026-11-17) settles the launch names: "managed+typing = work
   session, managed+headless = worker, bare+typing = chat, bare+headless =
-  batch", "Use these words in docs". This branch's text still says "Run" for a
-  headless Session (`lf steer`'s "is a finished Run", `docs/sessions.md`, the
-  server README). Compress left them; the rename follows LOO-924's, which
-  owns the `Run` type.
+  batch", "Use these words in docs". User-facing text here now says worker or
+  batch (slice 5); the `harness::Run` type's rename to `LaunchKind` is
+  LOO-924's.
 - QA 2026-11-17: a held start takes every unread steer as its first input and
   marks them delivered before the provider runs. A start that never runs a
   turn (killed at a dialog, or a resume of a thread Claude never wrote, which
@@ -51,3 +50,17 @@
   does not say the server starts the Task's quit primary conversation, as
   `lf steer SESSION` does. Left as is; a reader line for Task steers is a
   small follow-up if wanted.
+- Steer 474316e8 item 2 (from the LOO-924 concept review): "If a Desktop pane
+  or lf --machine can create a work session that is neither [bound nor
+  primary], lf resume ID from a terminal would reopen it as a chat."
+  `SqliteStore::is_bare` and `transport::session_run` exist only on LOO-924's
+  branch, so nothing here can change until it merges. Reading of that branch
+  (2026-11-17, not run): a fresh Session is a work session only when
+  `delegate_current` runs inside a held terminal (`transport::current()`); a
+  Desktop pane's own shell and `lf --machine` (ssh dispatch runs `lf` remotely
+  outside any held terminal) both start chats. The one unbound, non-primary
+  work-session launch is a held start of a chat: the phone's Continue, or this
+  branch's server start for a steer (`session.continue` → `lf session resume`
+  in a held terminal, where `session_run` keeps its parent's choice). A later
+  `lf resume` from a terminal reopens it as a chat, which is what the Session
+  was. Left as is; recheck after LOO-924 lands.

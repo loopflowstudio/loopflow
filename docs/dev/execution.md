@@ -161,14 +161,15 @@ Fresh native launches and saved-history resumes share invocation admission and
 attachment settlement. A recorded client move is an intentional command exit,
 not provider failure; it does not establish a successful provider turn.
 
-### Runs are not resumed
+### Workers and batches are not resumed
 
-`lf resume` takes only Sessions. A Run's id (`-b`, a Graph step), running or
-finished, is refused, with `--fork`, `--prepare` and `lf --explain resume`
-alike, and the refusal points to `lf resume --task <task>`. Resume never stops a
-Run; stopping a Graph is `lf task interrupt`. A Run is continued only by its own
-Graph process correcting a structured answer with `lf -b steer`; a steer from
-anyone else is saved and reported unread.
+`lf resume` opens only work sessions and chats. A headless Session's id, a
+worker (a Graph step) or a batch (`lf -b`), running or finished, is refused,
+with `--fork`, `--prepare` and `lf --explain resume` alike, and the refusal
+points to `lf resume --task <task>`. Resume never stops a worker; stopping a
+Graph is `lf task interrupt`. A worker is continued only by its own Graph
+process correcting a structured answer with `lf -b steer`; a steer from anyone
+else is saved and reported unread.
 
 Harness stop and resume use common exact-identity group close under the frozen
 attachment fence. Superseded callers, unknown identity and duplicate OS owners

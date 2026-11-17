@@ -677,8 +677,8 @@ it has read for starts. A server restart, a Machine reboot or an upgrade
 therefore starts nothing for a steer already read, and steers saved before
 the migration that added it start nothing. A start that fails is a line in
 `logs/lf.log` with the steers left pending for the Session's next start. A
-Run (a non-interactive Session) is never started: only its own Graph
-continues it, through `lf -b steer`. Wave and repository steers and Task
+worker or a batch (a headless Session) is never started: only a worker's own
+Graph continues it, through `lf -b steer`. Wave and repository steers and Task
 updates start nothing.
 
 A managed launch's agent starts only once the server answers. The launch

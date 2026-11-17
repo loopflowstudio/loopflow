@@ -1084,7 +1084,7 @@ pub async fn open(
             match crate::transport::delegate_session(&session.id, json, session.interactive, true)?
             {
                 crate::transport::Delegation::Delegated => return surface(store, session).await,
-                crate::transport::Delegation::Here { run, .. } => run,
+                crate::transport::Delegation::Here { run } => run,
             };
     }
     if session.captured.is_none() {
@@ -1223,7 +1223,7 @@ pub async fn open_without_replacing(
     };
     let run = match crate::transport::delegate_session(id, json, true, false)? {
         crate::transport::Delegation::Delegated => return Ok(record),
-        crate::transport::Delegation::Here { run, .. } => run,
+        crate::transport::Delegation::Here { run } => run,
     };
     let lock = match lock {
         Some(lock) => lock,
@@ -1315,7 +1315,7 @@ async fn fork(
 /// crosses to the launch; opening it reacquires the lock and reads current state.
 /// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
-    if let crate::transport::Delegation::Here { run, .. } =
+    if let crate::transport::Delegation::Here { run } =
         crate::transport::delegate_prepared_session(id, json)?
     {
         open_waiting(store, id, run).await?;

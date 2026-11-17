@@ -81,21 +81,16 @@ impl Table {
     /// `lf FLAGS : hello` in the checkout.
     fn launch(&self, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
-        let built = super::build_prompt(
-            loopflow_execution::transport::LaunchInput {
-                batch: cli.batch,
-                interactive: cli.interactive,
-                has_prompt: true,
-            }
-            .mode(),
-            self.repo.path(),
-            None,
-            Some("hello"),
-            &cli,
-        )?;
+        let mode = loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: true,
+        }
+        .mode();
+        let built = super::build_prompt(mode, self.repo.path(), None, Some("hello"), &cli)?;
         let args = self.args(
             &built.agent_config,
-            built.mode,
+            mode,
             loopflow_execution::harness::Start::New,
         )?;
         Ok(Launch {
@@ -191,7 +186,7 @@ fn assert_path_eq(left: &Path, right: &Path) {
 }
 
 #[test]
-fn prompt_build_keeps_the_mode_delegation_selected() {
+fn only_a_headless_prompt_build_streams() {
     use loopflow_execution::harness::Mode;
     let table = Table::new();
     table.config(None, "agent: claude");
@@ -205,7 +200,6 @@ fn prompt_build_keeps_the_mode_delegation_selected() {
             &cli.process_options(),
         )
         .unwrap();
-        assert_eq!(built.mode, mode);
         assert_eq!(built.process.stream, mode == Mode::Headless);
     }
 }

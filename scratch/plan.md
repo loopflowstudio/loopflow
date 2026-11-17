@@ -173,6 +173,10 @@ headless, unbound, not primary, expecting `Bare(Interactive)`.
 - `cargo fmt` and `cargo clippy -p loopflow-execution --all-targets -- -D warnings`: passed, 2026-11-17. Gate runs workspace Clippy and the suites.
 - Still read from the code, not run: `cfg!(test)` returns before real delegation, so a live `lf -b research` → `lf resume <ID>` belongs to demo.
 
+Compress, 2026-11-17, `LF_*` cleared: `cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings` passed;
+`cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(transport::launch_mode_tests::) | test(commands::run::) | test(a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server)'`: 22 passed;
+`cargo nextest run -p loopflow --test agent_tests`: 14 passed.
+
 The Session command review's six open questions remain outside this PR
 (`scratch/concept-review.html`).
 
@@ -185,6 +189,7 @@ demo owns live steering and terminal lifetime checks.
 - Resume row classification inside `delegate`; both resume entry points use `session_run` before delegation.
 - `Holder`, `Place`, `transport::holder` and its independent Work reads/tests; `Run` from delegation owns the answer.
 - String agent parsing in launch consumers and `AgentConfig::resolved_agent`; typed selections own harness and model. Keep strings at config, CLI and persistence boundaries.
+- `PromptBuild.harness`, `.model` and `.mode` (`lf/commands/run.rs`) and the `prepared_config` argument of `begin_process_runtime` and `run_headless_prompt`: `agent_config.agent` and `Run` already say it. Removed in compress.
 
 ## Not in this PR
 

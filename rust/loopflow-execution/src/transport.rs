@@ -315,19 +315,14 @@ fn session_run(id: &str) -> crate::harness::Run {
             .transpose()
     });
     let mut gap = GAP.lock().expect("resume gap lock poisoned");
-    match bare {
-        Ok(Some(true)) => {
-            gap.recovered();
-            Run::Bare(Mode::Interactive)
-        }
-        Ok(_) => {
-            gap.recovered();
-            Run::Managed
-        }
-        Err(error) => {
-            gap.note("resume lifetime", &error);
-            Run::Managed
-        }
+    match &bare {
+        Ok(_) => gap.recovered(),
+        Err(error) => gap.note("resume lifetime", error),
+    }
+    if matches!(bare, Ok(Some(true))) {
+        Run::Bare(Mode::Interactive)
+    } else {
+        Run::Managed
     }
 }
 
@@ -349,15 +344,12 @@ fn delegate(
     {
         return Ok(Delegation::Here { run });
     }
-    crate::journal::admit_process(
-        &std::env::current_dir()?,
-        &std::env::args().collect::<Vec<_>>(),
-    );
+    let cwd = std::env::current_dir()?;
+    crate::journal::admit_process(&cwd, &std::env::args().collect::<Vec<_>>());
     crate::journal::current_lf_process_id().context(
         "Execution requires an admitted invocation; check the process ledger and caller provenance",
     )?;
     argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-    let cwd = std::env::current_dir()?;
     if run == crate::harness::Run::Worker {
         let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
             // No terminal shows detached work; it claims none.

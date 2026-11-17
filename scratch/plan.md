@@ -156,13 +156,9 @@ with its checks, callers and tests (`served_reads.rs`, `transport_tests.rs`
 and the benchmark scripts' remaining `--message` are other commands' flags).
 Remaining:
 
-- `public_commands_save_steers_without_launching_providers`: the command
-  itself still launches nothing; its stopped-Session and Task halves move to
-  the server wake tests (slice 2).
-- `lf steer`'s Clap help says only `-b` reads a stopped Session; slice 2 adds
-  that the Machine server starts a stopped Session a steer names.
-- `rust/loopflow/src/server/README.md` already describes the server start
-  (write-docs); check it against slice 2's code.
+- `public_commands_save_steers_without_launching_providers` stays: with no
+  server the commands still launch nothing; the server's half is the new
+  integration test.
 - Release notes under `release/` are shipped records and stay.
 
 ## Slices
@@ -197,6 +193,28 @@ Remaining:
    held terminal yields as idle without a viewer, so the existing inbox and
    app-server wakes deliver. If it doesn't, the held start passes the steer as
    the resumed conversation's first input instead.
+   *Built.* Killed the idle path: a resumed Claude records a turn end (and its
+   inbox) only at its Stop hook, and with no input it never takes a turn, so
+   `idle_conversations` never lists it. The fallback is the resume itself:
+   `resume_session_with_env` gives an interactive resumed thread every unread
+   steer as its first input when one names it (`take_steers_to_start`), for
+   any resumer, `lf resume` included. The per-steer column became a one-row
+   cursor, `steer_wake_reading` (migration `steer_wake_reading`): the server
+   reads steers past it once (`read_steer_wakes`, a rowid range), so a
+   restart or the upgrade starts nothing old and nothing is stamped on
+   `steers` (whose triggers move the planning revision). The watcher
+   (`wake::start_stopped`, given the Registry) starts each named stopped
+   Session once per reading with `continuing`, skipping one a held terminal
+   already runs. `lf steer SESSION` prints one of the three readers.
+   Tests: storage (`each_steer_wakes_the_session_it_names_once`,
+   `a_starting_conversation_takes_its_steers_when_one_names_it`: Task steer
+   → primary only), wake (`steers_start_a_stopped_session_once`: two steers
+   one start, restart starts nothing), integration
+   (`session_steers::a_steer_starts_a_stopped_conversation_on_the_machine_server`).
+   *Taught:* a managed Codex resume (`initial_prompt_on_resume` with turn
+   reports) keeps its captured first turn, so the steer is not its first
+   input; it is taken only on the other path. Codex in a held terminal is
+   unproven; see Open below.
 3. **Docs and help** across the files above; `.lf/qa/provider-switching.md`
    drives `steer` in place of `resume --message`.
 
@@ -215,7 +233,8 @@ and crash tables), `docs/agent-api.md` (Steer), `docs/config.md`,
 `.lf/qa/provider-switching.md`. `lf steer`'s Clap help is still to change in
 slice 3 with the code.
 
-Open: Pi and OpenCode have no idle wake, so a started stopped Pi or OpenCode
-Session never reads its steer through the idle path. Does the held start pass
-the steer as the resumed conversation's first input for those harnesses (the
-slice 2 fallback), or do steers start only Claude and Codex Sessions?
+Open: the first input rides `Launch::terminal_input`, which every harness's
+`open` uses, so Pi and OpenCode take it the same way as Claude (untested).
+A managed Codex resume sends its captured first turn instead
+(`sends_first_turn`), so a started Codex Session hears its steers only when
+its app-server yields: unproven, needs a Codex held-terminal fixture.

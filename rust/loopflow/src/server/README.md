@@ -643,22 +643,26 @@ signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 
 ### Starting a stopped conversation
 
-The same reading finds a third case: an interactive Session with a pending
-steer that names it, or names its Task when it is the Task's primary
-conversation, and no live AgentProcess. The watcher starts it with
-`session.continue`'s launch (`lf session resume` in a held terminal, in its
-recorded directory, refused through `run_refusal` when the Session is
-already running), with the steer's ID as the start's `request`. Once the
-resumed conversation yields, the idle path above delivers every unread steer
-in one message. Nothing else starts a Session for a steer: `lf steer` and
-`session.steer` only save it.
+The same reading finds a third case: an interactive Session with a steer
+that names it, or names its Task when it is the Task's primary conversation,
+and no live AgentProcess. The watcher starts it with `session.continue`'s
+launch (`lf session resume` in a held terminal, in its recorded directory,
+refused through `run_refusal` when the Session is already running), with the
+first such steer's ID as the start's `request`; a Session a held terminal
+already runs is left to it. A resumed provider waits for input and never
+yields on its own, so the resume itself hands the conversation every unread
+steer as its first input when one of them names it, whoever resumes it.
+Nothing else starts a Session for a steer: `lf steer` and `session.steer`
+only save it.
 
-A steer starts its Session at most once; the steer row records the start.
-A server restart, a Machine reboot or an upgrade therefore starts nothing for
-a steer that already started its Session, and a start that fails is a line in
-`logs/lf.log` with the steer left pending. A Run (a non-interactive Session)
-is never started: only its own Graph continues it, through `lf -b steer`.
-Wave and repository steers and Task updates start nothing.
+The watcher reads each steer once: `steer_wake_reading` holds the newest steer
+it has read for starts. A server restart, a Machine reboot or an upgrade
+therefore starts nothing for a steer already read, and steers saved before
+the migration that added it start nothing. A start that fails is a line in
+`logs/lf.log` with the steers left pending for the Session's next start. A
+Run (a non-interactive Session) is never started: only its own Graph
+continues it, through `lf -b steer`. Wave and repository steers and Task
+updates start nothing.
 
 A managed launch's agent starts only once the server answers. The launch
 opens a connection to the server, as a hook does; when nothing answers it runs `lf install server`

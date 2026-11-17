@@ -176,7 +176,6 @@ pub(super) async fn run() -> Result<()> {
     // redeems what a control connection on the same carrier requested.
     let tickets = Arc::new(Tickets::default());
     let subscriptions = Arc::new(Subscriptions::default());
-    super::wake::start();
     super::statistics::start();
     // Held terminals keep running in their holders whether or not this server
     // can host them; without a registry their views wait for the next server.
@@ -187,6 +186,7 @@ pub(super) async fn run() -> Result<()> {
             None
         }
     };
+    super::wake::start(terminals.clone());
     let (remote_control, remote_requests) = mpsc::channel(8);
     let remote = super::remote::manage(
         super::mobile::configured(),
@@ -906,7 +906,7 @@ async fn start_held(
 /// What `session.continue` starts: `lf session resume` of exactly this
 /// Session, in its directory, with this server's environment and its own
 /// `LF_HOME` and `LF_BIN`.
-fn continuing(
+pub(super) fn continuing(
     session: loopflow_model::id::LfSessionId,
     request: String,
     rows: u16,

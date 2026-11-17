@@ -448,10 +448,11 @@ pub enum Commands {
     /// Direct running agents: a Session, a Task's Sessions, or with `--wave` or `--repo` every Session there
     ///
     /// The steer is saved; each Session it applies to reads it after its next
-    /// tool call, or when it is next woken or prompted. With `-b`, a stopped
-    /// Session it names reads it in one turn here, and the reply prints. A Task
-    /// steer also joins the Task's thread. `lf session steers SESSION` shows
-    /// what a Session has read.
+    /// tool call, or when it is next woken or prompted. A stopped Session it
+    /// names, or a Task's stopped conversation, is started by the Machine
+    /// server to read it; with `-b`, a stopped Session reads it in one turn
+    /// here, and the reply prints. A Task steer also joins the Task's thread.
+    /// `lf session steers SESSION` shows what a Session has read.
     #[command(
         allow_missing_positional = true,
         after_help = "lf steer SESSION 'skip the vendored code'\nlf -b steer SESSION 'what changed?'\nlf steer LOO-12 'keep the public API'\nlf --wave parser steer 'prioritize the tokenizer'\nlf --repo . steer 'hold merges until the release is cut'"

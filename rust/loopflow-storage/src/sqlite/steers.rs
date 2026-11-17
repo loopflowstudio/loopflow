@@ -7,22 +7,13 @@ use super::SqliteStore;
 use crate::process::SessionAttachment;
 use crate::steer::{
     IdleConversation, IdleReach, NativeBoundary, SessionSteerPage, SessionSteerStatus, Steer,
-    SteerAdapter,
+    SteerAdapter, SteerWake,
 };
 use crate::{StoreError, StoreResult};
 
 #[derive(Debug)]
 pub struct IdleCandidate {
     pub conversation: IdleConversation,
-    pub identity: Option<(u32, i64)>,
-}
-
-/// A steer the server read that names `session`, an interactive Session
-/// that has not read it; `identity` is its unfinished AgentProcess, if any.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SteerWake {
-    pub steer: String,
-    pub session: String,
     pub identity: Option<(u32, i64)>,
 }
 
@@ -741,8 +732,8 @@ impl SqliteStore {
     /// Otherwise nothing, and its hooks hear the rest at its boundaries.
     pub fn take_steers_to_start(&self, session: &str) -> StoreResult<Vec<Steer>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let named: bool = tx.query_row(
+        // Nearly every start has none; asking takes no write lock.
+        let named: bool = conn.query_row(
             &format!(
                 "SELECT EXISTS({} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
                     AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1)))",
@@ -754,6 +745,7 @@ impl SqliteStore {
         if !named {
             return Ok(Vec::new());
         }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let steers = take_unread_in(&tx, session)?;
         tx.commit()?;
         Ok(steers)

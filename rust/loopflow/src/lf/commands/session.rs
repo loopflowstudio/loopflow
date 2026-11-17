@@ -108,13 +108,36 @@ pub fn steer(
     let steer = runtime.block_on(loopflow_execution::engine::session::steer(
         &store, &directory, scope, message,
     ))?;
-    if json {
-        println!("{}", serde_json::to_string(&steer)?);
-    } else {
-        println!("Saved {}", steer.id);
+    match (json, &session) {
+        (true, _) => println!("{}", serde_json::to_string(&steer)?),
+        (false, Some(session)) => println!(
+            "Saved {}; {}",
+            steer.id,
+            steer_reader(&store.sqlite, session)?
+        ),
+        (false, None) => println!("Saved {}", steer.id),
     }
     Ok(())
 }
+
+/// Who reads a steer saved for `session`, with no turn of its own to run it.
+fn steer_reader(
+    sqlite: &loopflow_execution::store::sqlite::SqliteStore,
+    session: &loopflow_execution::session::LfSession,
+) -> anyhow::Result<String> {
+    let id = &session.id;
+    Ok(
+        if loopflow_execution::ops::human_session::agent_running(sqlite, session)? {
+            format!("{id} reads it at its next boundary")
+        } else if session.interactive {
+            format!("the Machine server starts {id} to read it")
+        } else {
+            format!("{id} {FINISHED_RUN}")
+        },
+    )
+}
+
+const FINISHED_RUN: &str = "is a finished Run; nothing reads it until its Graph continues it";
 
 /// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
 /// unread steers, this one last, in one headless turn here, and the reply
@@ -148,7 +171,7 @@ fn steer_turn(
     } else if !super::run::continues_own_step(sqlite, &session)?
         && human::run_refusal(sqlite, &session)?.is_some()
     {
-        Some("is a finished Run; nothing reads it until its Graph continues it")
+        Some(FINISHED_RUN)
     } else {
         None
     };

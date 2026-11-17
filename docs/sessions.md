@@ -445,22 +445,21 @@ lf session steers <session>                          # was it delivered?
 
 ```text
 $ lf steer 0199b7c4 "what word did I give you?"
-Saved steer 7f3a…; the Machine server starts 0199b7c4 to read it
+Saved 7f3a…; the Machine server starts 0199b7c4 to read it
 ```
 
 | The Session is… | It reads the steer |
 |---|---|
 | running a turn | at its next provider boundary |
 | idle in a held terminal | now: the Machine server wakes it ([below](#keep-several-conversations-open)) |
-| interactive and stopped (you quit it, or the Machine restarted) | the Machine server starts it again in a held terminal, then wakes it |
+| interactive and stopped (you quit it, or the Machine restarted) | the Machine server starts it again in a held terminal, where it reads the steer first |
 | a finished headless run (`-b`, a Graph step) | when its own Graph continues it; nothing else starts it |
 
 A stopped Session started this way runs in a held terminal with no viewer.
 `lf resume <session>` attaches to it, with the answer on screen. Several steers
 saved together start it once and arrive together. Each steer starts its Session
-at most once: if that start fails (`logs/lf.log` says why) or the conversation
-is quit again before reading it, the steer stays pending in
-`lf session steers` until the Session next runs.
+at most once: if that start fails (`logs/lf.log` says why), the steer stays
+pending in `lf session steers` and the Session reads it whenever it next runs.
 
 Only a steer naming a stopped Session starts it. A Task steer starts one: the
 Task's conversation (the one `lf resume LOO-12` opens), which decides what

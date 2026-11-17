@@ -23,3 +23,10 @@
   slow start would print them again through the turn's hooks).
 - `lf -b steer` holds the Session's launch lock for the whole turn, so a
   `lf resume` of the same Session meanwhile waits 30 s and fails as busy.
+- A resumed interactive conversation takes its unread steers as its first
+  input whenever one names it, whoever resumes it (`lf resume` too), not only
+  a server start. Passed over: a server-only signal to the held start (a
+  second, hidden way to pass a message to `resume`).
+- The server's record of what it has read for starts is one cursor over
+  `steers.seq`, not a per-steer column: a steer to a running Session is read
+  past too, so if that Session quits before reading it, nothing starts it.

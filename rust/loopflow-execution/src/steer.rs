@@ -164,6 +164,26 @@ pub fn idle_conversations(
         .collect())
 }
 
+/// The stopped Sessions the steers saved since the server last read name,
+/// each once with the first steer naming it. Each steer is read once; a
+/// running Session hears its steers at its boundaries.
+pub fn sessions_to_start(
+    store: &loopflow_storage::sqlite::SqliteStore,
+) -> crate::store::StoreResult<Vec<SteerWake>> {
+    let mut named = std::collections::HashSet::new();
+    Ok(store
+        .read_steer_wakes()?
+        .into_iter()
+        .filter(|wake| {
+            let running = wake.identity.is_some_and(|(pid, start)| {
+                crate::journal::process_identity_evidence(pid, start)
+                    == crate::store::ProcessIdentityEvidence::Live
+            });
+            !running && named.insert(wake.session.clone())
+        })
+        .collect())
+}
+
 /// Publication is local; Session claims and receipts never enter planning sync.
 pub async fn save_steer(
     store: &crate::store::SharedStore,

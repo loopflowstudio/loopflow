@@ -867,3 +867,26 @@ fn a_starting_conversation_takes_its_steers_when_one_names_it() {
     );
     assert!(store.take_steers_to_start("primary").unwrap().is_empty());
 }
+
+/// The server's reading and a starting conversation's check scan no growing
+/// table, and a start that nothing names takes no write lock.
+#[test]
+fn reading_steers_for_starts_scans_nothing_growing() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    crate::query_plans::assert_no_empty_writes(&store, || {
+        store.take_steers_to_start("primary").unwrap()
+    });
+    let traced = crate::query_plans::statements(&store, || {
+        store.read_steer_wakes().unwrap();
+        store.take_steers_to_start("primary").unwrap();
+        store.take_steers_to_start("worker").unwrap();
+    });
+    assert_eq!(
+        crate::query_plans::growing_scans(&store, &traced),
+        Vec::<String>::new()
+    );
+}

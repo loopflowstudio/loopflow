@@ -5,7 +5,8 @@
 //! `lf` process is their carrier; a served request has none, so [`run`] and
 //! [`ship`] start the same command detached ([`super::launch`]) and return the
 //! result it reports, the value its CLI spelling prints with `--json`. Each
-//! runs here: the caller sends a Task another Machine runs to that Machine.
+//! runs here: the caller sends a Task another Machine runs to that Machine,
+//! whose server starts it with the `environment` the sender carried.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -152,15 +153,20 @@ pub fn run(
     graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
+    environment: &[(String, String)],
 ) -> Result<TaskRun> {
-    launch::start(directory, &spell_run(issue, from, graph, agent, approve))
+    launch::start_with(
+        directory,
+        &spell_run(issue, from, graph, agent, approve),
+        environment,
+    )
 }
 
 /// `task.ship`: approve Auto-Ship and start shipping detached, as `lf --task
 /// <issue> ship` does: every remaining step headless, an interactive step
 /// standing in for the person, until the PR lands.
-pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
-    launch::start(directory, &spell_ship(issue))
+pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskShip> {
+    launch::start_with(directory, &spell_ship(issue), environment)
 }
 
 /// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>

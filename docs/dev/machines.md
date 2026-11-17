@@ -76,10 +76,13 @@ lf --machine build-home --wave product wave-operate
 its Machine identity, resolves its own files and store, and returns the result.
 Planning intent, including Task ownership, has one owner of record: the planning
 provider, or Loopflow's journal when the plan is local. Execution facts stay with
-the Machine that produced them, and inventories remain local. SSH command
-routing needs no resident API server. Desktop uses a separate local client API
-server; LOO-718 adds authenticated remote client access. Neither moves execution
-ownership into a central service.
+the Machine that produced them, and inventories remain local. Work sent to
+another Machine runs in that Machine's server: a Task or Session write for a
+Task mini runs travels over SSH to `lf server connect` there, a pipe to mini's
+server that starts it when none is running. Commands run on a Machine itself
+need no server, and `ssh mini lf …` by hand is the way in when its server
+cannot run. LOO-718 adds authenticated remote client access. Neither moves
+execution ownership into a central service.
 
 The Machine and ownership types live in
 [`durable.rs`](../../rust/loopflow-execution/src/durable.rs). SSH routing is exposed by
@@ -165,18 +168,19 @@ as a command line. Running, shipping, holding, claiming or unassigning the Task,
 and opening or resuming its Session, reach the writer the same way:
 
 ```bash
-lf task hold LOO-123 --json             # LOO-123 runs on mini; mini answers
-lf --machine mini session history list  # mini's history shows the `lf server stdio` Process
+lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+ssh mini lf server status               # while it runs, the laptop is a connected client
 ```
 
-The sender runs `lf --repo-id <id> server stdio` on the writer over SSH and
-writes two JSON lines to its stdin: `hello`, then one `request` carrying the
-operation. The writer checks its Machine identity before admitting the
-Process, runs the operation in that repository and answers one `response` or
-`error`. An operation that arrives this way runs where it arrived; it is never
-forwarded again. Its progress lines come back on stderr. The destination
-records the call as an ordinary Process, so its history shows what was asked
-of it.
+The sender runs `lf server connect` on the writer over SSH, a pipe to the
+writer's server that checks its Machine identity and starts the server when
+none is running. The write goes as `machine.write`, naming the repository and
+carrying the sender's profile, participant name and agent override; a run or
+ship also carries what `forward` names, delivered first as a one-time file.
+The writer's server runs it in its own checkout and answers; an operation that
+arrives this way is never forwarded again. An older `lf` there fails naming
+its version and `ssh mini 'lf install'`; one that dies, or SSH that cannot
+reach mini, fails with what the destination printed.
 
 A writer with an older `lf` fails the call and names its version and the
 update command, for example ``mini runs lf 0.15.2, which cannot take this

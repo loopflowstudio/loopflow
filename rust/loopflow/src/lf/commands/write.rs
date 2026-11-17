@@ -1,8 +1,8 @@
 //! Writes submitted by native clients to the Loopflow server. [`Write::run`]
 //! calls the shared functions the CLI handlers call and returns the value the
 //! CLI prints with `--json`; the carrier owns its trace. A write for a Task or
-//! Session another Machine runs goes there as this same value
-//! ([`loopflow_execution::machine::ssh::call`]).
+//! Session another Machine runs goes to that Machine's server as this same
+//! value, over SSH ([`crate::server::wire::MachineOperation`]).
 
 use std::path::{Path, PathBuf};
 
@@ -10,7 +10,6 @@ use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
-use loopflow_execution::provider_account::selection::AccountSelection;
 use loopflow_execution::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
@@ -26,7 +25,7 @@ pub(crate) enum TaskMoveResult {
 // constructs that variant before the server serializes it, so returning a
 // different Rust type is a compile error.
 macro_rules! writes {
-    (run($this:ident, $directory:ident, $task_repo:ident, $remote:ident); $(
+    (run($this:ident, $directory:ident, $task_repo:ident, $remote:ident, $environment:ident); $(
         $(#[$meta:meta])*
         $name:ident { $($(#[$field_meta:meta])* $field:ident: $input:ty),* $(,)? }
         => $output:ty;
@@ -57,16 +56,16 @@ macro_rules! writes {
             /// Run the shared operation where its Work lives and keep its
             /// declared result until serialization.
             pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
-                self.execute(true)
+                self.execute(true, &[])
             }
 
-            /// Run the shared operation here: one that arrived from another
-            /// Machine is never sent on.
-            pub(crate) fn run_here(&self) -> anyhow::Result<WriteResult> {
-                self.execute(false)
+            /// Run the shared operation here, a launch it starts carrying
+            /// `environment`: one that arrived from another Machine is never sent on.
+            pub(crate) fn run_here(&self, environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
+                self.execute(false, environment)
             }
 
-            fn execute(&$this, routed: bool) -> anyhow::Result<WriteResult> {
+            fn execute(&$this, routed: bool, $environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
                 let $directory = $this.directory();
                 let $remote = match routed {
                     true => $this.remote()?,
@@ -85,7 +84,7 @@ macro_rules! writes {
 }
 
 writes! {
-    run(self, directory, task_repo, remote);
+    run(self, directory, task_repo, remote, environment);
     /// File or adopt a Task, with a durable request identity; optionally start it.
     #[serde(rename = "task.create")]
     TaskCreate {
@@ -200,6 +199,7 @@ writes! {
             graph.as_deref(),
             agent.as_deref(),
             *approve,
+            environment,
         )?,
     },
 
@@ -208,7 +208,7 @@ writes! {
     TaskShip { directory: PathBuf, issue: String } => task::TaskShip;
     { issue, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::ship(directory, issue)?,
+        None => task::ship(directory, issue, environment)?,
     },
 
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
@@ -1048,23 +1048,15 @@ impl Write {
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
     pub(super) fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
-        // A run or ship prepares provider logins on the destination:
-        // (launching, agent, batch).
-        let (route, launch) = match self {
+        // A run or ship starts agents there, which carry what `forward` names.
+        let (route, launching) = match self {
             Self::SessionResume { .. } => return self.remote_session(),
-            Self::TaskRun {
-                issue,
-                agent,
-                approve,
-                ..
-            } => (
-                remote_task(issue)?,
-                Some((true, agent.as_deref(), *approve)),
-            ),
-            Self::TaskShip { issue, .. } => (remote_task(issue)?, Some((false, None, false))),
-            Self::TaskHold { issue, .. } => (remote_task(issue)?, None),
+            Self::TaskRun { issue, .. } | Self::TaskShip { issue, .. } => {
+                (remote_task(issue)?, true)
+            }
+            Self::TaskHold { issue, .. } => (remote_task(issue)?, false),
             Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
-                (remote_ownership_writer(issue)?, None)
+                (remote_ownership_writer(issue)?, false)
             }
             _ => return Ok(None),
         };
@@ -1095,27 +1087,11 @@ impl Write {
                 .unwrap_or_else(|| route.task_id.to_string());
         }
         let machine = find_machine(route.machine_id.as_str())?;
-        let selection = match launch {
-            Some((launching, agent, batch)) => Some(
-                tokio::runtime::Runtime::new()?
-                    .block_on(loopflow_execution::machine::credentials::prepare_launch(
-                        &machine,
-                        &AccountSelection::from_env()?,
-                        &AccountSelection::default(),
-                        launching,
-                        agent,
-                        batch,
-                        self.directory(),
-                    ))?
-                    .env_value()?,
-            ),
-            None => None,
-        };
         Remote::new(
             machine,
             route.repository_id,
             write,
-            selection.as_deref(),
+            launching,
             source.as_ref(),
         )
         .map(Some)
@@ -1165,7 +1141,7 @@ impl Write {
             agent: agent.clone(),
             intent: *intent,
         };
-        Remote::new(machine, repository, write, None, None).map(Some)
+        Remote::new(machine, repository, write, false, None).map(Some)
     }
 
     /// `session.resume` / `session.new`: the conversation prepared where it
@@ -1276,6 +1252,18 @@ impl Write {
         }
     }
 
+    /// This write in this Machine's checkout of `repository`, for one another
+    /// Machine sent naming its own path.
+    pub(crate) fn in_checkout(
+        &self,
+        repository: &loopflow_model::durable::RepositoryId,
+    ) -> anyhow::Result<Self> {
+        let mut change = serde_json::to_value(self)?;
+        change["directory"] =
+            serde_json::to_value(super::work_route::repository_path(repository)?)?;
+        Ok(serde_json::from_value(change)?)
+    }
+
     pub(crate) fn directory(&self) -> &Path {
         match self {
             Self::TaskCreate { directory, .. }
@@ -1346,43 +1334,61 @@ impl Write {
 #[derive(Debug)]
 pub(super) struct Remote {
     machine: loopflow_model::durable::Machine,
-    repository: loopflow_model::durable::RepositoryId,
-    write: Write,
-    /// The preamble the destination's `lf server stdio` reads.
-    environment: Vec<(String, String)>,
+    operation: crate::server::wire::MachineOperation,
 }
 
 impl Remote {
+    /// `write` for `machine`'s checkout of `repository`, with what this `lf`
+    /// runs with and, for a launch, the secrets `forward` names.
     fn new(
         machine: loopflow_model::durable::Machine,
         repository: loopflow_model::durable::RepositoryId,
-        write: Write,
-        selection: Option<&str>,
+        change: Write,
+        launching: bool,
         source: Option<&loopflow_execution::ops::task::remote::TaskSource>,
     ) -> anyhow::Result<Self> {
         let environment = loopflow_execution::machine::task::forwarding_environment(
-            write.directory(),
+            change.directory(),
             &machine,
-            selection,
             source,
-        )?;
+        )?
+        .into_iter()
+        .collect();
+        let forwarded = match launching {
+            true => {
+                let forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let mut notices = Vec::new();
+                let file = loopflow_execution::machine::forward::deliver(
+                    &machine,
+                    &forwarded,
+                    &mut notices,
+                )?;
+                for line in String::from_utf8_lossy(&notices).lines() {
+                    loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
+                }
+                file
+            }
+            false => None,
+        };
         Ok(Self {
             machine,
-            repository,
-            write,
-            environment,
+            operation: crate::server::wire::MachineOperation::Write {
+                repository,
+                environment,
+                forwarded,
+                change,
+            },
         })
     }
 
-    /// The destination's answer; nothing runs here instead.
+    /// The answer of the destination's server; nothing runs here instead.
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
-        let answer = loopflow_execution::machine::ssh::call(
-            &self.machine,
-            &self.repository,
-            &self.environment,
-            &crate::server::wire::Operation::Write(self.write.clone()),
-        )?;
-        Ok(serde_json::from_value(answer)?)
+        let mut connection =
+            loopflow_execution::machine::client::Connection::open_on(&self.machine)?;
+        let answer = connection.request(crate::server::wire::Operation::Machine(
+            self.operation.clone(),
+        ))?;
+        Ok(serde_json::from_value(answer.result)?)
     }
 }
 

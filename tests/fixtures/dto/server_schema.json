@@ -4333,6 +4333,49 @@
       ],
       "type": "object"
     },
+    "MachineOperation": {
+      "description": "A write another Machine sent over SSH. It runs here, in this Machine's\ncheckout of `repository`, and is never sent on.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "change": {
+              "$ref": "#/$defs/Write"
+            },
+            "environment": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "What the sending `lf` runs with: its profile, participant name,\nagent override and Task source. A launch the write starts carries it.",
+              "type": "object"
+            },
+            "forwarded": {
+              "description": "The one-time file under this Machine's home the sender delivered\nits forwarded secrets in, for the launch the write starts.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "kind": {
+              "const": "machine.write",
+              "type": "string"
+            },
+            "repository": {
+              "description": "The repository `change` names; its `directory` is the sender's.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "repository",
+            "environment",
+            "forwarded",
+            "change"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "MachineRef": {
       "description": "A Machine for display; a missing id reads as \"Machine unknown\".",
       "properties": {
@@ -5500,6 +5543,9 @@
         },
         {
           "$ref": "#/$defs/MeasuredOperation"
+        },
+        {
+          "$ref": "#/$defs/MachineOperation"
         },
         {
           "$ref": "#/$defs/Read"

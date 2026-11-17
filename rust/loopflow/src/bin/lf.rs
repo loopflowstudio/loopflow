@@ -2006,9 +2006,6 @@ fn run() -> anyhow::Result<()> {
 
     // Availability and bootstrap are observational; no Work admission or repair.
     if let Some(Commands::Server { cmd }) = &cli.command {
-        if matches!(cmd, loopflow::lf::ServerCommand::Stdio) {
-            journal::admit_process(&std::env::current_dir()?, &args);
-        }
         return loopflow::lf::commands::server::run(cmd);
     }
 

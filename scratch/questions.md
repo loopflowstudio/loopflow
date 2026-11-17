@@ -129,3 +129,20 @@ Reading: the destination's resident server does the work; the SSH entry is a pip
 Settled by these: the destination's resident server runs every routed operation (question 6: the server does the work); the SSH entry is a pipe that starts the server when needed; answer 3a and the brief's "SSH routing needs no resident API server on the destination" are dropped; `ssh <machine> lf …` typed by hand is the way in when a server cannot run.
 - Jack, confirming: "think its fine for the lf-owned ssh transport to require some lf infrastructure and in exchange give more magical behavior".
 - On the server-does-the-work redesign, Jack: "ok. lets keep moving. i accept this new direction".
+
+## PR 1 rework choices (2026-11-17, headless)
+
+- The write another Machine sends is a new operation, `machine.write`
+  (`{repository, environment, forwarded, change}`), not a field on `Request`
+  or `hello`: additive, so Desktop, the phone and older servers are
+  untouched, and an older server answers "no operation `machine.write`".
+  Settles the open "repository id on Request vs entry rewrites `directory`"
+  and "per-run secrets": the one-time file `forward::deliver` writes is named
+  in the operation and read once by the destination's server
+  (`forward::take`). The operation, not `hello`'s kind, marks a write that
+  arrived; the kind `machine` is still sent, for `lf server status`.
+- `task.ship` forwards what `forward` names, as `task.run` does: both start
+  agents there. #1956 forwarded for runs only.
+- The entry kept #1956's error texts ("mini runs lf 0.15.2 …", "lf on mini
+  exited with status 101 before answering; the destination said: …"), now
+  inside the error itself so a served request keeps them.

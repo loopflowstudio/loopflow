@@ -308,8 +308,11 @@ pub(super) fn run_with_io(
             Some(io) => &mut *io.error,
             None => &mut stderr,
         };
-        preamble =
-            loopflow_execution::machine::forward::deliver(&target, forwarded, &preamble, notices)?;
+        if let Some(file) =
+            loopflow_execution::machine::forward::deliver(&target, forwarded, notices)?
+        {
+            preamble = loopflow_execution::machine::forward::sourced(&file, &preamble);
+        }
     }
     match io {
         Some(io) => {

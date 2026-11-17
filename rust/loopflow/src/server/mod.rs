@@ -1,12 +1,12 @@
 //! Standalone transport for shared reads and commands; owns no execution.
 pub(crate) mod boundary;
+pub mod connect;
 pub mod mobile;
 mod outbox;
 mod remote;
 pub mod schema;
 mod service;
 mod statistics;
-pub mod stdio;
 mod subscriptions;
 mod ticket;
 mod wake;

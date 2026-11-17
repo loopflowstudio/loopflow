@@ -1141,9 +1141,7 @@ impl Commands {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, .. } => cmd.is_some(),
-            // Another Machine's typed operation is recorded like its command.
-            Self::Server { cmd } => matches!(cmd, ServerCommand::Stdio),
-            Self::Holder { .. } => false,
+            Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),
@@ -1390,9 +1388,9 @@ pub enum ServerCommand {
     },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
-    /// Answer one connection's requests on stdin and stdout, here; another
-    /// Machine runs it over SSH to send a typed operation.
-    Stdio,
+    /// Pipe stdin and stdout to this Machine's server, starting it first if
+    /// needed; another Machine runs it over SSH to reach the server.
+    Connect,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.

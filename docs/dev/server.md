@@ -54,7 +54,7 @@ server task.run, task.ship ─ engine::launch ─ detached `lf task run`, `lf sh
 server session.start / attach ─ held terminal ─ holder ─ PTY ─ agent
 
 Desktop terminal preparation/launch ─ ordinary CLI ─ held terminals
-write for another Machine's Task ─ SSH ─ destination's `lf server stdio` ─ Write::run_here
+write for another Machine's Task ─ SSH ─ destination's `lf server connect` ─ its server ─ Write::run_here
 lf --machine host … ─ SSH ─ destination's ordinary lf command
 lf install ─ selected artifacts + OS registration of server
 lf desktop ─ app-owned automation socket ─ windows / panes
@@ -65,7 +65,9 @@ delivery and connection diagnostics. Shared commands own resolution, defaults, m
 attribution and recoverable outcomes. Holders own PTYs and the agents on
 them; the server owns each held terminal's screen, views and input/geometry
 claims. Graph processes own Graph execution.
-CLI operations can run without the server. Desktop owns rendering and UI actions.
+CLI operations on a Machine can run without its server; work sent to another
+Machine runs in that Machine's server, reached over SSH through `lf server
+connect`. Desktop owns rendering and UI actions.
 
 Subscriptions carry complete readings of current state and typed events for
 occurrences such as a Task shipping, a steer arriving or a Graph step finishing.
@@ -111,7 +113,8 @@ The server adds no scheduler, Work database, viewer registry or provider supervi
 
 Local peer credentials apply only to the private Unix socket. Remote access needs
 its own authenticated admission even over Tailscale. Never forward a trusted local
-socket and treat the proxy's UID as the phone's identity. Disabling remote access
+socket and treat the proxy's UID as the phone's identity. `lf server connect`
+pipes SSH to the socket because an SSH login is the socket's own OS user. Disabling remote access
 or revoking a client must preserve local access and running agents; client
 credentials grant no permission to disregard another view's control claim.
 
@@ -155,9 +158,9 @@ product choices. Removal must preserve Work and credentials.
 
 ## Commands and installed-state migration
 
-`lf server run` is the supervisor's foreground entry. `lf server stdio` answers one
-connection on stdin and stdout; another Machine runs it over SSH to send a
-typed operation (see [Machines](machines.md)). `lf server describe --json`
+`lf server run` is the supervisor's foreground entry. `lf server connect` pipes
+stdin and stdout to the server, starting it first; another Machine runs it
+over SSH to reach this one (see [Machines](machines.md)). `lf server describe --json`
 prints the protocol's JSON Schema, generated from the wire types, with no server
 running. `lf server status` reports
 readiness without registering a helper. The hidden `install server` operation

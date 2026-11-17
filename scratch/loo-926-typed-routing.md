@@ -223,30 +223,24 @@ LOO-957 (sign-in, based on `main`, running) retires `lf account` and changes
 what is delivered to a Machine. It touches the two `forward::deliver` call
 sites and the CLI entry code PR 3 rewrites.
 
-### State of the branch
+### State of the branch (2026-11-17)
 
-`main` at `528ccd8eda` (LOO-913) is merged in, conflicts resolved, and the
-branch does not compile: `lf/commands/write.rs:13,1098–1118` still calls
-`credentials::prepare_launch` and `AccountSelection`, both deleted by
-LOO-913, and passes a `selection` on to `Remote::new`. PR 1's rework deletes
-that code; fix it there, not separately. `main` has moved on since; sync
-again before building. #1956's QA note on typed writes moved to
-`.lf/qa/machine-moves.md`, since `main` split `.lf/skills/qa.md`.
+PR 1 is built on `main` at `e66b21801c`: `Connection::open_on` over
+`machine::ssh::Pipe`, `lf server connect` (`server/connect.rs`), and
+`machine.write` (`server/wire.rs::MachineOperation`), which the server runs
+with `Write::run_here` in its checkout of the named repository.
+`server/stdio.rs`, `ssh::call` and the `prepare_launch` path are deleted.
 
 ## Open
 
-- How a served launch on the destination gets per-run secrets
-  (`forward.env`), now that no forwarded process environment reaches the
-  server. Candidates: an `env` field on the launch operations, as
-  `session.start` has; or the one-time file `forward::deliver` already
-  writes, named in the request and read by the launch. LOO-957 decides where
-  logins sit; this is about the rest.
-- Whether PR 1 adds the repository id to `Request` (a wire change across the
-  DTO fixtures and Swift) or the entry rewrites `directory` per request as
-  #1956 does, which makes it more than a pipe until PR 3.
-- The entry's name.
-- PR #1956 stays open and unmerged. CI on it reported every check SKIPPED,
-  including `rust-test`. Not investigated.
+- In-process writes sent to another Machine (hold, claim, unassign, Session
+  preparation) run with the destination's own configuration; the sender's
+  `environment` reaches only the launches `task.run` and `task.ship` start.
+  PR 3's `Selection` on `Request` closes this.
+- The SSH carrier sets no read timeout; SSH bounds connecting, not a stalled
+  destination.
+- PR #1956 CI reported every check SKIPPED, including `rust-test`. Not
+  investigated.
 
 ## Built in #1956 (2026-11-16), before the redesign
 
@@ -256,6 +250,13 @@ again before building. #1956's QA note on typed writes moved to
   hold/claim/unassign/run/ship reach mini; older lf, older protocol, crashing
   and unreachable mini each name the cause.
 - Loopback sshd (`tests/transport/ssh_shells.rs`): CI.
+
+## Checks (PR 1)
+
+- `cargo nextest run -p loopflow --test integration -E 'test(served_ownership_routes_to_its_writer) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(an_lf_without_the_entry) | test(an_lf_that_dies_before) | test(a_served_resume_opens_the_session_on_your)'`: 6 pass (mini's real server answers the hold and the claim).
+- `--lib` `machine::forward:: | machine::client:: | machine::ssh:: | server::schema:: | server::wire:: | lf::commands::write:: | lf::tests::`, `documented_commands::`: pass; clippy clean on both crates.
+- A stopped destination server started by the entry: QA, not automated (`ensure` registers a supervisor job).
+- Swift `ServerProtocolTests` against the regenerated schema: gate/CI.
 
 ## Done when (PR 1)
 

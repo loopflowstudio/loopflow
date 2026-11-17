@@ -90,129 +90,96 @@ pub async fn request(
     Ok(output.stdout)
 }
 
-/// One typed operation, answered by `lf --repo-id <repository> server stdio`
-/// on `machine`: `hello`, then one `request`, on its stdin. Returns the
-/// response's result; an error it answered keeps its code. Its stderr lines
-/// become this request's diagnostics. An `lf` too old for the entry fails
-/// naming its version and the update command; nothing runs here instead.
-pub fn call(
-    machine: &loopflow_model::durable::Machine,
-    repository: &loopflow_model::durable::RepositoryId,
-    environment: &[(String, String)],
-    operation: &impl serde::Serialize,
-) -> anyhow::Result<serde_json::Value> {
-    use super::wire::{ClientMessage, Hello, ServerMessage, MIN_REVISION, REVISION};
-    use crate::engine::{Error, ErrorCode};
-    let messages: [ClientMessage; 2] = [
-        ClientMessage::Hello(Hello {
-            revision: REVISION,
-            min_revision: MIN_REVISION,
-            client: super::client::identity("machine", "lf"),
-        }),
-        ClientMessage::Request {
-            id: "1".into(),
-            operation: serde_json::to_value(operation)?,
-            select: None,
-        },
-    ];
-    let mut input = Vec::new();
-    for message in &messages {
-        serde_json::to_writer(&mut input, message)?;
-        input.push(b'\n');
+/// `ssh … lf server connect` on a Machine: a pipe to its server's socket.
+/// The destination checks it is the Machine named here and starts its server
+/// when none is running; every message after that is the protocol's.
+#[derive(Debug)]
+pub struct Pipe {
+    machine: loopflow_model::durable::Machine,
+    child: std::process::Child,
+    /// What the destination printed, collected until it exits.
+    said: Option<std::thread::JoinHandle<Vec<u8>>>,
+}
+
+impl Pipe {
+    /// The pipe and its two ends: what the destination's server sends, and
+    /// where this side writes.
+    pub fn open(
+        machine: &loopflow_model::durable::Machine,
+    ) -> anyhow::Result<(Self, std::process::ChildStdout, std::process::ChildStdin)> {
+        let command = ["lf", "server", "connect"].map(str::to_owned);
+        let preamble = build_preamble(&command, &[(EXPECTED_MACHINE_ID_ENV, machine.id.as_str())]);
+        let mut child = Command::new("ssh")
+            .args(crate::machine_route::bounded_ssh_args(
+                &machine.route,
+                false,
+            )?)
+            .arg(preamble)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .context("could not start ssh")?;
+        let (output, input) = (
+            child.stdout.take().expect("piped SSH stdout"),
+            child.stdin.take().expect("piped SSH stdin"),
+        );
+        let mut stderr = child.stderr.take().expect("piped SSH stderr");
+        let said = std::thread::spawn(move || {
+            let mut said = Vec::new();
+            let _ = std::io::Read::read_to_end(&mut stderr, &mut said);
+            said
+        });
+        Ok((
+            Self {
+                machine: machine.clone(),
+                child,
+                said: Some(said),
+            },
+            output,
+            input,
+        ))
     }
-    let command = ["lf", "--repo-id", repository.as_str(), "server", "stdio"].map(str::to_owned);
-    let environment: Vec<_> = environment
-        .iter()
-        .map(|(name, value)| (name.as_str(), value.as_str()))
-        .collect();
-    let (mut output, mut error) = (Vec::new(), Vec::new());
-    let ran = run_ssh_io(
-        &machine.route,
-        false,
-        &build_preamble(&command, &environment),
-        true,
-        &mut crate::command::CommandIo {
-            input: &mut input.as_slice(),
-            output: &mut output,
-            error: &mut error,
-        },
-    );
-    let said = String::from_utf8_lossy(&error);
-    let answers: Vec<ServerMessage> = output
-        .split(|byte| *byte == b'\n')
-        .filter(|line| !line.is_empty())
-        .map(serde_json::from_slice)
-        .collect::<Result<_, _>>()
-        .unwrap_or_default();
-    let failed = |failure: anyhow::Error| match said.trim() {
-        "" => failure,
-        said => failure.context(format!("the destination said: {said}")),
-    };
-    let answer = match answers.as_slice() {
-        [ServerMessage::Welcome(_), answer, ..] => {
-            for line in said.lines() {
-                crate::journal::request::diagnostic(format_args!("{line}"));
+
+    /// Why the destination closed the pipe before answering: an `lf` too old
+    /// for the entry, one that failed, or SSH's own failure, with what it
+    /// said. `code` is what the failure means for the request.
+    pub fn ended(&mut self, code: crate::engine::ErrorCode) -> anyhow::Error {
+        use crate::engine::{Error, ErrorCode};
+        let status = self.child.wait();
+        let said = self
+            .said
+            .take()
+            .and_then(|said| said.join().ok())
+            .unwrap_or_default();
+        let said = String::from_utf8_lossy(&said);
+        let name = self.machine.name();
+        let reason = match status.map(|status| status.code()) {
+            // Clap's usage error: this `lf` has no `server connect`.
+            Ok(Some(2)) => {
+                return Error::new(ErrorCode::Incompatible, outdated(&self.machine)).into()
             }
-            answer
+            Ok(Some(255) | None) => format!("could not reach {name} over SSH"),
+            Ok(Some(0)) => format!("{name} closed the connection before answering"),
+            Ok(Some(code)) => format!("lf on {name} exited with status {code} before answering"),
+            Err(error) => format!("ssh to {name} did not exit: {error}"),
+        };
+        let message = match said.trim() {
+            "" => reason,
+            said => format!("{reason}; the destination said: {said}"),
+        };
+        match code {
+            ErrorCode::OutcomeUnknown => Error::outcome_unknown(&anyhow::anyhow!(message)),
+            code => Error::new(code, message),
         }
-        // A refused hello: the revisions differ. An older receiver is named,
-        // as when it has no `server stdio` at all.
-        [ServerMessage::Error {
-            code: ErrorCode::Incompatible,
-            data: Some(data),
-            ..
-        }, ..]
-            if data["update"] == "server" =>
-        {
-            return Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
-        }
-        [refused @ ServerMessage::Error { .. }, ..] => refused,
-        [ServerMessage::Welcome(_)] => {
-            return Err(failed(
-                Error::outcome_unknown(&anyhow::anyhow!(
-                    "{} closed the connection before answering",
-                    machine.route
-                ))
-                .into(),
-            ))
-        }
-        _ => {
-            use crate::process::CommandExit;
-            return match ran.map_err(|failure| failure.downcast::<CommandExit>()) {
-                // Clap's usage error: this `lf` has no `server stdio`.
-                Err(Ok(CommandExit(2))) => {
-                    Err(Error::new(ErrorCode::Incompatible, outdated(machine)).into())
-                }
-                // Not a code to pass on: the operation may have run there.
-                Err(Ok(CommandExit(code))) => Err(failed(
-                    Error::outcome_unknown(&anyhow::anyhow!(
-                        "lf on {} exited with status {code} before answering",
-                        machine.route
-                    ))
-                    .into(),
-                )),
-                Err(Err(failure)) => Err(failed(failure)),
-                Ok(()) => Err(failed(anyhow::anyhow!(
-                    "{} did not answer the operation",
-                    machine.route
-                ))),
-            };
-        }
-    };
-    match answer {
-        ServerMessage::Response { result, .. } => Ok(result.clone()),
-        ServerMessage::Error {
-            code,
-            message,
-            data,
-            ..
-        } => Err(Error {
-            code: *code,
-            message: message.clone(),
-            data: data.clone(),
-        }
-        .into()),
-        other => anyhow::bail!("unexpected answer from {}: {other:?}", machine.route),
+        .into()
+    }
+}
+
+impl Drop for Pipe {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
 }
 

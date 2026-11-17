@@ -3834,6 +3834,7 @@ fn served_ownership_routes_to_its_writer_and_never_falls_back_locally() {
 
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
+    let _mini = served_mini(&fixture);
     let (server, socket) = served(&fixture);
     let send = |claimed| {
         let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
@@ -3933,10 +3934,90 @@ fn task_on_mini(fixture: &Machines) -> (SharedPlan, loopflow_execution::durable:
     (plan, task)
 }
 
+/// Mini's own server, ready, as `lf server connect` there finds it.
+fn served_mini(fixture: &Machines) -> Child {
+    use std::time::{Duration, Instant};
+    let remote = fixture.root.path().join("remote");
+    let lf = |args: &[&str]| {
+        let mut command = Command::new(remote.join(".local/bin/lf"));
+        command
+            .env_clear()
+            .env("HOME", &remote)
+            .env("PATH", "/usr/bin:/bin")
+            .current_dir(&remote)
+            .args(args);
+        command
+    };
+    let server = Child(lf(&["server", "run"]).spawn().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(20);
+    loop {
+        let status: Value =
+            serde_json::from_slice(&lf(&["server", "status"]).output().unwrap().stdout).unwrap();
+        if status["ready"] == true {
+            return server;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "mini's server did not become ready: {status}"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+/// Mini's `lf server connect` stood in: it welcomes the connection, records
+/// the hello and the request it reads, and answers with `result`.
+fn answering_entry(fixture: &Machines, record: &Path, result: &Value) {
+    let welcome: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
+    ))
+    .unwrap();
+    let mut response: Value = serde_json::from_str(include_str!(
+        "../../loopflow-execution/tests/fixtures/dto/server/response.json"
+    ))
+    .unwrap();
+    response["id"] = "@ID@".into();
+    response["result"] = result.clone();
+    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
+    let working = fs::read_to_string(&remote_lf).unwrap();
+    executable(
+        &remote_lf,
+        &working.replacen(
+            "#!/bin/sh\n",
+            &format!(
+                r#"#!/bin/sh
+case "$*" in *'server connect'*)
+cat <<'WELCOME'
+{welcome}
+WELCOME
+read -r hello; read -r request
+printf '%s\n%s\n' "$hello" "$request" > '{input}'
+id=$(printf '%s' "$request" | sed 's/^{{"type":"request","id":"\([^"]*\)".*/\1/')
+sed "s/@ID@/$id/" <<'ANSWER'
+{response}
+ANSWER
+exit 0;; esac
+"#,
+                input = record.join("input").display(),
+            ),
+            1,
+        ),
+    );
+}
+
+/// What a stood-in entry read: the hello, then the request.
+fn entry_input(record: &Path) -> (Value, Value) {
+    let input = fs::read_to_string(record.join("input")).unwrap();
+    let mut lines = input
+        .lines()
+        .map(|line| serde_json::from_str::<Value>(line).unwrap());
+    (lines.next().unwrap(), lines.next().unwrap())
+}
+
 #[test]
-fn a_hold_for_a_task_mini_runs_travels_as_the_typed_operation() {
+fn a_hold_for_a_task_mini_runs_is_answered_by_minis_server() {
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
+    let _mini = served_mini(&fixture);
     let remote = fixture.root.path().join("remote");
     let record = fixture.root.path().join("ssh-record");
     fs::create_dir_all(&record).unwrap();
@@ -3960,38 +4041,19 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
     );
 
     let commands = fs::read_to_string(record.join("commands")).unwrap();
-    let exec = commands
-        .lines()
-        .find(|line| line.starts_with("exec "))
-        .unwrap();
-    assert_eq!(
-        exec,
-        format!(
-            "exec 'lf' '--repo-id' '{}' 'server' 'stdio'",
-            plan.repository
-        )
+    assert!(
+        commands
+            .lines()
+            .any(|line| line == "exec 'lf' 'server' 'connect'"),
+        "{commands}"
     );
     assert!(!commands.contains("hold"), "{commands}");
-    let input = fs::read_to_string(record.join("input")).unwrap();
-    let messages: Vec<Value> = input
-        .lines()
-        .map(|line| serde_json::from_str(line).unwrap())
-        .collect();
-    assert_eq!(messages.len(), 2, "{input}");
-    assert_eq!(messages[0]["type"], "hello");
-    assert_eq!(messages[1]["type"], "request");
-    assert_eq!(messages[1]["operation"]["kind"], "task.hold");
-    assert_eq!(messages[1]["operation"]["issue"], task.as_str());
-    // Mini records the call as its own Process.
-    let db = rusqlite::Connection::open(remote.join("store/loopflow.db")).unwrap();
-    let recorded: i64 = db
-        .query_row(
-            "SELECT COUNT(*) FROM processes WHERE command LIKE '%server%stdio%'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(recorded, 1);
+    let (hello, request) = entry_input(&record);
+    assert_eq!(hello["client"]["kind"], "machine");
+    assert_eq!(request["operation"]["kind"], "machine.write");
+    assert_eq!(request["operation"]["repository"], plan.repository.as_str());
+    assert_eq!(request["operation"]["change"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["change"]["issue"], task.as_str());
 }
 
 /// A served `task.run` for a Task mini runs is mini's `task.run`: the laptop
@@ -4004,33 +4066,14 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
 
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
-    let welcome: Value = serde_json::from_str(include_str!(
-        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
-    ))
-    .unwrap();
     let mut running: Value = serde_json::from_str(include_str!(
         "../../loopflow-execution/tests/fixtures/dto/server/task_running.json"
     ))
     .unwrap();
-    running["id"] = "1".into();
     running["result"]["issue"] = task.as_str().into();
-    // Mini's `lf server stdio` records the request and answers that its run
-    // started; every other command runs mini's real lf.
-    let record = fixture.root.path().join("stdio");
+    let record = fixture.root.path().join("entry");
     fs::create_dir_all(&record).unwrap();
-    let remote_lf = fixture.root.path().join("remote/.local/bin/lf");
-    let working = fs::read_to_string(&remote_lf).unwrap();
-    executable(
-        &remote_lf,
-        &working.replacen(
-            "exec ",
-            &format!(
-                "case \"$*\" in *'server stdio') cat > '{}/input'; cat <<'ANSWER'\n{welcome}\n{running}\nANSWER\nexit 0;; esac\nexec ",
-                record.display()
-            ),
-            1,
-        ),
-    );
+    answering_entry(&fixture, &record, &running["result"]);
 
     let (server, socket) = served(&fixture);
     let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
@@ -4051,10 +4094,14 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
     drop(server);
 
     assert_eq!(started, running["result"]);
-    let input = fs::read_to_string(record.join("input")).unwrap();
-    let request: Value = serde_json::from_str(input.lines().nth(1).unwrap()).unwrap();
-    assert_eq!(request["operation"]["kind"], "task.run");
-    assert_eq!(request["operation"]["issue"], task.as_str());
+    let (_, request) = entry_input(&record);
+    assert_eq!(request["operation"]["kind"], "machine.write");
+    assert_eq!(request["operation"]["change"]["kind"], "task.run");
+    assert_eq!(request["operation"]["change"]["issue"], task.as_str());
+    assert_eq!(
+        request["operation"]["environment"]["LF_USER_NAME"], "Jack",
+        "{request}"
+    );
     assert_eq!(
         live_graph(&fixture.root.path().join("local/loopflow.db"), &task),
         None
@@ -4062,7 +4109,7 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
 }
 
 #[test]
-fn an_lf_without_the_typed_entry_names_its_version_and_update() {
+fn an_lf_without_the_entry_names_its_version_and_update() {
     let fixture = preview_machines();
     let (plan, task) = task_on_mini(&fixture);
     let mini = loopflow_execution::store::machines::local_machine(&plan.remote)
@@ -4074,7 +4121,7 @@ fn an_lf_without_the_typed_entry_names_its_version_and_update() {
         &format!(
             r#"#!/bin/sh
 case "$*" in
-*"server stdio"*) echo "error: unrecognized subcommand 'stdio'" >&2; exit 2;;
+*"server connect"*) echo "error: unrecognized subcommand 'connect'" >&2; exit 2;;
 esac
 case "$1" in
 --version) echo 'lf 0.15.2';;
@@ -4105,16 +4152,17 @@ fn an_lf_that_dies_before_answering_says_so_and_what_it_printed() {
         &remote_lf,
         &working.replacen(
             "exec ",
-            "case \"$*\" in *\"server stdio\"*) echo 'panicked at main.rs' >&2; exit 101;; esac\nexec ",
+            "case \"$*\" in *\"server connect\"*) echo 'panicked at main.rs' >&2; exit 101;; esac\nexec ",
             1,
         ),
     );
     let output = fixture.run(&["task", "hold", task.as_str(), "--json"]);
     assert_eq!(output.status.code(), Some(1));
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(error.contains("panicked at main.rs"), "{error}");
     assert!(
-        error.contains("lf on mini exited with status 101 before answering"),
+        error.contains(
+            "lf on mini exited with status 101 before answering; the destination said: panicked at main.rs"
+        ),
         "{error}"
     );
 }
@@ -4143,32 +4191,15 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .unwrap();
     assert_success(&set);
 
-    // Mini's `lf server stdio`, answering the request it reads.
     let mut record: Value = serde_json::from_str::<Vec<Value>>(include_str!(
         "../../../tests/fixtures/dto/sessions.json"
     ))
     .unwrap()
     .remove(0);
     record["workspace"]["machine_id"] = machine["id"].clone();
-    let welcome: Value = serde_json::from_str(include_str!(
-        "../../loopflow-execution/tests/fixtures/dto/server/welcome.json"
-    ))
-    .unwrap();
-    let mut response: Value = serde_json::from_str(include_str!(
-        "../../loopflow-execution/tests/fixtures/dto/server/response.json"
-    ))
-    .unwrap();
-    response["id"] = "1".into();
-    response["result"] = record.clone();
-    let record_dir = fixture.root.path().join("stdio");
+    let record_dir = fixture.root.path().join("entry");
     fs::create_dir_all(&record_dir).unwrap();
-    executable(
-        &fixture.root.path().join("remote/.local/bin/lf"),
-        &format!(
-            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{dir}/arguments'\ncat > '{dir}/input'\ncat <<'ANSWER'\n{welcome}\n{response}\nANSWER\n",
-            dir = record_dir.display(),
-        ),
-    );
+    answering_entry(&fixture, &record_dir, &record);
 
     let (_server, socket) = served(&fixture);
     let mut connection = Connection::open_at(Path::new(&socket)).unwrap();
@@ -4187,15 +4218,11 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .unwrap()
         .result;
 
-    let arguments = fs::read_to_string(record_dir.join("arguments")).unwrap();
-    assert_eq!(
-        arguments.lines().collect::<Vec<_>>(),
-        ["--repo-id", repository.trim(), "server", "stdio"]
-    );
-    let input = fs::read_to_string(record_dir.join("input")).unwrap();
-    let request: Value = serde_json::from_str(input.lines().nth(1).unwrap()).unwrap();
-    assert_eq!(request["operation"]["kind"], "session.resume");
-    assert_eq!(request["operation"]["intent"], "resume");
+    let (_, request) = entry_input(&record_dir);
+    assert_eq!(request["operation"]["kind"], "machine.write");
+    assert_eq!(request["operation"]["repository"], repository.trim());
+    assert_eq!(request["operation"]["change"]["kind"], "session.resume");
+    assert_eq!(request["operation"]["change"]["intent"], "resume");
     let argv: Vec<&str> = opened["open_argv"]
         .as_array()
         .unwrap()

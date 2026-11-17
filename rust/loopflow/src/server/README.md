@@ -52,27 +52,30 @@ same Mac connects; create it only on a Mac with one account. Setup saves the end
 Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
 add service state to `config.yaml` or the preferences catalogue.
 
-`lf server stdio` speaks the same protocol on stdin and stdout for one
-connection, with no server running. Another Machine runs it over SSH
-(`lf --repo-id <id> server stdio`) to send a Task or Session write that
-Machine owns:
+Another Machine reaches this server over SSH: `lf server connect` checks
+`LF_EXPECTED_MACHINE_ID`, starts the server when none is running
+(`installation::server::ensure`), and copies bytes between its stdin and stdout
+and the socket until either side closes. It reads none of them, so every
+message works over SSH as on the socket, and it records nothing; the server
+records each request. An SSH login is the same OS user the socket trusts. An
+`lf` older than this entry exits 2 with a usage error, which the sender
+reports as the destination's version and its update command; an older server
+answers `incompatible` itself. The client side is `Connection::open_on`.
+
+A Task or Session write another Machine sends is `machine.write`, the write
+wrapped with what the receiving server cannot know:
 
 ```text
-→ {"type":"hello","revision":5,…}
+→ {"type":"hello","revision":6,"min_revision":5,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"1","operation":{"kind":"task.hold",…}}
-← {"type":"response","id":"1","result":{…}}
+→ {"type":"request","id":"…","operation":{"kind":"machine.write","repository":"repo_…","environment":{"LF_USER_NAME":"…",…},"forwarded":null,"change":{"kind":"task.hold",…}},"select":null}
+← {"type":"response","id":"…","result":{…}}
 ```
 
-A revision mismatch gets `incompatible`, as on the socket. `subscribe` and
-every native request (`session.start`, attach, `mobile.*`, uploads) get
-`invalid`, naming the resident server: a stdio connection answers requests,
-nothing more. The entry is an ordinary admitted `lf` Process, recorded in the
-destination's history, and checks `LF_EXPECTED_MACHINE_ID` before admission.
-It runs the operation in the repository `--repo-id` names and never forwards
-it to another Machine. Diagnostics go to stderr. An `lf` older than this entry
-exits 2 with a usage error, which the sender reports as the destination's
-version and its update command.
+The server runs `change` in its own checkout of `repository`, never routes it
+onward, and starts any launch (`task.run`, `task.ship`) with `environment`
+plus the secrets in `forwarded`: a file under this Machine's home the sender
+delivered over SSH first, read once and removed.
 
 `machine/wire.rs` owns the envelope, endpoint and native request types;
 `server/wire.rs` instantiates the envelope with the CLI read/write operations.
@@ -399,9 +402,9 @@ the phone's `view.select` Task list and its creation destinations all read it.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
-  `task.claim`, `task.unassign`, `session.resume`) goes there as the same
-  value, over SSH to that Machine's `lf server stdio`, and returns the
-  destination's answer; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
+  `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
+  server as `machine.write` and returns its answer; it never falls back to
+  local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is

@@ -475,7 +475,7 @@ pub(super) async fn welcome<C: Carrier>(
 }
 
 /// The newest revision both sides speak.
-pub(super) fn negotiate(hello: &Hello) -> Option<u32> {
+fn negotiate(hello: &Hello) -> Option<u32> {
     let revision = REVISION.min(hello.revision);
     (revision >= MIN_REVISION && revision >= hello.min_revision).then_some(revision)
 }
@@ -1142,16 +1142,6 @@ fn refused_operation(line: &str) -> Option<(String, Error)> {
         );
         return Some((id, refusal.with(serde_json::json!({ "kind": kind }))));
     }
-    Some((id, refused_request(operation)))
-}
-
-/// Why `operation`, which no operation type accepted, was refused: the
-/// fields its kind takes, or that this build has no such kind.
-pub(super) fn refused_request(operation: &serde_json::Value) -> Error {
-    let kind = operation
-        .get("kind")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default();
     let refusals = [
         serde_json::from_value::<crate::lf::commands::read::Read>(operation.clone()).err(),
         serde_json::from_value::<crate::lf::commands::write::Write>(operation.clone()).err(),
@@ -1168,7 +1158,7 @@ pub(super) fn refused_request(operation: &serde_json::Value) -> Error {
             format!("this server has no operation `{kind}`; update the selected installation"),
         ),
     };
-    refusal.with(serde_json::json!({ "kind": kind }))
+    Some((id, refusal.with(serde_json::json!({ "kind": kind }))))
 }
 
 /// Hand the connection to the owner protocol. Tokio uses bounded copy buffers;
@@ -1324,27 +1314,31 @@ async fn operate(
         }
         Operation::Write(change)
         | Operation::Measured(super::wire::MeasuredOperation::Write { change }) => {
-            let mut target = serde_json::to_value(&change).map_err(unavailable)?;
-            if let Some(fields) = target.as_object_mut() {
-                // Setting values and authored text stay out of request telemetry.
-                for field in [
-                    "content",
-                    "request",
-                    "title",
-                    "notes",
-                    "plan",
-                    "layout",
-                    "slots",
-                    "expression",
-                    "value",
-                ] {
-                    fields.remove(field);
-                }
-            }
+            let target = telemetry(&change).map_err(unavailable)?;
             effect(target, id, instance, trace_id, measured, move || {
                 let _held = reservation;
                 loopflow_execution::provider_auth::operations::served(|| {
                     Ok(serde_json::to_value(change.run()?)?)
+                })
+            })
+            .await
+        }
+        Operation::Machine(super::wire::MachineOperation::Write {
+            repository,
+            environment,
+            forwarded,
+            change,
+        }) => {
+            let target = telemetry(&change).map_err(unavailable)?;
+            effect(target, id, instance, trace_id, measured, move || {
+                let _held = reservation;
+                let change = change.in_checkout(&repository)?;
+                let mut environment: Vec<(String, String)> = environment.into_iter().collect();
+                if let Some(file) = forwarded {
+                    environment.extend(loopflow_execution::machine::forward::take(&file)?);
+                }
+                loopflow_execution::provider_auth::operations::served(|| {
+                    Ok(serde_json::to_value(change.run_here(&environment)?)?)
                 })
             })
             .await
@@ -1361,6 +1355,28 @@ async fn operate(
             unreachable!("request dispatches boundaries")
         }
     }
+}
+
+/// A write as request telemetry records it: setting values and authored text
+/// stay out.
+fn telemetry(change: &crate::lf::commands::write::Write) -> anyhow::Result<serde_json::Value> {
+    let mut target = serde_json::to_value(change)?;
+    if let Some(fields) = target.as_object_mut() {
+        for field in [
+            "content",
+            "request",
+            "title",
+            "notes",
+            "plan",
+            "layout",
+            "slots",
+            "expression",
+            "value",
+        ] {
+            fields.remove(field);
+        }
+    }
+    Ok(target)
 }
 
 /// Mobile setup belongs to the Machine's own user: the private socket only.

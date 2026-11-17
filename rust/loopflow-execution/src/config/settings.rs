@@ -1814,11 +1814,6 @@ mod tests {
         }
     }
     #[test]
-    fn a_released_task_layout_stays_readable_and_does_nothing() {
-        let layout = "{tree: {kind: pane, id: p}, hidden: []}";
-        assert!(super::parse_value("task_layout", layout).is_ok());
-    }
-    #[test]
     fn composed_occurrences_keep_their_settings_and_match_launch_preparation() {
         let _env = loopflow_test_support::env_lock().lock().unwrap();
         let home = tempfile::tempdir().unwrap();

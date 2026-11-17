@@ -1197,10 +1197,8 @@ state and observations: provider-reported usage, machine identity, Sessions and
 execution history. Desktop keeps its pane arrangements on each Mac, outside the
 database.
 
-`task_layout` is ignored: `lf workspace` opens only each Task's conversation
-([workspaces](workspaces.md#what-a-task-tab-holds)). Released lf still reads it,
-so a file that sets it stays valid. External hosts own the workspaces lf opens;
-LF keeps no external-host workspace registry.
+External hosts own the workspaces lf opens; LF keeps no external-host workspace
+registry.
 
 Credentials stay with their secret/provider owner. The database is not an
 additional preference override layer.

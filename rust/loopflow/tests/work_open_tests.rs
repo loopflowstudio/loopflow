@@ -1291,40 +1291,6 @@ fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
     );
 }
 
-#[test]
-fn a_released_task_layout_setting_changes_nothing() {
-    let repo = TestRepo::new();
-    let home = tempfile::tempdir().unwrap();
-    let bin = tempfile::tempdir().unwrap();
-    let _env = EnvGuard::with_lf_home(&[], home.path());
-    register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    std::fs::write(
-        repo.path().join("lf.config.local.yaml"),
-        "task_layout:\n  hidden: [conversation]\n  tree:\n    kind: split\n    axis: vertical\n    ratio: 0.5\n    first:\n      kind: split\n      axis: horizontal\n      ratio: 0.5\n      first:\n        kind: pane\n        id: conversation\n        content: {kind: session, session_id: null, location: null}\n      second:\n        kind: pane\n        id: changes\n        content:\n          kind: browser\n          location: null\n          tabs:\n            - kind: changes\n              id: changes\n              comparison: {kind: working_tree, base: parent}\n          selected: changes\n    second:\n      kind: pane\n      id: shell\n      content:\n        kind: shell\n        tabs: [{id: s, location: null, lf_process_id: null}]\n        selected: s\n",
-    )
-    .unwrap();
-    rex_peer(bin.path());
-    json(&lf(
-        home.path(),
-        repo.path(),
-        Some(bin.path()),
-        &[
-            "workspace",
-            "--task",
-            "INF-123",
-            "--host",
-            "rex",
-            "--no-focus",
-            "--json",
-        ],
-    ));
-    let created = std::fs::read_to_string(bin.path().join("session.new_window.requests")).unwrap();
-    let request: Value = serde_json::from_str(created.trim()).unwrap();
-    // The released layout hid the conversation and added changes and a shell.
-    assert!(request["layout"]["split"].is_null(), "{request}");
-    assert!(created.contains("resume"), "{request}");
-}
-
 // The peer exposes inventory independently of replies, including writes whose reply is lost.
 fn rex_peer(bin: &Path) {
     use std::os::unix::fs::PermissionsExt;

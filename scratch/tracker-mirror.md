@@ -455,6 +455,33 @@ conflict used to be `acknowledged` with `conflict_json`; readers (sync status,
 own-echo, PR link done) updated. Lines unchanged since 470da475a1 kept their
 words, so older settle/observation/pending-effect prose stays for LOO-955.
 
+### Concept review (2026-11-17, after the vocabulary pass): two leftovers
+
+Read against 04d6e89999. Next implement direction; no product choice.
+
+- **Finish the phase words in lines this PR added.** The phases are
+  `queued · sent · confirmed · conflicted · retired`, but new code still says
+  the old ones: `planning/rules.rs` (`fn acknowledged` → `confirmed`,
+  "attempted action" → "sent action" in the `decide`/look docs),
+  `sqlite/tracker_actions.rs` (`pending_changes_in` → `queued_changes_in`,
+  doc lines 279/401/690/864/1142, test
+  `a_later_save_retires_the_unsent_value_and_keeps_the_attempted_one` →
+  `…_keeps_the_sent_one`), `ops/tracker/drain.rs` (`parent_pending` →
+  `parent_uncreated`, `target_pending` → `target_unbound`, the
+  "tracker action pending" log), `ops/tracker.rs:473`. The migration's
+  references to old-table columns (`attempted`, `acknowledged`, `settled`)
+  name released columns and stay.
+- **Git is a tracker in the glossary; the queue is not Git's.** `planning.md`
+  "Words" says tracker = Git, Linear or Asana ("git is a tracker", Jack Heart),
+  while "One outbound queue" opens "Every change a tracker carries is one
+  `tracker_actions` row" and `ops/tracker.rs` documents `Tracker {Linear,
+  Asana}` as "the configured tracker". Git exchanges the `WorkEdit` journal
+  and never reads the queue. Say so where each is defined: the glossary's
+  action row reads "one outgoing change for Linear or Asana … Git exchanges
+  the journal instead"; the queue section says "Linear or Asana carries";
+  `Tracker`'s doc says it is the configured Linear or Asana tracker, absent
+  under Git planning. No type changes.
+
 ## Checks run
 
 - Vocabulary pass: storage+execution `--lib` nextest over query_plans, tracker_actions, migration_runner, ops::tracker::, asana/planning_action/order/comments/lookup/sync tests, linear::actions/acceptance → 209 pass; `-p loopflow` schema, local_planning, pr, lookup, status, task_abandonment, documented_commands, subscribe → 105 pass; clippy `-D warnings` clean; server schema regenerated.

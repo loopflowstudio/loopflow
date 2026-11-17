@@ -77,3 +77,11 @@ order, both env variables, dev-only skew accepted).
 - `cargo test -p loopflow --lib graph_tests::authored_graph_records_each_skill_as_one_session -- --exact`: passed; initial compile exposed main's Task summary reference to `graph.process`, repaired to `graph.run`. Gate/CI run suites.
 - `cargo test -p loopflow-storage --lib sqlite::task_summaries::tests::an_abandoned_task_keeps_one_summary_of_its_run -- --exact`: passed with the owner-record fixture; gate/CI run suites.
 - `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed.
+
+## Rename checks (2026-11-16)
+
+- `cargo build -p loopflow --bin lf`, `cargo fmt`, `cargo clippy --all-targets -- -D warnings`: passed.
+- `cargo test -p loopflow --lib graph_tests::authored_graph_records_each_skill_as_one_session -- --exact`: passed.
+- `cargo test -p loopflow-storage --lib sqlite::task_summaries::tests::an_abandoned_task_keeps_one_summary_of_its_run -- --exact`: passed.
+- `cargo test -p loopflow-storage --lib sqlite::graph_inventory::` (5) and `cargo test -p loopflow-execution --lib harness::task_updates::` (8): passed. Gate/CI run suites.
+- `lf graph` now records `cwd` from the Graph's working directory and `repo` from the journal's main checkout (`journal::current_repo`), where both came from the journal context before; the two cwd values are the same path.

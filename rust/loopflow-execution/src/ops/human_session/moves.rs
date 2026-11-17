@@ -28,7 +28,7 @@ use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
-use loopflow_storage::graph_process::GraphRun;
+use loopflow_storage::graph_process::Run;
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
 use loopflow_storage::sqlite::task_work::ShipApproval;
 use loopflow_storage::sqlite::SqliteStore;
@@ -410,7 +410,7 @@ fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwn
 /// only once its pid is proven to be that recorded Process. Returns the
 /// stopped Graph, if one was running.
 async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedGraph>> {
-    let live = |run: &GraphRun| crate::journal::run_evidence(run) == ProcessIdentityEvidence::Live;
+    let live = |run: &Run| crate::journal::run_evidence(run) == ProcessIdentityEvidence::Live;
     let graphs: Vec<_> = store
         .sqlite
         .task_graphs(&task.id)?
@@ -423,7 +423,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedG
             .filter(|step| live(&step.run))
             .map(|step| graph.label(step))
     });
-    let processes: Vec<GraphRun> = graphs
+    let processes: Vec<Run> = graphs
         .into_iter()
         .flat_map(|graph| {
             std::iter::once(graph.run).chain(graph.steps.into_iter().map(|step| step.run))

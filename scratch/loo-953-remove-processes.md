@@ -4,8 +4,11 @@ Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
 (Graph runs and steps) is built and merged with main. LOO-936 is still moving
 (`concept-review`, loop 1 pass 3, no PR) on `processes.rs`, `sessions.rs`,
 `session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
-activation slices wait for it to merge. Buildable now: the renames and 2a
-fixes under "Concept review after slice 2a". After LOO-936 merges: rebase,
+activation slices wait for it to merge. The renames under "Concept review
+after slice 2a" are built: `Run`, `GraphRun`, `GraphStep`, `record_graph(…,
+repo, cwd)`, `finish_run` over `RUN_OWNERS`; the `graph::process` re-export
+is deleted. The end-write and bridge items there ship with the journal-writer
+removal (approach 2). After LOO-936 merges: rebase,
 rerun `python3 -I scratch/process_sql_scan.py rust` and reconcile the
 inventory. Quotes and the OS-scan measurement: `questions.md`.
 

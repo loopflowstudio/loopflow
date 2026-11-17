@@ -142,7 +142,7 @@ fn task_graph_pairs(task_ids: &str) -> String {
 pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::graph_process::GraphProcess>> {
+) -> StoreResult<Vec<crate::graph_process::GraphRun>> {
     super::graph_inventory::graphs_in(
         conn,
         &format!(
@@ -184,7 +184,7 @@ fn completed_graph_steps(
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
-) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphProcess>> {
+) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphRun>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
@@ -638,7 +638,7 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
 
 /// One of a Task's Graph processes with its inventory entry.
 type MemberGraph = (
-    crate::graph_process::GraphProcess,
+    crate::graph_process::GraphRun,
     crate::execution::GraphProcessInventoryEntry,
 );
 
@@ -1137,7 +1137,7 @@ impl SqliteStore {
     pub fn latest_task_graphs(
         &self,
         tasks: &[&TaskId],
-    ) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphProcess>> {
+    ) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
     }
@@ -1152,10 +1152,7 @@ impl SqliteStore {
     }
 
     /// Every Graph among the Task's work, oldest first.
-    pub fn task_graphs(
-        &self,
-        task: &TaskId,
-    ) -> StoreResult<Vec<crate::graph_process::GraphProcess>> {
+    pub fn task_graphs(&self, task: &TaskId) -> StoreResult<Vec<crate::graph_process::GraphRun>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_of_task(&conn, task)
     }
@@ -1591,11 +1588,9 @@ mod tests {
                 started_at: 1,
                 pid: None,
                 os_started_at: None,
-                repo: None,
-                cwd: Some((*cwd).into()),
             };
             store
-                .record_graph_process(id, &graph, *owner, &start)
+                .record_graph(id, &graph, *owner, &start, None, Some(cwd))
                 .unwrap();
         }
         let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();

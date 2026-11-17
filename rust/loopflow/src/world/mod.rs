@@ -766,12 +766,10 @@ impl World {
                 started_at: process.started_at,
                 pid: None,
                 os_started_at: None,
-                repo: process.repo.clone(),
-                cwd: process.cwd.clone(),
             }
         };
         let finish = |process: &loopflow_storage::process::LfProcess| {
-            store.sqlite.finish_graph_run(
+            store.sqlite.finish_run(
                 &process.id,
                 process.completed_at.expect("a recorded step has ended"),
                 process.exit_code,
@@ -780,9 +778,14 @@ impl World {
         };
         // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
-        store
-            .sqlite
-            .record_graph_process(&graph.id, &compiled, Some(task), &start(&graph))?;
+        store.sqlite.record_graph(
+            &graph.id,
+            &compiled,
+            Some(task),
+            &start(&graph),
+            graph.repo.as_deref(),
+            graph.cwd.as_deref(),
+        )?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
             store.sqlite.record_graph_step(

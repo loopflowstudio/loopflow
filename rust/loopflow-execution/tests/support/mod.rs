@@ -703,7 +703,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphRun row
 /// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
 /// names the Graph.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
@@ -759,7 +759,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             cwd.to_string_lossy()
         ],
     )
-    .expect("record GraphProcess");
+    .expect("record GraphRun");
     db.execute(
         "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![graph_process.as_str(), step.as_str()],

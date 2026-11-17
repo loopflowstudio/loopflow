@@ -278,7 +278,7 @@ mod tests {
         );
         assert!(quiet(&store), "between-step commits are silent");
         store
-            .finish_graph_run(&graph, 20, Some(1), Some("it failed"))
+            .finish_run(&graph, 20, Some(1), Some("it failed"))
             .unwrap();
         let text = deliver(&store);
         assert!(text.contains(&format!("Run feature ({graph}) · failed")));
@@ -411,14 +411,14 @@ mod tests {
             _ => (1, Some("it failed")),
         };
         finish_step(store, run, exit, error);
-        store.finish_graph_run(run, 20, Some(exit), error).unwrap();
+        store.finish_run(run, 20, Some(exit), error).unwrap();
     }
 
     fn finish_step(store: &SqliteStore, run: &LfProcessId, exit: i32, error: Option<&str>) {
         let graph = store.graph_process(run.as_str()).unwrap().unwrap().0;
         for step in graph.steps {
             store
-                .finish_graph_run(&step.run.id, 20, Some(exit), error)
+                .finish_run(&step.run.id, 20, Some(exit), error)
                 .unwrap();
         }
     }
@@ -441,8 +441,6 @@ mod tests {
             started_at: 21,
             pid: None,
             os_started_at: None,
-            repo: None,
-            cwd: None,
         };
         store
             .record_graph_step(run, &step, key, &[vec![]], &start)

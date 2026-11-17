@@ -2,11 +2,11 @@
 use crate::graph::CompiledGraph;
 use loopflow_model::id::LfProcessId;
 
-/// One run of a Graph or of one of its steps, as the run and its spawner
-/// recorded it. `pid` and `os_started_at` name the OS process while it runs
+/// One lf run, as the run and its spawner recorded it: a Graph run or one of
+/// its steps. `pid` and `os_started_at` name the OS process while it runs
 /// and are cleared at its end.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphRun {
+pub struct Run {
     pub id: LfProcessId,
     pub started_at: i64,
     pub ended_at: Option<i64>,
@@ -57,57 +57,55 @@ pub struct RunStart {
     pub started_at: i64,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
-    pub repo: Option<String>,
-    pub cwd: Option<String>,
 }
 
-impl GraphRun {
+impl Run {
     pub fn result(&self) -> RunResult {
         RunResult::of(self.ended_at, self.exit_code, self.error.as_deref())
     }
 }
 
-/// One step its Graph process started.
+/// One step its Graph run started.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphProcessStep {
-    pub run: GraphRun,
+pub struct GraphStep {
+    pub run: Run,
     /// The step's node in the compiled Graph, counted in preorder.
     pub key: u32,
     /// Returns taken on each loop edge, per nesting level, outermost first.
     pub iterations: Vec<Vec<u32>>,
 }
 
-/// One Graph process as it recorded itself.
+/// One Graph run as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphProcess {
-    pub run: GraphRun,
+pub struct GraphRun {
+    pub run: Run,
     /// The repository and directory the Graph ran in.
     pub repo: Option<String>,
     pub cwd: Option<String>,
     pub name: String,
     pub compiled: CompiledGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.
-    pub steps: Vec<GraphProcessStep>,
+    pub steps: Vec<GraphStep>,
 }
 
-impl GraphProcess {
+impl GraphRun {
     pub fn id(&self) -> &LfProcessId {
         &self.run.id
     }
 
-    pub fn latest(&self) -> Option<&GraphProcessStep> {
+    pub fn latest(&self) -> Option<&GraphStep> {
         self.steps.last()
     }
 
     /// The graph label of a recorded step.
-    pub fn label(&self, step: &GraphProcessStep) -> String {
+    pub fn label(&self, step: &GraphStep) -> String {
         self.compiled
             .node_at(step.key)
             .map(|node| node.label.clone())
             .unwrap_or_default()
     }
 
-    pub fn step_detail(&self, step: &GraphProcessStep) -> crate::execution::GraphStepProcess {
+    pub fn step_detail(&self, step: &GraphStep) -> crate::execution::GraphStepProcess {
         crate::execution::GraphStepProcess {
             lf_process_id: step.run.id.clone(),
             label: self.label(step),

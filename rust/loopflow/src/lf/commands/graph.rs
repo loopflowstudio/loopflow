@@ -178,7 +178,7 @@ impl TaskRunStopped {
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
 /// retry failed Graphs unless a provider refusal stopped them. Each attempt records
-/// its own GraphProcess beneath this process and sets out at the step the last
+/// its own GraphRun beneath this process and sets out at the step the last
 /// one failed at. A Graph held for a person or a
 /// watcher, an interrupted one, and a launch refused before any Graph started
 /// are returned as they ended. Once someone interrupts the Task, nothing is
@@ -237,7 +237,7 @@ pub fn run_task_graph_for(
             Ok(())
         })?;
         // A child that died before writing its end leaves what this process saw.
-        store.finish_graph_run(
+        store.finish_run(
             &graph_run,
             loopflow_storage::rows::now_unix(),
             status.code(),
@@ -515,11 +515,13 @@ fn execute(
         running
             .store
             .sqlite
-            .record_graph_process(
+            .record_graph(
                 &running.process,
                 &loopflow_execution::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
                 &journal::current_run_start().context("a Graph requires a registered Process")?,
+                journal::current_repo().as_deref(),
+                Some(&running.cwd.display().to_string()),
             )
             .context("could not record the Graph; no steps launched")?;
         journal::mark_run_owner();
@@ -798,8 +800,6 @@ impl RunningGraph<'_> {
             started_at: loopflow_storage::rows::now_unix(),
             pid: None,
             os_started_at: None,
-            repo: None,
-            cwd: None,
         };
         self.store
             .sqlite
@@ -893,7 +893,7 @@ impl RunningGraph<'_> {
             Err(error) => {
                 let error = anyhow::Error::new(error).context("could not execute Graph step");
                 if let Some(step) = &step {
-                    self.store.sqlite.finish_graph_run(
+                    self.store.sqlite.finish_run(
                         step,
                         loopflow_storage::rows::now_unix(),
                         None,
@@ -927,7 +927,7 @@ impl RunningGraph<'_> {
         drop(output);
         // A step that died before writing its end leaves what this Graph saw.
         if let (Some(step), Ok(status)) = (&step, &status) {
-            self.store.sqlite.finish_graph_run(
+            self.store.sqlite.finish_run(
                 step,
                 loopflow_storage::rows::now_unix(),
                 status.code(),

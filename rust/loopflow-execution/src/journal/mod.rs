@@ -740,9 +740,13 @@ pub fn current_run_start() -> Option<loopflow_storage::graph_process::RunStart> 
         started_at: context.started_at,
         pid: Some(std::process::id()),
         os_started_at: context.process_started_at,
-        repo: context.repo.clone(),
-        cwd: Some(context.cwd.display().to_string()),
     })
+}
+
+/// The repository this process records itself under: the main checkout of
+/// the one it runs in.
+pub fn current_repo() -> Option<String> {
+    current_context().and_then(|context| context.repo)
 }
 
 /// The current Process's start row, when `process` is the current Process.
@@ -836,7 +840,9 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
 
 /// A Graph run or step writes its own end on its Graph record. Only a process
 /// that owns one tries, and only once its Process receipt landed, so a held
-/// write lock delays it once.
+/// write lock delays it once. When the journal stops recording Process rows
+/// (LOO-953 approach 2), this becomes the run's only write at exit, best-effort
+/// with the journal's warn-once gap.
 fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfProcess) {
     let Some(ended_at) = record.completed_at else {
         return;
@@ -844,7 +850,7 @@ fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfPr
     if !context.owns_run.load(Ordering::Acquire) {
         return;
     }
-    if let Err(error) = store.finish_graph_run(
+    if let Err(error) = store.finish_run(
         &record.id,
         ended_at,
         record.exit_code,
@@ -1287,7 +1293,7 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
 
 /// Whether a Graph run or step is still running: one OS lookup against the
 /// pid it recorded. A run with no end and no pid cannot be confirmed.
-pub fn run_evidence(run: &loopflow_storage::graph_process::GraphRun) -> ProcessIdentityEvidence {
+pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdentityEvidence {
     match (run.ended_at, run.pid, run.os_started_at) {
         (Some(_), _, _) => ProcessIdentityEvidence::Dead,
         (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),

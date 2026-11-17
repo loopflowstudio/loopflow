@@ -318,7 +318,9 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)";
+    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)
+    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)
+    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)";
 
 /// The row's `kind` column is the only place an id becomes either type.
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessEntry> {
@@ -2721,6 +2723,37 @@ mod forget_tests {
     use rusqlite::params;
 
     use loopflow_model::id::{LfProcessId, TraceId};
+
+    /// Forgetting a Process a row still names either fails the delete or, on a
+    /// connection that does not enforce foreign keys, leaves a reference no
+    /// migration can pass. The schema says which columns can name one.
+    #[test]
+    fn every_column_that_names_an_lf_process_keeps_it_from_being_forgotten() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let mut statement = conn
+            .prepare(
+                "SELECT m.name, f.\"from\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f
+                 WHERE m.type='table' AND f.\"table\"='processes' AND f.on_delete!='CASCADE'",
+            )
+            .unwrap();
+        let references: Vec<(String, String)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(!references.is_empty());
+        let unguarded: Vec<_> = references
+            .into_iter()
+            // Agent rows are never forgotten.
+            .filter(|(_, column)| column != "agent_process_id")
+            .filter(|(table, column)| {
+                !super::FORGETTABLE.contains(&format!("FROM {table} WHERE {column}=p.id"))
+            })
+            .collect();
+        assert_eq!(unguarded, Vec::<(String, String)>::new());
+    }
 
     #[test]
     fn an_exit_forgets_the_process_unless_something_still_needs_it() {

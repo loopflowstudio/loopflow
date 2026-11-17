@@ -1394,7 +1394,7 @@ fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
     repo.create_file(
         ".lf/graphs/inspect.yaml",
-        "- probe\n- loop: probe\n  step: decide\n",
+        "- loop:\n    - probe\n    - decide\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()

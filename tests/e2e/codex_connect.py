@@ -1053,7 +1053,7 @@ def _graph_decision_retry_contract(
         (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
     (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
     (work / ".lf/graphs/native-proof.yaml").write_text(
-        "- step:\n    id: work\n    name: native-proof\n- loop: work\n  step: native-proof\n"
+        "- loop:\n    - step:\n        id: work\n        name: native-proof\n    - native-proof\n"
     )
     server.fail_request = 4
     server.invalid_decision_output = not replace

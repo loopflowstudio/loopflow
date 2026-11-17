@@ -171,22 +171,23 @@ mod graph_instructions {
         .unwrap();
         fs::write(
             repo.path().join(".lf/graphs/repair.yaml"),
-            "- work\n- loop: work\n",
+            "- loop:\n    - work\n    - loop-or-next\n",
         )
         .unwrap();
         fs::write(
             repo.path().join(".lf/graphs/chat.yaml"),
             r#"
-- step: {name: work, id: first}
-- cmd: commit -m don't-expand-$HOME;echo-unsafe
-- xor:
-    paths:
-      repair:
-        graph: repair
-        description: Repair the findings
-      skip:
-        description: Nothing to repair
-- loop: first
+- loop:
+    - step: {name: work, id: first}
+    - cmd: commit -m don't-expand-$HOME;echo-unsafe
+    - xor:
+        paths:
+          repair:
+            graph: repair
+            description: Repair the findings
+          skip:
+            description: Nothing to repair
+    - loop-or-next
 - interactive: {name: demo, id: review}
 "#,
         )
@@ -229,7 +230,7 @@ mod graph_instructions {
             )
             .unwrap();
         }
-        fs::write(repo.path().join(".lf/graphs/chat.yaml"), "- implement\n- loop: implement\n- xor:\n    paths:\n      done:\n        description: Finished\n").unwrap();
+        fs::write(repo.path().join(".lf/graphs/chat.yaml"), "- loop:\n    - implement\n    - loop-or-next\n- xor:\n    paths:\n      done:\n        description: Finished\n").unwrap();
         let plan = recipe(repo.path(), "chat");
         for name in ["loop-or-next", "xor-route"] {
             assert!(plan.contains(&format!("Execute the skill `{name}` in this conversation.")));

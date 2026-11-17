@@ -554,7 +554,10 @@ fn next_step(graph: &TaskGraph, issue: &str) -> OpsResult<ShipStep> {
 pub fn ship_progressed(task: &loopflow_storage::work::task::TaskId) -> OpsResult<()> {
     block_on_task(async {
         let store = task_store().await?;
-        store.sqlite.reset_ship_restarts(task).map_err(task_error)
+        store
+            .sqlite
+            .reset_task_run_restarts(task)
+            .map_err(task_error)
     })
 }
 
@@ -682,7 +685,7 @@ pub(crate) fn restart_runs() -> OpsResult<()> {
             };
             if !store
                 .sqlite
-                .count_task_run_restart(&id, &died.carrier, &died.restarts)
+                .count_task_run_restart(&id, Some(&died.carrier), &died.restarts)
                 .map_err(task_error)?
             {
                 continue;
@@ -759,7 +762,14 @@ async fn restart_ship(
     };
     let wait = super::limit_recovery::waiting_on_limit(&store.sqlite, id).map_err(task_error)?;
     if failure.is_some() {
-        store.sqlite.count_ship_restart(id).map_err(task_error)?;
+        let seen = store.sqlite.task_run_restarts(id).map_err(task_error)?;
+        if !store
+            .sqlite
+            .count_task_run_restart(id, None, &seen)
+            .map_err(task_error)?
+        {
+            return Ok(());
+        }
     }
     restart_lf_in(
         &worktree,

@@ -504,12 +504,13 @@ mod tests {
             store
                 .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
                 .unwrap();
-            store.count_ship_restart(&task).unwrap();
+            let seen = store.task_run_restarts(&task).unwrap();
+            store.count_task_run_restart(&task, None, &seen).unwrap();
             store
                 .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
                 .unwrap();
             store.task_shipping(&task).unwrap();
-            store.reset_ship_restarts(&task).unwrap();
+            store.reset_task_run_restarts(&task).unwrap();
         });
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));

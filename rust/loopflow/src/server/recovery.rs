@@ -26,6 +26,10 @@ const SETTLE_EVERY: Duration = Duration::from_secs(10);
 /// The longest one start holds the next: after a reboot, conversations come
 /// back one at a time rather than all at once.
 const PACE: Duration = Duration::from_secs(3);
+/// How soon the watcher reads again after a due conversation still had a
+/// terminal: the registry forgets an ended terminal just after the store
+/// records its end, and nothing writes after that.
+const ENDING: Duration = Duration::from_secs(1);
 
 /// Start the Machine's one recovery watcher. It runs as long as the server.
 pub(super) fn start(terminals: Arc<Registry>) {
@@ -45,16 +49,18 @@ fn watch(terminals: &Registry) {
     let mut watcher = Watcher::default();
     loop {
         watcher.read(&path, terminals);
-        changes.wait(UNREAD);
+        changes.wait(if watcher.ending { ENDING } else { UNREAD });
     }
 }
 
-/// The watcher's store, what it read last and when, and when it last settled.
+/// The watcher's store, what it read last and when, when it last settled,
+/// and whether a due conversation's terminal was still ending.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
+    ending: bool,
 }
 
 impl Watcher {
@@ -84,14 +90,14 @@ impl Watcher {
                 == (revisions.planning, revisions.sessions, revisions.processes)
                 && now.duration_since(at).is_ok_and(|waited| waited < UNREAD)
         });
-        if unchanged {
+        if unchanged && !self.ending {
             return;
         }
         self.seen = Some((revisions, now));
-        if self
-            .settled
-            .is_none_or(|at| now.duration_since(at).is_ok_and(|since| since >= SETTLE_EVERY))
-        {
+        if self.settled.is_none_or(|at| {
+            now.duration_since(at)
+                .is_ok_and(|since| since >= SETTLE_EVERY)
+        }) {
             self.settled = Some(now);
             loopflow_execution::ops::recovery::settle();
         }
@@ -109,8 +115,11 @@ impl Watcher {
             pace(store, conversation);
             Ok(())
         };
-        if let Err(error) = recover_conversations(store, unix(now), held, start) {
-            tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
+        match recover_conversations(store, unix(now), held, start) {
+            Ok(ending) => self.ending = ending,
+            Err(error) => {
+                tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
+            }
         }
     }
 }
@@ -139,23 +148,31 @@ fn unix(at: SystemTime) -> i64 {
 }
 
 /// Start every due Task conversation that has no terminal, one at a time,
-/// and record why a start failed on its Session.
-/// Each start is counted before it is made, and its request names the ended
-/// agent and the attempt, so the registry answers a repeat with the terminal
-/// it already started.
+/// and record why a start failed on its Session. Each start's request names
+/// the ended agent and the attempt, so the registry answers a repeat with the
+/// terminal it already started. `true` when a due one still had its terminal.
 fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
     mut start: impl FnMut(&RecoverableConversation, String) -> Result<()>,
-) -> Result<()> {
+) -> Result<bool> {
+    let mut ending = false;
     for conversation in loopflow_execution::ops::recovery::due_task_conversations(store, now)? {
         let RecoverableConversation { session, agent, .. } = &conversation;
         if held(session) {
+            ending = true;
             continue;
         }
-        let Some(attempt) = store.record_recovery_start(session, agent.as_ref(), now)? else {
-            continue;
+        // A start after a death is counted before it is made. A first start
+        // is counted only when it fails: its terminal holds the next pass off,
+        // and the first death after it comes back at once.
+        let attempt = match agent {
+            Some(agent) => match store.record_recovery_start(session, Some(agent), now)? {
+                Some(attempt) => attempt,
+                None => continue,
+            },
+            None => conversation.recovery_attempts + 1,
         };
         let generation = agent.as_ref().map_or("new", |agent| agent.as_str());
         let request = format!("recover:{session}:{generation}:{attempt}");
@@ -165,13 +182,16 @@ fn recover_conversations(
                 tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started")
             }
             Err(error) => {
+                if agent.is_none() {
+                    store.record_recovery_start(session, None, now)?;
+                }
                 let failure = format!("{error:#}");
                 store.record_recovery_failure(session, Some(&failure))?;
                 tracing::warn!(%session, task = %conversation.task, attempt, error = %failure, "Task conversation did not start")
             }
         }
     }
-    Ok(())
+    Ok(ending)
 }
 
 #[cfg(test)]
@@ -393,6 +413,9 @@ mod tests {
         fixture.exited(1);
         assert!(fixture.pass(NOW, true).is_empty());
         assert_eq!(fixture.attempts(), (0, None));
+        // Its terminal is ending: the watcher reads again soon.
+        let ending = recover_conversations(&fixture.store, NOW, |_| true, |_, _| Ok(())).unwrap();
+        assert!(ending);
     }
 
     #[test]
@@ -443,7 +466,22 @@ mod tests {
             fixture.pass(NOW, false),
             [format!("recover:{}:new:1", fixture.session)]
         );
-        assert!(fixture.pass(NOW + 30, false).is_empty(), "in flight");
+        assert_eq!(
+            fixture.attempts(),
+            (0, None),
+            "a first start is not a death"
+        );
+        assert!(fixture.pass(NOW, true).is_empty(), "its terminal holds it");
+        // A first start that fails counts, and waits its backoff.
+        recover_conversations(
+            &fixture.store,
+            NOW,
+            |_| false,
+            |_, _| Err(anyhow::anyhow!("claude is not installed")),
+        )
+        .unwrap();
+        assert_eq!(fixture.attempts(), (1, Some(NOW)));
+        assert!(fixture.pass(NOW + 30, false).is_empty());
     }
 
     #[test]

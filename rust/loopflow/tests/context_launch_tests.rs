@@ -1217,6 +1217,178 @@ fn assert_background_conversation(run_graph: bool) {
     }
 }
 
+/// The Task's conversation: its current agent, that agent's pid, and the
+/// recovery pass's count of starts.
+fn task_conversation_agent(db: &Path, task: &str) -> Option<(String, Option<i64>, u32)> {
+    rusqlite::Connection::open(db)
+        .unwrap()
+        .query_row(
+            "SELECT s.agent_process_id,p.pid,s.recovery_attempts FROM task_primary_sessions tp
+             JOIN agent_sessions s ON s.id=tp.session_id
+             JOIN processes p ON p.id=s.agent_process_id
+             WHERE tp.task_id=?1 AND p.completed_at IS NULL",
+            [task],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()
+        .unwrap()
+}
+
+fn debug_rows(db: &Path, task: &str) -> String {
+    let conn = rusqlite::Connection::open(db).unwrap();
+    let mut out = String::new();
+    for sql in [
+        "SELECT s.id,s.agent_process_id,s.completed_at,s.interactive,s.cwd,s.recovery_attempts,s.recovered_at,s.recovery_failure,s.held_terminal_id FROM task_primary_sessions tp JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+        "SELECT p.id,p.pid,p.completed_at,p.exit_code,p.command,l.id,l.pid,l.completed_at,l.exit_code,l.command FROM processes p LEFT JOIN processes l ON l.id=p.parent_lf_process_id JOIN agent_sessions s ON s.agent_process_id=p.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
+        "SELECT t.id,t.ended_at,t.exit_code FROM held_terminals t JOIN agent_sessions s ON s.held_terminal_id=t.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
+    ] {
+        let mut statement = conn.prepare(sql).unwrap();
+        let columns = statement.column_count();
+        let rows: Vec<String> = statement
+            .query_map([task], |row| {
+                Ok((0..columns)
+                    .map(|i| format!("{:?}", row.get::<_, rusqlite::types::Value>(i).unwrap()))
+                    .collect::<Vec<_>>()
+                    .join(" | "))
+            })
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        out.push_str(&format!("{sql}\n{rows:#?}\n"));
+    }
+    out
+}
+
+/// Wait for the Task's conversation to run an agent other than `previous`.
+fn next_task_conversation_agent(
+    db: &Path,
+    home: &Path,
+    task: &str,
+    previous: Option<&str>,
+) -> (String, i64, u32) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        if let Some((agent, Some(pid), attempts)) = task_conversation_agent(db, task) {
+            if Some(agent.as_str()) != previous {
+                return (agent, pid, attempts);
+            }
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the conversation did not start after {previous:?}\n{}\n{}",
+            fs::read_to_string(home.join("machine/logs/lf.log")).unwrap_or_default(),
+            debug_rows(db, task)
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
+    let repo = TestRepo::new();
+    let home = tempfile::tempdir().unwrap();
+    let machine = home.path().join("machine");
+    let path = format!("{}:/usr/bin:/bin", home.path().join("bin").display());
+    let server = || {
+        loopflow_test_support::MachineServer::start_with_path(
+            env!("CARGO_BIN_EXE_lf"),
+            &machine,
+            &path,
+        )
+    };
+    let mut running = Some(server());
+    let stop = home.path().join("stop");
+    let _release = Release(stop.clone());
+    let script = format!(
+        "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        stop.display()
+    );
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["set", "--global", "default_agent", "claude"]),
+    );
+    let created: serde_json::Value = serde_json::from_str(&succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["task", "create", "--title", "Comes back", "--json"]),
+    ))
+    .unwrap();
+    let id = created["task"]["id"].as_str().unwrap();
+    succeed(
+        claude_launch(home.path(), &script)
+            .current_dir(repo.path())
+            .args(["checkout", id, "--json"]),
+    );
+    let db = machine.join("loopflow.db");
+    let (first, pid, attempts) = next_task_conversation_agent(&db, home.path(), id, None);
+    assert_eq!(attempts, 0, "a first start is not a death");
+
+    // Killed: it comes back, counted once, and the death is not a quit.
+    succeed(Command::new("/bin/kill").args(["-9", &pid.to_string()]));
+    let (second, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&first));
+    assert_eq!(attempts, 1);
+    let exit: Option<i64> = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT l.exit_code FROM processes p JOIN processes l ON l.id=p.parent_lf_process_id
+             WHERE p.id=?1",
+            [&first],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(!matches!(exit, Some(0 | 130)), "{exit:?}");
+
+    // A finished turn resets the count; then the server stops, the holder
+    // dies with it, and the next server starts the conversation once.
+    rusqlite::Connection::open(&db)
+        .unwrap()
+        .execute("UPDATE agent_sessions SET recovery_attempts=0", [])
+        .unwrap();
+    drop(running.take());
+    let holder: i64 = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            r#"SELECT pid FROM processes WHERE command='["lf","holder","run"]' AND completed_at IS NULL"#,
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    succeed(Command::new("/bin/kill").args(["-9", &holder.to_string()]));
+    running = Some(server());
+    let (third, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&second));
+    assert_eq!(attempts, 1);
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    assert_eq!(
+        task_conversation_agent(&db, id).map(|(agent, _, attempts)| (agent, attempts)),
+        Some((third.clone(), 1)),
+        "started once"
+    );
+
+    // Quit: the provider exits 0 and stays down.
+    fs::write(&stop, b"").unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    while task_conversation_agent(&db, id).is_some() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the provider did not exit"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    std::thread::sleep(std::time::Duration::from_secs(4));
+    let current: (String, u32) = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT s.agent_process_id,s.recovery_attempts FROM task_primary_sessions tp
+             JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+            [id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(current, (third, 1), "a quit conversation stays quit");
+    drop(running);
+}
+
 #[test]
 fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() {
     let repo = TestRepo::new();

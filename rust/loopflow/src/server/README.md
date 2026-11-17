@@ -60,7 +60,9 @@ first reading after start is the restart and reboot case. Each reading:
    before it goes through `session.continue`'s path with request
    `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
    provider across server restarts. `lf task run`, `lf ship` and
-   `lf task checkout` only prepare the Session; this pass starts it.
+   `lf task checkout` only prepare the Session; this pass starts it. That
+   first start counts only if it fails, so the first death after it comes
+   back at once; its terminal holds later passes off.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
    checkpoint. A carrier that exits on its own clears itself, so a named dead

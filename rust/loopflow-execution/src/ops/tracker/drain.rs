@@ -375,11 +375,22 @@ impl Drain<'_> {
         // Everything on an owner waits behind its unconfirmed creation; otherwise
         // only actions on the same subject wait behind each other.
         let mut waiting = HashSet::new();
-        for action in queued {
-            let key = (action.kind, action.subject.clone());
+        for read in queued {
+            let key = (read.kind, read.subject.clone());
             if waiting.contains(&key) {
                 continue;
             }
+            // Another lf may have sent or resolved it between this pass's read
+            // and the lock; acting on the old phase would send it twice.
+            let Some(action) = self
+                .store
+                .sqlite
+                .tracker_action(&read.id)
+                .map_err(message)?
+                .filter(|action| matches!(action.phase, ActionPhase::Queued | ActionPhase::Sent))
+            else {
+                continue;
+            };
             match self.action(action).await? {
                 Step::Done => {}
                 Step::Wait if key.0 == ActionKind::Create => return Ok(()),
@@ -766,6 +777,24 @@ mod tests {
         assert_eq!(f.fake.requests(), 1, "only the other owner sends");
         assert_eq!(f.phases(&waiting), [ActionPhase::Sent, ActionPhase::Queued]);
         assert_eq!(f.phases(&other), [ActionPhase::Confirmed]);
+    }
+
+    #[tokio::test]
+    async fn a_reply_another_lf_lost_after_this_pass_read_is_not_sent_again() {
+        let f = fixture();
+        let task = f.bound_task();
+        f.title(&task, "Renamed", "queued", None);
+        let read = queued(&f.store, "/repo", TrackerKind::Linear).unwrap();
+        let now = loopflow_storage::rows::now_unix().to_string();
+        f.sql(
+            "UPDATE tracker_actions SET phase='sent',sent_at=?1,looked_at=?1",
+            &[&now],
+        );
+        drain(&f.store, "/repo", &f.tracker, read, Scope::All, Bound::PASS)
+            .await
+            .unwrap();
+        assert_eq!(f.fake.requests(), 0);
+        assert_eq!(f.phases(&task), [ActionPhase::Sent]);
     }
 
     #[tokio::test]

@@ -262,6 +262,18 @@ fn task_link_resolves_by_folder_name_without_preparing_anything() {
     );
     assert_eq!(link["target"]["task_id"], registered.task.id.as_str());
     assert_eq!(link["conversation"], "unknown");
+    let overview = json(&lf(
+        home.path(),
+        elsewhere.path(),
+        None,
+        &["open", "--workspace", &url, "--link", "--json"],
+    ));
+    let wave_url = format!("loopflow://{}/wave/task-pr-tests", folder(repo.path()));
+    assert_eq!(
+        overview[0]["fallback_argv"],
+        serde_json::json!(["lf", "open", "--workspace", wave_url]),
+        "an overview's fallback reopens the overview, not the conversation"
+    );
     assert_eq!(sessions(home.path()), 0, "a link never creates a Session");
 
     let text = lf(
@@ -822,6 +834,13 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
     assert_eq!(
         String::from_utf8_lossy(&empty.stdout),
         "No available conversations.\n"
+    );
+    let opened = lf(home.path(), repo.path(), None, &["open", "--available"]);
+    assert!(opened.status.success(), "{opened:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&opened.stdout),
+        "No available conversations.\n",
+        "opening nothing says so"
     );
 
     // A finished turn with no question, the Task's primary.

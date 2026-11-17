@@ -1,60 +1,59 @@
-<!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-935 QA</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style></head><body>
-<h1>LOO-935 QA, 2026-11-16</h1>
-<p>Branch <code>lf</code> 0.16.0+528ccd8ed, then rebuilt with the fixes below. Private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-935</code>, a git-planning repository with a local bare origin, and the installed <code>lf</code> 0.16.0 for the "before" side. Load average was about 57.</p>
+<!doctype html><meta charset="utf-8"><title>LOO-935 QA: lf open --workspace</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style>
+<h1>LOO-935 QA, 2026-11-16 (second pass: the fold into <code>lf open</code>)</h1>
+<p>Branch lf 0.16.0+dca1f1d84, then rebuilt with the fixes below. Private HOME/LF_HOME in <code>/tmp/lf-qa-935w</code>, a git-planning repository with a local bare origin, a stand-in <code>claude</code>, a private <code>rex server run</code> and a private <code>herdr --session qa server</code>. Load average was 45–58. The first pass (upgrade, Dashboards, Rex Task tabs) is at <code>git show 2abae87d9b:scratch/qa.html</code>; the migration did not change since then.</p>
 
-<h2>1. Upgrade a store the release created</h2>
-<p>The installed <code>lf</code> created a Task and a prepared Session. Then the branch opened the same store.</p>
-<pre>schema_migrations: 122 → 123 (unused_store_members)
-pool_machines: "pool TEXT REFERENCES pools(name)" → "pool TEXT"
-pragma integrity_check: ok   pragma foreign_key_check: (none)
-branch lf task list:   1b479e · — · Before upgrade
-release lf task list:  reads the migrated store; created 723c01 "After upgrade by release"
-branch lf task list:   both Tasks</pre>
-<p>Works: the migration is additive, and the released <code>lf</code> keeps reading and writing the store after it. I repeated this on a fresh home after the trigger fix: 6 dashboard triggers are present, and the release still lists Tasks.</p>
+<h2>1. The command surface</h2>
+<pre>lf workspace                     → error: skill or graph not found: workspace …
+lf open --workspace --tab        → error: '--workspace' cannot be used with '--tab'
+lf open --available --here       → error: '--available' cannot be used with '--here'
+lf open --workspace --focus …    → error: '--workspace' cannot be used with '--focus'</pre>
+<p><code>lf open --help</code> lists <code>--workspace</code>, <code>--available</code>, <code>--no-focus</code> and ends with "A Task opens its Wave's overview, else its repository's, with the Task among them."</p>
 
-<h2>2. <code>lf open</code> / <code>lf workspace</code> in Rex</h2>
-<p>I ran a private <code>rex server run</code> and gave the Task a checkout (<code>lf wt create</code> + <code>task create --worktree</code>).</p>
-<pre>lf open --task … --tab --host rex   → status usable; session "Open in Rex · fd73b3": ["Conversation"]
-lf workspace --task … --host rex    → new session "repo": ["Conversation"], tab prints
-  "Already open at rex:{…}; reveal it with `lf open --session 9f86… --focus`"
-lf open --task … --diff --host rex  → failed: "--diff requires --host desktop; use lf diff …"</pre>
-<p>Each Task tab holds only its conversation. When the conversation is already open, the tab points at it and leaves the input alone. The block ran real Claude at its first-run screen: Rex's panes don't inherit the stand-in <code>PATH</code>.</p>
-<p><b>Still wrong (on main too, not fixed):</b> <code>lf workspace --task … --diff</code> sends a split with a "Changes" block running <code>lf task diff &lt;id&gt; --base parent</code>. I confirmed this by logging the layout JSON sent to Rex. That command prints and exits, so Rex removes the block, and only "Conversation" remains. Main's <code>layout.rs</code> sends the same argv.</p>
-<p><b>Fixed:</b> help and docs still described configured layouts that this branch removed:</p>
-<ul>
-<li><code>lf workspace</code> about: "Open configured Task layouts…" → "Open Task tabs, or a repository/Wave overview"</li>
-<li><code>lf open</code> after_help and the module doc: "Layouts and overviews" → "Task tabs and overviews"</li>
-<li><code>docs/workspaces.md</code>: removed "the Task's configured panes" and "A Task's configured workspace can hide Conversation"</li>
-<li><code>docs/dev/settings.md</code>: the layout-template rows → a Desktop pane layouts row</li>
-<li><code>server/README.md</code>: <code>desktop.*</code> no longer claims saved pane layouts</li>
-</ul>
+<h2>2. Rex</h2>
+<table>
+<tr><th>Command</th><th>Rex shows</th></tr>
+<tr><td><code>lf open --workspace --task &lt;unstarted&gt;</code></td><td>new session "repo": Task &amp; workflow ("Task: unstarted · Checkout: unknown") + Workspace follower</td></tr>
+<tr><td><code>lf checkout</code>, then <code>lf open --task … --tab</code></td><td>session "Workspace QA · 541e38": one Conversation block, <code>STANDIN_CLAUDE … in repo.541e38-workspace-qa</code></td></tr>
+<tr><td><code>lf open --workspace</code> from the checkout, <code>--diff --no-focus</code></td><td>Task &amp; workflow + Workspace; reason "Focus preserved"; no Changes block (see below)</td></tr>
+<tr><td><code>lf open --workspace loopflow://repo/task/541e38</code></td><td>the repository overview with that Task</td></tr>
+<tr><td><code>lf open --workspace --task &lt;Wave Task&gt;</code></td><td>URL widens to <code>loopflow://repo/wave/product</code>, Task tab + follower</td></tr>
+<tr><td><code>lf open --workspace --wave product</code></td><td>follower only (no started Wave Tasks)</td></tr>
+<tr><td><code>lf open --wave product --tab</code></td><td>"repo · product Wave": the Wave's conversation (stand-in in the Wave checkout)</td></tr>
+<tr><td><code>lf open --available</code> after an OSC 7501 <code>state=idle</code></td><td>"Already open at rex:{…}; reveal it with <code>lf open --session … --focus</code>"; input left alone</td></tr>
+</table>
 
-<h2>3. Dashboards</h2>
-<p><code>lf desktop dashboard query 'QA view' task:&lt;id&gt;</code>, <code>pin</code>/<code>unpin --revision</code> and <code>rename</code> all write and print the record. <code>lf desktop layout 'query:QA view'</code> reads it back. A CLI <code>lf desktop view list --subscribe</code> printed a new frame after a pin.</p>
-<p><b>Changed:</b> the migration dropped the six <code>store_revision_dashboard*</code> planning triggers. A served <code>desktop.view.list</code> watch (desktop hello over the socket) showed no frame after a CLI <code>unpin</code>. But that probe had a bug: Python's socket file stops reading after its first timeout. So the drop is <b>not shown</b> to cause the miss. With the triggers kept, the fixed probe got a frame after <code>unpin --revision 3</code>. I couldn't re-run the dropped variant, because lf refuses a store whose triggers were changed by hand ("migration history or schema differs"). I kept the triggers because that is main's behavior and it is known to work. The lines are removed from <code>unused_store_members.sql</code>, and <code>dashboards</code>/<code>dashboard_arrangements</code> are back out of <code>NEVER_DISPLAYED</code>.</p>
+<h2>3. Herdr</h2>
+<pre>lf open --workspace --task &lt;Wave Task&gt; --host herdr → w1 "Task &amp; workflow" (Task view, checkout, conversation listed)
+lf open --task &lt;Wave Task&gt; --tab --host herdr        → w2 "Conversation": STANDIN_CLAUDE in repo.755c53-wave-task-2</pre>
+
+<h2>Fixed</h2>
+<p><b>Overview links reopened the conversation.</b> <code>lf open --workspace --link</code> printed <code>lf open loopflow://repo/wave/product</code>, and every overview receipt's <code>fallback_argv</code> was the same. Since the fold, that command opens the Wave's conversation, not its overview. <code>Resolved</code> now records <code>overview</code> (set by <code>overview()</code>), and its fallback carries <code>--workspace</code>:</p>
+<pre>repo                 lf open --workspace loopflow://repo
+repo · product Wave  lf open --workspace loopflow://repo/wave/product
+Wave task 2 · 755c53 lf open loopflow://repo/task/755c53        (single conversation: unchanged)
+541e38 · Workspace QA | lf open --workspace loopflow://repo      (Task tab receipt in an overview)</pre>
+<p><b>Empty <code>lf open --available</code> printed nothing</b> and exited 0; <code>--link</code> already said "No available conversations." Now both say it (JSON stays <code>{"receipts":[],"unknown":[]}</code>).</p>
+<p>Tests: <code>task_link_resolves_by_folder_name_without_preparing_anything</code> asserts the overview fallback; <code>available_conversations_need_no_question_and_are_never_taken_over</code> asserts the empty open's text.</p>
 
 <h2>Checks</h2>
 <table>
-<tr><td><code>cargo nextest run -p loopflow-storage --lib -E 'test(revisions)|test(migration_runner)|test(planning_update_triggers)|test(selections)'</code></td><td>135 pass</td></tr>
-<tr><td><code>scripts/schema_page.py --check</code>, <code>scripts/check_migrations.py</code></td><td>pass</td></tr>
-<tr><td><code>scripts/due_removals.py</code></td><td>LOO-836, LOO-928, LOO-954 listed, not merged</td></tr>
-<tr><td><code>scripts/model_size.py</code></td><td>88 tables, 732 columns, 1009 storage pub fns, 35 SQL sites in 8 files (main grew since the plan's 87/723)</td></tr>
-<tr><td><code>cargo fmt --check</code></td><td>clean</td></tr>
-<tr><td>Swift, full Rust suites, clippy</td><td>left to gate/CI</td></tr>
+<tr><td><code>nextest work_open_tests::</code> at <code>-j 4</code></td><td>27 of 33; the failures (cmux ×2, tmux, the link test before its fix, a SIGKILL) passed run serially, except <code>task_location_uses_the_named_plan_outside_a_checkout</code>, which the plan records as failing without this diff</td></tr>
+<tr><td>the 7 touched/failed tests at <code>-j 1</code></td><td>pass</td></tr>
+<tr><td><code>cargo clippy -p loopflow --all-targets -- -D warnings</code>, <code>cargo fmt</code></td><td>pass</td></tr>
+<tr><td>Swift, full suites</td><td>left to gate/CI</td></tr>
 </table>
 
 <h2>Not reached</h2>
 <ul>
-<li>Desktop window: pane layouts in <code>desktop-cache/pane-layouts/</code> were not seen in a live window. They are covered only by the earlier headless <code>DashboardWorkspaceTests</code> run.</li>
-<li>Herdr and cmux tabs were not opened in this run.</li>
-<li><code>due_removals.py install</code> on the Machine that runs Tasks is left for verify.</li>
+<li>Desktop: <code>--workspace --host desktop</code> opens a <code>loopflow://open?view=</code> URL, which here would reach the installed Loopflow.app; not run. No Swift changed since the first pass.</li>
+<li>cmux is not installed; its tabs are covered only by the integration tests.</li>
+<li>Remote Machines (<code>--local-workspace</code> peers) were not exercised.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li><code>--diff</code> in Rex/Herdr/cmux shows no Changes: <code>lf task diff</code> exits and the host closes the block. This happens on main too. <code>docs/workspaces.md</code> says "--diff adds the Task's Changes beside it".</li>
-<li>Each <code>lf workspace --task</code> run from outside Rex creates a new Rex session, even when the conversation is already open in one. This is consistent with the docs ("a new container").</li>
+<li><code>--workspace --diff</code> in Rex/Herdr shows no Changes, even with a real commit on the branch: the block runs <code>lf task diff &lt;id&gt; --base parent</code>, which prints and exits, and the host removes it. Same on main. <code>lf open --task … --diff</code> off Desktop refuses instead, so <code>--diff</code> now means two things off Desktop. Whether native overviews keep a Changes tab (a shell left open after the diff) or <code>--diff</code> becomes Desktop-only everywhere is a product call.</li>
+<li>Each <code>lf open --workspace</code> from outside Rex makes a new Rex session, even when one for that overview exists (as the docs say: "a new container").</li>
+<li><code>lf --wave product task create …</code> silently creates a Task without a Wave (the global flag is context; <code>task create --wave</code> works). Not this branch.</li>
 </ol>
-</body></html>

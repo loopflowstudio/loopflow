@@ -172,6 +172,8 @@ struct Resolved {
     execution_machine: Option<String>,
     /// Why the Task's execution owner could not be read; opening refuses.
     execution_unavailable: Option<String>,
+    /// Opened as its Wave or repository overview (`--workspace`).
+    overview: bool,
 }
 
 impl Resolved {
@@ -225,7 +227,12 @@ impl Resolved {
                 self.session.clone().expect("exact Session"),
             ];
         }
-        vec!["lf".into(), "open".into(), self.url.to_string()]
+        let mut argv = vec!["lf".into(), "open".into()];
+        if self.overview {
+            argv.push("--workspace".into());
+        }
+        argv.push(self.url.to_string());
+        argv
     }
 
     fn receipt(
@@ -560,6 +567,7 @@ fn describe(
         primary_machine,
         execution_machine,
         execution_unavailable,
+        overview: false,
     })
 }
 
@@ -1355,6 +1363,10 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
 /// Every available conversation, each opened as one conversation.
 fn open_available(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     let (targets, unknown) = available(cli)?;
+    let json = args.selection.json || cli.json;
+    if targets.is_empty() && !json {
+        println!("No available conversations.");
+    }
     let single = args.conversation(args.selection.host != OpenHost::Desktop);
     let last = targets.len();
     let receipts = targets
@@ -1364,10 +1376,7 @@ fn open_available(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
             conversation::open(target, &single, !args.no_focus && index + 1 == last)
         })
         .collect();
-    print_report(
-        OpenReport { receipts, unknown },
-        args.selection.json || cli.json,
-    )
+    print_report(OpenReport { receipts, unknown }, json)
 }
 
 /// What `--workspace` opens: a Wave or repository, and the Task it was widened
@@ -1379,7 +1388,8 @@ struct Overview {
 
 /// A Task or Session widens to its scope: its Wave, else its repository.
 fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Overview> {
-    let target = target(cli, args)?;
+    let mut target = target(cli, args)?;
+    target.overview = true;
     if target.task.is_none() && target.session.is_none() {
         return Ok(Overview {
             target,
@@ -1408,8 +1418,10 @@ fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Overview> {
         context.task = ContextFact::Unbound;
         context.wave = ContextFact::Unbound;
     }
+    let mut widened = describe(store.as_ref(), &context, None, false, None)?;
+    widened.overview = true;
     Ok(Overview {
-        target: describe(store.as_ref(), &context, None, false, None)?,
+        target: widened,
         selected: target.task.map(|task| task.id),
     })
 }

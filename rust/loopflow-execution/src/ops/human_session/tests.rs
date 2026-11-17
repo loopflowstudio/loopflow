@@ -132,8 +132,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
                 crate::session::Holder::Caller,
             )?;
-            let opened = super::open(&store, home, &session.id, None, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, None, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, false, false).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, false, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -843,6 +843,7 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
             None,
             false,
             false,

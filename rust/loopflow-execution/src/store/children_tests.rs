@@ -970,13 +970,6 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
     );
     assert!(store.task_claimed_here(&task).unwrap());
     assert_eq!(store.task_primary(&task).unwrap().unwrap().id, session.id);
-    assert_eq!(
-        store
-            .admitted_task_creation(session.id.as_str())
-            .unwrap()
-            .as_deref(),
-        Some("req")
-    );
     let admitted = store.creation_receipt("req").unwrap().unwrap();
     assert_eq!(admitted.milestone, "admitted");
     assert_eq!(admitted.disposition, RecoveryDisposition::Complete);
@@ -984,33 +977,4 @@ fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
     assert_eq!(result["milestone"], "admitted");
     assert_eq!(result["graph"], "code");
     assert_eq!(result["session_id"], session.id.as_str());
-    let plan: String = store
-        .conn
-        .lock()
-        .unwrap()
-        .query_row(
-            "EXPLAIN QUERY PLAN SELECT request_id FROM creation_receipts
-             WHERE session_id='s' AND milestone='admitted' AND kind='task.create'",
-            [],
-            |row| row.get(3),
-        )
-        .unwrap();
-    assert!(
-        plan.contains("creation_receipts_admitted_session"),
-        "{plan}"
-    );
-
-    let launch = serde_json::json!({"lf_process_id": "process"});
-    assert!(store.record_setup_launch("req", &launch).unwrap());
-    // A reopened conversation finds nothing left to launch.
-    assert!(!store.record_setup_launch("req", &launch).unwrap());
-    assert_eq!(
-        store.admitted_task_creation(session.id.as_str()).unwrap(),
-        None
-    );
-    let started = store.creation_receipt("req").unwrap().unwrap();
-    assert_eq!(started.milestone, "started");
-    assert_eq!(started.result.unwrap()["milestone"], "started");
-    assert_eq!(started.launch, Some(launch));
-    assert_eq!(started.disposition, RecoveryDisposition::Complete);
 }

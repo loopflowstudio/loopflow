@@ -942,6 +942,7 @@ pub async fn open(
     directory: &Path,
     session_id: &str,
     agent: Option<&str>,
+    request_id: Option<&str>,
     fork: bool,
     resume: bool,
     json: bool,
@@ -1015,12 +1016,11 @@ pub async fn open(
         let id = session.id.clone();
         let _launch =
             crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
-        admitted = match store.sqlite.admitted_task_creation(&session.id)? {
-            Some(request) => {
-                drop(progress.take());
-                setup::finish(store, session.clone(), &request, agent).await?
-            }
-            None => primary::admit_workspace(store, session.clone()).await?,
+        admitted = if setup::owed(store, session)? {
+            drop(progress.take());
+            setup::finish(store, session.clone(), request_id, agent).await?
+        } else {
+            primary::admit_workspace(store, session.clone()).await?
         };
         &admitted
     } else {

@@ -253,7 +253,14 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     /// The Task's position before its reading arrives.
     public var unreadPosition: String {
-        startingGraph.map { "Starting \($0)" } ?? "Reading workflow…"
+        startingGraph.map(startPosition) ?? "Reading workflow…"
+    }
+
+    /// A started Task at the start of `graph`: why its setup stopped, else
+    /// that it is starting.
+    public func startPosition(_ graph: String) -> String {
+        guard let execution, execution.state == .blocked else { return "Starting \(graph)" }
+        return execution.reason
     }
 
     /// Completion dates may be unknown even when the lifecycle is settled.

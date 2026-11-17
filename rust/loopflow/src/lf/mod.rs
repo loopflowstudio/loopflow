@@ -1826,6 +1826,9 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// Time a new Task's setup steps under the creation request that started it
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness

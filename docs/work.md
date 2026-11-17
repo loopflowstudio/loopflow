@@ -84,10 +84,11 @@ Checkout ready  0.2 s
 Graph code started
 ```
 
-and the receipt moves to `started` when the Graph launch is recorded. Repeating
-the request ID during setup returns the same Task and Session and starts no
-second Graph. If a setup step fails, its error stays in the conversation;
-`lf resume --task <ID>` reopens it and setup continues from that step. Tracker
+Repeating the request ID during setup returns the same Task and Session and
+starts no second Graph. If a setup step fails, the conversation shows the error
+and the Task's position reads `Setup stopped: checkout failed` (or `graph`) in
+`lf task status` and Desktop; `lf resume --task <ID>` reopens it and runs setup
+again. Tracker
 sync and the assignee check run after the answer; a failure there is a Task
 event, not a creation failure.
 

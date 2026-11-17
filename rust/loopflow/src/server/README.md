@@ -1087,15 +1087,17 @@ does not store them.
 | Milestone | Means | Repeat |
 | --- | --- | --- |
 | `filed` | Task recorded, no `run` | complete |
-| `admitted` | Task, claim, Graph and primary Session recorded in one transaction; the held conversation owns checkout and Graph start | complete |
-| `started` | the Graph launch is recorded | complete |
-| `run_requested` | written by earlier releases: launch unconfirmed | inspect |
+| `admitted` | Task, claim, Graph and primary Session recorded in one transaction; the conversation sets the Task up | complete |
+| `run_requested` | `-b` launch requested, unconfirmed | inspect |
+| `started` | `-b` launch recorded | complete |
 
 `admitted` involves no network and no Git beyond resolving the repository and
 the Graph file. Tracker sync and the assignee check run after the answer under
-the request's trace; their failures are Task events. The conversation's setup
-steps read recorded state first, so a restarted conversation continues where it
-stopped and never launches a second Graph.
+the request's trace; their failures are Task events. Setup is the Task's, not
+the receipt's: a conversation opening on a Task that took up its Graph and never
+ran it makes the checkout and starts the Graph, and the receipt only answers
+repeats. The held conversation carries `--request-id`, so its setup steps are
+timed under the creation's request.
 
 `session.new` records its stop and new-thread admission against the same request.
 A completed retry returns the current record for the same Session without

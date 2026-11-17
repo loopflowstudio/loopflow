@@ -224,7 +224,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     match recorded.disposition {
         RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
         RecoveryDisposition::Complete if filed && admits => {
-            return start_conversation(&input, &store, runtime, receipt)
+            return start_conversation(id, &input, &store, runtime, receipt)
         }
         RecoveryDisposition::Complete => return answered(&store, &runtime, receipt),
         RecoveryDisposition::Continue if !admits => {}
@@ -266,6 +266,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
 /// Start the admitted conversation held and answer. The conversation makes
 /// the checkout and starts the Graph; planning exchange follows the answer.
 fn start_conversation(
+    id: &str,
     input: &TaskCreation,
     store: &crate::store::SharedStore,
     runtime: tokio::runtime::Runtime,
@@ -287,6 +288,7 @@ fn start_conversation(
             &task,
             &session,
             input.agent.as_deref(),
+            id,
         )) {
             Ok(true) => {}
             Ok(false) => tracing::info!("new Task conversation waits for its first open"),

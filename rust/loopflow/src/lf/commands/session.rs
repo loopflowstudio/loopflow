@@ -26,11 +26,13 @@ pub fn run(
             id,
             connection,
             fork,
+            request_id,
         } => tokio::runtime::Runtime::new()?.block_on(resume(
             cli,
             connection,
             connection.target(cli, id.as_deref())?,
             *fork,
+            request_id.as_deref(),
         )),
         SessionCommand::New {
             id,
@@ -766,6 +768,7 @@ async fn resume(
     connection: &SessionConnectionArgs,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     fork: bool,
+    request_id: Option<&str>,
 ) -> anyhow::Result<Option<ConversationLaunch>> {
     // Prepared connections have already returned through shared mutation dispatch.
     let message = &connection.message;
@@ -811,6 +814,7 @@ async fn resume(
         target,
         connection,
         cli.agent.as_deref(),
+        request_id,
         fork,
         connection.json || cli.json,
         named_work,
@@ -854,6 +858,7 @@ async fn reopen(
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     connection: &SessionConnectionArgs,
     agent: Option<&str>,
+    request_id: Option<&str>,
     fork: bool,
     json: bool,
     named_work: bool,
@@ -881,6 +886,7 @@ async fn reopen(
         directory,
         &id,
         agent,
+        request_id,
         fork,
         !connection.prepare,
         json,
@@ -903,6 +909,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 id,
                 connection,
                 fork,
+                ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
                 let named_work = connection.work_flag(cli).is_some();
@@ -912,6 +919,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     target,
                     connection,
                     cli.agent.as_deref(),
+                    None,
                     *fork,
                     false,
                     named_work,

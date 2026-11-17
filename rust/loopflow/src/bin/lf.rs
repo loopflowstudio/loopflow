@@ -2408,6 +2408,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
+                ..
             },
     }) = &cli.command
     {

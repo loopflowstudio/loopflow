@@ -1,7 +1,7 @@
-//! A new Task's conversation finishes the setup its creation admitted: the
-//! checkout, then the Graph, one line each in the terminal before the provider
-//! starts. Each step reads what is recorded first, so a reopened conversation
-//! continues where setup stopped and never launches a second Graph.
+//! A Task's conversation sets up a Task that took up its Graph and never ran
+//! it: the checkout, then the Graph, one line each in the terminal before the
+//! provider starts. The Task owes setup until its Graph's run is recorded, so a
+//! reopened conversation continues where setup stopped.
 
 use std::time::Instant;
 
@@ -13,10 +13,23 @@ use super::primary;
 use crate::session::LfSession;
 use crate::store::SharedStore;
 
+/// The Task `session` belongs to took up its Graph and has never run it.
+pub(super) fn owed(store: &SharedStore, session: &LfSession) -> Result<bool> {
+    let Some(task) = &session.task_id else {
+        return Ok(false);
+    };
+    let Some(row) = store.sqlite.task_graph_row(task)? else {
+        return Ok(false);
+    };
+    Ok(row.run.is_none() && store.sqlite.latest_task_graphs(&[task])?.is_empty())
+}
+
+/// Set up the conversation's Task; `request_id` names the creation whose
+/// Start these steps are timed under.
 pub(super) async fn finish(
     store: &SharedStore,
     session: LfSession,
-    request_id: &str,
+    request_id: Option<&str>,
     agent: Option<&str>,
 ) -> Result<LfSession> {
     if let Some(request) = session
@@ -27,31 +40,57 @@ pub(super) async fn finish(
         println!("{request}");
     }
     let started = Instant::now();
-    let (session, task) = step(request_id, "checkout", checkout(store, session))
-        .await
-        .inspect_err(|error| println!("Checkout failed: {error:#}"))?;
+    let task_id = session.task_id.clone();
+    let (session, task) = match step(request_id, "checkout", checkout(store, session)).await {
+        Ok(checked_out) => checked_out,
+        Err(error) => {
+            println!("Checkout failed: {error:#}");
+            stopped(store, task_id.as_ref(), "checkout", &error).await;
+            return Err(error);
+        }
+    };
     println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());
     // The agent starts once the checkout exists, whatever happens to the Graph.
     match step(
         request_id,
         "graph",
-        start_graph(store, &session, &task, request_id, agent),
+        start_graph(store, &session, &task, agent),
     )
     .await
     {
         Ok(graph) => println!("Graph {graph} started"),
         Err(error) => {
-            tracing::warn!(error = %format!("{error:#}"), "new Task's Graph did not start");
             println!("Graph did not start: {error:#}");
+            stopped(store, Some(&task.id), "graph", &error).await;
         }
     }
     Ok(session)
 }
 
+/// Record on the Task that setup stopped at `step`, so its position says so
+/// until a reopened conversation runs setup again. A resumable failure never
+/// refuses a later launch.
+async fn stopped(
+    store: &SharedStore,
+    task: Option<&loopflow_model::durable::TaskId>,
+    step: &str,
+    error: &anyhow::Error,
+) {
+    tracing::warn!(error = %format!("{error:#}"), step, "Task setup stopped");
+    let Some(task) = task else { return };
+    let event = loopflow_storage::work::task::TaskEventKind::Failed {
+        error: format!("Setup stopped: {step} failed: {error:#}"),
+        resumable: true,
+    };
+    if let Err(error) = store.append_task_event(task, &event).await {
+        tracing::warn!(%error, "Task setup failure was not recorded");
+    }
+}
+
 /// One setup step, timed under its creation's request ID so a Start's report
 /// nests it beside the server's creation steps. Never records request text.
 async fn step<T>(
-    request_id: &str,
+    request_id: Option<&str>,
     name: &'static str,
     run: impl std::future::Future<Output = T>,
 ) -> T {
@@ -100,34 +139,26 @@ async fn checkout(store: &SharedStore, session: LfSession) -> Result<(LfSession,
     Ok((primary::admit_workspace(store, session).await?, task))
 }
 
-/// Start the Task's run the way a terminal would, detached, and record the
-/// launch on the creation so neither a repeat nor a reopened conversation
-/// starts another.
+/// Start the Task's run the way a terminal would, detached. The run records
+/// itself on the Task's Graph, which ends what the Task owes; a second launch
+/// racing it loses at that record.
 async fn start_graph(
     store: &SharedStore,
     session: &LfSession,
     task: &Task,
-    request_id: &str,
     agent: Option<&str>,
 ) -> Result<String> {
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
         .context("the Task has no Graph")?;
-    let launch = match &row.run {
-        Some((_, process)) => serde_json::json!({ "lf_process_id": process.id }),
-        None => {
-            let mut argv = vec![crate::os_process::execution_context()?
-                .lf_bin
-                .to_string_lossy()
-                .into_owned()];
-            // The agent this conversation was started with runs its Graph too.
-            if let Some(agent) = agent {
-                argv.extend(["--agent".into(), agent.to_owned()]);
-            }
-            argv.extend(["task".into(), "run".into(), task.identifier.clone()]);
-            let process = crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
-            serde_json::json!({ "lf_process_id": process })
-        }
-    };
-    store.sqlite.record_setup_launch(request_id, &launch)?;
+    let mut argv = vec![crate::os_process::execution_context()?
+        .lf_bin
+        .to_string_lossy()
+        .into_owned()];
+    // The agent this conversation was started with runs its Graph too.
+    if let Some(agent) = agent {
+        argv.extend(["--agent".into(), agent.to_owned()]);
+    }
+    argv.extend(["task".into(), "run".into(), task.identifier.clone()]);
+    crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
     Ok(row.graph.name)
 }

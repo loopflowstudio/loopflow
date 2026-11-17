@@ -100,9 +100,9 @@ where it stopped and never launches a second Graph. A step that fails prints
 the error in the pane and the provider still starts when the checkout exists.
 
 **Milestones**: `filed` (run=false), `admitted` (Task + Session recorded; the
-conversation owns the rest), `started` (Graph launch recorded). `admitted` and
-`started` repeat as Complete. `run_requested` is no longer written; released
-rows that hold it stay Inspect.
+receipt's last milestone on the conversation path). `-b` keeps `run_requested`
+→ `started`. Setup is owed by the Task (Graph taken up, never run), not the
+receipt (2026-11-17, concept review 1a).
 
 **Ready checkout** per repository on the Machine that runs Tasks:
 `<parent>/<repo>.ready`, a detached worktree. Taking it: `git worktree move` to
@@ -400,6 +400,25 @@ return a launch) apart from `run_command` (the rest), so no `.map(|()| None)`
 chain; setup reads the Task once; `launch_conversation`'s Work env is one
 guard. `task_create_tests::` 9/9, `session_cli_tests::` 24/24, transport
 `piped_resume_json_runs_here_and_returns_once` ok (local, debug).
+
+Built 2026-11-17 from the concept review answers (questions.md), in order:
+- 4a. One Task shape: `engine::creation::Created {receipt, session, after}`;
+  the app's `task_create::TaskCreated {receipt, session, row}` (Swift
+  `TaskCreated`) is built where the row is read; `overview` is gone. The row
+  lacks the Graph's interactive steps and position, so instead of seeding
+  `taskWork`, Desktop's position line reads `RoadmapTask.unreadPosition`
+  ("Starting <graph>" for a started, never-run Task) until the reading arrives.
+  Step `read_answer` is now `read_session`.
+- 1a. `setup::owed`: the Task's Graph row has no run and no GraphProcess
+  history (`lf task run` records the run before holding its conversation, so a
+  backlog run never trips it). Deleted `admitted_task_creation`,
+  `record_setup_launch` and migration `creation_receipt_sessions.sql`; the
+  held argv carries `session resume --request-id`.
+- 3a. A failed step appends `TaskEventKind::Failed {error: "Setup stopped:
+  <step> failed: …", resumable: true}` (released lf already decodes it). The
+  row reports it as `execution` Blocked while the Task stands at `start` with
+  no Graph process; Desktop's `.at(start)` line shows it (`startPosition`).
+  Test: `task_create_tests::a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it`.
 
 Remaining: slice 5's remote sample and a windowed Start → typing (qa could not reach either: screen locked, no remote Machine).
 

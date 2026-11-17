@@ -128,28 +128,20 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
         std::thread::sleep(Duration::from_millis(20));
     }
     drop(lost);
-    // The held conversation makes the checkout and launches the Graph.
-    let saved: serde_json::Value =
-        loop {
-            use rusqlite::OptionalExtension;
-            let result: Option<String> = db.query_row(
-            "SELECT result FROM creation_receipts WHERE request_id=?1 AND milestone='started'",
-            [id.as_str()], |row| row.get(0)).optional().unwrap();
-            if let Some(result) = result {
-                break serde_json::from_str(&result).unwrap();
-            }
-            assert!(
-                Instant::now() < deadline,
-                "creation did not settle after the client disconnected: {}\n{}\n{}",
-                fs::read_to_string(task.home.path().join("service.stderr")).unwrap_or_default(),
-                fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default(),
-                fs::read_to_string(task.home.path().join("logs/detached.log")).unwrap_or_default()
-            );
-            std::thread::sleep(Duration::from_millis(20));
-        };
-    assert_eq!(saved["milestone"], "started", "{saved}");
-    assert!(saved["session_id"].is_string(), "{saved}");
+    // The held conversation makes the checkout and launches the Graph; the
+    // receipt stays as it was answered.
     task.wait_for_graph_start();
+    let saved: serde_json::Value = serde_json::from_str(
+        &db.query_row(
+            "SELECT result FROM creation_receipts WHERE request_id=?1",
+            [id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(saved["milestone"], "admitted", "{saved}");
+    assert!(saved["session_id"].is_string(), "{saved}");
     task.wait_for_graphs();
     drop(service);
     let service = Service::start(&task);
@@ -280,7 +272,8 @@ fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
             |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(milestone, "started");
+    // Setup is owed by the Task; the receipt only answers repeats.
+    assert_eq!(milestone, "admitted");
     // A Start's report reads the server's and the conversation's steps by
     // request ID.
     let log = fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap();
@@ -380,6 +373,70 @@ fn task_create_takes_the_ready_checkout_and_leaves_another() {
     task.start("Third Task");
     task.wait_for_graphs();
     task.wait_for_ready(&ready);
+}
+
+#[test]
+fn a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it() {
+    let task = CreationFixture::new();
+    task.repo.push();
+    let _service = Service::start(&task);
+    // Git refuses every new checkout while the marker exists.
+    let marker = task.home.path().join("refuse-checkouts");
+    fs::write(&marker, "").unwrap();
+    let git = task.home.path().join("bin/git");
+    fs::write(
+        &git,
+        format!(
+            "#!/bin/sh\ncase \"$*\" in *\"worktree add\"*|*\"worktree move\"*) [ -e '{}' ] && exit 1;; esac\nexec /usr/bin/git \"$@\"\n",
+            marker.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = task.run(&[
+        "task",
+        "create",
+        "Stops at checkout",
+        "--run",
+        "--graph",
+        "feature",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let issue = answer["task"]["identifier"].as_str().unwrap().to_owned();
+    let session = answer["session_id"].as_str().unwrap().to_owned();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        let status = task.run(&["task", "status", &issue, "--json"]);
+        let text = String::from_utf8_lossy(&status.stdout).into_owned();
+        if text.contains("Setup stopped: checkout failed") {
+            break text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "setup's stop never reached the Task: {text}\n{}",
+            fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(!status.contains("Starting"), "{status}");
+    // With the cause gone, opening the conversation again sets the Task up.
+    fs::remove_file(&marker).unwrap();
+    let reopened = task.run(&["session", "resume", &session]);
+    task.wait_for_graph_start();
+    task.wait_for_graphs();
+    let status = task.run(&["task", "status", &issue, "--json"]);
+    assert!(
+        !String::from_utf8_lossy(&status.stdout).contains("Setup stopped"),
+        "{}\n{}",
+        String::from_utf8_lossy(&status.stdout),
+        String::from_utf8_lossy(&reopened.stdout)
+    );
 }
 
 #[test]
@@ -728,27 +785,13 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
         "{}",
         String::from_utf8_lossy(&first.stderr)
     );
-    let mut receipt: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
+    let receipt: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(receipt["milestone"], "admitted");
     assert_eq!(receipt["graph"], "feature");
     assert!(receipt["session_id"].is_string());
-    // Setup records its Graph launch after the answer; a repeat reads it.
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(30);
-    while db
-        .query_row(
-            "SELECT milestone FROM creation_receipts WHERE request_id=?1",
-            [&id],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap()
-        != "started"
-    {
-        assert!(Instant::now() < deadline, "setup recorded no Graph launch");
-        std::thread::sleep(Duration::from_millis(20));
-    }
+    task.wait_for_graph_start();
     task.wait_for_graphs();
-    receipt["milestone"] = "started".into();
     let counts = || -> (i64, i64, i64) {
         db.query_row("SELECT (SELECT count(*) FROM tasks), (SELECT count(*) FROM graph_processes), (SELECT count(*) FROM agent_sessions)", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).unwrap()
     };

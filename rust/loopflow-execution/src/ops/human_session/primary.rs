@@ -162,11 +162,16 @@ async fn start_in_background(
     if Path::new(&session.cwd) != worktree.as_path() {
         return Ok(None);
     }
-    Ok(
-        hold(store, &session.id, Path::new(&session.cwd), wave, None)
-            .await?
-            .then(|| session.id.to_string()),
+    Ok(hold(
+        store,
+        &session.id,
+        Path::new(&session.cwd),
+        wave,
+        None,
+        None,
     )
+    .await?
+    .then(|| session.id.to_string()))
 }
 
 /// Start a new Task's recorded conversation in a held terminal, where it
@@ -178,12 +183,21 @@ pub(crate) async fn hold_task_conversation(
     task: &loopflow_storage::work::task::Task,
     session: &LfSession,
     agent: Option<&str>,
+    request_id: &str,
 ) -> Result<bool> {
     let wave = match &task.wave_id {
         Some(id) => store.get_wave(id).await?,
         None => None,
     };
-    hold(store, &session.id, &session.cwd, wave, agent).await
+    hold(
+        store,
+        &session.id,
+        &session.cwd,
+        wave,
+        agent,
+        Some(request_id),
+    )
+    .await
 }
 
 async fn hold(
@@ -192,6 +206,7 @@ async fn hold(
     cwd: &Path,
     wave: Option<crate::work::wave::Wave>,
     agent: Option<&str>,
+    request_id: Option<&str>,
 ) -> Result<bool> {
     // Prepared conversations can start; previously opened ones stay as they are.
     if opened(store, session.as_str())? {
@@ -204,6 +219,9 @@ async fn hold(
         argv.extend(["--agent".into(), agent.into()]);
     }
     argv.extend(["session".into(), "resume".into(), session.to_string()]);
+    if let Some(request_id) = request_id {
+        argv.extend(["--request-id".into(), request_id.into()]);
+    }
     let (held, cwd) = (session.clone(), cwd.to_path_buf());
     tokio::task::spawn_blocking(move || {
         crate::transport::start_held(&argv, &cwd, Some(&held), &|command| {

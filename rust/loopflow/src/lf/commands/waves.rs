@@ -1869,7 +1869,7 @@ async fn snapshot_task_detail(
     let pr = facts.active_prs.get(&task.id).cloned();
     let active = pr.as_ref().filter(|pr| pr.is_active());
     let observed_at = now();
-    let (execution, graph_record) =
+    let (mut execution, graph_record) =
         loopflow_execution::ops::task_execution::execution_of_latest_graph(
             &store.sqlite,
             task,
@@ -1877,6 +1877,25 @@ async fn snapshot_task_detail(
             &reads.execution,
         )
         .await?;
+    // A Task at the start of a Graph it never ran, whose conversation's setup
+    // stopped, says so until a reopened conversation sets it up.
+    if let (
+        None,
+        Some(loopflow_storage::work::task::TaskEventKind::Failed {
+            error,
+            resumable: true,
+        }),
+    ) = (
+        &graph_record,
+        facts.latest_events.get(&task.id).map(|event| &event.kind),
+    ) {
+        if facts.steps.get(&task.id).map(String::as_str)
+            == Some(loopflow_execution::task_graph::START)
+        {
+            execution.state = loopflow_execution::ops::task_execution::TaskExecutionState::Blocked;
+            execution.reason = error.clone();
+        }
+    }
     let status = *facts
         .states
         .get(&task.id)

@@ -39,3 +39,9 @@ To build:
 - 4a, first: one Task shape in the answer. Jack Heart: "i care more about unifying htis Three shapes of one Task in the answer ... And having simple code than i do about perfect edge/race condition checks right now (though i do still value that some)". The answer becomes receipt + session + `row` (`RoadmapTask`); Desktop fills `taskWork` from the row (extend the row only if it truly lacks a field), `overview` goes, and `TaskCreated`/`TaskCreateAnswer` become one type built where the row is read. The receipt's stored `task` stays only if the CLI's printed answer needs it.
 - Priority: 4a, then 1a, then 3a. Prefer the simpler code over extra race handling; no dedicated race test for 2 unless it falls out cheaply.
 - 5: no change in this Task (revisions belong to the sibling that builds pending changes).
+
+Choices made building them (2026-11-17):
+- 4a: Desktop does not fill `taskWork` from the row. The row has no interactive steps or Graph position; adding a `TaskGraph` to every listed row costs a per-Task graph read. The position line reads the row ("Starting <graph>") until the Task reading arrives; the stage dots appear with the reading.
+- 1a: setup runs only for a Task that took up its Graph. A Task with no Graph and no checkout keeps the ordinary `admit_workspace` checkout (with fetch); so does a Task whose Graph has run but whose checkout is gone.
+- 3a: the stop is a resumable `Failed` Task event, not a Session observation: a conversation before its provider has no input key to record an observation against, and an unknown event kind would break released lf reading the row.
+- A 128-test local run (load ≈ 50) failed `task_create_answers_and_its_conversation_checks_out_without_the_network` and `session_cli_tests::a_closed_terminal_finishes_a_bare_launchs_agent`; both pass alone and the creation suite passed together. Left to gate/CI.

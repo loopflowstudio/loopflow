@@ -144,6 +144,7 @@ fn connected(clients: &Clients) -> Vec<ConnectedClient> {
 }
 
 pub(super) async fn run() -> Result<()> {
+    loopflow_storage::instrumentation::enable_request_tracing();
     let observations = loopflow_execution::observe::Cache::shared();
     let _transcripts = loopflow_execution::transcript::watch::watch(&observations);
     let path = super::socket_path()?;
@@ -283,6 +284,7 @@ pub(super) async fn connection(
     slots: &Arc<Semaphore>,
     subscriptions: &Arc<Subscriptions>,
 ) -> Result<()> {
+    loopflow_storage::instrumentation::enable_request_tracing();
     let first = tokio::time::timeout(FIRST_MESSAGE, socket.read_u8())
         .await
         .context("no message within five seconds")??;
@@ -815,7 +817,7 @@ pub(super) async fn session<C: Carrier>(
                 }
             }
             Start::Request(operation, select) => {
-                let write = if matches!(operation, Operation::Write(_)) {
+                let write = if operation.is_write() {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
                         continue;
@@ -1192,7 +1194,7 @@ async fn request(
 ) {
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
-    let write = matches!(operation, Operation::Write(_));
+    let write = operation.is_write();
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
     let result = match operation {
@@ -1251,6 +1253,17 @@ async fn request(
     }
 }
 
+fn measured_result(
+    measured: bool,
+    run: impl FnOnce() -> Result<serde_json::Value>,
+) -> Result<serde_json::Value> {
+    if !measured {
+        return run();
+    }
+    let (result, work) = loopflow_storage::instrumentation::capture(run);
+    result.map(|result| serde_json::json!({ "result": result, "work": work.receipt() }))
+}
+
 async fn operate(
     operation: Operation,
     id: &str,
@@ -1259,6 +1272,7 @@ async fn operate(
     reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
 ) -> Result<serde_json::Value, Error> {
+    let measured = matches!(&operation, Operation::Measured(_));
     match operation {
         Operation::Server(ServerOperation::MobileStatus) => {
             let (reply, result) = tokio::sync::oneshot::channel();
@@ -1282,18 +1296,24 @@ async fn operate(
             Ok(serde_json::json!({ "configuration": configuration }))
         }
 
-        Operation::Read(query) => tokio::task::spawn_blocking(move || {
-            let _held = reservation;
-            loopflow_execution::journal::request::isolate(|| {
-                loopflow_execution::observe::Cache::shared()
-                    .capture(|| query.read())
-                    .0
+        Operation::Read(query)
+        | Operation::Measured(super::wire::MeasuredOperation::Read { query }) => {
+            tokio::task::spawn_blocking(move || {
+                let _held = reservation;
+                measured_result(measured, || {
+                    loopflow_execution::journal::request::isolate(|| {
+                        loopflow_execution::observe::Cache::shared()
+                            .capture(|| query.read())
+                            .0
+                    })
+                })
             })
-        })
-        .await
-        .map_err(unavailable)?
-        .map_err(unavailable),
-        Operation::Write(change) => {
+            .await
+            .map_err(unavailable)?
+            .map_err(unavailable)
+        }
+        Operation::Write(change)
+        | Operation::Measured(super::wire::MeasuredOperation::Write { change }) => {
             let mut target = serde_json::to_value(&change).map_err(unavailable)?;
             if let Some(fields) = target.as_object_mut() {
                 // Setting values and authored text stay out of request telemetry.
@@ -1311,7 +1331,7 @@ async fn operate(
                     fields.remove(field);
                 }
             }
-            effect(target, id, instance, trace_id, move || {
+            effect(target, id, instance, trace_id, measured, move || {
                 let _held = reservation;
                 loopflow_execution::provider_auth::operations::served(|| {
                     Ok(serde_json::to_value(change.run()?)?)
@@ -1386,13 +1406,16 @@ async fn effect(
     id: &str,
     instance: &str,
     trace_id: &loopflow_model::id::TraceId,
+    measured: bool,
     run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
 ) -> Result<serde_json::Value, Error> {
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
     tokio::task::spawn_blocking(move || {
         let mut diagnostics = Vec::new();
-        let result = loopflow_execution::journal::request::run(&trace_id, &target, || {
-            loopflow_execution::journal::request::diagnostics(&mut diagnostics, run)
+        let result = measured_result(measured, || {
+            loopflow_execution::journal::request::run(&trace_id, &target, || {
+                loopflow_execution::journal::request::diagnostics(&mut diagnostics, run)
+            })
         });
         for line in String::from_utf8_lossy(&diagnostics).lines() {
             tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
@@ -1478,7 +1501,7 @@ mod tests {
     use crate::server::wire::MAX_CONNECTIONS;
     use crate::server::wire::{
         ClientIdentity, ClientMessage, Hello, Operation, ServerMessage, ServerOperation, MAX_BULK,
-        MAX_MESSAGE, REVISION,
+        MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use loopflow_execution::engine::ErrorCode;
     use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
@@ -1626,6 +1649,63 @@ mod tests {
 
     fn catalog() -> Operation {
         Operation::Read(crate::lf::commands::read::Read::ConfigCatalog)
+    }
+
+    #[test]
+    fn measured_read_returns_the_ordinary_result_and_a_request_work_receipt() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            client
+                .send(&ClientMessage::Request {
+                    id: "measured".into(),
+                    operation: Operation::Measured(crate::server::wire::MeasuredOperation::Read {
+                        query: Read::ConfigCatalog,
+                    }),
+                    select: None,
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected a reading");
+            };
+            assert!(!result["result"].as_array().unwrap().is_empty());
+            assert!(result["work"]["statements"].is_u64());
+            assert!(result["work"]["rows"].is_u64());
+        });
+    }
+
+    #[test]
+    fn measured_write_executes_the_command_and_returns_its_receipt() {
+        with_empty_home(async {
+            let repo = loopflow_test_support::TestRepo::new();
+            let mut client = Client::connect();
+            client.hello(REVISION, REVISION).await;
+            client
+                .send(&ClientMessage::Request {
+                    id: "measured-write".into(),
+                    operation: Operation::Measured(crate::server::wire::MeasuredOperation::Write {
+                        change: crate::lf::commands::write::Write::ConfigSet {
+                            destination:
+                                loopflow_execution::config::files::Destination::SharedRepository {
+                                    repository: repo.path().to_owned(),
+                                },
+                            key: "agent".into(),
+                            value: "codex".into(),
+                        },
+                    }),
+                    select: None,
+                })
+                .await;
+            let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
+                panic!("expected the write result");
+            };
+            assert!(result["result"].is_object());
+            assert!(result["work"]["id"].is_string());
+            assert!(result["work"]["statements"].is_u64());
+            assert!(std::fs::read_to_string(repo.path().join(".lf/config.yaml"))
+                .unwrap()
+                .contains("codex"));
+        });
     }
 
     /// Serialize the tests that read an empty Machine registry through env.
@@ -1993,10 +2073,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn oldest_supported_revision_is_welcomed() {
+        let mut client = Client::connect();
+        let ServerMessage::Welcome(welcome) = client.hello(MIN_REVISION, MIN_REVISION).await else {
+            panic!("expected welcome");
+        };
+        assert_eq!(welcome.revision, MIN_REVISION);
+        drop(client.writer);
+        client.server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
     async fn no_common_revision_names_the_side_to_update_then_closes() {
         for (revision, min_revision, side) in [
             (REVISION + 1, REVISION + 1, "selected installation"),
-            (REVISION - 1, REVISION - 1, "client"),
+            (MIN_REVISION - 1, MIN_REVISION - 1, "client"),
         ] {
             let mut client = Client::connect();
             let ServerMessage::Error {
@@ -2271,6 +2362,9 @@ mod tests {
             };
             assert_eq!(id, "ps");
             assert!(frame["unavailable"].is_null(), "{frame}");
+            let work: loopflow_storage::instrumentation::SqlReceipt =
+                serde_json::from_value(frame["work"].clone()).unwrap();
+            assert!(!work.id.is_empty());
             // Its acknowledgement does not release a subscription's ID.
             client
                 .send(&ClientMessage::Request {

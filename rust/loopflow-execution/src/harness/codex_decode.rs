@@ -319,6 +319,8 @@ struct Turn {
     started: bool,
     request: Option<String>,
     attributed: bool,
+    response_prefix: String,
+    response_previewed: bool,
 }
 
 impl Turn {
@@ -428,6 +430,29 @@ impl CodexDecoder {
             }
         }
         if turn.is_none() || turn == self.active_turn {
+            if method == "item/agentMessage/delta" {
+                if let (Some(turn), Some(delta)) = (&turn, params["delta"].as_str()) {
+                    let observed = self.observe(turn);
+                    if !observed.response_previewed {
+                        let remaining =
+                            64usize.saturating_sub(observed.response_prefix.chars().count());
+                        observed
+                            .response_prefix
+                            .extend(delta.chars().take(remaining));
+                        let text = observed.response_prefix.trim_start();
+                        if text.chars().any(char::is_whitespace) || text.chars().count() >= 64 {
+                            observed.response_previewed = true;
+                            if !text.trim().is_empty() {
+                                signals.push(Signal::Previewed {
+                                    turn: provider_turn(turn),
+                                    source: "codex",
+                                    text: text.to_owned(),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
             match (
                 &turn,
                 method == "item/completed" && params["item"]["type"] == "agentMessage",
@@ -947,6 +972,39 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+
+    #[test]
+    fn first_response_word_is_previewed_once_before_message_completion() {
+        let mut decoder = CodexDecoder::default();
+        let thread = AgentSessionId::from("thread-1");
+        decoder.decode(
+            &json!({"method":"turn/started", "params":{
+                "threadId":"thread-1", "turn":{"id":"turn-1"}
+            }}),
+            Some(&thread),
+        );
+        let mut previews = Vec::new();
+        for delta in ["Hel", "lo ", "world", "!"] {
+            let decoded = decoder.decode(
+                &json!({"method":"item/agentMessage/delta", "params":{
+                    "threadId":"thread-1", "turnId":"turn-1", "itemId":"message-1", "delta":delta
+                }}),
+                Some(&thread),
+            );
+            previews.extend(
+                fact::fact_lines(&decoded)
+                    .into_iter()
+                    .filter(|line| line.starts_with("Activity Previewed")),
+            );
+        }
+        assert_eq!(previews, [r#"Activity Previewed "Hello ""#]);
+        let stale = decoder.decode(&json!({"method":"item/agentMessage/delta", "params":{
+            "threadId":"thread-1", "turnId":"older-turn", "itemId":"message-0", "delta":"Old answer "
+        }}), Some(&thread));
+        assert!(!fact::fact_lines(&stale)
+            .iter()
+            .any(|line| line.starts_with("Activity Previewed")));
+    }
 
     /// A recorded trace decoded alone, without a store, as its fact sequence.
     fn replay(file: &str) -> Vec<String> {

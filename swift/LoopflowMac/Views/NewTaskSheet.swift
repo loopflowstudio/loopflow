@@ -153,10 +153,18 @@ struct NewTaskSheet: View {
         creating = true
         error = nil
         let (request, wave, graph) = (trimmed, wave, graph)
-        Task {
-            defer { creating = false }
-            do { try await model.createTask(request: request, wave: wave, graph: graph) }
-            catch { self.error = error.localizedDescription }
+        let owner = model.navigation.performanceOwner
+        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: "new-task",
+                        repository: model.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
+            Perf.acknowledged(.startTask, id: "new-task", owner: owner)
+            Task {
+                defer { creating = false }
+                do { try await model.createTask(request: request, wave: wave, graph: graph) }
+                catch {
+                    Perf.finish(.startTask, id: "new-task", owner: owner, outcome: .failed)
+                    self.error = error.localizedDescription
+                }
+            }
         }
     }
 

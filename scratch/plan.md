@@ -127,7 +127,7 @@ stays (a drop is a staged contract); only its code goes.
 
 ### Which providers a rental is signed in to
 
-`logins: Vec<Provider>` on `ondemands.<name>`, the template that rents and
+`logins: Vec<Provider>` on `ondemands.<name>` (`OnDemandDeclaration.logins`), the template that rents and
 prepares a Machine; unset, every provider signed in here. Rental `prepare`
 (`lf/commands/rental.rs`) already signs in GitHub and Linear; it signs in this
 list instead, at most one approval per provider, none with command approvers.
@@ -226,7 +226,8 @@ the two meet only at `forward::deliver`'s call sites. PR #1966 adds
 `HarnessKind` and a per-harness trait: if it merges first, the sign-in command,
 status probe and logout live on that trait instead of a `match` in
 `machine/`. Slices 1–2 used the `match` (#1966 still open 2026-11-17); whichever
-slice follows its merge moves them onto the trait.
+slice follows its merge moves them onto the trait. Still open after slice 3
+(checked 2026-11-17): slice 4 stays on the `match` unless it merges first.
 
 ## Exclusions
 
@@ -369,7 +370,7 @@ Machines and rentals"; "Choose who approves", "Rentals", "Per-run secrets",
 `init.md` and `repo_operate.md`. `server/README.md` and `security.md`'s service
 transfer text untouched until slice 4.
 
-Settled while writing: on-demand templates live in the store, so `logins` is
-`lf ondemand add … --logins claude,github` and an `ondemands` column (this
-Task's migration). `LF_APPROVE_CODE` is set for any device-code page (Codex,
+Settled while writing: `logins` is `lf ondemand add … --logins
+claude,github`, a field of the `ondemands.<name>` config template (slice 3
+found templates in `~/.lf/config.yaml`, not the store). `LF_APPROVE_CODE` is set for any device-code page (Codex,
 GitHub, OpenCode), not only Codex.

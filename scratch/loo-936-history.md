@@ -466,6 +466,18 @@ report grouping frozen at dispatch versus later binds (no report reads it
 yet; `lf usage` grouping is separate work), "interrupted" for an unknown
 OpenCode completion, and the two skew costs under "Upgrade skew".
 
+## Concept review after QA fixes (2026-11-16, headless)
+
+Both fixes reduce rather than guard: a gap drops the busy wait instead of
+adding a timeout knob, and `--final` reads the transcript it already trusts
+(option B) instead of a second copy of the answer. `AnsweredTurn.turn` as
+`Option` is the real fact (a gap may leave no turn row). Nothing the design
+implies is left to build; next is gate. Carried to the PR body, unchanged:
+turn-row retention, report grouping frozen at dispatch versus later binds,
+"interrupted" for an unknown OpenCode completion, the skew costs, headless
+Claude turns with no duration, and a gapped writer missing an ordinary
+contended write until the next uncontended one closes the gap.
+
 ## Slice 5 as built (2026-11-16)
 
 - `JournalFile` in `journals.rs` (was `HistoryFile`, `history.rs`).

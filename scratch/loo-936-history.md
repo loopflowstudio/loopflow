@@ -458,8 +458,13 @@ Remaining before ship (slice 5 unless noted):
 - History-file statistics: nothing analyzes `history.db`.
 - Move pass for rows a released lf leaves in `loopflow.db` (they are
   invisible meanwhile), retention by age, the server's prune clock, docs check.
-- Stand-in providers in fixtures must write transcripts where their provider
-  would (`loopflow-execution/tests/support/task_graph.rs` does).
+- Stand-in providers keep transcripts where their provider does (shared
+  helpers in `loopflow-execution/tests/support/`: `claude_transcript.py`,
+  `codex_rollout.py`; OpenCode and Pi stand-ins write their stores).
+- `opencode_disconnect_after_tool_preserves_unknown_native_completion` now
+  expects one `completed` row with status `interrupted` (lf reads the turn
+  OpenCode's store left open, as it does for a crashed Pi turn). Whether
+  "interrupted" is right for an unknown completion is a product call.
 
 Check results: `cargo nextest run -p loopflow-storage -p loopflow-execution
 --lib`: 2438 passed, 2 failed; the two were

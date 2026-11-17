@@ -2250,7 +2250,8 @@ mod metadata_tests {
         conn.execute_batch(&migration_section_sql("history_apart_from_state"))
             .unwrap();
 
-        let inputs: Vec<(String, Option<String>, Option<String>, Option<i64>)> = conn
+        type Input = (String, Option<String>, Option<String>, Option<i64>);
+        let inputs: Vec<Input> = conn
             .prepare("SELECT receipt_key,provider_thread,provider_account,independent FROM session_events WHERE kind='captured' ORDER BY seq")
             .unwrap()
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))

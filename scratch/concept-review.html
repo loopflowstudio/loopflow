@@ -1,9 +1,5 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Launch states as built</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Launch kinds as built</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5f5b54; --line: #dedad2; --card: #ffffff;
@@ -51,114 +47,86 @@ th { font-weight: 600; }
 ol.q > li { margin-bottom: 14px; }
 ol.q ol { list-style: lower-alpha; margin-top: 4px; }
 </style>
-</head>
-<body>
+</head><body>
 <main>
-<h1>Bare, managed, worker: does the code say what we say?</h1>
-<p class="lede">LOO-924 as built at <code>74a96d6176</code>, PR #1966, 89 files against main. The area is launching an agent: which harness, which agent, who keeps it running, which Task it belongs to. No code changed by this review. The earlier Session-commands review now lives with LOO-958.</p>
+<h1>Work session, worker, chat, batch: does the code say what we say?</h1>
+<p class="lede">LOO-924 as built at <code>0eeb7092b7</code>, PR #1966, 102 files against main. The area is launching an agent: which of the four kinds a launch is, who decides, and what a person can call it afterwards. I took the whole launch area and not the last pass, because the names changed after most of the code was written. No code changed by this review.</p>
 
-<p>Most of it lines up now. <code>Holder</code>, <code>Place</code>, <code>transport::holder</code> and <code>WorkSource::is_managed</code> are gone; one value, <code>Run</code>, comes back from <code>delegate</code>; belonging to a Task no longer changes how a launch lives. What's left is about names: the code's three states are really two yes-or-no questions, and the type is called something it isn't.</p>
+<p>The grid is in the code now, cleanly. <code>Run</code> has four variants and everything that reads it asks <code>is_managed()</code> or <code>mode()</code>. What's left: one of the four names is doing three jobs, and the words people see for the headless column don't agree with each other.</p>
 
 <h2>One interaction</h2>
 <div class="box existing">
-<p><code>lf task run LOO-12</code>, and its <code>implement</code> step.</p>
+<p><code>lf task run LOO-12</code>, its implement step, a bad answer, and a person looking afterwards.</p>
 <ol>
-<li>The Graph starts the step with <code>LF_GRAPH_STEP=worker</code>. In the step's process, <code>delegate_current</code> sees <code>journal::worker_step()</code> and picks <code>Run::Worker</code>.</li>
-<li><code>Launch { run: Worker, harness, admitted, start }</code>; <code>Run::mode()</code> says headless, so <code>drive::run</code> drives it.</li>
-<li>Hooks: <code>Run::reports_turns()</code> is true, so each turn boundary is sent to the Machine server, exactly as for a managed conversation.</li>
-<li><strong>Failure:</strong> the answer fails its schema. The Graph runs <code>lf -b session resume ID --message …</code>; that turn is also a <code>Worker</code>.</li>
-<li><strong>Recovery:</strong> a person runs <code>lf resume ID</code> on that step's Session. <code>session_run</code> reads the row: not bound, not a primary conversation, so <code>Bare(Interactive)</code>, in their terminal. A store that can't be read gives <code>Managed</code> and logs one recording gap.</li>
+<li><code>lf task run</code> itself is classified <code>Run::Worker</code> (<code>delegate_current(input, task_run)</code> in <code>bin/lf.rs</code>). No agent starts here. <code>delegate</code> sees a Worker that is not a Graph step and re-runs the command detached.</li>
+<li>The Graph starts the step with <code>LF_GRAPH_STEP=worker</code>. The step is <code>Run::Worker</code> again; this time <code>delegate</code> returns <code>Here</code>, and Worker means "headless, and each turn is reported to the server".</li>
+<li>Failure: the answer fails its schema. The Graph runs <code>lf --batch session resume ID --message …</code> with the same env, so that turn is a worker too.</li>
+<li>Recovery: a person runs <code>lf resume ID</code> on the step's Session. It is refused: "<code>ID is a Run (LOO-12 · code · implement · finished); `lf resume` takes only Sessions.</code>" The glossary calls that same thing a worker, and calls it a Session.</li>
 </ol>
 </div>
 
 <h2>Product concepts against code concepts</h2>
-<div class="wrap">
-<table>
-<thead><tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Where not</th></tr></thead>
-<tbody>
-<tr><td>The harness</td><td><code>HarnessKind</code> → <code>&amp;dyn Harness</code>, one file each</td><td><span class="tag yes">yes</span></td><td>—</td></tr>
-<tr><td>The agent I chose (<code>-a claude:opus</code>)</td><td><code>config::Agent { harness, model }</code> on <code>AgentConfig</code>; <code>claude_model</code> folded in</td><td><span class="tag part">mostly</span></td><td><code>parse_agent</code> went from 44 production call sites to 20 and <code>HarnessKind::parse</code> from 36 to 25. The plan said they'd remain only where text comes in (CLI, config files, stored rows). Nobody has checked that the 45 left are all of that kind.</td></tr>
-<tr><td>Which Task it belongs to</td><td>The Session's Task membership; <code>WorkSource</code> kept only to say where the binding came from</td><td><span class="tag yes">yes</span></td><td>Belonging gives counting and Task steers and nothing else, as decided.</td></tr>
-<tr><td>Who keeps it running: bare, managed, worker</td><td><code>enum Run { Bare(Mode), Managed, Worker }</code></td><td><span class="tag no">no</span></td><td>Three names, but the code only ever asks two questions of it. See below.</td></tr>
-<tr><td>Reopening keeps what the Session was</td><td><code>session_run</code> → <code>SqliteStore::is_bare</code>: bound, or a Task/Wave/repository's primary conversation</td><td><span class="tag yes">yes</span></td><td>"resume connects to existing sessions."</td></tr>
-<tr><td>Seeing which state a Session is in</td><td>Nothing. <code>Run</code> is not stored or printed; <code>lf ps</code> and <code>lf session list</code> have no such column</td><td><span class="tag no">no</span></td><td>A concept people are taught and can't look up. The demo written for this Task ("<code>lf ps</code> shows it as bare") can't be run.</td></tr>
-<tr><td>A Graph's run (LOO-953's word)</td><td>LOO-953 has <code>Run</code>, <code>GraphRun</code>, <code>GraphStep</code>; this PR has <code>harness::Run</code></td><td><span class="tag no">no</span></td><td>One name, two ideas, as soon as both land.</td></tr>
-</tbody>
-</table>
-</div>
+<div class="wrap"><table>
+<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Where not</th></tr>
+<tr><td>Four kinds: work session, worker, chat, batch</td><td><code>enum Run { Chat, Batch, WorkSession, Worker }</code>, <code>is_managed()</code>, <code>mode()</code></td><td><span class="tag yes">yes</span></td><td>The launch matrix test runs all four harnesses in each cell.</td></tr>
+<tr><td>A worker</td><td><code>Run::Worker</code></td><td><span class="tag no">no</span></td><td>One name, three behaviors. See below.</td></tr>
+<tr><td>What the kinds are kinds of</td><td>Code and plan: a launch ("launch kind", never stored). Glossary: a Session ("a managed, interactive Session")</td><td><span class="tag part">partly</span></td><td>A Session can change kind: a chat that is bound to a Task reopens as a work session. The code's rule for reopening is "bound, or a Task, Wave or repository's primary conversation"; the glossary's definition is "reports each turn". Both are true, and the glossary gives the one a person can't see.</td></tr>
+<tr><td>The name of the idea itself</td><td>Type <code>Run</code>; docs say "launch kind"; the refusal message says "is a Run" for a headless Session; LOO-953 has <code>Run</code> for a Graph's execution</td><td><span class="tag no">no</span></td><td>One word, three ideas. "Run" was also the name turned down for the bare headless cell.</td></tr>
+<tr><td>The headless column</td><td>Glossary: worker, batch. <code>docs/sessions.md</code>: "a headless Session (<code>-b</code>, a Graph step)". Refusal message: "a Run". Flag: <code>--headless</code></td><td><span class="tag no">no</span></td><td>The message is the one that contradicts the others: it says a worker is not a Session.</td></tr>
+<tr><td>Who decides the kind: the command</td><td><code>delegate_current</code>: Graph step env, else held terminal, else <code>-b</code> or the tty. <code>session_run</code> for reopening.</td><td><span class="tag yes">yes</span></td><td>No flag a person passes changes it. Steps of <code>lf task run</code> are workers and steps of <code>lf graph</code> are batches, as said: "lf skill/graph: Bare / lf task run ...: not bare".</td></tr>
+<tr><td>Which Task it belongs to</td><td>Session membership; <code>WorkSource</code> only says where it came from</td><td><span class="tag yes">yes</span></td><td>Checked by the reopen test: Checkout, Declared and Inherited all stay chats.</td></tr>
+<tr><td>Reopening keeps what the Session was</td><td><code>session_run</code> → <code>SqliteStore::is_bare</code></td><td><span class="tag part">partly</span></td><td>Holds for the cases tested. Not checked: a work session that is neither bound nor primary (if a Desktop pane or <code>lf --machine</code> can make one) would reopen from a terminal as a chat.</td></tr>
+<tr><td>The agent I chose</td><td><code>config::Agent { harness, model }</code></td><td><span class="tag yes">yes</span></td><td>The plan says the audit of remaining parse sites is in the PR body; I did not re-count.</td></tr>
+<tr><td>What a launch records under</td><td><code>Recording { store, session, attachment }</code></td><td><span class="tag yes">yes</span></td><td>—</td></tr>
+</table></div>
 
-<h2>The biggest mismatch: three names over a two-by-two</h2>
+<h2>The biggest mismatch: worker means three things</h2>
 <div class="box big">
-<p>Everything that reads <code>Run</code> asks one of two questions:</p>
-<pre><code>run.reports_turns()   // !Bare        — hooks, env, thread naming
-run.mode()            // Interactive | Headless — which runner, held terminal or not</code></pre>
-<p>Where the code matches on it, <code>Managed</code> and <code>Worker</code> sit in the same arm (<code>Run::Managed | Run::Worker =&gt;</code> in <code>agent_process.rs</code> and <code>harness/mod.rs</code>). So the four values are a grid:</p>
-<div class="wrap">
-<table>
-<thead><tr><th></th><th>someone typing</th><th>headless</th></tr></thead>
-<tbody>
-<tr><th>the server is told about each turn</th><td><code>Managed</code></td><td><code>Worker</code></td></tr>
-<tr><th>it isn't</th><td><code>Bare(Interactive)</code></td><td><code>Bare(Headless)</code></td></tr>
-</tbody>
-</table>
+<div class="wrap"><table>
+<tr><th>Who is <code>Run::Worker</code></th><th>Is an agent?</th><th>Detached?</th><th>Reports turns?</th></tr>
+<tr><td>the <code>lf task run</code> command</td><td>no, it runs a Graph</td><td>yes, that is all Worker means here</td><td>has no turns</td></tr>
+<tr><td>a step of a Task's Graph</td><td>yes</td><td>no, it follows the Graph</td><td>yes</td></tr>
+<tr><td>a Discord Wave answer</td><td>yes</td><td>no, the bridge waits for it</td><td>yes</td></tr>
+</table></div>
+<p>The decided meaning is "WOrker = (Manage &amp; Headless)". Rows two and three are that. Row one is a different fact, "this command leaves its terminal", carried in the same variant, which is why <code>delegate</code> has to ask <code>run == Worker &amp;&amp; graph_step()</code> to tell them apart, and why the glossary's "no terminal or viewer" needs a second sentence for Discord.</p>
 </div>
-<p>That is <code>Holder × Mode</code> again under better names. It's fine as code. It's the vocabulary that's off: said earlier, "workers are always headless, so there is basically no point to making them managed", and as built a worker <em>is</em> a managed launch without a terminal. I chose that for this pass because the server records Codex turns and refreshes planning from those turn reports.</p>
-</div>
-
 <div class="cols">
-<div class="box existing">
-<p><strong>As built</strong></p>
-<p>Worker = reports turns + headless + runs detached.<br>Managed = reports turns + interactive + held terminal.</p>
-<p class="muted">Honest description: two states, bare and managed, and a managed one is either a conversation or a worker.</p>
+<div class="box existing"><p><b>As built</b></p>
+<pre><code>delegate_current(input, worker: bool)
+  worker || worker_step() → Run::Worker
+delegate(run, …)
+  Worker && graph_step() → Here
+  Worker                 → run detached</code></pre>
+<p>A launch kind decides whether a non-launch detaches.</p></div>
+<div class="box proposed"><p><b>Proposed</b> <span class="tag prop">not built</span></p>
+<pre><code>// lf task run: its own line, before any launch
+detach_task_run(argv)       // no Run involved
+delegate_current(input)
+  worker_step() → Run::Worker   // always Here
+delegate(run, …)
+  only a work session is handed to the holder</code></pre>
+<p>Worker is exactly managed and headless. <code>Run</code> is only ever about an agent.</p></div>
 </div>
-<div class="box proposed">
-<p><span class="tag prop">proposed, if worker should mean something</span></p>
-<p>Worker = headless, runs detached, <strong>reports its run and its exit, not each turn</strong>. Codex turns are recorded and planning refreshed when the step ends.</p>
-<p class="muted">Then three states are three behaviors. It needs the server's turn-end work moved to step exit, which is its own change with its own risk.</p>
-</div>
-</div>
-<p><strong>Tested:</strong> normal path is the same either way. Failure: a worker killed mid-step. As built, the server has its turns up to the kill. Proposed, it has nothing after the step's start unless the exit path runs, so LOO-959's recovery would have to read the provider's transcript. That counterexample is why this isn't in the PR.</p>
+<p class="muted">Tested. Normal: <code>lf task run</code> detaches as today, by its own call; steps and Discord answers are workers. Failure: the correction turn inherits the step's env and stays a worker. Recovery: nothing reads the kind afterwards, so nothing changes. Counterexample kept: <code>lf -b task run</code> waits for the Graph today through the same detached call; the split has to keep that. It is a move of about twenty lines in <code>transport.rs</code> and <code>bin/lf.rs</code>, with no behavior change.</p>
 
-<h2>The name</h2>
-<div class="box proposed">
-<p><span class="tag prop">proposed</span> The comments already call it what it is: "Who keeps the provider running", "Retain the recorded <em>lifetime</em>", "the selected <em>lifetime</em>", "resume <em>lifetime</em>". Rename <code>harness::Run</code> to <code>Lifetime</code>. It reads true (<code>Launch { lifetime }</code>, <code>Delegation::Here { lifetime }</code>) and it leaves <code>Run</code> to LOO-953, where a run is a Graph's execution.</p>
+<h2>Smaller: say what a person sees first</h2>
+<div class="cols">
+<div class="box existing"><p><b>Glossary now</b></p><p>Work session: "A managed, interactive Session in a held terminal that survives its viewer."</p><p>Managed: "…reports each turn to the Machine server."</p></div>
+<div class="box proposed"><p><b>Proposed</b> <span class="tag prop">not built</span></p><p>Work session: the conversation of a Task, Wave or repository. The server keeps it running when you close the window, and tells it about steers while it is idle.</p><p>Turn reports stay in the Managed row as how that works.</p></div>
 </div>
-
-<h2>Who picks the state</h2>
-<p>The rule was "the command alone". As built there are four inputs, all written by lf and none settable by a flag a person passes:</p>
-<div class="wrap">
-<table>
-<thead><tr><th>Input</th><th>Gives</th></tr></thead>
-<tbody>
-<tr><td><code>LF_GRAPH_STEP=worker</code>, set by a Task's Graph on its steps; or the caller passing <code>worker</code></td><td>Worker</td></tr>
-<tr><td>Running inside a held terminal the server started</td><td>Managed</td></tr>
-<tr><td>On reopen, the Session's row: bound, or a primary conversation</td><td>Managed, else Bare</td></tr>
-<tr><td>Anything else</td><td>Bare, with <code>-b</code> or the terminal choosing interactive or headless</td></tr>
-</tbody>
-</table>
-</div>
-<p>That holds. The one exception is still <code>lf -b resume ID --message</code>, where a flag makes a resume a Worker turn; LOO-958 removes it.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>What is a worker?
-  <ol><li>As built: a managed launch that is headless and has no terminal. Say that in the docs, and keep three names.</li>
-  <li>Something of its own: it reports its run and exit, not each turn. A separate Task, after LOO-959 says how a killed worker is recovered.</li>
-  <li>Drop the third name: bare and managed, where managed is a conversation or a step.</li></ol></li>
-<li>Rename <code>harness::Run</code>:
-  <ol><li>To <code>Lifetime</code>, in this PR.</li>
-  <li>Leave it; LOO-953 picks other names.</li></ol></li>
-<li>Showing the state in <code>lf session list</code> and <code>lf ps</code>:
-  <ol><li>In this PR, derived from the Session row, not stored.</li>
-  <li>A follow-up Task.</li>
-  <li>Not needed.</li></ol></li>
-<li>The 45 remaining <code>parse_agent</code> / <code>HarnessKind::parse</code> call sites:
-  <ol><li>Check each in this PR; keep only those where text comes in.</li>
-  <li>Good enough.</li></ol></li>
-<li>Carried over: <code>Admitted</code> names the step that made it, not the store, Session and attachment it holds.
-  <ol><li>Rename to <code>Recording</code>.</li>
-  <li>Keep it.</li></ol></li>
+<li>Worker carrying "detach <code>lf task run</code>":
+  <ol><li>Split it in this PR, so Worker is only managed and headless.</li><li>Leave it; file a Task.</li><li>Leave it.</li></ol></li>
+<li>The type's name, now that the docs say "launch kind" and a message says "is a Run" for something else:
+  <ol><li>Keep <code>harness::Run</code>, as answered before.</li><li>Rename it <code>LaunchKind</code> in this PR.</li></ol></li>
+<li>The refusal "<code>ID is a Run (…); `lf resume` takes only Sessions</code>":
+  <ol><li>Reword in this PR to name it a worker or a batch.</li><li>Leave it to LOO-958, which owns <code>resume</code>.</li></ol></li>
+<li>Glossary rows for the four kinds:
+  <ol><li>Lead with what a person sees, mechanism second, as sketched.</li><li>Keep them as written.</li></ol></li>
+<li>The unchecked case, a work session that is neither bound nor primary reopening as a chat:
+  <ol><li>Check it in this PR, and add the row to the reopen test.</li><li>Hand it to LOO-958.</li></ol></li>
 </ol>
 </main>
-</body>
-</html>
+</body></html>

@@ -107,3 +107,35 @@ exercises all four harnesses against stand-in providers.
 - `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed.
 - `cargo nextest run -p loopflow-execution --lib -E 'test(harness::agent_process) | test(transport::registry)'` passed all 31 after correcting the batch and bound-session fixtures and checking interrupted paste bytes at the child. The earlier paste failure passed in isolation before the fixture edit. That run predates merging main at `14149fac0c` (#1960, which touched `harness/server_connection.js` and `harness/testdata/pi_rpc.py` but no launch path); gate reruns the suites on the merged tree. Gate and live demo remain.
 - Compress: `lf session list --on` and `lf session move -a` parse through `config::Agent::parse` (deleted `SessionOn`); the four `Capabilities` literals are rustfmt-formatted again. `cargo nextest run -p loopflow-execution --lib -E 'test(human_session::) | test(moves_bulk) | test(harness::tests)'` passed 48/48; execution clippy clean. No test exercises `--on`; the predicate is unchanged.
+
+## Review answers, 2026-11-17, second review (`scratch/concept-review.html`)
+
+Jack: "1a 2 --d ont really care but dont be biased by my previous answers. just
+do whatevers cleanest 3b. thats landing soon tho so tell them asap 4a 5n".
+"5n" is read as 5b (hand to LOO-958); n sits beside b.
+
+To build, with no behavior change:
+
+1. **Worker is only managed and headless.** `lf task run` detaching from its
+   terminal is that command's own fact, not a launch kind. Give it its own
+   call before any launch; drop the `worker: bool` argument of
+   `delegate_current` and the `run == Worker && graph_step()` test in
+   `delegate`, so a Worker always runs `Here` and only a work session is
+   handed to the holder. Keep `lf -b task run` waiting for the Graph as it
+   does today. Steps of a Task's Graph (`LF_GRAPH_STEP=worker`) and Discord
+   Wave answers stay workers.
+2. **Rename `harness::Run` to `LaunchKind`** (fields and variables `kind`).
+   The docs already say "launch kind"; "Run" also means a Graph's execution
+   (LOO-953) and a headless Session in the `lf resume` refusal.
+3. **Glossary rows lead with what a person sees**, mechanism second. Work
+   session: the conversation of a Task, Wave or repository; the server keeps
+   it running when its window closes and tells it about steers while idle.
+   Chat: a conversation in your terminal that ends with it. Worker: a headless
+   step of a Task's Graph (or a Discord Wave answer) the server follows turn by
+   turn. Batch: one headless answer returned to its caller. Turn reports stay
+   in the Managed and Bare rows. Say these are kinds of launch, and that a
+   Session can change kind (a chat bound to a Task reopens as a work session).
+
+Not in this PR, handed to LOO-958: the refusal text "`ID is a Run (…); lf
+resume takes only Sessions`", and checking whether a work session that is
+neither bound nor primary reopens from a terminal as a chat.

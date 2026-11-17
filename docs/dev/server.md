@@ -165,7 +165,7 @@ lets local clients request readiness from the selected installation; it does not
 select or install a different build. Machine has no service subcommands.
 
 Rust `server/`, Swift `ServerClient` / `ServerProtocol` and the shared fixtures
-under `rust/loopflow-execution/tests/fixtures/dto/server/` speak revision 5: one connection per client,
+under `rust/loopflow-execution/tests/fixtures/dto/server/` speak revision 6 (minimum 5): one connection per client,
 a negotiated revision, requests multiplexed by id, newline-delimited JSON on the
 Unix socket and one text frame per message on the remote WebSocket carrier.
 Control messages are bounded at 1 MiB; terminals and larger messages travel on

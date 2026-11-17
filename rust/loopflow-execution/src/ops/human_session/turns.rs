@@ -22,7 +22,7 @@ pub fn read(store: &SqliteStore, sessions: &mut [SessionRecord]) -> Result<()> {
         .iter_mut()
         .filter(|session| matches!(session.state, SessionState::Active | SessionState::Detached))
     {
-        session.turn = current(store, session.id.as_str(), Path::new(&session.cwd))?;
+        current(store, session)?;
         if session.availability.is_none()
             && handed_back(&session.turn)
             && !store.session_reports_status(session.id.as_str())?
@@ -39,14 +39,44 @@ fn handed_back(turn: &Option<SessionTurn>) -> bool {
 
 /// The transcript's last turn; ended where Loopflow recorded the end of the
 /// same turn when the transcript shows none.
-fn current(store: &SqliteStore, session: &str, cwd: &Path) -> Result<Option<SessionTurn>> {
-    let Some(conversation) = store.current_conversation(session)? else {
-        return Ok(None);
+fn current(store: &SqliteStore, session: &mut SessionRecord) -> Result<()> {
+    session.turn = None;
+    let Some(conversation) = store.current_conversation(session.id.as_str())? else {
+        return Ok(());
     };
-    crate::transcript::live::locate(store, &conversation, cwd)?
-        .and_then(|(harness, source)| crate::observe::transcript_turn(harness, &source))
-        .map(|turn| close(store, session, &conversation.thread, turn))
-        .transpose()
+    let Some((harness, source)) =
+        crate::transcript::live::locate(store, &conversation, Path::new(&session.cwd))?
+    else {
+        return Ok(());
+    };
+    let Some(reading) = crate::observe::transcript_current(harness, &source) else {
+        return Ok(());
+    };
+    if harness == HarnessKind::Codex {
+        let current = reading.turn.id.as_deref();
+        if session
+            .preview
+            .as_ref()
+            .is_none_or(|preview| Some(preview.provider_turn.as_str()) != current)
+        {
+            session.preview = reading.response.and_then(|(text, observed_at)| {
+                Some(crate::session::SessionPreview {
+                    provider_thread: conversation.thread.clone(),
+                    provider_turn: reading.turn.id.clone()?,
+                    observed_at,
+                    source: "codex_transcript".to_owned(),
+                    text,
+                })
+            });
+        }
+    }
+    session.turn = Some(close(
+        store,
+        session.id.as_str(),
+        &conversation.thread,
+        reading.turn,
+    )?);
+    Ok(())
 }
 
 /// End a turn its transcript leaves open where Loopflow recorded the end of
@@ -226,6 +256,18 @@ mod tests {
                 Some(SessionAvailability::Available)
             );
         }
+    }
+
+    #[test]
+    fn an_unavailable_transcript_does_not_retain_a_previous_turn() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+        let mut sessions = [raw(turn(TurnState::Running))];
+
+        read(&store, &mut sessions).unwrap();
+
+        assert_eq!(sessions[0].turn, None);
+        assert_eq!(sessions[0].availability, None);
     }
 
     #[test]

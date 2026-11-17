@@ -1182,7 +1182,7 @@ fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() 
     }
     fs::write(
         repo.join(".lf/graphs/repair.yaml"),
-        "- work\n- loop: work\n  step: decide\n",
+        "- loop:\n    - work\n    - decide\n",
     )
     .unwrap();
     fs::write(repo.join(".lf/graphs/probe.yaml"), "- xor:\n    router: route\n    paths:\n      repair:\n        description: Repair the work\n        graph: repair\n      skip:\n        description: Skip repairs\n- cmd: config set repo_root /must-not-write\n- work\n").unwrap();

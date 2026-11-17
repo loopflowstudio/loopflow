@@ -312,10 +312,12 @@ mod tests {
       pass:
         description: Continue
         steps: []
-- step: {name: sample, id: start}
-- loop: start
-- demo
-- loop: start
+- loop:
+    - loop:
+        - step: {name: sample, id: start}
+        - loop-or-next
+    - demo
+    - loop-or-next
 "#,
         )
         .unwrap();

@@ -238,6 +238,11 @@ launch. The preamble's environment goes (`Selection` is on `Request` since PR 1)
 `ssh::request`'s callers get kinds; the Clap → `Invocation` table is
 snapshot-tested.
 
+`lf task status <issue>` then has one human rendering, of the `task.status`
+body: PR 1 has two (`bin/lf.rs` renders the local `TaskStatus`;
+`waves::print_remote_task_status` renders a remote `TaskDetail`, with
+different lines). Both go when the CLI prints what `Read::read` answers.
+
 ### PR 4: Swift
 
 - `onMachine` keeps `serve`/`write` and names the Machine in the request's

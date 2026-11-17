@@ -88,7 +88,7 @@ While it runs:
 
 ```bash
 lf task status <ID>              # where it is, and why
-lf process list                            # live lf call trees: each Graph, its steps, their agents
+lf ps                            # what is running: each Session and Graph run, OS-confirmed
 ```
 
 ## 4. Pick up the conversation

@@ -138,11 +138,11 @@ as history; Task, worktree and PR are unchanged.
 
 ## Diagnose execution and accounts
 
-When work looks stuck, run `lf top` before guessing (`lf ps --json` for a
-snapshot). It shows live call trees, output rates, tokens, age, idle time,
-health and PIDs. Time alone never means dead. `lf mon prune --dry-run` shows
-cleanup candidates; plain prune removes dead records and orphaned provider
-groups. Never kill an `unclaimed` PID.
+When work looks stuck, run `lf ps --json` before guessing. It lists each live
+Session and Graph run with its PID and age, confirmed against the OS. Time
+alone never means dead. `lf machine doctor` lists strays: processes carrying an
+lf Session or run that nothing live claims. It kills nothing; neither do you
+unless you know what the process is.
 
 Check `lf account --json` (saved service authentication, offline) before
 proposing an account fix. Claude and Codex own native

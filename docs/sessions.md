@@ -201,8 +201,8 @@ A Task or Wave conversation's agent runs in a holder: one `lf holder run`
 process beside the server that keeps the terminals and agents of every such
 conversation. The server restarts on every install; a holder is never
 restarted for one. With ten Task conversations open, `ps` shows one
-`lf server run`, one `lf holder run` and ten agents; `lf ps` lists the
-holder once.
+`lf server run`, one `lf holder run` and ten agents; `lf ps` lists the ten
+conversations, not the holder.
 
 | Opened with | Runs in |
 |---|---|
@@ -451,7 +451,7 @@ again, steer again.
 
 ```bash
 lf task run LOO-12    # as each step settles, idle conversations on LOO-12 wake and report it
-lf process list       # no Task-update watcher per conversation
+lf ps                 # one row per conversation; no Task-update watcher beside each
 ```
 
 Leave Task conversations open while their Graphs run. When a Graph step

@@ -166,10 +166,10 @@ until stdin closes.
 ```bash
 lf wave show --all --subscribe --json         # every Wave's plan and Tasks
 lf task list --subscribe --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph runs and thread
 lf session list --subscribe --json            # conversations, with which ones are available for you
 lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
-lf process list --subscribe --json                      # live lf call trees
+lf ps --subscribe --json                      # live Sessions and Graph runs
 lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
 lf desktop view list --subscribe --json           # every plan a repository window shows
 ```

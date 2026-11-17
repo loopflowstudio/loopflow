@@ -327,3 +327,16 @@ Dropping other dead columns (LOO-935). `lf server stop` keeps its own path.
 - No replacement Process log beyond journal traces and `lf.log`.
 - Ship result columns live on the starting ship event row, not a new table.
 - `prepare_resume` stops leaving a second agent running.
+
+## Docs written for this change (describe intended behavior)
+
+`docs/telemetry.md` (What's running now, What happened, Is Loopflow healthy,
+Reference), `docs/troubleshooting.md` (What went wrong, Doctor, outcome_unknown,
+Disk, Stray agent processes, Many lf processes), `docs/getting-started.md`,
+`docs/surfaces.md`, `docs/sessions.md`, `docs/orchestration.md`,
+`docs/agent-api.md`, `docs/index.md`, `docs/ops.md`, `docs/work.md`,
+`docs/glossary.md`, `docs/security.md`, `docs/lf-reference.md` preamble;
+builtin skills `repo_operate.md`, `task_operate.md`, `wave_operate.md`.
+`docs/dev/*` still describe the Process table; slice 4 updates them with the
+code. The `lf ps` text sample in telemetry.md is the column set slice 4 builds
+(scope, kind, harness or graph, title or step, pid, state, age).

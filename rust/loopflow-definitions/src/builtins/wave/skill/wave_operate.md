@@ -72,9 +72,8 @@ is a valid result only when every started Task you own already has a
 disposition.
 
 - **Look for a live Graph first.** In `lf task status <issue> --json`, check
-  every Graph in `execution.work.graphs` and every unfinished Process in
-  `execution.work.processes` against `lf ps --json`. A live process makes the
-  Task moving, whoever launched it.
+  every Graph in `execution.work.graphs` against `lf ps --json`. A live run
+  makes the Task moving, whoever launched it.
 - **Repair before reporting a blocker.** Read the failed step's log and look at
   what it changed. Fix the cause if you can, then relaunch the remaining work
   with `lf task run <issue> <graph> --reason "<what changed>"`. A stopped Graph

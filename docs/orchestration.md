@@ -73,7 +73,7 @@ lf graph ship-api --context --json       # what the first step would receive; la
 
 Without `-i` or `-b`, steps run headless except `interactive:` ones, which open
 here ([below](#where-a-person-takes-part)). A failed step stops the Graph. A
-stopped Graph is history: inspect it with `lf process show ID`, then
+stopped Graph is history: inspect it with `lf graph show <RUN_ID>`, then
 start fresh work. Nothing resumes it.
 
 Mechanical steps ride along as commands:
@@ -247,7 +247,7 @@ lf task run LOO-12 --pool lab --rent code         # a free lab machine, else ren
 
 The Task's Graph runs on a free machine from your `lab` pool, or on one rented
 from the `code` on-demand when none is free. When it ends, its Sessions and
-Processes are copied back here before a rented machine is given back. Adding
+Graph runs are copied back here before a rented machine is given back. Adding
 machines, pools and on-demands is under [Machines](ops.md#machines).
 
 ## Goals

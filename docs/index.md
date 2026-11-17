@@ -120,9 +120,9 @@ A Skill supplies instructions; a Graph composes skills and mechanical operations
 A Task owns one change, its checkout and PRs. A Wave keeps the objective
 and memory; its planning holds the Tasks, KRs and targets; the Wave names the graph its Tasks take up by default.
 
-Process records an actual lf command process. LfSession keeps the conversation,
-including headless work. A running Graph is one lf process and the step processes
-it starts. A conversation can outlive its command. A Graph whose
+LfSession keeps the conversation, including headless work, and the pid of the
+agent it runs. A running Graph is one lf process and the steps it starts; the
+run records its own pid and result. A conversation can outlive its command. A Graph whose
 command stopped stays as history; fresh work is launched explicitly.
 
 Read the [contract and cutover status](dev/reference-cutover.md#cutover-status)

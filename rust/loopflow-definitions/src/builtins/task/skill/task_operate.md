@@ -27,8 +27,7 @@ Finish with one disposition and what showed it:
 ready for anyone: `lf sync`, resolve conflicts, verify, push, reread status.
 
 **Never start a second Graph process.** A live one is left running, and unknown
-liveness is not permission. A run in status doesn't mean a live process: check
-each Graph and unfinished Process against `lf ps --json`.
+liveness is not permission. Check each Graph in status against `lf ps --json`.
 
 ## Workflow
 

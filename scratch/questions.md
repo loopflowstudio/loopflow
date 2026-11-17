@@ -41,3 +41,16 @@ agent's Bash with no sandbox; a sandboxed read is untested.
 ## Open choices (headless calls; reversible)
 
 See the plan's "Decisions" for the calls made at kickoff.
+
+## Raised while writing docs
+
+- `lf top` refreshed in place; the docs give `lf ps` no refresh mode, only
+  `lf ps --subscribe --json` (a served read). Should `lf ps` keep a refreshing
+  terminal view, or is `--subscribe` enough?
+- Does `lf ps` list `idle` conversations held by the holder (agent alive,
+  waiting for a person), or only Sessions mid-turn and Graph runs? Docs list
+  them, with state `idle`.
+- `lf graph show <NAME>` inspects an authored Graph today; docs make it also
+  take a run id. A run id and a Graph name can't collide (UUID vs slug), but
+  `lf graph runs show <RUN>` would keep the two apart. Docs use
+  `lf graph show <RUN_ID>`.

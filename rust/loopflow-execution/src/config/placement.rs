@@ -144,6 +144,9 @@ pub struct OnDemandDeclaration {
     pub max_machines: u32,
     pub max_usd_per_hour: loopflow_storage::rental::Usd,
     pub hours: f64,
+    /// Written only when set, so a released lf that lacks it still reads the file.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub logins: Vec<loopflow_storage::provider::Provider>,
 }
 
 impl Default for OnDemandDeclaration {
@@ -160,6 +163,7 @@ impl Default for OnDemandDeclaration {
             max_machines: 0,
             max_usd_per_hour: loopflow_storage::rental::Usd::ZERO,
             hours: loopflow_storage::rental::DEFAULT_HOURS,
+            logins: Vec::new(),
         }
     }
 }

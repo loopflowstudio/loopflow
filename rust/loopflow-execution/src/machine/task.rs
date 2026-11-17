@@ -131,6 +131,10 @@ pub fn forwarding_environment(
             target.id.to_string(),
         ),
         (crate::config::USER_NAME_ENV.into(), user_name),
+        (
+            crate::machine::login::MACHINE_NAME_ENV.into(),
+            target.name(),
+        ),
     ];
     for name in [crate::config::AGENT_OVERRIDE_ENV, "LF_SETTINGS"] {
         if let Ok(value) = std::env::var(name) {

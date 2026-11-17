@@ -52,3 +52,14 @@ Choices made headless for review; the plan says what each passed over.
 - Slice 2: the `auth_browser_bindings` export in `config/migrate.rs` is
   deleted with the setting; an old store's bindings are no longer copied to
   config, since nothing reads them.
+- Slice 3: `--logins` is stored in the `ondemands.<name>` config template
+  (`OnDemandDeclaration.logins`), written only when set, because templates live
+  in `~/.lf/config.yaml` and `OnDemandDeclaration` denies unknown fields: a
+  released lf reading a template with `logins` fails to load it. Passed over:
+  an `ondemands` store column, which the docs named but no template row holds.
+- Slice 3: the launch probe runs with the launch's env, so a per-run
+  `CLAUDE_CODE_OAUTH_TOKEN` or API key counts only if the client's own status
+  command sees it. Not checked against a real token.
+- Slice 3: the launch probe deadline is 2 s; a slower client launches anyway.
+- Slice 3: `lf ondemand rent` (by hand) signs nothing in; its hint names
+  `lf machine login <provider> <label>`. Only `--rent` placement prepares.

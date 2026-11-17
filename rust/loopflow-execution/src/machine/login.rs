@@ -92,20 +92,23 @@ fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result
     }
     login.answer(code)?;
     login.finish(code)?;
-    match claude_status(machine)? {
-        ClaudeStatus {
-            logged_in: true,
-            email,
-            subscription_type,
+    match probe(machine, Provider::Claude, PROBE_DEADLINE) {
+        LoginRow {
+            state: LoginState::SignedIn,
+            account,
+            ..
         } => {
-            let account = email.as_deref().unwrap_or("an account with no email");
-            match subscription_type {
-                Some(plan) => println!("{name}: Claude signed in as {account} ({plan})"),
-                None => println!("{name}: Claude signed in as {account}"),
+            match account {
+                Some(account) => println!("{name}: Claude signed in as {account}"),
+                None => println!("{name}: Claude signed in"),
             }
             Ok(())
         }
-        ClaudeStatus { .. } => bail!("Claude's login finished but {name} reports signed out"),
+        LoginRow {
+            state: LoginState::SignedOut,
+            ..
+        } => bail!("Claude's login finished but {name} reports signed out"),
+        LoginRow { .. } => bail!("Claude's login finished but {name} could not say who it is"),
     }
 }
 
@@ -137,16 +140,17 @@ fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
         }
     }
     login.finish(&code)?;
-    match codex_status(machine) {
-        Status::SignedIn(account) => {
+    let LoginRow { state, account, .. } = probe(machine, Provider::Codex, PROBE_DEADLINE);
+    match state {
+        LoginState::SignedIn => {
             println!(
                 "{name}: Codex signed in ({})",
                 account.as_deref().unwrap_or("no account named")
             );
             Ok(())
         }
-        Status::SignedOut => bail!("Codex's login finished but {name} reports signed out"),
-        Status::Unknown => bail!("Codex's login finished but {name} could not say who it is"),
+        LoginState::SignedOut => bail!("Codex's login finished but {name} reports signed out"),
+        LoginState::Unknown => bail!("Codex's login finished but {name} could not say who it is"),
     }
 }
 
@@ -213,33 +217,9 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
         return serde_json::from_slice(&output)
             .with_context(|| format!("{}'s logins were unreadable", name(machine)));
     }
-    let row = |provider, status: Status| {
-        let (state, account) = match status {
-            Status::SignedIn(account) => (LoginState::SignedIn, account),
-            Status::SignedOut => (LoginState::SignedOut, None),
-            Status::Unknown => (LoginState::Unknown, None),
-        };
-        LoginRow {
-            provider,
-            state,
-            account,
-        }
-    };
-    let claude = match claude_status(machine) {
-        Ok(ClaudeStatus {
-            logged_in: true,
-            email,
-            subscription_type,
-        }) => Status::SignedIn(match (email, subscription_type) {
-            (Some(email), Some(plan)) => Some(format!("{email} ({plan})")),
-            (email, plan) => email.or(plan),
-        }),
-        Ok(_) => Status::SignedOut,
-        Err(_) => Status::Unknown,
-    };
     let mut rows = vec![
-        row(Provider::Claude, claude),
-        row(Provider::Codex, codex_status(machine)),
+        probe(machine, Provider::Claude, PROBE_DEADLINE),
+        probe(machine, Provider::Codex, PROBE_DEADLINE),
     ];
     for service in crate::provider_auth::operations::account_status::report(None)
         .await?
@@ -273,52 +253,142 @@ pub async fn print_logins(machine: &Machine, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// A client's answer to "who is signed in here?".
-enum Status {
-    SignedIn(Option<String>),
-    SignedOut,
-    Unknown,
+/// Asks `provider`'s own client on `machine` who is signed in. A client that
+/// is missing, slower than `deadline` or unreadable answers `unknown`.
+pub fn probe(machine: &Machine, provider: Provider, deadline: Duration) -> LoginRow {
+    let (state, account) = status_argv(provider)
+        .and_then(|argv| command(machine, argv).ok())
+        .map_or((LoginState::Unknown, None), |mut command| {
+            answer(provider, &mut command, deadline)
+        });
+    LoginRow {
+        provider,
+        state,
+        account,
+    }
 }
 
-/// What `claude auth status --json` reports; it exits 1 when signed out.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ClaudeStatus {
-    pub logged_in: bool,
-    pub email: Option<String>,
-    pub subscription_type: Option<String>,
-}
-
-pub fn claude_status(machine: &Machine) -> Result<ClaudeStatus> {
-    let output = command(machine, &["claude", "auth", "status", "--json"])?
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .context("ask Claude for its login")?;
-    serde_json::from_slice(&output.stdout)
-        .map_err(|_| anyhow!("`claude auth status` on {} was unreadable", name(machine)))
-}
-
-/// `codex login status`: exit 0 `Logged in using ChatGPT`, exit 1 `Not logged in`.
-fn codex_status(machine: &Machine) -> Status {
-    let Ok(output) = command(machine, &["codex", "login", "status"])
-        .and_then(|mut command| Ok(command.stdin(Stdio::null()).output()?))
-    else {
-        return Status::Unknown;
+/// The launch check: whether `harness`'s client here, with the launch's
+/// `env`, definitely has no login. Anything short of a definite answer
+/// launches: lf never refuses a working login on its own misreading.
+pub fn signed_out_here(harness: &str, env: &std::collections::BTreeMap<String, String>) -> bool {
+    let Some(provider) = harness.parse::<Provider>().ok() else {
+        return false;
     };
-    let said = format!(
-        "{}{}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+    let Some(argv) = status_argv(provider) else {
+        return false;
+    };
+    let mut command = local_command(argv);
+    command.envs(env);
+    let started = std::time::Instant::now();
+    let (state, _) = answer(provider, &mut command, LAUNCH_PROBE_DEADLINE);
+    tracing::debug!(
+        harness,
+        state = state.as_str(),
+        elapsed_ms = started.elapsed().as_millis(),
+        "login probe"
     );
-    match output.status.code() {
-        // An API key login reads `Logged in using an API key - sk-…`; only the method crosses.
-        Some(0) => Status::SignedIn(said.lines().find_map(|line| {
-            let method = line.trim().strip_prefix("Logged in using ")?;
-            Some(method.split(" - ").next().unwrap_or(method).to_string())
-        })),
-        Some(1) if said.contains("Not logged in") => Status::SignedOut,
-        _ => Status::Unknown,
+    state == LoginState::SignedOut
+}
+
+/// The name the launching Machine gives this one, so the sign-in advice a
+/// launch here prints is the command that works where it is read.
+pub const MACHINE_NAME_ENV: &str = "LF_MACHINE_NAME";
+
+fn launcher_name() -> Option<String> {
+    std::env::var(MACHINE_NAME_ENV)
+        .ok()
+        .filter(|name| !name.is_empty())
+}
+
+/// The command that signs this Machine in to `harness`, as whoever launched
+/// here would type it.
+pub fn sign_in_command(harness: &str) -> String {
+    match launcher_name() {
+        Some(name) => format!("lf machine login {harness} {name}"),
+        None => format!("lf machine login {harness}"),
+    }
+}
+
+/// `mini has no Codex login`, naming this Machine as its launcher does.
+pub fn no_login(harness: &str) -> String {
+    let provider = match harness.parse::<Provider>() {
+        Ok(provider) => provider.display_name(),
+        Err(_) => harness,
+    };
+    let machine = launcher_name().unwrap_or_else(|| "This Machine".to_string());
+    format!("{machine} has no {provider} login")
+}
+
+/// How long `logins` and a finished sign-in wait for a client, SSH included.
+const PROBE_DEADLINE: Duration = Duration::from_secs(30);
+/// How long a launch waits for its login probe before launching anyway.
+/// `claude auth status` took 0.34–0.39 s here (2026-11-17), Codex 0.05 s.
+const LAUNCH_PROBE_DEADLINE: Duration = Duration::from_secs(2);
+
+fn status_argv(provider: Provider) -> Option<&'static [&'static str]> {
+    match provider {
+        Provider::Claude => Some(&["claude", "auth", "status", "--json"]),
+        Provider::Codex => Some(&["codex", "login", "status"]),
+        _ => None,
+    }
+}
+
+/// `claude auth status --json` exits 1 with `loggedIn: false` when signed out;
+/// `codex login status` exits 0 `Logged in using ChatGPT`, 1 `Not logged in`.
+fn answer(
+    provider: Provider,
+    command: &mut Command,
+    deadline: Duration,
+) -> (LoginState, Option<String>) {
+    let Ok(output) = crate::os_process::bounded_output(command, deadline) else {
+        return (LoginState::Unknown, None);
+    };
+    match provider {
+        Provider::Claude => {
+            #[derive(Deserialize)]
+            #[serde(rename_all = "camelCase")]
+            struct Claude {
+                logged_in: bool,
+                email: Option<String>,
+                subscription_type: Option<String>,
+            }
+            match serde_json::from_slice::<Claude>(&output.stdout) {
+                Ok(Claude {
+                    logged_in: true,
+                    email,
+                    subscription_type,
+                }) => (
+                    LoginState::SignedIn,
+                    match (email, subscription_type) {
+                        (Some(email), Some(plan)) => Some(format!("{email} ({plan})")),
+                        (email, plan) => email.or(plan),
+                    },
+                ),
+                Ok(_) => (LoginState::SignedOut, None),
+                Err(_) => (LoginState::Unknown, None),
+            }
+        }
+        Provider::Codex => {
+            let said = format!(
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            match output.status.code() {
+                // An API key login reads `Logged in using an API key - sk-…`; only the method crosses.
+                Some(0) => (
+                    LoginState::SignedIn,
+                    said.lines().find_map(|line| {
+                        let method = line.trim().strip_prefix("Logged in using ")?;
+                        Some(method.split(" - ").next().unwrap_or(method).to_string())
+                    }),
+                ),
+                Some(1) if said.contains("Not logged in") => (LoginState::SignedOut, None),
+                _ => (LoginState::Unknown, None),
+            }
+        }
+        _ => (LoginState::Unknown, None),
     }
 }
 
@@ -618,9 +688,7 @@ fn not_installed(provider: Provider, target: &str) -> anyhow::Error {
 /// `BROWSER=true` keeps the client from opening a window of its own.
 fn command(machine: &Machine, argv: &[&str]) -> Result<Command> {
     if here(machine) {
-        let mut command = Command::new(argv[0]);
-        command.args(&argv[1..]).env("BROWSER", "true");
-        return Ok(command);
+        return Ok(local_command(argv));
     }
     let script = format!(
         "{}; BROWSER=true exec {}",
@@ -638,6 +706,12 @@ fn command(machine: &Machine, argv: &[&str]) -> Result<Command> {
         )?)
         .arg(script);
     Ok(command)
+}
+
+fn local_command(argv: &[&str]) -> Command {
+    let mut command = Command::new(argv[0]);
+    command.args(&argv[1..]).env("BROWSER", "true");
+    command
 }
 
 fn here(machine: &Machine) -> bool {

@@ -3135,6 +3135,10 @@ pub enum OndemandCommand {
         /// Above this hourly price nothing is rented
         #[arg(long, value_name = "USD")]
         max_usd_per_hour: loopflow_storage::rental::Usd,
+        /// Providers each rental is signed in to as it starts; unset, every
+        /// provider signed in here
+        #[arg(long, value_delimiter = ',', value_name = "PROVIDER")]
+        logins: Vec<loopflow_execution::provider_auth::Provider>,
     },
     /// Templates, budgets and the machines each has rented
     List {

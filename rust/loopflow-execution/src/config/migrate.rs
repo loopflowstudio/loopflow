@@ -333,6 +333,7 @@ fn export(conn: &Connection) -> Result<Export> {
                 max_usd_per_hour: loopflow_storage::rental::Usd::parse(&price)
                     .map_err(anyhow::Error::msg)?,
                 hours,
+                logins: Vec::new(),
             };
             super::settings::insert(
                 exports

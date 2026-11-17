@@ -306,14 +306,31 @@ checks on both ends; LOO-913's fallback and wait rules.
    Not yet: the logins rows carry no last refusal (slice 4, with `--refused`);
    the probes have no timeout (slice 3 bounds them for the launch check);
    `lf machine credentials inspect` still answers service transfers (slice 4).
-3. **Next. Launch check and rentals.** The harness login probe feeding the revoked-
-   login path with the new advice, bounded by a timeout (fail-open to unknown).
-   The probe is one type: `login.rs` now has `Status` (private, carries the
-   account) beside the public `LoginState`, and `claude_status` returns its
-   raw `ClaudeStatus`; fold them into one `signed_in(account) | signed_out |
-   unknown` the launch check and `logins` both read; `logins` on on-demand templates;
-   rental prepare signs in the list; delete the forward agent-
-   login names and `read_for_rental`.
+3. **Launch check and rentals.** **Built (2026-11-17)**, still on the `match`
+   (#1966 open). `login::probe(machine, provider, deadline) -> LoginRow` is the
+   one probe: `logins`, a finished sign-in and the launch check read it; the
+   private `Status` and public `ClaudeStatus`/`claude_status` are gone. Every
+   `run_agent` attempt goes through `_run_signed_in`: a definite signed-out
+   (`login::signed_out_here`, the launch's env, 2 s deadline, fail-open) is an
+   `AgentFailure::CredentialInvalidated` before the agent starts, so the order
+   moves to the next provider or stops with `<Machine> has no Codex login; run
+   `lf machine login codex <Machine>``. The launcher passes the name it gives
+   the target in `LF_MACHINE_NAME` (`machine::task::forwarding_environment`);
+   a mid-run revocation prints the same advice. Measured here: `claude auth
+   status --json` 0.34–0.39 s, `codex login status` 0.02–0.05 s, inside the
+   0.5 s p95 bound, so the check stays on every launch. `--logins` on
+   `lf ondemand add` is a field of the `ondemands.<name>` config template, not
+   a store column: templates live in `~/.lf/config.yaml` (the plan's "store"
+   premise was wrong), so no migration. Rental prepare signs in to that list,
+   else every provider `logins` shows signed in here, GitHub first for the
+   clone; the planning-transport check for Linear is gone. Deleted:
+   `AGENT_LOGIN_ENV`, `AGENT_LOGIN_FILES`, `carries_agent_login`,
+   `read_for_rental` and its test; `lf ondemand rent` no longer refuses
+   without a forwarded login. Fixture:
+   `session_launch_contract::a_signed_out_machine_refuses_the_launch_with_the_command_that_signs_it_in`
+   (remote and here), and the forward test now carries a generic per-run secret
+   (`forwarded_secrets_reach_a_remote_launch_only_by_name`). Not tested: rental
+   prepare's sign-in loop end to end (no rental fixture reaches prepare).
 4. **Retire `lf account`.** Services through `lf machine login`, `logout`,
    `--refused`; delete the command family, routes, fixtures, Swift cases;
    docs and builtin skills.

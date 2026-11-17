@@ -285,7 +285,9 @@ checks on both ends; LOO-913's fallback and wait rules.
    line must come from stderr, since stdout's unterminated paste prompt flushes
    last. Codex still errors with "not built yet" until slice 2.
    Remaining for a person at gate: a real `lf machine login claude mini`.
-2. **Codex, the command approver, this Machine as target.** Device auth on
+2. **Next.** PR #1966 still open and origin/main unchanged since the base
+   (checked 2026-11-17 after slice 1), so slice 2 builds on the `match` in
+   `machine/login.rs`. **Codex, the command approver, this Machine as target.** Device auth on
    either target; `approvers` setting and `LF_APPROVE_*` contract; `machine
    logins`. Remove `auth_browsers` and the access-profile code.
 3. **Launch check and rentals.** The harness login probe feeding the revoked-

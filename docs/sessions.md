@@ -311,52 +311,53 @@ available. A confirmed result clears its saved submission when it appears.
 
 ```bash
 lf task status LOO-12
-# conversation: died 12:01 (exit 137) · started again 12:01
-# run: died at implement 08:57 · carried again 09:14 (attempt 1)
+# Conversation: died 12:01 (exit 137) · starting again
+# Conversation: running (started again 12:01, attempt 1)
 ```
 
-A Task's conversation that ended without you quitting it comes back on its
+A Task's work session that ended without you quitting it comes back on its
 own: killed, crashed, taken down with its holder, or ended by a logout or
 reboot. The server starts it again from its saved thread, in a holder, on the
 provider and login it was using; a Desktop pane on it reconnects. A turn cut
 off by the crash is not replayed. Steers sent meanwhile are delivered at its
 first boundary.
 
-A conversation you quit stays quit: `/exit`, Ctrl+D or Ctrl+C at the prompt,
-closing it from Desktop, or `lf task interrupt`. Open it again with
-`lf resume --task <ID>`.
+A work session you quit stays quit: `/exit`, Ctrl+D or Ctrl+C at the prompt.
+Open it again with `lf resume --task <ID>`.
 
 ```bash
 lf task status LOO-12
-# conversation: quit 12:03 · lf resume --task LOO-12
+# Conversation: quit 12:03; `lf resume --task LOO-12` opens it
 ```
 
 A Task run whose `lf task run` or `lf ship` died is carried again the same
-way, from the step it reached. A run that was waiting for you at an
-interactive step stops there again; being carried again never approves
-Auto-Ship you had not approved.
+way, from the step it reached, and its workers with it. A run that was waiting
+for you at an interactive step stops there again; being carried again never
+approves Auto-Ship you had not approved.
 
 After a reboot the server brings work back one start at a time, the most
-recently active Task first. Each start waits a minute after a death, doubling
-to 30 minutes if it keeps dying. After 5 deaths in a row with no finished turn
-or step, lf stops trying and says which command continues:
+recently active Task first. The first start after a death is immediate; each
+later one waits a minute, doubling to 30 minutes if it keeps dying. After 5
+starts with no finished turn or step, lf stops trying and says which command
+continues:
 
 ```bash
 lf task status LOO-12
-# conversation: died 5 times since 09:14 (last: exit 1) · lf resume --task LOO-12
-# run: died 5 times at implement · lf task run LOO-12
+# Conversation: died 09:14 (exit 1) · started 5 times; `lf resume --task LOO-12` opens it
+# Run died 5 times at implement; `lf task run LOO-12` starts it again
 ```
 
 A start that cannot happen says why instead of retrying silently, for
-example `no PTY left: 511 in use (kern.tty.ptmx_max)`. `lf machine doctor`
-reports how many PTYs are left.
+example `last start failed: claude is not installed on this Machine's PATH`.
+`lf machine doctor` reports how many PTYs are left: each work session's
+holder takes one, and the Machine runs out of them first.
 
 | After a kill or reboot… | |
 |---|---|
-| a Task's conversation | starts again unless you quit it |
-| a Task's run | carried again from the step it reached |
-| a Wave's or repository's conversation | stays stopped: `lf resume SESSION` |
-| a conversation from `lf <skill>` in your terminal, or `-b` | stays stopped |
+| a Task's work session | starts again unless you quit it |
+| a Task's run and its workers | carried again from the step it reached |
+| a Wave's or repository's work session | stays stopped: `lf resume SESSION` |
+| a chat (`lf <skill>` in your terminal) or a batch (`-b`) | stays stopped |
 | only the server crashed | nothing to do: agents kept running and views reconnect |
 | Task worktrees, branches, PRs | untouched |
 | steers and reports | saved; delivered at the agent's next boundary |

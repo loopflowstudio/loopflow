@@ -25,8 +25,9 @@ conversation, and the Machine server starts it in the background within
 seconds. When its agent is not installed, the server records why on the
 conversation.
 An in-place `lf -i task run` uses its current terminal instead.
-`lf resume` in its worktree reattaches to it. A conversation you quit stays
-quit; one that was killed comes back on its own
+`lf resume` in its worktree reattaches to it. A work session you quit stays
+quit; one that was killed comes back on its own, and `lf task status` says
+which (`Conversation: died 12:01 (exit 137) · starting again`)
 ([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
 Every checked-out Task can run its conversation; there is no background
 conversation cap.

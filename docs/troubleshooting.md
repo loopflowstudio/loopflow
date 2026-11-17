@@ -15,15 +15,16 @@ lf resume                       # return to this scope’s conversation
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
-| A Task's conversation and run | Started again by the server unless you quit or stopped them | `lf task status <ID>` |
+| A Task's work session and run | Started again by the server unless you quit or stopped them | `lf task status <ID>` |
 | A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
 checkout, with the Task's thread and its open PR, at the step the last one
 stopped on; the steps before it stay done. When a run's `lf task run` or
-`lf ship` died rather than stopped, the server runs it again for you; after 5
-deaths in a row `lf task status` names the command instead
+`lf ship` died rather than stopped, the server runs it again for you, the
+first time at once; after 5 starts with no finished step `lf task status` names
+the command instead
 ([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
 
 ## What went wrong

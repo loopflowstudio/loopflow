@@ -71,7 +71,7 @@ and the Task's viewing grace, even without a checkout. See
 [Sessions](sessions.md#come-back-to-a-conversation) for Task closure and quitting
 an agent.
 Logout or reboot ends live processes; when the server starts again it brings
-back each Task's conversation and run
+back each Task's work session and run
 ([after a kill or reboot](sessions.md#after-a-kill-a-crash-or-a-reboot)).
 
 ## Recover a submitted creation

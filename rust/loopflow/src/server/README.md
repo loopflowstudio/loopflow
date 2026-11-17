@@ -39,7 +39,7 @@ Work and credentials stay in place.
 
 ```sh
 kill -9 <pid of a Task conversation's claude>
-lf task status LOO-12   # conversation: died 12:01 (exit 137) · started again 12:01
+lf task status LOO-12   # Conversation: running (started again 12:01, attempt 1)
 ```
 
 A watcher thread (`recovery.rs`) reads the store when its planning, Session or
@@ -67,7 +67,9 @@ first reading after start is the restart and reboot case. Each reading:
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
    checkpoint. A carrier that exits on its own writes an outcome on its
-   process row; a dead carrier with none died.
+   process row; a dead carrier with none died. One count serves both
+   (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
+   step.
 4. **Retains**, at most every hour: closes Process rows whose OS process is
    gone, forgets finished ones nothing references, merges per-receipt usage,
    reclaims pages, then removes receipts of Processes proven dead
@@ -75,13 +77,17 @@ first reading after start is the restart and reboot case. Each reading:
 
 One start is in flight at a time: the next begins when the last one's
 agent attaches, or after 3 seconds, most recently updated Task first. Sessions
-and carriers share one backoff (1 minute doubling to 30) and stop after 5
-deaths without a finished turn or step; the Session and the Task run then
-show the command that continues. A start that fails records its reason on the
-Session (`agent_sessions.start_failure`, for example `claude is not
-installed on this Machine's PATH`), cleared by the next start that succeeds, and retries on the
-same backoff. Wave, repository and bare conversations are reported, never
-started.
+and carriers share one backoff: the first start after a death is immediate,
+later ones wait 1 minute doubling to 30, and after 5 starts without a finished
+turn or step the Session and the Task run show the command that continues. A
+start that fails records its reason on the Session
+(`agent_sessions.start_failure`, for example `claude is not installed on this
+Machine's PATH`), cleared by the next start that succeeds, and retries on the
+same backoff. A Session's `ended {at, by, exit_code}` and `start {attempts,
+last_started_at, next_at, gave_up, failure}` carry these facts to
+`lf session list`, `lf task status` and Desktop. Only a Task's work session is
+started; a Wave's or repository's work session, a chat and a batch are
+reported, never started.
 
 ## Local protocol, revision 7
 

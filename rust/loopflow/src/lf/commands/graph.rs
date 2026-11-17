@@ -762,13 +762,17 @@ enum StepExit {
     Interrupted,
 }
 
-/// Whether the Graph process may end a step early when its Task is interrupted.
+/// What a child of the Graph process is: whether an interrupted Task may end
+/// it early, and whether it is a step at all.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum StepKind {
     /// An agent turn ends at once; its Session records the interruption.
     Agent,
     /// An operation always finishes: stopping one midway strands its work.
     Operation,
+    /// The commit after a skill step always finishes too, and is no step:
+    /// the Graph's steps stay the ones it declares.
+    Commit,
 }
 
 impl RunningGraph<'_> {
@@ -846,7 +850,8 @@ impl RunningGraph<'_> {
         }
     }
 
-    /// Run `lf <args>` as a child and record its Process as this Graph's next step.
+    /// Run `lf <args>` as a child and record its Process as this Graph's next
+    /// step, unless it is the commit that follows one.
     async fn spawn(
         &self,
         label: &str,
@@ -864,14 +869,17 @@ impl RunningGraph<'_> {
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
         command.env(loopflow_execution::journal::GRAPH_STEP_ENV, "1");
         // The step runs as the id this Graph mints and records for it.
-        let step = LfProcessId::default();
-        command.env(loopflow_execution::journal::LF_RUN_ID_ENV, step.as_str());
+        let run = LfProcessId::default();
+        command.env(loopflow_execution::journal::LF_RUN_ID_ENV, run.as_str());
+        let step = (kind != StepKind::Commit).then_some(run);
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
         }
         command.args(args);
-        self.reserve_step(&step)?;
+        if let Some(step) = &step {
+            self.reserve_step(step)?;
+        }
         let admission = loopflow_execution::store::admission::lock_task_checkouts(
             &self.store.sqlite,
             &[self.cwd],
@@ -884,19 +892,21 @@ impl RunningGraph<'_> {
             Ok(child) => child,
             Err(error) => {
                 let error = anyhow::Error::new(error).context("could not execute Graph step");
-                self.store.sqlite.finish_graph_run(
-                    &step,
-                    loopflow_storage::rows::now_unix(),
-                    None,
-                    Some(&format!("{error:#}")),
-                )?;
+                if let Some(step) = &step {
+                    self.store.sqlite.finish_graph_run(
+                        step,
+                        loopflow_storage::rows::now_unix(),
+                        None,
+                        Some(&format!("{error:#}")),
+                    )?;
+                }
                 return Err(error);
             }
         };
         drop(admission);
-        if let Some(pid) = child.id() {
+        if let (Some(step), Some(pid)) = (&step, child.id()) {
             let birth = journal::process_started_at(pid).ok().flatten();
-            self.store.sqlite.record_graph_step_pid(&step, pid, birth)?;
+            self.store.sqlite.record_graph_step_pid(step, pid, birth)?;
         }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
         watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -916,15 +926,14 @@ impl RunningGraph<'_> {
         };
         drop(output);
         // A step that died before writing its end leaves what this Graph saw.
-        if let Ok(status) = &status {
+        if let (Some(step), Ok(status)) = (&step, &status) {
             self.store.sqlite.finish_graph_run(
-                &step,
+                step,
                 loopflow_storage::rows::now_unix(),
                 status.code(),
                 None,
             )?;
         }
-        let step = Some(step);
         // A new installation can select a newer child. Never read its result
         // through an older schema.
         self.store
@@ -1037,6 +1046,36 @@ fn answer_value(text: &str) -> Result<serde_json::Value, String> {
     })
 }
 
+impl RunningGraph<'_> {
+    /// Every skill step's edits become one commit, written and pushed by a
+    /// child `lf commit --step` (which also pushes commits the skill made
+    /// itself), so its message-writing agent runs in a Process of its own.
+    /// The commit is no step: it adds none to the Graph's record. A Graph
+    /// contributing to a Task that another run carries leaves the checkout's
+    /// edits to that run. Best-effort: the next step runs either way.
+    async fn commit_step(&self, step: &str) {
+        let contribution = self.task.is_some() && self.task_run.is_none();
+        if contribution
+            || !matches!(
+                loopflow_execution::git::intervention_state(self.cwd),
+                Ok(None)
+            )
+            || !loopflow_execution::ops::step_commit_pending(self.cwd)
+        {
+            return;
+        }
+        let mut args = ["commit", "--step", step].map(str::to_owned).to_vec();
+        // `commit-message` keeps its own agent; the run's writes the message
+        // only when it has none.
+        if let Some(agent) = &self.launcher.agent {
+            args.extend(["--agent".to_owned(), agent.clone()]);
+        }
+        if let Err(error) = self.spawn("commit", StepKind::Commit, &args).await {
+            tracing::warn!(%step, %error, "could not commit the step's edits");
+        }
+    }
+}
+
 #[async_trait]
 impl SkillExecutor for &RunningGraph<'_> {
     async fn checkpoint(&self, cursor: &ExecutionCursor) -> Result<()> {
@@ -1138,6 +1177,7 @@ impl SkillExecutor for &RunningGraph<'_> {
                 StepExit::Held => return Ok(SkillOutcome::Waiting),
                 StepExit::Interrupted => return Ok(SkillOutcome::Interrupted),
             }
+            self.commit_step(name).await;
             let Some(output) = &output else {
                 return Ok(SkillOutcome::Completed);
             };

@@ -1034,7 +1034,7 @@ fn create_process_context(
                 root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
             })
             .and_then(|root| {
-                ensure_journal_ignored(&root)?;
+                crate::git::exclude(&root, JOURNAL_EXCLUDE_ENTRY)?;
                 let mut dir = traces_root(&root).join(trace_id.as_str());
                 // Only an inherited Trace from before canonical storage can retain
                 // another directory name; a minted or already-present one cannot.
@@ -1650,46 +1650,6 @@ fn remove_process_receipt(context: &ProcessContext) {
             debug!(error = %error, "failed to remove live Process receipt");
         }
     }
-}
-
-fn ensure_journal_ignored(repo_root: &Path) -> Result<(), std::io::Error> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repo_root)
-        .args(["rev-parse", "--git-path", "info/exclude"])
-        .output()?;
-    if !output.status.success() {
-        return Err(std::io::Error::other(format!(
-            "git rev-parse --git-path info/exclude failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        )));
-    }
-
-    // `--git-path` answers relative to the repo when run at its root (main
-    // repos) and absolute for linked worktrees — absolutize before writing.
-    let mut exclude_path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
-    if exclude_path.is_relative() {
-        exclude_path = repo_root.join(exclude_path);
-    }
-    if let Some(parent) = exclude_path.parent() {
-        fs::create_dir_all(parent)?;
-    }
-
-    let existing = fs::read_to_string(&exclude_path).unwrap_or_default();
-    if existing
-        .lines()
-        .any(|line| line.trim() == JOURNAL_EXCLUDE_ENTRY)
-    {
-        return Ok(());
-    }
-
-    let mut updated = existing;
-    if !updated.is_empty() && !updated.ends_with('\n') {
-        updated.push('\n');
-    }
-    updated.push_str(JOURNAL_EXCLUDE_ENTRY);
-    updated.push('\n');
-    fs::write(exclude_path, updated)
 }
 
 #[cfg(test)]

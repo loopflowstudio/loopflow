@@ -440,6 +440,8 @@ pub struct HistoryCapture {
     pub cwd: std::path::PathBuf,
     pub repo: Option<String>,
     pub skill: Option<String>,
+    /// SHA-256 of the skill text this input launched with; absent for another input's.
+    pub skill_version: Option<String>,
     pub provider: Option<String>,
     pub model: Option<String>,
     pub interactive: bool,

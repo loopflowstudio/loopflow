@@ -729,7 +729,6 @@ fn graph_parsing_parity() {
     assert_eq!(skill.occurrence.as_ref().unwrap().graph, "sample");
     assert_eq!(graph.items[1].id, None);
     assert!(!graph.items[1].interactive);
-    assert_eq!(graph.items[1].returns, None);
 }
 
 #[test]
@@ -1922,7 +1921,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     write_graph(
         repo.path(),
         "two-loops",
-        "- cmd: sync --plan\n- implement-proof\n- loop: implement-proof\n  step: decide-proof\n- xor:\n    router: route-proof\n    paths:\n      alpha:\n        description: Check the plan\n        graph: plan-check\n      zeta:\n        description: Show the work\n        skill: demo-proof\n- loop: implement-proof\n  step: decide-proof\n- cmd: graph show no-such-graph\n",
+        "- cmd: sync --plan\n- loop:\n    - loop:\n        - implement-proof\n        - decide-proof\n    - xor:\n        router: route-proof\n        paths:\n          alpha:\n            description: Check the plan\n            graph: plan-check\n          zeta:\n            description: Show the work\n            skill: demo-proof\n    - decide-proof\n- cmd: graph show no-such-graph\n",
     );
     let task_graph = || {
         lf_json(
@@ -2093,7 +2092,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
 }
 
 #[test]
-fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
+fn three_nested_loops_each_return_to_their_own_first_step() {
     let repo = loopflow_test_support::TestRepo::new();
     support::bind_task_planning(&repo);
     let home = TempDir::new().unwrap();
@@ -2107,12 +2106,12 @@ fn three_nested_loops_return_to_named_occurrences_of_one_skill() {
     observe_planning(&task, &checkout);
     repo.create_branch("nested-loops");
     write_skill(repo.path(), "work-proof", "Fixture step.");
-    // One skill three times, so each loop names its occurrence; the default
-    // decider closes the inner region first and the outer one last.
+    // One skill three times, in three nested blocks; `loop-or-next`
+    // closes the inner region first and the outer one last.
     write_graph(
         repo.path(),
         "nested",
-        "- step: {name: work-proof, id: outer}\n- step: {name: work-proof, id: middle}\n- step: {name: work-proof, id: inner}\n- loop: inner\n- loop: middle\n- loop: outer\n",
+        "- loop:\n    - step: {name: work-proof, id: outer}\n    - loop:\n        - step: {name: work-proof, id: middle}\n        - loop:\n            - step: {name: work-proof, id: inner}\n            - loop-or-next\n        - loop-or-next\n    - loop-or-next\n",
     );
     let catalog = lf_json(repo.path(), home.path(), &["graph", "list", "--json"]);
     let preview = catalog
@@ -2238,8 +2237,8 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
         String::from_utf8_lossy(&ended.stderr)
     );
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
-    // Running the Graph left a file uncommitted; ending kept it.
-    assert!(checkout.join(".gitignore").exists());
+    // Running the Graph left its prompt files; ending kept them.
+    assert!(checkout.join(".lf/prompts").exists());
 }
 
 #[test]
@@ -2339,7 +2338,7 @@ fn claude_deciding_step_records_native_answer_and_advances() {
         write_graph(
             repo.path(),
             "claude-decision",
-            "- work-proof\n- loop: work-proof\n  step: decide-proof\n- publish-proof\n",
+            "- loop:\n    - work-proof\n    - decide-proof\n- publish-proof\n",
         );
         write_executable(
             &bin.join("claude"),

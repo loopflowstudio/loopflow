@@ -50,6 +50,20 @@ and Task, and shows how turn time grows as context grows. `lf context` shows
 each budget, where it was set and current usage;
 [configuration](config.md#context-budgets) says how to change them.
 
+## How a Task went
+
+```bash
+lf task status LOO-12 --json | jq .summary   # one row, written when the Task completes or is abandoned
+```
+
+The summary names how the Task ended and when, the Graph it ran, how many times
+each loop went around again (`loop_passes`, by the deciding step), its Auto-Ship
+log by kind (`ship_events`), wall time from its first Graph process, and the
+first line its last `reflect` step said. It is `null` until the Task ends.
+Cost stays in `lf session usage --task`. Each recorded run also carries
+`skill_version`, the SHA-256 of the skill text it launched with, in
+`lf session usage --json`, so two runs of one skill name compare by its text.
+
 ## What happened
 
 ```bash

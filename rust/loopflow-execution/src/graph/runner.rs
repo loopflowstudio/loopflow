@@ -828,7 +828,7 @@ mod tests {
         .unwrap();
         std::fs::write(
             repo.path().join(".lf/graphs/inner.yaml"),
-            "- work\n- loop: work\n  step: decide\n",
+            "- loop:\n    - work\n    - decide\n",
         )
         .unwrap();
         let items = vec![

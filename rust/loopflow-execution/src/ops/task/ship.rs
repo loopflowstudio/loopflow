@@ -710,14 +710,14 @@ mod tests {
         };
         assert_eq!(at("start"), ShipStep::Run { from: None });
         assert_eq!(
-            at("demo"),
+            at("human-review"),
             ShipStep::Run {
-                from: Some("demo".into())
+                from: Some("human-review".into())
             }
         );
         assert_eq!(at("end"), ShipStep::Finished);
         let stopped = feature_at(TaskGraphPosition::Run {
-            step: "demo".into(),
+            step: "human-review".into(),
             at: "implement".into(),
             lf_process_id: "gone".into(),
             running: false,
@@ -737,7 +737,7 @@ mod tests {
     fn shipping_reads_what_happens_now_and_never_waits_on_a_person() {
         let repo = tempfile::tempdir().unwrap();
         let graph = feature_at(TaskGraphPosition::At {
-            step: "demo".into(),
+            step: "human-review".into(),
         });
         let handoff = TaskShipping {
             shipped_at: 5,
@@ -751,7 +751,7 @@ mod tests {
         let building = read(TaskState::Shipping, ProcessIdentityEvidence::Live, None);
         assert_eq!(building.shipped_at, 5);
         assert_eq!(building.state, ShippingState::Building);
-        assert_eq!(building.reason, "demo (stand-in)");
+        assert_eq!(building.reason, "human-review (stand-in)");
         // Unknown liveness is not a dead process.
         assert_eq!(
             read(TaskState::Shipping, ProcessIdentityEvidence::Unknown, None).state,

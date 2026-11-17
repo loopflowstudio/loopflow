@@ -11,18 +11,57 @@ the way you work and share it.
 ## Skills
 
 ```bash
-lf skill customize pr-message    # copies the builtin to .lf/skills/pr-message.md and prints the path
+lf skill customize pr-message    # writes .lf/skills/pr-message.md, an extension of the builtin, and prints the path
+lf skill customize gate --full   # copies the builtin's whole text instead
 lf audit focus on the token refresh path   # your .lf/skills/audit.md, with a message
 lf -a codex audit                # the same Skill on Codex
 ```
 
-A repository Skill replaces the builtin of the same name, for everyone who has
-your commit. Customize copies once, then keeps printing the existing file.
+Customize writes once, then keeps printing the existing file. A repository
+Skill without `extends` replaces the builtin of the same name, for everyone who
+has your commit; `--full` starts you from the builtin's text.
+
+The file customize writes adds to the builtin and keeps following it as it
+changes. Write only your section:
+
+```markdown
+---
+extends: builtin
+---
+## In this repository
+
+Run `make e2e` before publishing.
+```
+
+That file is the builtin with your section appended. `lf list skill` says
+which of your Skills extend a builtin and which replace one:
+
+```
+    lf skill gate (.lf/skills/gate.md, extends builtin)
+    lf skill qa (.lf/skills/qa.md, replaces builtin)
+```
 
 One Skill, one job: `design` writes the plan, `implement` builds it, `gate`
 judges whether it ships. Chain them in a Graph rather than writing one Skill
 that does everything. Pass work between steps through what already holds it:
 commits, and notes in `scratch/`.
+
+Each Skill step's edits become one commit, pushed unless you're on the default
+branch:
+
+```
+lf implement: Count retries per Task
+
+The board read attempts from the wrong row.
+```
+
+The `commit-message` Skill writes it on its own agent, so a cheap model can
+take that job alone: `lf skill customize commit-message`, then set `agent:
+claude:haiku` in its frontmatter.
+Without an answer the title is `lf implement: checkpoint`. `lf commit --step
+implement` runs the same thing by hand; plain `lf commit` has no prefix.
+The commit is no step of the Graph: its recorded steps stay the ones it
+declares.
 
 ## Pick the agent for each step
 
@@ -80,6 +119,7 @@ Mechanical steps ride along as commands:
 
 ```yaml
 # .lf/graphs/deliver.yaml (the builtin)
+- reflect                     # turn what you said during the Task into skill edits
 - gate                        # publish so CI starts, then review while it runs
 - cmd: land --wait-and-fix    # merge, repairing CI until it lands
 ```
@@ -88,18 +128,24 @@ Mechanical steps ride along as commands:
 
 ## Loops and branches
 
-`pursue` is a Graph with a backward edge:
+A `loop:` block runs again while its last step says so. `build`, the second
+half of `pursue`, is two of them:
 
 ```yaml
+# plan (builtin)
 - kickoff              # plan the change, risks answered
+- concept-review       # question the plan's premise before any code
 - write-docs           # edit the actual user docs before implementation
-- implement
-- concept-review
-- graph: refresh      # sync with main, then realign the plan
-- loop: implement     # loop-or-next decides: advance, iterate, or blocked
-- compress
-- qa                  # use the change through its real path before anyone demos it
-- loop: implement
+
+# build (builtin)
+- loop:
+    - loop:
+        - implement        # one chunk of the plan
+        - cmd: sync
+        - realign          # decides: next chunk, or on
+    - compress
+    - qa                   # use the change through its real path
+    - concept-review       # decides: the finished change, whole
 - pr-publish
 ```
 
@@ -117,17 +163,28 @@ attention now, tell the Task conversation. `lf open --file <path>` presents the
 original in an attached Desktop Files view. Internal changes with no
 documentation impact leave the docs alone.
 
-At each `loop:`, the deciding step reads the work and the plan and returns
-advance, iterate (back to the target, with direction) or blocked (with the
-question). There is no pass limit; iterate repeats as long as there's useful
-work. Name your own decider with `step:`:
+`qa` keeps what it learns about reaching each part of your product in
+`.lf/qa/`, one file per surface. The first line says when to read it, so a run
+lists them and opens only the ones its change touches:
 
-```yaml
-- step: {name: implement, id: first}
-- implement
-- loop: first
-  step: my-decider
 ```
+$ head -n 1 .lf/qa/*.md
+==> .lf/qa/desktop.md <==
+Read when the change reaches Loopflow Desktop: its windows, panes or bundled `lf`.
+
+==> .lf/qa/hooks.md <==
+Read when the change touches turn or tool hooks, or what they record.
+```
+
+When a step no note describes had to be worked out, or a note stopped working,
+`qa` writes the working version into that surface's file and commits it with
+the change. Edit them like any other file. A repository without `.lf/qa/` gets
+its first note when `qa` has something to keep.
+
+The last step of a block does its own work, then returns advance (go on),
+iterate (run the block again, with direction) or blocked (with the question).
+Loopflow tells it what each decision means, so any Skill can decide; a command
+can't. There is no pass limit; iterate repeats as long as there's useful work.
 
 `xor:` picks exactly one path. The router Skill reads the evidence and returns
 `{"path":"NAME"}`; a path with nothing to run exits cleanly:
@@ -169,23 +226,30 @@ stands at.
 ```yaml
 # feature (builtin)
 - interactive: explore      # you choose what to build, for as many rounds as it takes
-- graph: pursue             # kickoff plans it, then docs, code and a published PR
-- loop: implement
-  interactive: demo         # you try the change
-- graph: deliver            # gate, then land and stay until it merges
-- loop: implement
-  interactive: verify       # you check it on main; fix forward or finish
+- graph: plan               # kickoff plans it, then docs
+- loop:
+    - loop:
+        - graph: build      # code and a published PR
+        - interactive: human-review # you read the page; iterate goes back to build
+    - graph: deliver        # gate, then land and stay until it merges
+    - interactive: verify   # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf graph feature                    # explore and demo open here with you; the rest runs on its own
-lf -b graph feature                 # every step headless; an agent stands in at explore and demo
+lf graph feature                    # explore and human-review open here with you; the rest runs on its own
+lf -b graph feature                 # every step headless; an agent stands in at explore and human-review
 lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
-lf task run LOO-12                  # after you're done there: on to demo
+lf task run LOO-12                  # after you're done there: on to human-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
 lf ship LOO-12                      # the same, returning once the Task is shipping
 ```
+
+At `human-review` you read one page, `scratch/human-review.html`, built from
+what the run already produced: the plan, the concept review, what `qa` saw, each
+step's commit, the open questions and the PR's checks. Ask for more and the
+change goes back to `build` with your words in the plan; otherwise it goes on to
+`deliver`.
 
 `-i` makes every step of a launch interactive and `-b` every step headless. At an
 interactive step with a loop behind it, you, or the agent standing in, decide
@@ -221,8 +285,8 @@ Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
 | `shipping` | a run carries it and nothing ahead stops it |
 | `done` · `abandoned` | completed, dropped |
 
-Builtins are `feature` (explore, then pursue, demo, deliver, verify), `code` (demo, deliver,
-verify), `auto` (pursue then deliver, no interactive step: request to merged PR
+Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`
+(the same without explore), `auto` (pursue then deliver, no interactive step: request to merged PR
 without you) and `research` (findings, no PR). To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:
 

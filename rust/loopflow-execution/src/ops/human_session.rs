@@ -1016,9 +1016,9 @@ pub async fn open(
         let id = session.id.clone();
         let _launch =
             crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
-        admitted = if setup::owed(store, session)? {
+        admitted = if let Some(owed) = setup::owed(store, session)? {
             drop(progress.take());
-            setup::finish(store, session.clone(), request_id, agent).await?
+            setup::finish(store, session.clone(), owed, request_id, agent).await?
         } else {
             primary::admit_workspace(store, session.clone()).await?
         };

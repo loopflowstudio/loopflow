@@ -6,26 +6,32 @@
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use loopflow_storage::work::task::Task;
+use loopflow_model::durable::TaskId;
+use loopflow_storage::work::task::{Task, TaskEventKind};
 use tracing::Instrument;
 
 use super::primary;
 use crate::session::LfSession;
 use crate::store::SharedStore;
 
-/// The Task `session` belongs to took up its Graph and has never run it.
-pub(super) fn owed(store: &SharedStore, session: &LfSession) -> Result<bool> {
+/// The Task `session` belongs to and the Graph it took up, when it has never
+/// run that Graph.
+pub(super) fn owed(store: &SharedStore, session: &LfSession) -> Result<Option<(TaskId, String)>> {
     let Some(task) = &session.task_id else {
-        return Ok(false);
+        return Ok(None);
     };
-    Ok(store.sqlite.unrun_task_graph(task)?.is_some())
+    Ok(store
+        .sqlite
+        .unrun_task_graph(task)?
+        .map(|unrun| (task.clone(), unrun.graph)))
 }
 
-/// Set up the conversation's Task; `request_id` names the creation whose
-/// Start these steps are timed under.
+/// Set up `task`, which owes `graph`'s start; `request_id` names the creation
+/// whose Start these steps are timed under.
 pub(super) async fn finish(
     store: &SharedStore,
     session: LfSession,
+    (task, graph): (TaskId, String),
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> Result<LfSession> {
@@ -37,28 +43,26 @@ pub(super) async fn finish(
         println!("{request}");
     }
     let started = Instant::now();
-    let task_id = session.task_id.clone();
-    let (session, task) = match step(request_id, "checkout", checkout(store, session)).await {
+    let (session, task) = match step(request_id, "checkout", checkout(store, session, &task)).await
+    {
         Ok(checked_out) => checked_out,
         Err(error) => {
             println!("Checkout failed: {error:#}");
-            stopped(store, task_id.as_ref(), "checkout", &error).await;
+            stopped(store, &task, "checkout", &error).await;
             return Err(error);
         }
     };
     println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());
     // The agent starts once the checkout exists, whatever happens to the Graph.
-    match step(
-        request_id,
-        "graph",
-        start_graph(store, &session, &task, agent),
-    )
+    match step(request_id, "graph", async {
+        start_graph(&session, &task, agent)
+    })
     .await
     {
-        Ok(graph) => println!("Graph {graph} started"),
+        Ok(()) => println!("Graph {graph} started"),
         Err(error) => {
             println!("Graph did not start: {error:#}");
-            stopped(store, Some(&task.id), "graph", &error).await;
+            stopped(store, &task.id, "graph", &error).await;
         }
     }
     Ok(session)
@@ -67,15 +71,9 @@ pub(super) async fn finish(
 /// Record on the Task that setup stopped at `step`, so its position says so
 /// until a reopened conversation runs setup again. A resumable failure never
 /// refuses a later launch.
-async fn stopped(
-    store: &SharedStore,
-    task: Option<&loopflow_model::durable::TaskId>,
-    step: &str,
-    error: &anyhow::Error,
-) {
+async fn stopped(store: &SharedStore, task: &TaskId, step: &str, error: &anyhow::Error) {
     tracing::warn!(error = %format!("{error:#}"), step, "Task setup stopped");
-    let Some(task) = task else { return };
-    let event = loopflow_storage::work::task::TaskEventKind::Failed {
+    let event = TaskEventKind::Failed {
         error: format!("Setup stopped: {step} failed: {error:#}"),
         resumable: true,
     };
@@ -107,11 +105,11 @@ async fn step<T>(
 /// Check the Task out from local refs, taking the repository's ready checkout
 /// when one is waiting, move the conversation into it, and start the next ready
 /// checkout.
-async fn checkout(store: &SharedStore, session: LfSession) -> Result<(LfSession, Task)> {
-    let task = session
-        .task_id
-        .as_ref()
-        .context("the conversation has no Task")?;
+async fn checkout(
+    store: &SharedStore,
+    session: LfSession,
+    task: &TaskId,
+) -> Result<(LfSession, Task)> {
     let task = store
         .get_task(task)
         .await?
@@ -139,14 +137,7 @@ async fn checkout(store: &SharedStore, session: LfSession) -> Result<(LfSession,
 /// Start the Task's run the way a terminal would, detached. The run records
 /// itself on the Task's Graph, which ends what the Task owes; a second launch
 /// racing it loses at that record.
-async fn start_graph(
-    store: &SharedStore,
-    session: &LfSession,
-    task: &Task,
-    agent: Option<&str>,
-) -> Result<String> {
-    let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)?
-        .context("the Task has no Graph")?;
+fn start_graph(session: &LfSession, task: &Task, agent: Option<&str>) -> Result<()> {
     let mut argv = vec![crate::os_process::execution_context()?
         .lf_bin
         .to_string_lossy()
@@ -157,5 +148,5 @@ async fn start_graph(
     }
     argv.extend(["task".into(), "run".into(), task.identifier.clone()]);
     crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
-    Ok(row.graph.name)
+    Ok(())
 }

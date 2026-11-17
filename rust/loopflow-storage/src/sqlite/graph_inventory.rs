@@ -601,9 +601,7 @@ impl SqliteStore {
             limit_recoveries,
         })
     }
-}
 
-impl SqliteStore {
     /// The Graph `task` took up, when it never ran it.
     pub fn unrun_task_graph(&self, task: &TaskId) -> StoreResult<Option<UnrunGraph>> {
         let conn = self.conn.lock().expect("store mutex poisoned");

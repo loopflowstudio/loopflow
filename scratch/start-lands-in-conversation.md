@@ -433,6 +433,9 @@ conversation or run `lf task run <identifier>` to retry." Desktop shows it
 through `setupPosition`. `task_create_tests::a_stopped_setup_…` asserts the
 ending.
 
+Compress after dd462b933c: `setup::owed` returns the Task and its unrun
+Graph's name, so `finish` takes them and `start_graph` reads no Graph row.
+
 Remaining:
 - Slice 5's remote sample and a windowed Start → typing (qa could not reach
   either: screen locked, no remote Machine).
@@ -475,6 +478,8 @@ Remaining:
 - qa (5e74e2167, private lf-world, `scratch/qa.html`): CLI and served Start, repeat, conflict, lost answer, ready take/replace/prune/hand-delete, base after an origin push, one `lf` LfProcess per provider, dead-provider reopen — all as planned; served answer 0.20–0.37 s (debug, load ≈ 49). Desktop headless `WorkDestinationTests|NewTaskTests|DTOFixtureTests` 132 passed. Not seen: the click in a window (screen locked), remote Machine, phone.
 
 - One unrun reading: `task_create_tests::` 10 passed (one stopped-setup run needed the status path fix); nextest `ops::task:: | ops::task_execution:: | ops::task_actions:: | ops::human_session:: | lf::commands::waves::` 143 passed; `dto_fixtures::` 52; Swift `WorkDestinationTests|NewTaskTests|DTOFixtureTests` 132; clippy clean. Gate: `test(performance_tests::)` (new statement in execution facts).
+
+- Compress after dd462b933c: `task_create_tests::` 10 passed; clippy (`loopflow-execution`, `loopflow-storage`) clean.
 
 ## Done when
 

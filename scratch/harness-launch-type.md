@@ -307,6 +307,24 @@ Checked and unchanged: Graph steps spawn `lf` children from `step_args`, so no
 resolved mode crosses into a step; `place` matches the former inline branch
 row for row.
 
+Sixth pass (2026-11-16, against the slice 3b working diff). 3b did what the
+fifth pass asked and changes no entry: every definition target
+(`definition_invocation`) and the bare `lf` are in `dispatch`'s `execution`
+set, so skipping `resolve_cli_target` for ordinary commands drops nothing.
+The design is unchanged; slices 4–5 are the next implement direction. Three
+notes for slice 4:
+
+- `dispatch_launch` falls through to `execute_command` for `task run` and
+  history replay. Right for `task run` (its steps are `lf` children that
+  resolve their own mode). Replay launches in this process, so when it builds a
+  `Launch` it names `Mode::Headless` and `Holder::Caller` itself, like
+  `run::resume`; it does not take the delegated mode.
+- `Launch<'a>` borrows `config` and `admitted`; a driver outlives the call, so
+  `Harness::driver` clones both (`Admitted` is `Clone`), as `claude.rs`'s
+  private `Launch::new` does today. Don't give `Launch` owned fields to avoid it.
+- `execute_command` now has two `unreachable!` arms (`Inline`; Desktop/Open/
+  Workspace). Merge them into one arm when that function is next touched.
+
 Open, outside this Task (not blocking): what inherited `LF_AS` outside a Task
 checkout should be. `server/README.md` "Turn and tool boundaries" and
 `transport/README.md` "Which launches are managed" list the managed entries
@@ -372,14 +390,18 @@ Remaining work:
    previews use `LaunchInput::mode` without delegation. `transport::holder`
    consumes the caller's Work fact and is the only `Holder::of` caller. Place
    still reads named Work independently; inherited `LF_AS` stays here + Server.
-   Next (3b, fifth pass; not started at 842abad8a6, two literals remain at
-   `bin/lf.rs` `dispatch` and the planning-read `execute_command` call):
-   `execute_command` and `run::resume` lose their `Mode` parameter; no
-   `Mode::Headless` literal remains in `bin/lf.rs`.
+   Slice 3b is implemented: `execute_command` and `run::resume` no longer take
+   `Mode`; no `Mode::Headless` literal remains in `bin/lf.rs`. `dispatch_here`
+   retains the shared preparation and invokes either the ordinary command or
+   the launch continuation; only the latter captures the delegated mode.
+   Inline prompts dispatch beside skill and default-agent launches.
+   Headless resume names `Mode::Headless` where it builds its turn.
    Still remove `AgentConfig::holder` and `Holder: Default` with slice 4 so
    reporting ownership travels on `Launch`, through native commands and drivers.
    Focused: `--lib transport::launch_mode_tests::` and
-   `--lib lf::commands::run::launch_policy_tests::`.
+   `--lib lf::commands::run::launch_policy_tests::`. Shared `Launch` and the
+   per-harness `open`/`Driver` cut (slices 4–5) remain required before this
+   Task meets acceptance.
 4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
    one `harness::launch`; shared `native::run`. `claude.rs`'s private
    `Launch { config, owner }` is the driver-side half of this and goes when
@@ -422,9 +444,7 @@ Earlier admission and runner checks are recorded at
 b9542ecef5:scratch/harness-launch-type.md.
 
 - implement (2026-11-16): `cargo test -p loopflow-execution --lib harness::native_exit::` — 3 passed after the #1955 merge.
-- implement (2026-11-16, slice 3a): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::) | test(harness::native_session::tests::native_resume_does_not_replace_a_work_read_failure_with_server_ownership) | test(lf::commands::run::tests::retained_skill_context_keeps_its_source_after_catalog_selection_changes) | test(lf::commands::run::tests::interactive_bound_skill_refreshes_scratch_and_keeps_saved_work_direction) | test(lf::commands::run::tests::explicit_interactive_skill_launch_uses_the_assembled_prompt)'` — 15 passed; macOS ld emitted its compact-unwind size warning. Earlier checks: 2c11969a48:scratch/harness-launch-type.md.
-- implement (2026-11-16, slice 3a): `cargo clippy --all-targets -- -D warnings` — passed (Rust 1.98.1; inherited `LF_*` unset).
-- implement (2026-11-16, slice 3a): `cargo fmt --all -- --check` and `git diff --check` — passed.
+- implement (2026-11-16, slice 3b): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::)'` — 11 passed; `cargo test -p loopflow --bin lf definition_execution_stays_explicit` — 1 passed; `cargo check -p loopflow --bin lf` and `cargo clippy --all-targets -- -D warnings` passed; formatting and `git diff --check` passed. Earlier slice 3a checks: c42a60e75d:scratch/harness-launch-type.md.
 - gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::) | test(session_cli_tests::session_cli_uses_one_truthful_resolution_contract) | binary(lf)'`; CI runs the suites and clippy.
 - gate: the two `rg` commands above.
 - demo/qa: real-terminal launches above (needs installed providers).

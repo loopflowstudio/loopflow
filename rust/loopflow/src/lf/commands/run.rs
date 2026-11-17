@@ -110,7 +110,7 @@ pub(crate) fn preview_prompt(
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 /// `named_work` when the resume command named a Task or Wave.
-pub fn resume(mode: Mode, id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
+pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
@@ -169,7 +169,7 @@ pub fn resume(mode: Mode, id: &str, message: &str, cli: &Cli, named_work: bool) 
     // Continuation belongs to the saved conversation, even when invoked from
     // another Task's checkout. Do not rediscover Work from the caller's cwd.
     let mut built = build_prompt_at(
-        mode,
+        Mode::Headless,
         None,
         Some(&message),
         &turn,

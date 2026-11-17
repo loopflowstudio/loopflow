@@ -270,8 +270,8 @@ const LAUNCH_ENDED: &str =
     "The previous launch ended before the provider saved any history; Try again repeats its request";
 
 /// A headless Session opens nowhere: `lf resume` opens only work sessions and
-/// chats. A consumed first launch
-/// has nothing to open: MoveHere, without Open, is the click that repeats it.
+/// chats. A consumed first launch has nothing to open: MoveHere, without
+/// Open, is the click that repeats it.
 pub(crate) fn session_actions(
     state: SessionState,
     interactive: bool,

@@ -251,7 +251,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
 /// Seconds a finished scope delta answers reads. Linear's stretches as its
 /// shared budget falls; Asana keeps the healthy window.
 fn fresh_for(repository: &str) -> i64 {
-    if crate::ops::tracker::configured(std::path::Path::new(repository))
+    if crate::ops::tracker::queued_tracker(std::path::Path::new(repository))
         == Some(loopflow_storage::provider::Provider::Linear)
     {
         crate::linear::delta_fresh_secs()
@@ -264,7 +264,7 @@ fn fresh_for(repository: &str) -> i64 {
 /// delta up to date (a no-op inside its window), then report whether local
 /// state is current enough to answer in place of a per-item read.
 pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
-    if crate::ops::tracker::configured(std::path::Path::new(repository))
+    if crate::ops::tracker::queued_tracker(std::path::Path::new(repository))
         != Some(loopflow_storage::provider::Provider::Linear)
     {
         return false;

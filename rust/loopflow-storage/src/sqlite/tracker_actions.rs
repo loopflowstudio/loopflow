@@ -6,7 +6,7 @@ use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
 
 use super::SqliteStore;
-use crate::planning_sync::PlanningBaseline;
+use crate::planning_sync::{PlanningBaseline, TrackerActionStatus};
 use crate::provider::Provider;
 use crate::rows::now_unix;
 use crate::work::edit::WorkValue;
@@ -14,7 +14,18 @@ use crate::{StoreError, StoreResult};
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::WaveId;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActionKind {
     Create,
@@ -82,7 +93,12 @@ impl ActionKind {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Where an action stands. A person sees `queued`, `sent` and `conflicted`;
+/// `confirmed` and `retired` actions have left the queue.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ActionPhase {
     Queued,
@@ -130,6 +146,15 @@ pub enum ActionOwner {
 }
 
 impl ActionOwner {
+    /// `task`, `project` or `wave`.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Wave(_) => "wave",
+            Self::Project(_) => "project",
+            Self::Task(_) => "task",
+        }
+    }
+
     fn column(&self) -> &'static str {
         match self {
             Self::Wave(_) => "wave_id",
@@ -138,7 +163,7 @@ impl ActionOwner {
         }
     }
 
-    fn id(&self) -> &str {
+    pub fn id(&self) -> &str {
         match self {
             Self::Wave(id) => id.as_str(),
             Self::Project(id) => id.as_str(),
@@ -202,6 +227,60 @@ impl TrackerAction {
     pub fn comment_body(&self) -> Option<&str> {
         self.value["value"]["body"].as_str()
     }
+
+    /// The action as a person reads it in `lf repo plan` and on its Task.
+    pub fn status(&self) -> TrackerActionStatus {
+        // A field or state action holds a `WorkValue` (`{field, value}`); a
+        // conflict holds `{revision, value}` around one.
+        let shown = |value: &Value| match self.kind {
+            ActionKind::Field | ActionKind::Comment => value["value"].clone(),
+            ActionKind::State => value["value"]["planning_state"].clone(),
+            ActionKind::Delete => Value::Bool(true),
+            _ => value.clone(),
+        };
+        TrackerActionStatus {
+            id: self.id.clone(),
+            seq: Some(self.seq),
+            owner_kind: self.owner.kind().to_owned(),
+            owner_id: self.owner.id().to_owned(),
+            kind: self.kind,
+            change: change_word(
+                self.kind,
+                self.subject.as_deref(),
+                self.value["value"]["planning_state"].as_str(),
+            ),
+            subject: self.subject.clone(),
+            phase: self.phase,
+            tracker: self.provider.as_str().to_owned(),
+            error: self.error.clone(),
+            local_value: shown(&self.value),
+            tracker_value: self
+                .conflict
+                .as_ref()
+                .map(|conflict| shown(&conflict["value"])),
+        }
+    }
+}
+
+/// What a change does, as a person names it: `title`, `complete`, `comment`.
+pub(crate) fn change_word(
+    kind: ActionKind,
+    subject: Option<&str>,
+    planning_state: Option<&str>,
+) -> String {
+    match (kind, subject) {
+        (ActionKind::Field, Some(field)) => field
+            .trim_start_matches("task_")
+            .trim_start_matches("project_")
+            .to_owned(),
+        (ActionKind::State, _) => match planning_state {
+            Some("completed") => "complete",
+            Some("canceled") => "cancel",
+            _ => "reopen",
+        }
+        .to_owned(),
+        (kind, _) => kind.as_str().to_owned(),
+    }
 }
 
 /// How an action leaves the queue.
@@ -221,19 +300,20 @@ pub enum Resolution {
     },
 }
 
-const COLUMNS: &str = "e.seq,e.id,e.wave_id,e.project_id,e.task_id,e.subject,e.kind,e.value_json,
+pub(super) const COLUMNS: &str =
+    "e.seq,e.id,e.wave_id,e.project_id,e.task_id,e.subject,e.kind,e.value_json,
     e.base_json,e.conflict_json,e.phase,e.provider,e.remote_id,e.confirmed_revision,e.error,
     e.sent_at,e.looked_at";
 
 // Every action owner reaches its repository through one of these joins. Each
 // is a lookup per unconfirmed row, so a pass costs its queue, not the repository's
 // Task count.
-const IN_REPO: &str = "(EXISTS(SELECT 1 FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE t.id=e.task_id AND r.repo=?1)
+pub(super) const IN_REPO: &str = "(EXISTS(SELECT 1 FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE t.id=e.task_id AND r.repo=?1)
     OR EXISTS(SELECT 1 FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=e.project_id AND w.repo=?1)
     OR EXISTS(SELECT 1 FROM waves w WHERE w.id=e.wave_id AND w.repo=?1))";
 
 /// A row and its owner; the action is `Err` for a kind a later lf wrote.
-fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, ActionOwner>> {
+pub(super) fn read_action(row: &Row<'_>) -> StoreResult<Result<TrackerAction, ActionOwner>> {
     let wave: Option<String> = row.get(2)?;
     let project: Option<String> = row.get(3)?;
     let task: Option<String> = row.get(4)?;

@@ -80,7 +80,7 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
-    if crate::ops::tracker::configured(repository)
+    if crate::ops::tracker::queued_tracker(repository)
         != Some(loopflow_storage::provider::Provider::Linear)
     {
         return;

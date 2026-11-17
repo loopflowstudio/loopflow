@@ -2156,13 +2156,8 @@ pub enum TaskCommand {
         selection: crate::lf::Selection,
     },
 
-    /// Synchronize a Task with its tracker; the change sent last wins
-    Sync {
-        issue: String,
-        /// Retry uncertain saved field/state updates after observing the tracker's current values
-        #[arg(long)]
-        retry_updates: bool,
-    },
+    /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
+    Sync { issue: String },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
         issue: Option<String>,
@@ -3375,7 +3370,7 @@ mod tests {
             let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
             assert!(error.to_string().contains(login), "{error}");
         }
-        for service in ["github", "linear", "asana", "notion", "doppler", "opencode"] {
+        for service in ["github", "linear", "asana", "doppler", "opencode"] {
             assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
             assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
         }

@@ -117,3 +117,48 @@ Built (glossary in `docs/dev/planning.md` "Words"; renames in
   no Linear Initiative) still takes one of the pass's 20 requests, every pass.
   One such Project on this Machine (manabot `infrastructure`). Charge only
   requests that leave, or leave it?
+
+## Concept review round (2026-11-17)
+
+Page: `scratch/concept-review.html`. Jack Heart: "ok, go in for antoher round
+of action". Its five questions were not answered one by one; this round builds
+these defaults, reversible at review:
+- 1a: `task.sync` becomes the Task's slice of `lf repo plan`'s actions (one
+  view: seq, owner, change, subject, phase queued|sent|conflicted, tracker,
+  error, local_value, tracker_value). Delete PlanningSyncChange,
+  PlanningSyncState, `lines()` labels, `linear_value`; Swift
+  `PlanningSync.swift`, `planning_sync.json` fixture and Desktop headless test
+  follow.
+- 2a: keep "action" (Jack's choice); prose says "tracker action" where Desktop
+  actions are near.
+- 3a: Git is a tracker on surfaces: `lf task sync` on Git exchanges with the
+  ref instead of refusing; Git journal losing values show as `conflicted` in
+  the same view. No Git queue.
+- 4a: drop `--retry-updates`; explicit `lf task sync` always looks now and
+  resends what the tracker lacks.
+- 5a: already filed as LOO-956.
+- Also: `QueuedAction.phase` doc, `transport`/`provider` -> `tracker` in
+  PlanStatus/QueuedAction, `tracker::configured()` named for what it returns.
+
+Built, calls taken headless:
+- One row type, `TrackerActionStatus` (storage `planning_sync.rs`), in
+  `lf repo plan --json` `actions` and in `sync.actions` (`TrackerSync`);
+  Swift `TrackerSync.swift`, `TrackerSyncView`, fixture `tracker_sync.json`.
+  `connected` left the wire: with no tracker configured, queued rows are
+  simply absent. `lf repo plan` now lists conflicted actions too.
+- The row has no owner display name (a Task's short identifier costs a scan
+  of every Task per read); `lf repo plan`'s text resolves names. `--json`
+  consumers get `owner_kind` + `owner_id`.
+- Git conflicts are a field's competing journal heads other than the winner,
+  `tracker: "git"`, `seq: null`; the loser is `local_value` even when another
+  Machine wrote it (the journal does not say whose a head is).
+- Git conflicts show in a Task's or Project's `sync` (and `lf task sync`),
+  not in `lf repo plan`, which on Git lists destinations. A repo-wide list
+  needs every record's journal heads per read; open if wanted.
+- One line rendering for CLI and Desktop: `title · conflicted · lost here:
+  "A" · linear: "B"`. `lf task sync` prints these, else `synchronized`.
+
+Jack Heart's answers to the page, word for word: "1a 2a 3a for now, possibly
+a follow up task? 4a 5a". The defaults being built match. Git on the queue
+(3c) is already LOO-938's peer half ("Send every planning change through one
+queue": planning_peer_changes/observed/routes); no new Task filed.

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tracker concept review</title>
+<style>
+:root{
+  --bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--line:#e2ded5;--card:#ffffff;
+  --yes:#1f7a4d;--yes-bg:#e6f4ec;--no:#a8321f;--no-bg:#fbe9e5;--part:#8a6100;--part-bg:#fbf1d9;
+  --prop:#2a56c6;--prop-bg:#e8eefc;--code:#f1eee7;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#161514;--fg:#ebe8e2;--muted:#a19c92;--line:#33302b;--card:#1e1d1b;
+  --yes:#6fd19c;--yes-bg:#173326;--no:#f08f7c;--no-bg:#3a1d17;--part:#e7c066;--part-bg:#362b12;
+  --prop:#8fb0ff;--prop-bg:#1b2643;--code:#262421;
+}}
+:root[data-theme="dark"]{
+  --bg:#161514;--fg:#ebe8e2;--muted:#a19c92;--line:#33302b;--card:#1e1d1b;
+  --yes:#6fd19c;--yes-bg:#173326;--no:#f08f7c;--no-bg:#3a1d17;--part:#e7c066;--part-bg:#362b12;
+  --prop:#8fb0ff;--prop-bg:#1b2643;--code:#262421;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:32px 16px 80px}
+h1{font-size:1.7rem;margin:0 0 .3rem}
+h2{font-size:1.25rem;margin:2.4rem 0 .6rem}
+h3{font-size:1.05rem;margin:1.4rem 0 .4rem}
+p{margin:.5rem 0}
+.lede{color:var(--muted)}
+code,pre{font:13.5px/1.5 ui-monospace,"SF Mono",Menlo,monospace}
+code{background:var(--code);padding:1px 5px;border-radius:4px}
+pre{background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:.4rem 0}
+table{width:100%;border-collapse:collapse;background:var(--card);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:var(--code)}
+tr:last-child td{border-bottom:0}
+.wrap{overflow-x:auto}
+.mark{display:inline-block;font-weight:700;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.yes{color:var(--yes);background:var(--yes-bg)}
+.no{color:var(--no);background:var(--no-bg)}
+.part{color:var(--part);background:var(--part-bg)}
+.prop{border-left:4px solid var(--prop);background:var(--prop-bg);padding:10px 14px;border-radius:0 8px 8px 0;margin:.8rem 0}
+.prop b.tag{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h3{margin-top:0}
+.why{color:var(--muted);font-size:.93rem}
+ol.q>li{margin:.9rem 0}
+ol.q ol{list-style:lower-alpha;margin:.3rem 0}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:.4rem 0}
+.flow span{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:3px 9px;font-size:.92rem}
+.flow i{color:var(--muted);font-style:normal}
+</style>
+</head>
+<body>
+<main>
+<h1>Do the tracker's concepts line up?</h1>
+<p class="lede">LOO-925 at <code>2a2b47cc93</code>, PR #1957. I reviewed the whole path a person's plan takes to and from a tracker, not only the diff: connecting one, seeing whether a change arrived, losing a conflict, a coworker's edit coming in, and forcing a sync. That's where the new words (tracker, action, event) have to hold up.</p>
+
+<h2>One interaction, start to finish</h2>
+<p>You rename a Task while offline, a coworker renames it in Linear, then you reconnect.</p>
+<div class="flow"><span><code>lf task edit LOO-12 --title A</code></span><i>→</i><span>action <code>field</code> · <b>queued</b></span><i>→</i><span>drain sends · <b>sent</b>, reply lost</span><i>→</i><span>looked for · Linear holds B, newer</span><i>→</i><span><b>conflicted</b>, A kept</span></div>
+<p>What do you check, and what does it say?</p>
+<div class="cols">
+<div class="card"><h3><code>lf repo plan --json</code></h3>
+<pre>"transport": "linear",
+"actions": [{ "owner": "LOO-12",
+  "change": "title",
+  "phase": "sent",
+  "provider": "linear",
+  "error": "Reply lost" }]</pre>
+<p class="why">Phases are the new words, but the doc comment on <code>phase</code> still says "<code>pending</code>, or <code>attempted</code>". The tracker is named twice, as <code>transport</code> and <code>provider</code>. Once the action is conflicted it drops out of this list, because it only shows unconfirmed actions.</p></div>
+<div class="card"><h3><code>lf task show LOO-12 --json | jq .sync</code> (what Desktop shows)</h3>
+<pre>"changes": [{ "field": "task_title",
+  "state": "adopted_linear",
+  "local_value": "A",
+  "linear_value": "B" }]
+<i>Adopted planning provider change · task_title
+ · saved: "A" · provider: "B"</i></pre>
+<p class="why">The same action under a second vocabulary: <code>pending · uncertain · adopted_linear</code>, <code>linear_value</code> (even on Asana), "planning provider". This is the surface the Demo and Desktop read.</p></div>
+</div>
+<p>Do the same on a Git-planned repository and there's a third answer: the losing value is in <code>lf repo plan journal</code>. <code>lf task sync LOO-12</code> answers "Task repository has no remote planning provider", even though the glossary just made Git a tracker.</p>
+
+<h2>Product concepts and code concepts</h2>
+<div class="wrap"><table>
+<tr><th>What a person knows</th><th>What the code has</th><th>Lines up?</th></tr>
+<tr><td><b>Tracker</b>: where coworkers see the plan (Git, Linear, Asana)</td>
+<td><code>PlanningConfig {Git, Linear, Asana}</code>; <code>Provider {Linear, Asana}</code>; <code>tracker::configured()</code> returns None for Git; the DTO says <code>transport</code> and <code>provider</code></td>
+<td><span class="mark no">no</span><br>One name, two ideas. The glossary counts Git as a tracker; the code's "tracker" means only Linear or Asana. The same JSON uses three words for it.</td></tr>
+<tr><td><b>Connect a tracker</b></td>
+<td>Linear: <code>lf account connect linear</code> then <code>lf wave plan connect --team-key</code>. Asana: <code>lf account connect asana</code> then hand-edit <code>planning.team</code>. Git: nothing to do.</td>
+<td><span class="mark part">partly</span><br>Two trackers, two different sets of steps. "Linear and Asana behave the same way" holds for traffic, not for setup.</td></tr>
+<tr><td><b>Is my change there yet?</b></td>
+<td><code>tracker_actions</code> phases <code>queued · sent · confirmed · conflicted · retired</code>; shown as <code>QueuedAction</code> in <code>lf repo plan</code> and as <code>PlanningSyncChange</code> (<code>pending · uncertain · adopted_linear</code>) on the Task</td>
+<td><span class="mark no">no</span><br>One idea, two names. The store got the new words; what a person reads still uses the old ones.</td></tr>
+<tr><td><b>My edit lost</b></td>
+<td>Linear/Asana: <code>phase = conflicted</code> + <code>conflict_json</code>, shown as <code>adopted_linear</code> / <code>linear_value</code>. Git: <code>lf repo plan journal</code>.</td>
+<td><span class="mark no">no</span><br>One idea in two places, depending on the tracker.</td></tr>
+<tr><td><b>A coworker's edit arrives</b> (event)</td>
+<td><code>ops/tracker_events.rs</code>, <code>reconcile_in</code>, <code>TrackerObservation</code>; on the Task, <code>acquisition {state, observed_at}</code></td>
+<td><span class="mark part">partly</span><br>The module says event; the Task DTO a person reads still says acquisition. <code>TrackerObservation</code> keeping its name is right: it's the tracker's current copy of a record, not one event.</td></tr>
+<tr><td><b>Sync it now</b></td>
+<td><code>lf task sync &lt;id&gt; [--retry-updates]</code> → <code>drain::Bound { windows: !retry_updates }</code>; refuses Git</td>
+<td><span class="mark no">no</span><br>The flag asks a person to know what "uncertain" means and that a look has a window. An explicit sync can always look now and resend what the tracker doesn't have. Refusing Git contradicts the glossary.</td></tr>
+<tr><td><b>Task, Project, Wave</b></td><td><code>ActionOwner {Task, Project, Wave}</code></td><td><span class="mark yes">yes</span></td></tr>
+<tr><td><b>create, edit, comment, complete/cancel/reopen, reorder, delete, link a PR</b></td>
+<td><code>ActionKind {Create, Field, Comment, State, Order, Delete, Link}</code>; <code>QueuedAction.change</code> already turns them into words people use</td><td><span class="mark yes">yes</span></td></tr>
+<tr><td><b>Action</b>, the word</td>
+<td><code>tracker_actions</code>, and also <code>TaskActionModel</code>, <code>SessionAction</code>, <code>DesktopActionDescriptor</code> (buttons a person presses, about 87 references)</td>
+<td><span class="mark no">no</span><br>One name, two ideas. I recommended "action" last turn without checking this. In a Desktop file "actions" already means buttons.</td></tr>
+</table></div>
+
+<h2>The biggest mismatch</h2>
+<p><b>"Where does my change stand" has three answers.</b> The queue is one table with one set of phases. A person sees it through two projections written in two vocabularies, plus a third place for Git's losing values. The rename went as far as the store; the surface people and Desktop read still says <code>adopted_linear</code>.</p>
+
+<div class="cols">
+<div class="card"><h3>Existing</h3>
+<pre>lf repo plan   → actions[]: QueuedAction
+                 phase: queued|sent
+                 transport + provider
+lf task show   → sync.changes[]: PlanningSyncChange
+                 state: pending|uncertain|adopted_linear
+                 local_value, linear_value
+lf repo plan journal → Git losing values
+Swift: PlanningSync.swift mirrors PlanningSyncChange</pre></div>
+<div class="prop" style="margin:0"><b class="tag">Proposed</b>
+<pre>one TrackerActionView, two filters
+  seq, owner, change, subject,
+  phase: queued|sent|conflicted
+  tracker, error,
+  local_value, tracker_value  (when conflicted)
+lf repo plan   → tracker, actions[]          (all owners)
+lf task show   → sync.actions[]              (this Task's)
+Git: losing values from the journal show here
+     as phase "conflicted", same shape</pre></div>
+</div>
+<p>Behavior stays the same. <code>PlanningSyncChange</code>, <code>PlanningSyncState</code>, the hand-written <code>lines()</code> labels and <code>linear_value</code> are deleted; the Task view becomes a <code>WHERE owner = task</code> over the same read <code>lf repo plan</code> already does. Conflicted actions stay visible until a person edits the field again; today they also stay, under <code>adopted_linear</code>. What it costs: a wire change to <code>task.sync</code> (Rust, <code>PlanningSync.swift</code>, <code>planning_sync.json</code>, Desktop's headless test), the same kind of change as LOO-942.</p>
+<p><b>Counterexample checked.</b> Doesn't a creation need its own state? No: it's already a <code>create</code> action with phase <code>sent</code> while its reply is lost. Doesn't Git need a queue to fit the shape? Not for the view. Git's journal already keeps the losing value; only how it's presented changes, not how it's exchanged. Whether Git <em>sends</em> through the queue is a separate, much larger question (3c).</p>
+
+<h2>Smaller things on lines this PR added</h2>
+<ul>
+<li><code>QueuedAction.phase</code> doc comment: "<code>pending</code>, or <code>attempted</code>" → <code>queued</code>, or <code>sent</code> (<code>rust/loopflow/src/lf/commands/plan.rs:155</code>).</li>
+<li><code>PlanStatus.transport</code> and <code>QueuedAction.provider</code> both name the tracker → <code>tracker</code> (<code>plan.rs:132,158</code>).</li>
+<li><code>lf task sync</code> says "no remote planning provider" (<code>ops/task.rs:2333</code>): wrong word, and it refuses Git.</li>
+<li><code>tracker::configured()</code> is documented as "none under Git planning". If Git is a tracker, the function should say what it actually returns: whether there's a queue (<code>queued_tracker()</code>, or return <code>Tracker::Git</code>).</li>
+</ul>
+
+<h2>Larger than this work</h2>
+<ul>
+<li><b>Connecting Asana and Linear the same way.</b> Make <code>lf wave plan connect</code> handle Asana's team the way it handles Linear's <code>--team-key</code>, so setup is one command for either. It would take an Asana arm in <code>connect_wave</code> and dropping the hand-edited <code>planning.team</code> from the docs.</li>
+<li><b><code>acquisition</code> → the tracker's copy.</b> <code>task.acquisition {state: available|removed|absent|invalid|unavailable}</code> describes the tracker's copy of the Task. Under the glossary it reads as <code>tracker: {state, read_at}</code>. Wire change, so it fits LOO-955 or LOO-942.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Where does my change stand: one view?
+  <ol><li>Yes, in #1957: <code>task.sync</code> becomes the Task's slice of <code>lf repo plan</code>'s actions, Swift and fixture included.</li>
+  <li>Yes, but as its own Task after #1957 (fold into LOO-942, the wire rename).</li>
+  <li>No: keep two views; only rename <code>adopted_linear</code>/<code>linear_value</code> to tracker words.</li></ol></li>
+<li>The word "action" collides with Desktop's Task and Session actions (buttons).
+  <ol><li>Keep "action"; "tracker action" in prose, <code>tracker_actions</code> in code, which is clear enough.</li>
+  <li>Rename to "change" (<code>tracker_changes</code>): plain, with no Desktop collision; the old <code>task_changes</code> table goes in LOO-941.</li>
+  <li>Something else.</li></ol></li>
+<li>Git is a tracker. How far does that go?
+  <ol><li>Words and surfaces only: <code>lf task sync</code> on Git exchanges with the ref instead of refusing, and Git's losing values show as conflicted in the same view (1a).</li>
+  <li>Just the glossary: Git keeps its own commands and journal, and the glossary says Git is a tracker without a queue.</li>
+  <li>All the way: Git peer exchange becomes a tracker on the queue (LOO-938's peer half; much larger).</li></ol></li>
+<li><code>lf task sync --retry-updates</code>:
+  <ol><li>Drop the flag: an explicit sync always looks now and resends what the tracker lacks.</li>
+  <li>Keep it.</li></ol></li>
+<li>Asana setup through <code>lf wave plan connect</code>:
+  <ol><li>File a Task.</li>
+  <li>Fine as is: Asana is configured by hand.</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

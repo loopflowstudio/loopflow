@@ -24,7 +24,7 @@ other implementation and proof gaps.
 | plan | the shared Waves, Projects and Tasks; a Wave's plan is its Project | |
 | Project | the Wave's current plan | Chapter |
 | tracker | where the plan is mirrored: Git, Linear or Asana | bridge; provider means the agent's provider |
-| action | one outgoing change for Linear or Asana in `tracker_actions`: queued, sent, then confirmed, conflicted or retired; Git exchanges the journal instead | effect |
+| action | one outgoing change for Linear or Asana in `tracker_actions`: queued, sent, then confirmed, conflicted or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect |
 | event | one incoming change from a tracker | |
 | sync | moving the plan in either direction | |
 | Work | the model's name, in dev docs only | |
@@ -241,7 +241,8 @@ first. Within an owner, everything waits behind an unconfirmed `create`; otherwi
 only actions on the same subject wait behind each other. A Task naming a Project
 still being created, and a relation to a Task with no tracker object, hold
 without a request. A pass with nothing unconfirmed asks the provider nothing.
-`lf repo plan` lists the queue; `lf task sync <id>` drains one owner now.
+`lf task sync <id>` drains one owner now, looking for every sent action at
+once; on Git it exchanges the planning ref.
 
 `planning::rules::decide` confirms each kind against what the tracker holds,
 for the drain and for inbound events alike, or marks it conflicted: a field
@@ -269,8 +270,16 @@ Comments retain identity and authorship. Incoming planning completion changes on
 the planning disposition: it neither moves a local Task nor authorizes cleanup.
 Session/Process records and checkout paths never enter the Git document.
 
-`PlanningSyncStatus` presents local Linear delivery evidence; `lf repo plan`
-presents Git acquisition/publication receipts and held projections. The retained
+One view answers "where does my change stand" on every tracker:
+`TrackerActionStatus` (`planning_sync.rs`), with phase `queued`, `sent` or
+`conflicted`. `lf repo plan` lists every open action in the repository, and a
+Task's or Project's `sync` is its slice. An action stays open until confirmed;
+a conflicted one stays, with the losing `local_value` and the winning
+`tracker_value`, until a later save of its subject. Git has no queue: a field's
+competing journal heads are its conflicts, the winner's value as
+`tracker_value`, open until a save names them all as parents. They appear in
+`sync` only; `lf repo plan` on Git lists its destinations. `lf repo plan`
+also presents Git acquisition/publication receipts and held projections. The retained
 mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.

@@ -124,7 +124,7 @@ pub struct TaskSummary {
     pub project_id: Option<String>,
     pub wave_id: Option<String>,
     pub acquisition: loopflow_execution::store::TaskAcquisition,
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub id: String,
     pub linear_id: Option<String>,
     pub identifier: String,
@@ -387,7 +387,7 @@ impl RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub current: bool,
     pub id: String,
     pub linear_id: Option<String>,
@@ -409,7 +409,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
-                    sync: store.project_planning_sync(&project.id)?,
+                    sync: store.project_tracker_sync(&project.id)?,
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
@@ -1720,7 +1720,7 @@ impl<'a> DetailReads<'a> {
         }
         let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
         let mut planning_connections = HashMap::new();
-        for receipts in facts.planning_receipts.values() {
+        for receipts in facts.tracker_receipts.values() {
             planning_connections
                 .entry(receipts.repo.clone())
                 .or_insert_with(|| loopflow_execution::ops::tracker::connected(&receipts.repo));
@@ -2051,7 +2051,7 @@ async fn snapshot_task_detail(
         task: task_summary(
             task,
             facts
-                .planning_receipts
+                .tracker_receipts
                 .get(&task.id)
                 .map(|receipts| {
                     receipts
@@ -2368,7 +2368,7 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 
 fn task_summary(
     task: &Task,
-    sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    sync: loopflow_storage::planning_sync::TrackerSync,
     acquisition: loopflow_execution::store::TaskAcquisition,
     repo: String,
 ) -> TaskSummary {

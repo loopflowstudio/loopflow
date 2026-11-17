@@ -872,7 +872,7 @@ struct WaveProjectView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
-            PlanningSyncView(sync: project.sync)
+            TrackerSyncView(sync: project.sync)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()

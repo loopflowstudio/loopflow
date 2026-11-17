@@ -553,10 +553,10 @@ fn offline_completion_and_reopening_reach_an_open_watch() {
         // The tracker is unreachable: the saved decision shows with its failed delivery.
         status.body(Duration::from_secs(10), |body| {
             body["task"]["completed_at"].is_null() != completed
-                && body["sync"]["changes"].as_array().is_some_and(|changes| {
-                    changes
+                && body["sync"]["actions"].as_array().is_some_and(|actions| {
+                    actions
                         .iter()
-                        .any(|change| change["field"] == "state" && !change["error"].is_null())
+                        .any(|action| action["kind"] == "state" && !action["error"].is_null())
                 })
         });
     }

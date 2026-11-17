@@ -585,7 +585,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
 }
 
 #[test]
-fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
+fn task_sync_still_adopts_a_newer_linear_state() {
     with_planning_task(|runtime, fixture, repo, task, state| {
         runtime.block_on(state.lock()).fail_completion = true;
         crate::ops::task::task_complete(repo, task.id.as_str(), None).unwrap();
@@ -594,7 +594,7 @@ fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
             provider.issues[0]["state"] = json!({"type":"started"});
             mark_issue_updated(&mut provider.issues[0]);
         });
-        crate::ops::task::task_sync(task.id.as_str(), true).unwrap();
+        crate::ops::task::task_sync(task.id.as_str()).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -608,7 +608,7 @@ fn task_sync_explicit_retry_still_adopts_a_newer_linear_state() {
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, _repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
+        let result = crate::ops::task::task_sync(task.id.as_str()).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -616,7 +616,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(task.id.as_str(), false).unwrap();
+        crate::ops::task::task_sync(task.id.as_str()).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }

@@ -266,23 +266,25 @@ queue waits:
 
 ```text
 $ lf repo plan
-Planning: Linear. 3 changes waiting to send.
-  LOO-412  title     queued
-  LOO-412  comment   queued
-  LOO-398  complete  sent, waiting for Linear to confirm
+Planning: linear. 4 open actions.
+  LOO-412  title · queued · Offline
+  LOO-412  comment · queued · Offline
+  LOO-398  complete · sent, waiting for linear to confirm
+  LOO-377  title · conflicted · lost here: "Offline rename" · linear: "Renamed in Linear"
 ```
 
-When a send failed, a `Last attempt:` line after the list says why: offline,
-signed out, or the tracker's own error.
+When a send failed, the line ends with why: offline, signed out, or the
+tracker's own error.
 
-A change marked as waiting to confirm was sent, but its answer never arrived.
+A change waiting to confirm was sent, but its answer never arrived.
 Loopflow reads the tracker before sending anything else for that Task, at most
 once every ten minutes, so the change lands once. `lf task sync LOO-398` looks
 now.
 
 When a coworker changed the same field in the tracker before your edit
-arrived, the tracker's value wins and the Task shows both; copy yours back
-with `lf task edit` if it should stand.
+arrived, the tracker's value wins and the line shows both until you save that
+field again; copy yours back with `lf task edit` if it should stand. On Git,
+`lf task sync` shows a Task's losing values the same way, as `git`.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -484,15 +486,19 @@ and keeps the Session, checkout, PR and graph.
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
-**Sync.** `lf task sync LOO-12` sends that Task's queued changes now, first
-reading the tracker for any change that was sent without an answer; between
-syncs, every `lf` command sends one short batch. `--retry-updates` also resends
-saved field changes after reading the tracker again. `lf wave sync`
-refreshes from the tracker first; a Wave with no Initiative skips the refresh
-and still succeeds.
+**Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On
+Linear or Asana it looks for every change sent without an answer and resends
+what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
+every `lf` command sends one short batch. It prints what is still open: a
+change queued or sent, or one whose value lost to the tracker's, until you save
+that field again. On Linear and Asana, `lf repo plan` lists the same lines for the whole
+repository.
+`lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
+the refresh and still succeeds.
 
 ```bash
-lf task sync LOO-403 --retry-updates
+lf task sync LOO-403
+# LOO-403: title · conflicted · lost here: "Offline rename" · linear: "Renamed in Linear"
 ```
 
 Linear can change an issue or a Project without moving its `updatedAt` (it

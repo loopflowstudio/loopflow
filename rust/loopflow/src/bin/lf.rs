@@ -998,14 +998,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             unreachable!("workspace commands dispatch before repository binding")
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
-        TaskCommand::Sync {
-            issue,
-            retry_updates,
-        } => {
-            println!(
-                "{}",
-                loopflow_execution::ops::task::task_sync(issue, *retry_updates)?
-            );
+        TaskCommand::Sync { issue } => {
+            println!("{}", loopflow_execution::ops::task::task_sync(issue)?);
             Ok(())
         }
         TaskCommand::List {
@@ -3329,7 +3323,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::TrackerSync) {
     for line in sync.lines() {
         eprintln!("{line}");
     }

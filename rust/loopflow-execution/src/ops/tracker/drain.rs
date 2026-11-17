@@ -78,7 +78,7 @@ pub(crate) async fn drain_repository(
     scope: Scope<'_>,
     bound: Bound,
 ) -> OpsResult<Pass> {
-    let Some(provider) = super::configured(Path::new(repo)) else {
+    let Some(provider) = super::queued_tracker(Path::new(repo)) else {
         return Ok(Pass::default());
     };
     let actions = queued(store, repo, provider)?;

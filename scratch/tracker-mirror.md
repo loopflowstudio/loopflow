@@ -40,12 +40,13 @@ lf task create --title "Mirror demo" --json
 lf task edit <id> --title "Mirror demo, renamed"
 lf steer <id> "first comment"
 lf task complete <id>
-lf repo plan --json                # one queue: actions in seq order, kind, phase, provider
-lf task show <id> --json | jq .sync
+lf repo plan --json                # open actions in seq order: kind, change, phase, tracker
+lf task show <id> --json | jq .sync.actions   # the same rows, this Task's slice
+lf task sync <id>                  # looks now; on Git exchanges the ref
 ```
 
 Switch `.lf/config.yaml` to `provider: asana` against the Asana stand-in and
-run the same commands: the same queue rows with `provider: asana`. Pull the
+run the same commands: the same rows with `tracker: asana`. Pull the
 network: every command saves, `lf repo plan` lists the actions as queued with
 the tracker's error, and the next connected command drains one bounded pass.
 QA run: `scratch/qa.html`.
@@ -106,4 +107,5 @@ QA run: `scratch/qa.html`.
 - Vocabulary pass: storage+execution nextest over the tracker suites → 209 pass; `-p loopflow` schema, local_planning, pr, lookup, status, task_abandonment, documented_commands, subscribe → 105 pass; server schema regenerated.
 - `cargo nextest run -p loopflow --test task_pr_authority_tests` → 12 pass.
 - `EXPLAIN QUERY PLAN`, store seeded to 10,001 Tasks / 9,508 actions (84 unconfirmed): `uncreated()` searches `tasks` by `external_issue_id` and actions by index; the drain select reads the partial index. Per-row `EXISTS` (1 ms) replaced a repository scan (5 ms).
+- Concept-review round (one tracker-action view, Git conflicts, `lf task sync` on Git, no `--retry-updates`): execution `store::planning_sync_tests:: | ops::tracker:: | task_sync | tracker_actions` → 16 pass; `-p loopflow` local_planning, status, planning_setup, dto_fixtures, subscribe, `lf::tests::`, documented_commands, schema → pass, except two `subscribe::` watches that timed out in the 120-test run and pass alone (`a_store_created_after_the_watch_started_is_shown`, `a_paused_watch_and_a_truncated_log_both_catch_up`; load-timed, gate watches them); storage `query_plans | tracker_actions | migration` → 157 pass; `scripts/test_desktop.sh --filter "DTOFixtureTests|DesktopHeadlessTests|WorkModelTests|RegistryQueryTests|WaveLensTests|TaskRowMetadataTests|WaveStandupTests"` → 170 pass; clippy clean. `lf::tests::native_login_controls…` listed `notion` after Notion's delete; fixed.
 - Not run: `binary(two_people)`, `test(transport::)`, `binary(golden_prompt)`. Gate: `scripts/check_migrations.py`; CI runs the suites.

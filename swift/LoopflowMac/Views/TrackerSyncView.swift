@@ -1,21 +1,21 @@
 import Loopflow
 import SwiftUI
 
-struct PlanningSyncView: View {
-    let sync: PlanningSyncStatus
+struct TrackerSyncView: View {
+    let sync: TrackerSync
 
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
-            ForEach(sync.changes) { change in
-                Text(change.text)
+            ForEach(sync.actions) { action in
+                Text(action.text)
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
                     .textSelection(.enabled)
-                    .accessibilityIdentifier("planning-sync-\(change.id)")
+                    .accessibilityIdentifier("tracker-sync-\(action.id)")
             }
         }
-        .accessibilityIdentifier("planning-sync")
+        .accessibilityIdentifier("tracker-sync")
     }
 }

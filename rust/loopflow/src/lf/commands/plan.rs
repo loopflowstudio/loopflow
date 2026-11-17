@@ -5,6 +5,7 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::RepoPlanCommand as PlanCommand;
+use loopflow_execution::store::planning_sync::TrackerActionStatus;
 use loopflow_execution::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
@@ -125,63 +126,22 @@ pub(crate) fn subscribe_status(
     )
 }
 
-/// What `repo.plan` answers: the transport, for Git the destinations with
-/// their import and publication evidence, and for a tracker its queue.
+/// What `repo.plan` answers: the tracker, for Git its destinations with
+/// their import and publication evidence, and every open tracker action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct PlanStatus {
-    /// `git`, or the tracker's lowercased name.
-    transport: String,
+    /// `git`, `linear` or `asana`.
+    tracker: String,
     destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
-    /// Changes waiting for the tracker, in send order.
-    actions: Vec<QueuedAction>,
-}
-
-/// One change waiting for the tracker.
-#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct QueuedAction {
-    /// Send order across the repository.
-    seq: i64,
-    /// `task`, `project` or `wave`.
-    owner_kind: String,
-    owner_id: String,
-    /// The Task identifier or Project name people read.
-    owner: String,
-    /// `create`, `field`, `order`, `state`, `comment`, `delete` or `link`.
-    kind: String,
-    /// What changes, as a person names it: `title`, `complete`, `comment`.
-    change: String,
-    /// The field or comment the change addresses.
-    subject: Option<String>,
-    /// `pending`, or `attempted`: sent with its reply unknown.
-    phase: String,
-    /// The tracker it is addressed to.
-    provider: String,
-    /// Why the last request did not confirm it.
-    error: Option<String>,
-}
-
-/// What an action changes, as a person names it: `title`, `complete`, `comment`.
-fn change(action: &loopflow_execution::store::sqlite::tracker_actions::TrackerAction) -> String {
-    use loopflow_execution::store::sqlite::tracker_actions::ActionKind;
-    match (action.kind, action.subject.as_deref()) {
-        (ActionKind::Field, Some(field)) => field
-            .trim_start_matches("task_")
-            .trim_start_matches("project_")
-            .to_owned(),
-        (ActionKind::State, _) => match action.value["value"]["planning_state"].as_str() {
-            Some("completed") => "complete",
-            Some("canceled") => "cancel",
-            _ => "reopen",
-        }
-        .to_owned(),
-        (kind, _) => kind.as_str().to_owned(),
-    }
+    /// What the tracker has yet to confirm, and each value it won until it
+    /// is saved again, in send order.
+    actions: Vec<TrackerActionStatus>,
 }
 
 /// Where a repository's planning is exchanged.
 enum Status {
-    /// The tracker its config names, and what waits to reach it.
-    Remote(&'static str, Vec<QueuedAction>),
+    /// The tracker its config names, and its open actions.
+    Remote(&'static str, Vec<TrackerActionStatus>),
     Git(Vec<loopflow_execution::store::PeerPlanningStatus>),
 }
 
@@ -189,13 +149,13 @@ impl Status {
     /// What `lf repo plan --json` prints.
     fn report(self) -> PlanStatus {
         match self {
-            Self::Remote(provider, actions) => PlanStatus {
-                transport: provider.to_ascii_lowercase(),
+            Self::Remote(tracker, actions) => PlanStatus {
+                tracker: tracker.to_ascii_lowercase(),
                 destinations: Vec::new(),
                 actions,
             },
             Self::Git(destinations) => PlanStatus {
-                transport: "git".to_owned(),
+                tracker: "git".to_owned(),
                 destinations,
                 actions: Vec::new(),
             },
@@ -203,43 +163,21 @@ impl Status {
     }
 }
 
-fn queued(store: &Store, repo: &str) -> Result<Vec<QueuedAction>> {
-    use loopflow_execution::store::sqlite::tracker_actions::ActionOwner;
-    let mut queued = Vec::new();
-    for action in store.sqlite.unconfirmed_tracker_actions(repo)? {
-        let (owner_kind, owner_id, owner) = match &action.owner {
-            ActionOwner::Task(id) => (
-                "task",
-                id.to_string(),
-                store
-                    .sqlite
-                    .task(id)?
-                    .map_or_else(|| id.to_string(), |task| task.identifier),
-            ),
-            ActionOwner::Project(id) => (
-                "project",
-                id.to_string(),
-                store
-                    .sqlite
-                    .project(id)?
-                    .map_or_else(|| id.to_string(), |project| project.name),
-            ),
-            ActionOwner::Wave(id) => ("wave", id.to_string(), id.to_string()),
-        };
-        queued.push(QueuedAction {
-            seq: action.seq,
-            owner_kind: owner_kind.to_owned(),
-            owner_id,
-            owner,
-            kind: action.kind.as_str().to_owned(),
-            change: change(&action),
-            subject: action.subject,
-            phase: action.phase.as_str().to_owned(),
-            provider: action.provider.as_str().to_owned(),
-            error: action.error,
-        });
-    }
-    Ok(queued)
+/// The name a person reads for an action's owner: a Task's identifier, a
+/// Project's name.
+fn owner_name(store: &Store, action: &TrackerActionStatus) -> Result<String> {
+    let id = &action.owner_id;
+    Ok(match action.owner_kind.as_str() {
+        "task" => store
+            .sqlite
+            .task(&loopflow_model::durable::TaskId::from_raw(id))?
+            .map_or_else(|| id.clone(), |task| task.identifier),
+        "project" => store
+            .sqlite
+            .project(&loopflow_model::durable::ProjectId::from_raw(id))?
+            .map_or_else(|| id.clone(), |project| project.name),
+        _ => id.clone(),
+    })
 }
 
 fn remote_transport(repo: &str) -> Result<Option<&'static str>> {
@@ -263,7 +201,7 @@ pub(crate) fn read_status(directory: &Path) -> Result<PlanStatus> {
 async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
     if let Some(provider) = remote_transport(repo)? {
         let actions = match store {
-            Some(store) => queued(store, repo)?,
+            Some(store) => store.sqlite.open_tracker_actions(repo)?,
             None => Vec::new(),
         };
         return Ok(Status::Remote(provider, actions));
@@ -289,30 +227,23 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         return Ok(());
     }
     let destinations = match status {
-        Status::Remote(provider, actions) => {
+        Status::Remote(tracker, actions) => {
             if actions.is_empty() {
-                println!("Planning: {provider}. Nothing waiting to send.");
+                println!("Planning: {tracker}. Nothing open.");
                 return Ok(());
             }
             println!(
-                "Planning: {provider}. {} change{} waiting to send.",
+                "Planning: {tracker}. {} open action{}.",
                 actions.len(),
                 if actions.len() == 1 { "" } else { "s" }
             );
-            let width = actions.iter().map(|e| e.owner.len()).max().unwrap_or(0);
-            for action in &actions {
-                let state = if action.phase == "sent" {
-                    format!("sent, waiting for {provider} to confirm")
-                } else {
-                    "queued".to_owned()
-                };
-                println!("  {:width$}  {:9} {state}", action.owner, action.change);
-            }
-            let mut errors: Vec<&str> = actions.iter().filter_map(|e| e.error.as_deref()).collect();
-            errors.sort_unstable();
-            errors.dedup();
-            for error in errors {
-                println!("Last attempt: {error}");
+            let owners = actions
+                .iter()
+                .map(|action| owner_name(store, action))
+                .collect::<Result<Vec<_>>>()?;
+            let width = owners.iter().map(String::len).max().unwrap_or(0);
+            for (owner, action) in owners.iter().zip(&actions) {
+                println!("  {owner:width$}  {}", action.line());
             }
             return Ok(());
         }

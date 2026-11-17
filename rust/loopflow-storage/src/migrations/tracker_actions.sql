@@ -25,6 +25,7 @@ CREATE TABLE tracker_actions (
 );
 CREATE INDEX tracker_actions_unconfirmed ON tracker_actions(phase,seq)
     WHERE phase IN ('queued','sent');
+CREATE INDEX tracker_actions_conflicted ON tracker_actions(seq) WHERE phase='conflicted';
 CREATE INDEX tracker_actions_task ON tracker_actions(task_id,subject,seq) WHERE task_id IS NOT NULL;
 CREATE INDEX tracker_actions_project ON tracker_actions(project_id,subject,seq) WHERE project_id IS NOT NULL;
 CREATE INDEX tracker_actions_wave ON tracker_actions(wave_id,subject,seq) WHERE wave_id IS NOT NULL;

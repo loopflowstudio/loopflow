@@ -2,6 +2,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::sqlite::tracker_actions::{ActionKind, ActionPhase};
+
 /// A pending field edit and its provider baseline, independent of connection state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PlanningChange {
@@ -23,78 +25,88 @@ pub struct TaskDeletion {
     pub base_revision: Option<String>,
 }
 
-/// A receipt read with its owner, before observing provider configuration.
+/// An owner's open actions read with its repository, before observing
+/// whether that repository still names a tracker.
 #[derive(Debug, Clone)]
-pub struct PlanningSyncReceipts {
+pub struct TrackerReceipts {
     pub repo: String,
-    pub changes: Vec<PlanningSyncChange>,
+    pub actions: Vec<TrackerActionStatus>,
 }
 
-impl PlanningSyncReceipts {
-    pub fn status(self, connected: bool) -> PlanningSyncStatus {
-        PlanningSyncStatus {
-            connected,
-            changes: self
-                .changes
+impl TrackerReceipts {
+    /// With no tracker configured, nothing queued will be sent, so only what
+    /// was sent or lost stays.
+    pub fn status(self, connected: bool) -> TrackerSync {
+        TrackerSync {
+            actions: self
+                .actions
                 .into_iter()
-                .filter(|change| connected || change.state != PlanningSyncState::Pending)
+                .filter(|action| connected || action.phase != ActionPhase::Queued)
                 .collect(),
         }
     }
 }
 
-/// Read-only delivery evidence. These rows never confer execution authority.
+/// A Task's or Project's slice of `lf repo plan`'s actions: what its tracker
+/// has yet to confirm, and each value the tracker won until it is saved again.
+/// Read-only; these rows never confer execution authority.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PlanningSyncStatus {
-    pub connected: bool,
-    pub changes: Vec<PlanningSyncChange>,
+pub struct TrackerSync {
+    pub actions: Vec<TrackerActionStatus>,
 }
 
+/// One tracker action as a person reads it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct PlanningSyncChange {
+pub struct TrackerActionStatus {
     pub id: String,
-    pub field: String,
-    pub state: PlanningSyncState,
-    pub local_value: serde_json::Value,
-    pub linear_value: Option<serde_json::Value>,
+    /// Send order across the repository; none for Git, which keeps no queue.
+    pub seq: Option<i64>,
+    /// `task`, `project` or `wave`.
+    pub owner_kind: String,
+    pub owner_id: String,
+    pub kind: ActionKind,
+    /// What changes, as a person names it: `title`, `complete`, `comment`.
+    pub change: String,
+    /// The field or comment the change addresses.
+    pub subject: Option<String>,
+    /// `queued`, `sent` (reply unknown) or `conflicted` (the tracker's value won).
+    pub phase: ActionPhase,
+    /// `git`, `linear` or `asana`.
+    pub tracker: String,
+    /// Why the last request did not confirm it.
     pub error: Option<String>,
+    /// The value saved here; when conflicted, the one that lost.
+    pub local_value: serde_json::Value,
+    /// The tracker's winning value, when conflicted.
+    pub tracker_value: Option<serde_json::Value>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-#[non_exhaustive]
-pub enum PlanningSyncState {
-    Pending,
-    Uncertain,
-    AdoptedLinear,
+impl TrackerActionStatus {
+    /// One line: `title · queued`, `title · conflicted · lost here: "A" · linear: "B"`.
+    pub fn line(&self) -> String {
+        let mut line = format!("{} · {}", self.change, self.phase.as_str());
+        if self.phase == ActionPhase::Sent {
+            line.push_str(&format!(", waiting for {} to confirm", self.tracker));
+        }
+        if self.phase == ActionPhase::Conflicted {
+            let won = self
+                .tracker_value
+                .as_ref()
+                .unwrap_or(&serde_json::Value::Null);
+            line.push_str(&format!(
+                " · lost here: {} · {}: {won}",
+                self.local_value, self.tracker
+            ));
+        }
+        if let Some(error) = &self.error {
+            line.push_str(&format!(" · {error}"));
+        }
+        line
+    }
 }
 
-impl PlanningSyncStatus {
+impl TrackerSync {
     pub fn lines(&self) -> Vec<String> {
-        self.changes
-            .iter()
-            .map(|change| {
-                let label = match change.state {
-                    PlanningSyncState::Pending => "Saved locally; pending planning sync",
-                    PlanningSyncState::Uncertain => "Awaiting planning provider confirmation",
-                    PlanningSyncState::AdoptedLinear => "Adopted planning provider change",
-                };
-                let mut line = format!("{label} · {}", change.field);
-                if change.state == PlanningSyncState::AdoptedLinear {
-                    let value = change
-                        .linear_value
-                        .as_ref()
-                        .unwrap_or(&serde_json::Value::Null);
-                    line.push_str(&format!(
-                        " · saved: {} · provider: {value}",
-                        change.local_value
-                    ));
-                }
-                if let Some(error) = &change.error {
-                    line.push_str(&format!(" · {error}"));
-                }
-                line
-            })
-            .collect()
+        self.actions.iter().map(TrackerActionStatus::line).collect()
     }
 }

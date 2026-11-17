@@ -233,7 +233,7 @@ struct WaveStandupBoard: View {
                     Text(WaveMetricPortfolioPresentation(portfolio: roadmap.metricPortfolio).headline)
                         .font(Typography.body(13)).foregroundStyle(palette.textSecondary).lineLimit(1)
                         .accessibilityIdentifier("wave-metric-headline")
-                    PlanningSyncView(sync: project.sync)
+                    TrackerSyncView(sync: project.sync)
                 }
                 ForEach(project.krs) { kr in
                     Label(kr.text, systemImage: kr.holds ? "checkmark.circle.fill" : "xmark.circle")

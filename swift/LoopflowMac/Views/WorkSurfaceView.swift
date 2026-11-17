@@ -164,7 +164,7 @@ struct WorkSurfaceView: View {
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
                     }
-                    PlanningSyncView(sync: task.task.sync)
+                    TrackerSyncView(sync: task.task.sync)
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)
                 }

@@ -17,7 +17,7 @@ fn project_with_sync(
     };
     serde_json::json!({
         "project": store.project(project).unwrap().unwrap(),
-        "sync": application.project_planning_sync(project).unwrap(),
+        "sync": application.project_tracker_sync(project).unwrap(),
     })
 }
 
@@ -1510,11 +1510,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["name"], "Saved");
         assert_eq!(saved["project"]["summary"], "");
         assert_eq!(saved["project"]["krs"][0]["text"], "Retain the proof");
-        assert_eq!(saved["sync"]["connected"], connected);
         // An unmapped Project has no tracker object to edit; its creation will
         // carry these values.
         assert_eq!(
-            saved["sync"]["changes"].as_array().unwrap().is_empty(),
+            saved["sync"]["actions"].as_array().unwrap().is_empty(),
             !(connected && mapped)
         );
         if mapped {
@@ -1576,10 +1575,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
             assert!(pending
                 .iter()
                 .any(|change| change.value.field() == "project_name"));
-            let conflicts = read["sync"]["changes"].as_array().unwrap();
+            let conflicts = read["sync"]["actions"].as_array().unwrap();
             assert!(conflicts
                 .iter()
-                .all(|change| change["state"] != "adopted_linear"));
+                .all(|action| action["phase"] != "conflicted"));
             // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
@@ -1594,7 +1593,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             .unwrap();
             let read = project_with_sync(&store, &id);
             assert_eq!(store.pending_project_changes(&id).unwrap(), pending);
-            assert_eq!(read["sync"]["changes"], Value::Array(conflicts.clone()));
+            assert_eq!(read["sync"]["actions"], Value::Array(conflicts.clone()));
         }
         let plan_file = home.path().join("plan.json");
         let content = serde_json::json!({
@@ -1617,7 +1616,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
             connected && mapped
         );
         let saved = project_with_sync(&store, &id);
@@ -1665,11 +1664,11 @@ fn project_edits_save_offline_in_both_connection_modes() {
                 .unwrap()
                 .iter()
                 .any(|change| change.value.field() == "krs"));
-            assert!(read["sync"]["changes"]
+            assert!(read["sync"]["actions"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .all(|change| change["state"] != "adopted_linear"));
+                .all(|action| action["phase"] != "conflicted"));
         }
         assert!(store.list_tasks(None).unwrap().is_empty());
         assert!(!repo.path().join(".lf/wave").exists());
@@ -1838,7 +1837,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
             connected
         );
         // Edits are queued once the Task has a tracker object or a queued
@@ -1916,9 +1915,8 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
         let sync = loopflow_execution::store::Store {
             sqlite: store.clone(),
         }
-        .task_planning_sync(&second)
+        .task_tracker_sync(&second)
         .unwrap();
-        assert_eq!(sync.connected, connected);
         assert_eq!(status["sync"], serde_json::to_value(&sync).unwrap());
         assert_eq!(
             String::from_utf8(output.stderr).unwrap(),
@@ -1927,13 +1925,13 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
                 .map(|line| format!("{line}\n"))
                 .collect::<String>()
         );
-        assert_eq!(sync.changes.is_empty(), !connected);
+        assert_eq!(sync.actions.is_empty(), !connected);
         if connected {
             // A reorder in a Project without a tracker object yet is carried
             // by that Project's creation.
-            assert_eq!(sync.changes.iter().any(|c| c.field == "task_order"), mapped);
-            assert_eq!(sync.changes.iter().any(|c| c.field == "creation"), !mapped);
-            assert!(sync.changes.iter().any(|c| c.field == "task_title"));
+            assert_eq!(sync.actions.iter().any(|a| a.change == "order"), mapped);
+            assert_eq!(sync.actions.iter().any(|a| a.change == "create"), !mapped);
+            assert!(sync.actions.iter().any(|a| a.change == "title"));
         }
         let desktop = lf(
             repo.path(),
@@ -1973,10 +1971,10 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             let sync = loopflow_execution::store::Store {
                 sqlite: store.clone(),
             }
-            .task_planning_sync(&second)
+            .task_tracker_sync(&second)
             .unwrap();
-            assert!(sync.changes.iter().all(|c| c.state
-                != loopflow_execution::store::planning_sync::PlanningSyncState::AdoptedLinear));
+            assert!(sync.actions.iter().all(|a| a.phase
+                != loopflow_execution::store::sqlite::tracker_actions::ActionPhase::Conflicted));
             let retained = store.task(&second).unwrap().unwrap();
             assert_eq!(retained.title, "Saved offline");
             assert_eq!(retained.description, "");
@@ -2157,7 +2155,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             String::from_utf8_lossy(&output.stderr)
         );
         assert_eq!(
-            String::from_utf8_lossy(&output.stderr).contains("pending planning sync"),
+            String::from_utf8_lossy(&output.stderr).contains(" · queued"),
             connected
         );
         let moved = store.task(&task.id).unwrap().unwrap();

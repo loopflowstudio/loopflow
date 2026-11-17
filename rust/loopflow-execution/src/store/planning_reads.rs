@@ -1,7 +1,7 @@
 //! Compose saved planning evidence with observed repository configuration.
 use crate::store::{Store, StoreResult};
 use loopflow_model::durable::{ProjectId, TaskId};
-use loopflow_storage::planning_sync::PlanningSyncStatus;
+use loopflow_storage::planning_sync::TrackerSync;
 
 impl Store {
     pub fn task_comments(
@@ -16,14 +16,14 @@ impl Store {
         Ok(thread)
     }
 
-    pub fn task_planning_sync(&self, task: &TaskId) -> StoreResult<PlanningSyncStatus> {
-        let receipts = self.sqlite.task_planning_receipts(task)?;
+    pub fn task_tracker_sync(&self, task: &TaskId) -> StoreResult<TrackerSync> {
+        let receipts = self.sqlite.task_tracker_receipts(task)?;
         let connected = crate::ops::tracker::connected(&receipts.repo);
         Ok(receipts.status(connected))
     }
 
-    pub fn project_planning_sync(&self, project: &ProjectId) -> StoreResult<PlanningSyncStatus> {
-        let receipts = self.sqlite.project_planning_receipts(project)?;
+    pub fn project_tracker_sync(&self, project: &ProjectId) -> StoreResult<TrackerSync> {
+        let receipts = self.sqlite.project_tracker_receipts(project)?;
         let connected = crate::ops::tracker::connected(&receipts.repo);
         Ok(receipts.status(connected))
     }

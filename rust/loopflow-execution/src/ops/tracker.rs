@@ -81,8 +81,9 @@ fn transport(repo: &Path) -> Option<PlanningConfig> {
     crate::config::load_planning_transport(repo).ok()
 }
 
-/// The configured Linear or Asana tracker; none under Git planning.
-pub fn configured(repo: &Path) -> Option<Provider> {
+/// The tracker that sends through the action queue: Linear or Asana. Git
+/// exchanges its journal instead, so it answers none.
+pub fn queued_tracker(repo: &Path) -> Option<Provider> {
     match transport(repo)? {
         PlanningConfig::Linear { .. } => Some(Provider::Linear),
         PlanningConfig::Asana { .. } => Some(Provider::Asana),
@@ -91,7 +92,7 @@ pub fn configured(repo: &Path) -> Option<Provider> {
 }
 
 pub fn connected(repo: &str) -> bool {
-    configured(Path::new(repo)).is_some()
+    queued_tracker(Path::new(repo)).is_some()
 }
 
 #[cfg(any(test, feature = "test-support"))]
@@ -475,7 +476,7 @@ pub(crate) async fn ingest_task(
         confirmed
             .as_ref()
             .map(|(wave, initiative)| (wave, initiative.as_str())),
-        configured(repo).unwrap_or(Provider::Linear),
+        queued_tracker(repo).unwrap_or(Provider::Linear),
     )
     .map_err(message)
 }

@@ -2103,7 +2103,7 @@ pub(crate) fn counted_task(
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct TaskStatus {
-    pub sync: Option<loopflow_storage::planning_sync::PlanningSyncStatus>,
+    pub sync: Option<loopflow_storage::planning_sync::TrackerSync>,
     pub task: Option<Task>,
     pub project: Option<loopflow_storage::work::project::Project>,
     pub observed_at: Option<i64>,
@@ -2144,7 +2144,7 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
             }
         }
         let inspection = if task.is_none()
-            && crate::ops::tracker::configured(repo)
+            && crate::ops::tracker::queued_tracker(repo)
                 == Some(loopflow_storage::provider::Provider::Linear)
         {
             let selector = issue.ok_or_else(|| task_error("this checkout has no Task"))?;
@@ -2226,7 +2226,7 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
     let (overview, graph_processes) =
         crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
     let mut result = TaskStatus {
-        sync: Some(store.task_planning_sync(&task.id).map_err(task_error)?),
+        sync: Some(store.task_tracker_sync(&task.id).map_err(task_error)?),
         project: match &task.project_id {
             Some(id) => store.get_project(id).await.map_err(task_error)?,
             None => None,
@@ -2319,7 +2319,10 @@ pub fn start_conversation_beside(task: &Task) {
     }
 }
 
-pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
+/// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
+/// look for every sent action and resend what the tracker lacks; Git
+/// exchanges the repository's planning ref.
+pub fn task_sync(issue: &str) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = store
@@ -2328,19 +2331,12 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
         let repository = repository_for_task(&store, &task)?;
-        let repo = repository.as_path();
-        let Some(provider) = super::tracker::configured(repo)
-            .map(loopflow_storage::provider::Provider::display_name)
-        else {
-            return Err(task_error(
-                "Task repository has no remote planning provider",
-            ));
-        };
-        // The person's explicit look: an uncertain reply is looked for now, and
-        // with `--retry-updates` an attempted action the provider lacks is resent.
-        let bound = super::tracker::drain::Bound {
-            windows: !retry_updates,
-            ..super::tracker::drain::Bound::NOW
+        let repo = repository.to_string_lossy();
+        let Some(tracker) = super::tracker::queued_tracker(&repository) else {
+            let acquired = super::planning_sync::acquire_repository(&store, &repo).await;
+            super::planning_sync::publish_repository_now(&store, &repo).await?;
+            acquired?;
+            return synced(&store, &task.id).await;
         };
         let project = task
             .project_id
@@ -2350,9 +2346,9 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
         for owner in project.iter().chain([&owner]) {
             super::tracker::drain::drain_repository(
                 &store,
-                &repo.to_string_lossy(),
+                &repo,
                 super::tracker::drain::Scope::Only(owner),
-                bound,
+                super::tracker::drain::Bound::NOW,
             )
             .await?;
         }
@@ -2361,30 +2357,36 @@ pub fn task_sync(issue: &str, retry_updates: bool) -> OpsResult<String> {
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
-        let sync = store.task_planning_sync(&saved.id).map_err(task_error)?;
         if saved.linear_id.is_none() {
+            let sync = store.task_tracker_sync(&saved.id).map_err(task_error)?;
             let reason = sync
-                .changes
+                .actions
                 .iter()
-                .find_map(|change| change.error.as_deref())
+                .find_map(|action| action.error.as_deref())
                 .map(|error| format!(": {error}"))
                 .unwrap_or_default();
             return Err(task_error(format!(
-                "Task publication to {provider} remains pending{reason}"
+                "Task publication to {} remains pending{reason}",
+                tracker.display_name()
             )));
         }
-        let pending = sync.lines();
-        if !pending.is_empty() {
-            return Ok(format!("{}: {}", saved.identifier, pending.join("\n")));
-        }
-        Ok(match saved.pm_writeback {
-            loopflow_storage::work::task::LinearWritebackState::Current => {
-                format!("{}: synchronized", saved.identifier)
-            }
-            loopflow_storage::work::task::LinearWritebackState::Pending { error, .. } => {
-                format!("{}: {error}", saved.identifier)
-            }
-        })
+        synced(&store, &task.id).await
+    })
+}
+
+/// What `lf task sync` prints once the exchange ran: each open action, else
+/// that the Task is in sync.
+async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> OpsResult<String> {
+    let saved = store
+        .get_task(task)
+        .await
+        .map_err(task_error)?
+        .ok_or_else(|| task_error("Task is missing"))?;
+    let open = store.task_tracker_sync(task).map_err(task_error)?.lines();
+    Ok(if open.is_empty() {
+        format!("{}: synchronized", saved.identifier)
+    } else {
+        format!("{}: {}", saved.identifier, open.join("\n"))
     })
 }
 
@@ -2612,7 +2614,7 @@ pub(crate) async fn reconcile_task_completion(
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub struct TaskEdit {
     pub id: String,
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
 }
 
 pub(crate) fn validate_task_edit_input(
@@ -2654,7 +2656,7 @@ pub fn task_edit(
         .await;
         Ok(TaskEdit {
             id: edited.id.to_string(),
-            sync: store.task_planning_sync(&edited.id).map_err(task_error)?,
+            sync: store.task_tracker_sync(&edited.id).map_err(task_error)?,
         })
     })
 }
@@ -2707,7 +2709,7 @@ pub fn task_move_membership(repo: &Path, issue: &str, wave: Option<&str>) -> Ops
         .await;
         Ok(TaskEdit {
             id: task.id.to_string(),
-            sync: store.task_planning_sync(&task.id).map_err(task_error)?,
+            sync: store.task_tracker_sync(&task.id).map_err(task_error)?,
         })
     })
 }

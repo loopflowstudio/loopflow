@@ -87,7 +87,7 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
             "metric_targets": [],
             "status": "started",
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
-            "sync": {"connected": false, "changes": []},
+            "sync": {"actions": []},
             "initiative_ids": ["initiative-infrastructure"],
             "team_ids": ["team-infrastructure"]
         }],
@@ -508,7 +508,7 @@ fn project_operator_failures_remain_historical_without_reappearing_on_the_wave()
             "current": true,
             "metric_targets": [],
             "krs": [{"text": "Current state and history stay distinct", "holds": false}],
-            "sync": {"connected": false, "changes": []}
+            "sync": {"actions": []}
         }],
         "truncated": false
     });

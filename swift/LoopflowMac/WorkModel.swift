@@ -1513,8 +1513,8 @@ final class WorkModel {
     /// A saved Project or Task change has not reached its planning provider.
     private var planningPending: Bool {
         visibleRoadmaps.contains { roadmap in
-            roadmap.projects.items.contains { $0.sync.changes.contains { $0.state == .pending } }
-                || roadmap.tasks.items.contains { $0.task.sync.changes.contains { $0.state == .pending } }
+            roadmap.projects.items.contains { $0.sync.actions.contains { $0.phase == .queued } }
+                || roadmap.tasks.items.contains { $0.task.sync.actions.contains { $0.phase == .queued } }
         }
     }
 

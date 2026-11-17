@@ -71,6 +71,41 @@
       ],
       "type": "object"
     },
+    "ActionKind": {
+      "enum": [
+        "create",
+        "field",
+        "order",
+        "state",
+        "comment",
+        "delete",
+        "link"
+      ],
+      "type": "string"
+    },
+    "ActionPhase": {
+      "description": "Where an action stands. A person sees `queued`, `sent` and `conflicted`;\n`confirmed` and `retired` actions have left the queue.",
+      "oneOf": [
+        {
+          "enum": [
+            "queued",
+            "confirmed",
+            "retired"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "sent",
+          "description": "Sent with no answer yet; looked for before anything else on its owner.",
+          "type": "string"
+        },
+        {
+          "const": "conflicted",
+          "description": "The tracker's value won; `conflict` holds it and `value` the local loser.",
+          "type": "string"
+        }
+      ]
+    },
     "ActivityNode": {
       "properties": {
         "id": {
@@ -2251,7 +2286,7 @@
         "sync": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PlanningSyncStatus"
+              "$ref": "#/$defs/TrackerSync"
             },
             {
               "type": "null"
@@ -5762,12 +5797,12 @@
       "type": "object"
     },
     "PlanStatus": {
-      "description": "What `repo.plan` answers: the transport, for Git the destinations with\ntheir import and publication evidence, and for a tracker its queue.",
+      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open tracker action.",
       "properties": {
         "actions": {
-          "description": "Changes waiting for the tracker, in send order.",
+          "description": "What the tracker has yet to confirm, and each value it won until it\nis saved again, in send order.",
           "items": {
-            "$ref": "#/$defs/QueuedAction"
+            "$ref": "#/$defs/TrackerActionStatus"
           },
           "type": "array"
         },
@@ -5777,13 +5812,13 @@
           },
           "type": "array"
         },
-        "transport": {
-          "description": "`git`, or the tracker's lowercased name.",
+        "tracker": {
+          "description": "`git`, `linear` or `asana`.",
           "type": "string"
         }
       },
       "required": [
-        "transport",
+        "tracker",
         "destinations",
         "actions"
       ],
@@ -5799,63 +5834,6 @@
         "unavailable"
       ],
       "type": "string"
-    },
-    "PlanningSyncChange": {
-      "properties": {
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "field": {
-          "type": "string"
-        },
-        "id": {
-          "type": "string"
-        },
-        "linear_value": true,
-        "local_value": true,
-        "state": {
-          "$ref": "#/$defs/PlanningSyncState"
-        }
-      },
-      "required": [
-        "id",
-        "field",
-        "state",
-        "local_value",
-        "linear_value",
-        "error"
-      ],
-      "type": "object"
-    },
-    "PlanningSyncState": {
-      "enum": [
-        "pending",
-        "uncertain",
-        "adopted_linear"
-      ],
-      "type": "string"
-    },
-    "PlanningSyncStatus": {
-      "description": "Read-only delivery evidence. These rows never confer execution authority.",
-      "properties": {
-        "changes": {
-          "items": {
-            "$ref": "#/$defs/PlanningSyncChange"
-          },
-          "type": "array"
-        },
-        "connected": {
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "connected",
-        "changes"
-      ],
-      "type": "object"
     },
     "Portability": {
       "enum": [
@@ -6713,7 +6691,7 @@
           "$ref": "#/$defs/ProjectStatus"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         }
       },
       "required": [
@@ -6953,70 +6931,6 @@
         "url",
         "created",
         "pr"
-      ],
-      "type": "object"
-    },
-    "QueuedAction": {
-      "description": "One change waiting for the tracker.",
-      "properties": {
-        "change": {
-          "description": "What changes, as a person names it: `title`, `complete`, `comment`.",
-          "type": "string"
-        },
-        "error": {
-          "description": "Why the last request did not confirm it.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "kind": {
-          "description": "`create`, `field`, `order`, `state`, `comment`, `delete` or `link`.",
-          "type": "string"
-        },
-        "owner": {
-          "description": "The Task identifier or Project name people read.",
-          "type": "string"
-        },
-        "owner_id": {
-          "type": "string"
-        },
-        "owner_kind": {
-          "description": "`task`, `project` or `wave`.",
-          "type": "string"
-        },
-        "phase": {
-          "description": "`pending`, or `attempted`: sent with its reply unknown.",
-          "type": "string"
-        },
-        "provider": {
-          "description": "The tracker it is addressed to.",
-          "type": "string"
-        },
-        "seq": {
-          "description": "Send order across the repository.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "subject": {
-          "description": "The field or comment the change addresses.",
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "seq",
-        "owner_kind",
-        "owner_id",
-        "owner",
-        "kind",
-        "change",
-        "subject",
-        "phase",
-        "provider",
-        "error"
       ],
       "type": "object"
     },
@@ -12667,7 +12581,7 @@
           "type": "string"
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         }
       },
       "required": [
@@ -14555,7 +14469,7 @@
           ]
         },
         "sync": {
-          "$ref": "#/$defs/PlanningSyncStatus"
+          "$ref": "#/$defs/TrackerSync"
         },
         "wave_id": {
           "type": [
@@ -14731,6 +14645,94 @@
     },
     "TraceId": {
       "type": "string"
+    },
+    "TrackerActionStatus": {
+      "description": "One tracker action as a person reads it.",
+      "properties": {
+        "change": {
+          "description": "What changes, as a person names it: `title`, `complete`, `comment`.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the last request did not confirm it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActionKind"
+        },
+        "local_value": {
+          "description": "The value saved here; when conflicted, the one that lost."
+        },
+        "owner_id": {
+          "type": "string"
+        },
+        "owner_kind": {
+          "description": "`task`, `project` or `wave`.",
+          "type": "string"
+        },
+        "phase": {
+          "$ref": "#/$defs/ActionPhase",
+          "description": "`queued`, `sent` (reply unknown) or `conflicted` (the tracker's value won)."
+        },
+        "seq": {
+          "description": "Send order across the repository; none for Git, which keeps no queue.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "subject": {
+          "description": "The field or comment the change addresses.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker": {
+          "description": "`git`, `linear` or `asana`.",
+          "type": "string"
+        },
+        "tracker_value": {
+          "description": "The tracker's winning value, when conflicted."
+        }
+      },
+      "required": [
+        "id",
+        "seq",
+        "owner_kind",
+        "owner_id",
+        "kind",
+        "change",
+        "subject",
+        "phase",
+        "tracker",
+        "error",
+        "local_value",
+        "tracker_value"
+      ],
+      "type": "object"
+    },
+    "TrackerSync": {
+      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm, and each value the tracker won until it is saved again.\nRead-only; these rows never confer execution authority.",
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "actions"
+      ],
+      "type": "object"
     },
     "TransitionKind": {
       "enum": [

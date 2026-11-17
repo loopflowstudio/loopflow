@@ -41,6 +41,52 @@ task_graph_launch_tests, explain, world_recipes `--test-threads 8` → pass
 clean. Gate: `binary(two_people)`, `test(transport::)`, `test(performance_tests::)`
 for the table rebuild.
 
+### Concept review after slice 2a: next implement direction
+
+Settled by the design (no product choice involved):
+
+- **One record type for "one lf run".** `GraphRun` is also every step's
+  record, and ship events, CI repairs and activations will carry the same
+  columns. Rename the shared struct `Run` (id, start, end, pid, OS start,
+  exit, error; `Run::result()`), `GraphProcess` → `GraphRun`,
+  `GraphProcessStep` → `GraphStep` (27 Rust uses, 10 files; tables keep
+  their names until LOO-937). `RunStart` drops `repo`/`cwd`: only the Graph
+  run has them, so they are arguments of `record_graph`.
+  `finish_graph_run(id)` writes whichever of run or step owns the id; name it
+  `finish_run` and keep one writer per owner table as owners are added.
+- **Two env variables, two directions.** `LF_RUN_ID` (adopt this id, read
+  once) and `LF_PROCESS_ID` (the lf you were launched under, read by
+  agent-issued commands for the attachment fence) answer different
+  questions; a child could not tell them apart if merged. Keep both; the
+  2a question is closed.
+- **The child's end write stops depending on the journal row.**
+  `finish_owned_run` runs only after `record_process_within` lands. When the
+  journal stops recording (approach 2), the owner end write is the child's
+  only write at exit, best-effort with the journal's warn-once gap.
+- **The bridge needs its new → old half before the journal stops.** The
+  migration today copies old → new only; new children are still visible to
+  an old runner because the journal still writes their `processes` row.
+  The same change that removes the journal writer adds the owner-insert
+  triggers that write the `processes` rows an old `child_process_after` /
+  `graph_child_after` reads.
+- **The Task-run loop still waits for its child to write the Graph run.**
+  The spawner mints the id but cannot write the row (the child compiles the
+  Graph). Keep it; `registration` only serves the let-go log, and the
+  retry decision reads `graph_run_recorded`. Not a precondition worth
+  removing yet.
+- **Dev-only skew** (new runner, older installed child) leaves a step with
+  the spawner's exit code and no error. Released installs never run an
+  older child than their runner; accept.
+- **`lf ps`** lists idle held conversations (a live agent is a live
+  Session) and has no refreshing mode: `lf top` goes and `--subscribe
+  --json` covers watchers, in line with "i am unconvinced something like lf
+  top and lf ps even really makes sense". `lf graph show <RUN_ID>` stays as
+  the docs have it (UUID and slug cannot collide).
+
+Order unchanged: the renames and the 2a fixes above can land now; Session,
+ship, CI-repair and activation slices still wait for LOO-936 (in implement,
+no PR, 2026-11-16).
+
 ## Problem and outcome
 
 `processes` holds a row per `lf` invocation and per provider process (184,423
@@ -193,12 +239,13 @@ exit unknown. Wire DTOs keep `outcome` as that derived value.
 
 1. **Spawners mint ids.** The Task-run loop, `RunningGraph::spawn`, `lf ship`
    and the CI repair launcher mint the child's id, write the owner row with
-   pid and start at spawn, and pass the id as `LF_PROCESS_ID`. The child
+   pid and start at spawn, and pass the id as `LF_RUN_ID` (adopt this id;
+   `LF_PROCESS_ID` stays "the lf you run under"). The child
    writes its own end, exit and error at exit; the spawner writes them if the
    child died first. Deletes `process_mark`, `child_process_after`,
    `graph_child_after`, `process_under_graph` (a step knows from
-   `GRAPH_STEP_ENV`). `failure_cause` becomes: the Graph run's error, else its
-   last failed step's error. `process_starter` becomes the run's
+   `GRAPH_STEP_ENV`). `failure_cause` becomes: the last failed step's error,
+   else the Graph run's (a run's error wraps its step's). `process_starter` becomes the run's
    `caller_session_id`, else the person on the ship event.
 2. **The journal records no rows.** `.lf/journal/traces/<trace_id>/` and
    `lf.log` stay as the log of what ran; receipts and both locators go.

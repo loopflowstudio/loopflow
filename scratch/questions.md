@@ -44,6 +44,8 @@ See the plan's "Decisions" for the calls made at kickoff.
 
 ## Raised while writing docs
 
+All three settled in the plan's concept review after slice 2a.
+
 - `lf top` refreshed in place; the docs give `lf ps` no refresh mode, only
   `lf ps --subscribe --json` (a served read). Should `lf ps` keep a refreshing
   terminal view, or is `--subscribe` enough?
@@ -56,6 +58,9 @@ See the plan's "Decisions" for the calls made at kickoff.
   `lf graph show <RUN_ID>`.
 
 ## Raised while building slice 2a
+
+Settled in the plan's concept review after slice 2a (step-first cause
+order, both env variables, dev-only skew accepted).
 
 - Failure cause order: the plan says "the Graph run's error, else its last
   failed step's error"; built the other way (step first), matching the old

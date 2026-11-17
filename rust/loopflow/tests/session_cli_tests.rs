@@ -21,7 +21,6 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_GRAPH_ID")
-        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -149,7 +148,6 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_DIR",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
-            "LF_HUMAN_SESSION",
             "LF_GRAPH_ID",
         ] {
             command.env_remove(name);

@@ -340,7 +340,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::ops::WORK_DECLARATION_ENV,
     "LF_RUN_DIR",
     "LF_RUN_ID",
-    "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,

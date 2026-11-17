@@ -248,18 +248,26 @@ pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
 }
 
 /// Delegate the reopening of a recorded Session; `named_work` as for
-/// `delegate_current`.
+/// `delegate_current`. The delegated process decides again under its own
+/// launch lock, so this one releases `launch_lock` before it starts; the lock
+/// comes back when this process launches.
 pub(crate) fn delegate_session(
     json_session: Option<&str>,
     preview_session: Option<&str>,
     named_work: bool,
-) -> Result<bool> {
+    launch_lock: File,
+) -> Result<Option<File>> {
+    let Some(place) = place(false, json_session, preview_session, named_work) else {
+        return Ok(Some(launch_lock));
+    };
+    drop(launch_lock);
     let mut argv: Vec<String> = std::env::args().collect();
     if json_session.is_some() {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    delegate(false, json_session, preview_session, argv, named_work)
+    run_delegated(place, json_session, preview_session, argv)?;
+    Ok(None)
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
@@ -285,12 +293,26 @@ fn delegate(
     batch: bool,
     json_session: Option<&str>,
     preview_session: Option<&str>,
-    mut argv: Vec<String>,
+    argv: Vec<String>,
     named_work: bool,
 ) -> Result<bool> {
+    let Some(place) = place(batch, json_session, preview_session, named_work) else {
+        return Ok(false);
+    };
+    run_delegated(place, json_session, preview_session, argv)?;
+    Ok(true)
+}
+
+/// Where `delegate` runs a launch, or None to run it here.
+fn place(
+    batch: bool,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+    named_work: bool,
+) -> Option<Place> {
     // Library tests do not execute the CLI entry point.
     if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
-        return Ok(false);
+        return None;
     }
     let work = works(named_work, preview_session.or(json_session));
     // A Desktop pane or a framed `lf --machine` view relays this launch.
@@ -299,14 +321,22 @@ fn delegate(
     // `lf -b … > file` typed at a terminal writes only the answer, never a
     // relayed screen; an interactive run keeps the terminal it reads from.
     let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-    let place = if !batch && (relayed || (work && terminal)) {
-        Place::Held
+    if !batch && (relayed || (work && terminal)) {
+        Some(Place::Held)
     // A Graph waits on its step; the step has no caller to outlive.
     } else if work && !crate::journal::graph_step() {
-        Place::Detached
+        Some(Place::Detached)
     } else {
-        return Ok(false);
-    };
+        None
+    }
+}
+
+fn run_delegated(
+    place: Place,
+    json_session: Option<&str>,
+    preview_session: Option<&str>,
+    mut argv: Vec<String>,
+) -> Result<()> {
     crate::journal::admit_process(
         &std::env::current_dir()?,
         &std::env::args().collect::<Vec<_>>(),
@@ -331,7 +361,7 @@ fn delegate(
         if code != 0 {
             return Err(crate::process::CommandExit(code).into());
         }
-        return Ok(true);
+        return Ok(());
     }
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
@@ -344,7 +374,7 @@ fn delegate(
     let session = preview_session.map(LfSessionId::from);
     let terminal = start_held(&argv, &cwd, session.as_ref(), &|_| {})?;
     relay_with_preview(&terminal, session.as_ref(), json_session, preview)?;
-    Ok(true)
+    Ok(())
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine

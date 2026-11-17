@@ -1079,9 +1079,11 @@ mod tests {
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
                 || {
-                    crate::harness::native_session::resume_session(
+                    crate::harness::native_session::resume_session_with_env(
                         &capture.artifact_key(),
-                        &history,
+                        Some(&history),
+                        &Default::default(),
+                        None,
                         false,
                     )
                 },

@@ -96,3 +96,8 @@
 - **`lf resume` from inside the held terminal it would view** returns the record and does nothing; it used to fall through to resume.
 - **Handoff to another harness is decided from `has_provider_history`** (the summary) rather than `input_provider_session`, and now runs after `admit_workspace`.
 - **`lf resume --prepare` no longer validates the native capture** (`NativeSession::of`); it reads the log only for a handoff, as before.
+
+## Picks made headless (one launcher, 2026-11-17)
+
+- **`lf resume`'s record is read before launching or delegating**, so a delegated resume returns the Session as it was before the delegated child ran (it used to read after).
+- **A View whose held terminal is gone launches without stopping anything first**; only TakeOver stops the holder (with its diagnostic). `resume_native_session` still stops any agent before resuming.

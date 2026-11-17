@@ -863,6 +863,95 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
 }
 
 #[test]
+fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
+    use std::os::unix::fs::PermissionsExt;
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    let bin = tempfile::tempdir().unwrap();
+    let received = bin.path().join("received");
+    let claude = bin.path().join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s' \"$LF_HUMAN_SESSION\" > '{}'\n",
+            received.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::set_var(
+        "PATH",
+        std::env::join_paths(
+            std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&path)),
+        )
+        .unwrap(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let opened = crate::journal::with_runtime(home, &["lf".into(), "resume".into()], || {
+        runtime.block_on(async {
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    home.join("loopflow.db"),
+                ))
+                .await
+                .unwrap(),
+            );
+            // A bare conversation: no Task, Wave or repository holds it.
+            let capture = crate::session_record::SessionRecorder::begin_at(
+                home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: crate::session_record::SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            let session = store
+                .sqlite
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            let observation = crate::session_record::provider_session_observation(
+                &session,
+                session.input_key().unwrap(),
+                &"claude-thread".into(),
+                None,
+            );
+            store
+                .sqlite
+                .retain_session_observation(&session, &observation)
+                .unwrap();
+            assert_eq!(
+                super::invocation_intent(
+                    &session,
+                    &super::current_summary(&store, &session.id).unwrap(),
+                    false,
+                    false,
+                ),
+                super::SessionResumeIntent::Resume
+            );
+            super::open(&store, home, &session.id, false, true, false, false)
+                .await
+                .map(|_| session.id.to_string())
+        })
+    });
+    std::env::set_var("PATH", path);
+    let id = opened.unwrap();
+    let token: super::HumanSessionToken =
+        serde_json::from_str(&std::fs::read_to_string(&received).unwrap()).unwrap();
+    assert_eq!(token, super::HumanSessionToken::Primary { id });
+}
+
+#[test]
 fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();

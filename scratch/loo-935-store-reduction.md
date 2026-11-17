@@ -336,17 +336,16 @@ bootstrap. Which one runs depends on `captured.is_none()` and
 `input_provider_session`, reads beside the summary. TakeOver with no capture
 yet goes to `open_waiting` without stopping the holder.
 
-Next implement pass:
-- `open` keeps the launch lock from `lock_session_process` through the launch.
-  TakeOver calls `stop_session_agent` (with its diagnostic) under that lock;
-  TakeOver, Resume and Start then all call `open_waiting_locked` with the lock
-  and the admitted Session. Delete `open`'s tail and its `captured.is_none()`
-  / `input_provider_session` branches; `open_waiting` keeps its other caller.
-- `surface` is taken before launching, on every path.
-- `native_session::resume_session` stays for `ops/run.rs`.
-- Test: in ops::human_session:: tests, a Resume-intent `lf resume` launches
-  with `LF_HUMAN_SESSION` set (the path that lacked it). Existing open/resume
-  tests and the Unknown-liveness take-over test stay unchanged.
+Done (implement, 2026-11-17): `open` takes the launch lock once and holds
+it through `open_waiting_locked`; TakeOver stops the holder under it;
+View and NewThread release it first. `transport::delegate_session` takes the
+lock and returns it when this process launches (released before a delegated
+child, which decides again). `open`'s tail and `native_session::resume_session`
+are deleted (its one test caller uses `resume_session_with_env`); admission
+moved from `open_waiting_locked` into `open_waiting`.
+Check: `cargo nextest run -p loopflow-execution --lib -E 'test(ops::human_session::) | test(ops::run::) | test(transport::viewer_tests::)'`: 70 pass, including
+`resuming_an_ended_conversation_launches_its_provider_as_the_session`; clippy
+on execution: clean. Gate runs the session_cli truthful-resolution test.
 
 Then gate.
 

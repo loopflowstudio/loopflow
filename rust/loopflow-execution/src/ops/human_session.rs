@@ -928,12 +928,11 @@ pub async fn open(
         return surface(store, &target).await;
     }
     end_earlier_owner(&store.sqlite, &target.id, progress.as_ref())?;
-    let session = {
-        let id = target.id.clone();
-        let _launch =
-            crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
-        primary::admit_workspace(store, target).await?
-    };
+    // One launch lock covers the decision and the launch it chooses.
+    let id = target.id.clone();
+    let launch_lock =
+        crate::journal::request::spawn_blocking(move || lock_session_process(&id)).await??;
+    let session = primary::admit_workspace(store, target).await?;
     let intent = invocation_intent(
         &session,
         &current_summary(store, &session.id)?,
@@ -943,6 +942,7 @@ pub async fn open(
     drop(progress);
     match intent {
         NewThread => {
+            drop(launch_lock);
             new_thread(
                 store,
                 &session.id,
@@ -962,6 +962,7 @@ pub async fn open(
         // not: a stopped server never means a second agent for the Session.
         View => {
             if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
+                drop(launch_lock);
                 if crate::transport::current() != Some(&terminal) {
                     // The newest view shows where the conversation runs,
                     // not where it was launched.
@@ -985,22 +986,19 @@ pub async fn open(
         }
         TakeOver | Resume | Start => {}
     }
-    if crate::transport::delegate_session(
+    let result = surface(store, &session).await?;
+    let Some(launch_lock) = crate::transport::delegate_session(
         json.then_some(session.id.as_str()),
         session.interactive.then_some(session.id.as_str()),
         named_work,
-    )? {
-        return surface(store, &session).await;
-    }
-    if intent == Start || session.captured.is_none() {
-        open_waiting(store, &session.id, named_work).await?;
-        return surface(store, &session).await;
-    }
-    let native = NativeSession::of(&session)?;
-    crate::harness::native_session::require_provider_session_process(&native.dir)?;
+        launch_lock,
+    )?
+    else {
+        return Ok(result);
+    };
     // Opening takes over a client lf can't share, `lf <skill>`'s own
     // terminal included, and a held terminal whose view ended under it.
-    if intent != Resume {
+    if intent == TakeOver {
         crate::harness::agent_process::stop_session_agent(
             &store.sqlite,
             &session.id,
@@ -1011,15 +1009,7 @@ pub async fn open(
             session.provider.as_deref().unwrap_or("provider")
         ));
     }
-    let result = surface(store, &session).await?;
-    match store.sqlite.input_provider_session(session.input_key()?)? {
-        Some(provider_session) => crate::harness::native_session::resume_session(
-            session.input_key()?,
-            &provider_session,
-            named_work,
-        )?,
-        None => open_waiting(store, &session.id, named_work).await?,
-    }
+    open_waiting_locked(store, session, launch_lock, named_work).await?;
     Ok(result)
 }
 
@@ -1179,9 +1169,11 @@ async fn open_waiting(store: &SharedStore, id: &str, named_work: bool) -> Result
         .session(id)
         .await?
         .ok_or_else(|| session_not_found(id))?;
+    let session = primary::admit_workspace(store, session).await?;
     open_waiting_locked(store, session, launch_lock, named_work).await
 }
 
+/// `open_waiting` for a Session admitted to its workspace under `launch_lock`.
 async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
@@ -1189,7 +1181,6 @@ async fn open_waiting_locked(
     named_work: bool,
 ) -> Result<()> {
     let id = session.id.clone();
-    let session = primary::admit_workspace(store, session).await?;
     let mut launch_lock = Some(launch_lock);
     let session = if session.captured.is_none() {
         append_input(store, session).await?

@@ -41,6 +41,11 @@ starts the primary conversation; wait for its first turn, kill its Claude, then
 assigned thread Claude never wrote, and every later resume exits with "No
 conversation found with session ID". Attach with the PTY viewer
 (`lf resume <id>`, answering `ESC[6n`/`ESC[5n`) to see a start that is waiting.
+With `LF_BIN` on the branch, `lf checkout` starts that home's server itself
+when none runs, so a "server down" scenario ends at the first checkout. Before
+restarting, find every server for the home (`ps -E -ww -p <pid>` showing
+`LF_HOME=/private/tmp/...`; the macOS path is `/private`): `lf server status`
+stays ready while any one of them runs.
 
 # Native conversation opening
 

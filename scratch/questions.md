@@ -47,3 +47,7 @@
   are one SQL predicate (`naming()`, slice 4, built). It also counts an
   unlapsed claim as read, so a steer a hook is printing right now starts
   nothing. Passed over: leaving both.
+- QA 2026-11-17 (slice 4 rerun): `lf steer TASK` prints only "Saved …"; it
+  does not say the server starts the Task's quit primary conversation, as
+  `lf steer SESSION` does. Left as is; a reader line for Task steers is a
+  small follow-up if wanted.

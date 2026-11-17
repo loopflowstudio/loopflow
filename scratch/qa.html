@@ -81,9 +81,29 @@ No conversation found with session ID: c3dc5f7a-9947-4f50-a22c-b41ef7fcfc53
 claude exited with 1.</pre>
 <p>That Task's primary conversation was killed at the dialog before its first turn, so its assigned thread was never written; every later resume fails the same way (pre-existing). The new part: each server start marks the steers it carries delivered before the provider runs, so the steer reads <code>delivered</code> and that steer never starts the Session again. Recorded in <code>scratch/questions.md</code>.</p>
 
+<h2>10. Rerun at 6c96330 (slice 4: one rule for who a steer starts)</h2>
+<p>Same private home, now a returning Machine with the earlier run's Sessions, steers and cursor, opened by the branch <code>lf</code> rebuilt at 6c96330.</p>
+<pre>$ lf steer 7b9fe34d… 'Reply only with the word MANGO.'      # server down
+Saved f9680559-…; the Machine server starts 7b9fe34d… to read it
+$ lf server run &amp;
+# f9680559 delivered; one held claude --resume 93872343-… in repo.repo; transcript ends "MANGO"
+
+$ lf steer ef5e50 'Reply only with the word PAPAYA.'        # primary acfa6334 stopped
+Saved 7483ff7b-…
+# one new held claude --resume a79c38fc-…; transcript ends "PAPAYA"; repo Session's claude (85600) untouched
+
+$ lf task create --title 'QA shared steer'                  # 95b5dc, server down
+$ lf steer 95b5dc 'Reply only with the word LYCHEE.'        # no Session of the Task exists yet
+$ lf checkout 95b5dc                                        # starts the server and primary 0992fa76
+# 0992fa76 read 46836ee3 (LYCHEE) at its start: a Task steer saved before its primary existed, read by no one, still reaches it
+
+$ kill &lt;server&gt;; lf server run                           # restart
+# no new process; every Session 0 pending</pre>
+<p>The slice-4 cases themselves (a Task steer a later revision of its source replaced, a Task steer another Session read before the primary began) can't be made through commands: <code>lf steer TASK</code> gives each steer its own source, and the primary exists from the Task's first checkout, before any other Session can read a Task steer. <code>steers_tests::a_steer_its_start_would_not_take_starts_nothing</code> covers them.</p>
+<p>Seen, not changed: <code>lf steer TASK</code> prints only "Saved …", with no reader line, while <code>lf steer SESSION</code> says who reads it. A person steering a Task whose conversation is quit isn't told the server starts it.</p>
 <h2>Where it stands</h2>
-<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session.</p>
-<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (no Codex held-terminal run; the plan's open question stands); a Graph worker reading a Task steer; the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests.</p>
+<p><b>Works:</b> <code>resume</code> without <code>--message</code>; <code>lf -b steer</code> foreground turns with full text; a named stopped Session started once by the server and answering; Task steer starting only the primary conversation; the three reader lines; idle wake of a server-started Session. Rerun at 6c96330 on the returning home: named start, Task start, a Task steer saved before its primary existed, and a restart starting nothing (case 10).</p>
+<p><b>Not reached:</b> Codex, Pi and OpenCode held starts (no Codex held-terminal run; the plan's open question stands); a Graph worker reading a Task steer; the upgrade (steers saved by the released <code>lf</code> starting nothing), covered only by storage and wake unit tests; the slice-4 replaced and already-read Task steers, which no command produces (case 10).</p>
 <p><b>Still wrong, worst first:</b></p>
 <ol>
 <li>Steers taken by a start that never runs a turn read <code>delivered</code> and nothing retries them (case 9, and a start killed at a dialog).</li>

@@ -295,7 +295,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
         comment_id = saved["pending_sync"][0]
         receipt = db.execute(
-            "SELECT id FROM tracker_actions WHERE task_id=? AND kind='state' ORDER BY seq DESC LIMIT 1",
+            "SELECT id FROM tracker_actions WHERE task_id=? AND kind='state' "
+            "ORDER BY seq DESC LIMIT 1",
             (local_id,),
         ).fetchone()[0]
         task_graphs = db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall()
@@ -320,9 +321,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
 
         def caught_up() -> bool:
             return (
-                db.execute(
-                    "SELECT phase FROM tracker_actions WHERE id=?", (receipt,)
-                ).fetchone()
+                db.execute("SELECT phase FROM tracker_actions WHERE id=?", (receipt,)).fetchone()
                 == ("confirmed",)
                 and db.execute(
                     "SELECT phase FROM tracker_actions WHERE kind='comment' AND subject=?",

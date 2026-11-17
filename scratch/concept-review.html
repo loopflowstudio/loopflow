@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>LOO-957 concept review, as built</title>
+<title>LOO-957 concept review, as built (pass 2)</title>
 <style>
   :root { --bg:#fbfaf7; --fg:#1d1d1b; --muted:#5d5b55; --line:#dedad1; --card:#fff;
           --yes:#1f7a45; --no:#b3261e; --prop:#2456a6; --propbg:#eaf0fb; --oldbg:#f6ecea; }
@@ -29,85 +29,55 @@
 </head>
 <body>
 <h1>Signing Machines in, as built: do the concepts line up?</h1>
-<p class="lede">LOO-957 after all four slices, QA and compress (HEAD <code>c8f6d1ca83</code>, against base <code>2593c489d7</code>).
+<p class="lede">LOO-957 with the whole change in it (HEAD <code>6777c85270</code>, against <code>main</code>): four slices, the reach set from the first as-built review, its compress and QA.
 Area taken: everything a person touches to get any Machine signed in to any provider: <code>lf machine login / logout / logins</code>,
 <code>approvers.&lt;provider&gt;</code>, <code>ondemands.&lt;name&gt;.logins</code> and rental prepare, the launch check, and <code>--refused</code>.
-The pre-build review (commit <code>e207309a92</code>) settled the verbs and the provider list; this one reads the code they became.</p>
-<p><span class="tag e">existing</span> is on this branch now; <span class="tag p">proposed</span> is this review's change.</p>
+<span class="tag e">existing</span> is on this branch; nothing here is <span class="tag p">proposed</span>: this pass changes no plan.</p>
 
 <h2>The interaction, walked once</h2>
-<p>A rental for a Task, from a template made with <code>lf ondemand add code …</code> (no <code>--logins</code>). This Machine is signed in to Claude, GitHub, Linear and Doppler.</p>
+<p>A rental from a template with no <code>--logins</code>. This Machine is signed in to Claude, GitHub, Linear and Doppler.</p>
 <ol>
-  <li><code>lf --rent code -a claude implement</code>. The rental starts; prepare reads <code>lf machine logins</code> here for the default list: <code>github, claude, linear, doppler</code>.</li>
-  <li>GitHub transfers, Claude asks for a paste, Linear renews and sends.</li>
-  <li><b>Failure:</b> Doppler reaches <code>credentials::connect</code>, which ends in <code>bail!("machine login supports github, opencode and linear")</code>. Prepare stops; the repository is never cloned; the step never runs. The message names neither Claude nor Codex, which just worked.</li>
-  <li><b>Recovery:</b> the person has to learn that "every provider signed in here" means "every provider lf can carry to another Machine", and re-make the template with <code>--logins github,claude,linear</code>. Nothing on screen says so.</li>
+<li><code>lf --rent code -a claude implement</code>. Prepare reads <code>lf machine logins</code> here, keeps what reaches another Machine (<code>rental::sign_in_order</code>): GitHub, Claude, Linear. Doppler is skipped, not failed.</li>
+<li>GitHub transfers first (the clone needs it), Claude asks for a paste, Linear renews and sends. The step launches; <code>_run_signed_in</code> probes Claude on the rental and finds it signed in.</li>
+<li><b>Failure:</b> the Claude login was revoked later. The next launch there reads signed out before the agent starts and stops with <code>&lt;rental&gt; has no Claude login; run `lf machine login claude &lt;rental&gt;`</code>, named as the launching side calls it.</li>
+<li><b>Recovery:</b> that command, or <code>lf machine login claude --refused</code> for every Machine in the same state. Nothing is recorded; the probe and the refusal rows say who needs it.</li>
 </ol>
-<p>The same gap shows by hand: <code>lf machine login --help</code> lists all eight providers for <code>[&lt;machine&gt;…]</code>, and <code>lf machine login asana mini</code> fails after parsing. No fixture reaches prepare, so no test sees it.</p>
+<p>The edge from the first as-built review: <code>lf machine login asana mini</code> now refuses before any SSH with "Asana signs in on each Machine itself; run `lf machine login asana` there", and <code>lf ondemand add --logins asana</code> refuses at add, not at rent.</p>
 
 <h2>Product concepts against code concepts</h2>
 <table>
-<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>What's wrong</th></tr>
-<tr><td>Sign Machine M in to P</td><td><code>login::login(machine, provider, …)</code>: Claude/Codex run their client on M; services here run <code>operations::connect</code>; services elsewhere transfer through <code>credentials::connect</code></td><td class="yes">yes</td><td>One verb over two mechanisms (run the flow there; send a login from here) is the right call: the person's outcome is the same, and the services' identity checks survive on both ends.</td></tr>
-<tr><td>The providers I can sign a Machine in to</td><td><code>Provider::all()</code> (eight) for parsing, help and prepare's default; five in the dispatch</td><td class="no">no</td><td>One name for two sets. Asana, Notion and Doppler sign in here only. The set lives nowhere in code: it is the shape of a <code>match</code> and a <code>bail!</code> string that is itself out of date.</td></tr>
-<tr><td>Sign out</td><td><code>lf machine logout</code>: client logout, or the target's own <code>lf machine logout</code></td><td class="yes">yes</td><td>Has the same eight-vs-five question for services elsewhere; it asks the target, which answers for all eight, so it works.</td></tr>
-<tr><td>What M is signed in to</td><td><code>lf machine logins [--json]</code> → <code>Vec&lt;LoginRow&gt;</code>; elsewhere, M's own <code>logins --json</code></td><td class="yes">yes</td><td>One reader; <code>credentials inspect</code> is gone. Services read the client's record first (gh, OpenCode), else the store.</td></tr>
-<tr><td>Who approves: a browser profile or a command</td><td><code>config::placement::Approver</code> (<code>Chrome</code> / <code>Command</code>), <code>login::send</code> the one dispatch</td><td class="yes">yes</td><td>Covers services' OAuth and device pages too. It sits in <code>placement</code>, a module about where work runs; a home in <code>config</code> beside the setting would read truer. Cosmetic.</td></tr>
-<tr><td>Which providers a rental gets</td><td><code>OnDemandDeclaration.logins</code>; unset → every provider <code>logins</code> shows signed in here</td><td class="no">no</td><td>"Every provider signed in here" includes ones prepare cannot carry, so the default fails a rental whenever this Machine has Asana, Notion or Doppler. This is where the mismatch above bites.</td></tr>
-<tr><td>"M has no Codex login; run …"</td><td><code>_run_signed_in</code> → <code>CredentialInvalidated</code>; advice from <code>LF_MACHINE_NAME</code></td><td class="yes">yes</td><td>The launching side's name for M reaches the advice; unknown launches.</td></tr>
-<tr><td>Retry the refused Machines</td><td><code>--refused</code>: probe signed out, or <code>unanswered_refusal</code></td><td class="yes">yes</td><td>Derived, nothing recorded. Open (unchanged): whether a usage-limit refusal should count.</td></tr>
-<tr><td>A login I can see in <code>logins</code></td><td><code>LoginRow</code>, a wire type crossing Machines</td><td class="yes">yes</td><td>Required-nullable fields, <code>deny_unknown_fields</code>; QA covered skew.</td></tr>
+<tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Note</th></tr>
+<tr><td>Sign Machine M in to P</td><td><code>login::login</code>: Claude/Codex run their client on M; services here <code>operations::connect</code>; elsewhere <code>credentials::connect</code></td><td class="yes">yes</td><td>One verb over two mechanisms; the person's outcome is the same.</td></tr>
+<tr><td>Which providers can reach another Machine</td><td><code>login::reaches_other_machines</code>, read by the command (<code>require_reach</code>), prepare's default and <code>ondemand add</code></td><td class="yes">yes</td><td>Was <span class="no">no</span> in the first as-built review (three places, three answers). Help text names the three that stay here. <code>credentials::connect</code>'s catch-all is <code>unreachable!</code>, held by its callers.</td></tr>
+<tr><td>Sign out</td><td><code>login::logout</code>: client logout, else the target's own <code>lf machine logout</code></td><td class="yes">yes</td><td>Asks the target, which answers for all eight.</td></tr>
+<tr><td>What M is signed in to</td><td><code>lf machine logins [--json]</code> → <code>Vec&lt;LoginRow&gt;</code>; elsewhere, M's own <code>logins --json</code></td><td class="yes">yes</td><td>One reader; also the service transfers' pre-check. <code>credentials inspect</code> is gone.</td></tr>
+<tr><td>Who approves</td><td><code>Approver</code> (<code>Chrome</code> / <code>Command</code>), <code>login::send</code></td><td class="yes">yes</td><td>Home in <code>config::placement</code> reads oddly; cosmetic.</td></tr>
+<tr><td>Which providers a rental gets</td><td><code>OnDemandDeclaration.logins</code>; unset → signed in here ∩ reaches</td><td class="yes">yes</td><td>The list is what prepare signs in, explicit or derived.</td></tr>
+<tr><td>"M has no Codex login; run …"</td><td><code>_run_signed_in</code> → <code>CredentialInvalidated</code>; name from <code>LF_MACHINE_NAME</code></td><td class="yes">yes</td><td>Fail-open on unknown; measured inside the 0.5 s bound.</td></tr>
+<tr><td>Retry the refused Machines</td><td><code>--refused</code>: probe signed out, or <code>unanswered_refusal</code></td><td class="yes">yes</td><td>Derived. Open: whether a usage-limit refusal counts.</td></tr>
 </table>
 
-<h2>The biggest mismatch: "every provider" is two different lists</h2>
+<h2>Biggest mismatch: none left in this area</h2>
 <div class="cols">
-<div class="old"><b>As built</b> <span class="tag e">existing</span>
-<pre>// lf/mod.rs: one parser for every target
-provider: Provider,      // 8
-machines: Vec&lt;String&gt;,
-
-// rental.rs prepare: default
-logins(here).filter(SignedIn)   // up to 8
-
-// credentials.rs: the real set
-_ =&gt; bail!("machine login supports
-            github, opencode and linear")</pre>
-Three places, three answers. The one that is true is a string.
+<div class="old"><b>Before (first as-built review)</b><br>"Every provider" meant eight in the parser and prepare's default, five in the dispatch, and the true set lived in a stale <code>bail!</code> string. A default rental died before cloning when this Machine had Doppler.</div>
+<div class="prop" style="border-left-color:var(--yes)"><b>Now</b><br>One predicate, one refusal at the command, one filter in prepare, one check at <code>ondemand add</code>. The stale string is gone. Test: <code>machine_commands::services_that_sign_in_here_only_never_reach_another_machine</code>, <code>rental::tests::a_rental_signs_in_once_to_each_provider_that_reaches_it_github_first</code>.</div>
 </div>
-<div class="prop"><b>Proposed</b> <span class="tag p">proposed</span>
-<pre>// login.rs: the set, once
-pub fn reaches_other_machines(p) -&gt; bool
-  // Claude, Codex, GitHub, Linear, OpenCode
-
-lf machine login asana mini
-#  Asana signs in on this Machine only;
-#  run `lf machine login asana` on mini
-
-// prepare default
-logins(here).filter(SignedIn)
-            .filter(reaches_other_machines)</pre>
-One predicate, read by dispatch, prepare's default and the help text. An explicit <code>--logins asana</code> still fails, at <code>lf ondemand add</code>, not at rent.
-</div>
-</div>
-<p><b>Why this one:</b> the plan promised "services sign in through the same command", and here they do; what never got a name is that three of them only do it here. Naming the set makes the system smaller (the stale <code>bail!</code> string goes) and turns a rental that dies before cloning into one that starts without Doppler. <b>Passed over:</b> building remote transfers for Asana, Notion and Doppler. That is more behavior, not review; it would take a <code>Credential</code> variant each plus the target's receive and identity check, and is worth a Task only if a rental needs one.</p>
-<p><b>Counterexample checked:</b> a template that lists <code>doppler</code> on purpose. Rejecting it at <code>ondemand add</code> keeps "the list is what prepare signs in" true; skipping it silently would make the list lie.</p>
 
 <h2>Smaller, not for this change</h2>
 <ul>
-<li>Prepare with no approver in a headless run fails the whole rental on Claude's paste even when the step runs on Codex. Recorded behavior ("at most one approval per provider, none with command approvers"); a person who rents headless sets a command approver or <code>--logins</code>.</li>
-<li><code>Approver</code> in <code>config::placement</code>: rename the home if that file is next touched.</li>
+<li>Headless <code>--rent</code> with no command approver fails prepare on Claude's paste (and gives the rental back) even when the step runs on Codex. Recorded behavior; a headless renter sets a command approver or <code>--logins</code>. A check before renting would save the minutes of rental; it is a new precondition, so it is left out.</li>
+<li>Codex with no approver in a batch run opens this Machine's browser and waits up to 15 minutes for a person who may not be there.</li>
+<li>Rental prepare's sign-in loop has no end-to-end fixture; the PR says so.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>Providers that sign in here only (Asana, Notion, Doppler):
-    <ol><li>one predicate; dispatch says "this Machine only", prepare's default skips them, <code>ondemand add --logins</code> rejects them (chosen)</li>
-        <li>build remote transfers for them (a Task of its own)</li>
-        <li>leave as built; document the five</li></ol></li>
-  <li>Should a usage-limit refusal count for <code>--refused</code>?
-    <ol><li>yes, as built</li><li>no, only signed-out and missing-login refusals</li></ol></li>
-  <li>Should <code>--refused</code> include this Machine?
-    <ol><li>no, as built: <code>lf machine login codex</code> is right there</li><li>yes</li></ol></li>
+<li>Should a usage-limit refusal count for <code>--refused</code>?
+<ol><li>yes, as built</li><li>no, only signed-out and missing-login refusals</li></ol></li>
+<li>Should <code>--refused</code> include this Machine?
+<ol><li>no, as built: <code>lf machine login codex</code> is right there</li><li>yes</li></ol></li>
+<li>Headless rental with Claude and no command approver:
+<ol><li>fail at prepare and give the rental back, as built</li><li>skip Claude when the step's agent is not Claude</li><li>refuse before renting</li></ol></li>
 </ol>
 </body>
 </html>

@@ -23,7 +23,8 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-/// The tables that record a `Execution`, each keyed by `lf_process_id`.
+/// The tables that record an `Execution`, each keyed by `lf_process_id`. A
+/// Wave records its Project activation in prefixed columns.
 const RUN_OWNERS: [&str; 2] = ["graph_processes", "graph_process_steps"];
 
 /// The columns every `Execution` owner shares, prefixed by `alias`.
@@ -486,9 +487,15 @@ impl SqliteStore {
                 params![id, ended_at, exit_code, error],
             )?;
             if ended > 0 {
-                break;
+                return Ok(());
             }
         }
+        conn.execute(
+            "UPDATE waves SET project_activation_ended_at=?2,project_activation_exit_code=?3,
+                project_activation_error=?4
+             WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL",
+            params![id, ended_at, exit_code, error],
+        )?;
         Ok(())
     }
 

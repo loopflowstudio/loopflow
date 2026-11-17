@@ -2049,6 +2049,38 @@ mod tests {
         assert!(conn
             .execute("UPDATE graph_processes SET task_id=NULL,graph='other'", [])
             .is_err());
+
+        // A Project activation's end is on its Wave, backfilled and bridged
+        // from a released activating lf.
+        conn.execute(
+            "UPDATE processes SET completed_at=45,outcome='succeeded',exit_code=0 WHERE id='activation-live'",
+            [],
+        )
+        .unwrap();
+        let activations: Vec<(String, Option<i64>, Option<i64>, Option<String>)> = conn
+            .prepare(
+                "SELECT id,project_activation_ended_at,project_activation_exit_code,
+                    project_activation_error FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            activations,
+            [
+                (
+                    "wave-done".into(),
+                    Some(25),
+                    Some(1),
+                    Some("provider unavailable".into())
+                ),
+                ("wave-live".into(), Some(45), Some(0), None),
+            ]
+        );
         validate_foreign_keys(&conn).unwrap();
     }
 

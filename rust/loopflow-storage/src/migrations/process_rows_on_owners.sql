@@ -76,6 +76,15 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; E
 CREATE TRIGGER store_revision_agent_limit_recoveries_delete AFTER DELETE ON agent_limit_recoveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; END;
 
+-- A Wave's Project activation ends on the Wave: the activating lf writes its
+-- own end, exit code and error there.
+ALTER TABLE waves ADD COLUMN project_activation_ended_at INTEGER;
+ALTER TABLE waves ADD COLUMN project_activation_exit_code INTEGER;
+ALTER TABLE waves ADD COLUMN project_activation_error TEXT;
+UPDATE waves SET (project_activation_ended_at,project_activation_exit_code,project_activation_error)=(
+    SELECT completed_at,exit_code,error FROM processes WHERE id=waves.project_activation_lf_process_id)
+WHERE project_activation_lf_process_id IS NOT NULL;
+
 CREATE INDEX graph_processes_task ON graph_processes(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX graph_process_steps_graph ON graph_process_steps(graph_lf_process_id, seq);
 
@@ -143,8 +152,8 @@ BEGIN
 END;
 
 -- Bridge for a released lf still running after install: it records a Graph
--- run or step without these columns, after its Process row, and its end only
--- on `processes`. These copy both onto the owner row; the contract migration drops them with the
+-- run or step without these columns, after its Process row, and its end (and
+-- a Project activation's) only on `processes`. These copy both onto the owner row; the contract migration drops them with the
 -- table.
 CREATE TRIGGER graph_run_start_from_process AFTER INSERT ON graph_processes
 WHEN NEW.started_at IS NULL
@@ -173,6 +182,9 @@ BEGIN
     UPDATE graph_process_steps SET ended_at=NEW.completed_at,exit_code=NEW.exit_code,error=NEW.error,
         pid=NULL,os_started_at=NULL
     WHERE lf_process_id=NEW.id AND ended_at IS NULL;
+    UPDATE waves SET project_activation_ended_at=NEW.completed_at,
+        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error
+    WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
 END;
 CREATE TRIGGER graph_run_end_from_process_update AFTER UPDATE OF completed_at ON processes
 WHEN OLD.completed_at IS NULL AND NEW.completed_at IS NOT NULL
@@ -183,4 +195,7 @@ BEGIN
     UPDATE graph_process_steps SET ended_at=NEW.completed_at,exit_code=NEW.exit_code,error=NEW.error,
         pid=NULL,os_started_at=NULL
     WHERE lf_process_id=NEW.id AND ended_at IS NULL;
+    UPDATE waves SET project_activation_ended_at=NEW.completed_at,
+        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error
+    WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
 END;

@@ -11,3 +11,9 @@ INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iteration
 VALUES('graph-done','step-done',0,'[]'),('graph-live','step-live',0,'[]');
 INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,retry_at,agent,updated_at)
 VALUES('step-live','claude','limit',100,NULL,41);
+-- A Wave whose Project activation failed, and one whose activation still runs.
+INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,exit_code,error)
+VALUES('activation-done','trace','/repo',20,25,'failed',1,'provider unavailable'),
+      ('activation-live','trace','/repo',42,NULL,NULL,NULL,NULL);
+INSERT INTO waves(id,name,repo,created_at,project_activation_lf_process_id)
+VALUES('wave-done','done','/repo',1,'activation-done'),('wave-live','live','/repo',1,'activation-live');

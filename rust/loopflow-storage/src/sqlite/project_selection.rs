@@ -354,11 +354,12 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
              (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
-             e.id,e.completed_at,e.outcome,e.error
+             w.project_activation_lf_process_id,w.project_activation_ended_at,
+             w.project_activation_exit_code,w.project_activation_error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
              LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
              LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
-             LEFT JOIN processes e ON e.id=w.project_activation_lf_process_id WHERE w.id=?1",
+             WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
                 let process: Option<String> = row.get(4)?;
@@ -372,9 +373,16 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                         _ => ProjectReadinessState::Inactive,
                     },
                     pending_successor: row.get(3)?,
-                    activation: process.map(|lf_process_id| Ok::<_,rusqlite::Error>(ProjectActivation {
-                        lf_process_id, completed_at: row.get(5)?, outcome: row.get(6)?, error: row.get(7)?,
-                    })).transpose()?,
+                    activation: process.map(|lf_process_id| {
+                        let completed_at: Option<i64> = row.get(5)?;
+                        let error: Option<String> = row.get(7)?;
+                        let result = crate::graph_process::ExecutionResult::of(
+                            completed_at, row.get(6)?, error.as_deref());
+                        Ok::<_,rusqlite::Error>(ProjectActivation {
+                            lf_process_id, completed_at,
+                            outcome: result.outcome().map(str::to_owned), error,
+                        })
+                    }).transpose()?,
                 })
             },
         )?)
@@ -508,12 +516,14 @@ mod activation_tests {
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
-    fn readiness_retains_exact_unknown_and_failed_activation_outcomes() {
+    fn an_activation_reads_pending_until_its_lf_writes_its_end() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
         let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
         let process = LfProcessId::new();
+        // The journal's row for the activating lf, which `waves` still
+        // references until its rebuild drops the foreign key.
         store
             .conn
             .lock()
@@ -534,7 +544,9 @@ mod activation_tests {
         assert_eq!(pending.lf_process_id, process.as_str());
         assert!(pending.completed_at.is_none());
         assert!(pending.outcome.is_none());
-        store.conn.lock().unwrap().execute("UPDATE processes SET completed_at=2,outcome='failed',error='provider unavailable' WHERE id=?1", [&process]).unwrap();
+        store
+            .finish_run(&process, 2, Some(1), Some("provider unavailable"))
+            .unwrap();
         let failed = store
             .project_readiness(wave.id())
             .unwrap()

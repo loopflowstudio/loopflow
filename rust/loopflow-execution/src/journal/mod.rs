@@ -856,11 +856,12 @@ fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfPr
         record.exit_code,
         record.error.as_deref(),
     ) {
-        warn!(%error, "could not record this run's end on its Graph record");
+        warn!(%error, "could not record this run's end on its owner record");
     }
 }
 
-/// This process recorded a Graph run under its own id and writes its end.
+/// This process recorded itself as a Graph run or a Project activation under
+/// its own id and writes its end there.
 pub fn mark_run_owner() {
     if let Some(context) = current_context() {
         context.owns_run.store(true, Ordering::Release);

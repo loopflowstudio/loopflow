@@ -65,3 +65,8 @@
 - **`lf desktop view --task X`** errors like `lf open --workspace --task X`: it
   is the same overview path.
 - **`--workspace --session S`** is an error too: one Session is one conversation.
+
+## Sync with main (2026-11-17)
+
+- File measurement attribution follows `WorkModel.repoPath` through `SessionsWorkspace.measurementRepository`; it no longer depends on server layout persistence.
+- `swift build --build-tests --package-path swift`: pass; `scripts/test_desktop.sh --skip-build --filter WorkDestinationTests`: 71 pass. Terminal focus checks require a display; gate/CI runs them.

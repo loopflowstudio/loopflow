@@ -222,6 +222,7 @@ final class WorkModel {
     }
 
     private func startPersistence(_ workspace: SessionsWorkspace) {
+        workspace.measurementRepository = repoPath
         guard let paneLayouts else { return }
         workspace.startPersistence(layouts: paneLayouts, query: query)
     }

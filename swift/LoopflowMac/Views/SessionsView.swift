@@ -140,6 +140,7 @@ final class SessionsWorkspace {
     }
 
     let performanceOwner = UUID()
+    var measurementRepository: String?
 
     func toggleFocus(_ paneId: String) {
         Perf.begin(Perf.retainedWorkspaceAction, multiplexer.zoomedPaneId == nil ? "focus" : "restore", id: "workspace", owner: performanceOwner)
@@ -345,7 +346,7 @@ final class SessionsWorkspace {
     func files(issue: String, cwd: String, query: RegistryQuery = RegistryQueryLocal.shared, execution: TaskLocationObservation? = nil) -> TaskFilesStore {
         if let files = taskFiles { return files.store }
         let files = TaskFilesStore(issue: issue, cwd: cwd, query: query)
-        files.measurementRepository = persistenceRepo
+        files.measurementRepository = measurementRepository
         taskFiles = (files, execution)
         if let machine = execution?.machineID ?? location?.machineId ?? localMachineId {
             let place = WorkViewPlan.Location(machineID: machine, cwd: cwd)

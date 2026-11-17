@@ -1,11 +1,13 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-Status 2026-11-16: slice 2a (Graph runs and steps) built ahead of LOO-936,
-which was still implementing (pass 4) on `processes.rs`, `sessions.rs`,
+Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
+(Graph runs and steps) is built and merged with main. LOO-936 is still moving
+(`concept-review`, loop 1 pass 3, no PR) on `processes.rs`, `sessions.rs`,
 `session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
-activation slices wait for it to merge. After it merges: rebase, rerun
-`python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
-Quotes and the OS-scan measurement: `questions.md`.
+activation slices wait for it to merge. Buildable now: the renames and 2a
+fixes under "Concept review after slice 2a". After LOO-936 merges: rebase,
+rerun `python3 -I scratch/process_sql_scan.py rust` and reconcile the
+inventory. Quotes and the OS-scan measurement: `questions.md`.
 
 ### Slice 2a as built
 
@@ -129,8 +131,11 @@ Paths under `rust/`.
 - **Task runs.** `task_graphs.lf_process_id` names the carrier (`lf task run`,
   the retry loop), not the Graph. Task moving/shipping is
   `task_state_sql` (`durable.rs:407`): carrier or ship carrier
-  `completed_at IS NULL`. `tasks.ship_lf_process_id` no longer exists; ship
-  carriers are `task_ship_events.lf_process_id` (approved/carried).
+  `completed_at IS NULL`. Ship carriers are `task_ship_events.lf_process_id`
+  (approved/carried). `tasks.ship_lf_process_id` is still in the schema with
+  a `processes` foreign key but has no production writer or reader
+  (`task_machine_local.sql` copied it into ship events); only `FORGETTABLE`
+  names it, since #1961.
 - **Attachment.** `attach_in` (`processes.rs:608`) re-tokens on every claim;
   every production attach passes `replace_provider=true`, so a new lf always
   gets a new agent id. Exception: `prepare_resume` (`process/attachment.rs:165`)
@@ -205,8 +210,12 @@ Schema: 15 foreign keys reference `processes` (`agent_sessions` ×2,
 `ci_incidents`, `desktop_shells` ×2, `graph_process_steps`,
 `graph_processes`, `session_events`, `steer_adapters`, `steer_batches`,
 `task_graphs`, `waves`, `agent_limit_recoveries` and
-`relocated_task_processes` with CASCADE; `tasks.ship_lf_process_id` is gone
-since 0.14.19). 11 triggers on it (revisions, locators, `task_update_*`,
+`relocated_task_processes` with CASCADE, `tasks.ship_lf_process_id`; read
+from the released store 2026-11-16). #1961 added `tasks.ship_lf_process_id`
+and `desktop_shells.launcher_lf_process_id` to `FORGETTABLE` after dangling
+references failed every migration's foreign-key check on one Machine;
+`forget_tests` reads the schema, so a new reference must join the rule while
+`forget_processes` lives. 11 triggers on it (revisions, locators, `task_update_*`,
 canonical ids). DTO fields that carry Process data: `processes[]` in
 `task_work`, `task_lifecycle`, `task_checkout`, `process_page`
 (`swift/Loopflow/Models/LfProcess.swift`); `GraphStepProcess` and
@@ -381,6 +390,9 @@ two live agents on one Session; a `Legacy*` type.
 6. **File the contract Task**: after `STAGING_DAYS` (30), export `processes`
    to JSON lines (`-- exports:`), drop it, the bridge triggers,
    `relocated_task_processes`, `transport_lf_process_id`,
+   `tasks.ship_lf_process_id`, every remaining foreign key to `processes`
+   (rebuild `agent_sessions`, `desktop_shells`, `ci_incidents`, `waves`,
+   `task_graphs`, `session_events`, `steer_*`, `tasks` without them),
    `steer_batches.attachment_token`, unused locator indexes.
 
 ## Acceptance at gate (headless, private `LF_HOME`)

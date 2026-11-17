@@ -168,7 +168,12 @@ fn prepare_prompt(
         .skill
         .as_ref()
         .filter(|skill| {
-            agent.harness.harness().capabilities().native_skills.is_some()
+            agent
+                .harness
+                .harness()
+                .capabilities()
+                .native_skills
+                .is_some()
                 && skill.source.as_ref().is_some_and(|source| {
                     source.dialect != crate::skills::catalog::SkillDialect::Loopflow
                 })
@@ -569,7 +574,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -589,7 +597,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -666,7 +677,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("claude:sonnet"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("claude:sonnet")
+        );
     }
 
     #[test]
@@ -732,7 +746,10 @@ Test skill body.
         )
         .expect("prepare Process prompt");
 
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -882,7 +899,10 @@ Test skill body.
                 .map(|skill| skill.name.as_str()),
             Some("team/skill-creator")
         );
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("codex:o3"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("codex:o3")
+        );
     }
 
     #[test]
@@ -1110,6 +1130,9 @@ Test skill body.
         )
         .expect("bare OpenCode should defer to the user's default");
 
-        assert_eq!(Some(prepared.config.agent.to_string()).as_deref(), Some("opencode"));
+        assert_eq!(
+            Some(prepared.config.agent.to_string()).as_deref(),
+            Some("opencode")
+        );
     }
 }

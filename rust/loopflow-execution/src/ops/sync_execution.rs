@@ -379,7 +379,11 @@ fn process_skill_agent(
         ..Default::default()
     };
 
-    let result = run_agent(&launch, &process, crate::session::Holder::Caller);
+    let result = run_agent(
+        &launch,
+        &process,
+        crate::harness::Run::Bare(crate::harness::Mode::Headless),
+    );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

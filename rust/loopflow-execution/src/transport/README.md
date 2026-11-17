@@ -10,9 +10,9 @@ ps -axo command | grep '^lf '
 ```
 
 [What runs on a Machine](../../../../docs/dev/index.md#what-runs-on-a-machine)
-is the model: a launch runs here, held or detached, and hooks follow Work, not
-the place. This README owns the holder and view protocols, headless launches,
-exit settlement and Desktop shells.
+is the model: commands choose lifetime independently of Task attribution.
+This README owns the holder and view protocols, headless launches, exit
+settlement and Desktop shells.
 
 ## Held terminals
 
@@ -21,18 +21,14 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-`transport::delegate` chooses the place once:
+`transport::delegate` chooses `Run` once:
 
-| Launch | Runs |
-|---|---|
-| `lf task run` or an interactive `lf ship` step at a terminal, `lf resume --task`, a Task's primary conversation, Wave session commands | held |
-| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | held |
-| `lf resume SESSION` of a Session bound to a Task or Wave | held |
-| A bare Session opened through a Desktop pane or a framed `lf --machine` view | held, with the two bare hooks |
-| Desktop Task shells | held, with no hooks |
-| `lf <skill>`, `lf graph …`, `lf -i` at a terminal; a repository conversation recorded before it was managed (no `work_source`) | here, as the terminal's foreground program |
-| A bare `-b` or piped run, every headless Graph step | here, as the caller's child |
-| Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command | [detached](#headless-work) |
+| Command | Run | Lifetime |
+|---|---|---|
+| `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | `Bare(Mode)` | its caller or terminal |
+| Resume a Session or open a Task, Wave or repository conversation | `Managed` | held interactive terminal, independent of its viewer |
+| `lf task run` and its Graph steps | `Worker` | headless until its step ends |
+| Desktop Task shells | held shell | independent of its viewer, no hooks |
 
 A held launch calls `session.start` and becomes a view of the returned
 terminal. With the server unreachable it fails with `Loopflow server is not
@@ -45,46 +41,25 @@ foreground program, such as Rex, shows `lf` there, not the agent. Attaching
 never creates: a view of a Session whose terminal is gone says so and offers
 resume.
 
-### Which launches are managed
+### Launch lifetime and Task membership
 
-A launch is managed when it comes through a Task, Wave or repository
-conversation command, including those Desktop opens. `--task` and `--wave` (a
-Task or Wave conversation passes them, and `lf task run` passes `--task` to
-its Graph's agent steps) bind it as `WorkSource::Declared`, and the launch
-carries that as `Holder::Server` (`Launch::holder`). Beside a Session id,
-`--task`/`--wave` make the resume managed and the id still selects: Desktop's
-Task and Wave workspaces prepare with `lf session resume [ID] --task X
---prepare`, and the `open_argv` it gets back is `lf session resume ID --task
-X`. Reopening a recorded conversation by id alone names no Work, so there the
-Session row decides: `SqliteStore::is_bare` is false for `declared` or `bound`
-Work and for a scope's primary conversation.
+A command chooses the state; the checkout, `--task` and `LF_AS` choose which
+Task it belongs to. Every launch belonging to a Task counts toward its usage
+and receives its steers. Managed conversations and Workers report turn
+boundaries to the Machine server; Bare launches read their steers directly.
 
-A bare `lf` typed inside a Task's checkout stays bare and records the Task as
-its ancestry; its usage and time still count toward the Task. So do a child
-run started by a Session's agent, which that agent steers, and plain `lf
-<skill>`. Desktop adds no mark: an agent started from a Desktop shell is bare.
-Design the bare path for subagents started by a Task's agent, not a person at
-a prompt: nobody watches, the caller waits on the exit and reads the output,
-and the run ends with its parent.
-
-`delegate` returns either a completed delegation or the mode to run here.
-Mode selects a native client or a headless driver; `--batch` always selects the
-headless driver, while `--interactive`, a terminal or no prompt selects the
-native client. Where a launch runs still depends on `--batch`, named Work and
-its viewer. After Work binding, `transport::holder` separately selects who
-receives provider reports. An inherited `LF_AS` declaration keeps its current
-behavior: local execution with server reporting.
+`delegate` returns either a completed delegation or `Here { run }`. Only Bare
+launches choose a mode: `--batch` selects headless; otherwise `--interactive`,
+a terminal or no prompt selects interactive. Managed conversations always run
+interactive, Workers headless. Reopening a Session is Managed without a
+second Work lookup.
 
 ### Bare conversations at a terminal
 
-Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of
-an unmanaged Session) run as the terminal's foreground process-group leader
-with only the context hooks, and closing the terminal ends them.
-`os_process::foreground` hands the terminal over before exec and takes it back
-after; a provider stopped with Ctrl+Z stops lf too, and `fg` continues both.
-Opening a bare Session somewhere else starts a new process in the same Session
-from the provider's history; a process still open elsewhere is not one `lf`
-stops.
+Bare `lf` and skill launches run as the terminal's foreground process-group
+leader. Closing the terminal ends them. `os_process::foreground` hands over
+the terminal before exec and takes it back after; Ctrl+Z stops lf with its
+provider and `fg` continues both. `lf resume` opens a Managed conversation.
 
 ### Identity
 
@@ -173,9 +148,7 @@ reported as such, never given an invented exit code.
 A Claude launcher hands the server what it would record at exit, then execs
 into the provider, so Claude is the holder's direct child and no `lf -i` waits
 beside it; the server records the provider's exit, settles its capture and
-reports where the conversation moved. Interactive Graph steps keep their
-launcher so each step settles before the Graph continues. A Codex launcher
-does the same into its client, which talks to its app-server directly. The
+reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
 running, and the byte-handling loop never waits for that read. OpenCode keeps
@@ -520,27 +493,18 @@ ps -axo ppid,command | grep 'graph run'
 # 1 lf --agent claude --task task_… graph run
 ```
 
-Nothing hosts headless work (`os_process::detached`). A bare `-b` or piped
-execution, and every headless Graph step, runs in the caller's process and its
-agent is that process's child, so it ends with its caller and its stdout and
-stderr are the caller's. Work that must outlive its caller (Graph launches,
-landing watchers, `lf ship`, a `-b` or piped Work command) is spawned with
-`setsid`, stdin from `/dev/null` and every inherited descriptor closed except
-release locks and worktree leases. It gets one more pipe, named by
-`LF_LAUNCHER_FD`: the child writes its LfProcess ID there once admitted, and
-`released` when it lets its launcher go. Server launches, landing watchers and
-ship restarts read the ID and append the child's output to
-`logs/detached.log`; a pipe that closes without an ID leaves delivery unknown,
-and nothing is launched again. A `-b` or piped Work command prints the child's
-stdout and stderr as they grow and exits with its status, or with success
-once a Task run or ship lets it go after naming its Graph log. A piped
-`lf session resume` of a Task conversation also passes its stdin on while it
-waits, so piped input reaches the agent. Killing that caller leaves the work
-running.
+Nothing hosts headless work (`os_process::detached`). Bare headless skills
+and direct Graphs run with their caller. Task Graph workers, landing watchers
+and delivery controllers that must outlive the command use `setsid`, stdin
+from `/dev/null` and closed inherited descriptors except release locks and
+worktree leases. Task steps themselves wait inside their Graph's process tree.
 
-No PTY, view protocol or screen is involved. Hooks, turn recording and
-steers work as they do for any headless run; the child's own process records
-its exit.
+`LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
+Server launches, landing watchers and ship restarts record the ID and append
+output to `logs/detached.log`. A pipe closing without an ID leaves delivery
+unknown; nothing launches again on that uncertainty. Workers report turns and
+read Task steers while running without a PTY, viewer or screen. Their own
+process records their exit.
 
 ## Exit and settlement
 

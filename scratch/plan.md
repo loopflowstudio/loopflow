@@ -67,8 +67,8 @@ no viewer, not in what is recorded.
 
 ### Behavior that changes on purpose
 
-- `LF_AS` and `--task` on a skill or graph launch are Bare. Today `--task`
-  makes it Managed and `LF_AS` makes it report to the server while running
+- `LF_AS` and `--task` on a skill or graph launch are Bare. Previously `--task`
+  made it Managed and `LF_AS` made it report to the server while running
   here. Replace
   `transport::tests::inherited_declaration_keeps_server_reporting_without_naming_work`
   with tests of the table above.
@@ -104,30 +104,41 @@ as a worker and gets the same steer.
 
 ## 2. The agent choice parsed once
 
-Today `AgentConfig.agent: Option<String>` (`"claude:opus"`) is re-parsed by
-`parse_agent` at 44 production sites and `HarnessKind::parse` at 36, with
-`claude_model` and `codex_service_tier` sitting on the shared config.
-`agent/mod.rs:1394` can still fail at headless launch with "unsupported
-session harness".
+`AgentConfig` carries `Agent { harness: HarnessKind, model: Option<String> }`.
+Config resolution parses the choice and fallback order before launch. Launch
+consumers use the typed selection; native admission and missing-CLI errors no
+longer parse it again. Claude's configured model folds into `Agent.model`.
 
-- Add `Agent { harness: HarnessKind, model: Option<String> }`, parsed once
-  where config resolves. An unknown harness becomes a config/selection error.
-- `AgentConfig` carries the resolved `Agent`, and `Launch.harness` comes from
-  it. Delete the re-parses. `HarnessKind::parse` remains only at input
-  boundaries: CLI `-a`, config files, stored Session provider rows.
-- Fold `claude_model` into `Agent.model` where it means the same thing (the
-  `resolved_agent` special case). If a per-harness option still has to live on
-  the config, keep it, and say in the PR why.
-- Wire shapes (`--json`, stored rows) keep their string form. Parse at the
-  boundary; don't change DTOs.
+CLI, authored preferences and persistence retain string forms at their input
+boundaries. Wire DTOs are unchanged. `chrome` and `codex_service_tier` remain
+separate provider launch options because neither is a model choice.
 
-## Checks
+## Remaining review
 
-- `cargo test -p loopflow-execution --lib transport::` and
-  `harness::launch_matrix` (16-cell matrix unchanged).
-- `cargo test -p loopflow-execution --lib config::` for agent selection and
-  fallback order.
-- `cargo clippy --all-targets -- -D warnings`.
+No implementation slice remains. Gate owns the broader transport,
+configuration and Task performance suites; demo owns live provider steering.
+The original demo's `lf ps` Bare/Worker labels do not exist on the process
+surface. Adding labels needs a persistence/display design rather than a
+second derivation of Run from argv; this remains a review choice.
+
+Managed native fixtures open through `resume`; direct skills remain Bare
+with Task attribution. WorkSource remains for context provenance and primary
+selection, with no launch-lifetime authority. Fresh resume carries invocation
+settings and a literal inline-prompt delimiter across exec.
+
+Checks, 2026-11-17 (inherited `LF_*` cleared):
+
+- `cargo build -p loopflow --bin lf`: passed.
+- Focused `cargo nextest run --lib` selections: 11 core tests passed, including
+  the 16-cell launch matrix, agent fallback order, steer attribution and query plans.
+- Focused CLI nextest selections: startup, server-free Task attribution,
+  documented commands, Codex service tiers and document bytes, Claude/Codex/OpenCode
+  launch/resume policy, linked worktrees and all three native Pi cases passed.
+- Task-worker, launch-mode and steer-capability nextest selections: 3 passed.
+  macOS debug libtest linking warned about the size of `__eh_frame`; linking succeeded.
+- The native launch/resume policy test passed after moving its preparation
+  fixture into execution's shared test support.
+- `cargo clippy --all-targets -- -D warnings`: passed on the final tree.
 
 ## Delete — do not maintain
 

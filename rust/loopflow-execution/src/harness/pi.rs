@@ -1,5 +1,5 @@
 //! Pi 1.3 RPC transport. Pi owns models, credentials and its JSONL conversation.
-use crate::session::Holder;
+use crate::harness::Run;
 use std::collections::HashMap;
 use std::io::BufRead;
 use std::path::{Path, PathBuf};
@@ -64,7 +64,7 @@ pub struct Driver {
     state: Arc<Mutex<State>>,
     config: AgentConfig,
     owner: Admitted,
-    holder: Holder,
+    run: Run,
     session: Option<AgentSessionId>,
     child: Option<Child>,
     stdin: Option<ChildStdin>,
@@ -161,7 +161,7 @@ impl Driver {
             state: Arc::default(),
             config: launch.config.clone(),
             owner: launch.admitted.clone(),
-            holder: launch.holder,
+            run: launch.run,
             session: launch.start.thread(),
             child: None,
             stdin: None,
@@ -245,7 +245,7 @@ impl Driver {
         command.args(super::context::pi_args(
             config.conversation_context.as_ref(),
             false,
-            self.holder,
+            self.run,
         )?);
         super::configure_agent_env(&mut command, config);
         if let Some(context) = &config.conversation_context {
@@ -259,8 +259,8 @@ impl Driver {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = super::agent_process::spawn(command, None, &owner, self.holder)
-            .with_context(|| crate::agent::missing_agent_message("pi"))?;
+        let mut child = super::agent_process::spawn(command, None, &owner, self.run)
+            .with_context(|| crate::agent::missing_agent_message(super::HarnessKind::Pi))?;
         let Admitted {
             store,
             session,
@@ -709,7 +709,7 @@ impl super::Harness for Pi {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Reported },
+            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, reporting: super::ThreadName::Reported },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: false,
@@ -751,7 +751,7 @@ impl super::Harness for Pi {
             .args(super::context::pi_args(
                 launch.config.conversation_context.as_ref(),
                 true,
-                launch.holder,
+                launch.run,
             )?)
             .args(args);
         Ok(client)

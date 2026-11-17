@@ -1510,28 +1510,6 @@ impl SqliteStore {
         Ok(attachment)
     }
 
-    /// Whether a recorded Session is bare: neither recorded as Task, Wave or
-    /// repository work nor a scope's ongoing conversation.
-    pub fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
-        Ok(!session
-            .work_source
-            .is_some_and(crate::session::WorkSource::is_managed)
-            && self.primary_scope(&session.id)?.is_none())
-    }
-
-    /// Whether a launch is Work: its command names a Task or Wave
-    /// (`named_work`), or the recorded Session it opens is not bare.
-    pub fn is_work(
-        &self,
-        named_work: bool,
-        session: Option<&crate::session::LfSession>,
-    ) -> StoreResult<bool> {
-        match session {
-            Some(session) if !named_work => Ok(!self.is_bare(session)?),
-            _ => Ok(named_work),
-        }
-    }
-
     /// Whether this interactive Session runs as the foreground program of the
     /// terminal that started it (`lf <skill>`): no holder keeps it,
     /// so nothing else may stop it, and another launch on its thread runs
@@ -1540,9 +1518,7 @@ impl SqliteStore {
         let Some(record) = self.session(session)? else {
             return Ok(false);
         };
-        Ok(record.interactive
-            && self.is_bare(&record)?
-            && self.session_terminal(session)?.is_none())
+        Ok(record.interactive && self.session_terminal(session)?.is_none())
     }
 
     /// Hold attachment transfer across acquisition and the eventual SQL claim.

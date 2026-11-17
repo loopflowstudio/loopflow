@@ -17,9 +17,9 @@ use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime};
 
-use crate::config::Agent;
 #[cfg(test)]
 use crate::config::parse_agent;
+use crate::config::Agent;
 use crate::error::CoreError;
 use crate::process::LfProcessRuntime;
 use crate::prompt::structured_reply::{render_structured_reply_guidance, StructuredReply};
@@ -161,7 +161,7 @@ pub struct AgentConfig {
     pub skill_invocation: Option<crate::skills::invocation::SkillInvocation>,
     /// Native final-answer schema for this turn.
     pub output_schema: Option<serde_json::Value>,
-    /// Agent string (for example: "claude:opus" or "codex").
+    /// Resolved harness and provider model.
     pub agent: Agent,
     /// Agents a Graph step moves to when a usage limit or unavailable model
     /// refuses `agent`: the rest of the configured order (`default_agent`,
@@ -193,13 +193,24 @@ pub struct AgentConfig {
 impl AgentConfig {
     pub fn new(agent: Agent) -> Self {
         Self {
-            agent, chrome: None, codex_service_tier: None,
-            system_prompt: String::new(), conversation_context: None,
-            task_prompt: String::new(), skill_invocation: None, output_schema: None,
-            fallback_agents: Vec::new(), max_turns: None, resume_token: None,
-            cwd: None, write_scope: AgentWriteScope::Configured, execution_boundary: None,
-            skip_permissions: false, structured_replies: Vec::new(),
-            directive_relay: None, env: BTreeMap::new(),
+            agent,
+            chrome: None,
+            codex_service_tier: None,
+            system_prompt: String::new(),
+            conversation_context: None,
+            task_prompt: String::new(),
+            skill_invocation: None,
+            output_schema: None,
+            fallback_agents: Vec::new(),
+            max_turns: None,
+            resume_token: None,
+            cwd: None,
+            write_scope: AgentWriteScope::Configured,
+            execution_boundary: None,
+            skip_permissions: false,
+            structured_replies: Vec::new(),
+            directive_relay: None,
+            env: BTreeMap::new(),
         }
     }
 
@@ -287,7 +298,7 @@ fn _record_agent_move(agent: &Agent, failure: AgentFailure, reason: &str, next: 
     eprintln!("{agent}: {failure}; continuing on {next}");
     let provider = agent.harness.as_str();
     _record_limit_recovery(
-        &provider,
+        provider,
         &format!("{reason}{}{next}", crate::ops::task_execution::MOVED_TO),
         None,
     );
@@ -317,7 +328,11 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
     if !launch.fallback_agents.is_empty() {
         return format!(
             "Nothing is left in its order after {}; add another agent to `agents`",
-            rungs.iter().map(ToString::to_string).collect::<Vec<_>>().join(", ")
+            rungs
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(", ")
         );
     }
     let another = crate::harness::HarnessKind::ALL
@@ -756,8 +771,7 @@ pub fn build_codex_thread_start_params(
         );
     }
 
-    if let Some(model) = launch.agent.model.clone()
-    {
+    if let Some(model) = launch.agent.model.clone() {
         params.insert("model".to_string(), serde_json::Value::String(model));
     }
 
@@ -788,7 +802,7 @@ pub fn build_codex_thread_start_params(
 /// context hooks. Nothing else of lf's configuration rides along.
 pub(crate) fn codex_terminal_options(
     launch: &AgentConfig,
-    holder: crate::session::Holder,
+    run: crate::harness::Run,
 ) -> anyhow::Result<Vec<String>> {
     let params = build_codex_thread_start_params(launch, false);
     let mut args = Vec::new();
@@ -819,7 +833,7 @@ pub(crate) fn codex_terminal_options(
     if let Some(context) = &launch.conversation_context {
         config.insert(
             "hooks".into(),
-            crate::harness::context::codex_hooks(context, None, holder)?,
+            crate::harness::context::codex_hooks(context, None, run)?,
         );
     }
     args.extend(crate::harness::codex::config_overrides(&config.into())?);
@@ -882,7 +896,7 @@ pub(crate) fn validate_terminal_turn(prompt: &str) -> Result<(), CoreError> {
 pub fn run_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    holder: crate::session::Holder,
+    run: crate::harness::Run,
 ) -> Result<AgentProcessResult, CoreError> {
     let cwd = match &launch.cwd {
         Some(cwd) => cwd.clone(),
@@ -890,7 +904,7 @@ pub fn run_agent(
     };
     let command = std::env::args().collect::<Vec<_>>();
     crate::journal::with_runtime(&cwd, &command, || {
-        run_admitted_agent(launch, process, holder).map_err(Into::into)
+        run_admitted_agent(launch, process, run).map_err(Into::into)
     })
     .map_err(|error| {
         error
@@ -902,11 +916,10 @@ pub fn run_agent(
 fn run_admitted_agent(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    holder: crate::session::Holder,
+    run: crate::harness::Run,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness()
-        .capabilities();
+    let capabilities = launch.agent.harness.harness().capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -923,7 +936,7 @@ fn run_admitted_agent(
     let harness = launch.agent.harness.as_str();
     let model = launch.agent.model.clone();
     let implicit_runtime = if process.runtime.is_none() {
-        Some(_begin_process_runtime(&launch, &harness, model)?)
+        Some(_begin_process_runtime(&launch, harness, model)?)
     } else {
         None
     };
@@ -958,7 +971,7 @@ fn run_admitted_agent(
         &launch,
         &process,
         &TRANSIENT_RETRY_DELAYS,
-        |attempt, retry| _run_harness_once(attempt, &process, holder, retry),
+        |attempt, retry| _run_harness_once(attempt, &process, run, retry),
         _sleep_wall_clock,
     );
     if let Err(error) = crate::ops::planning_sync::check_directory(&directory) {
@@ -993,7 +1006,13 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt.agent.harness.harness().capabilities().classifies_failures {
+        if !attempt
+            .agent
+            .harness
+            .harness()
+            .capabilities()
+            .classifies_failures
+        {
             return Ok(result);
         }
         result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
@@ -1042,7 +1061,7 @@ fn _run_with_retries(
                     // Each try after the wait starts the order again and reads
                     // the native login afresh.
                     usage_waits += 1;
-                    _record_limit_wait(&provider, &reason, delay);
+                    _record_limit_wait(provider, &reason, delay);
                     if rung > 0 {
                         rung = 0;
                         attempt = _climb(&attempt, &rungs[0], process, launch);
@@ -1052,9 +1071,9 @@ fn _run_with_retries(
                     let advice = if revoked {
                         _sign_in_advice(attempt.agent.harness)
                     } else {
-                        _limit_stop_advice(&provider, launch, &rungs)
+                        _limit_stop_advice(provider, launch, &rungs)
                     };
-                    _record_stop(&provider, &reason, &advice);
+                    _record_stop(provider, &reason, &advice);
                     result.stderr = format!("{reason}\n{advice}");
                     return Ok(result);
                 }
@@ -1108,9 +1127,17 @@ fn _fallthrough_rungs(
         .chain(launch.fallback_agents.iter().cloned())
         .collect();
     if launch.fallback_agents.is_empty() && first.model.is_none() {
-        order.extend(first.harness.harness().model_rungs().iter().map(|model| Agent {
-            harness: first.harness, model: Some((*model).to_owned()),
-        }));
+        order.extend(
+            first
+                .harness
+                .harness()
+                .model_rungs()
+                .iter()
+                .map(|model| Agent {
+                    harness: first.harness,
+                    model: Some((*model).to_owned()),
+                }),
+        );
     }
     let mut rungs: Vec<Agent> = Vec::new();
     for rung in order {
@@ -1323,7 +1350,7 @@ fn _begin_process_runtime(
 fn _run_harness_once(
     launch: &AgentConfig,
     process: &ProcessConfig,
-    holder: crate::session::Holder,
+    run: crate::harness::Run,
     retry: bool,
 ) -> Result<AgentProcessResult, CoreError> {
     if tokio::runtime::Handle::try_current().is_ok() {
@@ -1331,7 +1358,7 @@ fn _run_harness_once(
         let process = process.clone();
         return std::thread::Builder::new()
             .name("lf-native-harness".to_string())
-            .spawn(move || _run_harness_once(&launch, &process, holder, retry))
+            .spawn(move || _run_harness_once(&launch, &process, run, retry))
             .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
             .join()
             .map_err(|_| {
@@ -1364,7 +1391,7 @@ fn _run_harness_once(
     let value = crate::harness::Launch {
         config: &config,
         harness: launch.agent.harness.harness(),
-        holder,
+        run,
         admitted: &admitted,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
         context_file: None,
@@ -1373,10 +1400,9 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(cli: &str) -> String {
-    let hint = crate::harness::HarnessKind::parse(cli)
-        .map(|kind| kind.harness().capabilities().install_hint)
-        .unwrap_or("Install it, or choose another agent with `-a claude` or `-a codex`.");
+pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
+    let cli = kind.as_str();
+    let hint = kind.harness().capabilities().install_hint;
     format!("'{cli}' is not installed. {hint}")
 }
 
@@ -1412,7 +1438,10 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         }
     }
 
@@ -1460,11 +1489,7 @@ mod tests {
 
     fn terminal_args(config: &AgentConfig) -> Vec<String> {
         let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
-        let launch = crate::harness::launch_for_test(
-            config.agent.harness,
-            config,
-            &admitted,
-        );
+        let launch = crate::harness::launch_for_test(config.agent.harness, config, &admitted);
         launch
             .harness
             .open(&launch)
@@ -1520,7 +1545,10 @@ trust_level = "trusted"
                     sandbox,
                     approval: None,
                 },
-                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                }),
                 true,
             );
             assert_eq!(
@@ -1538,7 +1566,10 @@ trust_level = "trusted"
                 sandbox: Some(CodexSandboxMode::DangerFullAccess),
                 approval: Some(CodexApprovalPolicy::Never),
             },
-            &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
+            &crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            }),
             true,
         );
         assert_eq!(policy, CodexPermissionConfig::default());
@@ -1551,12 +1582,22 @@ trust_level = "trusted"
             approval: Some(CodexApprovalPolicy::OnRequest),
         };
         assert_eq!(
-            codex_permission_policy(restrictive, &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }), false),
+            codex_permission_policy(
+                restrictive,
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None
+                }),
+                false
+            ),
             CodexPermissionConfig::default()
         );
         let yolo = AgentConfig {
             skip_permissions: true,
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         assert_eq!(
             codex_permission_policy(restrictive, &yolo, false),
@@ -1618,7 +1659,7 @@ trust_level = "trusted"
         let (_tmp, main, _) = git_worktree_fixture();
         for provider in ["claude", "codex"] {
             let launch = AgentConfig {
-                agent: crate::config::Agent::parse(&provider).unwrap(),
+                agent: crate::config::Agent::parse(provider).unwrap(),
                 cwd: Some(main.clone()),
                 system_prompt: "Fixed additions.".into(),
                 ..default_launch()
@@ -1715,7 +1756,7 @@ trust_level = "trusted"
     fn bare_harness_commands_do_not_select_a_model() {
         for harness in ["claude", "opencode"] {
             let launch = AgentConfig {
-                agent: crate::config::Agent::parse(&harness).unwrap(),
+                agent: crate::config::Agent::parse(harness).unwrap(),
                 ..default_launch()
             };
             let cmd = terminal_args(&launch);
@@ -1733,7 +1774,10 @@ trust_level = "trusted"
             agent: crate::config::Agent::parse("claude:fable").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
             task_prompt: "finish the operation".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -1760,7 +1804,10 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude:fable").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = 0;
         let result = _run_with_retries(
@@ -1790,7 +1837,10 @@ trust_level = "trusted"
     fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("pi:fixture/model").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = 0;
         let result = _run_with_retries(
@@ -1856,9 +1906,15 @@ trust_level = "trusted"
     fn model_unavailable_skips_logins_and_keeps_the_configured_order() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude:fable").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("claude:opus").unwrap(), crate::config::Agent::parse("codex").unwrap()],
+            fallback_agents: vec![
+                crate::config::Agent::parse("claude:opus").unwrap(),
+                crate::config::Agent::parse("codex").unwrap(),
+            ],
             task_prompt: "finish the operation".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -1899,7 +1955,10 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
             task_prompt: "compress the branch".to_string(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let process = graph_process();
         let mut results = vec![
@@ -2108,7 +2167,9 @@ trust_level = "trusted"
             let mut config = crate::config::Config::default();
             config.claude.model = saved.map(str::to_owned);
             let launch = AgentConfig {
-                agent: crate::config::Agent::parse(agent).unwrap().with_configured_model(&config),
+                agent: crate::config::Agent::parse(agent)
+                    .unwrap()
+                    .with_configured_model(&config),
                 skip_permissions: true,
                 ..default_launch()
             };
@@ -2137,9 +2198,15 @@ trust_level = "trusted"
     fn a_launch_refused_by_a_usage_limit_moves_to_the_next_agent() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
-            fallback_agents: vec![crate::config::Agent::parse("claude:fable").unwrap(), crate::config::Agent::parse("claude:opus").unwrap()],
+            fallback_agents: vec![
+                crate::config::Agent::parse("claude:fable").unwrap(),
+                crate::config::Agent::parse("claude:opus").unwrap(),
+            ],
             task_prompt: "compress the diff".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let refused = || failed_result("codex_error: You've hit your usage limit");
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
@@ -2170,7 +2237,10 @@ trust_level = "trusted"
     fn a_pinned_agent_refused_on_every_try_stops_after_the_last_wait() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = 0;
         let mut waits = Vec::new();
@@ -2202,7 +2272,14 @@ trust_level = "trusted"
             ..launch
         };
         assert_eq!(
-            _limit_stop_advice("claude", &ordered, &[Agent::parse("codex").unwrap(), Agent::parse("claude").unwrap()]),
+            _limit_stop_advice(
+                "claude",
+                &ordered,
+                &[
+                    Agent::parse("codex").unwrap(),
+                    Agent::parse("claude").unwrap()
+                ]
+            ),
             "Nothing is left in its order after codex, claude; add another agent to `agents`"
         );
         // A stopped headless launch explains the configured order it exhausted.
@@ -2216,7 +2293,10 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude:opus").unwrap(),
             task_prompt: "compress the diff".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut scripted = vec![limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
@@ -2246,7 +2326,10 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let process = ProcessConfig::default();
         let mut attempts = 0;
@@ -2275,7 +2358,10 @@ trust_level = "trusted"
         };
         let pinned = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let mut attempts = 0;
         let mut waits = Vec::new();
@@ -2303,7 +2389,10 @@ trust_level = "trusted"
 
         // Another provider in the order goes on.
         let ordered = AgentConfig {
-            fallback_agents: vec![crate::config::Agent::parse("claude:fable").unwrap(), crate::config::Agent::parse("codex").unwrap()],
+            fallback_agents: vec![
+                crate::config::Agent::parse("claude:fable").unwrap(),
+                crate::config::Agent::parse("codex").unwrap(),
+            ],
             ..pinned
         };
         let mut scripted = vec![revoked(), done()].into_iter();
@@ -2368,11 +2457,17 @@ trust_level = "trusted"
                     fallback_agents: if pinned {
                         vec![]
                     } else {
-                        vec![Agent::parse("claude:opus").unwrap(), Agent::parse("codex").unwrap()]
+                        vec![
+                            Agent::parse("claude:opus").unwrap(),
+                            Agent::parse("codex").unwrap(),
+                        ]
                     },
                     task_prompt: "finish the operation".into(),
                     resume_token: Some("native-thread".into()),
-                    ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                    ..crate::agent::AgentConfig::new(crate::config::Agent {
+                        harness: crate::harness::HarnessKind::Codex,
+                        model: None,
+                    })
                 };
                 // Headless here is a Graph step; other headless work
                 // stops at once (its own test).

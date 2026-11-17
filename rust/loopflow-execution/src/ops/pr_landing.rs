@@ -348,7 +348,11 @@ fn admit_ci_fix(
         if let Some(task) = &landing.task_id {
             argv.splice(1..1, ["--task".to_owned(), task.to_string()]);
         }
-        let environment = [(crate::ops::WORK_DECLARATION_ENV, ""), ("LF_USER_NAME", "")];
+        let environment = [
+            (crate::ops::WORK_DECLARATION_ENV, ""),
+            ("LF_USER_NAME", ""),
+            (crate::journal::GRAPH_STEP_ENV, "worker"),
+        ];
         let worker = crate::os_process::detached::start_lf(
             &landing.worktree,
             &argv,

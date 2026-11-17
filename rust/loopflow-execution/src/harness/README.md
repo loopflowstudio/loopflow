@@ -10,7 +10,7 @@ at turn boundaries, interjects through hooks and records what happened.
 let launch = Launch {
     config: &config,
     harness,            // resolved once from the selected agent
-    holder,             // resolved after Work binding
+    run,                // Bare(mode), Managed or Worker, from delegation
     admitted: &admitted, // required before opening the provider
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
@@ -22,9 +22,10 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-`transport::delegate` decides `Mode`, which selects the native or headless runner.
-After Work binding, `transport::holder` decides `Holder` once. In-process callers
-such as commit messages, PR text and replay choose Headless + Caller. A Task Graph step goes through `delegate`.
+`transport::delegate` decides `Run` once. `Bare(Mode)` follows its caller,
+`Managed` is an interactive conversation in a held terminal, and `Worker` is a
+headless Task Graph step. In-process callers such as commit messages, PR text
+and replay use `Bare(Headless)`. Task attribution never changes this choice.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.
 
@@ -48,15 +49,15 @@ may `exec` into a held terminal.
 | harness | interactive client | names the thread |
 |---|---|---|
 | Claude | native TUI, prompt on stdin | lf (`--session-id`) |
-| Pi, Caller | native TUI | lf (`--session-id`) |
-| Pi, Server | native TUI with the lf extension | provider |
-| Codex, Caller | `codex`, prompt in argv | provider (start hook) |
-| Codex, Server | `codex --remote` after lf opens the app-server thread | provider |
+| Pi, Bare | native TUI | lf (`--session-id`) |
+| Pi, Managed | native TUI with the lf extension | provider |
+| Codex, Bare | `codex`, prompt in argv | provider (start hook) |
+| Codex, Managed | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --server … --session` beside a private server; waits | provider |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
-runs every harness × mode × holder against the stand-in provider scripts and
-prints each cell's argv, hook ownership, wait mechanism and recorded thread.
+runs every harness with bare/managed interactive and bare/worker headless
+launches against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
 Headless matrix runs wait here; held-terminal exec handoff is covered by the
 transport fixtures.
 

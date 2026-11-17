@@ -836,3 +836,32 @@ pub mod human_session;
 pub mod planning_tasks;
 
 pub mod task_graph;
+
+/// Prepare a conversation with its first input; `resume` supplies the managed launch path.
+#[allow(dead_code)] // Shared support is compiled by every application test binary.
+pub fn prepare_native_conversation(
+    database: &std::path::Path,
+    cwd: &std::path::Path,
+    agent: &str,
+    skill: Option<&str>,
+    request: &str,
+) -> String {
+    let store = crate::store::open_sqlite(database).unwrap();
+    let agent = crate::config::Agent::parse(agent).unwrap();
+    let mut session = loopflow_storage::test_fixture::unpublished_conversation(
+        None,
+        None,
+        loopflow_storage::rows::now_unix(),
+    );
+    session.artifact_key = None;
+    session.cwd = cwd.into();
+    session.provider = Some(agent.harness.as_str().into());
+    session.model = agent.model;
+    session.skill = skill.map(str::to_owned);
+    session.request = Some(request.into());
+    session.interactive = true;
+    crate::store::sessions::create_session(&store, session, None)
+        .unwrap()
+        .id
+        .to_string()
+}

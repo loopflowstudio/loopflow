@@ -73,7 +73,7 @@ impl LiveSessionFixture {
                     session: session.id.to_string(),
                     attachment,
                 },
-                crate::session::Holder::Caller,
+                crate::harness::Run::Bare(crate::harness::Mode::Headless),
             )
             .unwrap(),
         )
@@ -130,10 +130,10 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 command,
                 None,
                 &crate::harness::Admitted { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
-                crate::session::Holder::Caller,
+                crate::harness::Run::Bare(crate::harness::Mode::Headless),
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, false, true, false).await;
+            let forked = super::open(&store, home, &session.id, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -777,7 +777,6 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             false,
             false,
-            false,
         )
         .await
         .unwrap();
@@ -801,7 +800,6 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &record.id,
             SessionOpenIntent::Start,
             true,
-            false,
             false,
         )
         .await
@@ -829,7 +827,6 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             SessionOpenIntent::Start,
             false,
             false,
-            false,
         )
         .await
         .unwrap();
@@ -839,7 +836,6 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &store,
             std::path::Path::new("/"),
             &record.id,
-            false,
             false,
             false,
             false,
@@ -873,7 +869,6 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             &store,
             &record.id,
             SessionOpenIntent::Reveal,
-            false,
             false,
             false,
         )
@@ -915,7 +910,6 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             SessionOpenIntent::Reveal,
             true,
             false,
-            false,
         )
         .await
         .unwrap_err();
@@ -950,7 +944,6 @@ fn recovery_refresh_follows_current_holder_and_history() {
             SessionOpenIntent::Reveal,
             false,
             false,
-            false,
         )
         .await
         .unwrap();
@@ -969,19 +962,19 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let holder =
+        let run =
             attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher, true)
                 .unwrap();
         store
             .sqlite
             .record_agent_process_launch(
                 &record.id,
-                &holder,
+                &run,
                 &std::process::Command::new("fixture-provider"),
                 true,
             )
             .unwrap();
-        // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
+        // An admitted run with unknown OS evidence cannot be replaced by a reveal.
         let refreshed = listed_session(&store, &record.id);
         let takeover = refreshed
             .actions
@@ -995,23 +988,22 @@ fn recovery_refresh_follows_current_holder_and_history() {
             SessionOpenIntent::Reveal,
             false,
             false,
-            false,
         )
         .await
         .unwrap();
         assert_eq!(reveal.actions, refreshed.actions);
         assert_eq!(
             store.sqlite.session_attachment(&record.id).unwrap(),
-            Some(holder.clone())
+            Some(run.clone())
         );
 
         store
             .sqlite
-            .record_session_agent_session(&record.id, &holder, &"saved-thread".into())
+            .record_session_agent_session(&record.id, &run, &"saved-thread".into())
             .unwrap();
         store
             .sqlite
-            .record_agent_process_exit(&record.id, &holder, true)
+            .record_agent_process_exit(&record.id, &run, true)
             .unwrap();
         let refreshed = listed_session(&store, &record.id);
         assert!(!refreshed
@@ -1075,7 +1067,6 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 SessionOpenIntent::Reveal,
                 false,
                 false,
-                false,
             )
             .await
             .unwrap();
@@ -1108,7 +1099,6 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 &store,
                 &next.id,
                 SessionOpenIntent::Reveal,
-                false,
                 false,
                 false,
             )
@@ -1503,7 +1493,6 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         &logins.store,
         &session.id,
         SessionOpenIntent::Reveal,
-        false,
         false,
         false,
     )

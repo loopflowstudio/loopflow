@@ -1,6 +1,6 @@
 //! Native provider launch and continuation of a recorded conversation.
 
-use crate::session::Holder;
+use crate::harness::Run;
 use anyhow::{anyhow, bail, Result};
 use std::collections::BTreeMap;
 use std::fs::File;
@@ -91,17 +91,13 @@ impl NativeClient {
     }
 }
 
-fn session_harness(config: &AgentConfig) -> Result<&'static dyn super::Harness> {
-    Ok(config.agent.harness.harness())
-}
-
 pub fn launch_session(
     config: &AgentConfig,
-    holder: Holder,
+    run: Run,
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let harness = session_harness(config)?;
+    let harness = config.agent.harness.harness();
     let cwd = config
         .cwd
         .clone()
@@ -114,16 +110,16 @@ pub fn launch_session(
                 environment.extend(capture.environment());
                 (Admitted::from_runtime(capture)?, None)
             }
-            None => admit(&config.agent.to_string(), &cwd, &mut environment)?,
+            None => admit(&config.agent, &cwd, &mut environment)?,
         };
         let result = {
             let mut config = config.clone();
             config.env = environment.clone();
-            run(
+            self::run(
                 &Launch {
                     config: &config,
                     harness,
-                    holder,
+                    run,
                     admitted: &admitted,
                     start: Start::New,
                     context_file,
@@ -142,14 +138,14 @@ pub fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
-    holder: Holder,
+    run: Run,
 ) -> Result<()> {
     resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
         None,
-        holder,
+        run,
     )
 }
 
@@ -160,7 +156,7 @@ pub fn resume_session_with_env(
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    holder: Holder,
+    run: Run,
 ) -> Result<()> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -168,17 +164,16 @@ pub fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
-    let harness = session_harness(&config)?;
+    let harness = config.agent.harness.harness();
     anyhow::ensure!(
         session.provider.as_deref() == Some(harness.kind().as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
-        &config.agent,
-        &config.agent,
+        config.agent,
+        config.agent,
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
-    let sends_first_turn =
-        harness.capabilities().initial_prompt_on_resume && holder != Holder::Caller;
+    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && run.reports_turns();
     if provider_session.is_some() && !sends_first_turn {
         config.task_prompt.clear();
     }
@@ -198,14 +193,14 @@ pub fn resume_session_with_env(
         .expect("resolved session config has a working directory");
     crate::journal::with_runtime(cwd, &std::env::args().collect::<Vec<_>>(), || {
         let mut environment = config.env.clone();
-        let (admitted, capture) = admit(&config.agent.to_string(), cwd, &mut environment)?;
+        let (admitted, capture) = admit(&config.agent, cwd, &mut environment)?;
         let mut config = config.clone();
         config.env = environment;
-        let result = run(
+        let result = self::run(
             &Launch {
                 config: &config,
                 harness,
-                holder,
+                run,
                 admitted: &admitted,
                 start: Start::from_thread(provider_session.map(|provider| &provider.agent_session)),
                 context_file: context_file.as_deref(),
@@ -214,7 +209,7 @@ pub fn resume_session_with_env(
             capture.as_ref(),
         );
         finish_admission(&admitted, capture, &result);
-        result?.result(harness.kind(), provider_session.is_some(), holder)
+        result?.result(harness.kind(), provider_session.is_some(), run)
     })
 }
 
@@ -312,9 +307,9 @@ impl NativeOutcome {
     /// A bare launch ends as its provider would alone, with the provider's
     /// own status, unless a mover took its conversation; only a held
     /// conversation can have another client.
-    pub fn result(&self, kind: super::HarnessKind, resuming: bool, holder: Holder) -> Result<()> {
+    pub fn result(&self, kind: super::HarnessKind, resuming: bool, run: Run) -> Result<()> {
         let program = kind.as_str();
-        if holder == Holder::Caller && self.moved.is_none() {
+        if !run.reports_turns() && self.moved.is_none() {
             match self.bare_exit_code(kind) {
                 0 => Ok(()),
                 code => Err(crate::process::CommandExit(code).into()),
@@ -421,7 +416,7 @@ fn native_provider_attachment(
 
 /// Admit a native invocation before constructing its provider command.
 pub fn admit(
-    program: &str,
+    agent: &crate::config::Agent,
     cwd: &Path,
     environment: &mut BTreeMap<String, String>,
 ) -> Result<(Admitted, Option<LfProcessRuntime>)> {
@@ -430,8 +425,8 @@ pub fn admit(
         let context = crate::trace::PreparedTurnContext::from_prompts("", "");
         let created = crate::session_record::SessionRecorder::begin_with_context(
             crate::session_record::SessionCaptureSpec {
-                harness: crate::config::parse_agent(program).0,
-                model: None,
+                harness: agent.harness.as_str().into(),
+                model: agent.model.clone(),
                 surface: "tui".into(),
                 cwd: cwd.into(),
                 repo: None,
@@ -617,11 +612,8 @@ fn run_client(
     // starts it fresh instead of resuming one that never ran. A Session's
     // first launch (`lf resume` starting a repository conversation) names no
     // Work on its command line; its recorded Session does.
-    if let Some(Admitted { store, session, .. }) = owned {
-        let named_work = launch.holder == Holder::Server;
-        if store.is_work(named_work, store.session(session)?.as_ref())? {
-            crate::harness::agent_process::require_server()?;
-        }
+    if launch.run.reports_turns() {
+        crate::harness::agent_process::require_server()?;
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
         crate::session_record::write_provider_session(capture_dir, agent_session, None)?;
@@ -658,7 +650,7 @@ fn run_client(
                     Some(owner) => crate::harness::agent_process::exec_native(
                         std::mem::replace(process, Command::new(program)),
                         owner,
-                        launch.holder,
+                        launch.run,
                         launch_lock,
                     ),
                     None => {
@@ -671,7 +663,7 @@ fn run_client(
                 };
                 crate::transport::drop_exit_record();
                 return Err(if error.kind() == std::io::ErrorKind::NotFound {
-                    anyhow!(missing_agent_message(program))
+                    anyhow!(missing_agent_message(launch.harness.kind()))
                 } else {
                     error.into()
                 });
@@ -688,7 +680,7 @@ fn run_client(
         Some(owner) => crate::harness::agent_process::spawn_native(
             std::mem::replace(process, Command::new(program)),
             owner,
-            launch.holder,
+            launch.run,
         ),
         None => {
             let Admitted {
@@ -706,7 +698,7 @@ fn run_client(
             .downcast_ref::<std::io::Error>()
             .is_some_and(|error| error.kind() == std::io::ErrorKind::NotFound)
         {
-            anyhow!(missing_agent_message(program))
+            anyhow!(missing_agent_message(launch.harness.kind()))
         } else {
             error
         }
@@ -823,8 +815,8 @@ mod tests {
     use super::{departure_notice, launch_session, resume_session_with_env};
     use super::{Launch, NativeClient, Start};
     use crate::agent::AgentConfig;
+    use crate::harness::Run;
     use crate::provider_auth::Provider;
-    use crate::session::Holder;
     use crate::store::{CredentialType, ProviderToken, StorageConfig};
     use std::collections::BTreeMap;
     use std::ffi::OsString;
@@ -951,18 +943,25 @@ mod tests {
     ) -> anyhow::Result<super::NativeOutcome> {
         crate::journal::with_runtime(cwd, &["lf".into(), "fixture".into()], || {
             let mut environment = environment.clone();
-            let (admitted, capture) = super::admit(program, cwd, &mut environment)?;
+            let (admitted, capture) = super::admit(
+                &crate::config::Agent::parse("claude")?,
+                cwd,
+                &mut environment,
+            )?;
             let admitted = admitted.clone();
             let config = AgentConfig {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(cwd.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                holder: Holder::Caller,
+                run: Run::Bare(crate::harness::Mode::Headless),
                 admitted: &admitted,
                 start: Start::New,
                 context_file: None,
@@ -1019,7 +1018,11 @@ mod tests {
             &capture.environment(),
         )
         .and_then(|outcome| {
-            outcome.result(crate::harness::HarnessKind::Claude, false, Holder::Caller)
+            outcome.result(
+                crate::harness::HarnessKind::Claude,
+                false,
+                Run::Bare(crate::harness::Mode::Headless),
+            )
         })
         .expect_err("a failed provider fails its launch")
     }
@@ -1114,7 +1117,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
-                    Holder::Caller,
+                    Run::Bare(crate::harness::Mode::Headless),
                 )
             };
             if index % 2 == 0 {
@@ -1190,7 +1193,10 @@ mod tests {
         let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
             task_prompt: "the first turn".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         })
         .unwrap();
         let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -1222,7 +1228,7 @@ mod tests {
             Some(&session),
             &BTreeMap::new(),
             None,
-            Holder::Caller,
+            Run::Bare(crate::harness::Mode::Headless),
         )
         .unwrap();
 
@@ -1262,7 +1268,11 @@ mod tests {
         });
         let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
             .and_then(|outcome| {
-                outcome.result(crate::harness::HarnessKind::Claude, false, Holder::Caller)
+                outcome.result(
+                    crate::harness::HarnessKind::Claude,
+                    false,
+                    Run::Bare(crate::harness::Mode::Headless),
+                )
             });
         stop.join().unwrap().unwrap();
         result.unwrap();
@@ -1351,7 +1361,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: original.clone(),
                 },
-                Holder::Caller,
+                Run::Bare(crate::harness::Mode::Headless),
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1381,12 +1391,15 @@ mod tests {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                holder: Holder::Caller,
+                run: Run::Bare(crate::harness::Mode::Headless),
                 admitted: &admitted,
                 start: Start::New,
                 context_file: None,
@@ -1485,12 +1498,15 @@ mod tests {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                holder: Holder::Caller,
+                run: Run::Bare(crate::harness::Mode::Headless),
                 admitted: &admitted,
                 start: Start::New,
                 context_file: None,
@@ -1596,9 +1612,12 @@ mod tests {
                 cwd: Some(temp.path().to_path_buf()),
                 task_prompt: "review it".into(),
                 env: BTreeMap::new(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             },
-            Holder::Caller,
+            Run::Bare(crate::harness::Mode::Headless),
             None,
             None,
         )

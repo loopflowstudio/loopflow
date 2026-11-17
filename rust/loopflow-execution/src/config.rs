@@ -521,13 +521,23 @@ impl Config {
     /// Resolve launch choices before provider effects, including configured models.
     pub fn resolve_agents(&self) -> Result<(Agent, Vec<Agent>), LoadError> {
         let first = Agent::parse(self.agent()?)?;
-        let mut fallback: Vec<Agent> = self.fallback_agents().iter()
+        let mut fallback: Vec<Agent> = self
+            .fallback_agents()
+            .iter()
             .map(|agent| Agent::parse(agent).map(|agent| agent.with_configured_model(self)))
             .collect::<Result<_, _>>()?;
         if fallback.is_empty() && first.model.is_none() {
-            fallback.extend(first.harness.harness().model_rungs().iter().map(|model| Agent {
-                harness: first.harness, model: Some((*model).to_owned()),
-            }));
+            fallback.extend(
+                first
+                    .harness
+                    .harness()
+                    .model_rungs()
+                    .iter()
+                    .map(|model| Agent {
+                        harness: first.harness,
+                        model: Some((*model).to_owned()),
+                    }),
+            );
         }
         let first = first.with_configured_model(self);
         fallback.retain(|agent| agent != &first);
@@ -979,21 +989,32 @@ mod tests {
 
     #[test]
     fn resolved_choices_keep_configured_models_and_fallback_order() {
-        let mut config = Config::default();
-        config.agent = Some("claude".into());
+        let mut config = Config {
+            agent: Some("claude".into()),
+            ..Config::default()
+        };
         config.claude.model = Some("sonnet".into());
         let (agent, fallback) = config.resolve_agents().unwrap();
         assert_eq!(agent.to_string(), "claude:sonnet");
-        assert_eq!(fallback.iter().map(ToString::to_string).collect::<Vec<_>>(), ["claude:opus", "claude:haiku"]);
+        assert_eq!(
+            fallback.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["claude:opus", "claude:haiku"]
+        );
         config.agent = Some("claude:fable".into());
         assert!(config.resolve_agents().unwrap().1.is_empty());
         config.agent = None;
         config.default_agent = Some("codex".into());
         config.agents = vec!["codex".into(), "claude".into(), "pi:fixture/model".into()];
         let (_, fallback) = config.resolve_agents().unwrap();
-        assert_eq!(fallback.iter().map(ToString::to_string).collect::<Vec<_>>(), ["claude:sonnet", "pi:fixture/model"]);
+        assert_eq!(
+            fallback.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["claude:sonnet", "pi:fixture/model"]
+        );
         config.agent = Some("unknown:model".into());
-        assert!(matches!(config.resolve_agents(), Err(LoadError::InvalidAgent(_))));
+        assert!(matches!(
+            config.resolve_agents(),
+            Err(LoadError::InvalidAgent(_))
+        ));
     }
 
     // ==========================================================================

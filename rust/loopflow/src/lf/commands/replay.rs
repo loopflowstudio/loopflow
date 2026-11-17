@@ -30,8 +30,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         )
     })?;
-    let (harness, model) = loopflow_execution::config::parse_agent(&request.agent);
-    if harness != source.harness || model != source.model {
+    let agent = loopflow_execution::config::Agent::parse(&request.agent)?;
+    if agent.harness.as_str() != source.harness || agent.model != source.model {
         return Err(anyhow!(
             "capture {} has inconsistent provider identity",
             source.artifact_key
@@ -43,7 +43,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
-        agent: loopflow_execution::config::Agent::parse(&request.agent)?,
+        agent,
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
         write_scope: request.write_scope,
@@ -51,7 +51,10 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
-        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
+        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent {
+            harness: loopflow_execution::harness::HarnessKind::Codex,
+            model: None,
+        })
     };
     config.apply_agent_override()?;
     let selected_harness = config.agent.harness.as_str().to_owned();
@@ -110,7 +113,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
     let result = run_agent(
         &config,
         &process,
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",

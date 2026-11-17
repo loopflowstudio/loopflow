@@ -187,7 +187,7 @@ fn a_settled_runtime_cannot_launch_another_native_provider() {
                 session,
                 attachment,
             },
-            crate::session::Holder::Caller,
+            crate::harness::Run::Bare(crate::harness::Mode::Headless),
         );
         assert!(result.is_err());
         assert!(!marker.exists());
@@ -259,7 +259,7 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
                     session: session.clone(),
                     attachment: attachment.clone()
                 },
-                crate::session::Holder::Caller,
+                crate::harness::Run::Bare(crate::harness::Mode::Headless),
             )
             .is_err());
             fs::remove_dir(&receipt)?;
@@ -363,7 +363,10 @@ fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
     let home = tempfile::tempdir().unwrap();
     let process = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "repair the failed operation".into(),
-        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+        ..crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        })
     })
     .unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -688,7 +691,10 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         skip_permissions: true,
         directive_relay: Some("/tmp/directive-secret".into()),
         env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
-        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+        ..crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        })
     };
     let expected = AgentProcessRequest::from_prepared(&config).unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -899,7 +905,10 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
     let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
     let request = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "the next instruction".into(),
-        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+        ..crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        })
     })
     .unwrap();
     let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
@@ -988,7 +997,13 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
             &session.id,
             spec(ledger.home()),
             &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-            AgentProcessRequest::from_prepared(&crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })).unwrap(),
+            AgentProcessRequest::from_prepared(&crate::agent::AgentConfig::new(
+                crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None
+                }
+            ))
+            .unwrap(),
         )
         .is_err());
         let next = store.session(&session.id)?.unwrap();
@@ -1147,7 +1162,7 @@ fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let (store, attachment, mut process, next) = attached_session(&ledger);
     // `lf <skill>` in another terminal: an interactive agent, no Work named,
-    // no holder or owner, its lf still waiting.
+    // no run or owner, its lf still waiting.
     let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
     sql.execute(
         "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",

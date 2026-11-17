@@ -1,5 +1,5 @@
+use crate::harness::Run;
 use crate::journal::OsProcess;
-use crate::session::Holder;
 use crate::transcript::is_user_input;
 use crate::transcript::json_lines;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -55,7 +55,7 @@ pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     config: AgentConfig,
     owner: Admitted,
-    holder: Holder,
+    run: Run,
     runtime: Option<crate::process::LfProcessRuntime>,
     should_seed_task_prompt: bool,
     skill_input: Option<String>,
@@ -105,7 +105,7 @@ impl Driver {
             events,
             config: launch.config.clone(),
             owner: launch.admitted.clone(),
-            holder: launch.holder,
+            run: launch.run,
             runtime: None,
             should_seed_task_prompt: true,
             skill_input: None,
@@ -178,7 +178,7 @@ impl Driver {
         let mut cmd = Command::new("claude");
         cmd.args(&args);
         if let Some(context) = &config.conversation_context {
-            cmd.args(super::context::claude_args(context, self.holder)?);
+            cmd.args(super::context::claude_args(context, self.run)?);
         }
         super::configure_agent_env(&mut cmd, config);
         if let Some(context) = &config.conversation_context {
@@ -190,12 +190,12 @@ impl Driver {
         if let Some(cwd) = &config.cwd {
             cmd.current_dir(cwd);
         }
-        let holder = self.holder;
+        let run = self.run;
         super::configure_vendor_std_env(cmd.as_std_mut())?;
         self.shutdown_requested.store(false, Ordering::SeqCst);
 
         let owner = self.owner.clone();
-        let mut child = super::agent_process::spawn(cmd, None, &owner, holder)?;
+        let mut child = super::agent_process::spawn(cmd, None, &owner, run)?;
         let stdin = child
             .stdin
             .take()
@@ -640,7 +640,10 @@ mod activity_tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -830,7 +833,10 @@ mod tests {
                         chrome: settings.chrome,
                         skip_permissions: settings.yolo,
                         cwd: Some(home.into()),
-                        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                        ..crate::agent::AgentConfig::new(crate::config::Agent {
+                            harness: crate::harness::HarnessKind::Codex,
+                            model: None,
+                        })
                     },
                     Admitted {
                         store: store.clone(),
@@ -955,7 +961,10 @@ mod tests {
             agent: crate::config::Agent::parse("claude").unwrap(),
             task_prompt: "task".into(),
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         let ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(ledger.home());
@@ -1000,7 +1009,10 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -1274,7 +1286,10 @@ cat > /dev/null
         AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             cwd: Some(std::env::temp_dir()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         }
     }
 
@@ -1565,7 +1580,7 @@ impl super::Harness for Claude {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Assigned },
+            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, reporting: super::ThreadName::Assigned },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: true,
@@ -1617,7 +1632,7 @@ impl super::Harness for Claude {
                     .config
                     .conversation_context
                     .as_ref()
-                    .map(|context| super::context::claude_args(context, launch.holder))
+                    .map(|context| super::context::claude_args(context, launch.run))
                     .transpose()?
                     .unwrap_or_default(),
             )

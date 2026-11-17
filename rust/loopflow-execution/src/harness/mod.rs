@@ -29,7 +29,6 @@ pub mod pi;
 mod pi_decode;
 pub mod task_updates;
 
-use crate::session::Holder;
 use anyhow::Result;
 use async_trait::async_trait;
 use loopflow_model::id::AgentSessionId;
@@ -109,11 +108,13 @@ mod environment_tests {
     use std::path::Path;
 
     use super::{configure_agent_env, set_vendor_std_env};
-    use crate::agent::AgentConfig;
 
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
+        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        });
         for key in [
             "LF_DISCORD_TOKEN",
             "LOOPFLOW_DIRECTIVE_FILE",
@@ -151,7 +152,10 @@ mod environment_tests {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
         command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
+        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        });
         config.env.insert(
             crate::os_process::DISCORD_TOKEN_ENV.into(),
             "fixture-override".into(),
@@ -166,7 +170,10 @@ mod environment_tests {
         command
             .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")
             .env("LF_RUN_DIR", "/stale/run");
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
+        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        });
         config.env.insert(
             crate::session_record::CAPTURE_KEY_ENV.to_string(),
             "run_fresh".to_string(),
@@ -279,6 +286,28 @@ pub enum Mode {
     Headless,
 }
 
+/// Who keeps the provider running, independently of Task attribution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Run {
+    Bare(Mode),
+    Managed,
+    Worker,
+}
+
+impl Run {
+    pub fn mode(self) -> Mode {
+        match self {
+            Self::Bare(mode) => mode,
+            Self::Managed => Mode::Interactive,
+            Self::Worker => Mode::Headless,
+        }
+    }
+
+    pub fn reports_turns(self) -> bool {
+        !matches!(self, Self::Bare(_))
+    }
+}
+
 /// The Session and frozen attachment an invocation launches and records under.
 #[derive(Debug, Clone)]
 pub struct Admitted {
@@ -361,15 +390,15 @@ pub enum ThreadName {
 
 #[derive(Debug, Clone, Copy)]
 pub struct ThreadNaming {
-    pub caller: ThreadName,
-    pub server: ThreadName,
+    pub bare: ThreadName,
+    pub reporting: ThreadName,
 }
 
 impl ThreadNaming {
-    pub fn for_holder(self, holder: Holder) -> ThreadName {
-        match holder {
-            Holder::Caller => self.caller,
-            Holder::Server => self.server,
+    pub fn for_run(self, run: Run) -> ThreadName {
+        match run {
+            Run::Bare(_) => self.bare,
+            Run::Managed | Run::Worker => self.reporting,
         }
     }
 }
@@ -410,7 +439,7 @@ impl<'a> Start<'a> {
 pub struct Launch<'a> {
     pub config: &'a AgentConfig,
     pub harness: &'static dyn Harness,
-    pub holder: Holder,
+    pub run: Run,
     pub admitted: &'a Admitted,
     pub start: Start<'a>,
     pub context_file: Option<&'a std::path::Path>,
@@ -420,7 +449,7 @@ impl Launch<'_> {
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
         let naming = self.harness.capabilities().thread;
         match self.start.thread() {
-            None if naming.for_holder(self.holder) == ThreadName::Assigned => {
+            None if naming.for_run(self.run) == ThreadName::Assigned => {
                 self.admitted.assigned_thread().map(Some)
             }
             thread => Ok(thread),
@@ -628,7 +657,7 @@ pub fn launch_for_test<'a>(
         config,
         admitted,
         harness: kind.harness(),
-        holder: Holder::Caller,
+        run: Run::Bare(Mode::Headless),
         start: Start::from_thread(config.resume_token.as_ref()),
         context_file: None,
     }
@@ -691,8 +720,11 @@ mod tests {
         for kind in HarnessKind::ALL {
             let name = kind.as_str();
             let config = AgentConfig {
-                agent: crate::config::Agent::parse(&name).unwrap(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                agent: crate::config::Agent::parse(name).unwrap(),
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             let home = tempfile::tempdir().unwrap();
             let admitted = admit_for_test(home.path());

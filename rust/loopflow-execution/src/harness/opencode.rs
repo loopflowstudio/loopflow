@@ -1,4 +1,4 @@
-use crate::session::Holder;
+use crate::harness::Run;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -32,7 +32,7 @@ pub struct Driver {
     authorization: reqwest::header::HeaderValue,
     interactive: bool,
     owner: Admitted,
-    holder: Holder,
+    run: Run,
     stream: Option<Arc<tokio::sync::Mutex<OpenCodeStream>>>,
     config: AgentConfig,
     should_seed_prompt: bool,
@@ -80,7 +80,7 @@ impl Driver {
             authorization: reqwest::header::HeaderValue::from_static(""),
             interactive: false,
             owner: launch.admitted.clone(),
-            holder: launch.holder,
+            run: launch.run,
             stream: None,
             config: launch.config.clone(),
             should_seed_prompt: true,
@@ -143,7 +143,7 @@ impl Driver {
             command.current_dir(cwd);
         }
         super::configure_agent_env(&mut command, config);
-        command.envs(environment(config, None, self.holder)?);
+        command.envs(environment(config, None, self.run)?);
         command.env("OPENCODE_PASSWORD", &self.password);
         super::configure_vendor_std_env(command.as_std_mut())?;
         let diagnostic_path = config
@@ -166,10 +166,7 @@ impl Driver {
         };
         command.stderr(diagnostics.try_clone()?);
         self.child = Some(super::agent_process::spawn(
-            command,
-            None,
-            &owner,
-            self.holder,
+            command, None, &owner, self.run,
         )?);
         let child = self.child.as_mut().expect("server was spawned");
         let mut endpoint = String::new();
@@ -900,8 +897,8 @@ fn parse_data_frame(frame: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use crate::harness::Run;
     use crate::process::attachment;
-    use crate::session::Holder;
 
     use super::{
         build_turn_content, mpsc, open_agent_session, sanitize_error_message, AgentConfig,
@@ -912,8 +909,11 @@ mod tests {
     #[test]
     fn bare_opencode_sends_no_model_and_a_pinned_variant_names_provider_and_model() {
         let launch = |agent: &str| AgentConfig {
-            agent: crate::config::Agent::parse(&agent).unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            agent: crate::config::Agent::parse(agent).unwrap(),
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         };
         assert_eq!(super::opencode_model(&launch("opencode")), None);
         assert_eq!(
@@ -949,15 +949,23 @@ mod tests {
         };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let child =
-            super::super::agent_process::spawn(command, None, &owner, Holder::Caller).unwrap();
+        let child = super::super::agent_process::spawn(
+            command,
+            None,
+            &owner,
+            Run::Bare(crate::harness::Mode::Headless),
+        )
+        .unwrap();
         let pid = child.id().unwrap();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::OpenCode,
-                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                }),
                 &owner,
             ),
             tx,
@@ -1019,7 +1027,10 @@ mod tests {
             "",
             &AgentConfig {
                 task_prompt: "task".to_string(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             },
             true,
         );
@@ -1097,7 +1108,10 @@ mod tests {
                 &client,
                 &base_url,
                 Some(&"live".into()),
-                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None
+                })
             )
             .await
             .unwrap(),
@@ -1107,14 +1121,25 @@ mod tests {
             &client,
             &base_url,
             Some(&"gone".into()),
-            &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            &crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None
+            })
         )
         .await
         .is_err());
         assert_eq!(
-            open_agent_session(&client, &base_url, None, &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }))
-                .await
-                .unwrap(),
+            open_agent_session(
+                &client,
+                &base_url,
+                None,
+                &crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None
+                })
+            )
+            .await
+            .unwrap(),
             "new".into()
         );
     }
@@ -1130,7 +1155,10 @@ mod tests {
         AgentConfig {
             agent: crate::config::Agent::parse("opencode").unwrap(),
             cwd: Some(std::env::temp_dir()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+            ..crate::agent::AgentConfig::new(crate::config::Agent {
+                harness: crate::harness::HarnessKind::Codex,
+                model: None,
+            })
         }
     }
 
@@ -1253,7 +1281,7 @@ mod tests {
 fn environment(
     config: &AgentConfig,
     context_file: Option<&std::path::Path>,
-    holder: Holder,
+    run: Run,
 ) -> Result<std::collections::BTreeMap<String, String>> {
     let mut environment = config.env.clone();
     {
@@ -1298,7 +1326,7 @@ fn environment(
                 &mut settings,
                 context,
                 &crate::agent::system_prompt_with_structured_replies(config),
-                holder,
+                run,
             )?;
         }
         environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
@@ -1383,7 +1411,7 @@ impl super::Harness for OpenCode {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { caller: super::ThreadName::Reported, server: super::ThreadName::Reported },
+            thread: super::ThreadNaming { bare: super::ThreadName::Reported, reporting: super::ThreadName::Reported },
             initial_prompt_on_resume: false,
             supports_execution_boundary: false,
             classifies_failures: false,

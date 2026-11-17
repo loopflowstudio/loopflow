@@ -34,7 +34,10 @@ fn base_launch() -> AgentConfig {
         agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
         skip_permissions: true,
         cwd: None,
-        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
+        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent {
+            harness: loopflow_execution::harness::HarnessKind::Codex,
+            model: None,
+        })
     }
 }
 
@@ -66,7 +69,7 @@ fn claude_batch_reads_large_context_without_argv_limits() {
         let result = run_agent(
             &launch,
             &process,
-            loopflow_execution::session::Holder::Caller,
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
         )
         .expect("large context launch");
         assert_eq!(result.exit_code, 0);
@@ -86,7 +89,7 @@ fn library_launch_records_each_provider_under_its_invocation() {
         let result = run_agent(
             &launch,
             &base_process(),
-            loopflow_execution::session::Holder::Caller,
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
         )
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -142,7 +145,7 @@ fn library_launch_reuses_the_enclosing_invocation() {
             let result = run_agent(
                 &launch,
                 &base_process(),
-                loopflow_execution::session::Holder::Caller,
+                loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
             )?;
             assert_eq!(result.exit_code, 0);
         }
@@ -176,7 +179,7 @@ fn launch_returns_exit_code() {
     let result = run_agent(
         &base_launch(),
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert_eq!(result.exit_code, 0);
@@ -188,7 +191,7 @@ fn launch_captures_stdout() {
     let result = run_agent(
         &base_launch(),
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert!(result.stdout.contains("hello"));
@@ -203,7 +206,7 @@ fn launch_captures_stderr() {
     let result = run_agent(
         &base_launch(),
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert!(result.stderr.contains("error"));
@@ -242,7 +245,10 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
         let launches = home.path().join("launches");
         let launch = AgentConfig {
             agent: loopflow_execution::config::Agent::parse("claude:fable").unwrap(),
-            fallback_agents: fallbacks.into_iter().map(str::to_owned).collect(),
+            fallback_agents: fallbacks
+                .into_iter()
+                .map(|agent| loopflow_execution::config::Agent::parse(agent).unwrap())
+                .collect(),
             cwd: Some(home.path().to_path_buf()),
             env: BTreeMap::from([
                 ("LF_TEST_LAUNCHES".into(), launches.display().to_string()),
@@ -257,7 +263,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
         let result = run_agent(
             &launch,
             &process,
-            loopflow_execution::session::Holder::Caller,
+            loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
         )
         .unwrap();
         assert_eq!(
@@ -288,7 +294,7 @@ fn launch_scopes_process_environment_to_child() {
     let result = run_agent(
         &launch,
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch with scoped environment");
 
@@ -301,7 +307,7 @@ fn launch_nonzero_exit() {
     let result = run_agent(
         &base_launch(),
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert_ne!(result.exit_code, 0);
@@ -313,7 +319,7 @@ fn launch_missing_binary_returns_error() {
     let result = run_agent(
         &base_launch(),
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     );
     assert!(matches!(
         result,
@@ -330,7 +336,7 @@ fn launch_with_cwd() {
     let result = run_agent(
         &launch,
         &base_process(),
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert!(result.stdout.contains(&cwd.path().display().to_string()));
@@ -346,7 +352,7 @@ fn launch_streaming_mode() {
     let result = run_agent(
         &base_launch(),
         &process,
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     )
     .expect("launch");
     assert!(result.stdout.contains("first"));
@@ -365,7 +371,7 @@ fn launch_batch_times_out() {
     let result = run_agent(
         &base_launch(),
         &process,
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     );
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),
@@ -385,7 +391,7 @@ fn launch_streaming_times_out() {
     let result = run_agent(
         &base_launch(),
         &process,
-        loopflow_execution::session::Holder::Caller,
+        loopflow_execution::harness::Run::Bare(loopflow_execution::harness::Mode::Headless),
     );
     assert!(
         matches!(result, Err(CoreError::ExecutionFailed(ref message)) if message.contains("timed out")),

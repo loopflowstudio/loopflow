@@ -3,9 +3,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 
 use crate::agent::{AgentConfig, ProcessConfig};
+use crate::harness::Run;
 use crate::harness::{Admitted, HarnessKind, Launch, Mode, Start};
 use crate::process::LfProcessRuntime;
-use crate::session::Holder;
 use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 
 fn executable(path: &Path, source: &str) {
@@ -74,7 +74,7 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
 }
 
 #[test]
-fn every_harness_runs_native_and_headless_for_each_holder() {
+fn every_harness_runs_bare_managed_and_worker() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
@@ -95,8 +95,15 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
 
     for kind in HarnessKind::ALL {
         for mode in [Mode::Interactive, Mode::Headless] {
-            for holder in [Holder::Caller, Holder::Server] {
-                let row = format!("{kind:?} {mode:?} {holder:?}");
+            for run in [
+                Run::Bare(mode),
+                if mode == Mode::Interactive {
+                    Run::Managed
+                } else {
+                    Run::Worker
+                },
+            ] {
+                let row = format!("{kind:?} {mode:?} {run:?}");
                 let directory = tempfile::tempdir_in(home).unwrap();
                 let cwd = directory.path();
                 crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
@@ -146,13 +153,16 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
                             references: vec![],
                         }),
                         env: capture.environment(),
-                        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                        ..crate::agent::AgentConfig::new(crate::config::Agent {
+                            harness: crate::harness::HarnessKind::Codex,
+                            model: None,
+                        })
                     };
                     config.env.insert("LF_BIN".into(), binary.into());
                     let launch = Launch {
                         config: &config,
                         harness: kind.harness(),
-                        holder,
+                        run,
                         admitted: &admitted,
                         start: Start::New,
                         context_file: None,
@@ -229,7 +239,7 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
                     }
                     let managed = commands.iter().any(|command| command["managed"] == true);
                     anyhow::ensure!(
-                        managed == (holder == Holder::Server),
+                        managed == (run.reports_turns()),
                         "{row}: wrong hook ownership: {commands:?}"
                     );
                     println!(
@@ -292,13 +302,16 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 cwd: Some(home.into()),
                 task_prompt: "First prompt on the saved thread".into(),
                 env: capture.environment(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
                 harness: HarnessKind::Codex.harness(),
                 config: &config,
-                holder: Holder::Server,
+                run: Run::Managed,
                 admitted: &admitted,
                 start: Start::New,
                 context_file: None,
@@ -335,12 +348,15 @@ fn native_limits_and_schemas_require_a_headless_run() {
                 agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
                 max_turns,
                 output_schema,
-                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
+                ..crate::agent::AgentConfig::new(crate::config::Agent {
+                    harness: crate::harness::HarnessKind::Codex,
+                    model: None,
+                })
             };
             let launch = Launch {
                 config: &config,
                 harness: kind.harness(),
-                holder: Holder::Caller,
+                run: Run::Bare(crate::harness::Mode::Headless),
                 admitted: &admitted,
                 start: Start::New,
                 context_file: None,

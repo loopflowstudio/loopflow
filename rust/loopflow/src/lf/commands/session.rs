@@ -794,7 +794,6 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
@@ -810,18 +809,18 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            let holder = match loopflow_execution::transport::delegate_current(
+            let run = match loopflow_execution::transport::delegate_current(
                 loopflow_execution::transport::LaunchInput {
                     batch: true,
                     interactive: false,
                     has_prompt: true,
                 },
-                named_work,
+                false,
             )? {
                 loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-                loopflow_execution::transport::Delegation::Here { holder, .. } => holder
+                loopflow_execution::transport::Delegation::Here { run } => run,
             };
-            crate::lf::commands::run::resume(&id, message, cli, holder)
+            crate::lf::commands::run::resume(&id, message, cli, run)
         });
     }
     let session = reopen(
@@ -831,7 +830,6 @@ async fn resume(
         connection,
         fork,
         connection.json || cli.json,
-        named_work,
     )
     .await?;
     print_opened(connection.json || cli.json, &session)
@@ -867,7 +865,6 @@ async fn reopen(
     connection: &SessionConnectionArgs,
     fork: bool,
     json: bool,
-    named_work: bool,
 ) -> anyhow::Result<SessionRecord> {
     let intent = connection.intent();
     if intent != SessionOpenIntent::Resume {
@@ -882,7 +879,6 @@ async fn reopen(
             intent,
             !connection.prepare,
             json,
-            named_work,
         )
         .await;
     }
@@ -894,7 +890,6 @@ async fn reopen(
         fork,
         !connection.prepare,
         json,
-        named_work,
     )
     .await
 }
@@ -915,11 +910,8 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 fork,
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let named_work = connection.work_flag(cli).is_some();
-                let mut record = reopen(
-                    &store, directory, target, connection, *fork, false, named_work,
-                )
-                .await?;
+                let mut record =
+                    reopen(&store, directory, target, connection, *fork, false).await?;
                 // The opening terminal resumes this Session by id, managed
                 // when the prepare named its Work.
                 if let Some(flag) = connection.work_flag(cli) {

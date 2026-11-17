@@ -512,20 +512,16 @@ reported, never started by an attachment attempt.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task, Wave or repository command starts it: `lf
-task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
-repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
-with `lf session bind`. Every other launch is bare, including
-`lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. The launch's Work source
-decides (`WorkSource::is_managed`; `lf task run` names its Task to each agent
-step), and reopening a recorded conversation also reads the Session row
-(`SqliteStore::is_bare`). The launch carries the answer as
-`AgentConfig::holder`: `Server` for managed work, `Caller` for every bare
-launch, which reports no boundary, held in a Desktop pane or not. Every launch
-[reads its own steers from the store](#every-launch-reads-its-own-steers).
+`transport::delegate` returns one launch state in `Launch::run`:
+`Bare(Mode)` for direct skill and Graph commands, `Managed` for interactive
+Task, Wave, repository and resumed conversations, and `Worker` for headless
+Task Graph steps. The command decides this state. The checkout, `--task` and
+`LF_AS` only decide Task membership: accounting and Task steers always travel
+together. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
+Bare launches report no boundaries. Managed conversations and Workers report
+the same turn boundaries to the Machine server.
 
-For a managed launch, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
+For a Managed conversation or Worker, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
 compaction, each prompt and each turn end. That process first makes one
 `session.boundary` request on `machine.sock`, for the server to record. The
 OpenCode plugin and the Pi extension send the same request from inside the

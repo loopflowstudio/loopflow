@@ -7,7 +7,7 @@ use crate::journal::{
 use crate::os_process::terminate_process_group;
 use crate::process::attachment;
 
-use crate::session::Holder;
+use crate::harness::Run;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
 use loopflow_model::id::LfProcessId;
@@ -41,7 +41,7 @@ pub fn spawn(
     mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
     owner: &Admitted,
-    holder: Holder,
+    run: Run,
 ) -> Result<tokio::process::Child> {
     let Admitted {
         store,
@@ -49,7 +49,7 @@ pub fn spawn(
         attachment,
     } = owner;
     super::dispatch::off_reactor(|| -> Result<tokio::process::Child> {
-        context_environment(command.as_std_mut(), owner, holder)?;
+        context_environment(command.as_std_mut(), owner, run)?;
         let program = command
             .as_std()
             .get_program()
@@ -75,7 +75,7 @@ pub fn spawn(
 pub(crate) fn spawn_native(
     mut command: std::process::Command,
     owner: &Admitted,
-    holder: Holder,
+    run: Run,
 ) -> Result<std::process::Child> {
     let Admitted {
         store,
@@ -83,7 +83,7 @@ pub(crate) fn spawn_native(
         attachment,
     } = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
-    context_environment(&mut command, owner, holder)?;
+    context_environment(&mut command, owner, run)?;
     let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
     let child = store
         .with_session_attachment(session, attachment, || {
@@ -142,7 +142,7 @@ pub(crate) fn require_server() -> Result<()> {
 fn context_environment(
     command: &mut std::process::Command,
     owner: &Admitted,
-    holder: Holder,
+    run: Run,
 ) -> Result<()> {
     let Admitted {
         store,
@@ -159,9 +159,9 @@ fn context_environment(
         delivery.identify(store, session)?;
         delivery.save(path)?;
     }
-    let capability_env = match holder {
-        Holder::Caller => crate::steer::BARE_STEER_ENV,
-        Holder::Server => {
+    let capability_env = match run {
+        Run::Bare(_) => crate::steer::BARE_STEER_ENV,
+        Run::Managed | Run::Worker => {
             require_server()?;
             crate::steer::PROVIDER_CONTEXT_ENV
         }
@@ -193,7 +193,7 @@ fn context_environment(
 pub(crate) fn exec_native(
     mut command: std::process::Command,
     owner: &Admitted,
-    holder: Holder,
+    run: Run,
     launch_lock: Option<std::fs::File>,
 ) -> std::io::Error {
     use std::os::unix::process::CommandExt;
@@ -203,7 +203,7 @@ pub(crate) fn exec_native(
         attachment,
     } = owner;
     crate::agent_input_timing::record("provider_exec_begin", session);
-    if let Err(error) = context_environment(&mut command, owner, holder) {
+    if let Err(error) = context_environment(&mut command, owner, run) {
         return std::io::Error::other(error.to_string());
     }
     let pid = std::process::id();
@@ -816,7 +816,7 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 mod tests {
     use crate::process::attachment;
 
-    use crate::session::Holder;
+    use crate::harness::Run;
     use loopflow_model::id::LfProcessId;
     use loopflow_storage::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
@@ -1006,7 +1006,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
             },
-            Holder::Caller,
+            Run::Bare(crate::harness::Mode::Headless),
         )
         .unwrap();
         child.wait().unwrap();
@@ -1113,7 +1113,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
                 },
-                Holder::Caller,
+                Run::Bare(crate::harness::Mode::Headless),
             )
             .unwrap();
             let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
@@ -1181,7 +1181,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
             },
-            Holder::Caller,
+            Run::Bare(crate::harness::Mode::Headless),
         )
         .unwrap();
         store
@@ -1358,7 +1358,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
                 },
-                Holder::Caller,
+                Run::Bare(crate::harness::Mode::Headless),
             )
             .unwrap();
             child.wait().unwrap();
@@ -1406,7 +1406,12 @@ mod tests {
             command.env_clear().arg("60");
             command
         };
-        let mut child = super::spawn_native(command(), &first_owner, Holder::Caller).unwrap();
+        let mut child = super::spawn_native(
+            command(),
+            &first_owner,
+            Run::Bare(crate::harness::Mode::Headless),
+        )
+        .unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
         let exited = store
@@ -1423,7 +1428,12 @@ mod tests {
             session: session.id.to_string(),
             attachment: next.clone(),
         };
-        let mut provider = super::spawn_native(command(), &next_owner, Holder::Caller).unwrap();
+        let mut provider = super::spawn_native(
+            command(),
+            &next_owner,
+            Run::Bare(crate::harness::Mode::Headless),
+        )
+        .unwrap();
         let recorded = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1438,7 +1448,11 @@ mod tests {
         );
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(command(), &next_owner, Holder::Caller);
+        let duplicate = super::spawn_native(
+            command(),
+            &next_owner,
+            Run::Bare(crate::harness::Mode::Headless),
+        );
         assert!(duplicate.is_err());
         assert_eq!(
             store.agent_process(&next.agent_process_id).unwrap(),
@@ -1484,7 +1498,12 @@ mod tests {
         };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let mut child = super::spawn_native(command, &first_owner, Holder::Caller).unwrap();
+        let mut child = super::spawn_native(
+            command,
+            &first_owner,
+            Run::Bare(crate::harness::Mode::Headless),
+        )
+        .unwrap();
         let next = attachment::claim_session_attachment(
             &store,
             &session.id,
@@ -1533,7 +1552,9 @@ mod tests {
         };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
+        let mut child =
+            super::spawn_native(command, &owner, Run::Bare(crate::harness::Mode::Headless))
+                .unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -1564,7 +1585,13 @@ mod tests {
         };
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(command, None, &owner(first.clone()), Holder::Caller).unwrap();
+        let mut child = super::spawn(
+            command,
+            None,
+            &owner(first.clone()),
+            Run::Bare(crate::harness::Mode::Headless),
+        )
+        .unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1585,7 +1612,13 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(stale, None, &owner(first.clone()), Holder::Caller).is_err());
+        assert!(super::spawn(
+            stale,
+            None,
+            &owner(first.clone()),
+            Run::Bare(crate::harness::Mode::Headless)
+        )
+        .is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1599,7 +1632,13 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(missing, None, &owner(next.clone()), Holder::Caller).is_err());
+        assert!(super::spawn(
+            missing,
+            None,
+            &owner(next.clone()),
+            Run::Bare(crate::harness::Mode::Headless)
+        )
+        .is_err());
         let failed = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1626,8 +1665,8 @@ mod tests {
     fn a_bare_launch_carries_only_a_store_steer_capability() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let capability = |holder: crate::session::Holder| {
-            let id = format!("{holder:?}");
+        let capability = |run: crate::harness::Run| {
+            let id = format!("{run:?}");
             let session = store.test_session(&id, &crate::session_record::new_artifact_key());
             let attachment = attachment::claim_session_attachment(
                 &store,
@@ -1653,13 +1692,13 @@ mod tests {
                 session: session.id.to_string(),
                 attachment,
             };
-            super::spawn_native(command, &owner, holder)
+            super::spawn_native(command, &owner, run)
                 .unwrap()
                 .wait()
                 .unwrap();
             std::fs::read_to_string(seen).unwrap()
         };
-        let output = capability(Holder::Caller);
+        let output = capability(Run::Bare(crate::harness::Mode::Headless));
         let (server, bare) = output.split_once('\n').unwrap();
         assert_eq!(server, "");
         let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
@@ -1681,7 +1720,9 @@ mod tests {
         };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
+        let mut child =
+            super::spawn_native(command, &owner, Run::Bare(crate::harness::Mode::Headless))
+                .unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1699,7 +1740,9 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn_native(stale, &owner, Holder::Caller).is_err());
+        assert!(
+            super::spawn_native(stale, &owner, Run::Bare(crate::harness::Mode::Headless)).is_err()
+        );
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1713,7 +1756,7 @@ mod tests {
         let error = super::spawn_native(
             Command::new(home.path().join("absent")),
             &owner,
-            Holder::Caller,
+            Run::Bare(crate::harness::Mode::Headless),
         )
         .unwrap_err();
         assert_eq!(

@@ -341,5 +341,5 @@ Not done here:
   that Machine's live lines.
 - A destination that accepts SSH and never answers fails within the bound,
   naming the Machine.
-- `rg 'machine\.write|MachineOperation|in_checkout|forward::take' rust/*/src`
+- `rg '\bmachine\.write\b|MachineOperation|\bin_checkout|forward::take' rust/*/src`
   finds nothing.

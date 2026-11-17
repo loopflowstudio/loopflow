@@ -17,6 +17,7 @@ use tokio::sync::{mpsc, Semaphore};
 use tokio::task::{AbortHandle, JoinSet};
 use tokio_util::codec::{Framed, LinesCodec, LinesCodecError};
 
+use super::answers::{Answer, Remembered};
 use super::outbox::{Outbox, Reservation, MAX_OPEN, MAX_RETAINED, MAX_WRITES};
 use super::remote::Control;
 use super::subscriptions::{Member, Subscriptions};
@@ -511,7 +512,7 @@ struct Inflight {
 
 /// What a request or subscription asks the session to start.
 enum Start {
-    Request(Operation, Option<Vec<String>>),
+    Request(Operation, Option<Vec<String>>, Option<String>),
     Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
@@ -593,7 +594,8 @@ pub(super) async fn session<C: Carrier>(
                 id,
                 operation,
                 select,
-            } => (id, Start::Request(operation, select)),
+                request_id,
+            } => (id, Start::Request(operation, select, request_id)),
             ClientMessage::Subscribe {
                 id,
                 operation,
@@ -672,7 +674,9 @@ pub(super) async fn session<C: Carrier>(
             continue;
         };
         let entry = match start {
-            Start::Request(ref operation, Some(_)) if !matches!(operation, Operation::Read(_)) => {
+            Start::Request(ref operation, Some(_), _)
+                if !matches!(operation, Operation::Read(_)) =>
+            {
                 send(
                     lines,
                     &error(Some(id), ErrorCode::Invalid, "select applies to reads"),
@@ -692,6 +696,7 @@ pub(super) async fn session<C: Carrier>(
                     placement,
                 }),
                 None,
+                _,
             ) => {
                 let start = loopflow_execution::transport::registry::Start {
                     session,
@@ -714,6 +719,7 @@ pub(super) async fn session<C: Carrier>(
                     cols,
                 }),
                 None,
+                _,
             ) => {
                 let start =
                     tokio::task::spawn_blocking(move || continuing(session, request, rows, cols))
@@ -729,6 +735,7 @@ pub(super) async fn session<C: Carrier>(
                     terminal_id,
                 }),
                 None,
+                _,
             ) => {
                 let held = terminals
                     .as_ref()
@@ -749,6 +756,7 @@ pub(super) async fn session<C: Carrier>(
                                 expires_in_ms: TICKET_LIFETIME.as_millis() as u64,
                             })
                             .expect("a ticket serializes"),
+                            revisions: None,
                         }
                     }
                     // Nothing ended; asking again later attaches.
@@ -764,7 +772,11 @@ pub(super) async fn session<C: Carrier>(
                 send(lines, &message).await?;
                 continue;
             }
-            Start::Request(Operation::Server(ServerOperation::RequestUpload { bytes }), None) => {
+            Start::Request(
+                Operation::Server(ServerOperation::RequestUpload { bytes }),
+                None,
+                _,
+            ) => {
                 if bytes > MAX_BULK {
                     send(
                         lines,
@@ -816,7 +828,7 @@ pub(super) async fn session<C: Carrier>(
                     checkpoints: Some(member),
                 }
             }
-            Start::Request(operation, select) => {
+            Start::Request(operation, select, named) => {
                 let write = if operation.is_write() {
                     let Ok(write) = writes.clone().try_acquire_owned() else {
                         send(lines, &busy(&id, "writes", MAX_WRITES)).await?;
@@ -849,6 +861,7 @@ pub(super) async fn session<C: Carrier>(
                         request_id,
                         operation,
                         select,
+                        named,
                         instance,
                         outgoing,
                         reservation,
@@ -889,6 +902,7 @@ async fn start_held(
             trace_id: loopflow_model::id::TraceId::default(),
             result: serde_json::to_value(SessionStarted { terminal_id })
                 .expect("a terminal ID serializes"),
+            revisions: None,
         },
         // The child may be running: the caller repeats the same request to
         // learn which.
@@ -970,6 +984,7 @@ fn ticket_response(id: String, ticket: String) -> ServerMessage {
         id,
         trace_id: loopflow_model::id::TraceId::default(),
         result: serde_json::json!({ "ticket": ticket }),
+        revisions: None,
     }
 }
 
@@ -1183,10 +1198,12 @@ pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request(
     id: String,
     operation: Operation,
     select: Option<Vec<String>>,
+    request_id: Option<String>,
     instance: Arc<str>,
     outgoing: Outbox,
     reservation: Arc<Reservation>,
@@ -1197,13 +1214,14 @@ async fn request(
     let write = operation.is_write();
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
-    let result = match operation {
+    let answer = match operation {
         Operation::Server(ServerOperation::SessionBoundary(boundary)) => {
-            session_boundary(boundary, reservation.clone()).await
+            Answer::read(session_boundary(boundary, reservation.clone()).await)
         }
         operation => {
             operate(
                 operation,
+                request_id,
                 &id,
                 &instance,
                 &trace_id,
@@ -1213,8 +1231,8 @@ async fn request(
             .await
         }
     };
-    tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = result.is_ok(), "Server request ended");
-    let message = match result {
+    tracing::debug!(request = %id, %instance, %trace_id, elapsed_ms = started.elapsed().as_millis(), ok = answer.result.is_ok(), "Server request ended");
+    let message = match answer.result {
         Ok(result) => ServerMessage::Response {
             id: id.clone(),
             trace_id,
@@ -1222,10 +1240,11 @@ async fn request(
                 Some(paths) => loopflow_execution::engine::select::select(&result, paths),
                 None => result,
             },
+            revisions: answer.revisions,
         },
         Err(refusal) => {
             tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
-            ServerMessage::error(Some(id.clone()), refusal)
+            ServerMessage::written_error(Some(id.clone()), refusal, answer.revisions)
         }
     };
     // A closed connection drops the answer; the effect stands.
@@ -1266,13 +1285,66 @@ fn measured_result(
 
 async fn operate(
     operation: Operation,
+    request_id: Option<String>,
     id: &str,
     instance: &str,
     trace_id: &loopflow_model::id::TraceId,
     reservation: Arc<Reservation>,
     remote_control: Option<mpsc::Sender<Control>>,
-) -> Result<serde_json::Value, Error> {
+) -> Answer {
     let measured = matches!(&operation, Operation::Measured(_));
+    let remembered = request_id
+        .filter(|_| operation.is_write())
+        .map(|request_id| Remembered::new(request_id, &operation));
+    let operation = match operation {
+        Operation::Write(change)
+        | Operation::Measured(super::wire::MeasuredOperation::Write { change }) => {
+            let mut target = match serde_json::to_value(&change) {
+                Ok(target) => target,
+                Err(error) => return Answer::read(Err(unavailable(error))),
+            };
+            if let Some(fields) = target.as_object_mut() {
+                // Setting values and authored text stay out of request telemetry.
+                for field in [
+                    "content",
+                    "request",
+                    "title",
+                    "notes",
+                    "plan",
+                    "layout",
+                    "slots",
+                    "expression",
+                    "value",
+                ] {
+                    fields.remove(field);
+                }
+            }
+            return effect(
+                target,
+                remembered,
+                id,
+                instance,
+                trace_id,
+                measured,
+                move || {
+                    let _held = reservation;
+                    Ok(serde_json::to_value(change.run()?)?)
+                },
+            )
+            .await;
+        }
+        operation => operation,
+    };
+    Answer::read(served(operation, measured, reservation, remote_control).await)
+}
+
+/// A read or a server operation; writes answer through `effect`.
+async fn served(
+    operation: Operation,
+    measured: bool,
+    reservation: Arc<Reservation>,
+    remote_control: Option<mpsc::Sender<Control>>,
+) -> Result<serde_json::Value, Error> {
     match operation {
         Operation::Server(ServerOperation::MobileStatus) => {
             let (reply, result) = tokio::sync::oneshot::channel();
@@ -1312,31 +1384,6 @@ async fn operate(
             .map_err(unavailable)?
             .map_err(unavailable)
         }
-        Operation::Write(change)
-        | Operation::Measured(super::wire::MeasuredOperation::Write { change }) => {
-            let mut target = serde_json::to_value(&change).map_err(unavailable)?;
-            if let Some(fields) = target.as_object_mut() {
-                // Setting values and authored text stay out of request telemetry.
-                for field in [
-                    "content",
-                    "request",
-                    "title",
-                    "notes",
-                    "plan",
-                    "layout",
-                    "slots",
-                    "expression",
-                    "value",
-                ] {
-                    fields.remove(field);
-                }
-            }
-            effect(target, id, instance, trace_id, measured, move || {
-                let _held = reservation;
-                Ok(serde_json::to_value(change.run()?)?)
-            })
-            .await
-        }
         Operation::Server(
             ServerOperation::SessionAttach { .. }
             | ServerOperation::SessionStart { .. }
@@ -1347,6 +1394,9 @@ async fn operate(
         }
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
+        }
+        Operation::Write(_) | Operation::Measured(super::wire::MeasuredOperation::Write { .. }) => {
+            unreachable!("operate answers writes")
         }
     }
 }
@@ -1396,33 +1446,41 @@ async fn session_boundary(
     serde_json::to_value(answer).map_err(unavailable)
 }
 
-/// Run a write on a request worker under `trace_id`. Once admitted,
-/// disconnection releases the client; the effect finishes without replay.
-/// Diagnostics the shared functions print go to the request's log.
+/// Run a write on a request worker under `trace_id` and answer once it has
+/// committed: planning sync and other work the write hands to
+/// `journal::request::after_reply` starts after it returns. Once admitted,
+/// disconnection releases the client; the effect finishes, and a repeat under
+/// its request ID gets this answer. Diagnostics the shared functions print go
+/// to the request's log.
 async fn effect(
     target: serde_json::Value,
+    remembered: Option<Remembered>,
     id: &str,
     instance: &str,
     trace_id: &loopflow_model::id::TraceId,
     measured: bool,
     run: impl FnOnce() -> Result<serde_json::Value> + Send + 'static,
-) -> Result<serde_json::Value, Error> {
+) -> Answer {
     let (id, instance, trace_id) = (id.to_owned(), instance.to_owned(), trace_id.clone());
     tokio::task::spawn_blocking(move || {
-        let mut diagnostics = Vec::new();
-        let result = measured_result(measured, || {
-            loopflow_execution::journal::request::run(&trace_id, &target, || {
-                loopflow_execution::journal::request::diagnostics(&mut diagnostics, run)
-            })
-        });
-        for line in String::from_utf8_lossy(&diagnostics).lines() {
-            tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
-        }
-        tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
-        result.map_err(|error| Error::written(&error))
+        super::answers::write(remembered, || {
+            let mut diagnostics = Vec::new();
+            let result = measured_result(measured, || {
+                loopflow_execution::journal::request::run(&trace_id, &target, || {
+                    loopflow_execution::journal::request::answer_first(|| {
+                        loopflow_execution::journal::request::diagnostics(&mut diagnostics, run)
+                    })
+                })
+            });
+            for line in String::from_utf8_lossy(&diagnostics).lines() {
+                tracing::info!(request = %id, %trace_id, diagnostic = line, "Server command diagnostic");
+            }
+            tracing::info!(request = %id, %instance, %trace_id, ok = result.is_ok(), "Server command finished");
+            result.map_err(|error| Error::written(&error))
+        })
     })
     .await
-    .map_err(|join| Error::outcome_unknown(&join.into()))?
+    .unwrap_or_else(|join| Answer::read(Err(Error::outcome_unknown(&join.into()))))
 }
 
 fn busy(id: &str, limit: &str, max: usize) -> ServerMessage {
@@ -1661,6 +1719,7 @@ mod tests {
                         query: Read::ConfigCatalog,
                     }),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -1692,6 +1751,7 @@ mod tests {
                         },
                     }),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -1736,6 +1796,7 @@ mod tests {
                     select: None,
                     id: "u".into(),
                     operation: Operation::Server(ServerOperation::RequestUpload { bytes: 200 }),
+                    request_id: None,
                 })
                 .await;
             let ticket = ticket_reply(&mut client, "u").await;
@@ -1745,6 +1806,7 @@ mod tests {
                     select: None,
                     id: "r".into(),
                     operation: catalog(),
+                    request_id: None,
                 })
                 .await;
             let ServerMessage::Response { id, result, .. } = client.receive().await.unwrap() else {
@@ -1776,6 +1838,7 @@ mod tests {
                     id: "big".into(),
                     trace_id: loopflow_model::id::TraceId::default(),
                     result: value.clone(),
+                    revisions: None,
                 })
                 .unwrap(),
                 &Admission::Local,
@@ -1911,6 +1974,7 @@ mod tests {
                     select: None,
                     id: "a".into(),
                     operation: catalog(),
+                    request_id: None,
                 })
                 .await;
             assert!(matches!(
@@ -2003,6 +2067,7 @@ mod tests {
                         id: id.into(),
                         operation: catalog(),
                         select: None,
+                        request_id: None,
                     })
                     .await;
             }
@@ -2023,6 +2088,7 @@ mod tests {
                     id: "a".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             let response = client.receive().await.unwrap();
@@ -2054,6 +2120,7 @@ mod tests {
                         id: "held-completion".into(),
                         operation: catalog(),
                         select: None,
+                        request_id: None,
                     })
                     .await;
                 let response = client.receive().await.unwrap();
@@ -2093,6 +2160,7 @@ mod tests {
                 code,
                 message,
                 data,
+                ..
             } = client.hello(revision, min_revision).await
             else {
                 panic!("expected an error")
@@ -2176,6 +2244,7 @@ mod tests {
                     id: "a".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             desktop.receive().await.unwrap();
@@ -2369,6 +2438,7 @@ mod tests {
                     id: "ps".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             assert!(matches!(
@@ -2393,6 +2463,7 @@ mod tests {
                     id: "after".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             // Nothing follows the cancel for `ps`; the sibling still answers.
@@ -2416,6 +2487,7 @@ mod tests {
                     id: "ps".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             assert!(matches!(
@@ -2468,6 +2540,7 @@ mod tests {
                     id: "next".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             let ServerMessage::Response { id, .. } = client.receive().await.unwrap() else {
@@ -2490,6 +2563,7 @@ mod tests {
                     id: "keys".into(),
                     operation: catalog(),
                     select: Some(vec!["key".into()]),
+                    request_id: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -2520,7 +2594,7 @@ mod tests {
             // A write has no answer to select from.
             client
                 .writer
-                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"]}\n")
+                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"],\"request_id\":null}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {
@@ -2591,6 +2665,7 @@ mod tests {
             code: ErrorCode::Invalid,
             message,
             data,
+            ..
         } = client.receive().await.unwrap()
         else {
             panic!("expected the control limit")
@@ -2734,6 +2809,7 @@ mod tests {
                     id: "sibling".into(),
                     operation: catalog(),
                     select: None,
+                    request_id: None,
                 })
                 .await;
             assert!(
@@ -2760,6 +2836,7 @@ mod tests {
                             id: n.to_string(),
                             operation: catalog(),
                             select: None,
+                            request_id: None,
                         }
                     } else {
                         ClientMessage::Subscribe {
@@ -2989,6 +3066,7 @@ mod tests {
                         id: "slow".into(),
                         operation: catalog(),
                         select: None,
+                        request_id: None,
                     })
                     .await;
                 assert!(
@@ -3312,6 +3390,7 @@ mod tests {
                 id: id.into(),
                 operation: Operation::Read(operation),
                 select: None,
+                request_id: None,
             })
             .await;
         loop {

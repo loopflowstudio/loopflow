@@ -1344,6 +1344,13 @@
             "operation": {
               "$ref": "#/$defs/Operation"
             },
+            "request_id": {
+              "description": "Names one write across connections and restarts: for a day, a\nrepeat under the same ID gets the first answer and runs nothing; a\ndifferent operation under it is `invalid`. Null for reads and for\nwrites the client never repeats.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "select": {
               "items": {
                 "type": "string"
@@ -1362,7 +1369,8 @@
             "type",
             "id",
             "operation",
-            "select"
+            "select",
+            "request_id"
           ],
           "type": "object"
         },
@@ -8805,6 +8813,14 @@
       ],
       "type": "object"
     },
+    "Revisions": {
+      "additionalProperties": {
+        "format": "int64",
+        "type": "integer"
+      },
+      "description": "Every domain's revision, by name, as clients see them: a write's answer\ncarries the domains it advanced, a reading the domains it was read at. A\ndomain added to `store_revisions` appears here without a type change.",
+      "type": "object"
+    },
     "RoadmapSnapshot": {
       "description": "`lf wave show` — every Wave's plan joined to durable Work and local delivery\nevidence, bucketed by planning section.",
       "properties": {
@@ -9356,6 +9372,17 @@
               "type": "string"
             },
             "result": true,
+            "revisions": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Revisions"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "For a write, each store domain it advanced, at its value after the\ncommit: a reading at or past every one shows the write. Null for\nreads and server operations."
+            },
             "trace_id": {
               "$ref": "#/$defs/TraceId"
             },
@@ -9368,7 +9395,8 @@
             "type",
             "id",
             "trace_id",
-            "result"
+            "result",
+            "revisions"
           ],
           "type": "object"
         },
@@ -9524,6 +9552,17 @@
             "message": {
               "type": "string"
             },
+            "revisions": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Revisions"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "The domains that advanced while a failed write ran, by it or by\nanother write; null when none did."
+            },
             "type": {
               "const": "error",
               "type": "string"
@@ -9534,7 +9573,8 @@
             "id",
             "code",
             "message",
-            "data"
+            "data",
+            "revisions"
           ],
           "type": "object"
         }
@@ -11751,6 +11791,17 @@
             }
           ]
         },
+        "read_at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Revisions"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Every store domain's revision in the snapshot this reading used; null\nwithout a store. A write whose answered revisions this reaches shows here."
+        },
         "unavailable": {
           "description": "Why the read failed. `body` is then `null`.",
           "type": [
@@ -11773,7 +11824,8 @@
         "answers",
         "unavailable",
         "body",
-        "work"
+        "work",
+        "read_at"
       ],
       "type": "object"
     },
@@ -14911,6 +14963,17 @@
         "slots": {
           "$ref": "#/$defs/SlotLayout",
           "description": "The page geometry visible members fill, in projection order."
+        },
+        "viewer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskOwner"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Who a Claim run on this Machine names as owner; `None` without a Git\n`user.email` in the repository, which claiming needs."
         }
       },
       "required": [
@@ -14925,7 +14988,8 @@
         "arrangement",
         "projection",
         "slots",
-        "contents"
+        "contents",
+        "viewer"
       ],
       "type": "object"
     },
@@ -18431,8 +18495,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 5,
-  "x-revision": 6,
+  "x-min-revision": 7,
+  "x-revision": 7,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

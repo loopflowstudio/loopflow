@@ -11,7 +11,7 @@ struct WorkPaletteRow: Identifiable, Equatable {
 
 extension WorkModel {
     var paletteIsStale: Bool {
-        roadmap.errorMessage != nil || sessions.errorMessage != nil || graphCatalog.errorMessage != nil
+        roadmap.failure != nil || sessions.failure != nil || graphCatalog.failure != nil
             || visibleRoadmaps.contains { $0.tasks.unavailableReason != nil || !$0.unavailableTasks.isEmpty }
     }
 
@@ -263,7 +263,6 @@ struct TaskLinkView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Open Task").font(Typography.sectionTitle(26))
-            if let error = model.taskLinkReading.errorMessage { Text(error) }
             if let result = model.taskLinkReading.value {
                 if result.tasks.items.isEmpty { Text("No exact Task found in available planning.") }
                 if let reason = result.tasks.unavailableReason { Text(reason) }
@@ -389,7 +388,7 @@ struct GraphCatalogInspector: View {
                     }
                 }
             }
-            if let error = sourceError ?? model.graphCatalog.errorMessage {
+            if let error = sourceError {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }
@@ -423,7 +422,7 @@ struct WorkflowCatalogInspector: View {
                     }
                 }
             }
-            if let error = sourceError ?? model.workflowCatalog.errorMessage {
+            if let error = sourceError {
                 Text(error).foregroundStyle(palette.warning)
             }
             Button("Refresh") { Task { await model.loadGraphCatalog(force: true) } }

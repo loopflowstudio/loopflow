@@ -9,7 +9,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use super::{
     lock_session_process, publish_prepared_input, session_not_found, surface, SessionRecord,
 };
-use crate::session::{conversation, LfSession, PrimaryScope, WorkSource};
+use crate::session::{conversation, LfSession, PrimaryScope, SessionOpenIntent, WorkSource};
 use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
@@ -169,6 +169,8 @@ async fn start_in_background(
         wave,
         None,
         None,
+        // A background start never takes the terminal of someone opening it.
+        SessionOpenIntent::Start,
     )
     .await?
     .then(|| session.id.to_string()))
@@ -196,6 +198,7 @@ pub(crate) async fn hold_task_conversation(
         wave,
         agent,
         Some(request_id),
+        SessionOpenIntent::Resume,
     )
     .await
 }
@@ -207,6 +210,7 @@ async fn hold(
     wave: Option<crate::work::wave::Wave>,
     agent: Option<&str>,
     request_id: Option<&str>,
+    intent: SessionOpenIntent,
 ) -> Result<bool> {
     // Prepared conversations can start; previously opened ones stay as they are.
     if opened(store, session.as_str())? {
@@ -222,6 +226,7 @@ async fn hold(
     if let Some(request_id) = request_id {
         argv.extend(["--request-id".into(), request_id.into()]);
     }
+    argv.extend(intent.flag().map(str::to_string));
     let (held, cwd) = (session.clone(), cwd.to_path_buf());
     tokio::task::spawn_blocking(move || {
         crate::transport::start_held(&argv, &cwd, Some(&held), &|command| {

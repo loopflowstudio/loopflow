@@ -47,9 +47,9 @@ pub(super) async fn finish(
     {
         Ok(checked_out) => checked_out,
         Err(error) => {
-            println!("Checkout failed: {error:#}");
             stopped(store, &task, "checkout", &error).await;
-            return Err(error);
+            // The launcher prints the error once, as the conversation's end.
+            return Err(error.context("Checkout failed"));
         }
     };
     println!("Checkout ready  {:.1} s", started.elapsed().as_secs_f64());

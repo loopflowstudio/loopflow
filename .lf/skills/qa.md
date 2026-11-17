@@ -20,3 +20,13 @@ beside the Task checkouts; `ls -di` before and after a Start shows the take.
 To reopen a conversation after killing its stand-in provider, write a line to
 `$CLAUDE_CONFIG_DIR/projects/<cwd with / and . as ->/<thread>.jsonl` for both
 the `/tmp/…` and `/private/tmp/…` spellings of the checkout.
+
+A served request needs the whole envelope, `"select": null, "request_id": null`
+included: without the top-level `request_id` the server answers "this server
+has no operation `task.create`". To stop setup on purpose, `chmod a-w` the
+directory holding the checkouts before Start (the answer stays `admitted`;
+`lf task status` shows "Setup stopped: …"), restore it, and reopen from a PTY
+running `sh -c 'tty; exec lf session resume <id>'`: the printed tty tells your
+view apart from a held terminal that takes it ("moved to ttysN"). Replacing a
+binary a live server runs: `rm` it and copy the new one, or macOS SIGKILLs the
+next exec (status exits 137); then restart the private server.

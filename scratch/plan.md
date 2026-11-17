@@ -285,11 +285,26 @@ checks on both ends; LOO-913's fallback and wait rules.
    line must come from stderr, since stdout's unterminated paste prompt flushes
    last. Codex still errors with "not built yet" until slice 2.
    Remaining for a person at gate: a real `lf machine login claude mini`.
-2. **Next.** PR #1966 still open and origin/main unchanged since the base
-   (checked 2026-11-17 after slice 1), so slice 2 builds on the `match` in
-   `machine/login.rs`. **Codex, the command approver, this Machine as target.** Device auth on
-   either target; `approvers` setting and `LF_APPROVE_*` contract; `machine
-   logins`. Remove `auth_browsers` and the access-profile code.
+2. **Codex, the command approver, this Machine as target.** **Built
+   (2026-11-17)**, on the `match` in `machine/login.rs` (PR #1966 still open).
+   `codex login --device-auth` on either target: lf reads the URL and the
+   `ABCD-1234` line (probed against codex-cli 0.169.0), sends both to the
+   approver and waits for Codex's own poll; failures add the ChatGPT
+   device-code hint. `approvers.<provider>` is `config::placement::Approver`
+   (`Chrome`/`Command`, one type; `--chrome-profile` becomes a one-run
+   `Chrome`); `login::send` is the one dispatch, also used by service sign-in
+   here and OpenCode's fresh device login. A command approver needs no
+   terminal, for Claude too. `lf machine logins [<machine>] [--json]`: Claude
+   and Codex from their clients, services from the store; another Machine
+   answers with its own `lf machine logins --json` over `remote_command`.
+   Deleted: `auth_browsers` (catalog row, validation, the old store export in
+   `config/migrate.rs`), `AccessProfile`, `AuthBrowserBinding`, `ProfileId`,
+   their store reads/writes and the interactive profile picker. Fixtures:
+   `machine_commands::command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal`,
+   `machine_commands::a_refusing_approver_leaves_the_machine_signed_out`.
+   Not yet: the logins rows carry no last refusal (slice 4, with `--refused`);
+   the probes have no timeout (slice 3 bounds them for the launch check);
+   `lf machine credentials inspect` still answers service transfers (slice 4).
 3. **Launch check and rentals.** The harness login probe feeding the revoked-
    login path with the new advice; `logins` on on-demand templates;
    rental prepare signs in the list; delete the forward agent-

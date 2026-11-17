@@ -1247,7 +1247,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let home = tempfile::tempdir().unwrap();
     fs::write(
         home.path().join("config.yaml"),
-        "default_agent: codex\nmachine: workstation\nauth_browsers: {linear: {default: [Work]}}\ntheme: light\nuser:\n  name: Test User\n",
+        "default_agent: codex\nmachine: workstation\napprovers: {linear: {chrome: Work}}\ntheme: light\nuser:\n  name: Test User\n",
     )
     .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
@@ -1283,7 +1283,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let machines = &table[positions[1]..positions[2]];
     assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
     let accounts = &table[positions[2]..positions[3]];
-    assert!(accounts.contains("auth_browsers") && accounts.contains("Work"));
+    assert!(accounts.contains("approvers") && accounts.contains("Work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")

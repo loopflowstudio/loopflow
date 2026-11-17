@@ -1410,9 +1410,11 @@ pub enum ServerCommand {
 impl MachineCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Self_ { .. } | Self::Doctor { .. } | Self::List { .. } | Self::Status { .. } => {
-                false
-            }
+            Self::Self_ { .. }
+            | Self::Doctor { .. }
+            | Self::List { .. }
+            | Self::Status { .. }
+            | Self::Logins { .. } => false,
             Self::Credentials { cmd } => match cmd {
                 MachineCredentialCommand::Inspect { .. } => false,
                 MachineCredentialCommand::Receive => true,
@@ -3002,6 +3004,13 @@ pub enum MachineCommand {
         /// Store an API key from the environment instead (OpenCode, this Machine)
         #[arg(long, conflicts_with = "machines")]
         api_key: bool,
+    },
+    /// What a Machine is signed in to, asked of its own clients; with no
+    /// Machine named, this one
+    Logins {
+        machine: Option<String>,
+        #[arg(long)]
+        json: bool,
     },
     /// Inspect or receive service credentials (credential bytes use stdin only).
     Credentials {

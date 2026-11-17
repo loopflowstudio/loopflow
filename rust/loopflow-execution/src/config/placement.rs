@@ -164,9 +164,13 @@ impl Default for OnDemandDeclaration {
     }
 }
 
-#[derive(schemars::JsonSchema, Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct AuthBrowsers {
-    pub default: Vec<String>,
-    pub accounts: std::collections::BTreeMap<String, Vec<String>>,
+/// Where `lf machine login` sends one provider's approval page; with none set,
+/// the default browser.
+#[derive(schemars::JsonSchema, Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum Approver {
+    /// A Chrome profile, by name or directory; a person approves.
+    Chrome { chrome: String },
+    /// `sh -c` with `LF_APPROVE_*` set; exit 0 means approved.
+    Command { command: String },
 }

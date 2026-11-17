@@ -89,6 +89,15 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             )
             .await
         }
+        MachineCommand::Logins { machine, json } => {
+            let machine = match machine {
+                Some(target) => {
+                    loopflow_execution::machine::connection::resolve_target(target, false).await?
+                }
+                None => local_machine().await?,
+            };
+            return loopflow_execution::machine::login::print_logins(&machine, *json).await;
+        }
         MachineCommand::Credentials { cmd } => {
             return super::machine_credentials::receive(cmd).await
         }
@@ -279,6 +288,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             println!("Removed {label}");
         }
         MachineCommand::Login { .. }
+        | MachineCommand::Logins { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
         | MachineCommand::Doctor { .. } => {

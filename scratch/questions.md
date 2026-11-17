@@ -41,3 +41,14 @@ Choices made headless for review; the plan says what each passed over.
   echo off with a restore guard.
 - Slice 1: `lf machine login <provider> a b` tries every Machine and fails at
   the end naming those not signed in. Passed over: stop at the first failure.
+- Slice 2: `lf machine logins --json` is a bare array of
+  `{provider, state: signed_in|signed_out|unknown, account}`; Rust is its only
+  reader, so no DTO fixture under `tests/fixtures/dto/`. Passed over: an object
+  wrapping the rows with the Machine's name.
+- Slice 2: a missing client reads `unknown`, not `signed out`, as the plan's
+  probe rule says; a launch then fails on its own.
+- Slice 2: an approver command runs to completion before lf waits on the
+  login; a command that never exits is not cut off at the 15-minute deadline.
+- Slice 2: the `auth_browser_bindings` export in `config/migrate.rs` is
+  deleted with the setting; an old store's bindings are no longer copied to
+  config, since nothing reads them.

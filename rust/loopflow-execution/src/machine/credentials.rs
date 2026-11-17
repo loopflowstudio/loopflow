@@ -45,7 +45,7 @@ const _: () = assert!(loopflow_storage::rental::MAX_HOURS <= LINEAR_ACCESS_HOURS
 pub async fn connect(
     machine: &Machine,
     provider: Provider,
-    chrome_profile: Option<&str>,
+    approver: Option<&crate::config::placement::Approver>,
     batch: bool,
 ) -> Result<()> {
     let store = crate::provider_auth::operations::local_store().await?;
@@ -104,12 +104,8 @@ pub async fn connect(
                 let staging = tempfile::Builder::new()
                     .prefix("lf-machine-login-")
                     .tempdir()?;
-                crate::provider_auth::operations::fresh_opencode_login(
-                    &store,
-                    chrome_profile,
-                    staging.path(),
-                )
-                .await?;
+                crate::provider_auth::operations::fresh_opencode_login(approver, staging.path())
+                    .await?;
                 let fresh = opencode_active(&opencode_export(Some(staging.path()), "laptop")?)
                     .cloned()
                     .ok_or_else(|| {
@@ -194,7 +190,11 @@ fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
     serde_json::from_slice(&output).context("remote credential inspection returned invalid JSON")
 }
 
-fn remote_command(machine: &Machine, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+pub(crate) fn remote_command(
+    machine: &Machine,
+    args: &[&str],
+    input: Option<&[u8]>,
+) -> Result<Vec<u8>> {
     let script = format!(
         "{}; export {}={}; exec lf {}",
         crate::machine::ssh::REMOTE_PATH,

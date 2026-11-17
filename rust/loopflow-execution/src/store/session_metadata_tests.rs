@@ -240,10 +240,7 @@ fn captured_reservation_survives_interruption_and_fences_replacement() {
     assert!(store
         .publish_capture(&retained.id, retained.captured)
         .is_err());
-    assert_eq!(
-        store.session_history("conversation", 0, 100).unwrap().len(),
-        2
-    );
+    assert_eq!(store.session_inputs("conversation").unwrap().len(), 2);
     assert!(
         store
             .session("conversation")

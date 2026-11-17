@@ -16557,14 +16557,8 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf task sync <issue> [--keep-theirs | --use-mine] [--action <id>]`:\nexchange the Task with its tracker now, first answering the values it\nlost (or the one `action` names). Answers what the command prints.",
+          "description": "`lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the\nTask with its tracker now, first answering every value it lost.\nAnswers what the command prints.",
           "properties": {
-            "action": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
             "answer": {
               "anyOf": [
                 {
@@ -16590,12 +16584,40 @@
             "kind",
             "directory",
             "issue",
-            "answer",
-            "action"
+            "answer"
           ],
           "type": "object",
           "x-result": {
             "type": "string"
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "`lf repo plan answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
+          "properties": {
+            "action": {
+              "type": "string"
+            },
+            "answer": {
+              "$ref": "#/$defs/LostAnswer"
+            },
+            "directory": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "plan.answer",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "action",
+            "answer"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/TrackerActionStatus"
           }
         },
         {

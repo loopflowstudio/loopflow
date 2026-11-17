@@ -2324,13 +2324,8 @@ pub fn start_conversation_beside(task: &Task) {
 /// look for every sent action and resend what the tracker lacks; Git
 /// exchanges the repository's planning ref, so a peer's Task this Machine
 /// has not fetched yet is found in `repo`'s planning. An `answer` first
-/// settles the values the Task lost, or the one `action` names.
-pub fn task_sync(
-    repo: &Path,
-    issue: &str,
-    answer: Option<LostAnswer>,
-    action: Option<&str>,
-) -> OpsResult<String> {
+/// settles every value the Task lost; `lf repo plan answer` settles one.
+pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
         let task = match store.get_task_by_issue(issue).await.map_err(task_error)? {
@@ -2345,9 +2340,21 @@ pub fn task_sync(
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.to_string_lossy();
         if let Some(answer) = answer {
+            let lost: Vec<String> = store
+                .sqlite
+                .task_tracker_actions(&task.id)
+                .map_err(task_error)?
+                .actions
+                .into_iter()
+                .filter(|action| {
+                    action.phase
+                        == loopflow_storage::sqlite::tracker_actions::ActionPhase::Conflicted
+                })
+                .map(|action| action.id)
+                .collect();
             store
                 .sqlite
-                .answer_lost_values(&task.id, answer, action)
+                .answer_lost(&lost, answer)
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {

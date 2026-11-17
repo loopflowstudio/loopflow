@@ -315,9 +315,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskRun(directory: String, issue: String, graph: String?, from: String?, agent: String?, approve: Bool)
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
-    /// Exchange the Task with its tracker now, first answering the values it
-    /// lost, or the one `action` names.
-    case taskSync(directory: String, issue: String, answer: LostAnswer?, action: String?)
+    /// Exchange the Task with its tracker now, first answering every value it lost.
+    case taskSync(directory: String, issue: String, answer: LostAnswer?)
+    /// Answer one lost line of the directory's repository, whoever owns it.
+    case planAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
@@ -421,13 +422,15 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
-        case .taskSync(_, let issue, let answer, let action):
+        case .taskSync(_, let issue, let answer):
             let flag: [String] = switch answer {
             case .keepTheirs: ["--keep-theirs"]
             case .useMine: ["--use-mine"]
             case nil: []
             }
-            return ["task", "sync", issue] + flag + argument("--action", action)
+            return ["task", "sync", issue] + flag
+        case .planAnswer(_, let action, let answer):
+            return ["repo", "plan", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
@@ -610,8 +613,10 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                       "approve": approve])
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
-        case .taskSync(let directory, let issue, let answer, let action):
-            TaggedFields("task.sync", ["directory": directory, "issue": issue, "answer": answer, "action": action])
+        case .taskSync(let directory, let issue, let answer):
+            TaggedFields("task.sync", ["directory": directory, "issue": issue, "answer": answer])
+        case .planAnswer(let directory, let action, let answer):
+            TaggedFields("plan.answer", ["directory": directory, "action": action, "answer": answer])
         case .taskHold(let directory, let issue):
             TaggedFields("task.hold", ["directory": directory, "issue": issue])
         case .taskSteer(let directory, let issue, let message):

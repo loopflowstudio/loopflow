@@ -5,13 +5,25 @@ use std::path::Path;
 use anyhow::{anyhow, Result};
 
 use crate::lf::RepoPlanCommand as PlanCommand;
-use loopflow_execution::store::planning_sync::{ActionOwnerKind, TrackerActionStatus, TrackerKind};
+use loopflow_execution::store::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
 use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
 use loopflow_execution::store::Store;
 
 /// `lf repo plan [key|journal]`; bare, the planning status.
 pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
-    let repo = status_repository(&std::env::current_dir()?)?;
+    let directory = std::env::current_dir()?;
+    if let Some(PlanCommand::Answer {
+        id,
+        keep_theirs,
+        json,
+        ..
+    }) = cmd
+    {
+        return answer(&directory, id, *keep_theirs, *json);
+    }
+    let repo = status_repository(&directory)?;
     if cmd.is_none() && subscribe {
         return subscribe_status(&repo, loopflow_execution::read_stream::Transport::Stdio)
             .map(drop);
@@ -105,6 +117,25 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
         }
         None => print_status(&store, &repo_key, status_json).await?,
         Some(PlanCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
+        Some(PlanCommand::Answer { .. }) => unreachable!("answering runs before the status read"),
+    }
+    Ok(())
+}
+
+/// `lf repo plan answer <id> --keep-theirs | --use-mine`.
+fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<()> {
+    let answer = if keep_theirs {
+        LostAnswer::KeepTheirs
+    } else {
+        LostAnswer::UseMine
+    };
+    let line = loopflow_execution::ops::planning_sync::answer_lost(directory, id, answer)?;
+    if json {
+        println!("{}", serde_json::to_string(&line)?);
+    } else if answer == LostAnswer::KeepTheirs {
+        println!("Kept {}'s {}.", line.tracker.display_name(), line.change);
+    } else {
+        println!("Saved your {} again.", line.change);
     }
     Ok(())
 }
@@ -328,15 +359,24 @@ fn print_actions(store: &Store, actions: &[TrackerActionStatus]) -> Result<()> {
         .collect::<Result<Vec<_>>>()?;
     let width = owners.iter().map(String::len).max().unwrap_or(0);
     for (owner, action) in owners.iter().zip(actions) {
-        println!("  {owner:width$}  {}", action.line());
+        let id = match action.phase {
+            ActionPhase::Conflicted => short_id(&action.id),
+            _ => "",
+        };
+        println!("  {owner:width$}  {id:8}  {}", action.line());
     }
     if actions
         .iter()
         .any(|action| action.phase == ActionPhase::Conflicted)
     {
-        println!("Answer a lost line: lf task sync <task> --keep-theirs, or --use-mine.");
+        println!("Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.");
     }
     Ok(())
+}
+
+/// The prefix `lf repo plan answer` accepts for a line.
+fn short_id(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
 }
 
 async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {

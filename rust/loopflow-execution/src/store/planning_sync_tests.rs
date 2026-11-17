@@ -216,13 +216,14 @@ fn a_git_value_that_lost_is_answered_by_keeping_theirs_or_using_mine() {
                 .len(),
             1
         );
-        assert_eq!(
-            store
-                .sqlite
-                .answer_lost_values(&task.id, answer, None)
-                .unwrap(),
-            1
-        );
+        let lost: Vec<String> = store
+            .sqlite
+            .repository_tracker_actions(repository, TrackerKind::Git)
+            .unwrap()
+            .into_iter()
+            .map(|line| line.id)
+            .collect();
+        store.sqlite.answer_lost(&lost, answer).unwrap();
         assert!(store
             .task_tracker_sync(&task.id)
             .unwrap()
@@ -256,4 +257,154 @@ fn planning_receipt_queries_stay_batched_across_repositories() {
     });
     assert_eq!(single.len(), multiple.len());
     assert!(growing_scans(&store, &multiple).is_empty());
+}
+
+/// A Wave and one Project in `repo`, named "Theirs".
+fn project(store: &SqliteStore, repo: &str) -> String {
+    let conn = store.conn.lock().unwrap();
+    conn.execute(
+        "INSERT INTO waves(id,name,repo,created_at) VALUES('wave-answer','answer',?1,1)",
+        [repo],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO projects(id,wave_id,project_name,created_at) VALUES('project-answer','wave-answer','Theirs',1)",
+        [],
+    )
+    .unwrap();
+    "project-answer".into()
+}
+
+#[test]
+fn a_project_name_linear_won_is_answered_from_its_line() {
+    use loopflow_model::durable::ProjectId;
+    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
+    for (answer, name, queued) in [
+        (LostAnswer::KeepTheirs, "Theirs", 0),
+        (LostAnswer::UseMine, "Mine", 1),
+    ] {
+        let home = tempfile::tempdir().unwrap();
+        let store = Store {
+            sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db"))
+                .unwrap(),
+        };
+        let project = ProjectId::from_raw(project(&store.sqlite, "/repo-answer"));
+        // Bound to a Linear Project, so a saved name queues for Linear.
+        store.sqlite.conn.lock().unwrap().execute_batch(
+            "INSERT INTO pm_projects(repo,provider,id,observed_at) VALUES('/repo-answer','linear','linear-answer',1);
+             UPDATE projects SET external_project_id='linear-answer' WHERE id='project-answer';",
+        )
+        .unwrap();
+        store.sqlite.conn.lock().unwrap().execute(
+            "INSERT INTO tracker_actions(id,project_id,subject,kind,value_json,phase,tracker,conflict_json)
+             VALUES('00000000-0000-4000-8000-0000000000d1',?1,'project_name','field',?2,'conflicted','linear',?3)",
+            rusqlite::params![
+                project.as_str(),
+                r#"{"field":"project_name","value":"Mine"}"#,
+                r#"{"revision":"r2","value":{"field":"project_name","value":"Theirs"}}"#,
+            ],
+        )
+        .unwrap();
+        let lines = store
+            .sqlite
+            .repository_tracker_actions("/repo-answer", TrackerKind::Linear)
+            .unwrap();
+        assert_eq!(
+            lines.iter().map(|line| line.phase).collect::<Vec<_>>(),
+            [ActionPhase::Conflicted]
+        );
+        store
+            .sqlite
+            .answer_lost(&[lines[0].id.clone()], answer)
+            .unwrap();
+        let open = store
+            .sqlite
+            .repository_tracker_actions("/repo-answer", TrackerKind::Linear)
+            .unwrap();
+        assert!(open.iter().all(|line| line.phase == ActionPhase::Queued));
+        assert_eq!(open.len(), queued);
+        let saved: String = store
+            .sqlite
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT project_name FROM projects WHERE id=?1",
+                [project.as_str()],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(saved, name);
+    }
+}
+
+#[test]
+fn a_git_project_head_that_lost_is_answered_with_a_merge() {
+    use loopflow_storage::planning_sync::{LostAnswer, TrackerKind};
+    let home = tempfile::tempdir().unwrap();
+    let store = Store {
+        sqlite: crate::store::opening::open_ephemeral(&home.path().join("registry.db")).unwrap(),
+    };
+    let project = project(&store.sqlite, "/repo-answer");
+    {
+        let conn = store.sqlite.conn.lock().unwrap();
+        for (id, name, clock, parents) in [
+            ("00000000-0000-4000-8000-0000000000e0", "First", 1, vec![]),
+            (
+                "00000000-0000-4000-8000-0000000000e1",
+                "Mine",
+                2,
+                vec!["00000000-0000-4000-8000-0000000000e0"],
+            ),
+            (
+                "00000000-0000-4000-8000-0000000000e2",
+                "Theirs",
+                3,
+                vec!["00000000-0000-4000-8000-0000000000e0"],
+            ),
+        ] {
+            let mutation = serde_json::json!({
+                "edit": {"target": project, "change": {"field": "project_name", "value": name}},
+                "clock": clock,
+                "parents": parents,
+            });
+            conn.execute(
+                "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'projects',?2)",
+                rusqlite::params![id, mutation.to_string()],
+            )
+            .unwrap();
+        }
+    }
+    let lines = store
+        .sqlite
+        .repository_tracker_actions("/repo-answer", TrackerKind::Git)
+        .unwrap();
+    assert_eq!(
+        lines
+            .iter()
+            .map(|line| line.id.as_str())
+            .collect::<Vec<_>>(),
+        ["00000000-0000-4000-8000-0000000000e1"]
+    );
+    store
+        .sqlite
+        .answer_lost(&[lines[0].id.clone()], LostAnswer::KeepTheirs)
+        .unwrap();
+    assert!(store
+        .sqlite
+        .repository_tracker_actions("/repo-answer", TrackerKind::Git)
+        .unwrap()
+        .is_empty());
+    let merges: i64 = store
+        .sqlite
+        .conn
+        .lock()
+        .unwrap()
+        .query_row(
+            "SELECT count(*) FROM planning_peer_changes WHERE object_id=?1 AND json_array_length(mutation,'$.parents')=2",
+            [project.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(merges, 1);
 }

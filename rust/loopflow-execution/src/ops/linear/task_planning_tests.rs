@@ -595,7 +595,7 @@ fn task_sync_still_adopts_a_newer_linear_state() {
             provider.issues[0]["state"] = json!({"type":"started"});
             mark_issue_updated(&mut provider.issues[0]);
         });
-        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -630,12 +630,12 @@ fn answer_a_lost_completion(
                 .map(|action| action.line())
                 .collect::<Vec<_>>()
         };
-        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         assert_eq!(
             lost(),
             [r#"complete · conflicted · lost: "completed" · linear: "started""#]
         );
-        crate::ops::task::task_sync(repo, task.id.as_str(), Some(answer), None).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), Some(answer)).unwrap();
         assert!(lost().is_empty());
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
@@ -672,7 +672,7 @@ fn a_lost_completion_closes_when_linear_changes_the_state_again() {
                 .count()
         };
         move_to("started");
-        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         assert_eq!(lost(), 1);
         // A coworker moves it again; the next refresh brings that event in.
         move_to("canceled");
@@ -704,7 +704,7 @@ fn using_mine_sends_the_lost_completion_again() {
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, repo, task, state| {
         assert!(task.linear_id.is_none());
-        let result = crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        let result = crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
@@ -712,7 +712,7 @@ fn task_sync_publishes_saved_task_and_reuses_its_identity() {
         assert!(saved.linear_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
-        crate::ops::task::task_sync(repo, task.id.as_str(), None, None).unwrap();
+        crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         assert_eq!(runtime.block_on(state.lock()).creation_writes, 2);
     });
 }

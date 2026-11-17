@@ -203,3 +203,8 @@ Built, calls taken headless:
   <id>` (beside `lf repo plan journal`), and `lf task sync --action` goes
   away so one line has one spelling. Alternative: keep `--action` on
   `lf task sync` and add a Project-level bulk answer to `lf wave sync`.
+
+## Landing (2026-11-17)
+Jack Heart, on concept review 3's `lf repo plan answer <id>` direction: "Sounds good. You drive from here. Get this landed".
+
+- Concept review 3 build (assumed, reversible): `lf repo plan` prints the first 8 characters of a lost line's id and `lf repo plan answer` takes any unique prefix within the repository; Desktop sends the full id. Desktop's answer is an `answerLost` environment action installed beside the WorkModel (`SessionsView`, `WavesView`) rather than a closure threaded through every Project view.

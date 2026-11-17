@@ -12,8 +12,13 @@ use std::time::Duration;
 
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
+use loopflow_model::durable::{ProjectId, TaskId};
+use loopflow_model::id::WaveId;
 use loopflow_storage::planning_exchange::PlanningSnapshot;
-use loopflow_storage::sqlite::tracker_actions::ActionOwner;
+use loopflow_storage::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
 
 use super::{OpsError, OpsResult};
 
@@ -133,6 +138,55 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
             "Saved locally; planning synchronization pending. See `lf repo plan`."
         ));
     }
+}
+
+/// `lf repo plan answer <id>`: answer one lost line of `repo`, whoever owns
+/// it, then make one exchange attempt for that owner. `id` is the line's
+/// action id or the short prefix `lf repo plan` prints.
+pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
+    tokio::runtime::Runtime::new()
+        .map_err(message)?
+        .block_on(async {
+            let store = planning_store().await?;
+            let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
+            let repo = main.to_string_lossy();
+            let tracker = super::tracker::queued_tracker(&main).unwrap_or(TrackerKind::Git);
+            let mut matches: Vec<_> = store
+                .sqlite
+                .repository_tracker_actions(&repo, tracker)
+                .map_err(message)?
+                .into_iter()
+                .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
+                .collect();
+            let line = match (matches.pop(), matches.is_empty()) {
+                (Some(line), true) => line,
+                (Some(_), false) => {
+                    return Err(message(format!("{id} names more than one lost line")))
+                }
+                (None, _) => {
+                    return Err(message(format!(
+                        "{id} is not a lost line in {repo}; `lf repo plan` lists them"
+                    )))
+                }
+            };
+            store
+                .sqlite
+                .answer_lost(std::slice::from_ref(&line.id), answer)
+                .map_err(message)?;
+            let owner = match line.owner_kind {
+                ActionOwnerKind::Task => {
+                    Some(ActionOwner::Task(TaskId::from_raw(line.owner_id.clone())))
+                }
+                ActionOwnerKind::Project => Some(ActionOwner::Project(ProjectId::from_raw(
+                    line.owner_id.clone(),
+                ))),
+                _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
+            };
+            if let Some(owner) = owner {
+                sync_after_save(&store, &repo, &owner).await;
+            }
+            Ok(line)
+        })
 }
 
 /// Resolve the repository configuration before touching a planning remote.

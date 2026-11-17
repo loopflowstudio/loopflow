@@ -267,11 +267,11 @@ queue waits:
 ```text
 $ lf repo plan
 Tracker: linear. 3 open · 1 lost.
-  LOO-412  title · queued · Offline
-  LOO-412  comment · queued · Offline
-  LOO-398  complete · sent, waiting for linear to confirm
-  LOO-377  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
-Answer a lost line: lf task sync <task> --keep-theirs, or --use-mine.
+  LOO-412            title · queued · Offline
+  LOO-412            comment · queued · Offline
+  LOO-398            complete · sent, waiting for linear to confirm
+  LOO-377  9f2c41d0  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
+Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.
 ```
 
 When a send failed, the line ends with why: offline, signed out, or the
@@ -284,9 +284,11 @@ now.
 
 When a coworker changed the same field in the tracker before your edit
 arrived, the tracker's value wins and your edit is lost, not open: nothing is
-left to send. The line shows both values on the Task until you answer it.
-`lf task sync LOO-377 --keep-theirs` closes it; `--use-mine` saves yours again
-and sends it; so does editing that field. It also closes on its own when a
+left to send. The line shows both values, on the Task or Project, until you
+answer it. `lf repo plan answer 9f2c41d0 --keep-theirs` closes it;
+`--use-mine` saves yours again and sends it; so does editing that field.
+Desktop's Keep and Use mine buttons on the line do the same, and
+`lf task sync LOO-377 --keep-theirs` answers every line a Task lost. It also closes on its own when a
 coworker changes that field again in the tracker. On Git, a value the journal
 lost shows the same way, as `git`.
 
@@ -496,7 +498,7 @@ what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
 every `lf` command sends one short batch. It prints what is still open (a
 change queued or sent) and what was lost to the tracker's value, until you
 answer it with `--keep-theirs` or `--use-mine`. `lf repo plan` lists the same
-lines for the whole repository.
+lines for the whole repository, and `lf repo plan answer <id>` answers one.
 `lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
 the refresh and still succeeds.
 

@@ -280,8 +280,10 @@ winning `tracker_value`. `lf repo plan` lists the repository's open and lost
 actions ("3 open · 1 lost"), and a Task's or Project's `sync` is its slice. A
 lost action retires when it is answered: a later save of its subject
 ("answered by a later save"), an event that changes that field again at a
-newer revision ("changed again in Linear"), or `answer_lost_values`
-(`lf task sync --keep-theirs | --use-mine`, Desktop's Keep / Use mine). Git
+newer revision ("changed again in Linear"), or `answer_lost` over action ids
+of any owner (`lf repo plan answer <id> --keep-theirs | --use-mine`, served
+as `plan.answer` for Desktop's Keep / Use mine on every line; `lf task sync
+--keep-theirs | --use-mine` answers a Task's whole slice). Git
 has no queue: a field's competing journal heads are its lost values, the
 winner's value as `tracker_value`, until a save names them all as parents;
 an answer records the chosen value with every head as a parent. `lf repo plan`

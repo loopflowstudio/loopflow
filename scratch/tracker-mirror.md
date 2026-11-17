@@ -3,7 +3,7 @@
 Status: built. Concept review round 2 (lost vs open, `--keep-theirs` /
 `--use-mine`, `tracker_actions.tracker`) is built; see `scratch/questions.md`.
 Open choices there keep today's behavior and do not block publishing.
-Concept review 3 found one gap to build: "Next" below.
+Concept review 3's gap (answering Project and Git lines) is built.
 The design as built is `docs/dev/planning.md` ("Words", "One outbound queue").
 
 ## Decision: any tracker — Linear and Asana, Notion deleted
@@ -53,37 +53,19 @@ network: every command saves, `lf repo plan` lists the actions as queued with
 the tracker's error, and the next connected command drains one bounded pass.
 QA run: `scratch/qa.html`.
 
-## Next: answer a lost line wherever it shows (concept review 3)
+## Answering a lost line wherever it shows (concept review 3, built)
 
-Round 2 made a lost value something you answer, but only Tasks can answer.
-Project fields (`ProjectName`, `ProjectSummary`, `ProjectDescription`,
-`ProjectStatus`, `Krs`, `MetricTargets`) and Git's `projects` heads also
-lose: they show in `lf repo plan` and on Desktop's Project views
-(`WaveDetailPane`, `ProjectHistoryView`, `WaveStandupBoard`) with no buttons,
-and `lf repo plan`'s hint sends you to `lf task sync <task>`, which cannot
-reach them. The answer belongs to the line, not the Task:
-
-- Storage: `answer_lost_values(task, …)` becomes `answer_lost(ids, answer)`
-  over action ids of any owner; `lf task sync`'s bulk answer is its slice's
-  lost ids. Only field and state actions reach `conflicted`
-  (`rules::field`/`state`), so `--use-mine` always has a `WorkValue` to save;
-  no per-kind button rule.
-- One line, one spelling: `lf repo plan answer <id> --keep-theirs |
-  --use-mine`, served as `plan.answer`; Desktop's two buttons call it on
-  every `TrackerSyncView` (`onAnswer` stops being Task-only). Since #1960
-  (merged at f5a6e4b686) Desktop writes go through `PendingChanges.request`
-  with a `ServedWrite` (`RegistryQuery.swift`); the answer becomes a
-  `ServedWrite.planAnswer(directory:, action:, answer:)` case, and
-  `.taskSync` drops `action`. Today `WorkModel.answerLost` sends
-  `.taskSync(…, action:)`. `lf task sync
-  <task> --keep-theirs | --use-mine` stays the bulk answer (Jack Heart, round
-  2: "2a"); its `--action` moves to `plan.answer`, and `task.sync` drops
-  `action`.
-- `lf repo plan` text prints a lost line's short id so the hint can name it:
-  `Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.`
-- Test: a Project name conflicted by the drain closes from `lf repo plan
-  answer`, and the same call on a Git Project head records a merge; fails
-  with today's Task-only path.
+The answer belongs to the line, not the Task. `SqliteStore::answer_lost(ids,
+answer)` answers action ids of any owner (a `tracker_actions` row, else a Git
+`planning_peer_changes` head). `lf repo plan answer <id> --keep-theirs |
+--use-mine` (served `plan.answer`, `ops::planning_sync::answer_lost`) resolves
+the 8-character prefix `lf repo plan` prints among the repository's lost
+lines, then runs `sync_after_save` for the owner. `lf task sync <task>
+--keep-theirs | --use-mine` stays the bulk answer (Jack Heart, round 2: "2a")
+over its slice's lost ids; `--action` and `task.sync`'s `action` are gone.
+Desktop: `ServedWrite.planAnswer`; `TrackerSyncView(sync:, repo:)` reads an
+`answerLost` environment action that `answeringLostLines(model)` installs in
+`SessionsView` and `WavesView`, so Task and Project lines all get the buttons.
 
 ## Choices built that the code does not explain
 
@@ -148,3 +130,4 @@ reach them. The answer belongs to the line, not the Task:
 - QA 3 (247d2917fd, `scratch/qa.html`): conflict line says `lost:` (a Git loser may be a peer's head); `lf task sync` of an unfetched Task exchanges the repository's planning first. `two_people::a_peer_syncs_a_task_it_has_never_fetched` passes and fails with the lookup reverted; `store::planning_sync_tests:: | task_sync` → 5, `dto_fixtures::` → 52, Swift `DTOFixtureTests` → 57 pass; clippy clean.
 - Concept review round 2 (lost vs open, answers, `tracker` column): execution `test(task_sync) | test(lost) | test(planning_sync_tests::)` → 18 pass (event close fails with `retire_changed_again` removed); `-p loopflow -p loopflow-storage` `lf::tests:: | server::schema | write::tests | dto_fixtures | repo_plan | planning_status | task_sync | planning_lookup_tests | tracker_actions | query_plans | documented_commands | planning::rules` → 135 pass, `task_status_reads_projectless_planning_without_allocating_execution` timed out at 300 s in the batch and passes alone in 234 s (Machine under load; gate watches it); schema regenerated; Swift `DTOFixtureTests|DesktopHeadlessTests|RegistryQueryTests|ServerProtocolTests|WorkModelTests` → 161 pass; clippy clean. `served_reads` (new `task.sync` arms) left to gate.
 - Merge of #1960 (f5a6e4b686): `WorkSurfaceView` called the now-synchronous `answerLost` with `await`; fixed in ae0b2f7dcc. Desktop build not run; gate builds it.
+- Concept review 3 build: execution `store::planning_sync_tests:: | task_planning_tests:: | planning_action_tests::` → 28/29; new `a_project_name_linear_won_is_answered_from_its_line` and `a_git_project_head_that_lost_is_answered_with_a_merge` (fail on the Task-only `answer_lost_values`); the failure is the known sccache `codex_foreground` fixture. `-p loopflow` `lf::tests:: | server::schema::tests:: | write::tests:: | documented_commands::` → 54 pass; schema regenerated; `scripts/test_desktop.sh --filter 'DesktopHeadlessTests|RegistryQueryTests'` → 37 pass; clippy storage+execution+loopflow clean. `served_reads` (new `plan.answer` arm) and the Xcode Desktop build left to gate; `lf repo plan`'s short-id text has no test of its own.

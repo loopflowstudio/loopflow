@@ -1320,6 +1320,7 @@ impl RepoCommand {
         match self {
             Self::Plan { cmd, .. } => match cmd {
                 Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoPlanCommand::Answer { .. }) => true,
                 Some(RepoPlanCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
@@ -2158,7 +2159,8 @@ pub enum TaskCommand {
 
     /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
     #[command(after_help = "A lost line is a value the tracker kept over yours. \
---keep-theirs closes it; --use-mine saves yours again and sends it.")]
+--keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
+`lf repo plan answer <id>` answers one.")]
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
@@ -2168,9 +2170,6 @@ pub enum TaskCommand {
         /// Save each lost value again, which sends it
         #[arg(long)]
         use_mine: bool,
-        /// Answer only this lost line (its action id in `lf task show --json`)
-        #[arg(long, value_name = "ID", requires = "answer")]
-        action: Option<String>,
     },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
@@ -2843,6 +2842,20 @@ pub enum RepoPlanCommand {
     },
     /// Show each destination's retained changes, including losing values, without contacting Git
     Journal {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Answer a lost line: keep the tracker's value, or save yours again and send it
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
+    Answer {
+        /// The line's id, as `lf repo plan` prints it
+        id: String,
+        /// Keep the tracker's value; the line closes
+        #[arg(long)]
+        keep_theirs: bool,
+        /// Save the lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
         #[arg(long)]
         json: bool,
     },

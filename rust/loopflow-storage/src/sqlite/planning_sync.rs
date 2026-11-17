@@ -17,7 +17,7 @@ use crate::StoreResult;
 use loopflow_model::durable::{ProjectId, TaskId};
 
 // An action shows while queued or sent, and while conflicted: a value that
-// lost stays until it is answered (`answer_lost_values`, a later save, or the
+// lost stays until it is answered (`answer_lost`, a later save, or the
 // tracker changing that field again). A creation for an owner already bound
 // waits only to be resolved.
 const SHOWN: &str = "NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
@@ -97,39 +97,35 @@ impl SqliteStore {
         Ok(actions)
     }
 
-    /// Answer the values a Task lost, or the one `action` names: keep the
-    /// tracker's, or save the local one again, which queues it (Git records
-    /// either as the field's merge). Returns how many were answered.
-    pub fn answer_lost_values(
-        &self,
-        task: &TaskId,
-        answer: LostAnswer,
-        action: Option<&str>,
-    ) -> StoreResult<usize> {
+    /// Answer lost lines by action id, whoever owns them: keep the tracker's
+    /// value, or save the local one again, which queues it (Git records either
+    /// as the field's merge).
+    pub fn answer_lost(&self, ids: &[String], answer: LostAnswer) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        let lost: Vec<_> = task_tracker_actions_in(&tx, std::slice::from_ref(task))?
-            .remove(task)
-            .ok_or(crate::StoreError::NotFound)?
-            .actions
-            .into_iter()
-            .filter(|row| row.phase == ActionPhase::Conflicted)
-            .filter(|row| action.is_none_or(|id| row.id == id))
-            .collect();
-        if let (Some(id), true) = (action, lost.is_empty()) {
-            return Err(crate::StoreError::InvalidData(format!(
-                "{id} is not a value this Task lost"
-            )));
-        }
-        for row in &lost {
-            if row.tracker == TrackerKind::Git {
-                answer_git(&tx, &row.id, answer)?;
-            } else {
-                answer_queued(&tx, &row.id, answer)?;
+        for id in ids {
+            let queued = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tracker_actions WHERE id=?1 AND phase='conflicted')",
+                [id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            let journaled = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE id=?1)",
+                [id],
+                |row| row.get::<_, bool>(0),
+            )?;
+            match (queued, journaled) {
+                (true, _) => answer_queued(&tx, id, answer)?,
+                (false, true) => answer_git(&tx, id, answer)?,
+                (false, false) => {
+                    return Err(crate::StoreError::InvalidData(format!(
+                        "{id} is not a lost line"
+                    )))
+                }
             }
         }
         tx.commit()?;
-        Ok(lost.len())
+        Ok(())
     }
 }
 

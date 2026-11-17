@@ -1003,7 +1003,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             issue,
             keep_theirs,
             use_mine,
-            action,
         } => {
             let answer = match (keep_theirs, use_mine) {
                 (true, _) => Some(LostAnswer::KeepTheirs),
@@ -1012,7 +1011,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             };
             println!(
                 "{}",
-                loopflow_execution::ops::task::task_sync(repo, issue, answer, action.as_deref())?
+                loopflow_execution::ops::task::task_sync(repo, issue, answer)?
             );
             Ok(())
         }

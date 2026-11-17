@@ -2746,11 +2746,13 @@ final class WorkModel {
         }
     }
 
-    /// Answer a value the Task's tracker kept over a local one.
-    func answerLost(_ task: RoadmapTask, action: TrackerActionStatus, answer: LostAnswer) {
+    /// Answer a value a tracker kept over a local one, whoever owns the line.
+    func answerLost(repo: String, action: TrackerActionStatus, answer: LostAnswer) {
         let name = answer == .keepTheirs ? "Keep theirs" : "Use mine"
-        request(task, name, .taskSync(directory: directory(task), issue: task.task.identifier,
-                                      answer: answer, action: action.id))
+        pendingChanges.request(name, subject: action.id,
+                               write: .planAnswer(directory: WaveOrigin.resolve(repo), action: action.id, answer: answer),
+                               notices: navigation.notices,
+                               answered: { [weak self] in try? await self?.confirmWorkUpdate() })
     }
 
     func moveTask(_ task: RoadmapTask, toWave wave: String?) {

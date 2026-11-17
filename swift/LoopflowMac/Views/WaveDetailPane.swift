@@ -237,7 +237,7 @@ private struct WavePlanView: View {
 
     private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let project = displayedPlan.currentProject { WaveProjectView(project: project) }
+            if let project = displayedPlan.currentProject { WaveProjectView(project: project, repo: wave.repo) }
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -831,12 +831,13 @@ private struct PrLink: View {
 
 struct WaveProjectView: View {
     let project: ProjectPlanningSnapshot
+    let repo: String
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
-            TrackerSyncView(sync: project.sync)
+            TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()

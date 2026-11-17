@@ -216,10 +216,16 @@ struct PendingChangesTests {
         #expect(changes.apply(to: [rows[3]], readAt: at(4), wave: "other").isEmpty)
     }
 
-    @Test func aLostLinkSendsAgainUnderTheSameRequestID() async throws {
+    @Test(arguments: [nil, URLError.networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+                      .cannotFindHost, .dnsLookupFailed, .timedOut])
+    func aLostLinkSendsAgainUnderTheSameRequestID(_ code: URLError.Code?) async throws {
         let changes = changes()
         complete(changes, "LOO-2")
-        await machine.fail(RegistryQueryError(ServerLink.disconnected))
+        if let code {
+            await machine.fail(URLError(code))
+        } else {
+            await machine.fail(RegistryQueryError(ServerLink.disconnected))
+        }
         #expect(changes.link == .blip)
         #expect(changes.acceptsChanges)
         // The answer goes to the second send, under the first one's request ID.
@@ -228,6 +234,16 @@ struct PendingChangesTests {
         #expect(Set(machine.sent).count == 1)
         #expect(changes.link == .connected)
         #expect(changes.changes.first?.answer == Revisions(["planning": 5]))
+    }
+
+    @Test(arguments: [URLError.cancelled, .badURL, .serverCertificateUntrusted, .userAuthenticationRequired])
+    func aURLRefusalDoesNotResend(_ code: URLError.Code) async throws {
+        let changes = changes()
+        complete(changes, "LOO-2")
+        await machine.fail(URLError(code))
+        #expect(changes.changes.isEmpty)
+        #expect(machine.sent.count == 1)
+        #expect(notices.current?.text.contains("couldn't be completed") == true)
     }
 
     @Test func requestedShowsInTheClickAndARefusalPostsOverIt() async throws {

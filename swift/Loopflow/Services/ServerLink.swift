@@ -60,6 +60,15 @@ public actor ServerLink {
     /// Whether `error` lost the connection before an answer arrived, so a
     /// change sent again under its request ID still runs once.
     public static func lostLink(_ error: any Error) -> Bool {
+        if let error = error as? URLError {
+            switch error.code {
+            case .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+                 .cannotFindHost, .dnsLookupFailed, .timedOut:
+                return true
+            default:
+                return false
+            }
+        }
         if let error = error as? RegistryQueryError {
             return [disconnected, handshakeExpired, unanswered].contains(error.message)
         }
@@ -116,7 +125,7 @@ public actor ServerLink {
     /// A write under `requestID`, answered with the revisions it advanced. A
     /// repeat under the same ID, on this or a later connection, gets the same
     /// answer and runs nothing. A failed write throws a `ServerError` whose
-    /// `revisions` says whether it advanced anything.
+    /// `revisions` lists domains that advanced while it ran, including other writes.
     public func write(_ change: ServedWrite, requestID: String) async throws -> ServerAnswer {
         try await request(.command(change), requestID: requestID, deadline: nil)
     }

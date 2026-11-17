@@ -149,19 +149,37 @@ OS user the socket already trusts.
 Today's SSH preamble and `--repo-id` give the destination `lf` its context.
 A pipe gives the server none, so the context moves into the protocol:
 
-In PR 1 one operation carries all of it: `machine.write { repository,
-environment, forwarded, change }` (`server/wire.rs`). The server runs `change`
-with `Write::run_here` in its checkout of `repository` and never sends it on;
-`hello`'s kind `machine` only labels the client in `lf server status`.
-`environment` is the preamble's variables (profile, user name, Task source,
-agent override); `forwarded` names the one-time file `forward::deliver`
-wrote, which the server reads once (`forward::take`) for the launch.
+The request carries it, typed (concept review of the built PR, 2026-11-17;
+answers in `scratch/questions.md`):
 
-`machine.write` is a second envelope around `Write`, and `environment` puts
-environment-variable names on the wire. Both last only until PR 3: there,
-`Request` carries a typed `Selection` (repository, profile, participant,
-Task source, agent, forwarded file), every write is plain `Write` with that
-selection, and `machine.write` is deleted.
+```
+hello   { client: { kind: "machine" } }
+request { repository, selection: { profile, participant, agent, source },
+          secrets: { NAME: value }, operation: <any Operation>, select }
+```
+
+- **The connection says where it runs.** A client whose `hello` kind is
+  `machine` has every operation run here, in this Machine's checkout of
+  `repository`, and never sent on: `Write::run_here`, and reads and
+  subscriptions through the same rule. The operation's kind decides nothing.
+- **`repository` and `selection` are fields of `Request`**, required and
+  nullable like `select`; a local client sends null. `selection` is the
+  sender's profile, participant name, agent override and Task source as their
+  own types, not environment-variable names.
+- **`secrets` are the run's forwarded values, in the request.** It is on SSH
+  stdin and ends at an owner-only socket. The field's type prints nothing
+  (`Debug`, request telemetry, the journal, `lf server status`), and a test
+  holds that. Files named by `forward.files` are still delivered as files by
+  `forward::deliver`. If no type can make the telemetry claim certain, keep
+  the one-time file and say so in `scratch/questions.md`.
+- **Deleted from the built branch:** `MachineOperation` and `machine.write`,
+  the `environment` map, `forwarded`, `Write::in_checkout`'s JSON rewrite,
+  `forward::take` and `forward::exported`.
+
+Every client encodes `Request`, so this changes Desktop's and the phone's
+encoder and the DTO fixtures in the same PR (two null fields). The headless
+choice it replaces picked a new operation to avoid that; the wrapper could
+carry only writes.
 
 ### One way to open SSH to a Machine
 
@@ -183,8 +201,16 @@ Each PR is its own Task. This Task is PR 1.
 Rework #1956 on `main`:
 
 - `Connection` over a carrier; `ssh::open`; `lf server connect`.
-- `machine.write` carries the repository id, the sender's context and the
-  forwarded file; the server runs its `change` here.
+- `Request` carries `repository`, a typed `selection` and `secrets`; a
+  `machine` connection's operations run here. `machine.write` is deleted
+  before it ships.
+- Reads and `--subscribe` for a Task another Machine runs go over the same
+  connection: `lf task status LOO-123 --subscribe` prints mini's live lines.
+- The SSH carrier bounds a wait for an answer to a request (not a
+  subscription's quiet stream); past it the command fails naming the Machine
+  and `ssh <route> lf server status`.
+- `Write::TaskHold` gains `reason`; the CLI's hold calls `Write::run` and the
+  routing copy in `mutation.rs` goes.
 - Delete `ssh::call`, the request executor in `server/stdio.rs`, and every
   `prepare_launch` call (LOO-913 deleted the function).
 - Kept from #1956: `Write::run` routes and `Write::run_here` runs; engine
@@ -198,14 +224,12 @@ Rework #1956 on `main`:
 - `lf --machine mini resume S`, Task conversations and Desktop shells on
   another Machine open with `session.attach` and a ticket over the pipe.
 - The SSH relay to `held.sock` is deleted once nothing older needs it.
-- `lf task status --subscribe` for a Task on another Machine.
 
 ### PR 3: Clap produces an `Invocation`; one dispatcher
 
 As the first plan had it. `--machine` sends the operation over
 `Connection::open_on`; a command with no `Operation` takes the plain-command
-launch. `Selection` moves onto `Request` with typed fields, `machine.write`
-and its `environment` map are deleted, and the preamble's environment goes. `mutation.rs`, CLI `work_route::forward`, `Read::argv`,
+launch. The preamble's environment goes (`Selection` is on `Request` since PR 1). `mutation.rs`, CLI `work_route::forward`, `Read::argv`,
 `aliases.rs`, the extra parses and the group A served guards are deleted;
 `transport::delegate_current` and the detached launch send an operation;
 `ssh::request`'s callers get kinds; the Clap → `Invocation` table is
@@ -227,26 +251,28 @@ sites and the CLI entry code PR 3 rewrites.
 
 ### State of the branch (2026-11-17)
 
-PR 1 is built on `main` at `e66b21801c`: `Connection::open_on` over
-`machine::ssh::Pipe`, `lf server connect` (`server/connect.rs`), and
-`machine.write` (`server/wire.rs::MachineOperation`), which the server runs
-with `Write::run_here` in its checkout of the named repository.
-`server/stdio.rs`, `ssh::call` and the `prepare_launch` path are deleted.
-A destination `lf` that exits non-zero (not 2, 255) adds "; check `ssh
-<route> lf server status`" (`machine::ssh::Pipe::ended`), the demo's third
-failure clause. The Done-when `rg` finds nothing.
+Built on `main` at `e66b21801c` (head `60895c2e30`): `Connection::open_on`
+over `machine::ssh::Pipe`, `lf server connect` (`server/connect.rs`), and the
+skew, crash, unreachable and unstartable errors. These stay.
+
+Built and now replaced by "What the server must learn" above:
+`machine.write` (`server/wire.rs::MachineOperation`), `Write::in_checkout`,
+`forward::take`/`exported`, `Remote`'s `environment` and `forwarded`.
+
+Found reading the built branch, not yet done:
+- `server/service.rs::operate` runs a plain `Write` from any client with
+  `Write::run`, which may route onward, and accepts `machine.write` from any
+  admitted client with any environment names. The connection rule closes both.
+- `Write::remote_session` builds a Clap command line (`session_spelling`) to
+  ask `work_route::forward` which Machine. PR 3.
+- `ContinueRun` is passed through `move_session`/`move_task` because `Write`
+  lives in the application crate. Larger than this PR.
 
 ## Open
 
-- In-process writes sent to another Machine (hold, claim, unassign, Session
-  preparation) run with the destination's own configuration; the sender's
-  `environment` reaches only the launches `task.run` and `task.ship` start.
-  PR 3's `Selection` on `Request` closes this.
-- The SSH carrier sets no read timeout; SSH bounds connecting, not a stalled
-  destination.
-- PR #1956 CI reports every check SKIPPED except `macos-inputs` and
-  `scratch-clear`, including `rust-test` (rechecked 2026-11-17 at
-  `836125fd5a`). Not investigated; gate must see the suites run.
+- No CI suite has run on this branch. #1956 carries `scratch/`, so
+  `scratch-clear` defers the matrix (`.github/CI.md`, "Scratch, cancellation
+  and macOS path filters"); gate clears scratch and the suites run then.
 
 ## Built in #1956 (2026-11-16), before the redesign
 
@@ -275,3 +301,9 @@ failure clause. The Done-when `rg` finds nothing.
 - `rg 'prepare_launch|fn run_remote|fn remote_on|ssh::call|\.cli\(\)' rust/*/src`
   finds nothing (`fn cli(` also matches unrelated cmux and Rex helpers).
 - An older destination fails with its version and the update command.
+- `lf task status <issue> --subscribe` for a Task another Machine runs prints
+  that Machine's live lines.
+- A destination that accepts SSH and never answers fails within the bound,
+  naming the Machine.
+- `rg 'machine\.write|MachineOperation|in_checkout|forward::take' rust/*/src`
+  finds nothing.

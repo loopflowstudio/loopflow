@@ -146,3 +146,15 @@ Settled by these: the destination's resident server runs every routed operation 
 - The entry kept #1956's error texts ("mini runs lf 0.15.2 …", "lf on mini
   exited with status 101 before answering; the destination said: …"), now
   inside the error itself so a served request keeps them.
+
+## Concept review of the built PR (2026-11-17, `60895c2e30`)
+
+`scratch/concept-review.html` has the page. Its questions and Jack's answer, "1a 2a 3a 4a 5a":
+
+1. Where "who is asking, for which repository" lives. **a**: on the request, typed, in this PR; `machine.write` and the environment map deleted before they ship.
+2. What makes the server run an operation here and never send it on. **a**: the connection, a client that said it is a Machine; applies to every operation.
+3. How a run's secret values reach the destination's server. **a**: in the request, as a field nothing can log; files still delivered as files.
+4. A destination that accepts SSH and never answers. **a**: bounded in this PR, with a message naming the Machine.
+5. Reads and `--subscribe` for a Task on another Machine. **a**: in this PR.
+
+This reverses the headless choice above ("The write another Machine sends is a new operation, `machine.write`").

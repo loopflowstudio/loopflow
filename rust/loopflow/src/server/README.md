@@ -517,9 +517,10 @@ reported, never started by an attachment attempt.
 ## Turn and tool boundaries
 
 `transport::delegate` returns one launch state in `Launch::run`:
-`Bare(Mode)` for direct skill and Graph commands, `Managed` for interactive
-Task, Wave, repository and resumed conversations, and `Worker` for headless
-Task Graph steps. The command decides this state. The checkout, `--task` and
+`Bare(Mode)` for direct skill and Graph commands and `lf resume <ID> 'message'`,
+`Managed` for interactive Task, Wave, repository and resumed conversations, and
+`Worker` for headless runs lf starts for a Task or Wave: `lf task run` steps,
+the `ci-fix` run landing starts, and Discord answers for a Wave. The command decides this state. The checkout, `--task` and
 `LF_AS` only decide Task membership: accounting and Task steers always travel
 together. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
 Bare launches report no boundaries. Managed conversations and Workers report

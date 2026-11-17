@@ -45,7 +45,7 @@ enum Run { Bare(Mode), Managed, Worker }   // replaces Holder x Place x Mode
 |---|---|---|---|
 | `lf`, `lf <skill>`, `lf graph <g>`, `lf -b ...`, with or without `--task`/`LF_AS`, in any checkout | Bare | interactive or headless | its terminal closes or its caller exits |
 | a Task, Wave or repository conversation: `lf resume [ID] --task/--wave`, a Session bound with `lf session bind`, a primary conversation | Managed | interactive | someone quits it; survives its viewer |
-| `lf task run` and each Graph step it starts | Worker | headless | the step ends; outlives the command that started it |
+| `lf task run` steps, landing's `ci-fix` run, Discord Wave answers | Worker | headless | the run ends; outlives the command that started it |
 
 Names chosen for review: `Worker`, not "detached", because lf already shows
 `"state": "detached"` on an interactive Session nobody is viewing. One word
@@ -96,11 +96,6 @@ carries `Run`). `ThreadNaming { caller, server }` keys on `Run` instead.
 In-process callers that never go through `delegate` (commit message, PR text,
 replay) are `Bare(Headless)`.
 
-Update `server/README.md` "Turn and tool boundaries", `transport/README.md`
-and `harness/README.md` to this vocabulary; they still name
-`AgentConfig::holder`. `lf pr_landing` already clears `LF_AS` and passes
-`--task` to the worker it starts; that worker is started by Task delivery and
-is a Worker.
 
 ### Demo
 
@@ -124,32 +119,20 @@ CLI, authored preferences and persistence retain string forms at their input
 boundaries. Wire DTOs are unchanged. `chrome` and `codex_service_tier` remain
 separate provider launch options because neither is a model choice.
 
-## Next implement slice: say what Worker is
+## Worker and resume, in the words
 
-Concept review of `cb6aee93e5`. The code holds the model: `Run` has one
-definition, `delegate` returns it, `Holder`/`Place`/`is_managed`/`named_work`
-are gone, and attribution no longer reaches lifetime. Two places where the
-words and the code disagree; both are fixed in the words.
+Concept review of `cb6aee93e5` found the docs narrower than the code; realign
+fixed the words, no code path changed. Worker is any headless run lf starts
+for a Task or Wave that nobody views and whose turns the server records:
+`lf task run` steps, the `ci-fix` run `pr_landing.rs` starts
+(`LF_GRAPH_STEP=worker`), and `run::answer_bound` for Discord Wave answers,
+the one `Run` chosen outside `delegate` that isn't Bare (commented in
+`lf/commands/run.rs`). `lf resume <ID> 'message'` is `Bare(Headless)`; with no
+message it is Managed. The transport, harness and server READMEs say so.
 
-1. **Worker is wider than "a Task Graph step".** Three things are Workers:
-   steps under `lf task run`, the `ci-fix` run landing starts
-   (`pr_landing.rs`, `LF_GRAPH_STEP=worker`), and each Discord answer for a
-   Wave (`run::answer_bound`, built in-process, never through `delegate`).
-   What they share: lf started them for a Task or Wave, nobody views them,
-   and the server records their turns. The table above and
-   `transport/README.md`, `harness/README.md`, `server/README.md` say
-   "headless Task Graph step"; make them say that definition and list all
-   three. `answer_bound` keeps `Run::Worker`: it reported turns before this
-   branch, and the same caution that kept Worker's turn reports applies.
-   Give it a one-line comment naming why it is not `Bare(Headless)`, since
-   it is the only `Run` chosen outside `delegate` that isn't Bare.
-2. **Resume with a message is Bare.** `transport/README.md` says every
-   resume is Managed. Add the row: `lf resume <ID> 'message'` is
-   `Bare(Headless)`; `lf resume` with no message is Managed.
-
-No code path changes. After this slice nothing remains for implement; gate
-owns the broader transport, configuration and Task performance suites, demo
-owns live provider steering.
+Nothing remains for implement. Gate owns the broader transport,
+configuration and Task performance suites; demo owns live provider steering
+and the resume-outlives-viewer change.
 
 Managed native fixtures open through `resume`; direct skills remain Bare
 with Task attribution. WorkSource remains for context provenance and primary

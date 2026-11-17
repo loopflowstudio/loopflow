@@ -24,7 +24,9 @@ headless results retain answer text and typed turn failures for retry policy.
 
 `transport::delegate` decides `Run` once. `Bare(Mode)` follows its caller,
 `Managed` is an interactive conversation in a held terminal, and `Worker` is a
-headless Task Graph step. In-process callers such as commit messages, PR text
+headless run lf starts for a Task or Wave, which nobody views and whose turns the
+server records: `lf task run` steps, the `ci-fix` run landing starts, and each
+Discord answer for a Wave. In-process callers such as commit messages, PR text
 and replay use `Bare(Headless)`. Task attribution never changes this choice.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.

@@ -217,6 +217,7 @@ pub fn run_bound(
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
+/// Worker, not `Bare(Headless)`: these turns reported to the server before `Run`.
 pub(crate) fn answer_bound(
     message: &str,
     cli: &Cli,

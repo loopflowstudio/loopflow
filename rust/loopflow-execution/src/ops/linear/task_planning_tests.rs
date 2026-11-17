@@ -831,26 +831,21 @@ fn task_completion_late_acknowledgement_preserves_explicit_reopening() {
 }
 
 #[test]
-fn native_runner_is_quiet_until_its_turn_ends_codex_foreground() {
-    assert_native_runner_is_quiet_until_its_turn_ends("codex", false, true);
-}
-
-#[test]
-fn native_runner_is_quiet_until_its_turn_ends_claude_foreground() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", false, true);
+fn native_runner_is_quiet_until_its_turn_ends_codex_task_headless() {
+    assert_native_runner_is_quiet_until_its_turn_ends("codex", true);
 }
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_claude_task_headless() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, true);
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", true);
 }
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_claude_taskless_headless() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, false);
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", false);
 }
 
-fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, task_bound: bool) {
+fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bool) {
     with_planning_task(|runtime, fixture, repo, task, state| {
         let _environment = crate::test_ambient::EnvGuard::clear(&[
             "HOME",
@@ -887,7 +882,6 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             state.lock().await.requests = 0;
         });
         let process = crate::agent::ProcessConfig {
-            auto,
             task_input: task_bound.then(|| {
                 crate::ops::task_input::TaskInput::new(
                     fixture.store.clone(),

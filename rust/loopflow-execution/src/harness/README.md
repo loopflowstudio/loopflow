@@ -11,16 +11,17 @@ let harness = HarnessKind::Codex.harness();
 let outcome = harness::launch(Launch {
     config: &config,
     mode,               // from transport::delegate
-    holder,             // from transport::delegate
+    holder,             // from transport::holder after Work binding
     admitted: &admitted, // from admit(); never optional
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
 })?;
 ```
 
-Every launch, interactive or headless, bare or held, goes through
+Every launch, interactive or headless, for the caller or server, goes through
 `harness::launch`. `transport::delegate` decides `Mode` (`Interactive` or
-`Headless`) and `Holder` (`Caller` or `Server`) once. In-process callers that
+`Headless`); after Work binding, `transport::holder` decides `Holder` (`Caller`
+or `Server`) once. In-process callers that
 never delegate, like commit messages and PR text, use `Mode::Headless` and
 `Holder::Caller`; a Graph step for a Task goes through `delegate`. `admit` creates the capture and claims the
 attachment before any harness is chosen, so a launch cannot start unattached.
@@ -31,7 +32,7 @@ Each harness file answers the rest:
 |---|---|
 | `capabilities()` | who names the thread, same-turn input, native skills, turn limit, output schema, respawn after crash, install hint |
 | `open(&Launch)` | native interactive client: argv, hook and title flags, plus any companion lf keeps alive (Codex app-server, OpenCode server and observer) |
-| `driver(events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+| `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 
 `HarnessKind::harness()` is the only dispatch, and `HarnessKind::parse` and
 `as_str` are the only places a harness name appears outside its own file.
@@ -43,10 +44,10 @@ may `exec` into a held terminal.
 | harness | interactive client | names the thread |
 |---|---|---|
 | Claude | native TUI, prompt on stdin | lf (`--session-id`) |
-| Pi, bare | native TUI | lf (`--session-id`) |
-| Pi, held | native TUI with the lf extension | provider |
-| Codex, bare | `codex`, prompt in argv | provider (start hook) |
-| Codex, held | `codex --remote` after lf opens the app-server thread | provider |
+| Pi, Caller | native TUI | lf (`--session-id`) |
+| Pi, Server | native TUI with the lf extension | provider |
+| Codex, Caller | `codex`, prompt in argv | provider (start hook) |
+| Codex, Server | `codex --remote` after lf opens the app-server thread | provider |
 | OpenCode | `opencode --server … --session` beside a private server; waits | provider |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`

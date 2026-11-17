@@ -92,8 +92,7 @@ pub fn resume_session_with_env(
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
     // Reopening a conversation recorded as Task, Wave or repository work is
     // Work whatever command reopened it.
-    let work = store.is_work(named_work, Some(&session))?;
-    config.holder = crate::session::Holder::of(work);
+    config.holder = crate::transport::holder(named_work, None, Some(&session.id));
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",

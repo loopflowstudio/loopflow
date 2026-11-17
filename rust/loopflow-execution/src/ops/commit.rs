@@ -291,7 +291,6 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         }
     };
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         timeout: Some(COMMIT_MESSAGE_TIMEOUT),
         ..Default::default()

@@ -40,7 +40,6 @@ fn base_launch() -> AgentConfig {
 
 fn base_process() -> ProcessConfig {
     ProcessConfig {
-        auto: true,
         stream: false,
         ..Default::default()
     }
@@ -288,7 +287,6 @@ fn launch_with_cwd() {
 fn launch_streaming_mode() {
     let _env = EnvGuard::new(&[("claude", &claude_script("text = 'first\\nsecond'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         ..Default::default()
     };
@@ -301,7 +299,6 @@ fn launch_streaming_mode() {
 fn launch_batch_times_out() {
     let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         timeout: Some(Duration::from_millis(100)),
         ..Default::default()
@@ -318,7 +315,6 @@ fn launch_batch_times_out() {
 fn launch_streaming_times_out() {
     let _env = EnvGuard::new(&[("claude", &claude_script("time.sleep(2); text = 'late'"))]);
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         timeout: Some(Duration::from_millis(100)),
         ..Default::default()

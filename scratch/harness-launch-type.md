@@ -21,16 +21,10 @@ required in the type; a fifth harness is one file.
 LOO-913 (#1953, which removes account routing) is on main at 4a0691a9a0 and
 merged into this branch. Add no account selection back.
 
-**#1955 is on main (528ccd8eda) and not merged here.** It overlaps seven
-branch files. One conflicts: `native_exit::record_exit`. Take main's body
-(returns `Result<()>`; an agent process no longer records an `"interrupted"`
-outcome) with this branch's `&Admitted` destructure. After it, a native
-launch's `interrupted` is exactly "a mover took the attachment", so
-`Outcome` gets that from `attachment_lost`, not from a stored outcome. #1955
-also adds `PromptBuild::skill_version` and drops `work:` from the prompt
-context in `run.rs`; slice 3 builds on those lines. The original caller
-inventory and dependency investigation are in
-`3b735e67d6:scratch/harness-launch-type.md`.
+#1955 (528ccd8eda) is merged into this checkout. `native_exit::record_exit`
+uses main's `Result<()>` body with `&Admitted`; native interruption no longer
+reads a stored AgentProcess outcome. Main also supplies `PromptBuild::skill_version`.
+Earlier merge analysis is in b9542ecef5:scratch/harness-launch-type.md.
 
 **The resume path admits lazily.** `session_command_status_with_env`
 (`native_session.rs:379`) creates a capture and claims an attachment when
@@ -64,9 +58,9 @@ it stays private to `transport` and no harness sees it. "Held" means only
 decides `Place::Held` from `!batch`. The resolver keeps both inputs so neither decision
 changes.
 
-**Usage parsing is duplicated.** `transcript/claude.rs:117` and
-`harness/claude_decode.rs:296,325,500,691` each read
-`input_tokens / cache_read_input_tokens / cache_creation_input_tokens`.
+**Usage parsing** now shares `claude::usage(&Value)` between stream and
+transcript decoding. Missing input remains distinct from zero; cache-only
+observations still contribute to peak pressure.
 
 ## Role models: what to take
 
@@ -143,15 +137,17 @@ pub struct Admitted { store: SqliteStore, session: String, attachment: SessionAt
 
 - `transport::delegate*` returns `Delegation::{Delegated, Here { mode }}`
   instead of `bool`. The early return (inside a held terminal or a detached
-  launcher) resolves the mode too. `Mode` comes from `is_interactive_run`,
-  moved into `transport`; `Place::Held` still keys on `batch`.
+  launcher) resolves the mode too. `LaunchInput::mode` owns the former
+  `is_interactive_run` predicate; `Place::Held` still keys on `batch`.
 - Place and Holder read two facts, each derived once in `transport`.
   **Place** reads whether the command names its Work (`named`: `task run`,
   `--task`, `--wave`, or a reopened Session that is not bare), as `delegate`
   does today. **Holder** reads whether the launch's Work source is managed
-  (`WorkSource::is_managed()`, or `store.is_work` for a reopened Session).
-  They agree at every entry but one: inherited `LF_AS` outside a Task checkout
-  binds as `Declared`, so it runs here (`named = false`) with `Holder::Server`.
+  (`WorkSource::is_managed()`, or `store.is_work` for a native reopened Session).
+  A headless resume by ID uses only the command's named Work, as today; native
+  resume consults stored Session Work. Inherited `LF_AS` outside a Task
+  checkout binds as `Declared`, so it runs here (`named = false`) with
+  `Holder::Server`.
   A Graph step is already `Server` and here, so that pair is not new. This
   Task keeps every entry as it is ("behave as before"); the entry gets its own
   row in the launch matrix so the next change to it is deliberate.
@@ -214,7 +210,7 @@ and `Launch`; do not add a mode-tagged result.
 
 ### Concept review (2026-11-16, headless)
 
-Settled by the design, for implement:
+Settled by the design:
 
 - `Start::New` carries no thread. An Assigned thread id is the UUID in the
   capture's artifact key (`run.rs:743-753` strips `run_` today), so `admit`
@@ -261,6 +257,14 @@ Third pass, against the admission diff:
   has one. `native_exit::settle`'s `Option<Admitted>` stays: there `None` is a
   store that did not open, a recording gap.
 
+Slice 3 counterexample (2026-11-16): headless `lf -b resume ID --message`
+reaches `run::resume` with `named_work` derived only from CLI selectors in
+`lf/commands/session.rs::resume`. It neither delegates by stored Session Work
+nor uses it for Holder. The same ID can therefore be Caller headless and Server
+native. The resolver now retains that distinction; the matrix needs separate
+headless/native resume-by-ID rows. The earlier blanket statement about reopened
+Sessions was incorrect. This changes the written design, not launch behavior.
+
 Open, outside this Task (not blocking): what inherited `LF_AS` outside a Task
 checkout should be. `server/README.md` "Turn and tool boundaries" and
 `transport/README.md` "Which launches are managed" list the managed entries
@@ -273,14 +277,7 @@ changes hooks and the server requirement for those child runs.
 
 ## Delete, do not maintain
 
-- `agent/mod.rs`: `ProcessConfig::auto` and its dead reads: the `process.auto &&`
-  guard on the Claude-only warnings, `!process.auto ||` in the retry loop, the
-  `"tui"` surface and the `begin_with_context` arm of `_begin_process_runtime`,
-  and the `for auto in [false, true]` test loop. Confirm each is unreachable
-  from `run.rs`'s interactive path before deleting.
-  `AgentConfig::holder`; any remaining `pin_provider_account*`.
-- `run.rs`: the `!process.auto && holder == Caller` exit arm in
-  `run_headless_prompt` (`run_prompt` returns before it when not `auto`).
+- `agent/mod.rs`: `AgentConfig::holder`; any remaining `pin_provider_account*`.
 - `native_session.rs`: the program-name dispatch and provider `SessionCommand`.
 - `agent/session.rs`: `ProviderInvocation`, `SessionCommand`,
   `build_session_command`, `native_connection_command`; its name-keyed tests
@@ -326,23 +323,24 @@ supplied runtime stays caller-owned. Both optional launch fields, `open_owner` a
 the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
 
 Remaining work:
-0. **Merge main (#1955).** Resolve `record_exit` as above; focused:
-   `cargo test -p loopflow-execution --lib harness::native_exit::`.
-3. **Mode at delegate, holder in `transport`.** `Delegation::Here { mode }`,
-   `Mode`, `transport::holder` as the only `Holder::of` caller; delete
-   `AgentConfig::holder`, `ProcessConfig::auto` with its dead reads,
-   `Holder: Default`. No entry changes place or holder; a test pins inherited
-   `LF_AS` outside a Task checkout as here with `Holder::Server`. Focused:
-   `cargo test -p loopflow --lib lf::commands::run::` and
-   `--lib transport::`.
+3. **Finish moving holder into `Launch`.** Mode now comes from
+   `Delegation::Here { mode }` and reaches `PromptBuild` through `Cli::launch_mode`;
+   prompt previews use `LaunchInput::preview_mode` without delegation.
+   `transport::holder` is the only `Holder::of` caller. Place still reads named
+   Work, independently of reporting ownership; the inherited `LF_AS` row pins
+   here + Server. `ProcessConfig::auto` and its unreachable branches are deleted.
+   Still remove `AgentConfig::holder` and `Holder: Default` with slice 4 so
+   reporting ownership travels on `Launch`, through native commands and drivers.
+   Focused: `--lib transport::launch_mode_tests::` and
+   `--lib lf::commands::run::launch_policy_tests::`.
 4. **`Harness` + `Driver` + per-harness `open`.** Move the table rows above;
    one `harness::launch`; shared `native::run`. `claude.rs`'s private
    `Launch { config, owner }` is the driver-side half of this and goes when
    `Harness::driver` takes `harness::Launch`. (`transcript::Launch`, a parsed
    launch turn, is unrelated and keeps its name.) Focused:
    `--lib harness::conformance_tests` plus a new `harness::launch_matrix` test.
-5. **Leftovers.** Claude usage once, replay, raw process recognition, settings
-   rule, docs.
+5. **Leftovers.** Replay, raw process recognition, settings rule, docs.
+   Claude usage parsing now has one helper for live and saved observations.
 
 ## Demo
 
@@ -373,11 +371,14 @@ behave exactly as before.
 
 ## Checks
 
-- implement (2026-11-16): `cargo test -p loopflow-execution --lib --no-run` — built; its test binary passed 78 tests selected by `harness::native_session::`, `harness::agent_process::`, `process::runtime::tests::`, `session_record::capture_tests::` and `agent::session::tests::`.
-- implement (2026-11-16): same binary with `harness::claude::tests::interrupted_capture_retains_policy_after_settings_change_and_fences_old_snapshots` and `harness::pi_tests::pi_turns_resume_the_exact_conversation_and_capture_tools_usage` — 2 passed.
-- implement (2026-11-16): `cargo test -p loopflow --lib lf::commands::run::launch_policy_tests::` — built; 5 passed. macOS ld emitted its compact-unwind size warning (`__eh_frame` over 16 MB).
-- implement (2026-11-16): `cargo fmt --all -- --check` and `git diff --check` — passed; no checkout test processes remain.
-- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::)'`; CI runs the suites and clippy.
+Earlier admission and runner checks are recorded at
+b9542ecef5:scratch/harness-launch-type.md.
+
+- implement (2026-11-16): `cargo test -p loopflow-execution --lib harness::native_exit::` — 3 passed after the #1955 merge.
+- implement (2026-11-16): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::) | test(agent::tests::native_retry_policy_matrix) | test(harness::claude_decode::tests::result_extracts_turn_usage_tokens) | test(harness::claude_decode::tests::assistant_usage_is_live_and_deduplicated_by_message) | test(harness::claude_decode::tests::result_pairs_peak_assistant_input_with_its_model_window) | test(transcript::live::tests::a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message)'` — 15 passed; macOS ld emitted its compact-unwind size warning.
+- implement (2026-11-16): `cargo +stable fmt --all -- --check` (Rustup tools first on PATH) and `git diff --check` — passed.
+- implement (2026-11-16): `cargo +stable clippy --all-targets -- -D warnings` (Rustup tools first on PATH, inherited `LF_*` unset) — passed with Rust 1.100.0.
+- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::) | binary(lf)'`; CI runs the suites and clippy.
 - gate: the two `rg` commands above.
 - demo/qa: real-terminal launches above (needs installed providers).
 
@@ -389,7 +390,8 @@ behave exactly as before.
 #1953 replaced the README's account paragraphs with "Native clients own
 authentication."
 
-Both describe the finished design; `Admitted` now exists, but shared `Launch`,
-`Mode`, per-harness `open` and `launch_matrix` remain absent. Realign (2026-11-16)
-replaced the README's `Placement` with `mode` and `holder`. They must not merge
-ahead of slice 4; implement corrects them to whatever it actually builds.
+Both describe the finished design. `Admitted` and `Mode` now exist; shared
+`Launch`, per-harness `open` and `launch_matrix` remain absent. The README
+names `transport::holder` after Work binding and distinguishes Caller/Server
+from physical terminal placement. The finished interface docs stay with this
+unpublished branch until slice 4 is built.

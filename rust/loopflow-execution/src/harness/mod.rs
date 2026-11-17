@@ -282,6 +282,12 @@ pub trait Harness: Send + Sync {
     fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Mode {
+    Interactive,
+    Headless,
+}
+
 /// The Session and frozen attachment an invocation launches and records under.
 #[derive(Debug, Clone)]
 pub struct Admitted {

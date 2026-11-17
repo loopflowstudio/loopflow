@@ -67,6 +67,14 @@ Design the bare path for subagents started by a Task's agent, not a person at
 a prompt: nobody watches, the caller waits on the exit and reads the output,
 and the run ends with its parent.
 
+`delegate` returns either a completed delegation or the mode to run here.
+Mode selects a native client or a headless driver; `--batch` always selects the
+headless driver, while `--interactive`, a terminal or no prompt selects the
+native client. Where a launch runs still depends on `--batch`, named Work and
+its viewer. After Work binding, `transport::holder` separately selects who
+receives provider reports. An inherited `LF_AS` declaration keeps its current
+behavior: local execution with server reporting.
+
 ### Bare conversations at a terminal
 
 Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of

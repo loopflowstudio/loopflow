@@ -2543,13 +2543,20 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             cmd: TaskCommand::Run { .. }
         })
     );
-    if execution
-        && loopflow_execution::transport::delegate_current(
-            cli.batch,
+    if execution {
+        match loopflow_execution::transport::delegate_current(
+            loopflow_execution::transport::LaunchInput {
+                batch: cli.batch,
+                interactive: cli.interactive,
+                has_prompt: cli.command.is_some() || cli.skill_input.is_some(),
+            },
             task_run || cli.work_subject_selector().is_some(),
-        )?
-    {
-        return Ok(());
+        )? {
+            loopflow_execution::transport::Delegation::Delegated => return Ok(()),
+            loopflow_execution::transport::Delegation::Here { mode } => {
+                cli.launch_mode = Some(mode)
+            }
+        }
     }
     // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.

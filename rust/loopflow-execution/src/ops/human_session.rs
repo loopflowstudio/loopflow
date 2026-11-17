@@ -1076,7 +1076,9 @@ pub async fn open(
             session.interactive.then_some(session.id.as_str()),
             true,
             named_work,
-        )? {
+        )?
+        .delegated()
+        {
             return surface(store, session).await;
         }
     }
@@ -1211,7 +1213,9 @@ pub async fn open_without_replacing(
     // again; a bare conversation opens here, in this terminal.
     let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)?
+            .delegated()
+        {
             return Ok(record);
         }
         let lock_id = id.to_owned();
@@ -1302,7 +1306,7 @@ async fn fork(
 /// crosses to the launch; opening it reacquires the lock and reads current state.
 /// Its new thread has no native history, so it launches with the Session's Work.
 async fn open_prepared(store: &SharedStore, id: &str, json: bool) -> Result<()> {
-    if !crate::transport::delegate_prepared_session(id, json)? {
+    if !crate::transport::delegate_prepared_session(id, json)?.delegated() {
         open_waiting(store, id, false).await?;
     }
     Ok(())

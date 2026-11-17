@@ -20,7 +20,6 @@ use loopflow_execution::prompt::Surface;
 use loopflow_execution::session_record::{
     AgentProcessRequest, SessionCaptureSpec, SubjectAttribution,
 };
-use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tracing::{debug, info, instrument, trace};
@@ -49,11 +48,10 @@ pub fn run(repo_root: &Path, skill: Option<&str>, message: Option<&str>, cli: &C
             source: loopflow_execution::session::WorkSource::Declared,
         })
     });
-    built.agent_config.holder = loopflow_execution::session::Holder::of(
-        built
-            .work
-            .as_ref()
-            .is_some_and(|work| work.source.is_managed()),
+    built.agent_config.holder = loopflow_execution::transport::holder(
+        false,
+        built.work.as_ref().map(|work| work.source),
+        None,
     );
 
     print_context_header(&built, cli);
@@ -111,9 +109,17 @@ pub(crate) fn preview_prompt(
 /// using `message` and the provider's own history without re-executing its skill.
 /// `named_work` when the resume command named a Task or Wave.
 pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
-    if loopflow_execution::transport::delegate_current(true, named_work)? {
-        return Ok(());
-    }
+    let mode = match loopflow_execution::transport::delegate_current(
+        loopflow_execution::transport::LaunchInput {
+            batch: true,
+            interactive: false,
+            has_prompt: true,
+        },
+        named_work,
+    )? {
+        loopflow_execution::transport::Delegation::Delegated => return Ok(()),
+        loopflow_execution::transport::Delegation::Here { mode } => mode,
+    };
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
@@ -158,6 +164,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
     } else {
         message.to_owned()
     };
+    turn.launch_mode = Some(mode);
     turn.resume = Some(session.id.to_string());
     turn.skill_input = None;
     turn.resolved_invocation = None;
@@ -202,7 +209,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         task_prompt: prepared.task_prompt,
         structured_replies: prepared.structured_replies,
         env: prepared.env,
-        holder: loopflow_execution::session::Holder::of(named_work),
+        holder: loopflow_execution::transport::holder(named_work, None, None),
         ..resolved
     };
     (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
@@ -282,7 +289,7 @@ fn build_bound_prompt(
     }
     built.subjects = binding.subjects.clone();
     built.agent_config.holder =
-        loopflow_execution::session::Holder::of(binding.source.is_managed());
+        loopflow_execution::transport::holder(false, Some(binding.source), None);
     built.work = Some(loopflow_execution::session::SessionWork {
         task_id: match &binding.work {
             loopflow_model::durable::WorkRef::Task(id) => Some(id.clone()),
@@ -337,6 +344,7 @@ struct PromptBuild {
     repo_root: PathBuf,
     agent_config: AgentConfig,
     process: ProcessConfig,
+    mode: loopflow_execution::harness::Mode,
     components: PromptComponents,
     context: loopflow_execution::trace::PreparedTurnContext,
     harness: String,
@@ -518,7 +526,15 @@ fn build_prompt_at(
     captured: bool,
 ) -> Result<PromptBuild> {
     let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
-    let is_interactive = is_interactive_run(cli, skill, message);
+    let mode = cli.launch_mode.unwrap_or_else(|| {
+        loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: skill.is_some() || message.is_some(),
+        }
+        .preview_mode()
+    });
+    let is_interactive = mode == loopflow_execution::harness::Mode::Interactive;
     let subject = cli.task.as_deref().unwrap_or_default();
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
@@ -635,7 +651,6 @@ fn build_prompt_at(
     let process = ProcessConfig {
         task_input: task_input
             .map(|(store, seed)| loopflow_execution::ops::task_input::TaskInput::new(store, seed)),
-        auto: !is_interactive,
         stream: !is_interactive,
         wait_for_capacity: !is_interactive && loopflow_execution::ops::graph_process::in_graph(),
         ..Default::default()
@@ -675,6 +690,7 @@ fn build_prompt_at(
         repo_root,
         agent_config,
         process,
+        mode,
         components,
         context,
         harness,
@@ -687,27 +703,6 @@ fn build_prompt_at(
         subjects: Vec::new(),
         work: None,
     })
-}
-
-pub(crate) fn is_interactive_run(cli: &Cli, skill: Option<&str>, message: Option<&str>) -> bool {
-    is_interactive_run_with_tty(
-        cli,
-        skill,
-        message,
-        std::io::stdin().is_terminal() || std::io::stdout().is_terminal(),
-    )
-}
-
-fn is_interactive_run_with_tty(
-    cli: &Cli,
-    skill: Option<&str>,
-    message: Option<&str>,
-    attached_tty: bool,
-) -> bool {
-    if cli.batch {
-        return false;
-    }
-    cli.interactive || attached_tty || (skill.is_none() && message.is_none())
 }
 
 fn print_context_header(built: &PromptBuild, cli: &Cli) {
@@ -733,7 +728,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 }
 
 fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
-    if !built.process.auto {
+    if built.mode == loopflow_execution::harness::Mode::Interactive {
         info!("launching interactive vendor session");
         let runtime = begin_process_runtime(built, "tui", &built.agent_config, None)?;
         // Claude and a bare Pi take the thread id lf gives them; a held Pi
@@ -881,13 +876,6 @@ fn run_headless_prompt(
     debug!(exit_code = result.exit_code, "agent completed");
     if result.exit_code == 0 {
         Ok(())
-    } else if !process.auto && agent_config.holder == loopflow_execution::session::Holder::Caller {
-        // A bare terminal launch exits as its provider did; lf already said
-        // whether the provider failed.
-        Err(
-            loopflow_execution::process::CommandExit(u8::try_from(result.exit_code).unwrap_or(1))
-                .into(),
-        )
     } else if result.exit_code == 130 {
         eprintln!("The agent's turn was interrupted.");
         Err(loopflow_execution::process::CommandExit(130).into())
@@ -1015,8 +1003,7 @@ fn relay_directives(relay: &std::path::Path, target: &str) {
 mod tests {
     use super::{
         attributed_context, begin_process_runtime, build_bound_prompt_at, build_prompt,
-        build_prompt_at, is_interactive_run, is_interactive_run_with_tty, run_headless_prompt,
-        run_prompt, PromptBuild,
+        build_prompt_at, run_headless_prompt, run_prompt, PromptBuild,
     };
 
     use crate::lf::Cli;
@@ -1259,10 +1246,8 @@ for line in sys.stdin:
                 env,
                 ..AgentConfig::default()
             },
-            process: ProcessConfig {
-                auto: true,
-                ..ProcessConfig::default()
-            },
+            process: ProcessConfig::default(),
+            mode: loopflow_execution::harness::Mode::Headless,
             components: PromptComponents::default(),
             context,
             harness: "claude".to_string(),
@@ -1383,10 +1368,8 @@ for line in sys.stdin:
                     env,
                     ..AgentConfig::default()
                 },
-                process: ProcessConfig {
-                    auto: true,
-                    ..ProcessConfig::default()
-                },
+                process: ProcessConfig::default(),
+                mode: loopflow_execution::harness::Mode::Headless,
                 components: PromptComponents::default(),
                 context: loopflow_execution::trace::PreparedTurnContext::from_prompts("", task),
                 harness: "claude".to_string(),
@@ -1695,36 +1678,6 @@ for line in sys.stdin:
             .references
             .iter()
             .any(|path| std::fs::read_to_string(path).unwrap().contains("Task seed")));
-    }
-
-    #[test]
-    fn explicit_interactive_runs_without_a_tty() {
-        let cli = Cli::parse_from(["lf", "-i", "gate"]);
-
-        assert!(is_interactive_run_with_tty(&cli, Some("gate"), None, false));
-    }
-
-    #[test]
-    fn batch_named_skill_is_headless() {
-        let cli = Cli::parse_from(["lf", "--batch", "design"]);
-        assert!(!is_interactive_run(&cli, Some("design"), None));
-    }
-
-    #[test]
-    fn direct_tty_is_human_present_but_detached_named_launch_is_headless() {
-        let cli = Cli::parse_from(["lf", "design"]);
-        assert!(is_interactive_run_with_tty(
-            &cli,
-            Some("design"),
-            None,
-            true
-        ));
-        assert!(!is_interactive_run_with_tty(
-            &cli,
-            Some("design"),
-            None,
-            false
-        ));
     }
 
     #[test]

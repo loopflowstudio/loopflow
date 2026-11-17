@@ -225,6 +225,70 @@ enum Place {
     Detached,
 }
 
+/// Whether this process runs the launch or has handed it to its execution owner.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delegation {
+    Delegated,
+    Here { mode: crate::harness::Mode },
+}
+
+impl Delegation {
+    pub fn delegated(self) -> bool {
+        matches!(self, Self::Delegated)
+    }
+}
+
+/// Inputs that select the native client or stream driver before delegation.
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchInput {
+    pub batch: bool,
+    pub interactive: bool,
+    pub has_prompt: bool,
+}
+
+impl LaunchInput {
+    /// Preview uses the same mode selection without starting an execution.
+    pub fn preview_mode(self) -> crate::harness::Mode {
+        self.mode(io::stdin().is_terminal() || io::stdout().is_terminal())
+    }
+
+    fn mode(self, tty: bool) -> crate::harness::Mode {
+        if !self.batch && (self.interactive || tty || !self.has_prompt) {
+            crate::harness::Mode::Interactive
+        } else {
+            crate::harness::Mode::Headless
+        }
+    }
+}
+
+/// Resolve reporting ownership after Work binding, independently of delegation.
+pub fn holder(
+    named: bool,
+    source: Option<crate::session::WorkSource>,
+    session: Option<&str>,
+) -> crate::session::Holder {
+    crate::session::Holder::of(works(
+        named || source.is_some_and(|source| source.is_managed()),
+        session,
+    ))
+}
+
+fn place(
+    batch: bool,
+    relayed: bool,
+    work: bool,
+    terminal: bool,
+    graph_step: bool,
+) -> Option<Place> {
+    if !batch && (relayed || (work && terminal)) {
+        Some(Place::Held)
+    } else if work && !graph_step {
+        Some(Place::Detached)
+    } else {
+        None
+    }
+}
+
 /// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
 /// keeps the launch Work.
 fn works(named_work: bool, session: Option<&str>) -> bool {
@@ -238,15 +302,15 @@ fn works(named_work: bool, session: Option<&str>) -> bool {
 
 /// Delegate before capture admission or provider effects. A missing startup
 /// acknowledgement is uncertainty, never permission to launch again. Returns
-/// false when this process runs the launch itself: inside its host or
+/// `Here` when this process runs the launch itself: inside its host or
 /// launcher, or as a bare launch in its own terminal or headless.
 ///
 /// `named_work` says the command names its Task or Wave or starts a Task's
 /// Graph; its conversation is held for the Machine server when a terminal
 /// views it.
-pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
+pub fn delegate_current(input: LaunchInput, named_work: bool) -> Result<Delegation> {
     let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, true, named_work)
+    delegate(input, None, None, argv, true, named_work)
 }
 
 /// Delegate the reopening of a recorded Session; `named_work` as for
@@ -256,14 +320,18 @@ pub(crate) fn delegate_session(
     preview_session: Option<&str>,
     replace: bool,
     named_work: bool,
-) -> Result<bool> {
+) -> Result<Delegation> {
     let mut argv: Vec<String> = std::env::args().collect();
     if json_session.is_some() {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
     delegate(
-        false,
+        LaunchInput {
+            batch: false,
+            interactive: true,
+            has_prompt: false,
+        },
         json_session,
         preview_session,
         argv,
@@ -274,9 +342,13 @@ pub(crate) fn delegate_session(
 
 /// Open the resulting Session after a fork or thread replacement, without
 /// repeating the command that prepared it.
-pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        false,
+        LaunchInput {
+            batch: false,
+            interactive: true,
+            has_prompt: false,
+        },
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
@@ -293,16 +365,18 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
 /// until it exits or lets go. Everything else runs here: as the terminal's
 /// foreground program, as a Graph's step, or headless as its caller's child.
 fn delegate(
-    batch: bool,
+    input: LaunchInput,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     mut argv: Vec<String>,
     replace: bool,
     named_work: bool,
-) -> Result<bool> {
+) -> Result<Delegation> {
+    let mode = input.preview_mode();
+    let batch = input.batch;
     // Library tests do not execute the CLI entry point.
     if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
-        return Ok(false);
+        return Ok(Delegation::Here { mode });
     }
     let work = works(named_work, preview_session.or(json_session));
     // A Desktop pane or a framed `lf --machine` view relays this launch.
@@ -311,13 +385,8 @@ fn delegate(
     // `lf -b … > file` typed at a terminal writes only the answer, never a
     // relayed screen; an interactive run keeps the terminal it reads from.
     let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-    let place = if !batch && (relayed || (work && terminal)) {
-        Place::Held
-    // A Graph waits on its step; the step has no caller to outlive.
-    } else if work && !crate::journal::graph_step() {
-        Place::Detached
-    } else {
-        return Ok(false);
+    let Some(place) = place(batch, relayed, work, terminal, crate::journal::graph_step()) else {
+        return Ok(Delegation::Here { mode });
     };
     crate::journal::admit_process(
         &std::env::current_dir()?,
@@ -343,7 +412,7 @@ fn delegate(
         if code != 0 {
             return Err(crate::process::CommandExit(code).into());
         }
-        return Ok(true);
+        return Ok(Delegation::Delegated);
     }
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
@@ -363,7 +432,7 @@ fn delegate(
         preview,
         replace,
     )?;
-    Ok(true)
+    Ok(Delegation::Delegated)
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
@@ -2805,5 +2874,81 @@ mod tests {
         let mut exec = Command::new("lf");
         carry_across_exec(&mut exec);
         assert_eq!(exec.get_envs().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod launch_mode_tests {
+    use super::LaunchInput;
+    use crate::harness::Mode;
+
+    #[test]
+    fn mode_keeps_batch_interactive_tty_and_empty_prompt_semantics() {
+        for (batch, interactive, has_prompt, tty, expected) in [
+            (true, false, false, false, Mode::Headless),
+            (true, true, false, true, Mode::Headless),
+            (false, true, true, false, Mode::Interactive),
+            (false, false, true, true, Mode::Interactive),
+            (false, false, true, false, Mode::Headless),
+            (false, false, false, false, Mode::Interactive),
+        ] {
+            let input = LaunchInput {
+                batch,
+                interactive,
+                has_prompt,
+            };
+            assert_eq!(input.mode(tty), expected, "{input:?}, tty={tty}");
+        }
+    }
+
+    #[test]
+    fn delegation_that_stays_here_still_resolves_mode() {
+        for (batch, expected) in [(true, Mode::Headless), (false, Mode::Interactive)] {
+            assert_eq!(
+                super::delegate_current(
+                    LaunchInput {
+                        batch,
+                        interactive: true,
+                        has_prompt: true
+                    },
+                    false
+                )
+                .unwrap(),
+                super::Delegation::Here { mode: expected }
+            );
+        }
+    }
+
+    #[test]
+    fn place_keeps_named_work_relay_and_graph_semantics() {
+        use super::{place, Place};
+        for (batch, relayed, work, terminal, graph_step, expected) in [
+            (false, false, false, true, false, None),
+            (true, false, false, false, false, None),
+            (false, false, true, true, false, Some(Place::Held)),
+            (false, true, false, false, false, Some(Place::Held)),
+            (true, true, false, true, false, None),
+            (true, false, true, true, false, Some(Place::Detached)),
+            (false, false, true, false, false, Some(Place::Detached)),
+            (true, false, true, false, true, None),
+        ] {
+            assert_eq!(place(batch, relayed, work, terminal, graph_step), expected);
+        }
+    }
+
+    #[test]
+    fn inherited_declaration_keeps_server_reporting_without_naming_work() {
+        // Inherited LF_AS declares reporting ownership but does not name Work
+        // on the command line; neither a TTY nor a headless caller delegates it.
+        assert_eq!(super::place(false, false, false, true, false), None);
+        assert_eq!(super::place(true, false, false, false, false), None);
+        assert_eq!(
+            super::holder(false, Some(crate::session::WorkSource::Declared), None),
+            crate::session::Holder::Server
+        );
+        assert_eq!(
+            super::holder(false, Some(crate::session::WorkSource::Checkout), None),
+            crate::session::Holder::Caller
+        );
     }
 }

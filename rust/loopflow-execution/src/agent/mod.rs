@@ -384,8 +384,6 @@ pub fn system_prompt_with_structured_replies(config: &AgentConfig) -> String {
 pub struct ProcessConfig {
     /// Task policy input; the provider loop remains the ordinary command loop.
     pub task_input: Option<crate::ops::task_input::TaskInput>,
-    /// Run in auto/batch mode (non-interactive).
-    pub auto: bool,
     /// Stream output in real-time.
     pub stream: bool,
     /// Path to context file for system prompt loading (model-agnostic).
@@ -928,7 +926,7 @@ fn run_admitted_agent(
     process: &ProcessConfig,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    if process.auto && parse_agent(launch.agent()?).0 != "claude" {
+    if parse_agent(launch.agent()?).0 != "claude" {
         if launch.max_turns.is_some() {
             eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
         }
@@ -945,7 +943,7 @@ fn run_admitted_agent(
     }
     let (harness, model) = parse_agent(&launch.resolved_agent()?);
     let implicit_runtime = if process.runtime.is_none() {
-        Some(_begin_process_runtime(&launch, process, &harness, model)?)
+        Some(_begin_process_runtime(&launch, &harness, model)?)
     } else {
         None
     };
@@ -1015,7 +1013,7 @@ fn _run_with_retries(
         let provider = parse_agent(attempt.agent()?).0;
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !process.auto || matches!(provider.as_str(), "opencode" | "pi") {
+        if matches!(provider.as_str(), "opencode" | "pi") {
             return Ok(result);
         }
         result.failure = result.failure.or_else(|| _classify_agent_failure(&result));
@@ -1315,7 +1313,6 @@ fn subscription_limit_text(line: &str) -> Option<()> {
 
 fn _begin_process_runtime(
     launch: &AgentConfig,
-    process: &ProcessConfig,
     harness: &str,
     model: Option<String>,
 ) -> Result<LfProcessRuntime, CoreError> {
@@ -1329,7 +1326,7 @@ fn _begin_process_runtime(
     let spec = crate::session_record::SessionCaptureSpec {
         harness: harness.to_string(),
         model,
-        surface: if process.auto { "headless" } else { "tui" }.to_string(),
+        surface: "headless".to_string(),
         cwd: cwd.clone(),
         repo: Some(cwd.clone()),
         worktree: Some(cwd),
@@ -1338,26 +1335,11 @@ fn _begin_process_runtime(
         graph: crate::session_record::SessionGraphMembership::Independent,
         work: None,
     };
-    let runtime = if process.auto {
-        crate::session_record::SessionRecorder::begin_with_request(
-            spec,
-            crate::session_record::AgentProcessRequest::from_prepared(launch)?,
-        )
-        .map(crate::process::LfProcessRuntime::new)
-    } else {
-        let context = crate::trace::PreparedTurnContext::from_prompts(
-            &system_prompt_with_structured_replies(launch),
-            &launch.task_prompt,
-        );
-        crate::session_record::SessionRecorder::begin_with_context(
-            spec,
-            &context,
-            Some(crate::session_record::AgentProcessRequest::from_prepared(
-                launch,
-            )?),
-        )
-        .map(crate::process::LfProcessRuntime::new)
-    };
+    let runtime = crate::session_record::SessionRecorder::begin_with_request(
+        spec,
+        crate::session_record::AgentProcessRequest::from_prepared(launch)?,
+    )
+    .map(crate::process::LfProcessRuntime::new);
     runtime.map_err(|error| {
         CoreError::ExecutionFailed(format!(
             "failed to publish Session capture manifest before agent launch: {error}"
@@ -1648,9 +1630,8 @@ mod tests {
     }
 
     /// A Graph step: it moves through its agents and waits for capacity.
-    fn auto_process() -> ProcessConfig {
+    fn graph_process() -> ProcessConfig {
         ProcessConfig {
-            auto: true,
             wait_for_capacity: true,
             ..Default::default()
         }
@@ -1936,7 +1917,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[],
             |config, _| {
                 attempts.push(config.agent.clone().unwrap());
@@ -1993,7 +1974,7 @@ trust_level = "trusted"
         let mut attempts = 0;
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[Duration::ZERO],
             |_, _| {
                 attempts += 1;
@@ -2061,7 +2042,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[],
             |config, _| {
                 attempts.push(config.clone());
@@ -2099,7 +2080,7 @@ trust_level = "trusted"
             task_prompt: "compress the branch".to_string(),
             ..Default::default()
         };
-        let process = auto_process();
+        let process = graph_process();
         let mut results = vec![
             AgentProcessResult {
                 exit_code: 1,
@@ -2159,7 +2140,7 @@ trust_level = "trusted"
         let mut attempts = 0;
         _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[Duration::ZERO],
             |config, _| {
                 attempts += 1;
@@ -2220,7 +2201,7 @@ trust_level = "trusted"
             agent: Some("codex".to_string()),
             ..default_launch()
         };
-        let process = auto_process();
+        let process = graph_process();
         let mut attempts = 0;
 
         let result = _run_with_retries(
@@ -2245,7 +2226,7 @@ trust_level = "trusted"
             agent: Some("codex".to_string()),
             ..default_launch()
         };
-        let process = auto_process();
+        let process = graph_process();
         let mut attempts = 0;
         let mut waits = 0;
 
@@ -2345,7 +2326,7 @@ trust_level = "trusted"
         let mut attempts = Vec::new();
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[],
             |config, _| {
                 attempts.push(config.clone());
@@ -2375,7 +2356,7 @@ trust_level = "trusted"
         let mut waits = Vec::new();
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[],
             |_, _| {
                 attempts += 1;
@@ -2422,7 +2403,7 @@ trust_level = "trusted"
         let mut waits = Vec::new();
         let result = _run_with_retries(
             &launch,
-            &auto_process(),
+            &graph_process(),
             &[],
             |config, _| {
                 attempts.push(config.clone());
@@ -2447,10 +2428,7 @@ trust_level = "trusted"
             fallback_agents: vec!["codex".into()],
             ..Default::default()
         };
-        let process = ProcessConfig {
-            auto: true,
-            ..Default::default()
-        };
+        let process = ProcessConfig::default();
         let mut attempts = 0;
         let mut waits = Vec::new();
         let result = _run_with_retries(
@@ -2483,7 +2461,7 @@ trust_level = "trusted"
         let mut waits = Vec::new();
         let result = _run_with_retries(
             &pinned,
-            &auto_process(),
+            &graph_process(),
             &[],
             |_, _| {
                 attempts += 1;
@@ -2512,7 +2490,7 @@ trust_level = "trusted"
         let mut agents = Vec::new();
         let result = _run_with_retries(
             &ordered,
-            &auto_process(),
+            &graph_process(),
             &[],
             |config, _| {
                 agents.push(config.agent.clone().unwrap());
@@ -2564,123 +2542,129 @@ trust_level = "trusted"
             observation: crate::work::task::Observation::NotRequired,
         };
         for task_bound in [false, true] {
-            for auto in [false, true] {
-                for pinned in [false, true] {
-                    let launch = AgentConfig {
-                        agent: Some("claude:fable".into()),
-                        fallback_agents: if pinned {
-                            vec![]
-                        } else {
-                            vec!["claude:opus".into(), "codex".into()]
-                        },
-                        task_prompt: "finish the operation".into(),
-                        resume_token: Some("native-thread".into()),
-                        ..Default::default()
-                    };
-                    // Headless here is a Graph step; other headless work
-                    // stops at once (its own test).
-                    let process = ProcessConfig {
-                        auto,
-                        wait_for_capacity: auto,
-                        task_input: task_bound.then(|| {
-                            crate::ops::task_input::TaskInput::new(
-                                store.clone(),
-                                crate::ops::task_input::TaskSeed {
-                                    task: task.clone(),
-                                    message: String::new(),
-                                    interrupt: 0,
-                                },
-                            )
-                        }),
-                        ..Default::default()
-                    };
-                    for failure in [
-                        AgentFailure::UsageLimit,
-                        AgentFailure::CredentialInvalidated,
-                        AgentFailure::ModelUnavailable,
-                    ] {
-                        let mut attempts = Vec::new();
-                        let mut waits = Vec::new();
-                        let result = _run_with_retries(
-                            &launch,
-                            &process,
-                            &[],
-                            |config, _| {
-                                attempts.push(config.clone());
-                                Ok(AgentProcessResult {
-                                    exit_code: 1,
-                                    failure: Some(failure),
-                                    agent_session: Some("native-thread".into()),
-                                    stderr: "provider refused the current turn".into(),
-                                    ..Default::default()
-                                })
+            for pinned in [false, true] {
+                let launch = AgentConfig {
+                    agent: Some("claude:fable".into()),
+                    fallback_agents: if pinned {
+                        vec![]
+                    } else {
+                        vec!["claude:opus".into(), "codex".into()]
+                    },
+                    task_prompt: "finish the operation".into(),
+                    resume_token: Some("native-thread".into()),
+                    ..Default::default()
+                };
+                // Headless here is a Graph step; other headless work
+                // stops at once (its own test).
+                let process = ProcessConfig {
+                    wait_for_capacity: true,
+                    task_input: task_bound.then(|| {
+                        crate::ops::task_input::TaskInput::new(
+                            store.clone(),
+                            crate::ops::task_input::TaskSeed {
+                                task: task.clone(),
+                                message: String::new(),
+                                interrupt: 0,
                             },
-                            |delay| waits.extend(Some(delay).filter(|delay| !delay.is_zero())),
                         )
-                        .unwrap();
-                        assert_eq!(result.failure, Some(failure));
-                        // Only a headless usage limit waits: 5, 15, 30 and 60
-                        // minutes, each followed by the whole order again.
-                        let backoff = auto && failure == AgentFailure::UsageLimit;
-                        assert_eq!(
-                            waits,
-                            if backoff {
-                                USAGE_LIMIT_WAITS.to_vec()
-                            } else {
-                                vec![]
-                            }
-                        );
-                        // A revoked login skips its provider's other models.
-                        let order = match (auto && !pinned, failure) {
-                            (false, _) => 1,
-                            (true, AgentFailure::CredentialInvalidated) => 2,
-                            (true, _) => 3,
-                        };
-                        let tries = if backoff {
-                            1 + USAGE_LIMIT_WAITS.len()
+                    }),
+                    ..Default::default()
+                };
+                for failure in [
+                    AgentFailure::UsageLimit,
+                    AgentFailure::CredentialInvalidated,
+                    AgentFailure::ModelUnavailable,
+                ] {
+                    let mut attempts = Vec::new();
+                    let mut waits = Vec::new();
+                    let result = _run_with_retries(
+                        &launch,
+                        &process,
+                        &[],
+                        |config, _| {
+                            attempts.push(config.clone());
+                            Ok(AgentProcessResult {
+                                exit_code: 1,
+                                failure: Some(failure),
+                                agent_session: Some("native-thread".into()),
+                                stderr: "provider refused the current turn".into(),
+                                ..Default::default()
+                            })
+                        },
+                        |delay| waits.extend(Some(delay).filter(|delay| !delay.is_zero())),
+                    )
+                    .unwrap();
+                    assert_eq!(result.failure, Some(failure));
+                    // Only a headless usage limit waits: 5, 15, 30 and 60
+                    // minutes, each followed by the whole order again.
+                    let backoff = failure == AgentFailure::UsageLimit;
+                    assert_eq!(
+                        waits,
+                        if backoff {
+                            USAGE_LIMIT_WAITS.to_vec()
                         } else {
-                            1
-                        };
-                        assert_eq!(attempts.len(), order * tries);
-                        if backoff && !pinned {
-                            // After a wait the order starts again at its first agent.
-                            assert_eq!(attempts[3].agent.as_deref(), Some("claude:fable"));
-                            assert!(attempts[3].resume_token.is_none());
-                            assert!(attempts[3].task_prompt.contains("finish the operation"));
+                            vec![]
                         }
+                    );
+                    // A revoked login skips its provider's other models.
+                    let order = match (!pinned, failure) {
+                        (false, _) => 1,
+                        (true, AgentFailure::CredentialInvalidated) => 2,
+                        (true, _) => 3,
+                    };
+                    let tries = if backoff {
+                        1 + USAGE_LIMIT_WAITS.len()
+                    } else {
+                        1
+                    };
+                    assert_eq!(attempts.len(), order * tries);
+                    if backoff && !pinned {
+                        // After a wait the order starts again at its first agent.
+                        assert_eq!(attempts[3].agent.as_deref(), Some("claude:fable"));
+                        assert!(attempts[3].resume_token.is_none());
+                        assert!(attempts[3].task_prompt.contains("finish the operation"));
+                    }
+                    assert_eq!(
+                        attempts[0]
+                            .resume_token
+                            .as_ref()
+                            .map(AgentSessionId::as_str),
+                        Some("native-thread")
+                    );
+                    if attempts.len() == 3 {
                         assert_eq!(
-                            attempts[0]
+                            attempts[1]
                                 .resume_token
                                 .as_ref()
                                 .map(AgentSessionId::as_str),
                             Some("native-thread")
                         );
-                        if attempts.len() == 3 {
-                            assert_eq!(
-                                attempts[1]
-                                    .resume_token
-                                    .as_ref()
-                                    .map(AgentSessionId::as_str),
-                                Some("native-thread")
-                            );
-                            assert_eq!(attempts[2].agent.as_deref(), Some("codex"));
-                            assert!(attempts[2].resume_token.is_none());
-                            assert!(attempts[2].task_prompt.contains("finish the operation"));
-                        }
-                        if order == 2 {
-                            assert_eq!(attempts[1].agent.as_deref(), Some("codex"));
-                        }
+                        assert_eq!(attempts[2].agent.as_deref(), Some("codex"));
+                        assert!(attempts[2].resume_token.is_none());
+                        assert!(attempts[2].task_prompt.contains("finish the operation"));
                     }
-                    let mut dispatches = 0;
-                    let success = _run_with_retries(&launch, &process, &[], |_, _| {
+                    if order == 2 {
+                        assert_eq!(attempts[1].agent.as_deref(), Some("codex"));
+                    }
+                }
+                let mut dispatches = 0;
+                let success = _run_with_retries(
+                    &launch,
+                    &process,
+                    &[],
+                    |_, _| {
                         dispatches += 1;
                         Ok(AgentProcessResult {
-                            stdout: "You've hit your usage limit is an example error, not this answer.".into(),
+                            stdout:
+                                "You've hit your usage limit is an example error, not this answer."
+                                    .into(),
                             ..Default::default()
                         })
-                    }, |_| panic!("a successful answer never retries")).unwrap();
-                    assert_eq!((dispatches, success.exit_code), (1, 0));
-                }
+                    },
+                    |_| panic!("a successful answer never retries"),
+                )
+                .unwrap();
+                assert_eq!((dispatches, success.exit_code), (1, 0));
             }
         }
     }

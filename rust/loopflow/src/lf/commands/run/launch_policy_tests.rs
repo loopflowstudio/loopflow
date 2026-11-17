@@ -94,7 +94,9 @@ impl Table {
     fn launch(&self, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
         let built = super::build_prompt(self.repo.path(), None, Some("hello"), &cli)?;
-        let invocation = if built.process.auto && built.harness == "claude" {
+        let invocation = if built.mode == loopflow_execution::harness::Mode::Headless
+            && built.harness == "claude"
+        {
             ProviderInvocation::ClaudeStream { session_id: None }
         } else {
             ProviderInvocation::Terminal { session_id: None }
@@ -166,6 +168,26 @@ impl Table {
 
 fn assert_path_eq(left: &Path, right: &Path) {
     assert_eq!(left.canonicalize().unwrap(), right.canonicalize().unwrap());
+}
+
+#[test]
+fn prompt_build_keeps_the_mode_delegation_selected() {
+    use loopflow_execution::harness::Mode;
+    let table = Table::new();
+    table.config(None, "agent: claude");
+    for mode in [Mode::Interactive, Mode::Headless] {
+        let mut cli = Cli::parse_from(["lf", "-i"]);
+        cli.launch_mode = Some(mode);
+        let built = super::build_prompt(
+            table.repo.path(),
+            None,
+            Some("hello"),
+            &cli.process_options(),
+        )
+        .unwrap();
+        assert_eq!(built.mode, mode);
+        assert_eq!(built.process.stream, mode == Mode::Headless);
+    }
 }
 
 #[test]

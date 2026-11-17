@@ -101,7 +101,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         Some(file)
     };
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),

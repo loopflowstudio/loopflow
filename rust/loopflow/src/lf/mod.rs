@@ -52,6 +52,9 @@ pub fn selected_paths(args: &[String]) -> Option<Vec<String>> {
 #[command(about = "Open Loopflow or run its CLI")]
 #[command(version = crate::build_info::VERSION_LINE)]
 pub struct Cli {
+    #[arg(skip)]
+    pub launch_mode: Option<loopflow_execution::harness::Mode>,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -390,6 +393,7 @@ impl Cli {
     pub fn process_options(&self) -> Self {
         Self {
             command: None,
+            launch_mode: self.launch_mode,
             context: self.context,
             explain: self.explain,
             json: self.json,

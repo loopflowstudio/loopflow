@@ -373,7 +373,6 @@ fn process_skill_agent(
 
     let launch = prepared.config;
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         ..Default::default()

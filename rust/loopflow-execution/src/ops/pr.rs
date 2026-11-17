@@ -546,7 +546,6 @@ pub fn generate_pr_copy(
         ..Default::default()
     };
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         ..Default::default()
     };

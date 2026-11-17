@@ -2,11 +2,34 @@
 use std::io::IsTerminal;
 use std::path::Path;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
+use serde::{Deserialize, Serialize};
 
 use crate::lf::TaskCommand;
 use loopflow_execution::command::CommandIo;
 use loopflow_execution::engine::creation::{self, TaskCreation};
+
+/// `task.create`'s answer: its receipt, the primary conversation's record, the
+/// Task's overview and its row in the Work projection's shape, all read when
+/// answering, so a client selects the Task and opens the conversation before
+/// its planning subscription lists it. The stored receipt holds none of them.
+#[derive(Debug, Serialize, Deserialize, schemars::JsonSchema)]
+pub struct TaskCreateAnswer {
+    #[serde(flatten)]
+    pub created: creation::TaskCreated,
+    pub row: super::waves::RoadmapTask,
+}
+
+/// Read the created Task's row after its commit and join it to the answer.
+pub(crate) fn answer(created: creation::TaskCreated) -> Result<TaskCreateAnswer> {
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .context("no Loopflow store exists on this Machine")?;
+        let row = super::waves::task_row(&store, &created.receipt.task).await?;
+        Ok(TaskCreateAnswer { created, row })
+    })
+}
 
 pub fn create(
     repo: &Path,
@@ -78,6 +101,7 @@ pub fn create(
         )?;
     }
     if *json {
+        let answer = self::answer(answer.clone())?;
         writeln!(io.output, "{}", serde_json::to_string_pretty(&answer)?)?;
     } else {
         writeln!(

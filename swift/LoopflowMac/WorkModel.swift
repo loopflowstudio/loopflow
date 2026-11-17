@@ -97,8 +97,6 @@ struct StartingTask: Equatable {
     let wave: WaveSnapshot?
     let graph: String?
     var error: String?
-    /// The answer arrived: the Task exists, so starting again would file another.
-    var filed = false
 }
 
 /// One resolved opening: its companion must never outlive or drift from the Session.
@@ -2553,18 +2551,17 @@ final class WorkModel {
     }
 
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository) with its conversation admitted. The sheet closes in the click
-    /// and the words stand in until the answer's Session is installed; nothing
-    /// else is read or prepared for it. A failure before filing keeps the words
-    /// and Try again; after the answer, the Task exists, so a failure opening it
-    /// belongs to its workspace. A submitted request whose answer is lost hands
-    /// uncertainty to recovery.
+    /// repository) with its conversation admitted. The click has closed the
+    /// sheet; the words stand in until the answer's Session is installed, and
+    /// nothing else is read or prepared for it. A failure before filing keeps the
+    /// words and Try again; after the answer, the Task exists, so a failure
+    /// opening it belongs to its workspace. A submitted request whose answer is
+    /// lost hands uncertainty to recovery.
     func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
         let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
         let owner = navigation
         let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
         owner.startingTask = starting
-        if owner.palette == .newTask { owner.palette = nil }
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
         let created: TaskCreated
@@ -2586,36 +2583,19 @@ final class WorkModel {
         CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
         if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
            navigation === owner, destinationGeneration == destination {
-            do {
-                try await openCreatedTask(created, generation: destination)
-            } catch {
-                // Planning never showed the filed Task: no workspace to carry the
-                // failure, and Try again would file a second one.
-                if owner.startingTask?.id == requestID {
-                    owner.startingTask?.filed = true
-                    owner.startingTask?.error = error.localizedDescription
-                }
-                throw error
-            }
+            await openCreatedTask(created)
         }
         if owner.startingTask?.id == requestID { owner.startingTask = nil }
     }
 
-    /// Install a created Task's conversation from the answer: its overview seeds
-    /// the Task's reading and its Session opens as prepared. Nothing saved can
-    /// exist for a new Task, so its layout starts empty instead of being read.
-    /// Throws only while the Task is missing from planning; once it is selected,
-    /// an opening failure is its workspace's `conversationError`.
-    private func openCreatedTask(_ created: TaskCreated, generation: Int) async throws {
-        let id = created.receipt.task.id
-        if task(id: id) == nil {
-            // The answer follows the commit; the Work subscription carries the row.
-            try await confirmWorkUpdate()
-            guard !Task.isCancelled, destinationGeneration == generation else { return }
-        }
-        guard let found = task(id: id) else {
-            throw RegistryQueryError("Task \(created.receipt.task.identifier) was created; this window's planning does not show it yet.")
-        }
+    /// Install a created Task's conversation from the answer: its row selects the
+    /// Task (retained evidence until planning lists it), its overview seeds the
+    /// Task's reading and its Session opens as prepared. Nothing saved can exist
+    /// for a new Task, so its layout starts empty instead of being read. An
+    /// opening failure is its workspace's `conversationError`.
+    private func openCreatedTask(_ created: TaskCreated) async {
+        let row = created.row
+        let found = task(id: row.id) ?? (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
         if taskWork[found.task.id].value == nil { taskWork.values[found.task.id] = .available(created.overview) }
         guard let record = created.session, let registry = workspaceRegistry, let repository = workspaceRepository else {
             openTaskDestination(wave: found.wave, task: found.task)

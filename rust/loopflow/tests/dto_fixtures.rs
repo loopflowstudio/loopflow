@@ -1335,26 +1335,31 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 }
 
 #[test]
-fn task_create_answers_with_the_conversation_record_and_task_overview() {
+fn task_create_answers_with_the_conversation_record_task_overview_and_row() {
+    use loopflow::lf::commands::task_create::TaskCreateAnswer;
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let answers: Vec<loopflow_execution::engine::creation::TaskCreated> =
-        serde_json::from_str(json).unwrap();
-    let admitted = &answers[0];
+    let answers: Vec<TaskCreateAnswer> = serde_json::from_str(json).unwrap();
+    let admitted = &answers[0].created;
     assert_eq!(admitted.receipt.milestone, "admitted");
     assert_eq!(admitted.receipt.graph.as_deref(), Some("code"));
     let session = admitted.session.as_ref().unwrap();
     assert_eq!(Some(&session.id), admitted.receipt.session_id.as_ref());
     assert!(!session.open_argv.is_empty());
     assert_eq!(admitted.overview.graph.as_ref().unwrap().step(), "start");
-    // A headless `-b` run has no conversation.
-    assert_eq!(answers[1].receipt.session_id, None);
-    assert!(answers[1].session.is_none());
-    let mut absent: serde_json::Value = serde_json::from_str(json).unwrap();
-    absent[1].as_object_mut().unwrap().remove("session");
-    assert!(
-        serde_json::from_value::<Vec<loopflow_execution::engine::creation::TaskCreated>>(absent)
-            .is_err()
+    // The row a client selects before planning lists the Task.
+    assert_eq!(answers[0].row.task.id, admitted.receipt.task.id.as_str());
+    assert_eq!(
+        answers[0].row.section,
+        loopflow_execution::durable::TaskSection::Working
     );
+    // A headless `-b` run has no conversation.
+    assert_eq!(answers[1].created.receipt.session_id, None);
+    assert!(answers[1].created.session.is_none());
+    for key in ["session", "row"] {
+        let mut absent: serde_json::Value = serde_json::from_str(json).unwrap();
+        absent[1].as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<Vec<TaskCreateAnswer>>(absent).is_err());
+    }
     assert_eq!(
         serde_json::to_value(&answers).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()

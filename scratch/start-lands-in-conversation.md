@@ -238,9 +238,17 @@ the request log after Start holds only `task.create`.
 After the answer, no Try again (1f8eb5476e): `createTask` throws only before
 filing (`StartingTaskView` keeps the words and Try again); an opening failure
 lands on the selected Task's `conversationError`
-(`WorkDestinationTests`: one `task.create`, `startingTask` nil). If planning
-never shows the filed Task, the words stay with the error and Close
-(`StartingTask.filed`), no Try again.
+(`WorkDestinationTests`: one `task.create`, `startingTask` nil).
+
+The answer carries the Task's row (`TaskCreateAnswer.row`, Rust
+`lf::commands::task_create`, read by `waves::task_row`; Swift
+`TaskCreated.row`). `openCreatedTask` selects from planning's row, else the
+answer's (retained evidence, "Updating…"), with no Work checkpoint wait, and
+never throws; `StartingTask.filed`, Close and "planning does not show it yet"
+are gone, and only `StartingTaskView.start` closes the palette. A real answer
+showed the admitted Task `unstarted`/Backlog: `task_state_sql` called a Task
+unstarted until it had a checkout. It now needs neither a checkout nor a
+taken-up Graph (every take-up is a start), so the admitted Task is Working.
 
 Slice 2, phone half built. A first Start is `startTask`:
 `CreationSubmissions.submit` saves, sends once and decodes `TaskCreated`
@@ -262,36 +270,15 @@ The first send reads "Starting…" (`MobileTaskCreation.starting`); recovery
 reads "Checking your Task…".
 
 Concept review of 1f8eb5476e: the split holds (Try again only before filing;
-after the answer the failure is the workspace's). One state is left that the
-answer can remove: `StartingTask.filed`, words plus Close for a Task that
-exists but this window cannot show. It exists because Desktop selects from a
-planning row the answer lacks, so `openCreatedTask` waits on a Work checkpoint
-(up to 10 s, on the typing path whenever the answer beats the subscription)
-and throws "planning does not show it yet".
+after the answer the failure is the workspace's).
 
 Remaining, in order:
-1. **The answer carries the Task's planning row** (concept review of
-   1f8eb5476e). `task.create`'s answer adds the Task's row in the shape the
-   Work projection emits (Swift `RoadmapTask`, wave by ID); DTO rule: required
-   key, fixture `task_create_receipt.json` and each language's fixture test.
-   `openCreatedTask` selects from it at once: it joins `taskRecords` as
-   retained evidence ("Updating…" until the subscription's row replaces it),
-   no `confirmWorkUpdate` (today up to 10 s on the typing path whenever the
-   answer beats the subscription). `openCreatedTask` stops throwing; delete
-   `StartingTask.filed`, the Close label and the "planning does not show it
-   yet" error, so `StartingTaskView` has one failure: before filing. Test: the
-   after-answer test with planning that never lists the Task → selection is
-   the Task, `startingTask` nil, log is `task.create` alone. Phone: nothing
-   (its `MobileTask` already comes from the answer).
-   Same pass: the palette closes twice (`StartingTaskView.start` inside the
-   click, `createTask` a turn later, `WorkModel.swift:2567`). Keep `start`'s;
-   drop `createTask`'s.
-2. `Perf.retarget(.startTask, from: "new-task", …)` (`WorkModel.swift:2584`):
+1. `Perf.retarget(.startTask, from: "new-task", …)` (`WorkModel.createTask`):
    key by request ID from the click (slice 5).
-3. Slice 3, including checkout without network for a new branch:
+2. Slice 3, including checkout without network for a new branch:
    `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
    setup (off the answer path, on the typing path).
-4. Slices 4–5.
+3. Slices 4–5.
 
 ## Slices
 
@@ -320,7 +307,8 @@ Remaining, in order:
 ## Checks
 
 - `cargo test -p loopflow --test integration task_create_` — slices 1, 3, 4; gate.
-- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests'` — 74 passed (Mac).
+- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests'` — 132 passed (Mac).
+- `cargo test -p loopflow --test integration dto_fixtures::task_create` and `task_create_tests::task_create_without_recovery_keeps_the_existing_receipt_and_exit_status` (real row is Working) — passed; `cargo test -p loopflow-storage --lib` 365 passed; `loopflow-execution --lib store::tests::` 47 passed; `server::schema::tests::` 8 passed; clippy clean. Gate: `binary(two_people)`, `test(performance_tests::)`, `test(ops::task::tests::)` for the Task state SQL.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.
 - `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
 - Live Start → typing, local and remote Machine — qa (remote needs a rented or

@@ -1462,16 +1462,19 @@ public struct TaskCreateReceipt: Codable, Sendable, Hashable {
     }
 }
 
-/// `task.create`'s answer: the receipt, plus the primary conversation's record
-/// and the Task's overview read when answering. A repeat reads both again; the
-/// stored receipt that `creation.lookup` returns holds neither.
+/// `task.create`'s answer: the receipt, plus the primary conversation's record,
+/// the Task's overview and its planning row read when answering. A repeat reads
+/// them again; the stored receipt that `creation.lookup` returns holds none.
 public struct TaskCreated: Decodable, Sendable {
     public let receipt: TaskCreateReceipt
     public let session: SessionRecord?
     public let overview: TaskOverview
+    /// The Task's row in the Work projection's shape, so a window selects the
+    /// Task before its planning subscription lists it.
+    public let row: RoadmapTask
 
     enum CodingKeys: String, CodingKey {
-        case session, overview
+        case session, overview, row
     }
 
     public init(from decoder: Decoder) throws {
@@ -1479,6 +1482,7 @@ public struct TaskCreated: Decodable, Sendable {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         session = try values.decode(SessionRecord?.self, forKey: .session)
         overview = try values.decode(TaskOverview.self, forKey: .overview)
+        row = try values.decode(RoadmapTask.self, forKey: .row)
     }
 }
 

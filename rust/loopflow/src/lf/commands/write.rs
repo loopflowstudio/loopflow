@@ -78,8 +78,8 @@ writes! {
         graph: Option<String>,
         session: Option<String>,
         run: bool,
-    } => loopflow_execution::engine::creation::TaskCreated;
-    { request_id, title, request, wave, graph, session, run, .. } => loopflow_execution::engine::creation::create(
+    } => super::task_create::TaskCreateAnswer;
+    { request_id, title, request, wave, graph, session, run, .. } => super::task_create::answer(loopflow_execution::engine::creation::create(
         request_id,
         loopflow_execution::engine::creation::TaskCreation {
             directory: directory.to_path_buf(),
@@ -95,7 +95,7 @@ writes! {
         },
     )?
     // The server lets planning exchange finish after the answer.
-    .answer,
+    .answer)?,
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]

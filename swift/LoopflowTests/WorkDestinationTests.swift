@@ -188,12 +188,7 @@ struct WorkDestinationTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
         let task = try #require(snapshot.tasks.items.first)
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
-        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
-        let receipt = """
-        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
-         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
-        """
+        let receipt = try creationAnswer(task, record: record, planning: planning)
         let requests = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let barrier = LinkedDestinationBarrier()
         let query = RegistryQuery { args, _ in
@@ -244,12 +239,7 @@ struct WorkDestinationTests {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
         let task = try #require(snapshot.tasks.items.first)
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
-        let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
-        let receipt = """
-        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
-         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
-        """
+        let receipt = try creationAnswer(task, record: record, planning: planning)
         let requests = OSAllocatedUnfairLock<[[String]]>(initialState: [])
         let query = RegistryQuery { args, _ in
             requests.withLock { $0.append(args) }
@@ -261,7 +251,6 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: nil)
         model.bindWorkspaces(registry, repository: "repo")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        model.navigation.palette = .newTask
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
         #expect(model.navigation.startingTask == nil)
         #expect(model.selection == .task(id: task.id))
@@ -269,6 +258,42 @@ struct WorkDestinationTests {
         #expect(workspace.conversationError != nil)
         #expect(requests.withLock { $0 }.filter { $0.starts(with: ["task", "create"]) }.count == 1)
         await CreationRecovery.shared.presented(requests.withLock { $0 }.filter { $0.starts(with: ["task", "create"]) }.map { $0[3] })
+    }
+
+    @Test("The answer's row selects a Task planning never lists, with no other read")
+    func newTaskSelectsFromTheAnswersRow() async throws {
+        let planning = try fixture()
+        let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(planning.utf8))
+        let task = try #require(snapshot.tasks.items.first)
+        let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
+        let receipt = try creationAnswer(task, record: record, planning: planning)
+        // This window's planning never lists the created Task.
+        var shown = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
+        var tasks = try #require(shown["tasks"] as? [String: Any])
+        tasks["items"] = (tasks["items"] as? [[String: Any]])?.filter { ($0["task"] as? [String: Any])?["id"] as? String != task.task.id }
+        shown["tasks"] = tasks
+        let without = try JSONDecoder().decode(RoadmapSnapshot.self, from: JSONSerialization.data(withJSONObject: shown))
+        let requests = OSAllocatedUnfairLock<[[String]]>(initialState: [])
+        let query = RegistryQuery { args, _ in
+            requests.withLock { $0.append(args) }
+            if args.starts(with: ["task", "create"]) { return receipt }
+            if args.starts(with: ["machine", "self"]) { return #"{"id": "machine-local"}"# }
+            throw RegistryQueryError("A created Task reads nothing after its answer: \(args)")
+        }
+        let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
+        model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
+        let deadline = ContinuousClock.now + .seconds(3)
+        while !requests.withLock({ $0.contains { $0.starts(with: ["desktop", "layout", "repository"]) } }),
+              ContinuousClock.now < deadline { await Task.yield() }
+        requests.withLock { $0.removeAll() }
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        #expect(model.navigation.startingTask == nil)
+        #expect(model.selection == .task(id: task.id))
+        #expect(model.task(id: task.id)?.task.id == task.id)
+        #expect(installedSession(model, registry)?.id == record.id)
+        let log = requests.withLock { $0 }
+        #expect(log.filter { !$0.starts(with: ["machine", "self"]) }.map { Array($0.prefix(2)) } == [["task", "create"]])
+        await CreationRecovery.shared.presented(log.filter { $0.starts(with: ["task", "create"]) }.map { $0[3] })
     }
 
     enum CreationDeparture: CaseIterable {
@@ -285,11 +310,7 @@ struct WorkDestinationTests {
         let other = try #require(snapshot.waves.flatMap { $0.tasks.items }.first { $0.id != task.id })
         let record = try renameFixtureRecord("primary", title: "Task conversation", work: .task(id: #require(task.runtime?.workId)))
         let encoded = String(decoding: try JSONEncoder().encode(record), as: UTF8.self)
-        let receipt = """
-        {"task": {"id": "\(task.task.id)", "identifier": "\(task.task.identifier)", "title": "\(task.task.name)"},
-         "graph": "code", "session_id": "\(record.id)", "milestone": "admitted",
-         "session": \(encoded), "overview": {"sessions": [], "graph_processes": [], "graph": null}}
-        """
+        let receipt = try creationAnswer(task, record: record, planning: planning)
         let barrier = LinkedDestinationBarrier()
         let submitted = OSAllocatedUnfairLock(initialState: "")
         let query = RegistryQuery { args, _ in
@@ -308,7 +329,6 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let originalNavigation = model.navigation
-        model.navigation.palette = .newTask
         let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil) }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
@@ -352,9 +372,8 @@ struct WorkDestinationTests {
             throw SubmittedCreationError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
-        model.navigation.palette = .newTask
         try await model.createTask(request: "fix it", wave: nil, graph: nil)
-        #expect(model.navigation.palette == nil)
+        #expect(model.navigation.startingTask == nil)
     }
 
     @Test("New Task keeps the words and the failure when nothing was filed")
@@ -363,11 +382,9 @@ struct WorkDestinationTests {
             throw RegistryQueryError("not a repository")
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
-        model.navigation.palette = .newTask
         await #expect(throws: RegistryQueryError.self) {
             try await model.createTask(request: "fix it", wave: nil, graph: nil)
         }
-        #expect(model.navigation.palette == nil)
         #expect(model.navigation.startingTask?.request == "fix it")
         #expect(model.navigation.startingTask?.error == "not a repository")
     }
@@ -2474,6 +2491,20 @@ struct WorkDestinationTests {
         #expect(model.selection == (navigateAway ? .wave(id: wave.wave.id) : .task(id: second.id)))
         #expect(!model.showsTaskLink)
         #expect(model.navigation.recentDestinations.map(\.id) == (navigateAway ? [] : [.task(second.id)]))
+    }
+
+    /// `task.create`'s answer admitting `task` with `record`, its row as `planning` reads it.
+    private func creationAnswer(_ task: RoadmapTask, record: SessionRecord, planning: String) throws -> String {
+        let snapshot = try #require(JSONSerialization.jsonObject(with: Data(planning.utf8)) as? [String: Any])
+        let items = try #require((snapshot["tasks"] as? [String: Any])?["items"] as? [[String: Any]])
+        let row = try #require(items.first { ($0["task"] as? [String: Any])?["id"] as? String == task.task.id })
+        let session = try JSONSerialization.jsonObject(with: JSONEncoder().encode(record))
+        let answer: [String: Any] = [
+            "task": ["id": task.task.id, "identifier": task.task.identifier, "title": task.task.name],
+            "graph": "code", "session_id": record.id, "milestone": "admitted", "session": session,
+            "overview": ["sessions": [], "graph_processes": [], "graph": NSNull()], "row": row,
+        ]
+        return String(decoding: try JSONSerialization.data(withJSONObject: answer), as: UTF8.self)
     }
 
     private func fixture() throws -> String {

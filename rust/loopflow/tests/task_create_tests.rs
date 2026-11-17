@@ -587,9 +587,17 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
         "{}",
         String::from_utf8_lossy(&created.stderr)
     );
-    let answer: loopflow_execution::engine::creation::TaskCreated =
-        serde_json::from_slice(&created.stdout).unwrap();
+    let loopflow::lf::commands::task_create::TaskCreateAnswer {
+        created: answer,
+        row,
+    } = serde_json::from_slice(&created.stdout).unwrap();
     assert_eq!(answer.receipt.graph.as_deref(), Some("feature"));
+    // The answer's row is the plan's: started, never "Not started".
+    assert_eq!(row.task.id, answer.receipt.task.id.as_str());
+    assert_eq!(
+        row.section,
+        loopflow_execution::durable::TaskSection::Working
+    );
     assert_eq!(
         answer.session.map(|session| session.id),
         answer.receipt.session_id

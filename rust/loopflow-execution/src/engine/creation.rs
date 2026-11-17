@@ -86,9 +86,9 @@ fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
     })
 }
 
-/// `task.create`'s answer: its receipt, the primary conversation's record and
-/// the Task's overview, both read when answering so a client opens the
-/// conversation without another read. The stored receipt holds neither.
+/// A created Task's receipt, the primary conversation's record and the Task's
+/// overview, read when answering. The application adds the Task's row to make
+/// `task.create`'s answer.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct TaskCreated {
     #[serde(flatten)]

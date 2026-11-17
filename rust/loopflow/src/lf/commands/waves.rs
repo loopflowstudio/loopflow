@@ -1000,13 +1000,18 @@ pub(crate) async fn task_pane(
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
     let row = match &status.task {
-        Some(task) => {
-            let shared = SharedTaskReads::read(store).await?;
-            snapshot_task_details(store, vec![task], false, &shared)?.pop()
-        }
+        Some(task) => Some(task_row(store, task).await?),
         None => None,
     };
     Ok(DesktopTaskPane { status, row })
+}
+
+/// One Task's row in the Work projection's shape, as the plan reads it.
+pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<RoadmapTask> {
+    let shared = SharedTaskReads::read(store).await?;
+    Ok(snapshot_task_details(store, vec![task], false, &shared)?
+        .pop()
+        .expect("one Task reads one row"))
 }
 
 /// `lf task status --json`.
@@ -1035,10 +1040,7 @@ pub(crate) async fn task_detail(
     let task = status
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
-    let shared = SharedTaskReads::read(store).await?;
-    let row = snapshot_task_details(store, vec![&task], false, &shared)?
-        .pop()
-        .expect("a registered Task has a row");
+    let row = task_row(store, &task).await?;
     let capacity = loopflow_execution::provider_account::LaunchCapacity::read(&store.sqlite)?;
     let mut sessions = Vec::new();
     for session in status

@@ -402,6 +402,8 @@ pub(super) fn map_machine_by_id(
 /// exited. Its carrier is the latest Auto-Ship log entry naming one; the
 /// Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
+/// A Task with neither a checkout nor a Graph taken up is unstarted; creation
+/// admits a Graph before setup makes the checkout.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
@@ -414,7 +416,8 @@ pub(crate) fn task_state_sql(t: &str) -> String {
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \
              AND tg.lf_process_id IS NULL AND tg.step NOT IN ('start','end')) THEN 'active' \
-         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) THEN 'unstarted' \
+         WHEN NOT EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id={t}.id) \
+             AND NOT EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id) THEN 'unstarted' \
          ELSE 'idle' END",
         open_processes = super::task_work::task_open_process_ids(
             &format!("{t}.id"),

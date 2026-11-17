@@ -17,6 +17,7 @@ extension PendingChanges {
     static var thisMachine: PendingChanges { DesktopMachine.changes }
 }
 
+/// A named `send`: a closure in a static initializer cannot be main actor-isolated.
 @MainActor
 private enum DesktopMachine {
     static let changes = PendingChanges(send: send)
@@ -2851,7 +2852,7 @@ final class WorkModel {
         return .available(items: shown(items, wave: wave), truncated: truncated)
     }
 
-    private func directory(_ task: RoadmapTask) -> String { WaveOrigin.resolve(task.task.repo) ?? "/" }
+    private func directory(_ task: RoadmapTask) -> String { WaveOrigin.resolve(task.task.repo) }
 
     /// Who a Claim makes owner, as a reading of the Task's repository says.
     private func viewer(for task: RoadmapTask) -> TaskOwner? {

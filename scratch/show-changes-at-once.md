@@ -304,6 +304,11 @@ confirmation and "Blocked Sessions" result; the phone's Keychain pairing
 (`MachineConnectionView.swift:52`) and timing capture
 (`TaskListView.swift:368`) alerts.
 
+Compress pass: `WaveDetailReading.failure`/`recordFailure` and the mock
+fixture's `refreshError` deleted (nothing showed them). Checks:
+`scripts/test_desktop.sh --filter 'WaveDetailReadingTests|MockWaveFixtureTests|PendingChangesTests|WorkModelTests'`
+72 passed.
+
 Remaining: the journey (slice 5, demo) and the native-display
 `TaskSessionLaunchProofTests` / `TaskHistoryProofTests`, which go to demo/CI.
 

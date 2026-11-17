@@ -40,8 +40,6 @@
   events; `conversationError` stays as the conversation pane's content.
 - New session failure text: "<ID> New session failed: <reason>", keyed per
   Task, so a second Task's failure replaces the first in the one event slot.
-- `WaveDetailReading.failure` is now read only by its tests and the mock
-  Wave fixture; delete with that fixture.
 - A failed read no longer disables Task controls; only away and a saved,
   unconfirmed workspace do.
 - `RemoteMobileClient(savedMachine:endpoint:)`: the endpoint is where control

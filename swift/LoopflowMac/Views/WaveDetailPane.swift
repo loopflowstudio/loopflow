@@ -4,7 +4,6 @@ import Loopflow
 
 struct WaveDetailReading {
     private(set) var snapshot: WaveRoadmap?
-    private(set) var failure: String?
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
@@ -13,17 +12,11 @@ struct WaveDetailReading {
 
     mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
-        failure = nil
     }
 
-    mutating func recordFailure(_ error: Error) {
-        snapshot = nil
-        failure = "Wave status unavailable: \(error.localizedDescription)"
-    }
-
+    /// The Wave has no live reading; the planning reading's Notice says why.
     mutating func clear() {
         snapshot = nil
-        failure = nil
     }
 }
 
@@ -161,7 +154,7 @@ private struct WavePlanView: View {
             historyNow = Date()
             reading.update(snapshot)
         } else {
-            reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
+            reading.clear()
         }
         isAwaitingDetail = false
     }

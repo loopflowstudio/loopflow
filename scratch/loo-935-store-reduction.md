@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged, compressed; `lf workspace` folded into `lf open --workspace`; next is gate.
+Status: split implemented, `lf workspace` folded into `lf open --workspace`; concept review (2026-11-16) found `--workspace` still holds a Task — next is implement (see "Next: --workspace never holds a Task"), then gate.
 
 ## Demo
 
@@ -132,3 +132,28 @@ Task's tab (remote routing and arrivals use it); docs show only Wave/repository
 overviews. `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
 PR body, User interface changes: removed `lf workspace`; added `lf open
 --workspace`, `--available`, `--no-focus`.
+
+## Next: --workspace never holds a Task (concept review, 2026-11-16)
+
+The fold left a Task inside the overview path. `lf open --workspace` from a Task
+checkout, or `--workspace --task X`, resolves to the Task and `open/workspace.rs`
+opens one Task tab in the caller's container: a second implementation of
+`lf open --task X --tab`, with its own remote routing (`remote_open` passes
+`--task`), checkout creation (`place_task`) and Desktop Task URL. The docs
+already say otherwise ("this checkout's Wave or repository", "A Task has no
+overview"), and the steer was "workspace should just be for waves and repos".
+
+Implement:
+- `--workspace` widens the selection to its scope: a Task (by `--task`, link,
+  Session or checkout) opens its Wave's overview when it has a Wave, else its
+  repository's, with the Task selected so it shows even from backlog. A Session
+  with no Task opens its own scope's overview.
+- Delete the explicit-Task branch of `open/workspace.rs`: `explicit`,
+  `Presentation.conversations`, joining `native.here()`, `place_task`,
+  `open_conversation`, the `Work` arm of `remote_open`, and the Task case of
+  `desktop_workspace_url`. Arrivals (`--arrive-task`) stay: they are Task tabs
+  of an overview. `OpenArgs::conversation` goes if nothing else uses it.
+- Tests that open `--workspace --task INF-123` either become overview tests
+  (the Task appears in its repository's container) or move to
+  `lf open --task INF-123 --tab` when they check single-conversation attachment
+  (`workspace_attachment_failure_keeps_the_created_tab_and_destination`).

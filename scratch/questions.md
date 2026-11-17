@@ -42,3 +42,6 @@
   system Python SQLite rejects the released migrations.
 - **SCHEMA.md names Task and marking migration, no date**: a date would change
   at merge and fail `--check` on main.
+- **`lf open --workspace` from a Task** opens the Task's Wave overview when it
+  has a Wave, else its repository's, with the Task selected (concept review);
+  the docs already said "this checkout's Wave or repository". Reversible.

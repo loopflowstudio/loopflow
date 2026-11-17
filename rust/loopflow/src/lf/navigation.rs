@@ -379,6 +379,14 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             Commands::Graph {
                 cmd: GraphCommand::Show { name, json },
             } => {
+                // A name no authored Graph has may be a run's id.
+                if let Err(loopflow_execution::error::LoadError::GraphNotFound(_)) =
+                    loopflow_execution::graph::load_authored_graph(name, &repo)
+                {
+                    if let Some(run) = crate::lf::commands::graph_inventory::find(name)? {
+                        return crate::lf::commands::graph_inventory::print(&run, *json);
+                    }
+                }
                 if *json {
                     let entry =
                         loopflow_execution::graph::compiled::graph_catalog_entry(name, &repo)?;

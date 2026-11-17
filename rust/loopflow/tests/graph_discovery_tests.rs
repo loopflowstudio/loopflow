@@ -108,10 +108,8 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
             .id,
         graph
     );
-    let detail = command(
-        dir.path(),
-        &["graph", "show", "--processes", "--json", &graph],
-    );
+    // A run's id needs no flag: no authored Graph has that name.
+    let detail = command(dir.path(), &["graph", "show", "--json", &graph]);
     assert!(
         detail.status.success(),
         "{}",

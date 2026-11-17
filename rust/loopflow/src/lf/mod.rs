@@ -1570,7 +1570,7 @@ pub enum GraphCommand {
         #[command(flatten)]
         inventory: commands::graph_inventory::GraphProcessInventoryArgs,
     },
-    /// Inspect an authored graph
+    /// Inspect an authored graph, or a Graph run by its id
     Show {
         name: String,
         #[arg(long)]

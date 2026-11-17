@@ -125,9 +125,13 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
 }
 
 pub fn inspect(selector: &str, json: bool) -> Result<()> {
-    let detail = detail(selector)?;
+    print(&detail(selector)?, json)
+}
+
+/// Prints one Graph that ran, with each step and how it exited.
+pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     if json {
-        println!("{}", serde_json::to_string_pretty(&detail)?);
+        println!("{}", serde_json::to_string_pretty(detail)?);
         return Ok(());
     }
     let summary = &detail.entry.summary;
@@ -143,13 +147,15 @@ pub fn inspect(selector: &str, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf graph show <selector> --processes`: one Graph that ran, with its steps.
+/// `lf process show <selector>`: one Graph that ran, with its steps.
 pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
+    find(selector)?.context("no Graph has that Graph process")
+}
+
+/// The Graph run `selector` names, if one was recorded.
+pub fn find(selector: &str) -> Result<Option<GraphProcessDetail>> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store(&storage_config_from_env()?).await?;
-        store
-            .graph_detail(selector)
-            .await?
-            .context("no Graph has that Graph process")
+        Ok(store.graph_detail(selector).await?)
     })
 }

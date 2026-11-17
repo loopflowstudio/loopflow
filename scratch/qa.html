@@ -1,0 +1,66 @@
+<!doctype html><meta charset="utf-8"><title>LOO-953 QA: Graph runs own their lifecycle</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}</style>
+<h1>LOO-953 QA, 2026-11-16</h1>
+<p>Branch <code>lf</code> (ee2416ca3 + this fix) on a private Machine: isolated <code>HOME</code>/<code>LF_HOME</code>, a Git repository with a bare origin and git planning, command-only Graphs. Installed <code>lf</code> is the branch base (4852348e5), used as the released build.</p>
+
+<h2>1. Returning user: store written by the released lf</h2>
+<p>Ran <code>qa-ok</code> (<code>- cmd: help</code>) and <code>qa-fail</code> (help, then <code>task show no-such-task-xyz</code>) with the installed lf, then opened the store with the branch (<code>lf graph list --processes</code>).</p>
+<pre>process_rows_on_owners applied
+47964f12… qa-ok   started 1794895886 ended 1794895887 exit 0
+0c5a2f4e… qa-fail started 1794895887 ended 1794895887 exit 1 error "task show no-such-task-xyz process exited with exit status: 1"
+steps: node 1 exit 1 error "Task no-such-task-xyz is not registered"; pid NULL on ended rows</pre>
+<p>Backfill copies start, end, exit, error, repo and cwd from <code>processes</code>; pid is kept only for unfinished rows.</p>
+
+<h2>2. Direct Graph runs on the branch</h2>
+<pre>ffa910e1… qa-ok   exit 0
+1458014d… qa-fail exit 1 + error; step 1 exit 1 "Task no-such-task-xyz is not registered"</pre>
+<p><b>Broke:</b> the branch's docs and <code>task_operate</code> point at <code>lf graph show &lt;RUN_ID&gt;</code> (and <code>--json</code>); it answered <code>error: graph not found: 1458014d…</code>. Only the aliased <code>graph show --processes</code> worked.</p>
+<p><b>Fixed:</b> <code>lf graph show NAME</code> falls back to the recorded run when no authored Graph has that name (<code>navigation.rs</code>; <code>graph_inventory::find</code>/<code>print</code>). Unknown names still say "graph not found", and authored names win. <code>graph_discovery_tests::public_graph_discovery_reads_saved_detail_without_selecting_work</code> now uses the documented form; replacing the fallback with <code>None</code> made it fail, restoring it made it pass.</p>
+<pre>$ lf graph show 1458014d-829f-4d17-b696-7ebd231d5da3
+1458014d-829f-4d17-b696-7ebd231d5da3  Stopped  qa-fail
+  4fd0c5a8-…  help  succeeded
+  b17b41a3-…  task show no-such-task-xyz  failed</pre>
+
+<h2>3. Task run that fails: retry and cause</h2>
+<p><code>lf task run &lt;task&gt; qa-fail</code> through the private <code>lf server run</code>. Three attempts, each its own <code>graph_processes</code> row with exit 1 and error; then stopped.</p>
+<pre>Graph qa-fail: stopped at task show no-such-task-xyz
+latest Graph: task show no-such-task-xyz: Task no-such-task-xyz is not registered. Inspect its history and effects, then launch fresh work</pre>
+<p>The cause is the failed step's error (<code>graph_failure_cause</code>).</p>
+
+<h2>4. Interrupt during a step</h2>
+<p><code>qa-slow</code>: help, then <code>task wait &lt;blocker&gt;</code>. While waiting, the running step's row held <code>pid</code>/<code>os_started_at</code> and no end; the run row held its own pid. <code>lf task interrupt</code> answered "stopped Graph qa-slow at task wait …" while both processes kept running: a <code>cmd:</code> step is not killed, the Graph stops before its next step (as <code>task_interrupt</code>'s comment says). After completing the blocker:</p>
+<pre>step 1: exit 0, pid cleared
+run:    exit 130, error NULL, pid cleared — not retried
+status: "Graph stopped after task wait …"</pre>
+
+<h2>5. Upgrade bridge: released runner across the migration</h2>
+<p>Second private home. The installed lf started <code>qa-bridge</code> (help, <code>task wait</code>, help) on the old schema. While step 2 waited, <code>lf</code> on PATH switched to the branch, which migrated the store and completed the blocker. The released runner then spawned step 3 (the branch binary) and finished.</p>
+<pre>run 44ce4cef… started 1794896169 ended 1794896182 exit 0
+step 0 exit 0 | step 1 ended 1794896182 exit 0 | step 2 exit 0   — all pids cleared
+lf graph list --processes: Completed qa-bridge</pre>
+<p>The start and end triggers copied the released runner's <code>processes</code> rows onto the owner rows.</p>
+
+<h2>Checks</h2>
+<ul>
+<li><code>cargo test -p loopflow --test integration graph_discovery_tests::</code>: 5 passed.</li>
+<li><code>cargo fmt</code>, <code>cargo clippy -p loopflow --all-targets -- -D warnings</code>: clean. Gate/CI run the suites.</li>
+<li>Private server stopped; no process with the QA <code>LF_HOME</code> left; no launchd job registered.</li>
+</ul>
+
+<h2>Works now</h2>
+<p>Graph runs and steps record their own start, end, pid, exit and error, on the branch and across an upgrade from the released build; failure causes and interrupts read them; <code>lf graph show &lt;RUN_ID&gt;</code> works as documented.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>Successful Task run to the end: <code>qa-ok</code> on a Task with Auto-Ship would try to ship; direct runs cover the success row.</li>
+<li>Branch runner with an older child (dev-only skew, accepted in the plan).</li>
+<li>Agent (skill) steps and Sessions: Session slices are not built yet.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The branch's docs and operate skills describe slices not built yet: <code>lf ps</code> is still <code>lf process list</code> (call trees, "Print one parseable snapshot of live Loopflow call trees"), and <code>lf machine doctor</code> reports no strays. If this branch lands before those slices, the docs are wrong.</li>
+<li><code>lf task status</code> labels the interrupted carrier "Process: … failed" (from <code>processes.outcome</code>), while its run row says interrupted (130, no error). Goes with the Process lines.</li>
+<li><code>lf graph show &lt;RUN_ID&gt; --json</code> steps carry <code>exit_code</code> but not the step's <code>error</code>, which the row now has.</li>
+<li><code>lf graph list --processes</code> orders by id, not recency (unchanged from base).</li>
+</ol>

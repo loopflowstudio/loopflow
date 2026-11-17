@@ -90,3 +90,8 @@ order, both env variables, dev-only skew accepted).
 
 - `cargo clippy --all-targets -- -D warnings`: passed after `RunStart::reserved` and bool `registration`.
 - `cargo test -p loopflow --lib graph_tests::authored_graph_records_each_skill_as_one_session -- --exact` (1) and `task_graph_launch_tests::` (56): passed.
+
+## QA (2026-11-16)
+
+- `lf graph show <RUN_ID>` failed with "graph not found" though docs and `task_operate` use it; now falls back to the recorded run. Walkthrough in `scratch/qa.html`.
+- Docs and operate skills already describe `lf ps` as live Sessions and Graph runs and `lf machine doctor` strays; neither is built. Land them with those slices or trim before an early merge.

@@ -66,9 +66,10 @@ impl Tools<'_> {
         ))
     }
 
-    fn conversation(&mut self, session: Option<&str>) -> Result<Option<Value>> {
+    /// The Session's conversation, or the Task view where overviews show workflow.
+    fn conversation_pane(&mut self, session: Option<&str>) -> Result<Value> {
         if !self.conversations {
-            return Ok(None);
+            return self.task_view();
         }
         let session = session.or(self.content.primary_session.as_deref());
         let task = session.is_none().then_some(self.content.work.id.as_str());
@@ -100,14 +101,7 @@ impl Tools<'_> {
             self.attachment = Some(attachment);
             argv
         };
-        Ok(Some(self.host.block("Conversation", target.cwd(), argv)))
-    }
-
-    fn conversation_pane(&mut self, session: Option<&str>) -> Result<Value> {
-        match self.conversation(session)? {
-            Some(conversation) => Ok(conversation),
-            None => self.task_view(),
-        }
+        Ok(self.host.block("Conversation", target.cwd(), argv))
     }
 
     fn changes(&self) -> Result<Value> {

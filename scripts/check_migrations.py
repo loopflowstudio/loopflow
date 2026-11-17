@@ -74,10 +74,6 @@ class Leaving:
     member: str
     task: str
 
-    @property
-    def table(self) -> str:
-        return self.member.split(".", 1)[0]
-
     def covers(self, drop: str) -> bool:
         """Whether this mark lets a contract drop `drop` (`table t` or `column t.c`)."""
         kind, name = drop.split(" ", 1)

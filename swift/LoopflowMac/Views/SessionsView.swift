@@ -336,7 +336,6 @@ final class SessionsWorkspace {
     var persistenceError: String?
     private var persistenceQuery: RegistryQuery?
     private var paneLayouts: PaneLayoutStore?
-    /// The Sessions read when persistence started; a saved pane naming another is emptied.
     private var persistenceLoaded = false
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     private var taskFiles: (store: TaskFilesStore, execution: TaskLocationObservation?)?

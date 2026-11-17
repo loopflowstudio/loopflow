@@ -112,7 +112,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `agent_limit_recoveries`: lf_process_id, provider, reason, retry_at, agent, updated_at
 - `processes`: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, inbox, held_terminal_id
 
-## Provider account / route
+## Provider authentication
 
 - `access_profiles`: profile_id, chrome_directory, expected_login, created_at, updated_at
 - `provider_account_limits` — **leaving → LOO-928, unused_store_members**: provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until

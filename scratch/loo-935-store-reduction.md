@@ -98,5 +98,6 @@ Upgrade of that copy with the branch: applied, `foreign_key_check` clean,
 - Swift: `scripts/test_desktop.sh --filter DashboardWorkspaceTests` after the layout change: 14 pass.
 - Swift (before it): `scripts/test_desktop.sh --skip-build --filter 'WorkSelectionTests|ToolTabTests|DashboardWorkspaceTests|MultiplexerStoreTests|DTOFixtureTests'`: 90 pass (subagent run); a wider 14-suite filter, 195 pass.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
+- Compress (after merging main): `cargo clippy -p loopflow --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (30), `check_migrations.py`: pass; `schema_page.py --check` was stale from main's "Provider authentication" rename, regenerated.
 - Not run: the two `#[ignore]` installed-host tests in `work_open_tests.rs` (Rex, Herdr) lost their tools-only `task_layout`; gate/QA with installed hosts.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

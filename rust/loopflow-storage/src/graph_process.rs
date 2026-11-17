@@ -1,12 +1,76 @@
 //! Saved Graph execution records.
 use crate::graph::CompiledGraph;
-use crate::process::LfProcess;
 use loopflow_model::id::LfProcessId;
+
+/// One run of a Graph or of one of its steps, as the run and its spawner
+/// recorded it. `pid` and `os_started_at` name the OS process while it runs
+/// and are cleared at its end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GraphRun {
+    pub id: LfProcessId,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    pub exit_code: Option<i32>,
+    pub error: Option<String>,
+}
+
+/// How a run ended, derived from its end, exit code and error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RunResult {
+    Running,
+    Succeeded,
+    /// Exit 130 with no error: someone interrupted it.
+    Interrupted,
+    Failed,
+    /// It ended without lf seeing how: killed, or its exit was never written.
+    Unknown,
+}
+
+impl RunResult {
+    pub fn of(ended_at: Option<i64>, exit_code: Option<i32>, error: Option<&str>) -> Self {
+        match (ended_at, exit_code, error) {
+            (None, _, _) => Self::Running,
+            (Some(_), Some(0), _) => Self::Succeeded,
+            (Some(_), Some(130), None) => Self::Interrupted,
+            (Some(_), Some(_), _) => Self::Failed,
+            (Some(_), None, _) => Self::Unknown,
+        }
+    }
+
+    /// The wire spelling; a running run has none.
+    pub fn outcome(self) -> Option<&'static str> {
+        match self {
+            Self::Running => None,
+            Self::Succeeded => Some("succeeded"),
+            Self::Interrupted => Some("interrupted"),
+            Self::Failed => Some("failed"),
+            Self::Unknown => Some("unknown"),
+        }
+    }
+}
+
+/// What a run's spawner, or the run itself, knows as it starts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunStart {
+    pub started_at: i64,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    pub repo: Option<String>,
+    pub cwd: Option<String>,
+}
+
+impl GraphRun {
+    pub fn result(&self) -> RunResult {
+        RunResult::of(self.ended_at, self.exit_code, self.error.as_deref())
+    }
+}
 
 /// One step its Graph process started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphProcessStep {
-    pub process: LfProcess,
+    pub run: GraphRun,
     /// The step's node in the compiled Graph, counted in preorder.
     pub key: u32,
     /// Returns taken on each loop edge, per nesting level, outermost first.
@@ -16,7 +80,10 @@ pub struct GraphProcessStep {
 /// One Graph process as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphProcess {
-    pub process: LfProcess,
+    pub run: GraphRun,
+    /// The repository and directory the Graph ran in.
+    pub repo: Option<String>,
+    pub cwd: Option<String>,
     pub name: String,
     pub compiled: CompiledGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.
@@ -25,7 +92,7 @@ pub struct GraphProcess {
 
 impl GraphProcess {
     pub fn id(&self) -> &LfProcessId {
-        &self.process.id
+        &self.run.id
     }
 
     pub fn latest(&self) -> Option<&GraphProcessStep> {
@@ -42,14 +109,14 @@ impl GraphProcess {
 
     pub fn step_detail(&self, step: &GraphProcessStep) -> crate::execution::GraphStepProcess {
         crate::execution::GraphStepProcess {
-            lf_process_id: step.process.id.clone(),
+            lf_process_id: step.run.id.clone(),
             label: self.label(step),
             key: step.key,
             iterations: step.iterations.clone(),
-            started_at: step.process.started_at,
-            completed_at: step.process.completed_at,
-            outcome: step.process.outcome.clone(),
-            exit_code: step.process.exit_code,
+            started_at: step.run.started_at,
+            completed_at: step.run.ended_at,
+            outcome: step.run.result().outcome().map(str::to_owned),
+            exit_code: step.run.exit_code,
         }
     }
 
@@ -75,7 +142,7 @@ impl GraphProcess {
             iterations: latest
                 .map(|step| step.iterations.clone())
                 .unwrap_or_default(),
-            cwd: self.process.cwd.as_ref().map(std::path::PathBuf::from),
+            cwd: self.cwd.as_ref().map(std::path::PathBuf::from),
             steps: self
                 .steps
                 .iter()

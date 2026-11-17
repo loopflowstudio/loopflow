@@ -54,3 +54,15 @@ See the plan's "Decisions" for the calls made at kickoff.
   take a run id. A run id and a Graph name can't collide (UUID vs slug), but
   `lf graph runs show <RUN>` would keep the two apart. Docs use
   `lf graph show <RUN_ID>`.
+
+## Raised while building slice 2a
+
+- Failure cause order: the plan says "the Graph run's error, else its last
+  failed step's error"; built the other way (step first), matching the old
+  deepest-error walk so a repeated step failure still reads as one cause.
+- Child adoption of a minted id: `LF_RUN_ID` (new variable) rather than
+  reusing `LF_PROCESS_ID`, which still carries the parent while the journal
+  records Process rows. Collapse when the journal stops recording.
+- A new runner spawning an older installed lf (branch build in development):
+  the old child ignores `LF_RUN_ID`, so the step row has only the spawner's
+  exit code and no error, and its Session input is not found under the step id.

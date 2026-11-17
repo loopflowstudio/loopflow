@@ -761,20 +761,43 @@ impl World {
                 break;
             }
         }
+        let start = |process: &loopflow_storage::process::LfProcess| {
+            loopflow_storage::graph_process::RunStart {
+                started_at: process.started_at,
+                pid: None,
+                os_started_at: None,
+                repo: process.repo.clone(),
+                cwd: process.cwd.clone(),
+            }
+        };
+        let finish = |process: &loopflow_storage::process::LfProcess| {
+            store.sqlite.finish_graph_run(
+                &process.id,
+                process.completed_at.expect("a recorded step has ended"),
+                process.exit_code,
+                process.error.as_deref(),
+            )
+        };
         // Its steps finish while it runs, so exit forgets none of them.
         store.sqlite.record_process(&graph)?;
         store
             .sqlite
-            .record_graph_process(&graph.id, &compiled, Some(task))?;
+            .record_graph_process(&graph.id, &compiled, Some(task), &start(&graph))?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;
-            store
-                .sqlite
-                .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
+            store.sqlite.record_graph_step(
+                &graph.id,
+                &process.id,
+                key,
+                &[Vec::new()],
+                &start(&process),
+            )?;
+            finish(&process)?;
         }
         graph.completed_at = Some(begin);
         outcome.complete(&mut graph);
         store.sqlite.record_process(&graph)?;
+        finish(&graph)?;
         Ok(())
     }
 

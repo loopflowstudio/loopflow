@@ -76,29 +76,13 @@ pub async fn execution_of_latest_graph(
         ));
     };
     let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
-    let evidence = |process: &crate::process::LfProcess| match process.completed_at {
-        Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::lf_process_evidence(
-            process,
-            &match facts.receipts.get(&process.id) {
-                Some(locator) => match facts.receipt_home.as_deref() {
-                    Some(home) => crate::journal::read_process_receipt(
-                        &crate::journal::process_receipt_path(home, locator),
-                    ),
-                    None => Ok(None),
-                },
-                None => Ok(None),
-            },
-            crate::journal::process_identity_evidence,
-        ),
-    };
-    let step = graph.latest().map(|step| &step.process);
+    let step = graph.latest().map(|step| &step.run);
     let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(
         graph,
         entry.summary.state,
-        evidence(&graph.process),
-        step.map_or(ProcessIdentityEvidence::Dead, evidence),
+        crate::journal::run_evidence(&graph.run),
+        step.map_or(ProcessIdentityEvidence::Dead, crate::journal::run_evidence),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
@@ -257,10 +241,10 @@ fn project_execution(
             captured: None,
         };
     }
-    // A Graph process that has started no step is the Graph's only Process so far.
+    // A Graph that has started no step is its only run so far.
     let (label, process) = match graph.latest() {
-        Some(latest) => (graph.label(latest), &latest.process),
-        None => (graph.name.clone(), &graph.process),
+        Some(latest) => (graph.label(latest), &latest.run),
+        None => (graph.name.clone(), &graph.run),
     };
     let label = &label;
     let (state, reason) = match (graph_process, step) {
@@ -277,7 +261,7 @@ fn project_execution(
             format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            if process.outcome.as_deref() == Some("succeeded") {
+            if process.result() == loopflow_storage::graph_process::RunResult::Succeeded {
                 (
                     TaskExecutionState::Idle,
                     format!("Graph stopped after {label}; inspect its history and effects before launching fresh work"),

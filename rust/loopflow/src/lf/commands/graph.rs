@@ -210,13 +210,14 @@ pub fn run_task_graph_for(
     // The error every failed attempt so far shared, if they all shared one.
     let mut repeated: Option<String> = None;
     loop {
-        let mark = store.process_mark(&process)?;
+        // This process mints the attempt's Graph run id; the child runs as it.
+        let graph_run = LfProcessId::default();
         let mut log = letting_go
             .then(|| PendingLog::open(&format!("pending-{process}-{attempt}")))
             .transpose()?;
         let sink = log.as_ref().map(|log| log.file.try_clone()).transpose()?;
-        let status = spawn_task_child(&args, checkout, sink, Some(cursor), |child| {
-            let registered = registration(store, &process, mark, child)?;
+        let status = spawn_task_child(&args, checkout, sink, Some(cursor), &graph_run, |child| {
+            let registered = registration(store, &graph_run, child)?;
             match (registered, log.take()) {
                 (Some(registered), Some(mut log)) => {
                     log.settle(&registered)?;
@@ -235,6 +236,13 @@ pub fn run_task_graph_for(
             }
             Ok(())
         })?;
+        // A child that died before writing its end leaves what this process saw.
+        store.finish_graph_run(
+            &graph_run,
+            loopflow_storage::rows::now_unix(),
+            status.code(),
+            None,
+        )?;
         if status.success() {
             return Ok(());
         }
@@ -244,7 +252,9 @@ pub fn run_task_graph_for(
         }
         // Only a Graph process that failed is started again.
         let graph = match status.code() {
-            Some(1) => store.graph_child_after(&process, mark)?,
+            Some(1) => store
+                .graph_run_recorded(&graph_run)?
+                .then(|| graph_run.clone()),
             _ => None,
         };
         let failed = graph.is_some();
@@ -255,7 +265,7 @@ pub fn run_task_graph_for(
                 );
                 return Err(loopflow_execution::process::CommandExit(1).into());
             }
-            let cause = store.failure_cause(graph)?.map(|(_, cause)| cause);
+            let cause = store.graph_failure_cause(graph)?.map(|(_, cause)| cause);
             repeated = cause.filter(|cause| attempt == 1 || repeated.as_ref() == Some(cause));
             if let Some((step, recovery)) =
                 loopflow_execution::ops::task::limit_recovery::ended_step_recovery(store, &task.id)?
@@ -379,6 +389,7 @@ fn spawn_task_child(
     checkout: &Path,
     log: Option<std::fs::File>,
     interrupt: Option<i64>,
+    graph_run: &LfProcessId,
     started: impl FnOnce(&mut std::process::Child) -> Result<()>,
 ) -> Result<std::process::ExitStatus> {
     static ATTEMPT_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -391,6 +402,10 @@ fn spawn_task_child(
     let lf = loopflow_execution::os_process::resolve_lf_binary()?;
     let mut command = std::process::Command::new(&lf);
     command.args(args).current_dir(checkout);
+    command.env(
+        loopflow_execution::journal::LF_RUN_ID_ENV,
+        graph_run.as_str(),
+    );
     if let Some(cursor) = interrupt {
         command.env(graph_process::TASK_INTERRUPT_CURSOR_ENV, cursor.to_string());
     }
@@ -415,18 +430,16 @@ fn spawn_task_child(
 }
 
 /// Where a Task run that let its launcher go keeps its Graph process's output.
-/// Wait until the attempt records its GraphProcess or ends first. No deadline:
+/// Wait until the attempt records its Graph run or ends first. No deadline:
 /// the child's own exit bounds it.
 fn registration(
     store: &SqliteStore,
-    process: &LfProcessId,
-    mark: i64,
+    graph_run: &LfProcessId,
     child: &mut std::process::Child,
 ) -> Result<Option<LfProcessId>> {
     loop {
-        let registered = store.graph_child_after(process, mark)?;
-        if registered.is_some() {
-            return Ok(registered);
+        if store.graph_run_recorded(graph_run)? {
+            return Ok(Some(graph_run.clone()));
         }
         if child.try_wait()?.is_some() {
             return Ok(None);
@@ -506,8 +519,10 @@ fn execute(
                 &running.process,
                 &loopflow_execution::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
+                &journal::current_run_start().context("a Graph requires a registered Process")?,
             )
             .context("could not record the Graph; no steps launched")?;
+        journal::mark_run_owner();
         drop(admission);
         let outcome = drive(&running, start, stop_at_interactive).await?;
         // A Task run's Graph writes where it left the Task. Blocked at an
@@ -771,16 +786,21 @@ impl RunningGraph<'_> {
         body.get(leaf.index).cloned()
     }
 
-    /// Record the Process this Graph process's newest child registered, once it has.
-    fn record_step(&self, mark: i64) -> Result<Option<loopflow_model::id::LfProcessId>> {
-        let Some(step) = self.store.sqlite.child_process_after(&self.process, mark)? else {
-            return Ok(None);
-        };
+    /// Reserve the step about to spawn under the id minted for it, so the
+    /// step finds its row however fast it ends.
+    fn reserve_step(&self, step: &LfProcessId) -> Result<()> {
         let (key, iterations) = self.location();
+        let start = loopflow_storage::graph_process::RunStart {
+            started_at: loopflow_storage::rows::now_unix(),
+            pid: None,
+            os_started_at: None,
+            repo: None,
+            cwd: None,
+        };
         self.store
             .sqlite
-            .record_graph_step(&self.process, &step, key, &iterations)?;
-        Ok(Some(step))
+            .record_graph_step(&self.process, step, key, &iterations, &start)?;
+        Ok(())
     }
 
     /// Where a Task run waits instead of merging: the step about to run merges
@@ -843,12 +863,15 @@ impl RunningGraph<'_> {
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
         command.env(loopflow_execution::journal::GRAPH_STEP_ENV, "1");
+        // The step runs as the id this Graph mints and records for it.
+        let step = LfProcessId::default();
+        command.env(loopflow_execution::journal::LF_RUN_ID_ENV, step.as_str());
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");
         }
         command.args(args);
-        let mark = self.store.sqlite.process_mark(&self.process)?;
+        self.reserve_step(&step)?;
         let admission = loopflow_execution::store::admission::lock_task_checkouts(
             &self.store.sqlite,
             &[self.cwd],
@@ -857,19 +880,30 @@ impl RunningGraph<'_> {
         loopflow_execution::transport::configure_child(command.as_std_mut());
         let output =
             loopflow_execution::terminal_output::TerminalOutput::for_child(command.as_std_mut())?;
-        let mut child = command.spawn().context("could not execute Graph step")?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                let error = anyhow::Error::new(error).context("could not execute Graph step");
+                self.store.sqlite.finish_graph_run(
+                    &step,
+                    loopflow_storage::rows::now_unix(),
+                    None,
+                    Some(&format!("{error:#}")),
+                )?;
+                return Err(error);
+            }
+        };
         drop(admission);
-        let mut step = None;
+        if let Some(pid) = child.id() {
+            let birth = journal::process_started_at(pid).ok().flatten();
+            self.store.sqlite.record_graph_step_pid(&step, pid, birth)?;
+        }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));
         watch.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let mut signalled = false;
         let status = loop {
             tokio::select! {
                 status = child.wait() => break status,
-                // A read can fail while a newer child migrates; the exit retries it.
-                () = tokio::time::sleep(std::time::Duration::from_millis(10)), if step.is_none() => {
-                    step = self.record_step(mark).unwrap_or(None);
-                }
                 _ = watch.tick(), if kind == StepKind::Agent && !signalled => {
                     if self.interrupted() {
                         if let Some(pid) = child.id() {
@@ -881,10 +915,16 @@ impl RunningGraph<'_> {
             }
         };
         drop(output);
-        // The step ran whatever comes next, so its row is attempted first.
-        if step.is_none() {
-            step = self.record_step(mark).unwrap_or(None);
+        // A step that died before writing its end leaves what this Graph saw.
+        if let Ok(status) = &status {
+            self.store.sqlite.finish_graph_run(
+                &step,
+                loopflow_storage::rows::now_unix(),
+                status.code(),
+                None,
+            )?;
         }
+        let step = Some(step);
         // A new installation can select a newer child. Never read its result
         // through an older schema.
         self.store

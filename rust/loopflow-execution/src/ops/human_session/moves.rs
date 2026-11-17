@@ -28,6 +28,7 @@ use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
 use loopflow_model::id::{AgentSessionId, LfSessionId, WaveId};
+use loopflow_storage::graph_process::GraphRun;
 use loopflow_storage::sqlite::task_moves::{MoveInFlight, MoveStage};
 use loopflow_storage::sqlite::task_work::ShipApproval;
 use loopflow_storage::sqlite::SqliteStore;
@@ -409,27 +410,23 @@ fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwn
 /// only once its pid is proven to be that recorded Process. Returns the
 /// stopped Graph, if one was running.
 async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedGraph>> {
-    let live = |process: &crate::process::LfProcess| {
-        process.completed_at.is_none()
-            && crate::journal::lf_evidence(&store.sqlite, &process.id)
-                == ProcessIdentityEvidence::Live
-    };
+    let live = |run: &GraphRun| crate::journal::run_evidence(run) == ProcessIdentityEvidence::Live;
     let graphs: Vec<_> = store
         .sqlite
         .task_graphs(&task.id)?
         .into_iter()
-        .filter(|graph| live(&graph.process))
+        .filter(|graph| live(&graph.run))
         .collect();
     let step = graphs.iter().find_map(|graph| {
         graph
             .latest()
-            .filter(|step| live(&step.process))
+            .filter(|step| live(&step.run))
             .map(|step| graph.label(step))
     });
-    let processes: Vec<crate::process::LfProcess> = graphs
+    let processes: Vec<GraphRun> = graphs
         .into_iter()
         .flat_map(|graph| {
-            std::iter::once(graph.process).chain(graph.steps.into_iter().map(|step| step.process))
+            std::iter::once(graph.run).chain(graph.steps.into_iter().map(|step| step.run))
         })
         .filter(|process| live(process))
         .collect();
@@ -455,10 +452,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedG
     loop {
         let running: Vec<String> = processes
             .iter()
-            .filter(|process| {
-                crate::journal::lf_evidence(&store.sqlite, &process.id)
-                    == ProcessIdentityEvidence::Live
-            })
+            .filter(|process| live(process))
             .map(|process| process.id.to_string())
             .collect();
         if running.is_empty() {

@@ -1,10 +1,45 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-Status 2026-11-16: kickoff. Inventory below is for review before code
-changes. Code starts after LOO-936 merges (it rewrites `retention.rs`,
-`sessions.rs`, `session_events.rs`); rebase, then rerun
+Status 2026-11-16: slice 2a (Graph runs and steps) built ahead of LOO-936,
+which was still implementing (pass 4) on `processes.rs`, `sessions.rs`,
+`session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
+activation slices wait for it to merge. After it merges: rebase, rerun
 `python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
 Quotes and the OS-scan measurement: `questions.md`.
+
+### Slice 2a as built
+
+- `process_rows_on_owners.sql` rebuilds `graph_processes`,
+  `graph_process_steps` and `agent_limit_recoveries` without `processes`
+  foreign keys or the step-parent trigger; adds `started_at, ended_at, pid,
+  os_started_at, exit_code, error` (+ `repo, cwd` on the run); backfills from
+  `processes`; keeps launch columns immutable; bridge triggers copy a released
+  lf's start/end from `processes` onto owner rows.
+- `GraphRun` / `RunResult` / `RunStart` (`loopflow-storage/src/graph_process.rs`)
+  replace `LfProcess` inside `GraphProcess` and its steps.
+- Spawners mint ids: the Task-run loop and `RunningGraph::spawn` pass
+  `LF_RUN_ID`; the journal adopts it as the child's own id. The step row is
+  written at spawn with pid; the child writes its end in `ledger_insert`; the
+  spawner writes `status.code()` if the child left none. Deleted:
+  `process_mark`, `child_process_after`, `graph_child_after`.
+- `graph_failure_cause` (last failed step's error, else the run's) replaces
+  the Process walk for Task-run retry; `journal::run_evidence` replaces
+  `lf_evidence`/receipts for Graph runs and steps (Task execution, interrupt,
+  landing, limit recovery). A plain `CommandExit(130)` records no error.
+- Kept for now: `process_under_graph` (`run.rs` capacity wait; Sessions
+  served by a transport owner lack the step env), `failure_cause` and
+  `process_starter` (ship carriers), receipts for open execution in a Task's
+  work (`task_open_process_pairs`).
+
+Checks (2026-11-16, load average 60–95 from other checkouts):
+`nextest -p loopflow-storage --lib` migration_runner/query_plans/graph_inventory/
+revisions/task_work → pass (one `canonical_ids` timeout at 300 s under load in
+an earlier run; CI); execution task_updates/journal/read_stream/human_session/
+task_execution → pass; `nextest -p loopflow --lib` graph_tests,
+task_graph_launch_tests, explain, world_recipes `--test-threads 8` → pass
+(default parallelism timed out at load 95); `cargo clippy --all-targets` →
+clean. Gate: `binary(two_people)`, `test(transport::)`, `test(performance_tests::)`
+for the table rebuild.
 
 ## Problem and outcome
 

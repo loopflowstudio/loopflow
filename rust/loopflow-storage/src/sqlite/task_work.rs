@@ -53,6 +53,8 @@ fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
     )?)
 }
 
+/// The cwd-membership reading `lf_process_ids` must agree with.
+#[cfg(test)]
 fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
     Ok(if has_relocations(conn)? {
         relocated_process_membership(process)
@@ -129,33 +131,6 @@ pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> Sto
         session_ids(selector), tasks(selector)))
 }
 
-/// Prefer the deepest checkout when membership names more than one Task.
-/// Explicit Session bindings use the same association as Task inventory.
-pub(super) fn task_of_process(
-    conn: &rusqlite::Connection,
-    process: &LfProcessId,
-) -> StoreResult<Option<String>> {
-    use rusqlite::OptionalExtension;
-    Ok(conn
-        .query_row(
-            &format!(
-                "WITH members AS MATERIALIZED (
-                    SELECT session_id AS id FROM session_events INDEXED BY session_events_process
-                        WHERE lf_process_id=?1
-                    UNION SELECT agent_session_id FROM processes
-                        WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL)
-                 SELECT tw.id FROM ({TASK_CHECKOUTS}) tw JOIN processes e ON e.id=?1
-                 WHERE ({}) OR EXISTS(SELECT 1 FROM agent_sessions a
-                    WHERE a.id IN (SELECT id FROM members) AND ({}))
-                 ORDER BY length(tw.worktree) DESC, tw.id LIMIT 1",
-                process_membership(conn, "e")?, session_membership("a")
-            ),
-            [process],
-            |row| row.get(0),
-        )
-        .optional()?)
-}
-
 /// Each Task among `task_ids` paired with each Graph started for it. The Graph
 /// recorded its Task at launch, so the pairs come from an index probe per Task.
 fn task_graph_pairs(task_ids: &str) -> String {
@@ -170,7 +145,10 @@ pub(super) fn graphs_of_task(
 ) -> StoreResult<Vec<crate::graph_process::GraphProcess>> {
     super::graph_inventory::graphs_in(
         conn,
-        &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
+        &format!(
+            "g.lf_process_id IN (SELECT graph FROM ({}))",
+            task_graph_pairs("?1")
+        ),
         &[&task.as_str()],
     )
 }
@@ -184,8 +162,7 @@ fn completed_graph_steps(
     let mut query = conn.prepare(&format!(
         "SELECT pairs.task_id, gs.lf_process_id FROM ({}) pairs
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
-         JOIN processes s ON s.id=gs.lf_process_id
-         WHERE s.completed_at IS NOT NULL",
+         WHERE gs.ended_at IS NOT NULL",
         task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
@@ -211,7 +188,7 @@ fn latest_task_graphs(
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
-         ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
+         ORDER BY (SELECT g.rowid FROM graph_processes g WHERE g.lf_process_id=pairs.graph)",
         task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
@@ -224,11 +201,11 @@ fn latest_task_graphs(
     let ids = super::children::ids_json(latest.values().map(String::as_str));
     let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
         conn,
-        "e.id IN (SELECT value FROM json_each(?1))",
+        "g.lf_process_id IN (SELECT value FROM json_each(?1))",
         &[&ids],
     )?
     .into_iter()
-    .map(|graph| (graph.process.id.to_string(), graph))
+    .map(|graph| (graph.run.id.to_string(), graph))
     .collect();
     latest
         .into_iter()
@@ -1602,21 +1579,24 @@ mod tests {
                 ("/repo/task-other/x", Some(&sibling)),
                 ("/elsewhere", None),
             ] {
-                let id = LfProcessId::new();
-                conn.execute(
-                    "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,1)",
-                    params![id, TraceId::new(), cwd],
-                )
-                .unwrap();
-                graphs.push((id, owner));
+                graphs.push((LfProcessId::new(), cwd, owner));
             }
         }
         let graph = crate::graph::CompiledGraph {
             name: "proof".into(),
             steps: vec![],
         };
-        for (id, owner) in &graphs {
-            store.record_graph_process(id, &graph, *owner).unwrap();
+        for (id, cwd, owner) in &graphs {
+            let start = crate::graph_process::RunStart {
+                started_at: 1,
+                pid: None,
+                os_started_at: None,
+                repo: None,
+                cwd: Some((*cwd).into()),
+            };
+            store
+                .record_graph_process(id, &graph, *owner, &start)
+                .unwrap();
         }
         let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
@@ -1626,14 +1606,8 @@ mod tests {
                 "{id}"
             );
         }
-        assert_eq!(
-            latest[&task].process.cwd.as_deref(),
-            Some("/repo/task/deep/er")
-        );
-        assert_eq!(
-            latest[&sibling].process.cwd.as_deref(),
-            Some("/repo/task-other/x")
-        );
+        assert_eq!(latest[&task].cwd.as_deref(), Some("/repo/task/deep/er"));
+        assert_eq!(latest[&sibling].cwd.as_deref(), Some("/repo/task-other/x"));
         assert!(!latest.contains_key(&idle));
     }
 

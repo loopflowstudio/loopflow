@@ -1946,6 +1946,113 @@ mod tests {
     }
 
     #[test]
+    fn graph_runs_and_steps_carry_their_process_lifecycle_after_upgrade() {
+        let conn = open();
+        apply_before_migration(&observers(), &build(), &conn, "process_rows_on_owners");
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/migrations/process_rows_on_owners_released.sql"
+        )))
+        .unwrap();
+        apply_pending_migrations(&observers(), &build(), &conn);
+
+        type Run = (
+            String,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let runs = |sql: &str| -> Vec<Run> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let select = "SELECT lf_process_id,started_at,ended_at,pid,exit_code,error FROM";
+        assert_eq!(
+            runs(&format!("{select} graph_processes ORDER BY lf_process_id")),
+            [
+                (
+                    "graph-done".into(),
+                    10,
+                    Some(30),
+                    None,
+                    Some(1),
+                    Some("the run failed".into())
+                ),
+                ("graph-live".into(), 40, None, Some(4001), None, None),
+            ]
+        );
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps ORDER BY lf_process_id"
+            )),
+            [
+                (
+                    "step-done".into(),
+                    11,
+                    Some(29),
+                    None,
+                    Some(1),
+                    Some("gate: tests failed".into())
+                ),
+                ("step-live".into(), 41, None, Some(4002), None, None),
+            ]
+        );
+        let wait: i64 = conn
+            .query_row("SELECT count(*) FROM agent_limit_recoveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(wait, 1);
+
+        // A released runner still alive after install: its step's end reaches
+        // the step row, and a step it records after the Process row is filled.
+        conn.execute_batch(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,exit_code)
+                 VALUES('step-next','trace','graph-live',50,51,'succeeded',0);
+             INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                 VALUES('graph-live','step-next',0,'[[1]]');
+             UPDATE processes SET completed_at=60,outcome='failed',exit_code=1,error='boom' WHERE id='step-live';",
+        )
+        .unwrap();
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps WHERE graph_lf_process_id='graph-live' ORDER BY seq"
+            )),
+            [
+                (
+                    "step-live".into(),
+                    41,
+                    Some(60),
+                    None,
+                    Some(1),
+                    Some("boom".into())
+                ),
+                ("step-next".into(), 50, Some(51), None, Some(0), None),
+            ]
+        );
+        // What a run launched with stays fixed.
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL,graph='other'", [])
+            .is_err());
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn a_newer_tail_changes_nothing_this_build_validates() {
         for sql in [
             "CREATE TABLE newer_table (id TEXT);",

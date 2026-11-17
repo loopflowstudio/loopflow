@@ -1117,9 +1117,8 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
         .any(|graph| {
-            graph.process.completed_at.is_none()
-                && crate::journal::lf_evidence(&store.sqlite, graph.id())
-                    != crate::journal::ProcessIdentityEvidence::Dead
+            crate::journal::run_evidence(&graph.run)
+                != crate::journal::ProcessIdentityEvidence::Dead
         })
     {
         eprintln!("PR merged; retained its checkout for the Graph that landed it.");

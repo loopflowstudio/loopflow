@@ -511,7 +511,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
             .iter()
             .map(loopflow_storage::process::ProcessEntry::id)
             .collect::<Vec<_>>(),
-        [graph.steps[0].process.id.as_str()]
+        [graph.steps[0].run.id.as_str()]
     );
 
     let child = TaskId::new();

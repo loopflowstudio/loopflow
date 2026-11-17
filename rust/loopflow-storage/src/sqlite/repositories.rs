@@ -398,12 +398,6 @@ mod tests {
             process.as_str()
         );
         let conn = store.conn.lock().unwrap();
-        assert_eq!(
-            super::super::task_work::task_of_process(&conn, &process)
-                .unwrap()
-                .as_deref(),
-            Some(task.as_str())
-        );
         let cwd: String = conn
             .query_row("SELECT cwd FROM processes WHERE id=?1", [&process], |row| {
                 row.get(0)
@@ -417,14 +411,5 @@ mod tests {
             .unwrap(),
             1
         );
-        let unrelated = LfProcessId::new();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',2)",
-            params![unrelated, TraceId::new()],
-        )
-        .unwrap();
-        assert!(super::super::task_work::task_of_process(&conn, &unrelated)
-            .unwrap()
-            .is_none());
     }
 }

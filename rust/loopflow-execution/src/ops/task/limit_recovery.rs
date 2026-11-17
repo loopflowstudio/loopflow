@@ -48,11 +48,11 @@ pub fn ended_step_recovery(
     let Some(step) = graph.latest() else {
         return Ok(None);
     };
-    if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
+    if crate::journal::run_evidence(&step.run) != ProcessIdentityEvidence::Dead {
         return Ok(None);
     }
     Ok(store
-        .agent_limit_recovery(&step.process.id)?
+        .agent_limit_recovery(&step.run.id)?
         .map(|recovery| (graph.label(step), recovery)))
 }
 

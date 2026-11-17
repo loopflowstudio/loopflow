@@ -28,6 +28,9 @@ const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const PROCESS_RECEIPT_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
+/// The id a spawner minted for this process and already recorded on the run
+/// it owns (a Graph run or step). Taken once at start; children never see it.
+pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
 
 /// Serializes tests that mutate process-global store or Process identity variables.
 /// Every test in the crate that touches these variables must hold this lock.
@@ -197,6 +200,10 @@ struct ProcessContext {
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
     receipts: Arc<Mutex<ReceiptCost>>,
+    /// It runs under an id its spawner minted for a Graph run or step, or it
+    /// recorded a Graph run of its own.
+    #[serde(skip)]
+    owns_run: Arc<AtomicBool>,
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
@@ -407,6 +414,11 @@ pub fn command_exit_code<T>(result: &anyhow::Result<T>) -> u8 {
     }
 }
 
+/// Whether `error` is only an exit status, with nothing said about why.
+fn is_bare_exit(error: &anyhow::Error) -> bool {
+    error.chain().count() == 1 && error.is::<crate::process::CommandExit>()
+}
+
 pub(crate) fn is_cli_process() -> bool {
     PROCESS_STARTED_AT.get().is_some()
 }
@@ -559,10 +571,12 @@ fn finish_runtime<T>(directory: &Path, result: &anyhow::Result<T>) {
             LfEventType::Errored
         },
         LfEventFields {
+            // A bare exit 130 is an interrupt, not an error: its run reads
+            // as interrupted.
             error: result
                 .as_ref()
                 .err()
-                .filter(|_| code != 0)
+                .filter(|error| code != 0 && !(code == 130 && is_bare_exit(error)))
                 .map(|error| format!("{error:#}")),
             exit_code: Some(i32::from(code)),
             ..LfEventFields::default()
@@ -720,6 +734,17 @@ fn start_record(context: &ProcessContext) -> LfProcess {
     }
 }
 
+/// What this process's own run record says at its start.
+pub fn current_run_start() -> Option<loopflow_storage::graph_process::RunStart> {
+    current_context().map(|context| loopflow_storage::graph_process::RunStart {
+        started_at: context.started_at,
+        pid: Some(std::process::id()),
+        os_started_at: context.process_started_at,
+        repo: context.repo.clone(),
+        cwd: Some(context.cwd.display().to_string()),
+    })
+}
+
 /// The current Process's start row, when `process` is the current Process.
 pub(crate) fn current_start_record(process: &LfProcessId) -> Option<LfProcess> {
     current_context()
@@ -771,7 +796,10 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
                 .receipt_wait
                 .saturating_sub(already_waited + started.elapsed());
             match store.record_process_within(&record, crate::transport::current(), wait) {
-                Ok(()) => true,
+                Ok(()) => {
+                    finish_owned_run(context, &store, &record);
+                    true
+                }
                 Err(err) => {
                     let waited = (already_waited + started.elapsed()).as_secs_f64();
                     if first_ledger_failure() {
@@ -803,6 +831,33 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
     cost.waited += started.elapsed();
     if !recorded {
         cost.unrecorded += 1;
+    }
+}
+
+/// A Graph run or step writes its own end on its Graph record. Only a process
+/// that owns one tries, and only once its Process receipt landed, so a held
+/// write lock delays it once.
+fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfProcess) {
+    let Some(ended_at) = record.completed_at else {
+        return;
+    };
+    if !context.owns_run.load(Ordering::Acquire) {
+        return;
+    }
+    if let Err(error) = store.finish_graph_run(
+        &record.id,
+        ended_at,
+        record.exit_code,
+        record.error.as_deref(),
+    ) {
+        warn!(%error, "could not record this run's end on its Graph record");
+    }
+}
+
+/// This process recorded a Graph run under its own id and writes its end.
+pub fn mark_run_owner() {
+    if let Some(context) = current_context() {
+        context.owns_run.store(true, Ordering::Release);
     }
 }
 
@@ -954,7 +1009,13 @@ fn create_process_context(
             .flatten()
             .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
-    let lf_process_id = LfProcessId::default();
+    let minted = std::env::var(LF_RUN_ID_ENV)
+        .ok()
+        .and_then(|value| LfProcessId::parse(&value).ok());
+    std::env::remove_var(LF_RUN_ID_ENV);
+    let minted = minted.filter(|_| inherits);
+    let owns_run = Arc::new(AtomicBool::new(minted.is_some()));
+    let lf_process_id = minted.unwrap_or_default();
     // Export the identity so prompt logs and child processes carry the same
     // trace and parent as the ledger rows. The export is removed when the
     // Process ends (see try_emit).
@@ -1036,6 +1097,7 @@ fn create_process_context(
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
         receipts: Arc::default(),
+        owns_run,
     };
     set_context(context.clone());
     // Only an `lf` executable exits on interrupt; library callers settle their
@@ -1220,6 +1282,16 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
         Ok(Some(process)) => process.evidence(started_at),
         Ok(None) => ProcessIdentityEvidence::Dead,
         Err(_) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// Whether a Graph run or step is still running: one OS lookup against the
+/// pid it recorded. A run with no end and no pid cannot be confirmed.
+pub fn run_evidence(run: &loopflow_storage::graph_process::GraphRun) -> ProcessIdentityEvidence {
+    match (run.ended_at, run.pid, run.os_started_at) {
+        (Some(_), _, _) => ProcessIdentityEvidence::Dead,
+        (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
+        (None, _, _) => ProcessIdentityEvidence::Unknown,
     }
 }
 

@@ -41,7 +41,7 @@ the private server and every relay afterward.
 A probe compiling `ServerConnection.swift` against real relay publications can
 check mailbox delivery and cancellation without WindowServer. Label this as a
 component probe: it does not establish mounted panes, hidden-pane rendering,
-focus, copy/Find, or Move here interaction. Keep display diagnostics optional in
+focus or copy/Find. Keep display diagnostics optional in
 headless runs; record those limits and leave the full Swift suite and Xcode
 fallback build to gate. See `swift/README.md` for the supported checks.
 

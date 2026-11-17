@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Concept review left two doc repairs ("Next" below), then gate.
+Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Concept review's doc repairs are done; next is gate.
 
 ## Demo
 
@@ -214,17 +214,11 @@ editable viewers into the same terminal, so you see drafts from A in B", then
 - Swift: `scripts/test_desktop.sh --filter 'OwnerStreamTests|ServerConnectionTests|ProviderTransitionTests|DTOFixtureTests|WorkDestinationTests'` and `test_ios.py SessionTerminalTests`: pass. `GhosttyTerminalInputTests` needs a display (gate/CI); no test covers focus reports reaching the relay.
 - `lf open` keeps its "already open" report for a Session a native client holds outside a held terminal (and for a Desktop pane in Desktop mode).
 
-## Next (concept review, 2026-11-17)
+## Concept review repairs (2026-11-17, done)
 
-Prose only; no code changes.
-
-- `docs/dev/server-first.md`: the "Every view types" piece is this PR. Drop its
-  row from Pieces and rewrite "### Every view types" as built: size follows the
-  live view with the latest attach, input or focus (not "most recently
-  opened"); only the sizing view's query answers reach the agent; a native
-  client outside a held terminal still gets **Take back**. Desktop's relay
-  status stream stays (it carries Reconnecting, Session unavailable and Retry),
-  so the row's claim that the handshake goes is not done here; say what
-  remains, or leave it as its own piece.
-- `.lf/qa/desktop.md:44`: drop "or Move here interaction" from the component
-  probe's limits.
+- `docs/dev/server-first.md`: "### Every view types" describes what is built;
+  its Pieces row now names only what remains: the server's emulator answering
+  every query, and Desktop's relay status handshake (`LF_SERVER_STATUS`,
+  "Opening… Input paused"), which still carries Reconnecting, Session
+  unavailable and Retry.
+- `.lf/qa/desktop.md`: the component probe's limits no longer mention Move here.

@@ -130,7 +130,7 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        match generate_commit_message(repo, options.agent.as_deref()) {
+        match generate_commit_message(repo, MessageAgent::Chosen(options.agent.as_deref())) {
             Ok(message) => message.text(),
             Err(_) => format_commit_message(&options.task, &options.sources),
         }
@@ -176,7 +176,8 @@ impl CommitMessage {
 /// Commit what a skill left as `lf <step>: <what changed>` with a body, and
 /// push the branch unless it is the default branch, including commits the
 /// skill made itself. The `commit-message` skill writes the message on its
-/// own configured agents; without an answer the title is `lf <step>: checkpoint`.
+/// own configured agents, and on `agent` (the run's `-a`) only when it has
+/// none; without an answer the title is `lf <step>: checkpoint`.
 ///
 /// # Errors
 /// Returns the Git failure when staging, committing or pushing fails.
@@ -192,7 +193,7 @@ pub fn commit_step(
         .is_empty();
     let written = if staged {
         progress.status("Writing the commit message...");
-        generate_commit_message(repo, agent)
+        generate_commit_message(repo, MessageAgent::Fallback(agent))
             .inspect_err(|error| progress.error(&error.to_string()))
             .ok()
     } else {
@@ -241,7 +242,18 @@ fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {
 /// A hung provider must not hold the Graph or the skill run that asked.
 const COMMIT_MESSAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResult<CommitMessage> {
+/// Where an agent named on the command line stands against the
+/// `commit-message` skill's own preference.
+#[derive(Debug, Clone, Copy)]
+enum MessageAgent<'a> {
+    /// `lf commit -a`: the person chose the agent for this message.
+    Chosen(Option<&'a str>),
+    /// A step commit: the run's agent writes the message only when
+    /// `commit-message` resolves none of its own.
+    Fallback(Option<&'a str>),
+}
+
+fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<CommitMessage> {
     let skill = load_skill("commit-message", repo)
         .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?;
     let template = skill
@@ -265,12 +277,18 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
     let config = crate::config::settings::resolve(&config, Some(&skill))
         .map(|resolved| resolved.config)
         .unwrap_or(config);
-    let agents = match agent_override {
-        Some(agent) => vec![agent.to_string()],
-        None => match config.agent_order() {
+    let configured = || -> OpsResult<Vec<String>> {
+        Ok(match config.agent_order() {
             order if order.is_empty() => vec![config.agent()?.to_string()],
             order => order,
-        },
+        })
+    };
+    let agents = match agent {
+        MessageAgent::Chosen(Some(agent)) => vec![agent.to_string()],
+        MessageAgent::Chosen(None) | MessageAgent::Fallback(None) => configured()?,
+        MessageAgent::Fallback(Some(agent)) => {
+            configured().unwrap_or_else(|_| vec![agent.to_string()])
+        }
     };
     let process = ProcessConfig {
         auto: true,

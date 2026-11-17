@@ -513,7 +513,8 @@ fn execute_target(
 }
 
 /// A child `lf commit --step`, as a Graph runs after each skill step, so the
-/// message-writing agent is a Process of its own. The run's `-a` selects it too.
+/// message-writing agent is a Process of its own. The run's `-a` writes the
+/// message only when `commit-message` has no agent of its own.
 fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
     let committed = loopflow_execution::os_process::resolve_lf_binary()
         .map_err(|error| error.to_string())

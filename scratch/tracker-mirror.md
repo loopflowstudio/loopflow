@@ -1,8 +1,31 @@
 # LOO-925: the tracker mirrors the store
 
-Status: built. Nothing left to build here; open choices in
+Status: built except "Next implement" below. Open choices in
 `scratch/questions.md` keep today's behavior and do not block publishing.
 The design as built is `docs/dev/planning.md` ("Words", "One outbound queue").
+
+## Next implement (concept review, 2026-11-17)
+
+What the design already implies; no product choice in it.
+
+1. **The pass bound counts requests that leave.** `Drain::send` takes a
+   request before `tracker.send`, so a create the tracker refuses locally
+   (Linear Project in a Wave with no Initiative, `linear/actions.rs:699`)
+   spends one of the 20 every pass, forever. The bound exists for the
+   provider's allowance. A tracker says it refused before any request
+   (a `Sent` variant, or a local check before `take()`); that answer saves
+   its error, leaves the action `queued` in `lf repo plan`, and is free.
+   Test: 21 such Projects plus one ordinary edit; the edit is sent in one
+   pass and `requests == 1`.
+2. **Closed sets are enums on the wire.** `TrackerActionStatus.owner_kind`
+   and `.tracker` are strings beside `ActionKind`/`ActionPhase` enums. Use
+   an owner-kind enum (`task|project|wave`) and a tracker enum
+   (`git|linear|asana`) in storage, the schema, Swift `TrackerSync.swift`
+   and `tracker_sync.json`.
+3. **Name the read for what it is.** `TrackerReceipts` (and
+   `task_tracker_receipts`, `project_tracker_receipts`, `tracker_receipts`)
+   is an owner's open actions, not receipts; `planning_sync.rs`'s module doc
+   still says "provider delivery evidence". Rename both to the action words.
 
 ## Decision: any tracker — Linear and Asana, Notion deleted
 

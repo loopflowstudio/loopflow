@@ -115,8 +115,9 @@ Built (glossary in `docs/dev/planning.md` "Words"; renames in
 
 - QA 2: a Project `create` the tracker rejects before any request (Wave with
   no Linear Initiative) still takes one of the pass's 20 requests, every pass.
-  One such Project on this Machine (manabot `infrastructure`). Charge only
-  requests that leave, or leave it?
+  One such Project on this Machine (manabot `infrastructure`). Concept
+  review 2026-11-17, headless: charge only requests that leave, since the
+  bound is the provider's allowance (next implement, `tracker-mirror.md`).
 
 ## Concept review round (2026-11-17)
 

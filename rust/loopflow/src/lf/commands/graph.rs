@@ -1015,7 +1015,11 @@ impl RunningGraph<'_> {
         {
             return;
         }
-        let args = ["commit", "--step", step].map(str::to_owned);
+        let mut args = ["commit", "--step", step].map(str::to_owned).to_vec();
+        // `-a` selects every agent step of the Graph, this one included.
+        if let Some(agent) = &self.launcher.agent {
+            args.extend(["--agent".to_owned(), agent.clone()]);
+        }
         if let Err(error) = self.spawn("commit", StepKind::Operation, &args).await {
             tracing::warn!(%step, %error, "could not commit the step's edits");
         }

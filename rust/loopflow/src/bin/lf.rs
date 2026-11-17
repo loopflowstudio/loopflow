@@ -494,7 +494,7 @@ fn execute_target(
                     {
                         // Best-effort: the skill ran whether or not its edits commit.
                         if loopflow_execution::ops::step_commit_pending(&repo_root) {
-                            commit_skill_step(&repo_root, name);
+                            commit_skill_step(&repo_root, name, cli.agent.as_deref());
                         }
                     }
                     Ok(())
@@ -513,13 +513,14 @@ fn execute_target(
 }
 
 /// A child `lf commit --step`, as a Graph runs after each skill step, so the
-/// message-writing agent is a Process of its own.
-fn commit_skill_step(repo_root: &Path, skill: &str) {
+/// message-writing agent is a Process of its own. The run's `-a` selects it too.
+fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
     let committed = loopflow_execution::os_process::resolve_lf_binary()
         .map_err(|error| error.to_string())
         .and_then(|lf| {
             std::process::Command::new(lf)
                 .args(["commit", "--step", skill])
+                .args(agent.map(|agent| ["--agent", agent]).into_iter().flatten())
                 .current_dir(repo_root)
                 .stdin(std::process::Stdio::null())
                 .status()

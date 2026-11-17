@@ -99,6 +99,7 @@ pub fn commit_workflow(
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
+            progress.status("Pushing...");
             push_with_upstream_if_needed(repo, inherit_git)?;
             if options.create_draft_pr {
                 ensure_draft_pr(repo, progress)?;
@@ -139,6 +140,7 @@ pub fn commit_workflow(
     commit(repo, &message, inherit_git)?;
 
     if options.push {
+        progress.status("Pushing...");
         push_with_upstream_if_needed(repo, inherit_git)?;
         if options.create_draft_pr {
             ensure_draft_pr(repo, progress)?;

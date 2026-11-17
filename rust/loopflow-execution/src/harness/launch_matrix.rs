@@ -74,7 +74,7 @@ if "--mode" not in sys.argv and "LF_PROVIDER_CONTEXT" not in os.environ: sys.exi
 }
 
 #[test]
-fn every_harness_runs_bare_managed_and_worker() {
+fn every_harness_runs_all_four_launch_kinds() {
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
@@ -94,160 +94,156 @@ fn every_harness_runs_bare_managed_and_worker() {
     let _server = loopflow_test_support::MachineServer::start(binary, home);
 
     for kind in HarnessKind::ALL {
-        for mode in [Mode::Interactive, Mode::Headless] {
-            for run in [
-                Run::Bare(mode),
-                if mode == Mode::Interactive {
-                    Run::Managed
-                } else {
-                    Run::Worker
-                },
-            ] {
-                let row = format!("{kind:?} {mode:?} {run:?}");
-                let directory = tempfile::tempdir_in(home).unwrap();
-                let cwd = directory.path();
-                crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
-                    let capture = SessionRecorder::begin_at(
-                        home,
-                        SessionCaptureSpec {
-                            harness: kind.as_str().into(),
-                            model: None,
-                            surface: if mode == Mode::Interactive {
-                                "tui"
-                            } else {
-                                "headless"
-                            }
-                            .into(),
-                            cwd: cwd.into(),
-                            repo: None,
-                            worktree: None,
-                            skill: None,
-                            subjects: vec![],
-                            graph: SessionGraphMembership::Independent,
-                            work: None,
-                        },
-                    )
-                    .map(LfProcessRuntime::new)?;
-                    capture.claim_session_attachment()?;
-                    let recording = Recording::from_runtime(&capture)?;
-                    let mut config = AgentConfig {
-                        agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
-                        cwd: Some(cwd.into()),
-                        system_prompt: "fixed instructions".into(),
-                        chrome: Some(true),
-                        skip_permissions: true,
-                        write_scope: if kind == HarnessKind::Pi {
-                            crate::agent::AgentWriteScope::Configured
+        for (run, mode, reports) in [
+            (Run::Chat, Mode::Interactive, false),
+            (Run::Batch, Mode::Headless, false),
+            (Run::WorkSession, Mode::Interactive, true),
+            (Run::Worker, Mode::Headless, true),
+        ] {
+            assert_eq!(run.mode(), mode, "{run:?}");
+            let row = format!("{kind:?} {run:?}");
+            let directory = tempfile::tempdir_in(home).unwrap();
+            let cwd = directory.path();
+            crate::journal::with_runtime(home, &["lf".into(), "matrix".into()], || {
+                let capture = SessionRecorder::begin_at(
+                    home,
+                    SessionCaptureSpec {
+                        harness: kind.as_str().into(),
+                        model: None,
+                        surface: if mode == Mode::Interactive {
+                            "tui"
                         } else {
-                            crate::agent::AgentWriteScope::Worktree
-                        },
-                        task_prompt: "say hi".into(),
-                        conversation_context: Some(crate::context_block::ContextDelivery {
-                            identity: None,
-                            repository: None,
-                            repo: home.into(),
-                            home: home.into(),
-                            wave: None,
-                            skill_file: None,
-                            submitted_docs: None,
-                            references: vec![],
-                        }),
-                        env: capture.environment(),
-                        ..crate::agent::AgentConfig::default()
-                    };
-                    config.env.insert("LF_BIN".into(), binary.into());
-                    let launch = Launch {
-                        config: &config,
-                        harness: kind.harness(),
-                        run,
-                        recording: &recording,
-                        start: Start::New,
-                        context_file: None,
-                    };
-                    let before = std::fs::read_to_string(home.join("matrix-argv.jsonl"))
-                        .unwrap_or_default()
-                        .lines()
-                        .count();
-                    let thread = match mode {
-                        Mode::Interactive => {
-                            let outcome =
-                                super::native_session::run(&launch, None, Some(&capture))?;
-                            anyhow::ensure!(!outcome.failed(), "{row}: {:?}", outcome.status);
-                            if kind == HarnessKind::OpenCode {
-                                let log = std::fs::read_to_string(
-                                    capture.artifact_dir().join("opencode.stderr.log"),
-                                )?;
-                                anyhow::ensure!(
-                                    log.contains("native diagnostic"),
-                                    "{row}: native diagnostics left their log"
-                                );
-                            }
-                            crate::session_record::read_provider_session(&capture.artifact_dir())?
-                                .map(|session| session.agent_session)
+                            "headless"
                         }
-                        Mode::Headless => {
-                            let outcome = super::drive::run(
-                                &launch,
-                                &ProcessConfig {
-                                    runtime: Some(capture.clone()),
-                                    timeout: Some(std::time::Duration::from_secs(20)),
-                                    ..Default::default()
-                                },
+                        .into(),
+                        cwd: cwd.into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        graph: SessionGraphMembership::Independent,
+                        work: None,
+                    },
+                )
+                .map(LfProcessRuntime::new)?;
+                capture.claim_session_attachment()?;
+                let recording = Recording::from_runtime(&capture)?;
+                let mut config = AgentConfig {
+                    agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
+                    cwd: Some(cwd.into()),
+                    system_prompt: "fixed instructions".into(),
+                    chrome: Some(true),
+                    skip_permissions: true,
+                    write_scope: if kind == HarnessKind::Pi {
+                        crate::agent::AgentWriteScope::Configured
+                    } else {
+                        crate::agent::AgentWriteScope::Worktree
+                    },
+                    task_prompt: "say hi".into(),
+                    conversation_context: Some(crate::context_block::ContextDelivery {
+                        identity: None,
+                        repository: None,
+                        repo: home.into(),
+                        home: home.into(),
+                        wave: None,
+                        skill_file: None,
+                        submitted_docs: None,
+                        references: vec![],
+                    }),
+                    env: capture.environment(),
+                    ..crate::agent::AgentConfig::default()
+                };
+                config.env.insert("LF_BIN".into(), binary.into());
+                let launch = Launch {
+                    config: &config,
+                    harness: kind.harness(),
+                    run,
+                    recording: &recording,
+                    start: Start::New,
+                    context_file: None,
+                };
+                let before = std::fs::read_to_string(home.join("matrix-argv.jsonl"))
+                    .unwrap_or_default()
+                    .lines()
+                    .count();
+                let thread = match mode {
+                    Mode::Interactive => {
+                        let outcome = super::native_session::run(&launch, None, Some(&capture))?;
+                        anyhow::ensure!(!outcome.failed(), "{row}: {:?}", outcome.status);
+                        if kind == HarnessKind::OpenCode {
+                            let log = std::fs::read_to_string(
+                                capture.artifact_dir().join("opencode.stderr.log"),
                             )?;
-                            anyhow::ensure!(outcome.exit_code == 0, "{row}: {}", outcome.stderr);
-                            outcome.agent_session
+                            anyhow::ensure!(
+                                log.contains("native diagnostic"),
+                                "{row}: native diagnostics left their log"
+                            );
                         }
-                    };
-                    anyhow::ensure!(thread.is_some(), "{row}: no recorded provider thread");
-                    let recorded = std::fs::read_to_string(home.join("matrix-argv.jsonl"))?;
-                    let commands: Vec<serde_json::Value> = recorded
-                        .lines()
-                        .skip(before)
-                        .map(serde_json::from_str)
-                        .collect::<Result<_, _>>()?;
-                    anyhow::ensure!(!commands.is_empty(), "{row}: provider did not run");
-                    let flag = |name: &str| {
-                        commands.iter().any(|command| {
-                            command["args"]
-                                .as_array()
-                                .is_some_and(|args| args.iter().any(|arg| arg == name))
-                        })
-                    };
-                    anyhow::ensure!(
-                        flag("--chrome") == (kind == HarnessKind::Claude),
-                        "{row}: Chrome flag ownership"
-                    );
-                    anyhow::ensure!(
-                        !flag("--dangerously-skip-permissions")
-                            && !flag("--dangerously-bypass-approvals-and-sandbox"),
-                        "{row}: yolo escaped worktree policy"
-                    );
-                    if kind == HarnessKind::OpenCode {
-                        let settings = commands
-                            .iter()
-                            .find_map(|command| command["opencode"].as_str())
-                            .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
-                        let settings: serde_json::Value = serde_json::from_str(settings)?;
-                        anyhow::ensure!(
-                            settings["permissions"][1]["action"] == "external_directory"
-                                && settings["permissions"][1]["effect"] == "deny",
-                            "{row}: worktree permissions lost"
-                        );
+                        crate::session_record::read_provider_session(&capture.artifact_dir())?
+                            .map(|session| session.agent_session)
                     }
-                    let managed = commands.iter().any(|command| command["managed"] == true);
+                    Mode::Headless => {
+                        let outcome = super::drive::run(
+                            &launch,
+                            &ProcessConfig {
+                                runtime: Some(capture.clone()),
+                                timeout: Some(std::time::Duration::from_secs(20)),
+                                ..Default::default()
+                            },
+                        )?;
+                        anyhow::ensure!(outcome.exit_code == 0, "{row}: {}", outcome.stderr);
+                        outcome.agent_session
+                    }
+                };
+                anyhow::ensure!(thread.is_some(), "{row}: no recorded provider thread");
+                let recorded = std::fs::read_to_string(home.join("matrix-argv.jsonl"))?;
+                let commands: Vec<serde_json::Value> = recorded
+                    .lines()
+                    .skip(before)
+                    .map(serde_json::from_str)
+                    .collect::<Result<_, _>>()?;
+                anyhow::ensure!(!commands.is_empty(), "{row}: provider did not run");
+                let flag = |name: &str| {
+                    commands.iter().any(|command| {
+                        command["args"]
+                            .as_array()
+                            .is_some_and(|args| args.iter().any(|arg| arg == name))
+                    })
+                };
+                anyhow::ensure!(
+                    flag("--chrome") == (kind == HarnessKind::Claude),
+                    "{row}: Chrome flag ownership"
+                );
+                anyhow::ensure!(
+                    !flag("--dangerously-skip-permissions")
+                        && !flag("--dangerously-bypass-approvals-and-sandbox"),
+                    "{row}: yolo escaped worktree policy"
+                );
+                if kind == HarnessKind::OpenCode {
+                    let settings = commands
+                        .iter()
+                        .find_map(|command| command["opencode"].as_str())
+                        .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
+                    let settings: serde_json::Value = serde_json::from_str(settings)?;
                     anyhow::ensure!(
-                        managed == (run.reports_turns()),
-                        "{row}: wrong hook ownership: {commands:?}"
+                        settings["permissions"][1]["action"] == "external_directory"
+                            && settings["permissions"][1]["effect"] == "deny",
+                        "{row}: worktree permissions lost"
                     );
-                    println!(
-                        "{row}: waited; thread={thread:?}; argv/hooks={commands}",
-                        commands = serde_json::to_string(&commands)?
-                    );
-                    capture.finish("completed")?;
-                    Ok(())
-                })
-                .unwrap_or_else(|error| panic!("{row}: {error:#}"));
-            }
+                }
+                let managed = commands.iter().any(|command| command["managed"] == true);
+                anyhow::ensure!(
+                    managed == reports,
+                    "{row}: wrong hook ownership: {commands:?}"
+                );
+                println!(
+                    "{row}: waited; thread={thread:?}; argv/hooks={commands}",
+                    commands = serde_json::to_string(&commands)?
+                );
+                capture.finish("completed")?;
+                Ok(())
+            })
+            .unwrap_or_else(|error| panic!("{row}: {error:#}"));
         }
     }
 }
@@ -305,7 +301,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
             let launch = Launch {
                 harness: HarnessKind::Codex.harness(),
                 config: &config,
-                run: Run::Managed,
+                run: Run::WorkSession,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -347,7 +343,7 @@ fn native_limits_and_schemas_require_a_headless_run() {
             let launch = Launch {
                 config: &config,
                 harness: kind.harness(),
-                run: Run::Bare(crate::harness::Mode::Headless),
+                run: Run::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,

@@ -28,7 +28,7 @@ function ownNews(callback, log, args = [], options = {}) {
   }
 }
 
-// A held launch reports each boundary for the server to record: one
+// A managed launch reports each boundary for the server to record: one
 // machine.sock connection, as a hook makes one request: connect, the hello a
 // hook sends, one session.boundary, close. The server's connection slot is
 // back as soon as the answer arrives. Nothing here throws: an unanswered

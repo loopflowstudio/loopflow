@@ -1565,7 +1565,7 @@ impl super::Harness for Claude {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, reporting: super::ThreadName::Assigned },
+            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, managed: super::ThreadName::Assigned },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: true,

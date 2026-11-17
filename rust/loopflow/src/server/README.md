@@ -239,7 +239,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
+| `session.start` | start a held terminal, for example for `lf resume --task`, a Desktop pane or a Desktop Task shell | server |
 | `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -518,12 +518,13 @@ reported, never started by an attachment attempt.
 
 `Launch::run` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
-`transport::delegate` selects chats or batches for direct skill and Graph
-commands, and a batch for `lf -b resume <ID> --message TEXT`. A Graph's correction
-turn in a Task run remains a worker. Interactive Task, Wave, repository and
-bound conversations are work sessions. Workers run `lf task run` steps,
-the `ci-fix` run landing starts, and Discord answers for a Wave. The command
-chooses the launch. The checkout, `--task` and
+`transport::delegate_current` selects chats or batches for skill and Graph
+commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`
+is a batch. A Graph's correction turn in a Task run remains a worker.
+Interactive Task, Wave, repository and bound conversations are work sessions,
+as are conversations opened in a held terminal through Desktop or a framed
+`lf --machine` view. Workers run headless Task Graph steps, the `ci-fix` run
+landing starts, and Discord answers for a Wave. The checkout, `--task` and
 `LF_AS` only decide Task membership: accounting and Task steers always travel
 together. Resume retains a Session's bare or managed lifetime, reading its
 binding and primary scope once before delegation; attribution alone leaves it
@@ -609,7 +610,7 @@ waiting. Saving a steer touches one marker under `steers/` inside the write:
 Wave's or repository's. A launch names its Session's marker and its Task's
 (`LF_STEER_SESSION`, `LF_STEER_TASK`); its hook exits while `LF_STEER_SEEN`,
 touched at each check, is newer than all three. So a comment on one Task
-starts `lf` only in that Task's conversations. A held launch's prompt hook
+starts `lf` only in that Task's conversations. A managed launch's prompt hook
 always runs, which reaches a Session bound to a Task after launch. For chats
 and batches, prompt hooks are gated like tool hooks.
 
@@ -695,7 +696,7 @@ When context needs rendering, the plugin sends `start` or `compact`, then runs
 from checkout files and asks no one; it reuses that block for every model
 request until the next one.
 
-For steers, held or bare, the plugin makes the hook's file comparison in
+For steers on every launch, the plugin makes the hook's file comparison in
 process and starts `lf __context-block --moment steer` only when a marker is
 newer than its last check.
 

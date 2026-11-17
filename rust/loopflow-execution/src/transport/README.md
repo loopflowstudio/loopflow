@@ -26,16 +26,18 @@ managed, with [four launch names](../../../../docs/glossary.md#loopflows-words):
 
 | Command | Launch | Lifetime |
 |---|---|---|
-| `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
+| Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
 | `lf -b resume <ID> --message TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
 | Resume a chat with no message | chat | its terminal |
 | Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
-| `lf task run` steps, the `ci-fix` run landing starts, a Discord answer for a Wave | worker | headless until its run ends; nobody views it, the server records its turns |
+| Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
+| Headless steps of `lf task run` or `lf ship`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
+| A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-A held launch calls `session.start` and becomes a view of the returned
-terminal. With the server unreachable it fails with `Loopflow server is not
-running; run lf server status` and starts nothing in its place. The one launch
+To open a work session from the CLI, `lf` calls `session.start` and becomes
+a view of the returned terminal. With the server unreachable it fails with
+`Loopflow server is not running; run lf server status`. The one launch
 nobody views, a Task's background conversation, goes unstarted instead and its
 Graph runs on.
 
@@ -52,10 +54,11 @@ and receives its steers. Work sessions and workers report turn
 boundaries to the Machine server; chats and batches read their steers directly.
 
 `delegate` returns either a completed delegation or `Here { run }`. Direct
-launches choose between a chat and a batch: `--batch` selects a batch;
-otherwise `--interactive`, a terminal or no prompt selects a chat. Reopening a Session with no message
-reads its binding and primary scope once before `delegate`: chats reopen as
-chats; bound and primary conversations reopen as work sessions.
+launches outside a held terminal or worker step choose between a chat and a
+batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
+prompt selects a chat. Reopening a Session with no message reads its binding
+and primary scope once before `delegate`. Chats reopen as chats, and bound and
+primary conversations reopen as work sessions.
 An unreadable store falls back to a work session and logs a recording gap.
 
 ### Chats at a terminal

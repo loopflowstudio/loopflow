@@ -1047,7 +1047,7 @@ pub async fn open(
         session
     };
     drop(progress);
-    let mut run = crate::harness::Run::Bare(crate::harness::Mode::Headless);
+    let mut run = crate::harness::Run::Batch;
     if resume {
         if session.interactive {
             // A held terminal is attached while its child runs, answering or

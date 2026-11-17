@@ -1,4 +1,4 @@
-//! `session.boundary`: what a held launch's hook reports at a turn or tool
+//! `session.boundary`: what a managed launch's hook reports at a turn or tool
 //! boundary, for the server to record. The hook opens no store for this; it
 //! reads the Session's steers and Task update from the store itself afterwards
 //! ([`loopflow_execution::steer::claim`]).
@@ -658,7 +658,7 @@ mod tests {
                 let at = |moment, callback: serde_json::Value| {
                     boundary(moment, &adapter, &delivery, callback)
                 };
-                // What a held launch's hooks do at each boundary: report it,
+                // What a managed launch's hooks do at each boundary: report it,
                 // then claim the Session's steers themselves.
                 answer(
                 &store,

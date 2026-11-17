@@ -255,9 +255,9 @@ pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> 
         if worker || crate::journal::worker_step() {
             crate::harness::Run::Worker
         } else if current().is_some() {
-            crate::harness::Run::Managed
+            crate::harness::Run::WorkSession
         } else {
-            crate::harness::Run::Bare(input.mode())
+            crate::harness::Run::bare(input.mode())
         },
         None,
         None,
@@ -302,10 +302,10 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
 
 /// Retain the recorded lifetime; a held child keeps its parent's decision.
 fn session_run(id: &str) -> crate::harness::Run {
-    use crate::harness::{Mode, Run};
+    use crate::harness::Run;
 
     if current().is_some() {
-        return Run::Managed;
+        return Run::WorkSession;
     }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
     let bare = crate::journal::process_ledger().and_then(|store| {
@@ -320,9 +320,9 @@ fn session_run(id: &str) -> crate::harness::Run {
         Err(error) => gap.note("resume lifetime", error),
     }
     if matches!(bare, Ok(Some(true))) {
-        Run::Bare(Mode::Interactive)
+        Run::Chat
     } else {
-        Run::Managed
+        Run::WorkSession
     }
 }
 
@@ -339,7 +339,7 @@ fn delegate(
     if cfg!(test)
         || current().is_some()
         || crate::os_process::detached::launched()
-        || matches!(run, crate::harness::Run::Bare(_))
+        || !run.is_managed()
         || (run == crate::harness::Run::Worker && crate::journal::graph_step())
     {
         return Ok(Delegation::Here { run });
@@ -2830,7 +2830,7 @@ mod tests {
 #[cfg(test)]
 mod launch_mode_tests {
     use super::LaunchInput;
-    use crate::harness::Mode;
+    use crate::harness::{Mode, Run};
 
     #[test]
     fn mode_keeps_batch_interactive_tty_and_empty_prompt_semantics() {
@@ -2853,7 +2853,7 @@ mod launch_mode_tests {
 
     #[test]
     fn direct_commands_keep_their_mode_and_caller() {
-        for (batch, mode) in [(true, Mode::Headless), (false, Mode::Interactive)] {
+        for (batch, run) in [(true, Run::Batch), (false, Run::Chat)] {
             let input = LaunchInput {
                 batch,
                 interactive: true,
@@ -2861,9 +2861,7 @@ mod launch_mode_tests {
             };
             assert_eq!(
                 super::delegate_current(input, false).unwrap(),
-                super::Delegation::Here {
-                    run: crate::harness::Run::Bare(mode)
-                }
+                super::Delegation::Here { run }
             );
             assert_eq!(
                 super::delegate_current(input, true).unwrap(),
@@ -2879,7 +2877,7 @@ mod launch_mode_tests {
         let _lock = crate::journal::test_env_lock();
         let _env = crate::test_ambient::EnvGuard::new();
         std::env::set_var(crate::ops::WORK_DECLARATION_ENV, "task:inherited");
-        for batch in [false, true] {
+        for (batch, run) in [(false, Run::Chat), (true, Run::Batch)] {
             let input = LaunchInput {
                 batch,
                 interactive: true,
@@ -2887,16 +2885,13 @@ mod launch_mode_tests {
             };
             assert_eq!(
                 super::delegate_current(input, false).unwrap(),
-                super::Delegation::Here {
-                    run: crate::harness::Run::Bare(input.mode())
-                }
+                super::Delegation::Here { run }
             );
         }
     }
 
     #[test]
     fn reopening_keeps_bare_attribution_and_managed_conversations() {
-        use crate::harness::Run;
         use crate::session::WorkSource;
         use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 
@@ -2904,51 +2899,45 @@ mod launch_mode_tests {
         crate::journal::with_process(|| {
             crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
             let store = crate::journal::process_ledger().unwrap();
-            // A Session recorded headless (`lf -b research`) reopens Bare at
-            // a terminal, though it has no screen to preview.
+            // Attribution selects a launch kind independently of the stored
+            // surface. Resume eligibility is checked before delegation.
             for (surface, source, bound, primary, expected) in [
-                ("headless", None, false, false, Run::Bare(Mode::Interactive)),
-                (
-                    "interactive",
-                    None,
-                    false,
-                    false,
-                    Run::Bare(Mode::Interactive),
-                ),
+                ("headless", None, false, false, Run::Chat),
+                ("interactive", None, false, false, Run::Chat),
                 (
                     "interactive",
                     Some(WorkSource::Checkout),
                     false,
                     false,
-                    Run::Bare(Mode::Interactive),
+                    Run::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Declared),
                     false,
                     false,
-                    Run::Bare(Mode::Interactive),
+                    Run::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Inherited),
                     false,
                     false,
-                    Run::Bare(Mode::Interactive),
+                    Run::Chat,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Bound),
                     true,
                     false,
-                    Run::Managed,
+                    Run::WorkSession,
                 ),
                 (
                     "interactive",
                     Some(WorkSource::Declared),
                     false,
                     true,
-                    Run::Managed,
+                    Run::WorkSession,
                 ),
             ] {
                 let capture = SessionRecorder::begin_at(
@@ -3002,7 +2991,7 @@ mod launch_mode_tests {
                 );
                 assert_eq!(
                     store.runs_in_its_terminal(&session.id).unwrap(),
-                    surface == "interactive" && matches!(expected, Run::Bare(_))
+                    surface == "interactive" && !expected.is_managed()
                 );
             }
             Ok(())
@@ -3019,7 +3008,7 @@ mod launch_mode_tests {
         assert_eq!(
             super::delegate_prepared_session("unreadable-session", false).unwrap(),
             super::Delegation::Here {
-                run: crate::harness::Run::Managed
+                run: crate::harness::Run::WorkSession
             }
         );
     }

@@ -111,10 +111,9 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
-/// A managed launch is recorded and steered through the Machine server, so
-/// its agent starts only once that server welcomes a connection, as the hooks
-/// will need it to. A stopped server is started the way a managed view starts
-/// it: by the selected installation, never by this build.
+/// A managed launch reports turns to the Machine server, so its agent starts
+/// once the server welcomes a connection. The selected installation starts
+/// a stopped server, as it does when opening a work session.
 pub(crate) fn require_server() -> Result<()> {
     use crate::machine::client::Connection;
     if Connection::open().is_ok() {
@@ -136,9 +135,8 @@ pub(crate) fn require_server() -> Result<()> {
 }
 
 /// Capture identity in the launch's delivery file and give the launch its
-/// steer capability. A launch the Machine server holds starts beside it and
-/// presents the capability to that server. A bare launch reaches no server:
-/// its hook presents the capability to the store.
+/// steer capability. Managed hooks use it when reporting to the Machine
+/// server. Every launch uses it when reading steers from the store.
 fn context_environment(
     command: &mut std::process::Command,
     owner: &Recording,
@@ -159,12 +157,11 @@ fn context_environment(
         delivery.identify(store, session)?;
         delivery.save(path)?;
     }
-    let capability_env = match run {
-        Run::Bare(_) => crate::steer::BARE_STEER_ENV,
-        Run::Managed | Run::Worker => {
-            require_server()?;
-            crate::steer::PROVIDER_CONTEXT_ENV
-        }
+    let capability_env = if run.is_managed() {
+        require_server()?;
+        crate::steer::PROVIDER_CONTEXT_ENV
+    } else {
+        crate::steer::BARE_STEER_ENV
     };
     let capability = store.reserve_steer_adapter(session, attachment)?;
     let home = crate::store::lf_home_dir();
@@ -1009,7 +1006,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
             },
-            Run::Bare(crate::harness::Mode::Headless),
+            Run::Batch,
         )
         .unwrap();
         child.wait().unwrap();
@@ -1116,7 +1113,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
                 },
-                Run::Bare(crate::harness::Mode::Headless),
+                Run::Batch,
             )
             .unwrap();
             let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
@@ -1184,7 +1181,7 @@ mod tests {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
             },
-            Run::Bare(crate::harness::Mode::Headless),
+            Run::Batch,
         )
         .unwrap();
         store
@@ -1361,7 +1358,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: attachment.clone(),
                 },
-                Run::Bare(crate::harness::Mode::Headless),
+                Run::Batch,
             )
             .unwrap();
             child.wait().unwrap();
@@ -1409,12 +1406,7 @@ mod tests {
             command.env_clear().arg("60");
             command
         };
-        let mut child = super::spawn_native(
-            command(),
-            &first_owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap();
+        let mut child = super::spawn_native(command(), &first_owner, Run::Batch).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
         let exited = store
@@ -1431,12 +1423,7 @@ mod tests {
             session: session.id.to_string(),
             attachment: next.clone(),
         };
-        let mut provider = super::spawn_native(
-            command(),
-            &next_owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap();
+        let mut provider = super::spawn_native(command(), &next_owner, Run::Batch).unwrap();
         let recorded = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1451,11 +1438,7 @@ mod tests {
         );
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(
-            command(),
-            &next_owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        );
+        let duplicate = super::spawn_native(command(), &next_owner, Run::Batch);
         assert!(duplicate.is_err());
         assert_eq!(
             store.agent_process(&next.agent_process_id).unwrap(),
@@ -1501,12 +1484,7 @@ mod tests {
         };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let mut child = super::spawn_native(
-            command,
-            &first_owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap();
+        let mut child = super::spawn_native(command, &first_owner, Run::Batch).unwrap();
         let next = attachment::claim_session_attachment(
             &store,
             &session.id,
@@ -1555,9 +1533,7 @@ mod tests {
         };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child =
-            super::spawn_native(command, &owner, Run::Bare(crate::harness::Mode::Headless))
-                .unwrap();
+        let mut child = super::spawn_native(command, &owner, Run::Batch).unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -1588,13 +1564,7 @@ mod tests {
         };
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(
-            command,
-            None,
-            &owner(first.clone()),
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap();
+        let mut child = super::spawn(command, None, &owner(first.clone()), Run::Batch).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1615,13 +1585,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(
-            stale,
-            None,
-            &owner(first.clone()),
-            Run::Bare(crate::harness::Mode::Headless)
-        )
-        .is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone()), Run::Batch).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1635,13 +1599,7 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(
-            missing,
-            None,
-            &owner(next.clone()),
-            Run::Bare(crate::harness::Mode::Headless)
-        )
-        .is_err());
+        assert!(super::spawn(missing, None, &owner(next.clone()), Run::Batch).is_err());
         let failed = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1701,7 +1659,7 @@ mod tests {
                 .unwrap();
             std::fs::read_to_string(seen).unwrap()
         };
-        let output = capability(Run::Bare(crate::harness::Mode::Headless));
+        let output = capability(Run::Batch);
         let (server, bare) = output.split_once('\n').unwrap();
         assert_eq!(server, "");
         let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
@@ -1723,9 +1681,7 @@ mod tests {
         };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child =
-            super::spawn_native(command, &owner, Run::Bare(crate::harness::Mode::Headless))
-                .unwrap();
+        let mut child = super::spawn_native(command, &owner, Run::Batch).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1743,9 +1699,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(
-            super::spawn_native(stale, &owner, Run::Bare(crate::harness::Mode::Headless)).is_err()
-        );
+        assert!(super::spawn_native(stale, &owner, Run::Batch).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1756,12 +1710,9 @@ mod tests {
             session: session.id.to_string(),
             attachment: next.clone(),
         };
-        let error = super::spawn_native(
-            Command::new(home.path().join("absent")),
-            &owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap_err();
+        let error =
+            super::spawn_native(Command::new(home.path().join("absent")), &owner, Run::Batch)
+                .unwrap_err();
         assert_eq!(
             error.downcast_ref::<std::io::Error>().unwrap().kind(),
             std::io::ErrorKind::NotFound

@@ -187,7 +187,7 @@ fn a_settled_runtime_cannot_launch_another_native_provider() {
                 session,
                 attachment,
             },
-            crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            crate::harness::Run::Batch,
         );
         assert!(result.is_err());
         assert!(!marker.exists());
@@ -259,7 +259,7 @@ fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
                     session: session.clone(),
                     attachment: attachment.clone()
                 },
-                crate::harness::Run::Bare(crate::harness::Mode::Headless),
+                crate::harness::Run::Batch,
             )
             .is_err());
             fs::remove_dir(&receipt)?;

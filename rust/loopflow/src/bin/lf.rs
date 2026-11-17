@@ -1844,8 +1844,8 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
-    // A turn or tool boundary binds no Work. A held launch's asks the Machine
-    // server and opens no store; a bare launch's steer check opens it itself.
+    // A turn or tool boundary binds no Work. A managed launch reports to
+    // the Machine server. Steer checks open the store locally.
     if let Some(Commands::ContextBlock {
         delivery,
         moment:

@@ -178,7 +178,7 @@ Graph. Nothing hosts either: no server, no holder.
 | The start is never acknowledged | the command says delivery is unknown and starts nothing again; `lf task status` shows whether it ran |
 | Steers | reach a Graph's steps and `lf -b <skill>` run for a Task through that Task |
 
-A step of `lf task run` is a worker. `lf task run` started by an agent, a
+A headless step of `lf task run` is a worker. `lf task run` started by an agent, a
 script or Desktop
 behaves the same way whether or not a terminal is attached; only a person's
 interactive step opens in a holder.
@@ -207,11 +207,11 @@ holder once.
 | Opened with | Runs in |
 |---|---|
 | a person's interactive step of `lf task run` or `lf ship`, `lf resume --task`, a Wave session command | the holder |
-| a Desktop pane | the holder |
+| a Desktop pane or framed `lf --machine` view opening a held conversation | the holder |
 | `lf resume <session>` of a conversation one of those opened | the holder |
 | a Desktop Task shell | the holder |
 | `lf <skill>`, `lf -i`, bare Graphs, even in a Task's checkout, with `--task` or under `LF_AS` | [your terminal](#run-one-in-your-terminal) |
-| anything with `-b`, a pipe or `--json`, and every Graph runner | [its own process](#run-one-headless) |
+| batches, headless Task Graph steps and Graph runners | [headless](#run-one-headless) |
 
 A holder keeps the build it started with. After an install, conversations
 already open stay where they are and new ones start in a holder on the new

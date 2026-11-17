@@ -5,11 +5,11 @@ use std::time::Duration;
 
 use loopflow_execution::agent::{run_agent, AgentConfig, AgentFailure, ProcessConfig};
 use loopflow_execution::error::CoreError;
-use loopflow_execution::harness::{Mode, Run};
+use loopflow_execution::harness::Run;
 use support::EnvGuard;
 use tempfile::TempDir;
 
-const HEADLESS: Run = Run::Bare(Mode::Headless);
+const HEADLESS: Run = Run::Batch;
 
 fn claude_script(body: &str) -> String {
     r#"#!/usr/bin/python3

@@ -209,7 +209,7 @@ pub fn run_bound(
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
-/// Worker, not `Bare(Headless)`: these turns reported to the server before `Run`.
+/// The bridge waits for the worker's answer while its turns reach the server.
 pub(crate) fn answer_bound(
     message: &str,
     cli: &Cli,
@@ -1223,7 +1223,7 @@ for line in sys.stdin:
                 let manifest = std::fs::read_to_string(run_dir.join("manifest.json"))?;
                 assert!(manifest.contains("task:LOO-265"));
                 assert!(!run_dir.join("terminal.json").exists());
-                let result = run_headless_prompt(&built, &runtime, Run::Bare(Mode::Headless));
+                let result = run_headless_prompt(&built, &runtime, Run::Batch);
                 runtime.finish(if result.is_ok() {
                     "completed"
                 } else {
@@ -1255,7 +1255,7 @@ for line in sys.stdin:
             home.path().join("implicit-attempt").display().to_string(),
         );
         let result = loopflow_execution::journal::with_test_ledger(registry.clone(), || {
-            run_agent(&implicit_launch, &built.process, Run::Bare(Mode::Headless))
+            run_agent(&implicit_launch, &built.process, Run::Batch)
         })
         .unwrap();
         assert_eq!(result.exit_code, 0);
@@ -1410,7 +1410,7 @@ for line in sys.stdin:
         let admitted = |built: &PromptBuild| {
             loopflow_execution::journal::with_test_ledger(ledger.clone(), || {
                 loopflow_execution::journal::with_runtime(repo.path(), &command, || {
-                    run_prompt(built, &cli, Run::Bare(Mode::Headless))
+                    run_prompt(built, &cli, Run::Batch)
                 })
             })
         };

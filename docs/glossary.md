@@ -19,10 +19,10 @@ first, then the engineering words it borrows.
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
-| **Managed** | A launch that outlives its initiating command or viewer and reports each turn to the Machine server: a work session or worker. |
-| **Bare** | A launch that follows its caller or terminal and reports no turns to the Machine server: a chat or batch. |
-| **Work session** | A managed, interactive Session in a held terminal, opened with `lf resume --task LOO-12` (or a Wave, repository or bound Session). |
-| **Worker** | A managed, headless Session, such as a step of `lf task run LOO-12`, with no terminal or viewer. |
+| **Managed** | A work session or worker that reports each turn to the Machine server. |
+| **Bare** | A chat or batch with no turn reports to the Machine server. |
+| **Work session** | A managed, interactive Session in a held terminal that survives its viewer. Examples include `lf resume --task LOO-12` and conversations opened in a held terminal through a Desktop pane or framed `lf --machine` view. |
+| **Worker** | A managed, headless Session with no terminal or viewer. Most workers run under a Graph started by `lf task run` or `lf ship`. A Discord Wave answer runs in its caller and returns its answer there. |
 | **Chat** | A bare, interactive Session, started with `lf <skill>` or plain `lf`, that ends with its terminal. |
 | **Batch** | A bare, headless Session, started with `lf -b <skill>`, that follows its caller and returns its answer. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |

@@ -73,7 +73,7 @@ impl LiveSessionFixture {
                     session: session.id.to_string(),
                     attachment,
                 },
-                crate::harness::Run::Bare(crate::harness::Mode::Headless),
+                crate::harness::Run::Batch,
             )
             .unwrap(),
         )
@@ -130,7 +130,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 command,
                 None,
                 &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
-                crate::harness::Run::Bare(crate::harness::Mode::Headless),
+                crate::harness::Run::Batch,
             )?;
             let opened = super::open(&store, home, &session.id, false, true, false).await;
             let forked = super::open(&store, home, &session.id, true, true, false).await;

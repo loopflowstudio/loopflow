@@ -797,7 +797,7 @@ mod tests {
                     session: "resume".into(),
                     attachment: attached.clone(),
                 },
-                crate::harness::Run::Bare(crate::harness::Mode::Headless),
+                crate::harness::Run::Batch,
             )
             .unwrap(),
         );

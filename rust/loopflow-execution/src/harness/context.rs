@@ -11,13 +11,13 @@ use crate::context_block::ContextDelivery;
 use crate::harness::Run;
 use crate::prompt::write_prompt_log;
 
-/// `Run::Managed` launches are registered Sessions the Machine server
-/// wakes through Claude's inbox.
+/// Managed launches accept messages through Claude's inbox so the Machine
+/// server can wake idle conversations.
 pub(crate) fn claude_args(context: &ContextDelivery, run: Run) -> Result<Vec<String>> {
     let mut hooks = context.hook_settings(run)?;
     hooks["PostToolUseFailure"] = hooks["PostToolUse"].clone();
     let mut settings = json!({"hooks": hooks});
-    if run.reports_turns() {
+    if run.is_managed() {
         // The Machine server wakes an idle conversation with steers and Task
         // updates through Claude's cross-session inbox. lf runs in no
         // permission mode it could attest, and a session that bypasses
@@ -98,7 +98,7 @@ pub(crate) fn add_opencode_context(
     instructions: &str,
     run: Run,
 ) -> Result<()> {
-    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":run.reports_turns(),
+    let spec = json!({"executable":crate::os_process::resolve_lf_binary()?, "delivery":context, "instructions":instructions, "turns":run.is_managed(),
         "steers":loopflow_storage::steer_markers::latest_marker(&context.home), "server":server_spec("lf opencode plugin")});
     let delivery = write_prompt_log(
         &context.repo,
@@ -142,7 +142,7 @@ pub(crate) fn pi_args(
         .unwrap_or_else(crate::store::lf_home_dir);
     let source = format!(
         "const spec = {};\n{}\n{}",
-        json!({"native":native, "turns":run.reports_turns(), "executable":crate::os_process::resolve_lf_binary()?,
+        json!({"native":native, "turns":run.is_managed(), "executable":crate::os_process::resolve_lf_binary()?,
             "log":home.join("logs").join("pi-extension.log"), "server":server_spec("lf pi extension"),
             "steers":loopflow_storage::steer_markers::latest_marker(&home),
             "bashGuard":pi_bash_guard()}),
@@ -244,14 +244,14 @@ mod tests {
                 references: vec![repo.path().join("task-reference.md")],
             })
             .collect();
-        let first = super::codex_hooks(&contexts[0], None, Run::Managed).unwrap();
+        let first = super::codex_hooks(&contexts[0], None, Run::WorkSession).unwrap();
         assert_eq!(
             first,
-            super::codex_hooks(&contexts[1], None, Run::Managed).unwrap()
+            super::codex_hooks(&contexts[1], None, Run::WorkSession).unwrap()
         );
         assert_eq!(
-            super::claude_args(&contexts[0], Run::Managed).unwrap(),
-            super::claude_args(&contexts[1], Run::Managed).unwrap()
+            super::claude_args(&contexts[0], Run::WorkSession).unwrap(),
+            super::claude_args(&contexts[1], Run::WorkSession).unwrap()
         );
         let mut saved = Vec::new();
         for context in &contexts {
@@ -275,10 +275,8 @@ mod tests {
         assert_eq!(restored, contexts[0]);
     }
 
-    /// Only a server-held launch's conversation is registered for waking, so only
-    /// it accepts messages from other processes without review.
     #[test]
-    fn only_server_held_claude_launches_accept_inbox_messages() {
+    fn only_managed_claude_launches_accept_inbox_messages() {
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
@@ -300,7 +298,7 @@ mod tests {
             serde_json::from_slice(&std::fs::read(&args[1]).unwrap()).unwrap()
         };
         // A bare launch reports no turns; its tool hook reads steers from the store.
-        let bare = settings(Run::Bare(crate::harness::Mode::Headless));
+        let bare = settings(Run::Batch);
         assert!(bare["hooks"]["SessionStart"].is_array());
         assert!(bare["hooks"].get("Stop").is_none());
         for event in ["PostToolUse", "PostToolUseFailure", "UserPromptSubmit"] {
@@ -310,9 +308,15 @@ mod tests {
             assert!(command.ends_with("--moment steer"), "{event}: {command}");
         }
         assert!(bare.get("crossSessionInbound").is_none());
-        let managed = settings(Run::Managed);
-        assert!(managed["hooks"]["Stop"].is_array(), "Work keeps turn hooks");
-        assert_eq!(managed["crossSessionInbound"], "accept");
+        for run in [Run::WorkSession, Run::Worker] {
+            let managed = settings(run);
+            assert!(managed["hooks"]["Stop"].is_array(), "{run:?}");
+            let prompt = managed["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
+                .as_str()
+                .unwrap();
+            assert!(prompt.ends_with("--moment tool"), "{run:?}: {prompt}");
+            assert_eq!(managed["crossSessionInbound"], "accept");
+        }
     }
 
     #[test]
@@ -339,7 +343,7 @@ mod tests {
                 "/<session-flags>/config.toml:session_start:0:0": {"trusted_hash": "host"},
             },
         });
-        let hooks = &super::codex_hooks(&context, Some(&host), Run::Managed).unwrap();
+        let hooks = &super::codex_hooks(&context, Some(&host), Run::WorkSession).unwrap();
         assert_eq!(hooks["SessionStart"][0]["hooks"][0]["command"], "host-hook");
         let state = hooks["state"].as_object().unwrap();
         assert_eq!(state["host-trust"]["trusted_hash"], "unchanged");
@@ -480,7 +484,7 @@ await new Promise((resolve) => server.listen(SOCKET, resolve));
     /// One conversation through the OpenCode plugin: a prompt, three model
     /// requests with a compaction before the third, then the turn's end.
     fn opencode_turn(run: Run) -> Probe {
-        let turns = run.reports_turns();
+        let turns = run.is_managed();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let repo = tempfile::tempdir().unwrap();
@@ -539,7 +543,7 @@ await close();
 
     #[test]
     fn a_managed_opencode_turn_reports_to_the_server_and_starts_lf_only_for_context_and_steers() {
-        let managed = opencode_turn(Run::Managed);
+        let managed = opencode_turn(Run::WorkSession);
         let calls: Vec<_> = managed
             .calls
             .lines()
@@ -561,7 +565,7 @@ await close();
 
     #[test]
     fn a_bare_opencode_run_reads_its_own_steers_and_opens_no_connection() {
-        let bare = opencode_turn(Run::Bare(crate::harness::Mode::Headless));
+        let bare = opencode_turn(Run::Batch);
         // One steer check, at the first request; later ones find nothing newer.
         let calls: Vec<_> = bare
             .calls
@@ -576,7 +580,7 @@ await close();
     /// One headless Pi turn with two tool calls through the extension, with
     /// Pi's package stood in.
     fn pi_turn(native: bool, run: Run, frozen: bool) -> Probe {
-        let turns = run.reports_turns();
+        let turns = run.is_managed();
         let _lock = loopflow_test_support::env_lock().lock().unwrap();
         let _env = crate::test_ambient::EnvGuard::clear(&["LF_HOME", "LF_BIN"]);
         let home = tempfile::tempdir().unwrap();
@@ -654,7 +658,7 @@ assert.deepEqual(steers, [["STEER ", "steer"]]);
 
     #[test]
     fn a_managed_native_pi_turn_reports_events_and_starts_lf_only_for_context_and_steers() {
-        let native = pi_turn(true, Run::Managed, false);
+        let native = pi_turn(true, Run::WorkSession, false);
         // One render at start and one steer check; no lf per event, tool or
         // bash command.
         assert_eq!(
@@ -691,17 +695,17 @@ assert.deepEqual(steers, [["STEER ", "steer"]]);
         let checks = "__context-block --moment start\n__context-block --moment steer\n";
         // Pi's RPC driver records the events; the extension reports the
         // render and the turn end.
-        let driven = pi_turn(false, Run::Managed, false);
+        let driven = pi_turn(false, Run::Worker, false);
         assert_eq!(driven.calls, checks);
         assert_eq!(moments(&driven), ["start", "stop"]);
-        let bare = pi_turn(false, Run::Bare(crate::harness::Mode::Headless), false);
+        let bare = pi_turn(false, Run::Batch, false);
         assert_eq!(bare.calls, checks);
         assert!(moments(&bare).is_empty(), "{}", bare.server);
     }
 
     #[test]
     fn a_native_pi_turn_against_a_frozen_server_waits_only_at_its_kept_events() {
-        let frozen = pi_turn(true, Run::Managed, true);
+        let frozen = pi_turn(true, Run::WorkSession, true);
         // Nine boundaries reach a live server. With no answer, only session
         // start, the start render, each tool start, the turn end and `stop`
         // wait their two seconds; the rest fall into the open gap.
@@ -799,7 +803,7 @@ assert.deepEqual(steers, [["STEER ", "steer"]]);
         let executable = std::env::current_exe().unwrap();
         std::env::set_var("LF_BIN", &executable);
 
-        let args = super::pi_args(None, true, Run::Managed).unwrap();
+        let args = super::pi_args(None, true, Run::WorkSession).unwrap();
 
         // A fresh machine's Pi process inherits no LF_BIN; the source carries it.
         let source = std::fs::read_to_string(&args[1]).unwrap();
@@ -830,7 +834,13 @@ assert.deepEqual(steers, [["STEER ", "steer"]]);
             "model": "fixture/model"
         });
         let mut config = original.clone();
-        add_opencode_context(&mut config, &context, "Fixed instructions", Run::Managed).unwrap();
+        add_opencode_context(
+            &mut config,
+            &context,
+            "Fixed instructions",
+            Run::WorkSession,
+        )
+        .unwrap();
         assert_eq!(config["permissions"], original["permissions"]);
         assert_eq!(config["model"], original["model"]);
         let plugins = config["plugins"].as_array().unwrap();

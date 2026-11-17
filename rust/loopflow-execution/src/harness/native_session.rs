@@ -175,7 +175,7 @@ pub fn resume_session_with_env(
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
-    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && run.reports_turns();
+    let sends_first_turn = harness.capabilities().initial_prompt_on_resume && run.is_managed();
     if provider_session.is_some() && !sends_first_turn {
         config.task_prompt.clear();
     }
@@ -311,7 +311,7 @@ impl NativeOutcome {
     /// conversation can have another client.
     pub fn result(&self, kind: super::HarnessKind, resuming: bool, run: Run) -> Result<()> {
         let program = kind.as_str();
-        if !run.reports_turns() && self.moved.is_none() {
+        if !run.is_managed() && self.moved.is_none() {
             match self.bare_exit_code(kind) {
                 0 => Ok(()),
                 code => Err(crate::process::CommandExit(code).into()),
@@ -614,7 +614,7 @@ fn run_client(
     // starts it fresh instead of resuming one that never ran. A Session's
     // first launch (`lf resume` starting a repository conversation) names no
     // Work on its command line; its recorded Session does.
-    if launch.run.reports_turns() {
+    if launch.run.is_managed() {
         crate::harness::agent_process::require_server()?;
     }
     if let (Some(capture_dir), Some(agent_session)) = (capture_dir.as_deref(), agent_session) {
@@ -960,7 +960,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Bare(crate::harness::Mode::Headless),
+                run: Run::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1016,13 +1016,7 @@ mod tests {
             temp.path(),
             &capture.environment(),
         )
-        .and_then(|outcome| {
-            outcome.result(
-                crate::harness::HarnessKind::Claude,
-                false,
-                Run::Bare(crate::harness::Mode::Headless),
-            )
-        })
+        .and_then(|outcome| outcome.result(crate::harness::HarnessKind::Claude, false, Run::Batch))
         .expect_err("a failed provider fails its launch")
     }
 
@@ -1116,7 +1110,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
-                    Run::Bare(crate::harness::Mode::Headless),
+                    Run::Batch,
                 )
             };
             if index % 2 == 0 {
@@ -1224,7 +1218,7 @@ mod tests {
             Some(&session),
             &BTreeMap::new(),
             None,
-            Run::Bare(crate::harness::Mode::Headless),
+            Run::Batch,
         )
         .unwrap();
 
@@ -1264,11 +1258,7 @@ mod tests {
         });
         let result = native_fixture("/bin/sleep", vec!["10".into()], home, &BTreeMap::new())
             .and_then(|outcome| {
-                outcome.result(
-                    crate::harness::HarnessKind::Claude,
-                    false,
-                    Run::Bare(crate::harness::Mode::Headless),
-                )
+                outcome.result(crate::harness::HarnessKind::Claude, false, Run::Batch)
             });
         stop.join().unwrap().unwrap();
         result.unwrap();
@@ -1357,7 +1347,7 @@ mod tests {
                     session: session.id.to_string(),
                     attachment: original.clone(),
                 },
-                Run::Bare(crate::harness::Mode::Headless),
+                Run::Batch,
             )?;
             let endpoint = home.join("provider.sock");
             store.record_session_connection(
@@ -1392,7 +1382,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Bare(crate::harness::Mode::Headless),
+                run: Run::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1496,7 +1486,7 @@ mod tests {
             let launch = Launch {
                 config: &config,
                 harness: super::super::HarnessKind::Claude.harness(),
-                run: Run::Bare(crate::harness::Mode::Headless),
+                run: Run::Batch,
                 recording: &recording,
                 start: Start::New,
                 context_file: None,
@@ -1604,7 +1594,7 @@ mod tests {
                 env: BTreeMap::new(),
                 ..crate::agent::AgentConfig::default()
             },
-            Run::Bare(crate::harness::Mode::Headless),
+            Run::Batch,
             None,
             None,
         )

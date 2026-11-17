@@ -387,7 +387,7 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
             harness: crate::harness::HarnessKind::Pi.harness(),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            run: crate::harness::Run::Batch,
             start: crate::harness::Start::Resume { thread: &token },
             context_file: Some(&directory.path().join("context.md")),
         })
@@ -635,7 +635,7 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
             harness: crate::harness::HarnessKind::Pi.harness(),
             config: &config,
             recording: &recording,
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            run: crate::harness::Run::Batch,
             start: crate::harness::Start::New,
             context_file: None,
         })
@@ -656,7 +656,7 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
             harness: crate::harness::HarnessKind::Pi.harness(),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            run: crate::harness::Run::Batch,
             start: crate::harness::Start::Resume { thread: &id },
             context_file: None,
         })
@@ -678,7 +678,7 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
             harness: crate::harness::HarnessKind::Pi.harness(),
             config: &config,
             recording: &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
-            run: crate::harness::Run::Bare(crate::harness::Mode::Headless),
+            run: crate::harness::Run::Batch,
             start: crate::harness::Start::Resume { thread: &id },
             context_file: None,
         })

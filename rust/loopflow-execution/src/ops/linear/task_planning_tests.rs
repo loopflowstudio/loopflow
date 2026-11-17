@@ -903,9 +903,9 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
             )
         });
         let run = if agent == "codex" {
-            crate::harness::Run::Managed
+            crate::harness::Run::WorkSession
         } else {
-            crate::harness::Run::Bare(crate::harness::Mode::Headless)
+            crate::harness::Run::Batch
         };
         let launch = crate::agent::AgentConfig {
             agent: crate::config::Agent::parse(agent).unwrap(),

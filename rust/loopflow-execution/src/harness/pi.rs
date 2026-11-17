@@ -97,7 +97,7 @@ pub(crate) fn validate_resume(token: &AgentSessionId) -> Result<PathBuf> {
 
 /// Pi arguments that reopen a recorded thread. A bare launch's id with no file
 /// yet never got a reply, so Pi starts it fresh under that id, as it would
-/// alone; a held launch's recorded file must still exist.
+/// alone. A managed launch's recorded file must still exist.
 pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
     // An unfound bare id stays the relative token.
     if conversation_file(token).is_relative() {
@@ -109,7 +109,7 @@ pub(crate) fn resume_args(token: &AgentSessionId) -> Result<[String; 2]> {
     ])
 }
 
-/// The file holding a recorded Pi thread. A held launch records the file Pi
+/// The file holding a recorded Pi thread. A managed launch records the file Pi
 /// reports; a bare launch records the `--session-id` lf gave it, which Pi
 /// keeps as `<agent dir>/sessions/<cwd>/<time>_<id>.jsonl`.
 pub(crate) fn conversation_file(token: &AgentSessionId) -> PathBuf {
@@ -709,7 +709,7 @@ impl super::Harness for Pi {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, reporting: super::ThreadName::Reported },
+            thread: super::ThreadNaming { bare: super::ThreadName::Assigned, managed: super::ThreadName::Reported },
             initial_prompt_on_resume: false,
             supports_execution_boundary: true,
             classifies_failures: false,

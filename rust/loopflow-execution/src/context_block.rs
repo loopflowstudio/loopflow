@@ -287,9 +287,8 @@ impl ContextDelivery {
     /// The provider hooks of one launch. Every launch prints its context
     /// block at session start and after a compaction, and reads its own
     /// steers and Task update from the store after a tool call and at a
-    /// prompt. A launch the Machine server holds (`Run::reports_turns`)
-    /// also reports its starts, prompts and turn ends to the server, which
-    /// records them.
+    /// prompt. A managed launch also reports its starts, prompts and turn
+    /// ends to the server for recording.
     pub fn hook_settings(&self, run: crate::harness::Run) -> anyhow::Result<serde_json::Value> {
         let executable = crate::os_process::resolve_lf_binary()?;
         let quote = |path: &Path| crate::os_process::shell_escape(&path.to_string_lossy());
@@ -315,14 +314,14 @@ impl ContextDelivery {
             {"matcher": "compact", "hooks": [context("compact")]},
         ]);
         let steer = hook(format!("{gate} {command} steer"));
-        if !run.reports_turns() {
+        if !run.is_managed() {
             return Ok(serde_json::json!({
                 "PostToolUse": steer,
                 "UserPromptSubmit": steer,
                 "SessionStart": start,
             }));
         }
-        // A held prompt always runs: the server records the turn it starts.
+        // A managed prompt hook always runs: the server records the turn it starts.
         Ok(serde_json::json!({
             "Stop": hook(format!("{command} stop")),
             "PostToolUse": steer,
@@ -940,9 +939,7 @@ mod tests {
         let delivery = delivery(repo.path());
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        let bare = delivery
-            .hook_settings(crate::harness::Run::Bare(crate::harness::Mode::Headless))
-            .unwrap();
+        let bare = delivery.hook_settings(crate::harness::Run::Batch).unwrap();
         assert_eq!(
             bare.as_object().unwrap().keys().collect::<Vec<_>>(),
             ["PostToolUse", "SessionStart", "UserPromptSubmit"]
@@ -978,10 +975,7 @@ mod tests {
         let delivery = delivery(repo.path());
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-        for run in [
-            crate::harness::Run::Bare(crate::harness::Mode::Headless),
-            crate::harness::Run::Managed,
-        ] {
+        for run in [crate::harness::Run::Batch, crate::harness::Run::WorkSession] {
             let hooks = delivery.hook_settings(run).unwrap();
             assert!(hooks.get("StopFailure").is_none());
             assert!(!hooks.to_string().contains("record-limit"));
@@ -1002,7 +996,7 @@ mod tests {
         std::env::set_var("LF_HOME", &delivery.home);
         std::env::set_var("LF_BIN", &stub);
         let settings = delivery
-            .hook_settings(crate::harness::Run::Managed)
+            .hook_settings(crate::harness::Run::WorkSession)
             .unwrap();
         let command = settings["PostToolUse"][0]["hooks"][0]["command"]
             .as_str()

@@ -1786,7 +1786,7 @@ impl super::Harness for Codex {
         super::Capabilities {
             thread: super::ThreadNaming {
                 bare: super::ThreadName::Reported,
-                reporting: super::ThreadName::Reported,
+                managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: true,
             supports_execution_boundary: true,
@@ -1813,7 +1813,7 @@ impl super::Harness for Codex {
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let (mut args, input) = launch.terminal_input()?;
         let mut client = super::native_session::NativeClient::new(launch)?;
-        if !launch.run.reports_turns() {
+        if !launch.run.is_managed() {
             args.extend(crate::agent::codex_terminal_options(
                 launch.config,
                 launch.run,

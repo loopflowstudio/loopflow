@@ -946,13 +946,7 @@ mod tests {
         };
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
-        let child = super::super::agent_process::spawn(
-            command,
-            None,
-            &owner,
-            Run::Bare(crate::harness::Mode::Headless),
-        )
-        .unwrap();
+        let child = super::super::agent_process::spawn(command, None, &owner, Run::Batch).unwrap();
         let pid = child.id().unwrap();
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
@@ -1390,7 +1384,7 @@ impl super::Harness for OpenCode {
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
-            thread: super::ThreadNaming { bare: super::ThreadName::Reported, reporting: super::ThreadName::Reported },
+            thread: super::ThreadNaming { bare: super::ThreadName::Reported, managed: super::ThreadName::Reported },
             initial_prompt_on_resume: false,
             supports_execution_boundary: false,
             classifies_failures: false,

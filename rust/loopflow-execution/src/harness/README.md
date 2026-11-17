@@ -10,7 +10,7 @@ at turn boundaries, interjects through hooks and records what happened.
 let launch = Launch {
     config: &config,
     harness,            // resolved once from the selected agent
-    run,                // Bare(mode), Managed or Worker, from delegation
+    run,                // Chat, Batch, WorkSession or Worker
     recording: &recording, // store, Session and attachment; required before opening
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
@@ -22,13 +22,7 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-The [glossary](../../../../docs/glossary.md#loopflows-words) defines managed,
-bare, work session, worker, chat and batch. Their launch values are:
-
-| | Interactive | Headless |
-|---|---|---|
-| Managed | work session: `Run::Managed` | worker: `Run::Worker` |
-| Bare | chat: `Run::Bare(Interactive)` | batch: `Run::Bare(Headless)` |
+The four `Run` variants match the [glossary's launch names](../../../../docs/glossary.md#loopflows-words).
 
 Work sessions and workers report turns to the Machine server. Chats and
 batches read their steers directly and report no turn boundaries.
@@ -132,7 +126,7 @@ its own process, and at a tool boundary only when a steer may be waiting
 ([Every launch reads its own steers](../../../loopflow/src/server/README.md#every-launch-reads-its-own-steers)).
 A chat or batch
 ([which launches are managed](../../../loopflow/src/server/README.md#turn-and-tool-boundaries))
-does nothing else: it reports no boundary and asks no server. A held launch's
+does nothing else: it reports no boundary and asks no server. A managed launch's
 hook first sends one `session.boundary` request to the Machine server at
 `machine.sock` with a two-second deadline, and the server records the turn,
 acknowledges the native input and, after a turn ends, records Codex turns,

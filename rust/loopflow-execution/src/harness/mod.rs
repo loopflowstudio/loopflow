@@ -272,26 +272,33 @@ pub enum Mode {
     Headless,
 }
 
-/// Bare or managed execution and its mode, independently of Task attribution.
-/// `Worker` is managed and headless; `Managed` is managed and interactive.
+/// Launch kind, independently of Task attribution.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Run {
-    Bare(Mode),
-    Managed,
+    Chat,
+    Batch,
+    WorkSession,
     Worker,
 }
 
 impl Run {
-    pub fn mode(self) -> Mode {
-        match self {
-            Self::Bare(mode) => mode,
-            Self::Managed => Mode::Interactive,
-            Self::Worker => Mode::Headless,
+    pub fn bare(mode: Mode) -> Self {
+        match mode {
+            Mode::Interactive => Self::Chat,
+            Mode::Headless => Self::Batch,
         }
     }
 
-    pub fn reports_turns(self) -> bool {
-        !matches!(self, Self::Bare(_))
+    pub fn mode(self) -> Mode {
+        match self {
+            Self::Chat | Self::WorkSession => Mode::Interactive,
+            Self::Batch | Self::Worker => Mode::Headless,
+        }
+    }
+
+    /// Whether the launch reports turns to the Machine server.
+    pub fn is_managed(self) -> bool {
+        matches!(self, Self::WorkSession | Self::Worker)
     }
 }
 
@@ -387,14 +394,15 @@ pub enum ThreadName {
 #[derive(Debug, Clone, Copy)]
 pub struct ThreadNaming {
     pub bare: ThreadName,
-    pub reporting: ThreadName,
+    pub managed: ThreadName,
 }
 
 impl ThreadNaming {
     pub fn for_run(self, run: Run) -> ThreadName {
-        match run {
-            Run::Bare(_) => self.bare,
-            Run::Managed | Run::Worker => self.reporting,
+        if run.is_managed() {
+            self.managed
+        } else {
+            self.bare
         }
     }
 }
@@ -653,7 +661,7 @@ pub fn launch_for_test<'a>(
         config,
         recording,
         harness: kind.harness(),
-        run: Run::Bare(Mode::Headless),
+        run: Run::Batch,
         start: Start::from_thread(config.resume_token.as_ref()),
         context_file: None,
     }

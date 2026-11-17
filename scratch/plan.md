@@ -79,6 +79,24 @@ store, Session and attachment.
   to `begin_process_runtime` and `run_headless_prompt`. The typed agent and
   launch kind already carry those facts.
 
+## Next implement
+
+Concept review of `2c15a785b7`: `Run` has the four variants, the delete list is
+gone from `rust/` and `docs/`, and the glossary, `docs/dev/index.md`,
+`docs/sessions.md` and the transport table agree. Prose only remains; no
+behavior changes and no test reruns beyond `documented_commands` if a command
+example moves.
+
+- `docs/dev/machines.md:469` still teaches the three places: "a launch runs
+  here, held by the Machine server's holder, or detached under a Graph
+  process". Name the four launch kinds, or link the table in
+  `index.md#what-runs-on-a-machine` and drop the sentence's own list.
+- `rust/loopflow-execution/src/transport/README.md:51`: "A command chooses the
+  state" is left from the two-state draft. It chooses the launch kind.
+- `transport.rs:269` and `:303` doc comments say a resume retains "its bare or
+  managed lifetime". Managed means turn reports; what resume retains is the
+  launch kind (chat or work session).
+
 ## Remaining checks
 
 Gate owns the broader transport, configuration and Task performance checks.

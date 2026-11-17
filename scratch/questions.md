@@ -82,3 +82,7 @@ Choices made headless for review; the plan says what each passed over.
 - QA: after a code, a Claude login still running 1 s after its first stderr line ends as rejected
   (a malformed code makes it complain and wait for another paste). Passed
   over: reading another code from the person.
+- Concept review (as built): Asana, Notion and Doppler sign in on this
+  Machine only; one predicate (`login::reaches_other_machines`) gates
+  dispatch, rental prepare's default and `ondemand add --logins`. Passed over:
+  remote transfers for them.

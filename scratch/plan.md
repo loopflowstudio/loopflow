@@ -363,6 +363,34 @@ checks on both ends; LOO-913's fallback and wait rules.
    `ServerProtocolTests` (CI); a real `lf machine login claude mini` and
    `codex mini` (a person at gate).
 
+## Remaining: one set of providers that reach other Machines (concept review, as built)
+
+`lf machine login <provider> <machine>` parses eight providers, but only
+Claude, Codex, GitHub, Linear and OpenCode reach another Machine; Asana,
+Notion and Doppler end in `credentials::connect`'s
+`bail!("machine login supports github, opencode and linear")`. Rental
+prepare's default ("every provider `logins` shows signed in here") includes
+them, so a rental from a template without `--logins` fails before its clone
+whenever this Machine is signed in to Asana, Notion or Doppler. **Made for
+review:** name the set once and read it everywhere; passed over: building
+remote transfers for those three (more behavior, its own Task if a rental
+needs one).
+
+- `login::reaches_other_machines(provider) -> bool` in `machine/login.rs`:
+  Claude, Codex, GitHub, Linear, OpenCode.
+- `login::login` checks it before dispatch for a Machine that is not here:
+  "<Provider> signs in on this Machine only; run `lf machine login <provider>`
+  on <machine>". `credentials::connect`'s catch-all becomes unreachable;
+  replace it with that same error or make the match exhaustive over the
+  transferable three.
+- Rental `prepare`'s default list filters by it; `lf ondemand add --logins`
+  rejects a provider outside it (at add, not at rent).
+- `lf machine login`'s `machines` help says which providers it takes.
+- Test: `machine_commands` — `lf machine login asana <fixture>` fails naming
+  "this Machine only" and nothing reaches the fixture SSH; `ondemand add
+  --logins doppler` fails. Prepare's default filter has no fixture (none
+  reaches prepare); a unit test on the list function it uses is enough.
+
 ## Remaining (gate)
 
 All four slices are built on the `match` (#1966 still open). Left:

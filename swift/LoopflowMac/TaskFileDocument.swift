@@ -32,7 +32,7 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
     }
 
     func reconcile(_ next: TaskFileSnapshot) async {
-        defer { editor.recordInputReadiness() }
+        defer { editor.recordReadiness() }
         incomingGeneration += 1
         let generation = incomingGeneration
         updateAccess(next)
@@ -241,18 +241,18 @@ final class TaskFileDocument: NSObject, NSTextViewDelegate, @preconcurrency NSTe
 
 @MainActor
 final class TaskFileTextView: NSTextView {
-    var inputReady: (() -> Void)?
+    var contentsReady: (() -> Void)?
     var compositionEnded: (() -> Void)?
 
-    func recordInputReadiness() {
-        guard let window, window.firstResponder === self, isEditable, acceptsFirstResponder else { return }
-        inputReady?()
+    func recordReadiness() {
+        guard window != nil, !isHiddenOrHasHiddenAncestor, !visibleRect.isEmpty,
+              isEditable, acceptsFirstResponder else { return }
+        contentsReady?()
     }
 
-    override func becomeFirstResponder() -> Bool {
-        let accepted = super.becomeFirstResponder()
-        if accepted { recordInputReadiness() }
-        return accepted
+    override func layout() {
+        super.layout()
+        recordReadiness()
     }
 
     override func unmarkText() {
@@ -313,10 +313,10 @@ final class TaskFilesStore {
     let performanceOwner = UUID()
 
     func selectFileFromInput(_ path: String, mode: Mode) {
-        Perf.userAction(.openFile, scenario: "file_to_editor", id: path,
+        Perf.userAction(.openFile, scenario: "file_to_visible_editor", id: path,
                         repository: measurementRepository, liveSessions: nil, owner: performanceOwner) {
             let document = document(path)
-            document.editor.inputReady = { [weak self, weak document] in
+            document.editor.contentsReady = { [weak self, weak document] in
                 guard let self, let document, self.selection == path,
                       document.snapshot?.state == .text, document.snapshot?.path == path,
                       document.editor.string == document.text else { return }
@@ -324,7 +324,7 @@ final class TaskFilesStore {
             }
             selectFile(path, mode: mode)
             Perf.acknowledged(.openFile, id: path, owner: performanceOwner)
-            document.editor.recordInputReadiness()
+            document.editor.recordReadiness()
         }
     }
 

@@ -75,12 +75,15 @@ Task selection and Session return follow the exact prepared Session, including
 already-focused retained terminals. New independent conversations follow their
 new shell tab to its recorded, available Session. Refresh measures the original
 Refresh click through reattachment to focused usable input. File selection ends
-only when the selected text snapshot is mounted in its editable, focused buffer;
-previews and read-only patches do not qualify as editor input.
+when the selected text snapshot is mounted, visible and editable. It does not
+wait for a second click to focus the editor. Read-only patches do not qualify.
 
 Send → response observed is currently instrumented for native Codex. A bounded
-provider preview is published once after the first response word, then the visible
-terminal text is checked at most ten times per second. A new provider turn and
+provider preview identifies the response, then visible terminal text is checked
+at most ten times per second. Native clients use the existing watched transcript
+reading; its publication can follow the full message. Streaming clients can
+publish once after the first response word. Sources remain identified as
+`codex_transcript` and `codex`. A new provider turn and
 response text absent before submission are required before acquiring a frame.
 This is an observed-response upper bound, including receipt delivery, polling and
 capture; it is not the precise first compositor frame or bare model TTFT. Prompt

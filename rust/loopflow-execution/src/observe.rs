@@ -53,7 +53,7 @@ enum Answer {
     Bool(bool),
     Time(i64),
     Process(Result<Option<OsProcess>, Failure>),
-    Turn(Option<crate::transcript::live::SessionTurn>),
+    Turn(Option<crate::transcript::live::CurrentTurn>),
     Raw(Vec<crate::transcript::raw::RawDirectory>),
 }
 
@@ -146,7 +146,7 @@ impl Fact {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
             Self::Turn(harness, source) => {
-                Answer::Turn(crate::transcript::live::read_turn(*harness, source))
+                Answer::Turn(crate::transcript::live::read_current(*harness, source))
             }
             Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
@@ -461,6 +461,13 @@ pub(crate) fn transcript_turn(
     harness: crate::harness::HarnessKind,
     source: &crate::transcript::Source,
 ) -> Option<crate::transcript::live::SessionTurn> {
+    transcript_current(harness, source).map(|reading| reading.turn)
+}
+
+pub(crate) fn transcript_current(
+    harness: crate::harness::HarnessKind,
+    source: &crate::transcript::Source,
+) -> Option<crate::transcript::live::CurrentTurn> {
     use crate::transcript::Source;
     let source = match source {
         Source::File(path) => Source::File(absolute(path)),

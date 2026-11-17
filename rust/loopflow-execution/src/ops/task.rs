@@ -69,6 +69,7 @@ use crate::work::wave::Wave;
 use loopflow_model::durable::WorkStatus;
 use loopflow_storage::child::ChildRef;
 use loopflow_storage::planning_sync::LostAnswer;
+use loopflow_storage::sqlite::tracker_actions::ActionPhase;
 use loopflow_storage::sqlite::{SqliteStore, TaskCheckout};
 use loopflow_storage::work::task::{
     GithubPr, Observation, PrMergeMode, PrPhase, PrPublication, Task, TaskEventKind, TaskPr,
@@ -2340,18 +2341,12 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.to_string_lossy();
         if let Some(answer) = answer {
-            let lost: Vec<String> = store
+            let mut lost = store
                 .sqlite
                 .task_tracker_actions(&task.id)
                 .map_err(task_error)?
-                .actions
-                .into_iter()
-                .filter(|action| {
-                    action.phase
-                        == loopflow_storage::sqlite::tracker_actions::ActionPhase::Conflicted
-                })
-                .map(|action| action.id)
-                .collect();
+                .actions;
+            lost.retain(|action| action.phase == ActionPhase::Conflicted);
             store
                 .sqlite
                 .answer_lost(&lost, answer)
@@ -2536,8 +2531,7 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
             Some(action)
                 if matches!(
                     action.phase,
-                    loopflow_storage::sqlite::tracker_actions::ActionPhase::Confirmed
-                        | loopflow_storage::sqlite::tracker_actions::ActionPhase::Conflicted
+                    ActionPhase::Confirmed | ActionPhase::Conflicted
                 ) =>
             {
                 None

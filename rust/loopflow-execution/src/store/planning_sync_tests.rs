@@ -216,13 +216,10 @@ fn a_git_value_that_lost_is_answered_by_keeping_theirs_or_using_mine() {
                 .len(),
             1
         );
-        let lost: Vec<String> = store
+        let lost = store
             .sqlite
             .repository_tracker_actions(repository, TrackerKind::Git)
-            .unwrap()
-            .into_iter()
-            .map(|line| line.id)
-            .collect();
+            .unwrap();
         store.sqlite.answer_lost(&lost, answer).unwrap();
         assert!(store
             .task_tracker_sync(&task.id)
@@ -313,10 +310,7 @@ fn a_project_name_linear_won_is_answered_from_its_line() {
             lines.iter().map(|line| line.phase).collect::<Vec<_>>(),
             [ActionPhase::Conflicted]
         );
-        store
-            .sqlite
-            .answer_lost(&[lines[0].id.clone()], answer)
-            .unwrap();
+        store.sqlite.answer_lost(&lines[..1], answer).unwrap();
         let open = store
             .sqlite
             .repository_tracker_actions("/repo-answer", TrackerKind::Linear)
@@ -388,7 +382,7 @@ fn a_git_project_head_that_lost_is_answered_with_a_merge() {
     );
     store
         .sqlite
-        .answer_lost(&[lines[0].id.clone()], LostAnswer::KeepTheirs)
+        .answer_lost(&lines[..1], LostAnswer::KeepTheirs)
         .unwrap();
     assert!(store
         .sqlite

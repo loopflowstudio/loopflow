@@ -151,27 +151,25 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
             let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
             let repo = main.to_string_lossy();
             let tracker = super::tracker::queued_tracker(&main).unwrap_or(TrackerKind::Git);
-            let mut matches: Vec<_> = store
+            let lost: Vec<_> = store
                 .sqlite
                 .repository_tracker_actions(&repo, tracker)
                 .map_err(message)?
                 .into_iter()
                 .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
                 .collect();
-            let line = match (matches.pop(), matches.is_empty()) {
-                (Some(line), true) => line,
-                (Some(_), false) => {
-                    return Err(message(format!("{id} names more than one lost line")))
-                }
-                (None, _) => {
+            let line = match lost.as_slice() {
+                [line] => line.clone(),
+                [] => {
                     return Err(message(format!(
                         "{id} is not a lost line in {repo}; `lf repo plan` lists them"
                     )))
                 }
+                _ => return Err(message(format!("{id} names more than one lost line"))),
             };
             store
                 .sqlite
-                .answer_lost(std::slice::from_ref(&line.id), answer)
+                .answer_lost(std::slice::from_ref(&line), answer)
                 .map_err(message)?;
             let owner = match line.owner_kind {
                 ActionOwnerKind::Task => {

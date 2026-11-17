@@ -97,31 +97,20 @@ impl SqliteStore {
         Ok(actions)
     }
 
-    /// Answer lost lines by action id, whoever owns them: keep the tracker's
-    /// value, or save the local one again, which queues it (Git records either
-    /// as the field's merge).
-    pub fn answer_lost(&self, ids: &[String], answer: LostAnswer) -> StoreResult<()> {
+    /// Answer lost lines, whoever owns them: keep the tracker's value, or
+    /// save the local one again, which queues it (Git records either as the
+    /// field's merge). A line answered meanwhile is left as it is.
+    pub fn answer_lost(
+        &self,
+        lines: &[TrackerActionStatus],
+        answer: LostAnswer,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-        for id in ids {
-            let queued = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tracker_actions WHERE id=?1 AND phase='conflicted')",
-                [id],
-                |row| row.get::<_, bool>(0),
-            )?;
-            let journaled = tx.query_row(
-                "SELECT EXISTS(SELECT 1 FROM planning_peer_changes WHERE id=?1)",
-                [id],
-                |row| row.get::<_, bool>(0),
-            )?;
-            match (queued, journaled) {
-                (true, _) => answer_queued(&tx, id, answer)?,
-                (false, true) => answer_git(&tx, id, answer)?,
-                (false, false) => {
-                    return Err(crate::StoreError::InvalidData(format!(
-                        "{id} is not a lost line"
-                    )))
-                }
+        for line in lines {
+            match line.tracker {
+                TrackerKind::Git => answer_git(&tx, &line.id, answer)?,
+                _ => answer_queued(&tx, &line.id, answer)?,
             }
         }
         tx.commit()?;
@@ -133,13 +122,17 @@ fn answer_queued(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult
     let reason = match answer {
         LostAnswer::KeepTheirs => "kept the tracker's value",
         LostAnswer::UseMine => {
-            let action = conn
-                .query_row_and_then(
-                    &format!("SELECT {COLUMNS} FROM tracker_actions e WHERE e.id=?1"),
-                    [id],
-                    read_action,
-                )?
-                .map_err(|_| crate::StoreError::NotFound)?;
+            let Some(action) = conn
+                .prepare(&format!(
+                    "SELECT {COLUMNS} FROM tracker_actions e WHERE e.id=?1 AND e.phase='conflicted'"
+                ))?
+                .query_and_then([id], read_action)?
+                .next()
+                .transpose()?
+            else {
+                return Ok(());
+            };
+            let action = action.map_err(|_| crate::StoreError::NotFound)?;
             let change = serde_json::from_value::<WorkValue>(action.value).map_err(|_| {
                 crate::StoreError::InvalidData(format!(
                     "a lost {} cannot be saved again; make the change again",

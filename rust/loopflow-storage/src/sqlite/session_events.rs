@@ -8,6 +8,16 @@ use loopflow_model::id::AgentSessionId;
 
 use super::SqliteStore;
 
+/// The provider turn that answered an input, and where its provider kept it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AnsweredTurn {
+    pub session_id: String,
+    pub provider: Option<String>,
+    pub thread: AgentSessionId,
+    pub turn: String,
+    pub cwd: std::path::PathBuf,
+}
+
 /// A Session's current provider conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CurrentConversation {
@@ -55,7 +65,7 @@ impl SqliteStore {
                         json_extract(c.payload,'$.provider')
                  FROM history.session_history e
                  LEFT JOIN session_events c ON c.seq=e.captured_event AND c.kind='captured'
-                 WHERE e.session_id=?1 AND e.kind IN ('started','completed','output')
+                 WHERE e.session_id=?1 AND e.kind IN ('started','completed')
                    AND e.provider_thread IS NOT NULL
                  ORDER BY e.seq",
             )?;
@@ -92,24 +102,16 @@ impl SqliteStore {
                             started_at: None,
                             settled_at: None,
                             status: None,
-                            final_answer: None,
                         });
                         facts.turns.len() - 1
                     }
                 };
                 let entry = &mut facts.turns[position];
-                match kind.as_str() {
-                    "started" => entry.started_at = Some(at),
-                    "completed" => {
-                        entry.settled_at = Some(at);
-                        entry.status = payload["status"].as_str().map(str::to_owned);
-                    }
-                    _ => {
-                        entry.final_answer = match payload.get("value") {
-                            Some(value) => Some(serde_json::to_string(value)?),
-                            None => payload["text"].as_str().map(str::to_owned),
-                        }
-                    }
+                if kind == "started" {
+                    entry.started_at = Some(at);
+                } else {
+                    entry.settled_at = Some(at);
+                    entry.status = payload["status"].as_str().map(str::to_owned);
                 }
             }
         }
@@ -293,33 +295,33 @@ impl SqliteStore {
         .collect()
     }
 
-    pub fn input_final_answer(&self, input: &str) -> StoreResult<Option<String>> {
-        let native: Option<String> = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.query_row(
-                "SELECT output.payload FROM history.session_history start
+    /// The provider turn that last answered `input`: the newest turn it
+    /// started that completed. Its text is in the provider's transcript.
+    pub fn input_answered_turn(&self, input: &str) -> StoreResult<Option<AnsweredTurn>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT c.session_id,COALESCE(json_extract(c.payload,'$.provider'),s.provider),
+                        start.provider_thread,start.provider_turn,COALESCE(json_extract(c.payload,'$.cwd'),s.cwd)
+                 FROM session_events c JOIN agent_sessions s ON s.id=c.session_id
+                 CROSS JOIN history.session_history start ON start.captured_event=c.seq AND start.kind='started'
                  JOIN history.session_history done ON done.session_id=start.session_id
                    AND done.provider_thread=start.provider_thread AND done.provider_turn=start.provider_turn
                    AND done.kind='completed' AND json_extract(done.payload,'$.status')='completed'
-                 JOIN history.session_history output ON output.session_id=start.session_id
-                   AND output.provider_thread=start.provider_thread AND output.provider_turn=start.provider_turn AND output.kind='output'
-                 WHERE start.kind='started' AND start.captured_event=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?1) ORDER BY done.seq DESC LIMIT 1",
-                 [input], |row| row.get(0)).optional()?
-        };
-        if let Some(payload) = native {
-            let value: Value = serde_json::from_str(&payload)?;
-            let text = match value.get("value") {
-                Some(output) => serde_json::to_string(output)?,
-                None => value["text"]
-                    .as_str()
-                    .ok_or_else(|| {
-                        StoreError::InvalidData("native output has no value or text".into())
-                    })?
-                    .to_owned(),
-            };
-            return Ok(Some(text));
-        }
-        Ok(None)
+                 WHERE c.kind='captured' AND c.receipt_key=?1
+                 ORDER BY done.seq DESC LIMIT 1",
+                [input],
+                |row| {
+                    Ok(AnsweredTurn {
+                        session_id: row.get(0)?,
+                        provider: row.get(1)?,
+                        thread: row.get(2)?,
+                        turn: row.get(3)?,
+                        cwd: row.get::<_, String>(4)?.into(),
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// One `store-gap` observation for boundaries missed from `first_miss` to
@@ -713,7 +715,7 @@ impl SqliteStore {
                ON origin.session_id=e.session_id AND origin.provider_thread=e.provider_thread
                AND origin.provider_turn=e.provider_turn AND origin.kind='started'
              WHERE e.session_id=?11 AND e.seq>?2
-             AND (NOT ?8 OR (e.kind IN ('started','usage','completed','output') AND COALESCE(origin.captured_event,e.captured_event) IS NULL
+             AND (NOT ?8 OR (e.kind IN ('started','usage','completed') AND COALESCE(origin.captured_event,e.captured_event) IS NULL
                   AND e.provider_thread IS ?9 AND e.provider_turn IS ?10))
              AND (?4 IS NULL OR (e.kind='observed' AND substr(e.receipt_key,1,length(?4)+1)=?4||':')
                   OR (e.kind!='observed' AND COALESCE(origin.captured_event,e.captured_event)=(SELECT seq FROM session_events WHERE kind='captured' AND receipt_key=?4)))
@@ -788,7 +790,6 @@ impl SqliteStore {
                     "started" => SessionEventKind::Started,
                     "usage" => SessionEventKind::Usage,
                     "completed" => SessionEventKind::Completed,
-                    "output" => SessionEventKind::Output,
                     "observed" => SessionEventKind::Observed,
                     _ => {
                         return Err(StoreError::InvalidData(format!(
@@ -835,6 +836,7 @@ mod tests {
     use crate::session::SessionEventKind;
     use crate::sqlite::SqliteStore;
     use crate::RecordingGap;
+    use loopflow_model::id::AgentSessionId;
     use serde_json::json;
 
     #[test]
@@ -880,6 +882,134 @@ mod tests {
             )
             .unwrap();
         assert_eq!(kept, 0);
+    }
+
+    /// Every Session history kind is read from `history.db` only: rows an
+    /// older lf left in `loopflow.db` are invisible until the move pass
+    /// carries them over, and new rows never land in the store.
+    #[test]
+    fn history_kinds_are_read_from_the_history_file_only() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        let input = crate::session_record::new_artifact_key();
+        let session = store.test_session("conversation", &input);
+        let observed = |source: &str| crate::session::SessionObservation {
+            artifact_key: input.clone(),
+            source: source.into(),
+            observed_at: 5,
+            task_id: None,
+            wave_id: None,
+            payload: json!({"source": source, "evidence": {"since": 1, "observed_at": 5}}),
+        };
+        let left_in_store = || -> i64 {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT count(*) FROM session_events WHERE kind!='captured'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        };
+        // What a released lf wrote into the store.
+        {
+            let conn = store.conn.lock().unwrap();
+            for (thread, turn, kind, receipt) in [
+                (None, None, "observed", format!("{input}:events.jsonl:1")),
+                (None, None, "observed", format!("{input}:silence:2")),
+                (None, None, "observed", "provider-transition:old".to_owned()),
+                (None, None, "observed", "legacy_review_feedback".to_owned()),
+                (Some("thread"), Some("old"), "started", String::new()),
+                (Some("thread"), Some("old"), "completed", String::new()),
+                (Some("thread"), Some("old"), "usage", String::new()),
+            ] {
+                conn.execute(
+                    "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload,captured_event)
+                     VALUES('conversation',?1,?2,?3,?4,1,'{\"type\":\"provider_transition\",\"summary\":\"old\",\"status\":\"completed\"}',?5)",
+                    rusqlite::params![thread, turn, kind, receipt, session.captured],
+                )
+                .unwrap();
+            }
+        }
+        let old = AgentSessionId::from("thread");
+        assert!(store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .is_empty());
+        assert!(store.input_events(&input).unwrap().is_empty());
+        assert!(store.input_silences(&input).unwrap().is_empty());
+        assert!(store
+            .provider_transitions("conversation")
+            .unwrap()
+            .is_empty());
+        assert!(!store
+            .session_turn_completed("conversation", &old, "old")
+            .unwrap());
+        assert_eq!(
+            store
+                .recorded_turn_end("conversation", &old, "old")
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            store
+                .session("conversation")
+                .unwrap()
+                .unwrap()
+                .ready_summary,
+            None
+        );
+        assert_eq!(store.input_answered_turn(&input).unwrap(), None);
+
+        // What this lf writes goes to the history file and is read from it.
+        for source in ["events.jsonl:1", "silence:2"] {
+            store
+                .retain_session_observation(&session, &observed(source))
+                .unwrap();
+        }
+        crate::test_fixture::record_captured_start(&store, "conversation", "new");
+        for (kind, payload) in [
+            (
+                SessionEventKind::Usage,
+                json!({"total": {"inputTokens": 1}}),
+            ),
+            (SessionEventKind::Completed, json!({"status": "completed"})),
+        ] {
+            store
+                .record_session_event("conversation", &old, "new", kind, &payload)
+                .unwrap();
+        }
+        assert_eq!(left_in_store(), 7);
+        let kinds: Vec<SessionEventKind> = store
+            .session_history("conversation", 0, 0)
+            .unwrap()
+            .into_iter()
+            .map(|event| event.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            [
+                SessionEventKind::Observed,
+                SessionEventKind::Observed,
+                SessionEventKind::Started,
+                SessionEventKind::Usage,
+                SessionEventKind::Completed
+            ]
+        );
+        assert_eq!(store.input_events(&input).unwrap().len(), 1);
+        assert_eq!(store.input_silences(&input).unwrap(), [(1, 5)]);
+        assert!(store
+            .session_turn_completed("conversation", &old, "new")
+            .unwrap());
+        assert_eq!(
+            store
+                .input_answered_turn(&input)
+                .unwrap()
+                .map(|turn| turn.turn),
+            Some("new".to_owned())
+        );
     }
 
     /// What a hook and the server do together: the hook sends its span, the

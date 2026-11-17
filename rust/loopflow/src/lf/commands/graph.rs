@@ -972,7 +972,8 @@ impl RunningGraph<'_> {
                 step.as_str()
             )
         })?;
-        let answer = self.store.sqlite.input_final_answer(&input)?;
+        let answer =
+            loopflow_execution::transcript::answer::input_final_answer(&self.store.sqlite, &input)?;
         Ok((session, answer))
     }
 }

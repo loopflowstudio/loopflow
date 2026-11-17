@@ -172,9 +172,6 @@ impl FactWriter {
                         .record_session_turn_origin(&turn.thread, &turn.turn, &origin)?;
                 }
             }
-            ProviderFact::Output { turn, answer } => {
-                event(turn, SessionEventKind::Output, answer)?;
-            }
             ProviderFact::TurnCompleted { turn, detail, .. } => {
                 // A replayed completion keeps its receipt and leaves the live
                 // turn's tally alone.
@@ -788,7 +785,7 @@ mod tests {
     }
 
     #[test]
-    fn a_claude_result_retains_exact_output_without_borrowing_another_request() {
+    fn a_claude_result_settles_its_request_without_borrowing_another() {
         let (_home, store, attachment) = attached(false);
         let mut writer = writer(&store, &attachment);
         let mut decoder = ClaudeDecoder::default();
@@ -814,9 +811,8 @@ mod tests {
         let original = store.session("conversation").unwrap().unwrap();
         let mut next = original.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
-        let next =
-            crate::store::sessions::replace_session_input(&store, original.captured, next, None)
-                .unwrap();
+        crate::store::sessions::replace_session_input(&store, original.captured, next, None)
+            .unwrap();
         hear(
             &mut decoder,
             &mut writer,
@@ -828,32 +824,19 @@ mod tests {
             &mut writer,
             json!({"type":"result","uuid":"result","session_id":"thread","subtype":"success","structured_output":value}),
         );
+        // The answer stays in Claude's transcript; the store keeps the turn.
         let events = receipts(&store);
-        assert_eq!(events.len(), 3);
+        assert_eq!(events.len(), 2);
         assert!(events
             .iter()
             .all(|e| e.provider_turn.as_deref() == Some("request")));
-        assert_eq!(events[1].kind, SessionEventKind::Output);
-        assert_eq!(events[1].payload["value"], value);
         assert_eq!(
-            events[2].payload,
+            events[1].payload,
             json!({"status":"completed","result_id":"result","errors":null,"subtype":"success",
                 "total_cost_usd":null,
                 "context":{"first_request_tokens":null,"peak_request_tokens":null,"tool_results":0,
                     "tool_output_tokens":0,"compactions":0,"compaction_tokens":null}})
         );
-        assert!(store
-            .input_final_answer(next.input_key().unwrap())
-            .unwrap()
-            .is_none());
-        let answer = store
-            .input_final_answer(
-                &crate::session_record::parse_artifact_key("run_00000000000000000000000000000001")
-                    .unwrap(),
-            )
-            .unwrap()
-            .unwrap();
-        assert_eq!(serde_json::from_str::<Value>(&answer).unwrap(), value);
     }
 
     /// The `context` each completed receipt retained, in order.

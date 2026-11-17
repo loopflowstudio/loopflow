@@ -21,6 +21,18 @@ while not os.path.exists(os.path.join(home, 'release')):
 if not streamed:
     sys.exit(0)
 message['session_id'] = 'stand-in'
+# Claude keeps the conversation in its transcript; lf reads answers there.
+claude = os.environ.get('CLAUDE_CONFIG_DIR') or os.path.join(os.path.expanduser('~'), '.claude')
+project = os.path.join(claude, 'projects', 'stand-in')
+os.makedirs(project, exist_ok=True)
+with open(os.path.join(project, 'stand-in.jsonl'), 'a') as transcript:
+    for row in [
+        {'type': 'user', 'userType': 'external', 'uuid': message.get('uuid'),
+         'message': {'role': 'user', 'content': 'request'}},
+        {'type': 'assistant', 'uuid': 'stand-in-answer', 'message': {'id': 'stand-in',
+         'role': 'assistant', 'stop_reason': 'end_turn', 'content': [{'type': 'text', 'text': 'Held.'}]}},
+    ]:
+        transcript.write(json.dumps(row) + '\n')
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
 print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)

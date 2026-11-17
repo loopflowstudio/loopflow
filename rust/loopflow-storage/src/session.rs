@@ -40,8 +40,6 @@ pub enum SessionEventKind {
     Started,
     Usage,
     Completed,
-    /// Final provider output for an exact native turn; completion is separate.
-    Output,
     /// Evidence without an exact native turn; cannot settle a Graph.
     Observed,
 }
@@ -64,7 +62,6 @@ impl SessionEventKind {
             Self::Started => "started",
             Self::Usage => "usage",
             Self::Completed => "completed",
-            Self::Output => "output",
             Self::Observed => "observed",
         }
     }

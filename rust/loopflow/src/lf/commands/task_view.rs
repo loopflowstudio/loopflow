@@ -157,8 +157,10 @@ fn step_log(reading: &Value, index: usize) -> Result<String> {
                 _ => {}
             }
         }
-        if let Some(answer) = store.sqlite.input_final_answer(&input)? {
-            text.push_str(&format!("\nRecorded conclusion\n{answer}\n"));
+        match loopflow_execution::transcript::answer::input_final_answer(&store.sqlite, &input) {
+            Ok(Some(answer)) => text.push_str(&format!("\nConclusion\n{answer}\n")),
+            Ok(None) => {}
+            Err(error) => text.push_str(&format!("\nConclusion unavailable: {error:#}\n")),
         }
     } else {
         text.push_str(

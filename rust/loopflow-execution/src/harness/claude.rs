@@ -1041,15 +1041,14 @@ mod tests {
             config
         }
 
-        /// The text of each Output event recorded for a Session.
-        fn outputs(&self, id: &str) -> Vec<serde_json::Value> {
+        /// How many provider turns were recorded complete for a Session.
+        fn completions(&self, id: &str) -> usize {
             self.store
                 .session_history(id, 0, 0)
                 .unwrap()
                 .into_iter()
-                .filter(|event| event.kind == crate::session::SessionEventKind::Output)
-                .map(|event| event.payload["text"].clone())
-                .collect()
+                .filter(|event| event.kind == crate::session::SessionEventKind::Completed)
+                .count()
         }
     }
 
@@ -1142,8 +1141,7 @@ done
 
         assert_eq!(status, Lifecycle::Completed);
         assert!(survived, "the provider ran until its tasks finished");
-        let outputs = claude.outputs("step");
-        assert_eq!(outputs, vec![serde_json::json!("FINISHED")]);
+        assert_eq!(claude.completions("step"), 1);
     }
 
     #[tokio::test]
@@ -1181,8 +1179,7 @@ cat > /dev/null
         harness.stop().await.unwrap();
 
         assert_eq!(status, Lifecycle::Completed);
-        let outputs = claude.outputs("step");
-        assert_eq!(outputs.last(), Some(&serde_json::json!("FINISHED")));
+        assert!(claude.completions("step") >= 1);
     }
 
     // Live persistent-process checks against the real `claude` CLI (subscription

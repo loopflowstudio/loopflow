@@ -1102,7 +1102,7 @@ impl SqliteStore {
                 UNION SELECT origin.captured_event FROM history.session_history completion CROSS JOIN history.session_history origin
                     ON origin.session_id=completion.session_id AND origin.provider_thread=completion.provider_thread
                     AND origin.provider_turn=completion.provider_turn AND origin.kind='started'
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed','output')
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND completion.kind IN ('started','usage','completed')
                     AND completion.kind='completed' AND completion.observed_at>=?5 AND +origin.captured_event IS NOT NULL
                 UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='captured'
@@ -1112,7 +1112,7 @@ impl SqliteStore {
             -- one its Process completed in the window may have started earlier.
             turns(session_id,provider_thread,provider_turn) AS (
                 SELECT +session_id,+provider_thread,+provider_turn FROM history.session_history
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed','output') AND observed_at>=?5
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND kind IN ('started','usage','completed') AND observed_at>=?5
                 UNION SELECT +ran.session_id,+ran.provider_thread,+ran.provider_turn
                     FROM processes exited CROSS JOIN history.session_history ran ON ran.lf_process_id=exited.id
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='started' AND ran.captured_event IS NULL
@@ -1172,7 +1172,7 @@ impl SqliteStore {
                         MAX(CASE WHEN kind='completed' THEN observed_at END) AS completed,
                         MAX(observed_at) AS latest
                     FROM turns CROSS JOIN history.session_history turn_event USING (session_id,provider_thread,provider_turn)
-                    WHERE turn_event.kind IN ('started','usage','completed','output') AND turn_event.captured_event IS NULL
+                    WHERE turn_event.kind IN ('started','usage','completed') AND turn_event.captured_event IS NULL
                     GROUP BY turn_event.session_id,turn_event.provider_thread,turn_event.provider_turn
                     HAVING ?6 OR MIN(observed_at)>=?5) e
                 LEFT JOIN history.session_history origin

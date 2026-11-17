@@ -279,10 +279,6 @@ mod tests {
         for (kind, payload) in [
             (SessionEventKind::Started, serde_json::json!({})),
             (
-                SessionEventKind::Output,
-                serde_json::json!({"text":"Shipped the fix."}),
-            ),
-            (
                 SessionEventKind::Completed,
                 serde_json::json!({"status":"completed"}),
             ),
@@ -380,10 +376,6 @@ mod tests {
         assert_eq!(conversation.retention.after, Some(NOW - 10 * DAY));
         let note = conversation.retention.note.as_deref().unwrap();
         assert!(note.contains("gone at claude; removed after"), "{note}");
-        assert_eq!(
-            conversation.facts[0].final_answer.as_deref(),
-            Some("Shipped the fix.")
-        );
         assert_eq!(conversation.facts[0].status.as_deref(), Some("completed"));
     }
 }

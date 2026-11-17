@@ -404,7 +404,6 @@ struct Turn {
     started: bool,
     request: Option<String>,
     attributed: bool,
-    final_answer: Option<String>,
 }
 
 impl Turn {
@@ -564,24 +563,7 @@ impl CodexDecoder {
                         out.push(ProviderFact::Request { input_tokens }.into());
                     }
                 }
-                "item/completed" => {
-                    if let Some(text) = final_text(&params["item"]) {
-                        observed.final_answer = Some(text.to_owned());
-                    }
-                }
-                "turn/completed" => {
-                    let answer = observed.final_answer.take();
-                    completion(thread, &params["turn"], out);
-                    if let Some(text) = answer {
-                        out.push(
-                            ProviderFact::Output {
-                                turn: provider_turn(&turn),
-                                answer: json!({"text": text}),
-                            }
-                            .into(),
-                        );
-                    }
-                }
+                "turn/completed" => completion(thread, &params["turn"], out),
                 _ => {}
             }
             self.observe(&turn).correlate(provider_turn(&turn), out);
@@ -610,12 +592,6 @@ impl CodexDecoder {
     }
 }
 
-fn final_text(item: &Value) -> Option<&str> {
-    (item["type"] == "agentMessage" && (item["phase"].is_null() || item["phase"] == "final_answer"))
-        .then(|| item["text"].as_str())
-        .flatten()
-}
-
 /// Completion of a native turn object, from a live notification or snapshot.
 fn completion(thread: &AgentSessionId, turn: &Value, out: &mut Vec<Decoded>) {
     let Some(id) = turn["id"].as_str() else {
@@ -631,18 +607,6 @@ fn completion(thread: &AgentSessionId, turn: &Value, out: &mut Vec<Decoded>) {
         thread: thread.clone(),
         turn: id.to_owned(),
     };
-    if let Some(text) = turn["items"]
-        .as_array()
-        .and_then(|items| items.iter().rev().find_map(final_text))
-    {
-        out.push(
-            ProviderFact::Output {
-                turn: provider_turn.clone(),
-                answer: json!({"text": text}),
-            }
-            .into(),
-        );
-    }
     out.push(
         ProviderFact::TurnCompleted {
             turn: Some(provider_turn),
@@ -1089,7 +1053,7 @@ mod tests {
         format!("{fact} 0197f00d-aaaa-7000-8000-000000000001/0197f00d-{turn}{rest}")
     }
 
-    /// The request's size arrives before completion; the answer follows it.
+    /// The request's size arrives before completion.
     #[test]
     fn trace_codex_normal_turn() {
         let turn = "bbbb-7000-8000-000000000002";
@@ -1108,7 +1072,6 @@ mod tests {
                 "RateLimit".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
-                at("Output", turn, r#" {"text":"OK"}"#),
             ]
         );
     }
@@ -1140,7 +1103,6 @@ mod tests {
                 "Request 100".to_owned(),
                 "Activity Yielded(true)".to_owned(),
                 at("TurnCompleted", turn, " Completed"),
-                at("Output", turn, r#" {"text":"Recovered after the retry."}"#),
             ]
         );
     }

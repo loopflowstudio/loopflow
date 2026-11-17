@@ -3,6 +3,7 @@
 //! none of the text. Where a transcript is, how long its provider keeps it,
 //! and what to say when it is gone are derived here when read.
 
+pub mod answer;
 mod claude;
 mod codex;
 pub mod facts;

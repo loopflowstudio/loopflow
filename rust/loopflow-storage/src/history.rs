@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS {p}session_history (
     session_id TEXT NOT NULL,
     provider_thread TEXT,
     provider_turn TEXT,
-    kind TEXT NOT NULL CHECK(kind IN ('started','usage','completed','observed','output')),
+    kind TEXT NOT NULL CHECK(kind IN ('started','usage','completed','observed')),
     receipt_key TEXT NOT NULL,
     lf_process_id TEXT,
     agent_process_id TEXT,
@@ -47,7 +47,7 @@ CREATE INDEX IF NOT EXISTS {p}session_history_outcome_window ON session_history(
     WHERE kind='observed' AND substr(receipt_key,-14) IN (':manifest.json',':terminal.json');
 CREATE INDEX IF NOT EXISTS {p}session_history_turn_window ON session_history(
     observed_at, kind, session_id, provider_thread, provider_turn)
-    WHERE kind IN ('started','usage','completed','output');
+    WHERE kind IN ('started','usage','completed');
 CREATE INDEX IF NOT EXISTS {p}session_history_window ON session_history(observed_at);
 CREATE INDEX IF NOT EXISTS {p}session_history_process ON session_history(lf_process_id, session_id)
     WHERE lf_process_id IS NOT NULL;

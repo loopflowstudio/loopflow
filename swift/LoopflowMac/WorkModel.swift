@@ -2713,7 +2713,8 @@ final class WorkModel {
         workspace.conversationRequest = request
         defer { if workspace.conversationRequest == request { workspace.conversationRequest = nil } }
         let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
-        sessions = sessions.errorMessage.map { .unavailable(lastGood: records, reason: $0) } ?? .available(records)
+        if let reason = sessions.failure { sessions = .unavailable(lastGood: records, reason: reason) }
+        else { sessions = .available(records) }
         let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
         let opening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
         taskOpening = opening

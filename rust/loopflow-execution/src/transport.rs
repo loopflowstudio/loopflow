@@ -1203,16 +1203,6 @@ pub fn attach(
     relay_with_preview(id, session, json_session, None)
 }
 
-pub(crate) fn attach_existing(id: &TerminalId, session: &str, json: bool) -> Result<()> {
-    std::env::set_var("LF_RELAY_SESSION", session);
-    relay_with_preview(
-        id,
-        Some(&LfSessionId::from(session)),
-        json.then_some(session),
-        None,
-    )
-}
-
 fn relay_with_preview(
     id: &TerminalId,
     session: Option<&LfSessionId>,
@@ -1755,14 +1745,6 @@ fn view(
                             } => {
                                 acknowledgement_deadline = None;
                                 can_reconnect |= id.is_some() && is_terminal;
-                                if !attached {
-                                    if let Some(id) = id {
-                                        if let Err(error) = record_relay_terminal(id) {
-                                            crate::store::RecordingGap::default()
-                                                .note("record viewer terminal", &error);
-                                        }
-                                    }
-                                }
                                 attached = true;
                                 let recovered = std::mem::take(&mut recovering);
                                 let continued = output.acknowledged(&nonce);
@@ -2137,25 +2119,6 @@ fn acknowledge_open() {
     if std::fs::write(&temporary, "attached").is_ok() {
         let _ = std::fs::rename(temporary, path);
     }
-}
-
-/// A reveal records its terminal once its view is attached.
-fn record_relay_terminal(held: &TerminalId) -> Result<()> {
-    let Some(session) = std::env::var_os("LF_RELAY_SESSION") else {
-        return Ok(());
-    };
-    std::env::remove_var("LF_RELAY_SESSION");
-    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-    let session = session.to_string_lossy();
-    if store.session_terminal(&session)?.as_ref() != Some(held) {
-        return Ok(());
-    }
-    if let Some(attachment) = store.session_attachment(&session)? {
-        let terminal = crate::session_record::current_terminal_id()
-            .or_else(crate::terminal_host::host_placement);
-        store.record_session_terminal(&session, &attachment, terminal.as_deref())?;
-    }
-    Ok(())
 }
 
 fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {

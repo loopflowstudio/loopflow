@@ -1337,12 +1337,11 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     };
 
     // No Session is different from an existing Session without native history.
-    // Reading the explicit Start offer must not admit either a Session or a turn.
+    // Reading the Start offer must not admit either a Session or a turn.
     let absent = fixture.json(&["resume", "--task", "INF-125", "--explain", "--json"]);
     assert_eq!(absent["state"], Value::Null);
     assert_eq!(absent["action"]["intent"], "start");
-    assert_eq!(absent["actions"].as_array().unwrap().len(), 1);
-    assert_eq!(absent["actions"][0]["label"], "Start conversation");
+    assert_eq!(absent["opening"]["label"], "Start conversation");
     assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.

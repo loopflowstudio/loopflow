@@ -1342,7 +1342,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -1350,7 +1349,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     request_id: "new-thread-parity".into(),
@@ -1749,7 +1747,6 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
-                        intent: loopflow_execution::session::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -2204,7 +2201,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             task,
             wave,
             agent,
-            intent,
         } => {
             let mut spelled = Vec::new();
             if id.is_none() && task.is_none() && wave.is_none() {
@@ -2214,7 +2210,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["session", "resume"]));
-            spelled.extend(intent.flag().map(str::to_owned));
             spelled.extend(id.clone());
             if let Some(task) = task {
                 spelled.extend(words(&["--task", task]));

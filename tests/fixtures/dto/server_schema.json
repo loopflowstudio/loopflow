@@ -9700,38 +9700,20 @@
       ]
     },
     "SessionAction": {
+      "description": "What opening a Session does here, as a person reads it. Every opening is\n`lf resume`: it adds a view, resumes saved history, or takes the\nconversation over from a client lf can't share.",
       "properties": {
         "help": {
           "type": "string"
         },
-        "kind": {
-          "$ref": "#/$defs/SessionActionKind"
-        },
         "label": {
           "type": "string"
-        },
-        "unavailable_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
-        "kind",
         "label",
-        "help",
-        "unavailable_reason"
+        "help"
       ],
       "type": "object"
-    },
-    "SessionActionKind": {
-      "enum": [
-        "reveal",
-        "open",
-        "move_here"
-      ],
-      "type": "string"
     },
     "SessionAttached": {
       "additionalProperties": false,
@@ -10133,15 +10115,6 @@
       ],
       "type": "string"
     },
-    "SessionOpenIntent": {
-      "description": "Whether opening may take control, start a thread, or only reveal history.",
-      "enum": [
-        "resume",
-        "start",
-        "reveal"
-      ],
-      "type": "string"
-    },
     "SessionPage": {
       "properties": {
         "entries": {
@@ -10201,11 +10174,16 @@
             "null"
           ]
         },
-        "actions": {
-          "items": {
-            "$ref": "#/$defs/SessionAction"
-          },
-          "type": "array"
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How opening it here reads; absent for a Run, which opens nowhere."
         },
         "agent_process_id": {
           "anyOf": [
@@ -10398,7 +10376,7 @@
         "work",
         "wave_id",
         "work_path",
-        "actions",
+        "action",
         "title",
         "title_source",
         "graph_membership",
@@ -16157,14 +16135,10 @@
           },
           "x-result-example": {
             "account": "work",
-            "actions": [
-              {
-                "help": "Open this Session in a terminal",
-                "kind": "open",
-                "label": "Open here",
-                "unavailable_reason": null
-              }
-            ],
+            "action": {
+              "help": "Open this Session in a terminal",
+              "label": "Open here"
+            },
             "agent_process_id": "44444444-4444-4444-8444-444444444444",
             "availability": "available",
             "cwd": "/src/loopflow.task",
@@ -16352,9 +16326,6 @@
                 "null"
               ]
             },
-            "intent": {
-              "$ref": "#/$defs/SessionOpenIntent"
-            },
             "kind": {
               "const": "session.resume",
               "type": "string"
@@ -16378,8 +16349,7 @@
             "id",
             "task",
             "wave",
-            "agent",
-            "intent"
+            "agent"
           ],
           "type": "object",
           "x-result": {

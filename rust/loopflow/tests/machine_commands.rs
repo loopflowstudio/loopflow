@@ -271,20 +271,6 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
     assert!(script.contains("/remote/private home"), "{script}");
     assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
-    for intent in ["--start-if-free", "--reveal-existing"] {
-        let automatic = fixture.json(&[
-            "--machine",
-            "mini",
-            "session",
-            "resume",
-            &id,
-            intent,
-            "--prepare",
-            "--json",
-        ]);
-        // Every view types: opening for a reveal attaches the same way.
-        assert_eq!(automatic["open_argv"], opened["open_argv"]);
-    }
 }
 
 #[test]
@@ -1076,8 +1062,8 @@ esac
         &attach,
         &format!(
             r#"#!/bin/sh
-if [ "$1 $2 $3" = 'session resume --start-if-free' ]; then
-  printf '%s\n' "$4" > "$LF_HOME/opened"
+if [ "$1 $2" = 'session resume' ]; then
+  printf '%s\n' "$3" > "$LF_HOME/opened"
   pwd -P > "$LF_HOME/opened-cwd"
   exit 0
 fi

@@ -349,7 +349,6 @@ use crate::store::SharedStore;
 
 use super::human_session_argv;
 use crate::session::LfSession;
-use crate::session::SessionOpenIntent;
 pub use crate::test_support::human_session::SessionHome;
 
 use loopflow_storage::work::task::TaskId;
@@ -359,7 +358,7 @@ fn session_action_fixtures_match_the_shared_boundary() {
     #[derive(serde::Deserialize)]
     struct Case {
         state: super::SessionState,
-        actions: Vec<super::SessionAction>,
+        action: Option<super::SessionAction>,
     }
     let cases: Vec<Case> = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/session_actions.json"
@@ -367,14 +366,14 @@ fn session_action_fixtures_match_the_shared_boundary() {
     .unwrap();
     for case in cases {
         assert_eq!(
-            super::session_actions(
+            super::session_action(
                 case.state,
                 true,
                 true,
                 case.state == super::SessionState::Active,
                 false
             ),
-            case.actions
+            case.action
         );
     }
     let report = include_str!("../../../../../tests/fixtures/dto/session_move_report.json");
@@ -393,8 +392,8 @@ fn session_action_fixtures_match_the_shared_boundary() {
     ] {
         let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
         assert_eq!(
-            session.actions,
-            super::session_actions(
+            session.action,
+            super::session_action(
                 session.state,
                 session.interactive,
                 true,
@@ -423,8 +422,8 @@ fn graph_membership_fixtures_cover_every_projection_and_are_required() {
     let mut kinds = Vec::new();
     for session in &sessions {
         assert_eq!(
-            session.actions,
-            super::session_actions(
+            session.action,
+            super::session_action(
                 session.state,
                 session.interactive,
                 true,
@@ -738,31 +737,23 @@ fn session_page_preserves_the_continuation_and_required_entries() {
 }
 
 #[test]
-fn only_a_consumed_first_launch_offers_try_again() {
-    use super::{SessionActionKind::*, SessionState::*};
-    let kinds = |state, history, occupied, consumed| -> Vec<_> {
-        super::session_actions(state, true, history, occupied, consumed)
-            .into_iter()
-            .map(|action| (action.kind, action.label))
-            .collect()
+fn opening_reads_as_what_resume_does_there() {
+    use super::SessionState::*;
+    let label = |state, history, occupied, consumed| {
+        super::session_action(state, true, history, occupied, consumed)
+            .unwrap()
+            .label
     };
-    assert_eq!(
-        kinds(Closed, false, false, true),
-        [
-            (MoveHere, "Try again".to_string()),
-            (Reveal, "Show conversation".to_string())
-        ]
-    );
-    assert_eq!(kinds(Closed, true, false, true)[0].0, Open);
-    assert_eq!(kinds(Closed, false, false, false)[0].0, Open);
-    let held = kinds(Active, false, true, true);
-    assert_eq!(held[0].0, Open);
-    assert_eq!(held[1], (MoveHere, "Take back".to_string()));
-    assert!(super::session_actions(Closed, false, false, false, true).is_empty());
+    assert_eq!(label(Closed, false, false, true), "Try again");
+    assert_eq!(label(Closed, true, false, true), "Open here");
+    assert_eq!(label(Closed, false, false, false), "Start conversation");
+    assert_eq!(label(Active, false, true, true), "Take over");
+    assert_eq!(label(Detached, true, true, false), "Reconnect");
+    assert!(super::session_action(Closed, false, false, false, true).is_none());
 }
 
 #[test]
-fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
+fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -771,70 +762,47 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let first = super::open_without_replacing(
+        let before = store.session(&record.id).await.unwrap().unwrap();
+        let first = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Start,
+            false,
             false,
             false,
             false,
         )
         .await
         .unwrap();
-        assert!(first.open_argv.ends_with(&["--start-if-free".into()]));
-        assert!(first.actions.iter().any(|action| {
-            action.kind == super::SessionActionKind::Open && action.unavailable_reason.is_none()
-        }));
+        assert_eq!(first.open_argv, super::human_session_argv(&record.id).unwrap());
+        for refreshed in [
+            super::surface(&store, &before).await.unwrap(),
+            listed_session(&store, &record.id),
+            super::list(&store, &crate::session::SessionFilter::default())
+                .await
+                .unwrap()
+                .into_iter()
+                .find(|row| row.id == record.id)
+                .unwrap(),
+        ] {
+            assert_eq!(refreshed.action, first.action);
+            assert_eq!(refreshed.action.unwrap().label, "Start conversation");
+        }
+        let unchanged = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(unchanged.captured, before.captured);
+        assert_eq!(unchanged.input_published, before.input_published);
 
-        let session = store.session(&record.id).await.unwrap().unwrap();
-        let session = super::append_input(&store, session).await.unwrap();
+        let session = super::append_input(&store, unchanged).await.unwrap();
         let (dir, _) = crate::session_record::resolve_manifest(
             &crate::store::lf_home_dir(),
             session.input_key().unwrap(),
         )
         .unwrap();
-        // The launcher consumes this marker before starting the provider. A
-        // crash at that boundary must not replay the captured request on load.
+        // The launcher consumes this marker before starting the provider; the
+        // next opening gives the request another attempt.
         std::fs::remove_file(dir.join("prepared")).unwrap();
-        let error = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Start,
-            true,
-            false,
-            false,
-        )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("retry it explicitly"));
-        let retry = |record: &super::SessionRecord| {
-            let action = record
-                .actions
-                .iter()
-                .find(|action| action.kind == super::SessionActionKind::MoveHere)
-                .unwrap()
-                .clone();
-            assert!(!record
-                .actions
-                .iter()
-                .any(|action| action.kind == super::SessionActionKind::Open));
-            action
-        };
         let listed = listed_session(&store, &record.id);
-        assert_eq!(retry(&listed).label, "Try again");
-        assert!(retry(&listed).unavailable_reason.is_none());
-        let refused = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Start,
-            false,
-            false,
-            false,
-        )
-        .await
-        .unwrap();
-        assert_eq!(retry(&refused), retry(&listed));
-        // The click prepares the launch that `open_waiting` gives a new attempt.
+        assert_eq!(listed.action.as_ref().unwrap().label, "Try again");
         let prepared = super::open(
             &store,
             std::path::Path::new("/"),
@@ -846,86 +814,10 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
         )
         .await
         .unwrap();
-        assert!(!prepared.open_argv.contains(&"--start-if-free".into()));
+        assert_eq!(prepared.action, listed.action);
         let after = store.session(&record.id).await.unwrap().unwrap();
         assert_eq!(after.captured, session.captured);
         assert_eq!(after.artifact_key, session.artifact_key);
-        assert!(store
-            .sqlite
-            .session_attachment(&record.id)
-            .unwrap()
-            .is_none());
-    });
-}
-
-#[test]
-fn reveal_requires_history_and_never_publishes_a_first_turn() {
-    let _lock = crate::journal::test_env_lock();
-    let home = SessionHome::new();
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        let store = home.store().await;
-        let repo = loopflow_test_support::TestRepo::new();
-        let (record, _) = super::primary::ensure(&store, repo.path(), None)
-            .await
-            .unwrap();
-        let before = store.session(&record.id).await.unwrap().unwrap();
-        let prepared = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Reveal,
-            false,
-            false,
-            false,
-        )
-        .await
-        .unwrap();
-        assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
-        let action = prepared
-            .actions
-            .iter()
-            .find(|action| action.kind == super::SessionActionKind::Reveal)
-            .unwrap();
-        assert!(action
-            .unavailable_reason
-            .as_ref()
-            .unwrap()
-            .contains("No saved provider history"));
-        for refreshed in [
-            super::surface(&store, &before).await.unwrap(),
-            listed_session(&store, &record.id),
-            super::list(&store, &crate::session::SessionFilter::default())
-                .await
-                .unwrap()
-                .into_iter()
-                .find(|row| row.id == record.id)
-                .unwrap(),
-        ] {
-            assert_eq!(refreshed.actions, prepared.actions);
-            let start = refreshed
-                .actions
-                .iter()
-                .find(|action| action.kind == super::SessionActionKind::Open)
-                .unwrap();
-            assert_eq!(start.label, "Start conversation");
-            assert!(start.unavailable_reason.is_none());
-        }
-        let error = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Reveal,
-            true,
-            false,
-            false,
-        )
-        .await
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("start this conversation explicitly"));
-        let after = store.session(&record.id).await.unwrap().unwrap();
-        assert_eq!(after.artifact_key, before.artifact_key);
-        assert_eq!(after.captured, before.captured);
-        assert_eq!(after.input_published, before.input_published);
         assert!(store
             .sqlite
             .session_attachment(&record.id)
@@ -944,20 +836,18 @@ fn recovery_refresh_follows_current_holder_and_history() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let prepared = super::open_without_replacing(
+        let prepared = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
+            false,
             false,
             false,
             false,
         )
         .await
         .unwrap();
-        assert!(!prepared
-            .actions
-            .iter()
-            .any(|a| a.kind == super::SessionActionKind::MoveHere));
+        assert_eq!(prepared.action.unwrap().label, "Start conversation");
 
         // A launcher that may still be running; an ended one would make its
         // unidentified agent dead instead of unknown.
@@ -981,25 +871,22 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 true,
             )
             .unwrap();
-        // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
+        // An admitted holder with unknown OS evidence: opening takes it over,
+        // and preparing leaves it attached.
         let refreshed = listed_session(&store, &record.id);
-        let takeover = refreshed
-            .actions
-            .iter()
-            .find(|a| a.kind == super::SessionActionKind::MoveHere)
-            .unwrap();
-        assert_eq!(takeover.label, "Take back");
-        let reveal = super::open_without_replacing(
+        assert_eq!(refreshed.action.as_ref().unwrap().label, "Take over");
+        let prepared = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
+            false,
             false,
             false,
             false,
         )
         .await
         .unwrap();
-        assert_eq!(reveal.actions, refreshed.actions);
+        assert_eq!(prepared.action, refreshed.action);
         assert_eq!(
             store.sqlite.session_attachment(&record.id).unwrap(),
             Some(holder.clone())
@@ -1014,26 +901,7 @@ fn recovery_refresh_follows_current_holder_and_history() {
             .record_agent_process_exit(&record.id, &holder, true)
             .unwrap();
         let refreshed = listed_session(&store, &record.id);
-        assert!(!refreshed
-            .actions
-            .iter()
-            .any(|a| a.kind == super::SessionActionKind::MoveHere));
-        assert!(refreshed
-            .actions
-            .iter()
-            .find(|a| a.kind == super::SessionActionKind::Reveal)
-            .unwrap()
-            .unavailable_reason
-            .is_some());
-        assert_eq!(
-            refreshed
-                .actions
-                .iter()
-                .find(|a| a.kind == super::SessionActionKind::Open)
-                .unwrap()
-                .label,
-            "Start conversation"
-        );
+        assert_eq!(refreshed.action.unwrap().label, "Start conversation");
     });
 }
 
@@ -1069,10 +937,11 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .sqlite
                 .retain_session_observation(&session, &observation)
                 .unwrap();
-            let prepared = super::open_without_replacing(
+            let prepared = super::open(
                 &store,
+                std::path::Path::new("/"),
                 &record.id,
-                SessionOpenIntent::Reveal,
+                false,
                 false,
                 false,
                 false,
@@ -1080,23 +949,8 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             .await
             .unwrap();
             let refreshed = listed_session(&store, &record.id);
-            assert_eq!(prepared.actions, refreshed.actions);
-            assert_eq!(
-                refreshed
-                    .actions
-                    .iter()
-                    .find(|a| a.kind == super::SessionActionKind::Open)
-                    .unwrap()
-                    .label,
-                "Open here"
-            );
-            assert!(refreshed
-                .actions
-                .iter()
-                .find(|a| a.kind == super::SessionActionKind::Reveal)
-                .unwrap()
-                .unavailable_reason
-                .is_none());
+            assert_eq!(prepared.action, refreshed.action);
+            assert_eq!(refreshed.action.unwrap().label, "Open here");
             assert!(store
                 .sqlite
                 .session_attachment(&record.id)
@@ -1104,10 +958,11 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 .is_none());
             // A new captured input cannot borrow the older input's resume reference.
             let next = super::append_input(&store, session).await.unwrap();
-            let prepared = super::open_without_replacing(
+            let prepared = super::open(
                 &store,
+                std::path::Path::new("/"),
                 &next.id,
-                SessionOpenIntent::Reveal,
+                false,
                 false,
                 false,
                 false,
@@ -1115,16 +970,8 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             .await
             .unwrap();
             let refreshed = listed_session(&store, &next.id);
-            assert_eq!(prepared.actions, refreshed.actions);
-            assert_eq!(
-                refreshed
-                    .actions
-                    .iter()
-                    .find(|a| a.kind == super::SessionActionKind::Open)
-                    .unwrap()
-                    .label,
-                "Start conversation"
-            );
+            assert_eq!(prepared.action, refreshed.action);
+            assert_eq!(refreshed.action.unwrap().label, "Start conversation");
         }
     });
 }
@@ -1447,7 +1294,7 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
 }
 
 /// A held Task conversation nobody views is the Task's, and any terminal
-/// attaches to it: there is no other terminal's input to take back.
+/// attaches to it as one more view.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn a_held_task_conversation_without_a_view_offers_attach() {
@@ -1488,31 +1335,9 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
     let row = rows.iter().find(|row| row.id == session.id).unwrap();
     assert_eq!(row.state, super::SessionState::Detached);
     assert_eq!(row.work_path.as_deref(), Some(created.identifier.as_str()));
-    let offered: Vec<_> = row
-        .actions
-        .iter()
-        .map(|action| (action.label.as_str(), action.unavailable_reason.as_deref()))
-        .collect();
-    assert_eq!(offered, [("Reconnect", None), ("Show conversation", None)]);
-    assert!(row.actions[0]
-        .help
-        .ends_with(&format!("lf resume {}", session.id)));
-    // Desktop reopens and refreshes a pane with reveal; it needs the action
-    // that carries whether revealing can attach.
-    let prepared = super::open_without_replacing(
-        &logins.store,
-        &session.id,
-        SessionOpenIntent::Reveal,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
-    assert!(prepared
-        .actions
-        .iter()
-        .any(|action| action.kind == super::SessionActionKind::Reveal));
+    let action = row.action.as_ref().unwrap();
+    assert_eq!(action.label, "Reconnect");
+    assert!(action.help.ends_with(&format!("lf resume {}", session.id)));
 }
 
 struct ListFilters {

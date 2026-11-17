@@ -3087,7 +3087,7 @@ done
 
     let open = |name: &str| {
         let status = ConnectionStatus::new(fixture.home.path().join(name));
-        let mut command = service.command(&["session", "resume", "--reveal-existing", &session]);
+        let mut command = service.command(&["session", "resume", &session]);
         command
             .env("PATH", &path)
             .env("LF_SERVER", "1")

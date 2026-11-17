@@ -918,7 +918,7 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert!(reports[1].action.as_ref().unwrap().prepare_only);
     assert_eq!(
         reports[2].action.as_ref().unwrap().intent,
-        SessionResumeIntent::TakeOver
+        SessionResumeIntent::View
     );
     assert!(!reports[2].action.as_ref().unwrap().fork);
     assert!(!reports[2].unavailable.is_empty());
@@ -927,9 +927,9 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert_eq!(new_thread.agent.as_deref(), Some("codex"));
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());
-    assert!(reports[3].actions.is_empty());
+    assert!(reports[3].opening.is_none());
     assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
-    for field in ["resolution", "actions", "impediments", "unavailable"] {
+    for field in ["resolution", "opening", "impediments", "unavailable"] {
         let mut missing = wire[0].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<SessionResumeExplanation>(missing).is_err());
@@ -1359,25 +1359,6 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
         serde_json::to_value(&graphs).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-}
-
-#[test]
-fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
-    use loopflow_execution::session::SessionOpenIntent;
-    let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/session_open_intents.json"
-    ))
-    .unwrap();
-    let intents: Vec<SessionOpenIntent> = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(
-        intents,
-        vec![
-            SessionOpenIntent::Resume,
-            SessionOpenIntent::Start,
-            SessionOpenIntent::Reveal
-        ]
-    );
-    assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }
 
 #[test]

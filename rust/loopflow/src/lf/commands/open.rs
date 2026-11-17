@@ -192,12 +192,7 @@ impl Resolved {
     }
 
     fn resume_argv(&self, lf: &str) -> Vec<String> {
-        let mut argv = vec![
-            lf.to_string(),
-            "session".into(),
-            "resume".into(),
-            "--start-if-free".into(),
-        ];
+        let mut argv = vec![lf.to_string(), "session".into(), "resume".into()];
         match (&self.session, &self.url.target) {
             (Some(session), _) => argv.push(session.clone()),
             (None, WorkTarget::Task(id)) => argv.extend(["--task".into(), id.clone()]),

@@ -1302,7 +1302,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
     ))
     .unwrap();
     assert_eq!(missing_bin["state"], explicit["state"]);
-    assert_eq!(missing_bin["actions"], explicit["actions"]);
+    assert_eq!(missing_bin["opening"], explicit["opening"]);
     assert_eq!(missing_bin["unavailable"], explicit["unavailable"]);
     let forked = read(&[
         "session",
@@ -1337,7 +1337,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
         .unwrap(),
     );
     assert!(text.contains("Resume saved provider history"), "{text}");
-    assert!(text.contains("unsent text there is lost"));
+    assert!(text.contains("Open here: Open this Session in a terminal"), "{text}");
     assert!(text.contains("Nothing was executed"));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1346,7 +1346,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
     let prepared = read(&["session", "resume", "native-proof", "--prepare", "--json"]);
     assert_eq!(prepared["id"], explicit["resolution"]["session"]["value"]);
     assert_eq!(prepared["state"], explicit["state"]);
-    assert_eq!(prepared["actions"], explicit["actions"]);
+    assert_eq!(prepared["action"], explicit["opening"]);
 }
 
 #[test]
@@ -1392,12 +1392,12 @@ fn session_resume_explain_preserves_missing_and_stale_evidence() {
     fs::write(&receipt, serde_json::json!({"schema_version":1,"pid":std::process::id(),"terminal_id":"stale","started_at":"2000-01-01T00:00:00Z"}).to_string()).unwrap();
     let stale = read(&session.id);
     assert_eq!(stale["state"], "unknown");
-    assert!(stale["actions"][0]["unavailable_reason"].is_null());
+    assert_eq!(stale["opening"]["label"], "Open here");
     fs::write(&receipt, "unreadable receipt").unwrap();
     let invalid = read(&session.id);
     // Native receipt corruption does not replace recorded Process evidence.
     assert_eq!(invalid["state"], "unknown");
-    assert_eq!(invalid["actions"], stale["actions"]);
+    assert_eq!(invalid["opening"], stale["opening"]);
     assert_eq!(fs::read_to_string(&receipt).unwrap(), "unreadable receipt");
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1458,7 +1458,7 @@ fn session_resume_explain_observes_takeover_without_signaling_owned_client() {
                 report["impediments"].as_array().unwrap().is_empty(),
                 "{report}"
             );
-            assert_eq!(report["actions"][1]["kind"], "move_here");
+            assert_eq!(report["opening"]["label"], "Take over");
             assert!(child.try_wait().unwrap().is_none());
             assert_eq!(fs::read_to_string(&receipt).unwrap(), bytes);
         }
@@ -1522,7 +1522,7 @@ fn session_resume_explain_never_probes_or_claims_a_live_endpoint() {
         .unwrap(),
     ))
     .unwrap();
-    assert_eq!(report["action"]["intent"], "take_over");
+    assert_eq!(report["action"]["intent"], "view");
     assert_eq!(report["action"]["prepare_only"], false);
     assert!(report["unavailable"]
         .as_array()

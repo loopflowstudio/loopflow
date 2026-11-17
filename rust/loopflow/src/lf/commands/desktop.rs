@@ -224,7 +224,8 @@ pub struct DesktopSessionInspection {
     pub reading: String,
     pub reason: Option<String>,
     pub observed_at: Option<String>,
-    pub actions: Option<Vec<SessionAction>>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub action: Option<SessionAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -3271,13 +3272,8 @@ impl DesktopInspection {
                     "    Observed: {}",
                     session.observed_at.as_deref().unwrap_or("unavailable")
                 ));
-                for action in session.actions.iter().flatten() {
-                    lines.push(format!(
-                        "    {}: {} · {}",
-                        action.label,
-                        action.unavailable_reason.as_deref().unwrap_or("available"),
-                        action.help
-                    ));
+                if let Some(action) = &session.action {
+                    lines.push(format!("    {}: {}", action.label, action.help));
                 }
             }
             if !window.view_parts.is_empty() {

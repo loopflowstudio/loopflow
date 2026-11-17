@@ -10,8 +10,9 @@ use super::{
     OpenHost, OpenReceipt, OpenRoute, OpenStatus, Opening, Resolved,
 };
 use crate::lf::commands::desktop::{self, DesktopOpeningStatus};
-use loopflow_execution::ops::human_session::{select_connection, SessionTarget};
-use loopflow_execution::session::SessionOpenIntent;
+use loopflow_execution::ops::human_session::{
+    existing_connection, select_connection, SessionTarget,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -258,32 +259,18 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             (_, _, Some(wave)) => SessionTarget::Wave(wave),
             _ => SessionTarget::Repository,
         };
-        let selected = select_connection(
-            &store,
-            &target.repository_path,
-            selector,
-            if prepare {
-                SessionOpenIntent::Start
-            } else {
-                SessionOpenIntent::Reveal
-            },
-        )
-        .await;
-        // No primary is the ordinary absent-focus result, not an admission.
-        let selected = match selected {
-            Ok(selected) => selected,
-            Err(error)
-                if !prepare
-                    && error.to_string() == "No existing conversation; start one explicitly" =>
-            {
-                return Ok(())
+        let id = if prepare {
+            select_connection(&store, &target.repository_path, selector)
+                .await?
+                .id
+        } else {
+            // No conversation yet is the ordinary absent-focus result.
+            match existing_connection(&store, &target.repository_path, selector).await? {
+                (_, Some(id)) => id,
+                (_, None) => return Ok(()),
             }
-            Err(error) => return Err(error),
         };
-        let session = store
-            .session(&selected.id)
-            .await?
-            .context("Session not found")?;
+        let session = store.session(&id).await?.context("Session not found")?;
         target.agent = match &session.provider {
             Some(provider) => Some(
                 session
@@ -301,7 +288,7 @@ pub(super) fn resolve(target: &mut Resolved, prepare: bool) -> Result<()> {
             .unwrap_or_default()
             .agent()?;
         }
-        target.session = Some(selected.id);
+        target.session = Some(id);
         target.session_cwd = Some(session.cwd);
         Ok(())
     })

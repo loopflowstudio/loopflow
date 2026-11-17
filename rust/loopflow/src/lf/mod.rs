@@ -1586,12 +1586,6 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
-    /// Reveal existing history without replacing another terminal or starting a turn
-    #[arg(long, hide = true, conflicts_with = "message")]
-    pub reveal_existing: bool,
-    /// Start or continue without replacing another terminal's input
-    #[arg(long, hide = true, conflicts_with_all = ["message", "reveal_existing"])]
-    pub start_if_free: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -1607,17 +1601,6 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
-        use loopflow_execution::session::SessionOpenIntent;
-        if self.reveal_existing {
-            SessionOpenIntent::Reveal
-        } else if self.start_if_free {
-            SessionOpenIntent::Start
-        } else {
-            SessionOpenIntent::Resume
-        }
-    }
-
     /// The Task or Wave this command names, as the flag and value that name
     /// it. Naming one makes the resume managed, as `--task` or `--wave` does
     /// for a launch, also beside a Session id.

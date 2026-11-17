@@ -252,10 +252,11 @@ sessions".
 6. Help (`lf/mod.rs` after_help), `resume_explanation.rs`, docs/sessions.md's
    table and every "hands it over" / "replacing another terminal" text describe
    exactly 1-4.
-7. Delete `--start-if-free`, `--reveal-existing` and `SessionOpenIntent` unless
-   a caller still needs "require existing history" (Desktop reveal for
-   non-working Work); if it does, keep only that, named for what it does, and
-   say why in the PR.
+7. Jack Heart on `--start-if-free` and `--reveal-existing`: "kill it". Both
+   flags and `SessionOpenIntent` go, with no "require existing history" mode
+   for Desktop. Every caller (`lf open`, Desktop prepare, overview tabs) gets
+   plain resume: resolve, create if missing, attach or restart, take over a
+   native client.
 
 `lf open` keeps calling `lf session resume`; what `lf open` itself does is the
 next conversation, not this pass.

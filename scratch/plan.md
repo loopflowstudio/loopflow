@@ -237,8 +237,12 @@ steers_start_a_stopped_session_once` passed. CI runs the suites at gate.
    28 passed. Gate runs `test(transport_tests)`'s worker refusal and
    `documented_commands::`.
 
+QA 2026-11-17 at 8e26c5a (`scratch/qa.html` case 11): the refusals and reader
+lines for a finished batch, a finished worker and a running worker read as
+written; `-b steer` to a running worker saves and returns in 0.4 s.
+
 Next: gate. For gate: the Codex question below, and `-b steer` to a running
-Session (saves and returns) has no test.
+Session (saves and returns) has no automated test.
 
 ## Excluded
 

@@ -225,8 +225,8 @@ one frame, with accepted and confirmed times beside it.
 
 ## Slices
 
-All in one PR; deepest first. Status after the fourth implement pass
-(2026-11-16; the third pass is described here, the fourth below it), which built concept review pass 2's four directions
+All in one PR; deepest first. Status after the fifth implement pass
+(2026-11-16; the third pass is described here, the fourth and fifth below it), which built concept review pass 2's four directions
 (`e323a0a227` has their text).
 
 1. **Machine — built.** `journal::request::{after_reply, answer_first}`;
@@ -279,59 +279,32 @@ acceptance rg no matches. `TaskSessionLaunchProofTests` (display,
 `LOOPFLOW_NATIVE_TESTS=1`) fails at its first `find(task-new-session)` here,
 identically on 86841cc327: pre-existing, left to demo/CI.
 
-## Next implement direction (concept review, pass 4)
+Fifth pass (concept review pass 4, built in `7f5bcb0e0a`; its text is in
+`56e3014f5c`): `WorkModel.newTaskSession(_:open:)` is the one New session path
+for the sidebar and the Task page (owns `startingTaskSessions`, `Perf`, the
+`new-session-<task>` Notice with "Try again"); `WorkModel.openWorktree` is the
+one Warp open; `WorkModel.machines` is a reported reading and a failed
+"Run on …" posts a Notice. `SessionsView`'s prepare-checkout, action and
+move-blocked failures and `SessionPaneView`'s pane failures post event
+Notices. `rg -n 'launchError|shellError' swift` finds nothing.
+Checks: same Desktop filter, 111 passed (adds
+`sidebarNewSessionFailurePostsTheNotice`). Concept review pass 5
+(`bbf2a5c62c`) added no direction; it widened the list below.
 
-Built in pass 5: `WorkModel.newTaskSession(_:open:)` is the one New session
-path; `WorkModel.openWorktree` the one Warp open; `WorkModel.machines` a
-reported reading. Check: `scripts/test_desktop.sh --filter
-'PendingChangesTests|WorkModelTests|WorkNavigationTests|TaskSessionLaunchProofTests'`
-— 111 passed; native-display launch proof stays with demo/CI.
+Failures that stay inline, each checked against the code at `bbf2a5c62c`:
+`conversationError`, `completionPending`, the retained-Task banner; failures
+inside a sheet, where a window Notice would sit behind the modal (`saveError`,
+`CreateWaveSheet`, `NewWaveRow`, `NewTaskSheet`, the catalog inspectors'
+Customize `sourceError`); the app-level launch scene and snapshot reports that
+have no window yet (`WorkspaceLaunchView`); the "Workspace unavailable"
+content view (it is the page); the on-demand reads with no `WorkModel`
+(`ProjectHistoryView`, `GraphRunStep`, telemetry); the "Move blocked Sessions"
+confirmation and "Blocked Sessions" result; the phone's Keychain pairing
+(`MachineConnectionView.swift:52`) and timing capture
+(`TaskListView.swift:368`) alerts.
 
-Pass 3's three directions are built (`66067dc588`). Its text is in
-`86841cc327`. The same rule, that an action's failure posts one event Notice
-and no view keeps its own error string, still misses four places:
-
-1. **One New session path.** The sidebar's New session
-   (`SessionsView.newTaskSessionFromInput`, `SessionsView.swift:1985`) reports
-   failure in the `launchError` modal alert, while `WorkSurfaceView`'s button
-   posts `new-session-<task>` with "Try again". The same click fails two ways.
-   Both call one function, which owns `startingTaskSessions`, the `Perf`
-   bracket and the Notice. It lives on `WorkModel`, takes the `newTaskSession`
-   closure, and is deleted from `WorkSurfaceView`.
-2. **`SessionsView` alert failures post the Notice.** "Could not prepare
-   checkout", "Could not complete the action" (`actionFailed`) and "Could not
-   move blocked Sessions" become event Notices. The "Blocked Sessions" result
-   keeps its alert, because it is a multi-line report of outcomes rather than
-   a failure. `launchErrorTitle` goes.
-3. **`SessionPaneView.shellError`** (`WorkspacePanesView.swift:413`, the
-   New Shell, Files and session-replace failures) is an alert. It becomes an
-   event Notice and the state goes.
-4. **`WorkMachineControl`** (`WorkNavigator.swift:461`) puts its `error` in
-   the menu and swaps in a warning icon. A failed "Run on …" posts an event
-   Notice. The Machines list read reports through
-   `model.reported("machines", "Machines", …)`. `error` goes.
-
-Also merge the two copies of `openWorktree` (Warp URL and Notice) in
-`RoadmapView` and `WorkSurfaceView` into one function.
-
-These stay: `conversationError`, `completionPending`, the retained-Task
-banner, failures shown inside a sheet, where a window Notice would sit
-behind the modal (`saveError`, `CreateWaveSheet`, `NewWaveRow`, the catalog
-inspectors' Customize `sourceError`), the app-level deep-link and snapshot
-reports that have no window yet, the "Workspace unavailable" content view (it is the page),
-the on-demand reads that have no `WorkModel` (`ProjectHistoryView`,
-`GraphRunStep`, telemetry), the "Move blocked Sessions" confirmation, and two
-phone alerts outside the Task feed: Keychain pairing
-(`MachineConnectionView.swift:52`) and the timing capture tool
-(`TaskListView.swift:368`).
-
-Done looks like this:
-- `rg -n 'launchError|shellError' swift` finds nothing.
-- `WorkMachineControl` has no `error` state.
-- One `openWorktree`.
-- The pass-3 Desktop filter passes.
-- A WorkNavigationTests case covers a sidebar New session failure: one Notice
-  with "Try again" in the asking window, and no alert.
+Remaining: the journey (slice 5, demo) and the native-display
+`TaskSessionLaunchProofTests` / `TaskHistoryProofTests`, which go to demo/CI.
 
 ## Acceptance at gate (headless)
 

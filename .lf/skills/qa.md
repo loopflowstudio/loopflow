@@ -588,6 +588,15 @@ PID (find it by `LF_HOME` in `ps -E`) to check news recorded while it was down.
 `ps` matches `__context-block` in Codex app-server argv: those are hook
 declarations, not processes.
 
+## Upgrading a store the installed lf made
+
+Seeding a private home with the installed `lf` (`task create`, `session resume
+--prepare`) registers `com.loopflow.server.<hash>` in its `server.plist` with
+the installed binary. Boot that label out before driving the branch, or panes
+and hooks reach a released server that cannot read the upgraded store. Copy the
+seeded `LF_HOME` aside (`cp -R`) before the branch's first open, so the upgrade
+can be repeated from the same released state after a fix.
+
 ## Native conversation opening
 
 Use the private homes above for native servers too. Start Rex with
@@ -603,6 +612,16 @@ Use `rex api call session.list_blocks '{"session_id":"…"}'`, then
 `rex block capture -s <session> -b <block>` to read the terminal. To check the
 direct default inside Rex, create a `session.new_window` whose terminal command
 is `["<branch-lf>","open","--task","<task>"]`; it must stay in that block.
+The Rex executable lives in
+`~/Library/Application Support/com.superlogical.rex/RexServer/Versions/Current/Rex Server.app/Contents/MacOS/rex`.
+Start the Rex server with the branch `lf` first on its `PATH` and `LF_BIN` set:
+its panes run the conversation's `lf` with that environment. `lf open --tab`
+refuses `--diff` outside Desktop; `lf workspace --task <id> --diff --host rex`
+is the native path to the Changes split. The installed-host tests in
+`work_open_tests.rs` run with `cargo test -p loopflow --test integration --
+--ignored native_fresh_launches` and `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR`
+set to those executables; under load averages in the hundreds Rex misses lf's
+2 s answer deadline ("Rex did not answer within 2s"), so read `uptime` first.
 
 For Herdr, isolate `XDG_CONFIG_HOME` and `XDG_STATE_HOME`, start
 `herdr --session qa server`, and set `HERDR_SOCKET_PATH` to

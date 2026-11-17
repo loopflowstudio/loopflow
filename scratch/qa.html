@@ -1,0 +1,110 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-935 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+h1{font-size:1.5em}h2{font-size:1.15em;margin-top:2em;border-bottom:1px solid #ddd}
+pre{background:#f6f6f4;padding:.7em;overflow-x:auto;font-size:12.5px;border-radius:4px}
+td,th{padding:.25em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.ok{color:#1a7f37}.bad{color:#b42318}.warn{color:#9a6700}
+</style></head><body>
+<h1>LOO-935 QA: smaller store, one-tab <code>lf open</code></h1>
+<p>Branch build <code>lf 0.16.0</code> at <code>1c23598b47</code> plus this step's fixes, against a private Machine
+(<code>/tmp/lf-qa-935</code>: own <code>HOME</code>, <code>LF_HOME</code>, <code>CODEX_HOME</code>, Git repo with a bare origin).
+The store was seeded by the installed release (0.16.0, <code>470da475a</code>), then opened by the branch.</p>
+
+<h2>1. Returning user: released store upgraded by the branch</h2>
+<p>Released lf created two Tasks (one with a checkout), two prepared Sessions, a Dashboard query,
+and saved a full Task pane layout (<code>lf desktop layout --save</code>, main's DTO fixture with real IDs), so
+<code>work_pane_layouts</code> held one row. The home was copied aside before the branch touched it.</p>
+<pre>$NEW task list --json     → rc 0, 2 Tasks (working, working)
+exports/unused-store-members.json written (3.2 KB)
+pragma foreign_key_check / integrity_check → clean, "ok"
+tool_responses, work_pane_layouts, session_steers, pools, ondemands → "no such table"
+dashboards 1, dashboard_arrangements 1 (kept)</pre>
+<p class="ok">Works. The exported layout is complete, unsaved drafts included.</p>
+<p><b>Fixed:</b> the export saved every Task's <code>tasks.base_commit = ""</code>, <code>tasks.branch = ""</code> and
+<code>tasks.ship_restarts = 0</code>, values that are only the column default. <code>migration_exports.rs</code> now
+filters each column with <code>"col" IS NOT &lt;declared default&gt;</code>. Repeating the upgrade from the saved
+released home left only <code>task_ownership.written_here</code> and <code>work_pane_layouts</code>. On this Machine's
+real store (read-only count), that skips about 2,500 rows. Examples: <code>ship_restarts</code> 1373 → 22, <code>branch</code> 1373 → 886,
+<code>task_prs.repair_tracking_complete</code> 1120 → 805. Unit test extended; <code>migration_runner</code> lib tests: 126 pass.</p>
+
+<h2>2. Released lf after the upgrade</h2>
+<pre>OLD task list --json        → Error: sqlite error: no such table: task_deletions
+OLD task show &lt;id&gt; --json   → same
+OLD desktop layout task:…   → same
+OLD session list --json     → works
+OLD task create …           → works; the branch then lists 3 Tasks</pre>
+<p class="warn">As designed for the special-case contract ("You can drop everything old in this task as a special
+case"), but this is what anyone running 0.16.0 sees the moment any branch build opens their store: the Task
+list and Task pages fail. Desktop's bundled lf is the same release.</p>
+
+<h2>3. <code>lf open</code> in Rex: one tab, the conversation</h2>
+<p>Private Rex server; <code>lf open --task &lt;id&gt; --tab --host rex --server unix://… --json</code>.</p>
+<pre>receipt: status "usable", "Materialized in Rex; app visibility is unconfirmed (no unique capable client)"
+blocks:  [Conversation]
+capture: Welcome to Codex … Sign in with ChatGPT …   (private CODEX_HOME, no login)</pre>
+<p class="ok">One block holding the Task's conversation; nothing else.</p>
+<p><code>lf open --tab --diff --host rex</code> → "--diff requires --host desktop; use lf diff for terminal changes".
+Main refuses it the same way.</p>
+
+<h2>4. <code>lf workspace</code> in Rex</h2>
+<pre>workspace --task &lt;id&gt; --diff  → blocks [Conversation, Changes]
+  Conversation: "Already open at rex:{…}; reveal it with `lf open --session … --focus`"  (live elsewhere: no second provider)
+  Changes:      lf task diff output (+.lf/prompts/ in .gitignore)
+workspace (repository)         → one tab per Task, each [Task &amp; workflow], plus a "Workspace" follower</pre>
+<p class="ok">Matches the plan: Changes only with <code>--diff</code>, Task view where overviews show workflow.</p>
+
+<h2>5. Installed-host tests (<code>#[ignore]</code>)</h2>
+<p>The plan had left these for QA. Both failed against the new behaviour:</p>
+<pre>herdr: assert sessions == 0   (left 1)
+rex:   "workspace painting cannot prepare or start providers" (left 1)
+rex:   "an arriving Task gets its normal configured splits" (one block: Task &amp; workflow)</pre>
+<p><b>Fixed:</b> the tests now expect what the product is meant to do. An explicit Task workspace opens its one
+conversation and a second launch reuses it (1 Session). An arrival shows only its Task view. Herdr passes.
+Rex passes at load 257. At load 505 it failed with "Rex did not answer within 2s" (receipt now printed in the panic).</p>
+
+<h2>6. Desktop layout and Dashboard commands</h2>
+<pre>lf desktop layout task:&lt;id&gt;   → "`lf desktop layout` reads a Dashboard (query:&lt;id&gt;); Desktop keeps each Work's panes"
+lf desktop layout 'query:QA view' → saved Dashboard JSON
+lf desktop layout --save …     → "unexpected argument '--save'"
+lf desktop dashboard query …   → planning revision 99 → 99 (no planning wake)</pre>
+<p><b>Fixed:</b> help named the argument <code>&lt;WORK&gt;</code> and said "slots" while printing the whole saved Dashboard.
+It now reads <code>Usage: lf desktop layout &lt;QUERY&gt;</code>, "Read a saved Dashboard (its arrangement and slots) as JSON".</p>
+
+<h2>7. Scripts</h2>
+<table>
+<tr><td><code>model_size.py</code></td><td>74 tables, 645 columns, 1007 storage pub fns, 35 SQL sites in 8 files</td></tr>
+<tr><td><code>due_removals.py</code></td><td>LOO-730 regressed_in, LOO-836 work_source, LOO-928 provider tables</td></tr>
+<tr><td><code>schema_page.py --check</code></td><td class="ok">pass</td></tr>
+<tr><td><code>check_migrations.py</code></td><td class="ok">unstaged contract (LOO-935), exports named</td></tr>
+<tr><td><code>cargo clippy -p loopflow-storage -p loopflow --all-targets -D warnings</code></td><td class="ok">clean</td></tr>
+</table>
+
+<h2>What works</h2>
+<ul>
+<li>Upgrading a store from 0.16.0: data kept, dropped members exported, foreign keys clean.</li>
+<li><code>lf open --task</code> in Rex: one Conversation tab. <code>lf workspace</code> adds Changes with <code>--diff</code> and Task views for overviews.</li>
+<li>Dashboard edits no longer advance the planning revision.</li>
+</ul>
+
+<h2>Not reached</h2>
+<ul>
+<li>Desktop windows: no Swift run in this step (load 250–500). After the layout change, the implement step ran
+<code>DashboardWorkspaceTests</code> (14 pass), and Swift has not changed since. Whether a Desktop pane layout saved under
+<code>desktop-cache/pane-layouts/</code> comes back after a relaunch was not seen in a window.</li>
+<li>cmux: not installed.</li>
+<li>An authenticated provider reply: Codex stopped at sign-in.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li class="warn">Released 0.16.0 (CLI and Desktop's bundled lf) cannot list or show Tasks once a branch build has opened
+the store. Every branch-built <code>lf</code> run against <code>~/.lf</code> between merge and installing the release
+triggers it.</li>
+<li>A failed first launch can't be retried by its own advice. The receipt says "retry the same command". The retry says
+"The previous launch has no saved provider history; use `lf resume &lt;id&gt;` to retry it explicitly". The code is the same on main.</li>
+<li><code>lf workspace --help</code> says <code>--diff</code> is "(Desktop)", but Rex shows Changes with it; <code>lf open</code> does refuse it.</li>
+<li>Seeding a private home with released lf leaves its launchd server running the released binary. Recorded in the qa skill.</li>
+</ol>
+</body></html>

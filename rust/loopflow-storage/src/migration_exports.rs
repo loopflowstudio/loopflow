@@ -2,7 +2,7 @@
 //!
 //! The file is `<lf home>/exports/unused-store-members.json`: one key per
 //! dropped table (every row) and per dropped column (`id` and value for each
-//! row that holds one). Empty members are left out. A retried upgrade writes
+//! row whose value is not the column's default). Empty members are left out. A retried upgrade writes
 //! the same rows again, so the file always matches the store it came from.
 
 use std::fs::File;
@@ -77,7 +77,13 @@ pub(crate) fn export_unused_store_members(
     }
     for (table, column) in COLUMNS {
         let columns = ["id".to_string(), (*column).to_string()];
-        let rows = rows(conn, table, &columns, &format!("{column} IS NOT NULL"))?;
+        let default = default(conn, table, column)?.unwrap_or_else(|| "NULL".into());
+        let rows = rows(
+            conn,
+            table,
+            &columns,
+            &format!("\"{column}\" IS NOT {default}"),
+        )?;
         if !rows.is_empty() {
             export.insert(format!("{table}.{column}"), Value::Array(rows));
         }
@@ -103,6 +109,15 @@ fn columns(conn: &Connection, table: &str) -> StoreResult<Vec<String>> {
     let mut statement = conn.prepare("SELECT name FROM pragma_table_xinfo(?1) ORDER BY cid")?;
     let names = statement.query_map([table], |row| row.get(0))?;
     Ok(names.collect::<Result<_, _>>()?)
+}
+
+/// The column's declared default as SQL text, as `pragma_table_xinfo` reports it.
+fn default(conn: &Connection, table: &str, column: &str) -> StoreResult<Option<String>> {
+    Ok(conn.query_row(
+        "SELECT dflt_value FROM pragma_table_xinfo(?1) WHERE name = ?2",
+        [table, column],
+        |row| row.get(0),
+    )?)
 }
 
 fn rows(
@@ -146,14 +161,19 @@ mod tests {
             let columns = super::COLUMNS
                 .iter()
                 .filter(|(owner, _)| *owner == table)
-                .map(|(_, column)| format!(",{column} TEXT"))
+                .map(|(_, column)| match *column {
+                    "ship_restarts" => format!(",{column} INTEGER NOT NULL DEFAULT 0"),
+                    "base_commit" => format!(",{column} TEXT NOT NULL DEFAULT ''"),
+                    _ => format!(",{column} TEXT"),
+                })
                 .collect::<String>();
             create.push_str(&format!("CREATE TABLE {table}(id TEXT{columns});"));
         }
         conn.execute_batch(&create).unwrap();
         conn.execute_batch(
             "INSERT INTO session_steers(id) VALUES('steer');
-             INSERT INTO tasks(id,worktree) VALUES('task','/repo/task'),('bare',NULL);",
+             INSERT INTO tasks(id,worktree) VALUES('task','/repo/task'),('bare',NULL);
+             UPDATE tasks SET ship_restarts=2, base_commit='abc' WHERE id='task';",
         )
         .unwrap();
         let mut guards = Vec::new();
@@ -167,6 +187,8 @@ mod tests {
             serde_json::json!({
                 "session_steers": [{"id": "steer"}],
                 "tasks.worktree": [{"id": "task", "worktree": "/repo/task"}],
+                "tasks.ship_restarts": [{"id": "task", "ship_restarts": 2}],
+                "tasks.base_commit": [{"id": "task", "base_commit": "abc"}],
             })
         );
         assert_eq!(guards.len(), 1);

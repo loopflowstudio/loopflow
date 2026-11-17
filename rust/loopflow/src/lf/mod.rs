@@ -741,9 +741,10 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Read a Dashboard's slots as JSON; `lf desktop dashboard slots` replaces them
+    /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {
         /// query:ID
+        #[arg(value_name = "QUERY")]
         work: String,
     },
 

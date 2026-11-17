@@ -22,8 +22,8 @@ Jack Heart, 2026-11-16: "You can drop everything old in this task as a special
 case". So `unused_store_members.sql` is a contract that drops now, without an
 aged expand step. `check_migrations.py` exempts that file alone
 (`UNSTAGED_CONTRACT`, comment cites LOO-935); it still needs `-- exports:`.
-The preflight (`migration_exports.rs`) writes every non-empty dropped table and
-column to `<lf home>/exports/unused-store-members.json` before the SQL runs.
+The preflight (`migration_exports.rs`) writes every non-empty dropped table, and
+each dropped column's values other than its default, to `<lf home>/exports/unused-store-members.json` before the SQL runs.
 Released lf (0.16.0 and older) fails on the statement that names a dropped
 member; the rest of the store answers.
 
@@ -83,7 +83,7 @@ state; the file is not rewritten.
 |---|---|---|
 | tables | 87 | 74 |
 | columns | 723 | 645 |
-| storage `pub fn` (non-test) | 1050 | 1029 |
+| storage `pub fn` (non-test) | 1050 | 1007 (after merging main) |
 | SQL call sites outside storage | 35 in 8 files | 35 in 8 files |
 | store (copy of this Machine's, after VACUUM) | 991 MB | 897 MB |
 
@@ -99,5 +99,5 @@ Upgrade of that copy with the branch: applied, `foreign_key_check` clean,
 - Swift (before it): `scripts/test_desktop.sh --skip-build --filter 'WorkSelectionTests|ToolTabTests|DashboardWorkspaceTests|MultiplexerStoreTests|DTOFixtureTests'`: 90 pass (subagent run); a wider 14-suite filter, 195 pass.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
 - Compress (after merging main): `cargo clippy -p loopflow --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (30), `check_migrations.py`: pass; `schema_page.py --check` was stale from main's "Provider authentication" rename, regenerated.
-- Not run: the two `#[ignore]` installed-host tests in `work_open_tests.rs` (Rex, Herdr) lost their tools-only `task_layout`; gate/QA with installed hosts.
+- QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

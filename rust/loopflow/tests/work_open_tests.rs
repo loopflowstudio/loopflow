@@ -1825,8 +1825,8 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     );
     assert_eq!(
         sessions(&home),
-        0,
-        "workspace painting cannot prepare or start providers"
+        1,
+        "a Task workspace opens its one conversation; another launch reuses it"
     );
     let reply = root.path().join("caller.json");
     call(
@@ -1855,7 +1855,9 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         std::thread::sleep(Duration::from_millis(50));
     };
     assert_eq!(automatic["receipts"][0]["host"], "rex");
-    let inside = automatic["receipts"][0]["destination"].as_str().unwrap();
+    let inside = automatic["receipts"][0]["destination"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{automatic}"));
     assert_ne!(inside, window, "{automatic}");
     assert!(
         call("session.view", serde_json::json!({"session_id":container}))["windows"]
@@ -1959,15 +1961,17 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         })
         .unwrap()
         .clone();
-    let block_count: usize = arrival["layers"]
+    let labels: Vec<&Value> = arrival["layers"]
         .as_array()
         .unwrap()
         .iter()
-        .map(|layer| layer["blocks"].as_array().unwrap().len())
-        .sum();
-    assert!(
-        block_count > 1,
-        "an arriving Task gets its normal configured splits: {arrival}"
+        .flat_map(|layer| layer["blocks"].as_array().unwrap())
+        .map(|block| &block["label"])
+        .collect();
+    assert_eq!(
+        labels,
+        [&Value::from("Task & workflow")],
+        "an arriving Task shows only its Task view: {arrival}"
     );
     let deadline = Instant::now() + Duration::from_secs(5);
     let arrival_cwd = loop {
@@ -1987,7 +1991,11 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         std::fs::canonicalize(&sibling).unwrap(),
         "The arriving Task view must execute in its Task checkout, not the repository root"
     );
-    assert_eq!(sessions(&home), 0);
+    assert_eq!(
+        sessions(&home),
+        1,
+        "overviews and arrivals start no conversation"
+    );
     // A closed arrival stays closed while the follower runs.
     call(
         "session.close_window",
@@ -2113,7 +2121,11 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
     let second = json(&lf_with(&home, repo.path(), None, &environment, &args));
     assert_ne!(second["receipts"][0]["destination"].as_str().unwrap(), tab);
     assert_eq!(before, tabs(), "the earlier Task tab is untouched");
-    assert_eq!(sessions(&home), 0);
+    assert_eq!(
+        sessions(&home),
+        1,
+        "both launches show the Task's one conversation"
+    );
     for workspace in call("workspace.list", serde_json::json!({}))["workspaces"]
         .as_array()
         .unwrap()

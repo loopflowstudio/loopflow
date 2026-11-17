@@ -7,7 +7,8 @@ repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them; liveness by
 `run_evidence`). `detached::start_lf` returns `Started { id, pid,
 os_started_at }`, so `engine::launch` waits on the child without the store.
-Next: Task-run and ship carriers (below), then the Session slice.
+Next: the concept-review items below, then Task-run and ship carriers,
+then the Session slice.
 
 **Carriers, as found 2026-11-17.** `task_state_sql` reads "moving/shipping"
 from the carrier's `processes.completed_at`. Plan: `task_graphs.run_pid,
@@ -19,6 +20,36 @@ migration replaces it with a launch-columns-immutable trigger (as for Graph
 runs), `revisions.rs:187` special-cases its update, and the `finish_run` arm
 writes `ended_at/exit_code/error` by `task_ship_events_process`. The
 `open_processes` arm of `task_state_sql` stays until the Session slice.
+
+**Concept review after the owner slices (`05d35042b5`): next implement
+direction.** Settled by the design; build before the carriers.
+
+- **A Project activation records its pid.** `waves` has
+  `project_activation_{ended_at,exit_code,error}` but no start, pid or OS
+  start, so an activating lf killed after the journal stops writing reads
+  pending forever: no read can check the OS and the liveness pass (approach
+  4, "every owner row with a pid") cannot close it. Today the bridge hides it
+  (`close_dead_processes` closes the Process row, the trigger copies the
+  end). Add `project_activation_{started_at,pid,os_started_at}`, written by
+  `record_project_activation` from `current_execution_start()` and cleared
+  by its end, and read readiness through `run_evidence` as CI repairs do: a
+  dead pid with no end reads `unknown`, not pending. Backfill from
+  `processes` like the repair columns. Target records row for `waves` gains
+  the three columns. Test: an activation whose pid is dead reads `unknown`.
+- **A run says which record it owns; `finish_run` stops probing.** The
+  spawner knows it is ending a Graph run or a step, and the child knows what
+  it recorded, yet `finish_run(id)` tries `graph_processes`, then
+  `graph_process_steps`, then `waves`, and the carrier and ship arms would
+  make five UPDATEs on every owning lf's exit. Replace the bool `owns_run` /
+  `mark_run_owner()` with `mark_run_owner(RunOwner)` where `RunOwner` is the
+  record (`GraphRun`, `GraphStep`, `ProjectActivation`, `TaskCarrier`,
+  `ShipCarrier`), and `finish_run(owner, id, …)` writes that one table. One
+  writer per owner table, as the 2a review said, now spelled in the type.
+- **The spawner's end write is best-effort.** `finish_run(...)?` at
+  `lf/commands/graph.rs:240` and `:940` still fails a Graph whose child
+  succeeded when the store is busy. Both become warn-and-continue (the
+  journal's warn-once gap); the child's own end write and the liveness pass
+  cover a missed one. Closes the 2a review's open item.
 
 **Correction: foreign keys come off in the expand, not the contract.** Once
 the journal stops writing rows (approach 2), every column still declaring
@@ -303,7 +334,7 @@ agent generation id); no table holds them. Column sets, each with its reader:
 | `task_graphs` (carrier) | `run_pid`, `run_os_started_at` (cleared with `lf_process_id`) | Task moving, retirement, interrupt |
 | `task_ship_events` approved/carried | `pid`, `os_started_at`, `ended_at`, `exit_code`, `error`, `caller_session_id` | Task shipping, "started by", carrier failure |
 | `ci_incidents` | `repair_started_at`, `repair_pid`, `repair_os_started_at` | `pr_repair_lifetimes`, landing liveness |
-| `waves` | `project_activation_ended_at`, `_exit_code`, `_error` | `readiness_in` |
+| `waves` | `project_activation_started_at`, `_pid`, `_os_started_at`, `_ended_at`, `_exit_code`, `_error` | `readiness_in` |
 | `held_terminals` | `holder_pid`, `holder_os_started_at` | holder dedupe and settle |
 
 pid and OS start are cleared at exit. Agent states: reserved =

@@ -104,7 +104,8 @@ lf task move <issue> --machine <machine-label> # one existing Task
 ```
 
 The Machine choice is personal and never committed. Check the remote has `lf`,
-the repository, service access and native agent authentication before pointing work at it, and run logins in
+the repository, service access and native agent authentication before
+pointing work at it, and run logins in
 a foreground terminal with `lf machine connect`.
 
 ## 6. Check it works

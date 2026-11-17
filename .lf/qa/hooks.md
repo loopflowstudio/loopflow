@@ -3,23 +3,13 @@ Read when the change touches turn or tool hooks, or what they record.
 # Turn and tool hooks
 
 A Session launched in a Task's checkout is Task work. Headless (`-b`) there
-confines the agent and needs a managed login (`claude=<email>`), which a private
-home cannot get without real OAuth (`--import` checks the token against
-Anthropic). To drive real headless Task runs anyway, run a throwaway
-`rust/loopflow/examples/*.rs` that calls `upsert_provider_account` the way
-`tests/session_steers.rs`'s `connect_fixture_account` does, against the private
-store, then delete it. Put `tests/support/mod.rs`'s `FAKE_SECURITY` first on
-`PATH` as `security` and set `USER`: signing the login in goes through the
-Keychain. Never run `lf account` there: it checks the token with Anthropic and
-marks the fixture login "needs a login"; register it again if it did. A
-stand-in's usage-limit result cools the only login for 15 minutes, so the
-step waits for capacity rather than stopping. Starting a private server
-resumes every Task whose Auto-Ship was approved: abandon old QA Tasks first.
-Do not repeat this with release 0.15.3: its
-launch from a private home tries to write a Claude Keychain item. Dead
-AgentProcesses are reaped by `lf process prune`, not by `lf session list`.
-Otherwise launch interactively (`-i`) in a PTY. `lf account connect claude --api-key` with a placeholder
-`ANTHROPIC_API_KEY` satisfies account selection for that launch. A stand-in
+confines the agent and runs on the native login, like every other launch:
+with the real `HOME`, a private `LF_HOME` and that home's `lf server run`,
+`lf -b --task <id> -a claude:haiku : '<msg>'` in the Task checkout answers.
+Starting a private server resumes every Task whose Auto-Ship was approved:
+abandon old QA Tasks first. Dead AgentProcesses are reaped by
+`lf process prune`, not by `lf session list`.
+Interactive (`-i`) launches run in a PTY. A stand-in
 `claude` on `PATH` can read `--settings` and run each hook command exactly as
 installed, with Claude's callback JSON on stdin; release its turns with marker
 files so steers and server changes can happen between them. Run `lf` commands
@@ -59,7 +49,7 @@ per character, and drain output between writes of more than a few KB.
 
 Real providers on their existing logins: keep the real `HOME` with a private
 `LF_HOME`. Plain `lf -b` and `lf -i` launch there, as does `lf -i --task <id>`
-in a Task checkout; only `-b` in a Task checkout asks for a managed login. In a
+in a Task checkout, and `-b` there. In a
 private home with no Linear, `lf task update` needs the full `task_…` ID; the
 short identifier resolves through Linear.
 

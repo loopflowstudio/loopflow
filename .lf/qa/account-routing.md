@@ -1,21 +1,21 @@
-Read when the change touches provider logins, account capacity or routing.
+Read when the change touches native provider logins, historical accounts or quota refusals.
 
-# Account capacity and routing
+# Native logins and provider refusals
 
-A private home gets Claude logins without OAuth or `lf account`: per login, a
-`provider_accounts` row (`credential_state='connected'`, `observed_email`,
-`observed_subject`, `observed_credential_digest` = sha256 of the exact
-`.credentials.json` bytes under `$LF_HOME/accounts/claude/<id>/`) plus
-`accounts.claude.<id>: {login_email, routing_state: automatic}` in
-`$LF_HOME/config.yaml`. Raw SQL works on a store the installed `lf` created,
-so its recorder can write the "before" rows and the branch then upgrades them.
-A stand-in `claude` that prints a `rate_limit_event` line between `init` and an
-`is_error` `result` records a limit through a real `lf -b -a claude:<model>`.
-`--only-account` and `--account` bypass capacity, so use them to record a
-limit and plain routing to check it; `lf account --cached` marks the login a
-launch switched to `● active`. `-b` runs are not resumable Sessions: launch
-`-i` in a PTY (the stand-in prints and exits) and `lf -i session resume`.
-The Claude usage endpoint override (`LF_TEST_CLAUDE_USAGE_URL`) exists only
-under `cfg(test)`, so a branch binary's poll reaches Anthropic; the poll path
-is checked by `cargo test -p loopflow --lib claude_usage_reconciliation_`.
+lf selects no login: Claude and Codex read their own homes. To check that an
+old managed account changes nothing, seed `provider_accounts` and
+`provider_session_accounts` rows by raw SQL in the private store and put
+released `account:`/`accounts:` keys in `$LF_HOME/config.yaml`; launches must
+stay on the native login, print no "unknown setting" warning and leave those
+rows and files byte-for-byte. `lf session list` then shows "historical
+account: <id>". With `isolated=1` and the transcript only under the account's
+`home/projects/`, a resume copies the transcript (never credentials) into the
+native home; with no transcript anywhere it refuses with "its transcript is
+missing". For a quota refusal, put a stand-in `claude` first on `PATH` that
+prints `init`, a `rate_limit_event` with `status: rejected`, then an
+`is_error` `result`, and configure `agents: [claude, codex]`: unpinned `lf -b`
+prints "Continuing on codex" and real Codex answers; `-a claude:opus` stops
+with "agent stopped after provider usage limit". When replacing a copied
+`lf` that a server is running, `rm` it first: copying over the file in place
+makes macOS SIGKILL the next exec (exit 137, no output).
 Name the PTY driver anything but `pty.py`: it shadows the stdlib module.

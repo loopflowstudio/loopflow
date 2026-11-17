@@ -78,6 +78,7 @@ Task and PR. Routine progress goes in this conversation, not Task comments.
   `lf --repo <repo> set machine <machine>`, never committed. This pass changes
   no Task's person or Machine; operate a remote Task on its own Machine with
   `lf --machine <machine-id>`.
-- **Accounts.** Check `lf account --json` (saved service authentication, offline) before proposing an account fix.
-  Claude and Codex own native sign-in. Never print credential values, and don't change accounts or ownership just
-  to get a pass through.
+- **Accounts.** Check `lf account --json` (saved service authentication,
+  offline) before proposing an account fix. Claude and Codex own native
+  sign-in. Never print credential values, and don't change accounts or
+  ownership just to get a pass through.

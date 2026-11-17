@@ -1,3 +1,5 @@
+> Reference only: the design of LOO-953, which this branch is stacked on. Not this Task's plan. LOO-953 is still changing; sync from `jack/loo-953-remove-process-rows-liveness-on-sessions-and` before each implement pass.
+
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
 Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a

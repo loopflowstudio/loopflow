@@ -180,7 +180,6 @@ pub(crate) fn require_foreground(batch: bool) -> Result<()> {
     Ok(())
 }
 
-/// Whether the target's own `lf machine logins` already shows `login`.
 /// Whether `machine` already reads signed in to `provider` as `login`; says so
 /// when it does, since nothing is sent.
 async fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {

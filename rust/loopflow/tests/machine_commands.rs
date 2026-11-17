@@ -554,7 +554,7 @@ fn services_that_sign_in_here_only_never_reach_another_machine() {
     assert!(!output.status.success());
     let shown = String::from_utf8_lossy(&output.stderr);
     assert!(
-        shown.contains("Asana signs in on this Machine only; run `lf machine login asana` on mini"),
+        shown.contains("Asana signs in on each Machine itself; run `lf machine login asana` there"),
         "{shown}"
     );
     assert!(!reached.exists());
@@ -579,7 +579,7 @@ fn services_that_sign_in_here_only_never_reach_another_machine() {
     assert!(!output.status.success());
     let shown = String::from_utf8_lossy(&output.stderr);
     assert!(
-        shown.contains("Doppler signs in on this Machine only"),
+        shown.contains("Doppler signs in on each Machine itself"),
         "{shown}"
     );
     let listed = fixture.run(&["ondemand", "list"]);

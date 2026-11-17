@@ -40,7 +40,6 @@ pub async fn login(
     if here(machine) && !matches!(provider, Provider::Claude | Provider::Codex) {
         return crate::provider_auth::operations::connect(provider, chrome_profile, api_key).await;
     }
-    require_reach(provider, &name(machine))?;
     let approver = approver(provider, chrome_profile)?;
     match provider {
         Provider::Claude => claude(machine, approver.as_ref(), batch),
@@ -65,12 +64,12 @@ pub fn reaches_other_machines(provider: Provider) -> bool {
     )
 }
 
-/// Refuses, before anything connects to it, to sign `machine` in to a
-/// provider that signs in here only.
-pub fn require_reach(provider: Provider, machine: &str) -> Result<()> {
+/// Refuses a provider that cannot sign another Machine in, before anything
+/// connects to one.
+pub fn require_reach(provider: Provider) -> Result<()> {
     if !reaches_other_machines(provider) {
         bail!(
-            "{} signs in on this Machine only; run `lf machine login {}` on {machine}",
+            "{} signs in on each Machine itself; run `lf machine login {}` there",
             provider.display_name(),
             provider.as_str(),
         );

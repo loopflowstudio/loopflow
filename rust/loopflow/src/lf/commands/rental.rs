@@ -173,13 +173,8 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd_per_hour,
             logins,
         } => {
-            if let Some(provider) = logins.iter().find(|provider| {
-                !loopflow_execution::machine::login::reaches_other_machines(**provider)
-            }) {
-                return Err(anyhow!(
-                    "{} signs in on this Machine only; a rental cannot be signed in to it",
-                    provider.display_name()
-                ));
+            for provider in logins {
+                loopflow_execution::machine::login::require_reach(*provider)?;
             }
             let ondemand = OnDemand {
                 name: name.clone(),

@@ -82,6 +82,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             refused,
         } => {
             use loopflow_execution::machine::login;
+            if *refused || !machines.is_empty() {
+                login::require_reach(*provider)?;
+            }
             let targets = if *refused {
                 let targets = login::refused(*provider).await?;
                 if targets.is_empty() {
@@ -89,9 +92,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 }
                 targets
             } else {
-                for machine in machines {
-                    login::require_reach(*provider, machine)?;
-                }
                 named_or_here(machines).await
             };
             return each(targets, "signed in", |machine| async move {

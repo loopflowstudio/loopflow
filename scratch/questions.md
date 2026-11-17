@@ -86,6 +86,8 @@ Choices made headless for review; the plan says what each passed over.
   Machine only; one predicate (`login::reaches_other_machines`) gates
   dispatch, rental prepare's default and `ondemand add --logins`. Passed over:
   remote transfers for them.
-- `lf machine login asana <this Machine's label>` is refused by name before
-  resolution, though `login::login` would sign this Machine in; naming no
-  Machine is the way. Passed over: resolving first, which reaches SSH.
+- `lf machine login asana <any Machine>` and `--refused` are refused before
+  resolution, even naming this Machine's label, though `login::login` would
+  sign this Machine in; naming no Machine is the way. One check at the command
+  (`login::require_reach`), none inside `login::login`. Passed over:
+  resolving first, which reaches SSH.

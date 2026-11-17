@@ -1,4 +1,3 @@
-use crate::address::CanonicalRepo;
 use crate::provider::Provider;
 use crate::ProviderAccountId;
 use serde::{Deserialize, Serialize};
@@ -86,43 +85,4 @@ pub struct AuthBrowserBinding {
     pub account_id: Option<ProviderAccountId>,
     pub position: usize,
     pub profile_id: ProfileId,
-}
-
-/// Where an account route applies; a launch uses the nearest: Wave, then
-/// repository, then default.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum RouteScope {
-    Wave(loopflow_model::id::WaveId),
-    Repo(CanonicalRepo),
-    Default,
-}
-
-impl RouteScope {
-    pub fn kind(&self) -> &'static str {
-        match self {
-            Self::Wave(_) => "wave",
-            Self::Repo(_) => "repo",
-            Self::Default => "default",
-        }
-    }
-
-    pub fn id(&self) -> &str {
-        match self {
-            Self::Wave(wave_id) => wave_id.as_str(),
-            Self::Repo(repo_id) => repo_id
-                .as_path()
-                .to_str()
-                .expect("repository path is UTF-8"),
-            Self::Default => "",
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ProviderRoute {
-    pub scope: RouteScope,
-    pub provider: Provider,
-    pub accounts: Vec<ProviderAccountId>,
-    pub created_at: i64,
-    pub updated_at: i64,
 }

@@ -194,11 +194,7 @@ pub fn task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
     let current_session = store
         .sqlite
         .task_primary(&id)?
-        .map(|session| {
-            let capacity =
-                loopflow_execution::provider_account::LaunchCapacity::read(&store.sqlite)?;
-            loopflow_execution::ops::human_session::listed(&store, session.id.as_str(), &capacity)
-        })
+        .map(|session| loopflow_execution::ops::human_session::listed(&store, session.id.as_str()))
         .transpose()?
         .flatten();
     let checks = pane
@@ -233,15 +229,13 @@ pub fn session_card(id: &str) -> Result<SessionCard> {
     let store = loopflow_execution::store::read_existing_registry()?
         .map(Arc::new)
         .context("no Loopflow store exists on this Machine")?;
-    let capacity = loopflow_execution::provider_account::LaunchCapacity::read(&store.sqlite)?;
-    let session = loopflow_execution::ops::human_session::listed(&store, id, &capacity)?
-        .ok_or_else(|| {
-            loopflow_execution::engine::Error::new(
-                loopflow_execution::engine::ErrorCode::NotFound,
-                format!("Session {id} is not recorded"),
-            )
-            .with(serde_json::json!({ "id": id }))
-        })?;
+    let session = loopflow_execution::ops::human_session::listed(&store, id)?.ok_or_else(|| {
+        loopflow_execution::engine::Error::new(
+            loopflow_execution::engine::ErrorCode::NotFound,
+            format!("Session {id} is not recorded"),
+        )
+        .with(serde_json::json!({ "id": id }))
+    })?;
     Ok(session.into())
 }
 

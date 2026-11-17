@@ -6,7 +6,6 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::Duration;
 
-use loopflow_execution::store::ProviderAccountId;
 use loopflow_test_support::TestRepo;
 use serde_json::Value;
 
@@ -176,7 +175,6 @@ fn documented_recipes_share_file_cli_and_inspection_without_a_database() {
             "claude",
         ],
         vec!["set", "graphs.release.steps.fix-review.agent", "claude"],
-        vec!["set", "account.claude", "[work@example.com]"],
     ] {
         let output = lf(repo.path(), home.path(), &args);
         assert!(
@@ -288,43 +286,17 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     let here = loopflow_execution::store::machines::local_machine(&store)
         .unwrap()
         .id;
-    loopflow_execution::provider_account::catalog::upsert_provider_account(
-        &store,
-        &loopflow_execution::store::ProviderAccount {
-            provider: "codex".into(),
-            account_id: ProviderAccountId::parse("work").unwrap(),
-            home: None,
-            login_email: None,
-            observed_email: None,
-            observed_subject: None,
-            observed_credential_digest: None,
-            observed_plan: None,
-            credential_state: loopflow_execution::store::CredentialState::Connected,
-            routing_state: loopflow_execution::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: 1,
-            updated_at: 1,
-        },
-    )
-    .unwrap();
     drop(store);
-    // Machines and account routes are yours: `lf set`, never committed.
-    for args in [
-        vec!["--wave", "infra", "set", "machine.tasks", here.as_str()],
-        vec!["--wave", "research", "set", "account.codex", "work"],
-    ] {
-        let output = lf(repo.path(), home.path(), &args);
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let output = lf(
+        repo.path(),
+        home.path(),
+        &["--wave", "infra", "set", "machine.tasks", here.as_str()],
+    );
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 
     // Launches take their Wave's agent, per skill first; no Wave is the repository's.
     assert_eq!(
@@ -353,7 +325,6 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(infra["tasks_machine"]["value"], here.as_str());
     assert_eq!(infra["tasks_machine"]["source"], "personal");
     assert_eq!(infra["session_machine"]["source"], "builtin");
-    assert_eq!(infra["accounts"]["codex"]["source"], "builtin");
 
     let research = setup("research");
     assert_eq!(research["graph"]["value"], "repo-flow");
@@ -361,8 +332,6 @@ fn each_wave_runs_its_own_setup_and_the_repository_is_the_default() {
     assert_eq!(research["agent"]["value"], "codex:o3");
     assert_eq!(research["agent"]["source"], "repository");
     assert_eq!(research["tasks_machine"]["source"], "builtin");
-    assert_eq!(research["accounts"]["codex"]["accounts"][0], "work");
-    assert_eq!(research["accounts"]["codex"]["source"], "personal");
 
     let plain = setup("plain");
     assert_eq!(plain["graph"]["source"], "repository");

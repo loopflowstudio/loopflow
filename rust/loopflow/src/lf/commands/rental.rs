@@ -246,6 +246,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
             max_usd,
             json,
         } => {
+            loopflow_execution::machine::forward::read_for_rental(&std::env::current_dir()?)?;
             let (rental, machine) = rent(&runtime, sqlite, name, *hours, *max_usd, true)?;
             if *json {
                 println!("{}", serde_json::to_string(&rental)?);
@@ -260,7 +261,7 @@ pub fn run_ondemand(cmd: &OndemandCommand, batch: bool) -> anyhow::Result<()> {
                 );
                 if !batch {
                     println!(
-                        "Next: `lf machine connect {label} github` and `lf machine connect {label} claude`; \
+                        "Next: `lf machine connect {label} github`; launches carry `forward`; \
                          `lf machine end {label}` gives it back"
                     );
                 }
@@ -614,16 +615,12 @@ pub fn place(
         );
         return Ok(true);
     }
-    if batch {
-        runtime.block_on(async {
-            let accounts = loopflow_execution::provider_account::open_account_store().await?;
-            loopflow_execution::machine::credentials::require_unattended_logins(&accounts).await
-        })?;
-    }
     // The Task's own repository, wherever this checkout was first recorded.
     let (_, task) = runtime.block_on(loopflow_execution::ops::task::resolve_saved_task(
         repo, None, issue,
     ))?;
+    // A rental that could not authenticate its launch is money for nothing.
+    loopflow_execution::machine::forward::read_for_rental(repo)?;
     let (rental, machine) = rent(&runtime, sqlite, name, None, None, false)?;
     let label = machine.name();
     if let Err(error) = prepare(&runtime, &label, repo, &task.repository_id, batch) {
@@ -735,12 +732,8 @@ fn prepare(
         Login::GitHub,
         None,
         None,
-        false,
         batch,
     ))?;
-    runtime.block_on(
-        loopflow_execution::machine::credentials::connect_claude_accounts(&machine, batch),
-    )?;
     let planning = loopflow_execution::config::load_config(Some(repo))?
         .unwrap_or_default()
         .planning_transport();
@@ -753,7 +746,6 @@ fn prepare(
             Login::Linear,
             None,
             None,
-            false,
             batch,
         ))?;
     }

@@ -79,7 +79,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             provider,
             email,
             chrome_profile,
-            owned,
         } => {
             let machine =
                 loopflow_execution::machine::connection::resolve_target(target, false).await?;
@@ -88,7 +87,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 *provider,
                 email.as_deref(),
                 chrome_profile.as_deref(),
-                *owned,
                 batch,
             )
             .await;

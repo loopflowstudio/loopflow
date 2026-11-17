@@ -1090,9 +1090,6 @@ mod tests {
             Departure::Terminal {
                 to: Some("Desktop".into()),
             },
-            Departure::Account {
-                account: crate::store::ProviderAccountId::parse("other").unwrap(),
-            },
             Departure::Machine {
                 machine: loopflow_model::durable::MachineId::new(),
                 task: Some(loopflow_model::durable::TaskId::new()),

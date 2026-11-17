@@ -240,11 +240,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
-    for provider in parsed.account.keys() {
-        if !["claude", "codex"].contains(&provider.as_str()) {
-            return Err(invalid("account routes require claude or codex"));
-        }
-    }
     for (provider, browsers) in &parsed.auth_browsers {
         provider
             .parse::<crate::provider_auth::Provider>()
@@ -275,13 +270,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .provider
             .offer(&template.hardware)
             .map_err(invalid)?;
-    }
-    for accounts in parsed.accounts.values() {
-        for declaration in accounts.values() {
-            if let Some(date) = &declaration.paid_through {
-                super::placement::parse_date(date).map_err(|error| invalid(error.to_string()))?;
-            }
-        }
     }
     if path[0] == "context" {
         crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
@@ -524,6 +512,10 @@ fn _normalize_preferences(value: &mut Value) {
     }
 }
 
+/// Account routing preferences the released lf still reads from personal
+/// files. This lf ignores them without a warning; LOO-919 deletes this list.
+const RETIRED_SETTINGS: &[&[&str]] = &[&["account"], &["accounts"]];
+
 fn _filter_file_settings(
     value: &mut Value,
     path: &mut Vec<String>,
@@ -564,6 +556,10 @@ fn _filter_file_settings(
                 definition.accepts(&preference.iter().map(String::as_str).collect::<Vec<_>>())
             });
         if known && !selector && value.is_null() {
+            path.pop();
+            return false;
+        }
+        if !known && RETIRED_SETTINGS.contains(&parts.as_slice()) {
             path.pop();
             return false;
         }
@@ -773,15 +769,6 @@ pub fn resolve_layers(
             if let Some(value) = map.get_mut("machine") {
                 super::placement::expand_shorthand(value)
                     .map_err(|error| invalid(error.to_string()))?;
-            }
-            if let Some(accounts) = map.get_mut("account").and_then(Value::as_mapping_mut) {
-                for value in accounts.values_mut() {
-                    *value = serde_yaml_ng::to_value(
-                        serde_yaml_ng::from_value::<super::placement::AccountOrder>(value.clone())
-                            .map_err(|error| invalid(error.to_string()))?,
-                    )
-                    .expect("account order serializes");
-                }
             }
             map.retain(|key, _| {
                 key.as_str().is_some_and(|key| {

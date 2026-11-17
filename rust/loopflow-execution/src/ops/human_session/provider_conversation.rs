@@ -11,10 +11,10 @@ use anyhow::{anyhow, bail, Result};
 
 use super::{append_input, local_capture_dir, lock_session_process, publish_prepared_input};
 use crate::harness::HarnessKind;
-use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
+use crate::transcript::native_home;
 use crate::transcript::{conversation_home, is_user_input, json_lines, recorded_cwd, transcript};
 
 pub(super) async fn human_input_times<'a>(
@@ -232,10 +232,10 @@ pub async fn select(
             .ok_or_else(|| anyhow!("{provider} account {account} has no home"))?;
         let harness = HarnessKind::parse(provider.as_str())
             .expect("conversations are found only for agent providers");
-        crate::transcript::copy_between(harness, id, &home, &native_home(provider, None))?;
+        crate::transcript::copy_between(harness, id, &home, &native_home(provider))?;
         store
-            .pin_provider_session_route(provider, &id.into(), account)
-            .await?;
+            .sqlite
+            .record_native_conversation_home(provider, &id.into())?;
     }
     Ok(session)
 }
@@ -250,7 +250,7 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
             .iter()
             .filter(|account| account.provider == provider.as_str())
             .filter_map(|account| Some((account.home.clone()?, Some(account.account_id.clone()))));
-        for (home, account) in std::iter::once((native_home(provider, None), None)).chain(stored) {
+        for (home, account) in std::iter::once((native_home(provider), None)).chain(stored) {
             let home = fs::canonicalize(&home).unwrap_or(home);
             if found
                 .iter()
@@ -304,9 +304,6 @@ mod tests {
             observed_credential_digest: None,
             observed_plan: None,
             credential_state: crate::store::CredentialState::Missing,
-            routing_state: crate::store::RoutingState::Disabled,
-            plan: None,
-            paid_through: None,
             utilization_percent: None,
             cooldown_until: None,
             cooldown_reason: None,
@@ -348,7 +345,6 @@ mod tests {
             .unwrap();
         assert_eq!(retained.last_selected_at, None);
         assert_eq!(retained.credential_state, account.credential_state);
-        assert_eq!(retained.routing_state, account.routing_state);
     }
 
     #[test]

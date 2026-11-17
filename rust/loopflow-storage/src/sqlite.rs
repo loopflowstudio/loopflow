@@ -10,51 +10,12 @@ use crate::rows::{map_wave_row, now_unix};
 use crate::token_crypto;
 use crate::work::wave::{Wave, WaveLocator};
 use crate::{
-    AccountLimitRow, CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement,
-    RoutingState, StoreError, StoreResult, WaveLocatorUpdate,
+    CredentialState, ProviderAccount, ProviderAccountId, ProviderTokenReplacement, StoreError,
+    StoreResult, WaveLocatorUpdate,
 };
 use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
 use loopflow_model::id::{AgentSessionId, WaveId};
 
-fn write_account_windows(
-    transaction: &Connection,
-    provider: &str,
-    account_id: &ProviderAccountId,
-    windows: &[crate::AccountLimitWindow],
-    source: &str,
-) -> StoreResult<()> {
-    let now = now_unix();
-    for window in windows {
-        transaction.execute(
-            "INSERT INTO provider_account_limits
-                 (provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-             ON CONFLICT(provider, account_id, window) DO UPDATE SET
-                 used_percent = excluded.used_percent,
-                 resets_at = excluded.resets_at,
-                 plan = excluded.plan,
-                 observed_at = excluded.observed_at,
-                 source = excluded.source,
-                 model = excluded.model,
-                 limited_until = excluded.limited_until",
-            params![
-                provider,
-                account_id.as_str(),
-                window.window,
-                window.used_percent,
-                window.resets_at,
-                window.plan,
-                now,
-                source,
-                window.model,
-                window.limited_until,
-            ],
-        )?;
-    }
-    Ok(())
-}
-
-mod account_selection;
 mod admission;
 pub mod children;
 pub mod ci_incidents;
@@ -526,32 +487,9 @@ fn read_provider_account(row: &rusqlite::Row) -> StoreResult<ProviderAccount> {
         observed_subject: row.get(11)?,
         observed_plan: row.get(12)?,
         observed_credential_digest: row.get(13)?,
-        // Authored preferences are applied from one configuration read per operation.
+        // Historical labels are applied from one configuration read per operation.
         login_email: None,
-        routing_state: RoutingState::Automatic,
-        plan: None,
-        paid_through: None,
     })
-}
-
-fn read_account_limit_row(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccountLimitRow>> {
-    let account_id = row.get::<_, String>(1)?;
-    let account_id = match ProviderAccountId::parse(&account_id) {
-        Ok(account_id) => account_id,
-        Err(error) => return Ok(Err(StoreError::InvalidData(error))),
-    };
-    Ok(Ok(AccountLimitRow {
-        provider: row.get(0)?,
-        account_id,
-        window: row.get(2)?,
-        used_percent: row.get(3)?,
-        resets_at: row.get(4)?,
-        plan: row.get(5)?,
-        observed_at: row.get(6)?,
-        source: row.get(7)?,
-        model: row.get(8)?,
-        limited_until: row.get(9)?,
-    }))
 }
 
 fn read_access_profile(row: &rusqlite::Row) -> rusqlite::Result<StoreResult<AccessProfile>> {
@@ -1130,32 +1068,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn record_provider_account_identity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        email: &str,
-        subject: &str,
-        plan: Option<&str>,
-        credential_digest: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE provider_accounts SET observed_email = ?3, observed_subject = ?4,
-            observed_plan = ?5, observed_credential_digest = ?7, updated_at = ?6 WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                email,
-                subject,
-                plan,
-                now_unix(),
-                credential_digest
-            ],
-        )?;
-        Ok(())
-    }
-
     pub fn provider_account_row(
         &self,
         provider: &str,
@@ -1184,264 +1096,6 @@ impl SqliteStore {
         ))?;
         let accounts = statement.query_map([provider], |row| Ok(read_provider_account(row)))?;
         accounts.map(|row| row?).collect()
-    }
-
-    pub fn clear_provider_account_cooldown(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = transaction.execute(
-            "UPDATE provider_accounts SET cooldown_until = NULL, cooldown_reason = NULL,
-             capacity_revision = capacity_revision + 1, updated_at = ?3 WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        transaction.execute(
-            "UPDATE provider_account_limits SET limited_until=NULL WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn reset_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<()> {
-        self.record_provider_account_health(provider, account_id, None, None, None)
-    }
-
-    /// Verification changes credential evidence, never routing or cooldown policy.
-    pub fn update_provider_account_credential_state(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        state: CredentialState,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts SET credential_state = ?3, updated_at = ?4
-             WHERE provider = ?1 AND account_id = ?2",
-            params![provider, account_id.as_str(), state.as_str(), now_unix()],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn record_provider_account_credential_invalidated(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        reason: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts
-             SET capacity_revision = capacity_revision + 1, credential_state = 'missing',
-                 cooldown_until = NULL,
-                 cooldown_reason = ?3,
-                 updated_at = ?4
-             WHERE provider = ?1 AND account_id = ?2",
-            params![
-                provider,
-                account_id.as_str(),
-                reason,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn record_provider_account_health(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        utilization_percent: Option<u8>,
-        cooldown_until: Option<i64>,
-        cooldown_reason: Option<&str>,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let changed = conn.execute(
-            "UPDATE provider_accounts SET utilization_percent=?3, cooldown_until=?4,
-             cooldown_reason=?5, capacity_revision=capacity_revision+1, updated_at=?6
-             WHERE provider=?1 AND account_id=?2",
-            params![
-                provider,
-                account_id.as_str(),
-                utilization_percent,
-                cooldown_until,
-                cooldown_reason,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        Ok(())
-    }
-
-    pub fn provider_account_capacity_revision(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-    ) -> StoreResult<i64> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "SELECT capacity_revision FROM provider_accounts WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-            |row| row.get(0),
-        )?)
-    }
-
-    pub fn record_provider_account_capacity(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        capacity: &crate::AccountCapacity,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        // A warning or a scoped rejection cannot erase an account-wide rejection.
-        let changed = transaction.execute(
-            "UPDATE provider_accounts SET utilization_percent=?3,
-             cooldown_until=CASE WHEN ?4 IS NOT NULL THEN ?4 ELSE cooldown_until END,
-             cooldown_reason=CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE cooldown_reason END,
-             capacity_revision=capacity_revision+1, updated_at=?6
-             WHERE provider=?1 AND account_id=?2",
-            params![
-                provider,
-                account_id.as_str(),
-                capacity.utilization_percent,
-                capacity.cooldown_until,
-                capacity.cooldown_reason,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Err(StoreError::NotFound);
-        }
-        write_account_windows(
-            &transaction,
-            provider,
-            account_id,
-            &capacity.windows,
-            "stream",
-        )?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn provider_account_capacity(
-        &self,
-        provider: &str,
-        account: &ProviderAccountId,
-    ) -> StoreResult<crate::capacity::ProviderCapacityReading> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.savepoint()?;
-        let (revision, cooldown_reason, cooldown_until) = tx.query_row(
-            "SELECT capacity_revision,cooldown_reason,cooldown_until FROM provider_accounts WHERE provider=?1 AND account_id=?2",
-            params![provider, account.as_str()], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        )?;
-        let limits = {
-            let mut statement = tx.prepare("SELECT provider,account_id,window,used_percent,resets_at,plan,observed_at,source,model,limited_until FROM provider_account_limits WHERE provider=?1 AND account_id=?2")?;
-            let rows =
-                statement.query_map(params![provider, account.as_str()], read_account_limit_row)?;
-            let mut limits = Vec::new();
-            for row in rows {
-                limits.push(row??);
-            }
-            limits
-        };
-        tx.commit()?;
-        Ok(crate::capacity::ProviderCapacityReading {
-            revision,
-            cooldown_reason,
-            cooldown_until,
-            limits,
-        })
-    }
-
-    pub fn apply_provider_account_capacity(
-        &self,
-        provider: &str,
-        account: &ProviderAccountId,
-        revision: i64,
-        update: &crate::capacity::ProviderCapacityUpdate,
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let changed = tx.execute(
-            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1,
-             cooldown_until=CASE WHEN ?4 THEN NULL ELSE cooldown_until END,
-             cooldown_reason=CASE WHEN ?4 THEN NULL ELSE cooldown_reason END, updated_at=?5
-             WHERE provider=?1 AND account_id=?2 AND capacity_revision=?3",
-            params![
-                provider,
-                account.as_str(),
-                revision,
-                update.recovered,
-                now_unix()
-            ],
-        )?;
-        if changed == 0 {
-            return Ok(false);
-        }
-        for window in &update.superseded_windows {
-            tx.execute("DELETE FROM provider_account_limits WHERE provider=?1 AND account_id=?2 AND window=?3", params![provider, account.as_str(), window])?;
-        }
-        write_account_windows(&tx, provider, account, &update.windows, "poll")?;
-        tx.commit()?;
-        Ok(true)
-    }
-
-    /// Record observed subscription window state for one account, replacing
-    /// each window's previous observation.
-    pub fn upsert_provider_account_limits(
-        &self,
-        provider: &str,
-        account_id: &ProviderAccountId,
-        windows: &[crate::AccountLimitWindow],
-        source: &str,
-    ) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let transaction = conn.transaction()?;
-        transaction.execute(
-            "UPDATE provider_accounts SET capacity_revision=capacity_revision+1 WHERE provider=?1 AND account_id=?2",
-            params![provider, account_id.as_str()],
-        )?;
-        write_account_windows(&transaction, provider, account_id, windows, source)?;
-        transaction.commit()?;
-        Ok(())
-    }
-
-    pub fn provider_account_limit_rows(
-        &self,
-        provider: Option<&str>,
-    ) -> StoreResult<Vec<crate::AccountLimitRow>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut statement = conn.prepare(
-            "SELECT provider, account_id, window, used_percent, resets_at, plan, observed_at, source, model, limited_until
-             FROM provider_account_limits
-             WHERE ?1 IS NULL OR provider = ?1
-             ORDER BY provider, account_id, window",
-        )?;
-        let rows = statement.query_map([provider], read_account_limit_row)?;
-        let mut limits = Vec::new();
-        for row in rows {
-            limits.push(row??);
-        }
-        Ok(limits)
     }
 
     // -- Session moves --------------------------------------------------------
@@ -1526,29 +1180,16 @@ impl SqliteStore {
         rows.map(|row| row?).collect()
     }
 
-    pub fn pin_provider_session_route(
+    /// Transcript adoption changes its location, never its historical account.
+    pub fn record_native_conversation_home(
         &self,
         provider: Provider,
-        agent_session: &AgentSessionId,
-        account_id: &ProviderAccountId,
+        thread: &AgentSessionId,
     ) -> StoreResult<()> {
-        // Every launch runs in the shared home, so the conversation lives
-        // there from now on, wherever it ran before.
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO provider_session_accounts (
-                provider, provider_session_id, account_id, created_at, isolated
-             ) VALUES (?1, ?2, ?3, ?4, 0)
-             ON CONFLICT(provider, provider_session_id) DO UPDATE SET
-                account_id = excluded.account_id,
-                created_at = excluded.created_at,
-                isolated = 0",
-            params![
-                provider.as_str(),
-                agent_session,
-                account_id.as_str(),
-                now_unix(),
-            ],
+            "UPDATE provider_session_accounts SET isolated = 0 WHERE provider = ?1 AND provider_session_id = ?2",
+            params![provider.as_str(), thread],
         )?;
         Ok(())
     }
@@ -1564,44 +1205,6 @@ impl SqliteStore {
             "SELECT account_id FROM provider_session_accounts
              WHERE provider = ?1 AND provider_session_id = ?2",
             params![provider.as_str(), agent_session],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()?
-        .as_deref()
-        .map(ProviderAccountId::parse)
-        .transpose()
-        .map_err(StoreError::InvalidData)
-    }
-
-    pub fn record_provider_account_switch(
-        &self,
-        provider: Provider,
-        account_id: &ProviderAccountId,
-        cause: &str,
-    ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT INTO provider_account_switches (
-                provider, account_id, switched_at, cause
-             ) VALUES (?1, ?2, ?3, ?4)",
-            params![provider.as_str(), account_id.as_str(), now_unix(), cause],
-        )?;
-        Ok(())
-    }
-
-    /// The account the provider's native home was last switched to at or
-    /// after `since`; `None` when it has not changed account since then.
-    pub fn provider_account_switched_since(
-        &self,
-        provider: Provider,
-        since: i64,
-    ) -> StoreResult<Option<ProviderAccountId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.query_row(
-            "SELECT account_id FROM provider_account_switches
-             WHERE provider = ?1 AND switched_at >= ?2
-             ORDER BY switched_at DESC, id DESC LIMIT 1",
-            params![provider.as_str(), since],
             |row| row.get::<_, String>(0),
         )
         .optional()?

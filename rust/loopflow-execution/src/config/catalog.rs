@@ -243,6 +243,13 @@ definitions! {
 }
 
 definitions! {
+    #[derive(schemars::JsonSchema)]
+    ForwardConfig, FORWARD_DEFINITIONS, "forward.", {};
+    env: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Environment variables a remote launch carries from this Machine's environment or Doppler; lf does not interpret them";
+    files: Vec<String> = "[]", Personal, AppendReset, HostLocal, NextLaunch, Machines, "Home-relative files a remote launch copies to the same path when the destination has none";
+}
+
+definitions! {
     Config, DEFINITIONS, "", {
         skills: BTreeMap<String, Value> = BTreeMap::new();
         graphs: BTreeMap<String, Value> = BTreeMap::new();
@@ -265,13 +272,12 @@ definitions! {
     supported_harnesses: Vec<String> = "[]", General, AppendReset, Portable, NextRead, Agents, "Harnesses offered by model selection";
     automation: AutomationConfig = "{retries: 1}", General, Merge, Portable, NextRead, Agents, "Automatic retry count";
     pools: BTreeMap<String, placement::PoolDeclaration> = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "Local pools accepting new work; held work stays";
+    forward: ForwardConfig = "{}", Personal, Merge, HostLocal, NextLaunch, Machines, "What a remote launch carries from this Machine";
     ondemands: BTreeMap<String, placement::OnDemandDeclaration> = "{}", Personal, Replace, HostLocal, NextLaunch, Machines, "Local rental templates and admission limits; active rentals keep their admitted budget";
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
-    account: BTreeMap<String, placement::AccountOrder> = "{}", PersonalScoped, Merge, Portable, NextLaunch, Accounts, "Allowed account references in order; each provider list replaces atomically";
-    accounts: BTreeMap<String, BTreeMap<String, placement::AccountDeclaration>> = "{}", Personal, Merge, Portable, NextRead, Accounts, "Declared account identity, routing eligibility and subscription dates; credentials and observations stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     task_layout: Option<serde_json::Value> = "null", General, Replace, Portable, Inactive, Desktop, "Ignored: `lf open` opens only the Task's Session; kept readable for the released lf until Task LOO-946";
@@ -291,6 +297,7 @@ fn all_definitions() -> impl Iterator<Item = &'static Definition> {
     DEFINITIONS
         .iter()
         .chain(CONTEXT_DEFINITIONS)
+        .chain(FORWARD_DEFINITIONS)
         .chain(CODEX_DEFINITIONS)
         .chain(CLAUDE_DEFINITIONS)
 }

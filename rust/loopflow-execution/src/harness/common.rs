@@ -1,5 +1,5 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::io::{AsyncBufReadExt, AsyncRead, BufReader};
 use tokio::task::JoinHandle;
@@ -28,7 +28,11 @@ impl Drop for TurnInProgressGuard {
     }
 }
 
-pub(super) fn spawn_stderr_logger<R>(stderr: R, target: &'static str) -> JoinHandle<()>
+pub(super) fn spawn_stderr_logger<R>(
+    stderr: R,
+    target: &'static str,
+    diagnostic: Option<Arc<Mutex<String>>>,
+) -> JoinHandle<()>
 where
     R: AsyncRead + Unpin + Send + 'static,
 {
@@ -38,6 +42,9 @@ where
         while let Ok(Some(line)) = lines.next_line().await {
             if !line.trim().is_empty() {
                 tracing::debug!(stderr_target = target, "{line}");
+                if let Some(diagnostic) = &diagnostic {
+                    *diagnostic.lock().expect("stderr diagnostic lock poisoned") = line;
+                }
             }
         }
     })

@@ -8,7 +8,6 @@ use loopflow_execution::durable::TaskExecutionRoute;
 use loopflow_execution::machine::connection::resolve_target;
 use loopflow_execution::machine::ssh::{build_preamble, request, EXPECTED_MACHINE_ID_ENV};
 use loopflow_execution::machine::ssh::{run_ssh, ssh_argv};
-use loopflow_execution::provider_account::selection::AccountSelection;
 use std::io::IsTerminal;
 
 /// Whether `lf --machine <target> <args>` runs on this Machine: the target is
@@ -116,6 +115,13 @@ pub(super) fn run_with_io(
             cmd: crate::lf::WaveCommand::Show { .. }
         })
     );
+    // Only a command that may start an agent carries `forward`; a named value
+    // this Machine cannot supply stops it before any SSH. Session viewers are
+    // started by the destination's server, which carries nothing.
+    let launching = cli.may_launch_agent() && !resident_operation;
+    let forwarded = (!preview && launching)
+        .then(|| loopflow_execution::machine::forward::read(directory))
+        .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
     if let Some(id) = super::work_route::resumed_session(cli).filter(|_| !preview) {
         // Resuming a Session that lives here, or moved elsewhere, moves it (or its Task) there first.
@@ -172,42 +178,9 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => loopflow_execution::machine::task::current_repository(directory)?,
     };
-    // Preview forwards only authored selectors. Account lookup and connection
-    // belong to launch, on neither side of this read. The target launches in
-    // its own shared home.
-    let selection = if preview || resident_operation {
-        None
-    } else {
-        Some(
-            runtime
-                .block_on(loopflow_execution::machine::credentials::prepare_launch(
-                    &target,
-                    &AccountSelection::from_env()?,
-                    &AccountSelection::from_flags(&cli.account, &cli.only_account)?,
-                    matches!(
-                        cli.command,
-                        None | Some(
-                            crate::lf::Commands::Skill { .. }
-                                | crate::lf::Commands::Graph {
-                                    cmd: crate::lf::GraphCommand::External(_)
-                                }
-                                | crate::lf::Commands::External(_)
-                                | crate::lf::Commands::Task {
-                                    cmd: crate::lf::TaskCommand::Run { .. }
-                                }
-                        )
-                    ),
-                    cli.agent.as_deref(),
-                    cli.batch,
-                    directory,
-                ))?
-                .env_value()?,
-        )
-    };
     let environment = loopflow_execution::machine::task::forwarding_environment(
         directory,
         &target,
-        selection.as_deref(),
         source.as_ref(),
     )?;
     let mut extra_env: Vec<(&str, &str)> = environment
@@ -227,7 +200,6 @@ pub(super) fn run_with_io(
             lf_args,
             cli.task.as_ref(),
             cli.repo.is_some(),
-            cli.account.len() + cli.only_account.len(),
             routed,
             source.as_ref(),
         )
@@ -349,7 +321,16 @@ pub(super) fn run_with_io(
     if viewer {
         extra_env.push((loopflow_execution::transport::STREAM_ENV, "1"));
     }
-    let preamble = build_preamble(&cmd, &extra_env);
+    let mut preamble = build_preamble(&cmd, &extra_env);
+    if let Some(forwarded) = &forwarded {
+        let mut stderr = std::io::stderr();
+        let notices: &mut dyn std::io::Write = match io.as_mut() {
+            Some(io) => &mut *io.error,
+            None => &mut stderr,
+        };
+        preamble =
+            loopflow_execution::machine::forward::deliver(&target, forwarded, &preamble, notices)?;
+    }
     match io {
         Some(io) => {
             let reads_input = matches!(
@@ -426,46 +407,6 @@ mod tests {
     use loopflow_execution::machine::task::resident_args;
 
     #[test]
-    fn remote_preferences_cannot_relax_the_resident_account_restriction() {
-        let args = ["--account", "person@", "skill", "implement"].map(str::to_string);
-        let cli = parse_remote_command(&args).unwrap();
-        assert_eq!(
-            resident_args(
-                &args,
-                cli.task.as_ref(),
-                cli.repo.is_some(),
-                cli.account.len() + cli.only_account.len(),
-                false,
-                None
-            ),
-            ["skill", "implement"]
-        );
-    }
-    #[test]
-    fn remote_prompt_preserves_literal_account_flags() {
-        let args = [
-            "--only-account=codex=person@",
-            "skill",
-            "implement",
-            "--",
-            "--shared",
-            "--account=other@",
-        ]
-        .map(str::to_string);
-        let cli = parse_remote_command(&args).unwrap();
-        assert_eq!(
-            resident_args(
-                &args,
-                cli.task.as_ref(),
-                cli.repo.is_some(),
-                cli.account.len() + cli.only_account.len(),
-                false,
-                None
-            ),
-            ["skill", "implement", "--", "--shared", "--account=other@"]
-        );
-    }
-    #[test]
     fn repository_paths_stay_on_explicit_machine_but_not_automatic_work_routes() {
         for selection in [vec!["--repo", "~/src/remote"], vec!["--repo=~/src/remote"]] {
             let mut args = selection;
@@ -475,25 +416,11 @@ mod tests {
             let args = args.into_iter().map(str::to_owned).collect::<Vec<_>>();
             let cli = parse_remote_command(&args).unwrap();
             assert_eq!(
-                resident_args(
-                    &args,
-                    cli.task.as_ref(),
-                    cli.repo.is_some(),
-                    cli.account.len() + cli.only_account.len(),
-                    false,
-                    None
-                ),
+                resident_args(&args, cli.task.as_ref(), cli.repo.is_some(), false, None),
                 args
             );
             assert_eq!(
-                resident_args(
-                    &args,
-                    cli.task.as_ref(),
-                    cli.repo.is_some(),
-                    cli.account.len() + cli.only_account.len(),
-                    true,
-                    None
-                ),
+                resident_args(&args, cli.task.as_ref(), cli.repo.is_some(), true, None),
                 ["--task", "LOO-427", "skill", "debug", "--", "--repo", "literal"]
             );
         }

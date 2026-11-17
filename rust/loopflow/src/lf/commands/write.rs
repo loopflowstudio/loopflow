@@ -378,20 +378,19 @@ writes! {
         machine,
     )?,
 
-    /// `lf --agent <agent> session move --all [--blocked] [--on <on>]
+    /// `lf --agent <agent> session move --all --on <harness[:model]>
     /// --json`: the open Sessions the selector names continue on the agent;
     /// the report says which moved, which move after their turn, and which
     /// were skipped.
     #[serde(rename = "session.move")]
     SessionMove {
         directory: PathBuf,
-        blocked: bool,
         on: Option<String>,
         agent: String,
     } => loopflow_execution::ops::human_session::moves_bulk::MoveReport;
     {
-        blocked, on, agent, ..
-    } => super::session::moved(*blocked, on.as_deref(), agent)?,
+        on, agent, ..
+    } => super::session::moved(on.as_deref(), agent)?,
 
     /// `lf wave add <wave> [--objective <objective>] --json`: the Wave, its
     /// authored files and first Project; an existing Wave is unchanged.
@@ -568,118 +567,19 @@ writes! {
         &loopflow_execution::engine::Diagnostics,
     )?,
 
-    /// `lf account disconnect <provider>[=<email>]`: forget the provider's
-    /// local credentials, or one managed login's.
+    /// `lf account disconnect <provider>`: disconnect a service.
     #[serde(rename = "account.disconnect")]
-    AccountDisconnect {
-        provider: String,
-        email: Option<String>,
-    } => loopflow_execution::engine::account::Account;
-    { provider, email } => {
-        loopflow_execution::engine::account::disconnect(provider, email.as_deref())?
-    },
+    AccountDisconnect { provider: String } => loopflow_execution::engine::account::Account;
+    { provider } => loopflow_execution::engine::account::disconnect(provider)?,
 
-    /// `lf account connect <provider>[=<email>] [--chrome-profile] [--import]
-    /// [--api-key]`. Served, no profile is chosen interactively: a login with
-    /// no remembered profile needs `chrome_profile`.
+    /// `lf account connect <provider>`: connect a service.
     #[serde(rename = "account.connect")]
     AccountConnect {
         provider: String,
-        email: Option<String>,
         chrome_profile: Option<String>,
-        import: bool,
         api_key: bool,
     } => loopflow_execution::engine::account::Account;
-    {
-        provider,
-        email,
-        chrome_profile,
-        import,
-        api_key,
-    } => loopflow_execution::engine::account::connect(
-        provider,
-        email.as_deref(),
-        chrome_profile.as_deref(),
-        *import,
-        *api_key,
-    )?,
-
-    /// `lf account set <provider>[=<email>] …`: a managed login's lifecycle,
-    /// cooldown and browser choices, or the local credentials' browser choices.
-    #[serde(rename = "account.set")]
-    AccountSet {
-        provider: String,
-        email: Option<String>,
-        login_email: Option<String>,
-        plan: Option<String>,
-        clear_plan: bool,
-        paid_through: Option<String>,
-        clear_paid_through: bool,
-        clear_cooldown: bool,
-        chrome_profiles: Vec<String>,
-        clear_chrome_profiles: bool,
-    } => loopflow_execution::engine::account::Account;
-    {
-        provider,
-        email,
-        login_email,
-        plan,
-        clear_plan,
-        paid_through,
-        clear_paid_through,
-        clear_cooldown,
-        chrome_profiles,
-        clear_chrome_profiles,
-    } => loopflow_execution::engine::account::set(
-        provider,
-        email.as_deref(),
-        &loopflow_execution::engine::account::Settings {
-            login_email: login_email.clone(),
-            plan: plan.clone(),
-            clear_plan: *clear_plan,
-            paid_through: paid_through.clone(),
-            clear_paid_through: *clear_paid_through,
-            clear_cooldown: *clear_cooldown,
-            chrome_profiles: chrome_profiles.clone(),
-            clear_chrome_profiles: *clear_chrome_profiles,
-        },
-    )?,
-
-    /// `lf account redeem-reset <provider>=<email> [--idempotency-key]
-    /// [--credit-id] --json`: spend one banked Codex reset.
-    #[serde(rename = "account.redeem_reset")]
-    AccountRedeemReset {
-        provider: String,
-        email: String,
-        idempotency_key: Option<String>,
-        credit_id: Option<String>,
-    } => loopflow_execution::engine::account::Redemption;
-    {
-        provider,
-        email,
-        idempotency_key,
-        credit_id,
-    } => loopflow_execution::engine::account::redeem_reset(
-        provider,
-        email,
-        idempotency_key.as_deref(),
-        credit_id.as_deref(),
-    )?,
-
-    /// Hold one login on this Machine, or release holds with `auto`.
-    #[serde(rename = "account.use")]
-    AccountUse { login: String } => ();
-    { login } => loopflow_execution::engine::account::activate(login)?,
-
-    /// Pause a login's automatic rotation.
-    #[serde(rename = "account.pause")]
-    AccountPause { login: String } => ();
-    { login } => loopflow_execution::engine::account::pause(login, true)?,
-
-    /// Return a login to automatic rotation.
-    #[serde(rename = "account.unpause")]
-    AccountUnpause { login: String } => ();
-    { login } => loopflow_execution::engine::account::pause(login, false)?,
+    { provider, chrome_profile, api_key } => loopflow_execution::engine::account::connect(provider, chrome_profile.as_deref(), *api_key)?,
 
     /// `lf -b [--agent <agent>] graph <name> [message]`, started detached: the
     /// Process carrying the Graph.
@@ -1269,11 +1169,6 @@ impl Write {
             Self::DesktopPortfolioSet { .. }
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }
-            | Self::AccountSet { .. }
-            | Self::AccountRedeemReset { .. }
-            | Self::AccountPause { .. }
-            | Self::AccountUnpause { .. }
-            | Self::AccountUse { .. }
             | Self::ConfigSet { .. }
             | Self::ConfigUnset { .. }
             | Self::ConfigTheme { .. } => Path::new("/"),
@@ -1306,11 +1201,6 @@ mod tests {
             assert_result_schema("task.ship", &actual);
         }
         for (kind, answer, expected) in [
-            (
-                "account.use",
-                WriteResult::AccountUse(Box::new(())),
-                json!(null),
-            ),
             (
                 "wave.plan.connect",
                 WriteResult::WavePlanConnect(Box::default()),
@@ -1387,11 +1277,8 @@ mod tests {
             r#"{"kind":"checkout.commit","directory":"/r","message":"Tidy","push":false,"no_add":false,"paths":[],"agent":null}"#,
             r#"{"kind":"checkout.sync","directory":"/r","onto":null,"preview":true,"manual":false,"continue":false,"abort":false,"adopt":false}"#,
             r#"{"kind":"checkout.create","directory":"/r","name":"spike","preview":false,"persistent":false}"#,
-            r#"{"kind":"account.disconnect","provider":"claude","email":null}"#,
-            r#"{"kind":"account.connect","provider":"codex","email":"maya@example.com","chrome_profile":"Profile 1","import":false,"api_key":false}"#,
-            r#"{"kind":"account.set","provider":"codex","email":"maya@example.com","login_email":null,"plan":null,"clear_plan":false,"paid_through":null,"clear_paid_through":false,"clear_cooldown":true,"chrome_profiles":[],"clear_chrome_profiles":false}"#,
-            r#"{"kind":"account.redeem_reset","provider":"codex","email":"maya@example.com","idempotency_key":null,"credit_id":null}"#,
-            r#"{"kind":"account.use","login":"claude=maya@example.com"}"#,
+            r#"{"kind":"account.disconnect","provider":"linear"}"#,
+            r#"{"kind":"account.connect","provider":"linear","chrome_profile":"Profile 1","api_key":false}"#,
             r#"{"kind":"graph.run","directory":"/r","name":"code","message":null,"agent":null}"#,
             r#"{"kind":"skill.run","directory":"/r","name":"debug","message":"the failing test","agent":"claude"}"#,
             r#"{"kind":"pr.publish","directory":"/r","title":null,"body":null,"agent":null}"#,

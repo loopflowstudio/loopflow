@@ -124,3 +124,7 @@ tables and whether Process rows are needed are in LOO-953's
 - A gapped journal writer stops waiting for the lock, so while one gap is open
   an ordinary moment of contention also misses its write; the gap closes at
   the first uncontended write.
+- A never-released journal lock costs about 5 s per file per process (a 2 s
+  busy timeout, retried by SQLite's WAL path; measured 2026-11-16, second QA
+  pass). Kept at 2 s; 0.5 s would cost about 1.7 s and still cover a 0.7 s
+  prune batch. One constant, `journals.rs` `BUSY`.

@@ -28,8 +28,10 @@ turns with the installed `lf` (`lf session resume --prepare --json`, then
 `lf -b session resume <id> --message …`), copy the home, then open it with the
 branch: `lf session history <id>` is empty until `lf process prune` or the
 branch server's start-up pass moves the old rows. To make a journal write fail,
-hold `BEGIN EXCLUSIVE` on `history.db` and `usage.db` from Python; each journal
-write then waits 2 s before it records a gap.
+hold `BEGIN EXCLUSIVE` on `history.db` and `usage.db` from Python. A process's
+first write to each file then waits about 5 s (a 2 s busy timeout, retried by
+SQLite's WAL path) and records a gap; its later writes fail at once. Sample the
+branch `lf` itself (`$LF_BIN …&`), not a shell wrapper's PID.
 
 # Loopflow's local server
 

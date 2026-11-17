@@ -4,8 +4,9 @@
 //! store's write lock, and one that fails is a [`RecordingGap`] in
 //! `logs/lf.log`, never a failed turn.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior};
@@ -240,7 +241,8 @@ pub(crate) fn append_in(tx: &Connection, row: &Row) -> StoreResult<i64> {
 /// A journal write waits this long for another writer of the same file, then
 /// becomes a gap: a turn boundary does not queue behind history or usage.
 /// While a gap is open the next write does not wait at all, so a held lock
-/// costs a turn one wait, not one per write.
+/// costs a process one wait per file, not one per write. Against a lock that
+/// is never released, SQLite's WAL retries make that wait about 5 s.
 #[cfg(not(test))]
 const BUSY: Duration = Duration::from_secs(2);
 #[cfg(test)]
@@ -256,9 +258,11 @@ pub fn usage_path(store: &Path) -> PathBuf {
     USAGE.path(store)
 }
 
-/// The writer of one journal beside a store connection: opened at its first
-/// write, and reopened after a failure. `store` is the store beside which the
-/// journal lives; a store without a file keeps none.
+/// The writer of one journal file, shared by every store this process opens
+/// beside it: opened at its first write, and reopened after a failure. `store`
+/// is the store beside which the journal lives; a store without a file keeps
+/// none. Sharing it means a held lock costs the process one wait, however many
+/// times it opens the store.
 #[derive(Debug)]
 pub struct JournalFile {
     journal: &'static Journal,
@@ -273,14 +277,35 @@ struct WriterState {
 }
 
 impl JournalFile {
-    /// The writer of `journal` kept beside the store at `store`, or of none
-    /// for a store without a file.
-    pub(crate) fn beside(journal: &'static Journal, store: Option<&Path>) -> Self {
-        Self {
-            journal,
-            store: store.map(Path::to_path_buf),
-            state: Mutex::default(),
-        }
+    /// This process's writer of `journal` beside the store at `store`, or a
+    /// writer of none for a store without a file.
+    pub(crate) fn beside(journal: &'static Journal, store: Option<&Path>) -> Arc<Self> {
+        static WRITERS: OnceLock<Mutex<HashMap<PathBuf, Arc<JournalFile>>>> = OnceLock::new();
+        let writer = |store: Option<&Path>| {
+            Arc::new(Self {
+                journal,
+                store: store.map(Path::to_path_buf),
+                state: Mutex::default(),
+            })
+        };
+        let Some(store) = store else {
+            return writer(None);
+        };
+        let mut writers = WRITERS
+            .get_or_init(Mutex::default)
+            .lock()
+            .expect("journal writers mutex poisoned");
+        // One file reached through two spellings (`/tmp` and `/private/tmp`)
+        // still has one writer.
+        let path = journal.path(store);
+        let key = path
+            .parent()
+            .and_then(|dir| dir.canonicalize().ok())
+            .map_or_else(|| path.clone(), |dir| dir.join(journal.file));
+        writers
+            .entry(key)
+            .or_insert_with(|| writer(Some(store)))
+            .clone()
     }
 
     /// Run `write` in one transaction on the journal's file, with the store
@@ -508,13 +533,11 @@ mod tests {
             .unwrap();
         assert_eq!(append(&store, "missed"), None);
         assert!(store.history.gap_open());
-        // With the gap open, later writes fail at once instead of each
-        // waiting out the busy timeout.
-        let started = Instant::now();
-        for _ in 0..20 {
-            assert_eq!(append(&store, "missed again"), None);
-        }
-        assert!(started.elapsed() < super::BUSY * 5);
+        // The gap belongs to the file, not the store: a store opened again
+        // sees it open, so its writes skip the busy wait too.
+        let again = crate::test_fixture::open(&path).unwrap();
+        assert!(again.history.gap_open());
+        assert_eq!(append(&again, "missed again"), None);
         // The store itself keeps answering writes while history is gapped.
         store
             .conn

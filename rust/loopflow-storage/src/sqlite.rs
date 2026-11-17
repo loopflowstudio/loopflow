@@ -234,14 +234,8 @@ impl SqliteStore {
         Self {
             conn: Arc::new(Mutex::new(conn)),
             token_key,
-            history: Arc::new(crate::journals::JournalFile::beside(
-                &crate::journals::HISTORY,
-                path,
-            )),
-            usage: Arc::new(crate::journals::JournalFile::beside(
-                &crate::journals::USAGE,
-                path,
-            )),
+            history: crate::journals::JournalFile::beside(&crate::journals::HISTORY, path),
+            usage: crate::journals::JournalFile::beside(&crate::journals::USAGE, path),
         }
     }
 

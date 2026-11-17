@@ -1,6 +1,6 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–5 built and two QA fixes ("QA fixes");
+Status: 2026-11-16, slices 1–5 built, two QA fixes and one writer per journal file per process (second QA pass);
 merged with main through #1962 (`4a7c949b9e`). Remaining: gate. Since #1955
 an agent Process records no outcome, so a departure-less attachment exit now
 leaves nothing (no history row, no `processes.outcome`). Process rows are LOO-953 ("Remove Process rows:

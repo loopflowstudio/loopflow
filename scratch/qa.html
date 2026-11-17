@@ -1,77 +1,55 @@
-<!doctype html><meta charset=utf-8><title>LOO-936 QA</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:980px;margin:2em auto;padding:0 1em;color:#222}pre{background:#f5f5f3;padding:.8em;overflow:auto;font-size:12px}h2{margin-top:1.8em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}table{border-collapse:collapse}.ok{color:#176}.no{color:#a40}</style>
-<h1>LOO-936 QA: history and turns apart from state</h1>
-<p>Branch build <code>da7ae72af</code>, installed <code>lf 0.16.0+4852348e5</code>. Private <code>LF_HOME</code> under <code>/tmp/lf-qa-936</code>, real <code>HOME</code> for Claude's login, disposable Git repository. Every turn below is a real Claude reply (<code>claude-fable-5-2</code>).</p>
+<!doctype html><meta charset="utf-8"><title>LOO-936 QA, second pass</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f5f5f5;padding:.8em;overflow:auto;font-size:13px}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:.3em .6em;vertical-align:top;text-align:left}</style>
+<h1>LOO-936 QA, second pass: the two QA fixes on real turns</h1>
+<p>Branch build 7eb57512a plus this pass's fix. Private <code>LF_HOME</code> under <code>/tmp/lf-qa-936b</code>, real <code>HOME</code> for Claude's login, disposable Git repository. One Session, ten real Claude turns (<code>lf -b -a claude session resume &lt;id&gt; --message …</code>). The first pass (slices 1–5, upgrade, Graph routing, subscriptions, heartbeat) is in git at <code>cf50b7e904</code>.</p>
 
 <h2>Results</h2>
 <table>
 <tr><th>Scenario</th><th>Result</th></tr>
-<tr><td>Upgrade: 3 turns by the installed lf, then opened by the branch</td><td class=ok>Migration applies; after prune the Session's 3 turns are in <code>usage.turns</code> with the same token counts <code>lf usage</code> showed before; 18 observations moved, 9 unread ones dropped; second prune all zeros</td></tr>
-<tr><td>Resume after upgrade</td><td class=ok>The branch resumed the same provider thread (<code>48748f67…</code>) from the backfilled captured row; Claude recalled "QA_OLD_A QA_OLD_B"</td></tr>
-<tr><td>New turns write only <code>captured</code> to main</td><td class=ok>No new <code>output</code>/<code>started</code>/<code>usage</code>/<code>completed</code> rows in <code>loopflow.db</code></td></tr>
-<tr><td>Server start runs the prune</td><td class=ok><code>lf server run</code> on the old-shape copy logged <code>moved_observations: 18, converted_turns: 3, forgotten_history: 9</code> at start</td></tr>
-<tr><td>Subscriptions</td><td class=ok>Over the socket, <code>session.list</code> (Journals) sent 4 readings during a turn, the last after it ended; <code>plan.list</code> (State) sent none</td></tr>
-<tr><td>Graph routing on the transcript</td><td class=ok><code>lf -b graph qa-loop</code> (<code>loop: [qa-say, loop-or-next]</code>, then <code>cmd: help</code>): the decider's structured answer, read from the transcript, advanced to <code>help</code>; both turns carry <code>skill</code>, <code>graph</code>, <code>step</code></td></tr>
-<tr><td><code>--final</code> with the transcript moved aside</td><td class=ok>Fails, names the conversation and <code>~/.claude</code>, logs it; works again after restore</td></tr>
-<tr><td>Both journals locked by another connection for a whole turn</td><td class=ok>Turn completes and prints its answer; 7 recording-gap lines in <code>lf.log</code>, one per write kind</td></tr>
-<tr><td>Held shell viewed 70 s</td><td class=ok><code>processes</code> revision stayed 101 across 7 samples while <code>viewer_hold_at</code> was re-stamped (5 s old at the end)</td></tr>
-<tr><td><code>lf doctor</code></td><td class=ok><code>journals  history.db 0.0 MB, oldest 2026-11-17; usage.db 0.0 MB, oldest 2026-11-17</code></td></tr>
+<tr><td>Unlocked turn</td><td>6–8 s, answer printed, turn row with skill, model and tokens</td></tr>
+<tr><td>Both journals held by <code>BEGIN EXCLUSIVE</code> for a whole turn, at 7eb57512a</td><td>29.7 s (first pass: 71 s). One process, 7 gap lines</td></tr>
+<tr><td>Same, after this pass's fix</td><td>15.9–18.6 s: about 5 s at capture (history) and 5 s at turn origin (usage), nothing else waits</td></tr>
+<tr><td><code>lf session history show &lt;id&gt; --final</code> while still locked</td><td>Prints <code>QA_B_LOCKED3</code>, read from the transcript (first pass: "not settled")</td></tr>
+<tr><td>Next unlocked turn</td><td>Records normally; <code>loopflow.db</code> holds only 10 <code>captured</code> rows</td></tr>
+<tr><td>Gapped turns afterwards</td><td>All 7 have a <code>usage.turns</code> row with model and output tokens, written later from the transcript; no <code>captured_event</code>, skill or start time</td></tr>
 </table>
 
+<h2>What was still slow, and the fix</h2>
+<p>The fix in 425f79950d skipped the busy wait while a gap is open, but the gap lived on each <code>SqliteStore</code>'s own <code>JournalFile</code>. <code>lf</code> opens the store several times per turn, so each new store waited again. <code>JournalFile::beside</code> now hands every store in a process the one writer for that file, keyed by its canonical directory so <code>/tmp</code> and <code>/private/tmp</code> share it. The unit test opens the store a second time while the gap is open and checks the second store sees it (this replaces the elapsed-time assertion, which failed once under the full suite's load: 1164 s run). Breaking the sharing fails that test.</p>
+<p>Where the remaining 5 s goes, sampled on the branch <code>lf</code>: one <code>BEGIN IMMEDIATE</code> in <code>JournalFile::write</code> from <code>retain_session_observation</code>. The same wait from Python's sqlite3 (3.50) against a held WAL file:</p>
+<pre>busy timeout 0    → 0.00 s
+busy timeout 0.5  → 1.66 s
+busy timeout 1    → 3.04 s
+busy timeout 2    → 4.91 s</pre>
+<p>A lock that is never released costs about 2.5× the timeout, because SQLite's WAL path retries the busy handler. <code>BUSY</code> stays 2 s; its comment now says about 5 s per file per process.</p>
+
 <h2>Transcripts</h2>
-<h3>Installed lf's history before the upgrade (excerpt)</h3><pre>15 unknown-turn captured {&quot;artifact_key&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;caller_key&quot;:null,&quot;cwd&quot;:&quot;/private/tmp/lf-qa-936/repo.repo&quot;,&quot;model&quot;:null,&quot;provider&quot;:&quot;claude&quot;,&quot;skill&quot;:&quot;repo-session&quot;,&quot;work_source&quot;:&quot;declared&quot;}
-16 unknown-turn observed {&quot;evidence&quot;:{&quot;artifact_key&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;boot_id&quot;:null,&quot;caller_artifact_key&quot;:null,&quot;context&quot;:{&quot;bytes&quot;:9449,&quot;content_sha256&quot;:&quot;c3c5769c32569a6b0487549864748ad35014ab1787eb6ffec32bb259eec12efb&quot;,&quot;path&quot;:&quot;context.json&quot;},&quot;created_at&quot;:&quot;2026-11-17T05:51:26.981937Z&quot;,&quot;cwd&quot;:&quot;/private/tmp/lf-qa-936/repo.repo&quot;,&quot;exec&quot;:null,&quot;flow&quot;:{&quot;kind&quot;:&quot;independent&quot;},&quot;harness&quot;:&quot;claude&quot;,&quot;host&quot;:&quot;Jacks-MacBook-Pro-2.local&quot;,&quot;model&quot;:null,&quot;repo&quot;:&quot;/private/tmp/lf-qa-936/repo.repo&quot;,&quot;runtime_digest&quot;:null,&quot;runtime_path&quot;:&quot;/private/tmp/lf-qa-936/bin/lf-old&quot;,&quot;schema_version&quot;:1,&quot;skill&quot;:null,&quot;subjects&quot;:[],&quot;surface&quot;:&quot;headless&quot;,&quot;worktree&quot;:&quot;/private/tmp/lf-qa-936/repo.repo&quot;},&quot;input_id&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;source&quot;:&quot;manifest.json&quot;}
-17 unknown-turn observed {&quot;evidence&quot;:{&quot;account_id&quot;:null,&quot;attempt_key&quot;:&quot;attempt-1&quot;,&quot;model&quot;:null,&quot;observed_at&quot;:&quot;2026-11-17T05:51:27.131791Z&quot;,&quot;provider&quot;:&quot;claude&quot;,&quot;schema_version&quot;:1,&quot;seq&quot;:0,&quot;type&quot;:&quot;provider_attempt_started&quot;},&quot;input_id&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;source&quot;:&quot;events.jsonl:0&quot;}
-18 unknown-turn observed {&quot;source&quot;:&quot;observed&quot;,&quot;transition&quot;:{&quot;from_agent_process&quot;:null,&quot;from_provider_session&quot;:null,&quot;kind&quot;:&quot;started&quot;,&quot;observed_at&quot;:1794894688,&quot;original_running&quot;:null,&quot;seed&quot;:null,&quot;to_agent_process&quot;:&quot;31702683-ddb8-4b7c-97b2-285f5e79923a&quot;,&quot;to_provider_session&quot;:&quot;48748f67-2db8-43dc-9f86-62e6f78956dd&quot;},&quot;type&quot;:&quot;provider_transition&quot;}
-19 f1789d4d-8971-4671-a21d-efaf7ff4212e started {}
-20 unknown-turn observed {&quot;evidence&quot;:{&quot;account_id&quot;:null,&quot;provider_session_id&quot;:&quot;48748f67-2db8-43dc-9f86-62e6f78956dd&quot;,&quot;schema_version&quot;:1},&quot;input_id&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;source&quot;:&quot;provider-session:5eec0181-951f-470f-a5b3-084cb451a8e9&quot;}
-21 unknown-turn observed {&quot;evidence&quot;:{&quot;attempt_key&quot;:&quot;attempt-1&quot;,&quot;observed_at&quot;:&quot;2026-11-17T05:51:31.408493Z&quot;,&quot;provider_session_id&quot;:&quot;48748f67-2db8-43dc-9f86-62e6f78956dd&quot;,&quot;schema_version&quot;:1,&quot;seq&quot;:2,&quot;type&quot;:&quot;provider_session_observed&quot;},&quot;input_id&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;source&quot;:&quot;events.jsonl:2&quot;}
-22 f1789d4d-8971-4671-a21d-efaf7ff4212e output {&quot;text&quot;:&quot;QA_OLD_A&quot;}
-23 f1789d4d-8971-4671-a21d-efaf7ff4212e completed {&quot;context&quot;:{&quot;compaction_tokens&quot;:null,&quot;compactions&quot;:0,&quot;first_request_tokens&quot;:30016,&quot;peak_request_tokens&quot;:30016,&quot;tool_output_tokens&quot;:0,&quot;tool_results&quot;:0},&quot;errors&quot;:null,&quot;result_id&quot;:&quot;d4715f12-8205-48a0-811b-d1b41bb18494&quot;,&quot;status&quot;:&quot;completed&quot;,&quot;subtype&quot;:&quot;success&quot;,&quot;total_cost_usd&quot;:0.2204456}
-24 unknown-turn observed {&quot;evidence&quot;:{&quot;event&quot;:{&quot;status&quot;:&quot;completed&quot;,&quot;turn_id&quot;:&quot;f1789d4d-8971-4671-a21d-efaf7ff4212e&quot;,&quot;type&quot;:&quot;turn_completed&quot;},&quot;observed_at&quot;:&quot;2026-11-17T05:51:31.410095Z&quot;,&quot;schema_version&quot;:1,&quot;seq&quot;:6,&quot;type&quot;:&quot;conversation&quot;},&quot;input_id&quot;:&quot;ba2f1ca0b54d4cf29ba74c8601f1f7c6&quot;,&quot;source&quot;:&quot;events.jsonl:6&quot;}
-25 unknown-turn observed {&quot;attachment_token&quot;:&quot;1763a688-81f0-49f5-90e9-09a9c5a744bc&quot;,&quot;outcome&quot;:&quot;completed&quot;,&quot;type&quot;:&quot;attachment_exit&quot;}
-26 f1789d4d-8971-4671-a21d-efaf7ff4212e usage {&quot;final&quot;:true,&quot;provider&quot;:&quot;claude&quot;,&quot;usage&quot;:{&quot;cache_read_tokens&quot;:16468,&quot;cache_write_tokens&quot;:13546,&quot;input_tokens&quot;:2,&quot;model&quot;:&quot;claude-fable-5-2&quot;,&quot;output_tokens&quot;:10,&quot;total_input_tokens&quot;:30016}}
-</pre>
-<h3>Branch, before prune</h3><pre>$ lf session history a07b0975… --json
-{"events":[],"turns":[]}
-$ lf usage
-Nov 16 21:51  repo  -  repo-session   -  -  -  -  0/0  1  032f3b65</pre>
-<h3>Branch, after <code>lf process prune</code></h3><pre>store: closed 0 dead Processes · forgot 0 finished · moved 18 observations · converted 3 turns · forgot 9 history rows
-
-$ lf session history a07b0975…
-turn 48748f67-… f1789d4d-… completed input=30016 output=10
-turn 48748f67-… 6a364b03-… completed input=30056 output=10
-7 unknown-turn observed {"evidence":{"artifact_key":"ba2f1ca0…", …}
-
-$ lf usage            (same numbers as the installed lf showed)
-Nov 16 21:51  repo.repo  -  claude  4  10  17,033  -  1/1  0  032f3b65
-Nov 16 21:51  repo.repo  -  claude  2  10  16,468  -  1/1  0  ba2f1ca0
-Nov 16 21:51  repo       -  claude  2  12  11,496  -  1/1  0  f3fdbd9e</pre>
-<h3>Demo query on <code>usage.db</code></h3><pre>select coalesce(skill,'-'), count(*), sum(output_tokens), sum(ended_at-started_at) from turns group by 1
-loop-or-next|1|1249|21
-repo-session|3|38|0
-qa-say|1|12|0
--|1|12|0</pre>
-<h3>Locked journals</h3><pre>QA_LOCKED       (71 s; the same turn unlocked takes ~8 s)
-WARN recording gap: session history: database is locked; the conversation goes on without lf's records
-WARN recording gap: provider transition: …   turn origin: …   turn completion: …   turn usage: …</pre>
-<h3>Missing transcript</h3><pre>Error: Capture final answer unavailable: the transcript of conversation 48748f67-… that answered 29510aaf… is gone: /Users/jack/.claude has no file for it</pre>
+<pre>$ lf -b … --message 'Reply only with QA_B_LOCKED7'   (journals locked)
+WARN recording gap: session history: sqlite error: database is locked; …
+DEBUG published Session capture elapsed_ms=5293
+WARN recording gap: provider transition: …   turn origin: …   turn completion: …
+DEBUG agent finished elapsed_ms=10448
+QA_B_LOCKED7
+real 18.56</pre>
+<pre>$ sqlite3 usage.db "select provider_turn, captured_event, started_at is not null, skill, model, output_tokens from turns"
+0f080301|1|1|repo-session|claude-fable-5-2|10
+3dee0bdd|4|1|repo-session|claude-fable-5-2|14
+44b8310c||0||claude-fable-5-2|12      ← a gapped turn
+…
+02d41f3c|10|1|repo-session|claude-fable-5-2|11</pre>
 
 <h2>Fixed</h2>
-<p>Nothing in the product. The qa notes gained the three-file layout, the <code>?mode=ro</code> vs <code>immutable=1</code> trap, the upgrade recipe and how to lock a journal (<code>.lf/qa/server.md</code>), and <code>usage.db</code> for per-turn cost (<code>.lf/qa/transcripts.md</code>).</p>
+<ul>
+<li>A held journal lock now costs a process one wait per file, not one per store open (<code>journals.rs</code>, <code>sqlite.rs</code>).</li>
+<li>QA notes (<code>.lf/qa/server.md</code>): the lock recipe says ~5 s per file, and to sample the branch <code>lf</code>'s own PID (the shell's <code>lf</code> is a wrapper function).</li>
+</ul>
 
 <h2>Still wrong or worth a look, worst first</h2>
-<ol>
-<li><b>A held journal lock slows each turn by about a minute.</b> Each journal write waits 2 s (<code>journals.rs</code> <code>BUSY</code>) before recording a gap, and a turn makes ~30 writes: 71 s against ~8 s. The turn never fails. A prune batch (≤0.7 s) stays under the wait, so only a stuck or stopped writer causes this. A possible fix: skip the wait while a gap is open.</li>
-<li><b>After a gap, <code>--final</code> says "not settled".</b> The turn made while the journals were locked has no turn row, so <code>lf session history show &lt;id&gt; --final</code> answers "Capture … is not settled and has no final answer" until the next turn. The message predates this branch; a Graph step in that state fails, as it did when <code>output</code> rows were lost.</li>
-<li><b>Headless Claude turns have no duration.</b> <code>started_at = ended_at</code> and <code>duration_ms</code> is null on headless Claude turns, both converted and new, because the decoder learns the turn ID at the end. The released build stamps them the same way, so this is not a regression. But the "time by skill" half of the demo query is 0 for these turns.</li>
-<li><b>Upgrade skew window.</b> Until the server's start-up pass or <code>lf process prune</code> runs, <code>lf session history &lt;id&gt;</code> is empty and <code>lf usage</code> shows gaps for turns the released lf recorded. The design accepts this; after <code>lf install</code> the server restarts and closes it in seconds.</li>
-</ol>
+<ul>
+<li>A held lock still adds about 10 s to a turn (5 s per file). Lowering <code>BUSY</code> to 0.5 s would make it about 3 s and still cover a 0.7 s prune batch; left at 2 s, noted in <code>scratch/questions.md</code>.</li>
+<li>Gapped turns lose their grouping: no skill, Task or start time, so they fall out of "tokens by skill".</li>
+<li>Headless Claude turns still record no duration (<code>started_at = ended_at</code>), as in the first pass and the released build.</li>
+</ul>
 
 <h2>Not reached</h2>
-<ul>
-<li>Desktop windows (headless run, no display).</li>
-<li>Codex, Pi and OpenCode turns; Codex's cumulative usage resolution was not exercised live.</li>
-<li>Interactive <code>-i</code> turns, whose start comes from hooks.</li>
-<li>Revision rates and file sizes on the real store: measured on a copy during slice 5, not repeated here.</li>
-</ul>
+<p>Desktop windows (headless run). Codex, Pi and OpenCode turns. Interactive <code>-i</code> turns. Two processes contending for the lock at once (each now pays one wait).</p>

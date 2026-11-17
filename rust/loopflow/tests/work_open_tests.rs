@@ -411,7 +411,7 @@ fn cmux_launches_a_fresh_task_workspace_with_its_conversation() {
             home.path(),
             repo.path(),
             Some(bin.path()),
-            &["workspace", &url, "--host", "cmux", "--json"],
+            &["open", "--workspace", &url, "--host", "cmux", "--json"],
         ));
         let receipt = &report["receipts"][0];
         assert_eq!(receipt["status"], "usable");
@@ -467,7 +467,15 @@ fn opening_an_unplaced_task_places_it_and_starts_its_conversation() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["workspace", "--task", id, "--host", "cmux", "--json"],
+        &[
+            "open",
+            "--workspace",
+            "--task",
+            id,
+            "--host",
+            "cmux",
+            "--json",
+        ],
     ));
     assert_eq!(report["receipts"][0]["status"], "usable", "{report}");
     let worktree: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
@@ -511,7 +519,8 @@ fn cmux_task_joins_the_group_its_caller_is_in_now() {
             ("CMUX_SOCKET_PATH", "/fixture/cmux.sock"),
         ],
         &[
-            "workspace",
+            "open",
+            "--workspace",
             "--task",
             "INF-123",
             "--host",
@@ -759,7 +768,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         home.path(),
         repo.path(),
         None,
-        &["workspace", "--available", "--link"],
+        &["open", "--available", "--link"],
     );
     assert!(empty.status.success(), "{empty:?}");
     assert_eq!(
@@ -815,7 +824,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         home.path(),
         repo.path(),
         None,
-        &["workspace", "--available", "--link"],
+        &["open", "--available", "--link"],
     );
     assert!(
         !String::from_utf8_lossy(&text.stdout).contains("Unknown:"),
@@ -825,7 +834,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
         home.path(),
         repo.path(),
         None,
-        &["workspace", "--available", "--link", "--json"],
+        &["open", "--available", "--link", "--json"],
     ));
     let links = links.as_array().unwrap();
     assert_eq!(links.len(), 2, "{links:?}");
@@ -857,7 +866,7 @@ fn available_conversations_need_no_question_and_are_never_taken_over() {
             repo.path(),
             Some(bin.path()),
             &[("LF_DESKTOP", "com.loopflow.mac.test")],
-            &["workspace", "--available", "--host", "desktop", "--json"],
+            &["open", "--available", "--host", "desktop", "--json"],
         );
         let report: Value = serde_json::from_slice(&output.stdout).unwrap();
         let statuses: Vec<&str> = report["receipts"]
@@ -1163,7 +1172,8 @@ fn rex_each_open_launches_a_fresh_task_tab_without_finding_earlier_ones() {
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     rex_peer(bin.path());
     let args = [
-        "workspace",
+        "open",
+        "--workspace",
         "--task",
         "INF-123",
         "--host",
@@ -1280,7 +1290,15 @@ fn rex_display_selection_ignores_the_listing_cli_that_has_already_exited() {
         home.path(),
         repo.path(),
         Some(bin.path()),
-        &["workspace", "--task", "INF-123", "--host", "rex", "--json"],
+        &[
+            "open",
+            "--workspace",
+            "--task",
+            "INF-123",
+            "--host",
+            "rex",
+            "--json",
+        ],
     ));
     assert!(
         report["receipts"][0]["reason"]
@@ -1375,7 +1393,8 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
     let requests = host(bin.path(), "ssh", &receipt.to_string(), 0);
     let follow = |remote: Option<String>| {
         let mut args = vec![
-            "workspace".to_owned(),
+            "open".to_owned(),
+            "--workspace".into(),
             url.clone(),
             "--host".into(),
             "rex".into(),
@@ -1437,7 +1456,8 @@ fn rex_follower_places_remote_arrivals_in_one_container_per_machine() {
         repo.path(),
         Some(bin.path()),
         &[
-            "workspace",
+            "open",
+            "--workspace",
             &url,
             "--host",
             "rex",
@@ -1732,7 +1752,8 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let server = IsolatedRex::start(root.path(), &bin, &viewer);
     let endpoint = server.endpoint.clone();
     let args = [
-        "workspace",
+        "open",
+        "--workspace",
         "--task",
         "INF-123",
         "--host",
@@ -1797,7 +1818,7 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
     let reply = root.path().join("caller.json");
     call(
         "session.new_window",
-        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 workspace --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
+        serde_json::json!({"session_id":container,"focus":false,"layout":{"block":{"flavor":"com.superlogical.terminal.shell","options":{"shell":"none","cwd":repo.path(),"command":["/bin/sh","-c","PATH=\"$5:$PATH\" LF_HOME=\"$1\" \"$2\" --cwd \"$3\" --task INF-123 open --workspace --json > \"$4\" 2> \"$4.err\"; printf '%s' \"$?\" > \"$4.exit\"; exec /bin/cat","caller",home,env!("CARGO_BIN_EXE_lf"),repo.path(),reply,bin]}}}}),
     );
     let deadline = Instant::now() + Duration::from_secs(15);
     let automatic = loop {
@@ -1843,7 +1864,8 @@ fn rex_native_fresh_launches_keep_earlier_arrangements_and_task_directories() {
         repo.path(),
         None,
         &[
-            "workspace",
+            "open",
+            "--workspace",
             &repository_url,
             "--host",
             "rex",
@@ -2049,7 +2071,8 @@ fn herdr_native_fresh_launches_leave_earlier_tabs_alone() {
         result["result"].clone()
     };
     let args = [
-        "workspace",
+        "open",
+        "--workspace",
         "--task",
         "INF-123",
         "--host",
@@ -2320,7 +2343,7 @@ fn desktop_workspace_and_default_view_open_arrangements_without_starting_session
     register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let opened = host(bin.path(), "open", "", 0);
     for command in [
-        vec!["workspace", "--host", "desktop"],
+        vec!["open", "--workspace", "--host", "desktop"],
         vec!["desktop", "view"],
     ] {
         let args = [command.as_slice(), &["--task", "INF-123", "--json"]].concat();
@@ -2359,7 +2382,7 @@ fn workspace_attachment_failure_keeps_the_created_tab_and_destination() {
     );
     std::fs::write(ack, script).unwrap();
     let args = [
-        &["workspace", "--task", "INF-123", "--json"][..],
+        &["open", "--workspace", "--task", "INF-123", "--json"][..],
         FIXTURE_REX,
     ]
     .concat();

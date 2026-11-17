@@ -486,10 +486,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open one conversation here, in a sibling tab, or focus its existing view
+    /// Open one conversation here, in a sibling tab, or a repository/Wave overview
     Open(commands::open::OpenArgs),
-    /// Open Task tabs, or a repository/Wave overview
-    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -1145,7 +1143,6 @@ impl Commands {
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
             | Self::Open(_)
-            | Self::Workspace(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -3389,19 +3386,21 @@ mod tests {
     }
 
     #[test]
-    fn conversation_modes_and_workspace_options_have_separate_commands() {
+    fn workspace_options_belong_to_open_and_exclude_one_conversation_modes() {
         for flags in [
             ["--here", "--tab"],
             ["--here", "--focus"],
             ["--tab", "--focus"],
+            ["--workspace", "--here"],
+            ["--workspace", "--tab"],
+            ["--available", "--focus"],
+            ["--available", "--workspace"],
         ] {
             assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
         }
-        for option in ["--available", "--no-focus"] {
-            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
-            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        for option in ["--workspace", "--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_ok());
         }
-        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
     }
 
     #[test]

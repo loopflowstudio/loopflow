@@ -1808,7 +1808,6 @@ fn run() -> anyhow::Result<()> {
                 Commands::Config {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
-                    | Commands::Workspace(_)
             )
         )
     {
@@ -2147,9 +2146,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     };
     if let Some(Commands::Open(args)) = &cli.command {
         return loopflow::lf::commands::open::explain(cli, args, json);
-    }
-    if let Some(Commands::Workspace(args)) = &cli.command {
-        return loopflow::lf::commands::open::explain_workspace(cli, args, json);
     }
     if let Some(Commands::Task {
         cmd:
@@ -2624,10 +2620,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Desktop { cmd }) = &cli.command {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
-    if let Some(Commands::Workspace(workspace)) = &cli.command {
-        journal::observe_process(args);
-        return loopflow::lf::commands::open::run_workspace(&cli, workspace);
-    }
     if let Some(Commands::Open(open)) = &cli.command {
         // Bounded observation records this Process and the calling
         // conversation, which tells a link to the caller's own Work apart.
@@ -2990,7 +2982,7 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_)) => {
+        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {

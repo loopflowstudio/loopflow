@@ -1,5 +1,5 @@
 //! Conversation selection and host presentation. `open` reaches one Session;
-//! `workspace` opens Task tabs and overviews and follows Task arrivals. Both use the shared
+//! `open --workspace` opens Task tabs and overviews and follows Task arrivals. Both use the shared
 //! non-replacing Session connection; explicit resume owns input takeover.
 
 use loopflow_execution::store::session_projection;
@@ -1105,40 +1105,37 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Task tabs and overviews: lf workspace."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs."
 )]
 pub struct OpenArgs {
     #[command(flatten)]
     pub selection: OpenSelection,
     /// Attach in this terminal (direct CLI default)
-    #[arg(long, conflicts_with_all = ["tab", "focus"])]
+    #[arg(long, conflicts_with_all = ["tab", "focus", "workspace", "available"])]
     pub here: bool,
     /// Attach in a sibling tab (agent default)
-    #[arg(long, conflicts_with = "focus")]
+    #[arg(long, conflicts_with_all = ["focus", "workspace", "available"])]
     pub tab: bool,
     /// Reveal an existing conversation view; create nothing
-    #[arg(long)]
+    #[arg(long, conflicts_with_all = ["workspace", "available"])]
     pub focus: bool,
     /// Present original files in an attached Desktop Files view
-    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "diff", "link", "here", "tab", "focus"])]
+    #[arg(long = "file", value_name = "PATH", conflicts_with_all = ["session", "diff", "link", "here", "tab", "focus", "workspace", "available"])]
     pub files: Vec<PathBuf>,
-}
-
-#[derive(Debug, Clone, clap::Args)]
-pub struct WorkspaceArgs {
-    #[command(flatten)]
-    pub selection: OpenSelection,
+    /// Open the repository or Wave overview: started, unfinished Tasks as tabs
+    #[arg(long)]
+    pub workspace: bool,
     /// Open every conversation available for you to work with
-    #[arg(long, conflicts_with_all = ["url", "session"])]
+    #[arg(long, conflicts_with_all = ["url", "session", "workspace"])]
     pub available: bool,
     /// Keep the host's current selection
     #[arg(long)]
     pub no_focus: bool,
-    #[arg(long, hide = true, requires = "server")]
+    #[arg(long, hide = true, requires_all = ["server", "workspace"])]
     pub follow: Option<String>,
     #[arg(long, hide = true, requires = "follow", value_delimiter = ',')]
     pub seen: Vec<String>,
-    #[arg(long, hide = true)]
+    #[arg(long, hide = true, requires = "workspace")]
     pub local_workspace: bool,
     #[arg(long, hide = true, requires = "local_workspace", value_delimiter = ',')]
     pub arrive_task: Vec<String>,
@@ -1146,6 +1143,42 @@ pub struct WorkspaceArgs {
     pub into: Option<String>,
     #[arg(long = "remote", hide = true, requires = "follow")]
     pub remote: Vec<String>,
+}
+
+impl OpenArgs {
+    /// `lf open --workspace` for `selection`.
+    pub(crate) fn overview(selection: OpenSelection) -> Self {
+        Self {
+            selection,
+            here: false,
+            tab: false,
+            focus: false,
+            files: Vec::new(),
+            workspace: true,
+            available: false,
+            no_focus: false,
+            follow: None,
+            seen: Vec::new(),
+            local_workspace: false,
+            arrive_task: Vec::new(),
+            into: None,
+            remote: Vec::new(),
+        }
+    }
+
+    /// Several conversations at once: an overview or everything available.
+    fn opens_workspace(&self) -> bool {
+        self.workspace || self.available
+    }
+
+    /// One item of a workspace, opened as a single conversation.
+    fn conversation(&self, tab: bool) -> Self {
+        Self {
+            tab,
+            workspace: false,
+            ..Self::overview(self.selection.clone())
+        }
+    }
 }
 
 /// The one conversation named by an address, root selectors or checkout.
@@ -1211,6 +1244,11 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
     if !args.files.is_empty() {
         return files::run(cli, args, true);
     }
+    if args.opens_workspace() {
+        let mut selection = args.selection.clone();
+        selection.json = json;
+        return print_links(cli, &selection, args.available, route(selection.host));
+    }
     let link = target(cli, &args.selection)?.link(conversation::presentation(args)?);
     if json {
         println!(
@@ -1229,6 +1267,9 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if !args.files.is_empty() {
         return files::run(cli, args, false);
     }
+    if args.opens_workspace() {
+        return run_workspace(cli, args);
+    }
     if args.selection.link {
         return print_links(
             cli,
@@ -1237,7 +1278,7 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
             conversation::presentation(args)?,
         );
     }
-    let receipt = conversation::open(target(cli, &args.selection)?, args, true);
+    let receipt = conversation::open(target(cli, &args.selection)?, args, !args.no_focus);
     print_report(
         OpenReport {
             receipts: vec![receipt],
@@ -1245,12 +1286,6 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
         },
         args.selection.json || cli.json,
     )
-}
-
-pub fn explain_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs, json: bool) -> Result<()> {
-    let mut selection = args.selection.clone();
-    selection.json = json;
-    print_links(cli, &selection, args.available, route(selection.host))
 }
 
 fn desktop_workspace_url(
@@ -1270,7 +1305,7 @@ fn desktop_workspace_url(
     url
 }
 
-pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
+pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if args.selection.link {
         return print_links(
             cli,
@@ -1290,17 +1325,7 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
             .map(|(index, target)| {
                 let focus = !args.no_focus && index + 1 == targets.len();
                 if target.session.is_some() || args.available {
-                    return conversation::open(
-                        target.clone(),
-                        &OpenArgs {
-                            selection: args.selection.clone(),
-                            here: false,
-                            tab: false,
-                            focus: false,
-                            files: Vec::new(),
-                        },
-                        focus,
-                    );
+                    return conversation::open(target.clone(), &args.conversation(false), focus);
                 }
                 let url = desktop_workspace_url(
                     &target.repository_path,
@@ -1325,7 +1350,7 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
     }
     anyhow::ensure!(
         matches!(host, OpenHost::Rex | OpenHost::Herdr | OpenHost::Cmux),
-        "{} does not support workspaces; use lf open, lf task view or lf diff",
+        "{} does not support workspaces; use lf open without --workspace, lf task view or lf diff",
         host.label()
     );
     anyhow::ensure!(
@@ -1337,7 +1362,7 @@ pub fn run_workspace(cli: &crate::lf::Cli, args: &WorkspaceArgs) -> Result<()> {
 
 fn workspace_targets(
     cli: &crate::lf::Cli,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
 ) -> Result<(Vec<Resolved>, Vec<String>)> {
     if args.available {
         available(cli)

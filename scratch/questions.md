@@ -11,6 +11,9 @@
 
 ## Picks made headless
 
+- **Remote Machines on released lf** receive `lf open --workspace --local-workspace` and reject `--workspace` as an unexpected argument until they run this build; no fallback to the old `workspace` argv (no compat for solo dev). Upgrade the remote's `lf`.
+- **`lf open --no-focus`** also applies to a single conversation (passed as the focus flag) rather than being refused.
+
 - **The contract Task is LOO-954, not LOO-943**: `lf task reopen LOO-943` answered "An abandoned Task cannot be reopened". LOO-943 stays abandoned.
 - **Indexes on leaving `tasks` columns stay** until LOO-954: released lf filters by them.
 

@@ -1,4 +1,4 @@
-//! Fresh native workspaces. Every `lf workspace` launches new Task tabs, each with its
+//! Fresh native workspaces. Every `lf open --workspace` launches new Task tabs, each with its
 //! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
@@ -17,7 +17,7 @@ use serde_json::Value;
 use super::{
     cmux, herdr,
     rex::{self, Rex},
-    OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved, WorkspaceArgs,
+    OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved,
 };
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
@@ -235,7 +235,7 @@ struct Presentation<'a> {
     conversations: bool,
 }
 
-pub(super) fn run(cli: &crate::lf::Cli, args: &WorkspaceArgs, host: OpenHost) -> Result<()> {
+pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
     if let Some(session) = &args.follow {
         return follow(cli, session, args);
     }
@@ -327,7 +327,7 @@ fn open_machines(
     store: &SqliteStore,
     host: OpenHost,
     target: &Resolved,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
 ) -> Result<OpenReport> {
     if target.task.is_none() && (args.available || target.session.is_some()) {
         return Ok(OpenReport {
@@ -575,7 +575,7 @@ fn remote_open(
     machine: &str,
     repository: &str,
     selection: &Selection,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
 ) -> Result<OpenReport> {
     let machine = loopflow_execution::store::machines::machines(store)?
         .into_iter()
@@ -584,7 +584,8 @@ fn remote_open(
     let mut argv = vec![
         "--repo-id".into(),
         repository.into(),
-        "workspace".into(),
+        "open".into(),
+        "--workspace".into(),
         "--host".into(),
         host.label().to_lowercase(),
         "--local-workspace".into(),
@@ -671,21 +672,10 @@ fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) 
 
 /// A Session with no Task is one conversation, not a selection of Tasks: one
 /// tab in the caller's container, and nothing arrives after it.
-fn open_conversation(host: OpenHost, target: &Resolved, args: &WorkspaceArgs) -> OpenReceipt {
-    super::conversation::open(
-        target.clone(),
-        &super::OpenArgs {
-            selection: super::OpenSelection {
-                host,
-                ..args.selection.clone()
-            },
-            here: false,
-            tab: true,
-            focus: false,
-            files: Vec::new(),
-        },
-        !args.no_focus,
-    )
+fn open_conversation(host: OpenHost, target: &Resolved, args: &OpenArgs) -> OpenReceipt {
+    let mut single = args.conversation(true);
+    single.selection.host = host;
+    super::conversation::open(target.clone(), &single, !args.no_focus)
 }
 
 /// One conversation tab, independent of any saved Task layout.
@@ -715,7 +705,7 @@ fn launch(
     native: &Native,
     target: &Resolved,
     selected: &Selection,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
     local_tasks: &[&ViewContent],
     follow: Option<&Remotes>,
 ) -> Result<Vec<OpenReceipt>> {
@@ -847,7 +837,8 @@ fn start_follower(
     remotes: &[String],
 ) -> Result<()> {
     let mut words = vec![
-        "workspace".to_owned(),
+        "open".to_owned(),
+        "--workspace".into(),
         url.into(),
         "--host".into(),
         "rex".into(),
@@ -908,7 +899,7 @@ fn with_machine_home(mut argv: Vec<String>) -> Vec<String> {
 /// another Machine's to the container held for it here. A Machine with none gets
 /// one on its first arrival. Seen Tasks, including tabs someone closed, stay in
 /// memory and never reappear. Containers live only as long as this process.
-fn follow(cli: &crate::lf::Cli, session: &str, args: &WorkspaceArgs) -> Result<()> {
+fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
     let server = args
         .selection
         .server
@@ -1044,7 +1035,7 @@ fn arrive_remote(
     candidates: &[Candidate],
     repository: &str,
     selected: &Selection,
-    args: &WorkspaceArgs,
+    args: &OpenArgs,
 ) -> Vec<String> {
     let known = match placement {
         Placement::Uncertain => return Vec::new(),
@@ -1052,7 +1043,7 @@ fn arrive_remote(
         Placement::Container(container) => Some(container.clone()),
     };
     // Arrivals select no Session and take no focus.
-    let arrival = WorkspaceArgs {
+    let arrival = OpenArgs {
         arrive_task: candidates.iter().map(|task| task.id.clone()).collect(),
         into: known.clone(),
         no_focus: true,

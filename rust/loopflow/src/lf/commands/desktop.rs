@@ -848,30 +848,18 @@ fn view_plan(
 ) -> Result<()> {
     if !passive && expression.is_none() {
         require_supported()?;
-        // Default Work displays its arrangement, like `lf workspace`.
-        return super::open::run_workspace(
-            cli,
-            &super::open::WorkspaceArgs {
-                selection: super::open::OpenSelection {
-                    url: None,
-                    host: super::open::OpenHost::Desktop,
-                    session: None,
-                    diff: false,
-                    link: false,
-                    format: None,
-                    json,
-                    server: None,
-                },
-                available: false,
-                no_focus: false,
-                follow: None,
-                seen: Vec::new(),
-                local_workspace: false,
-                arrive_task: Vec::new(),
-                into: None,
-                remote: Vec::new(),
-            },
-        );
+        // Default Work displays its arrangement, like `lf open --workspace`.
+        let args = super::open::OpenArgs::overview(super::open::OpenSelection {
+            url: None,
+            host: super::open::OpenHost::Desktop,
+            session: None,
+            diff: false,
+            link: false,
+            format: None,
+            json,
+            server: None,
+        });
+        return super::open::run_workspace(cli, &args);
     }
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {

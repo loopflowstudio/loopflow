@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged, compressed; next is gate.
+Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged, compressed; `lf workspace` folded into `lf open --workspace`; next is gate.
 
 ## Demo
 
@@ -114,6 +114,7 @@ state; the file is not rewritten.
 - QA report of the pre-split upgrade (drops, export file): `git show 8d18764018:scratch/qa.html`.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
 - Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
+- Workspace fold: `nextest -p loopflow --lib` `lf::tests::`, `wave_resolution_matrix::`, `commands::open::`; integration `work_open_tests::`, `cli_discovery::`, `documented_commands::` at `-j 4` (72); `cargo clippy -p loopflow --all-targets -- -D warnings`: pass. `rex_agent_tool_open_uses_the_moved_viewer_instead_of_startup_context` failed once at `-j 4` (load ~38) and passed alone; gate/CI decides whether it is load-sensitive.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.
 
 ## lf workspace folds into lf open (2026-11-16)
@@ -123,13 +124,11 @@ now", "and honesrly workspace should be combined w open fr that reason", "do it
 here". Asked what `lf open --wave product` shows, the answer picked:
 "Conversation; overview by flag".
 
-- `lf workspace` is deleted, no alias. Everything it did moves to `lf open`.
-- `lf open --task X` is unchanged: the Task's conversation (`--diff` adds Changes).
-- `lf open --wave X`, or from a repository/Wave checkout, still attaches that
-  scope's conversation. `--workspace` instead opens the
-  overview; Jack Heart named it: "--workspace". It opens started, unfinished Tasks as tabs, Desktop's board, Rex's follow
-  tab. A Task has no overview.
-- `--available` and `--no-focus` move to `lf open`.
-- Update every caller (Swift, skills, docs, `docs/workspaces.md`, tests,
-  `documented_commands`), and list the removed command and new flags under
-  User interface changes in the PR body.
+Done: `lf workspace` and `WorkspaceArgs` are gone; `OpenArgs` carries
+`--workspace`, `--available`, `--no-focus` and the hidden follower/remote flags,
+and `run` dispatches overviews to `run_workspace`. Followers and remote Machines
+are invoked as `lf open --workspace …`. `--workspace --task X` still opens the
+Task's tab (remote routing and arrivals use it); docs show only Wave/repository
+overviews. `--here/--tab/--focus/--file` conflict with `--workspace`/`--available`.
+PR body, User interface changes: removed `lf workspace`; added `lf open
+--workspace`, `--available`, `--no-focus`.

@@ -67,16 +67,17 @@ reach a Task's recorded Machine; Herdr and cmux workspaces stay local.
 ## Open a workspace
 
 ```bash
-lf workspace --task ENG-123         # the Task's tab in your host
-lf workspace --wave product        # Product's started, unfinished Tasks
-lf workspace                       # this checkout's Task, Wave or repository
-lf workspace --available           # conversations ready for your next turn
+lf open --wave product --workspace  # Product's started, unfinished Tasks
+lf open --workspace                 # this checkout's Wave or repository
+lf open --available                 # conversations ready for your next turn
 lf task view ENG-123                # only the Task brief and workflow
 lf diff ENG-123                     # only its changes
 ```
 
-`lf workspace` opens Task tabs and overviews. In a repository or Wave, it
-shows started, unfinished Tasks; backlog Tasks appear only when selected.
+Without `--workspace`, `lf open --wave product` attaches the Wave's
+conversation. With it, a repository or Wave opens as an overview of its
+started, unfinished Tasks; backlog Tasks appear only when selected. A Task has
+no overview: `lf open --task ENG-123` is its conversation.
 Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
 Use `lf open --task <task>` to enter a conversation from an overview. Overviews
 and automatic arrivals start no agents and leave existing conversation input
@@ -87,8 +88,8 @@ current group, or the window if there is no group. A repository or Wave gets a
 new container. External hosts own these arrangements: use their controls to
 rearrange, rename, close and restore them. `--host` selects a host;
 `--no-focus` keeps the current tab selected. Hosts without workspace support
-report that limitation; use `lf open`, `lf task view` or `lf diff` for a single
-activity.
+report that limitation; drop `--workspace`, or use `lf task view` or `lf diff`,
+for a single activity.
 
 ## What a Task tab holds
 
@@ -116,7 +117,7 @@ starts no work.
 
 ## Follow newly started Tasks
 
-A repository or Wave opened with `lf workspace` in Rex includes a Workspace tab.
+A repository or Wave opened with `lf open --workspace` in Rex includes a Workspace tab.
 Keep it running to add newly started Tasks without taking focus or adding backlog
 Tasks. A Task tab you close stays closed while that Workspace tab runs.
 

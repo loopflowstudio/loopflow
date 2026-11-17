@@ -13,7 +13,7 @@ lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation her
 lf open --task LOO-12 --tab                  # attach in a sibling tab
 lf open --task LOO-12 --focus                # reveal its existing view
 lf open --wave product                      # the product Wave's conversation
-lf workspace --wave product                 # the Wave's Task overview
+lf open --wave product --workspace          # the Wave's Task overview
 lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
 ```
 
@@ -28,8 +28,8 @@ support reports that limitation and gives a command to run in a terminal you
 open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
 failure never falls through to another.
 
-`lf open` resolves one conversation, independently of workspace layouts.
-`lf workspace` opens configured arrangements and repository or Wave overviews;
+`lf open` resolves one conversation; `lf open --workspace` opens a repository
+or Wave overview instead;
 `lf task view` inspects workflow. Opening a conversation does not advance a Graph
 or replay its prompt. Success means the conversation attached; attachment
 failure reaches the opening command and can be retried.

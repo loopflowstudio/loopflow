@@ -426,7 +426,14 @@ fn a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it() {
         let status = task.run(&["task", "status", &issue, "--json"]);
         let text = String::from_utf8_lossy(&status.stdout).into_owned();
         if text.contains("Setup stopped: checkout failed") {
-            assert!(reason(&status).starts_with("Setup stopped"), "{text}");
+            let reason = reason(&status);
+            assert!(reason.starts_with("Setup stopped"), "{text}");
+            assert!(
+                reason.ends_with(&format!(
+                    "Reopen the conversation or run `lf task run {issue}` to retry."
+                )),
+                "{text}"
+            );
             break text;
         }
         assert!(

@@ -68,7 +68,7 @@ pub async fn execution_of_latest_graph(
     let Some(graph) = graph else {
         return Ok((
             open_graph_execution_from_facts(&task.id, facts)
-                .unwrap_or_else(|| unrun_execution(facts.unrun.get(&task.id))),
+                .unwrap_or_else(|| unrun_execution(&task.identifier, facts.unrun.get(&task.id))),
             None,
         ));
     };
@@ -136,12 +136,18 @@ pub async fn execution_of_latest_graph(
 
 /// A Task with no Graph history: starting the Graph it took up, stopped
 /// where its last attempt to start failed, or idle when it took up none.
-fn unrun_execution(unrun: Option<&UnrunGraph>) -> TaskExecutionSnapshot {
+fn unrun_execution(identifier: &str, unrun: Option<&UnrunGraph>) -> TaskExecutionSnapshot {
     let (state, reason) = match unrun {
         Some(UnrunGraph {
             stopped: Some(error),
             ..
-        }) => (TaskExecutionState::Blocked, error.clone()),
+        }) => (
+            TaskExecutionState::Blocked,
+            format!(
+                "{}. Reopen the conversation or run `lf task run {identifier}` to retry.",
+                error.trim_end().trim_end_matches('.')
+            ),
+        ),
         Some(UnrunGraph { graph, .. }) => {
             (TaskExecutionState::Starting, format!("Starting {graph}"))
         }

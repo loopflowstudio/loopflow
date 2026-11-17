@@ -277,7 +277,7 @@ crash, unreachable and unstartable errors, and "What the server must learn":
 
 Merged `origin/main` at `2593c489d7` (#1960): `request_id` on `request`.
 
-Then, to finish PR 1's concept review of `4be26c7113`:
+Built at `beade14bd0`, finishing PR 1's concept review of `4be26c7113`:
 
 - Protocol revision 8, `MIN_REVISION` 8 (`machine/wire.rs`,
   `ServerProtocol.swift`, `server/` DTO fixtures, `server_schema.json`,

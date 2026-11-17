@@ -299,6 +299,34 @@ opened) and would find the old one still there.
 
 Remaining: slices 4–5.
 
+Concept review of e01c813a0a: the ready checkout holds as one slot per
+repository, but its owner is split. `take_ready_checkout` runs inside
+`restore_task_checkout`, so any new-branch checkout (`lf task run` on a backlog
+Task, a moved Task) takes it, while only conversation setup replaces it; after a
+backlog run the next Start pays `worktree add`. And `prepare_ready_checkout`
+skips only when the path exists, so a hand-deleted ready checkout (docs: safe)
+leaves a missing-but-registered worktree that plain `worktree add` refuses
+(checked: Git 2.x exits 128, `add --force` succeeds), and it never returns.
+Direction: whoever takes it starts the next (the take's success calls
+`prepare_ready_checkout`; setup's call stays for a repository with none), and
+the replacement is `worktree add --force --detach` (one `--force` still
+refuses a locked, mid-checkout registration).
+
+Agent choice (steer, Jack Heart: "ok, check it"): `lf -a X task create --run`
+holds `lf session resume <id>` with no agent; `-a` lives in
+`settings::invocation_values()` in memory, not `LF_AGENT_OVERRIDE`, and
+`transport::start_held` copies only process env, so the conversation and its
+Graph likely run the configured agent. The choice travels in the creation
+request and the held argv, not ambient env.
+
+Slice order: slice 5's local half before slice 4. Jack Heart on the one-start
+count: "I guess this is fine, im not sure what the one lf start goal is about".
+Slice 4's case is deleting the exec carriers (`pass_launch_lock`,
+`LAUNCH_LOCK_ENV`, `inherited_launch_lock`, `carry_across_exec` in
+`serve_locked`) against a crate inversion; the spans say what the exec costs
+first. Its test becomes "the provider's parent is the held `session resume`",
+not a count of `lf` starts.
+
 Slice 4 shape (read, not built): `serve_locked`
 (`ops/human_session.rs`) builds `lf -i --agent … --cwd … [--task X] : <turn>`
 and execs it; the `-i` path is parsed and assembled in the application

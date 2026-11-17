@@ -69,8 +69,8 @@ store, Session and attachment.
 - `Run::Bare(Mode)`, `Run::Managed`, `Run::reports_turns` and the name
   `harness::Run`. The four launch names are `LaunchKind`'s variants, and
   `LaunchKind::is_managed` supplies hook, thread naming and steering policy.
-- `delegate_current`'s `worker` argument and the `Worker && graph_step()` test
-  in `delegate`.
+- `delegate_current` and `LaunchKind::bare`: a direct command never delegates,
+  so `LaunchInput::kind` selects its kind. `delegate` serves only resume.
 - Resume classification inside `delegate`, `SessionConnectionArgs::work_flag`
   and prepared-command work-flag forwarding. Both resume entry points use
   `session_kind` before delegation and the selected Session ID owns identity.
@@ -117,6 +117,8 @@ exercises all four harnesses against stand-in providers.
 - `cargo clippy --all-targets -- -D warnings` and `git diff --check` passed.
 - `cargo nextest run -p loopflow-execution --lib -E 'test(harness::agent_process) | test(transport::registry)'` passed all 31 after correcting the batch and bound-session fixtures and checking interrupted paste bytes at the child. The earlier paste failure passed in isolation before the fixture edit. That run predates merging main at `14149fac0c` (#1960, which touched `harness/server_connection.js` and `harness/testdata/pi_rpc.py` but no launch path); gate reruns the suites on the merged tree.
 - Compress: `lf session list --on` and `lf session move -a` parse through `config::Agent::parse` (deleted `SessionOn`); the four `Capabilities` literals are rustfmt-formatted again. `cargo nextest run -p loopflow-execution --lib -E 'test(human_session::) | test(moves_bulk) | test(harness::tests)'` passed 48/48; execution clippy clean. No test exercises `--on`; the predicate is unchanged.
+
+- Compress after `275a936bbb`: `delegate_current` could no longer delegate, so it became `LaunchInput::kind`; `detach_current` and `delegate` share `admit_current`. `cargo clippy --all-targets -p loopflow-execution -p loopflow -- -D warnings` clean; `cargo nextest run -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(human_session::)'` passed 51/51.
 
 ## Review answers, 2026-11-17, second review (`scratch/concept-review.html`)
 

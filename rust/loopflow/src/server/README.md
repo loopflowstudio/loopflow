@@ -535,7 +535,7 @@ reported, never started by an attachment attempt.
 
 `Launch::kind` carries whether a launch is bare or managed and its mode.
 [Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
-`transport::delegate_current` selects chats or batches for skill and Graph
+`transport::LaunchInput::kind` selects chats or batches for skill and Graph
 commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`
 is a batch. A Graph's correction turn in a Task run remains a worker.
 Interactive Task, Wave, repository and bound conversations are work sessions,

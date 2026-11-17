@@ -239,6 +239,24 @@ impl LaunchInput {
         self.mode_with_tty(io::stdin().is_terminal() || io::stdout().is_terminal())
     }
 
+    /// A direct command is a chat or batch in its caller's terminal or pipe,
+    /// whatever its Task attribution; Task delivery's step is a worker and a
+    /// held child takes up a work session.
+    pub fn kind(self) -> crate::harness::LaunchKind {
+        use crate::harness::{LaunchKind, Mode};
+
+        if crate::journal::worker_step() {
+            LaunchKind::Worker
+        } else if current().is_some() {
+            LaunchKind::WorkSession
+        } else {
+            match self.mode() {
+                Mode::Interactive => LaunchKind::Chat,
+                Mode::Headless => LaunchKind::Batch,
+            }
+        }
+    }
+
     fn mode_with_tty(self, tty: bool) -> crate::harness::Mode {
         if !self.batch && (self.interactive || tty || !self.has_prompt) {
             crate::harness::Mode::Interactive
@@ -260,13 +278,8 @@ pub fn detach_current() -> Result<bool> {
     {
         return Ok(false);
     }
-    let cwd = std::env::current_dir()?;
     let mut argv: Vec<String> = std::env::args().collect();
-    crate::journal::admit_process(&cwd, &argv);
-    crate::journal::current_lf_process_id().context(
-        "Execution requires an admitted invocation; check the process ledger and caller provenance",
-    )?;
-    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    let cwd = admit_current(&mut argv)?;
     let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
         // No terminal shows detached work; it claims none.
         command
@@ -279,24 +292,6 @@ pub fn detach_current() -> Result<bool> {
         return Err(crate::process::CommandExit(code).into());
     }
     Ok(true)
-}
-
-/// Delegate a direct command; Task attribution never changes its lifetime.
-pub fn delegate_current(input: LaunchInput) -> Result<Delegation> {
-    let argv: Vec<String> = std::env::args().collect();
-    delegate(
-        if crate::journal::worker_step() {
-            crate::harness::LaunchKind::Worker
-        } else if current().is_some() {
-            crate::harness::LaunchKind::WorkSession
-        } else {
-            crate::harness::LaunchKind::bare(input.mode())
-        },
-        None,
-        None,
-        argv,
-        true,
-    )
 }
 
 /// Reopen a recorded Session as a chat or a work session. Only
@@ -376,12 +371,7 @@ fn delegate(
     {
         return Ok(Delegation::Here { kind });
     }
-    let cwd = std::env::current_dir()?;
-    crate::journal::admit_process(&cwd, &std::env::args().collect::<Vec<_>>());
-    crate::journal::current_lf_process_id().context(
-        "Execution requires an admitted invocation; check the process ledger and caller provenance",
-    )?;
-    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    let cwd = admit_current(&mut argv)?;
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -401,6 +391,18 @@ fn delegate(
         replace,
     )?;
     Ok(Delegation::Delegated)
+}
+
+/// Admit this invocation before another process takes over its work, and point
+/// `argv` at this build. Returns the working directory the child starts in.
+fn admit_current(argv: &mut [String]) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    crate::journal::admit_process(&cwd, &std::env::args().collect::<Vec<_>>());
+    crate::journal::current_lf_process_id().context(
+        "Execution requires an admitted invocation; check the process ledger and caller provenance",
+    )?;
+    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    Ok(cwd)
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
@@ -2877,10 +2879,7 @@ mod launch_mode_tests {
                 interactive: true,
                 has_prompt: true,
             };
-            assert_eq!(
-                super::delegate_current(input).unwrap(),
-                super::Delegation::Here { kind }
-            );
+            assert_eq!(input.kind(), kind);
         }
     }
 
@@ -2895,10 +2894,7 @@ mod launch_mode_tests {
                 interactive: true,
                 has_prompt: true,
             };
-            assert_eq!(
-                super::delegate_current(input).unwrap(),
-                super::Delegation::Here { kind }
-            );
+            assert_eq!(input.kind(), kind);
         }
     }
 

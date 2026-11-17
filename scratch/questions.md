@@ -34,3 +34,10 @@
 - Same review: with managed defined by turn reports alone, the Discord Wave
   answer staying a worker needs no exception. Whether it should report turns
   at all is still the assumption recorded above.
+
+- 2026-11-17, compress: `LaunchInput::kind` makes a held child a work
+  session before reading `-b`, so `lf -b <skill>` started in a held terminal
+  runs interactively; on main it ran headless. Kept as is (compress changes no
+  behavior); unverified whether any held-terminal launcher passes `-b`.
+  Pairing `current()` with `mode()` (headless → Worker) would restore main's
+  behavior.

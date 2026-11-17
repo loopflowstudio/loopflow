@@ -809,16 +809,12 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            let kind = match loopflow_execution::transport::delegate_current(
-                loopflow_execution::transport::LaunchInput {
-                    batch: true,
-                    interactive: false,
-                    has_prompt: true,
-                },
-            )? {
-                loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-                loopflow_execution::transport::Delegation::Here { kind } => kind,
-            };
+            let kind = loopflow_execution::transport::LaunchInput {
+                batch: true,
+                interactive: false,
+                has_prompt: true,
+            }
+            .kind();
             crate::lf::commands::run::resume(&id, message, cli, kind)
         });
     }

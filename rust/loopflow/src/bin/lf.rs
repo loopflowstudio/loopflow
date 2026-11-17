@@ -2544,26 +2544,22 @@ fn dispatch(cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    let task_run = matches!(
+    if matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         })
-    );
-    if task_run && loopflow_execution::transport::detach_current()? {
+    ) && loopflow_execution::transport::detach_current()?
+    {
         return Ok(());
     }
     if execution {
-        let kind = match loopflow_execution::transport::delegate_current(
-            loopflow_execution::transport::LaunchInput {
-                batch: cli.batch,
-                interactive: cli.interactive,
-                has_prompt: cli.command.is_some() || cli.skill_input.is_some(),
-            },
-        )? {
-            loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-            loopflow_execution::transport::Delegation::Here { kind } => kind,
-        };
+        let kind = loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: cli.command.is_some() || cli.skill_input.is_some(),
+        }
+        .kind();
         return dispatch_here(cli, args, |cli, binding| {
             dispatch_launch(kind, cli, args, binding)
         });

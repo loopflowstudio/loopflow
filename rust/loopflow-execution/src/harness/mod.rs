@@ -282,13 +282,6 @@ pub enum LaunchKind {
 }
 
 impl LaunchKind {
-    pub fn bare(mode: Mode) -> Self {
-        match mode {
-            Mode::Interactive => Self::Chat,
-            Mode::Headless => Self::Batch,
-        }
-    }
-
     pub fn mode(self) -> Mode {
         match self {
             Self::Chat | Self::WorkSession => Mode::Interactive,

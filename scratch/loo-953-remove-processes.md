@@ -2,7 +2,7 @@
 
 Status 2026-11-16 (realigned after syncing main at `4852348e5c`): slice 2a
 (Graph runs and steps) is built and merged with main. LOO-936 is still moving
-(`concept-review`, loop 1 pass 3, no PR) on `processes.rs`, `sessions.rs`,
+(at `qa` after concept-review loop 1 pass 3, no PR, 2026-11-16 late) on `processes.rs`, `sessions.rs`,
 `session_events.rs`, `retention.rs`; the Session, ship, CI-repair and
 activation slices wait for it to merge. The renames under "Concept review
 after slice 2a" are built: `Run`, `GraphRun`, `GraphStep`, `record_graph(…,
@@ -89,8 +89,11 @@ Settled by the design (no product choice involved):
   the docs have it (UUID and slug cannot collide).
 
 Order unchanged: the renames and the 2a fixes above can land now; Session,
-ship, CI-repair and activation slices still wait for LOO-936 (in implement,
-no PR, 2026-11-16).
+ship, CI-repair and activation slices still wait for LOO-936 (moving at `qa`,
+no PR, 2026-11-16). Concept review after the renames: nothing further
+is buildable before LOO-936 merges; `RecordKind::GraphProcess*` in
+`machine_records.rs` names tables, not structs, and goes with the
+export in slice 4.
 
 ## Problem and outcome
 

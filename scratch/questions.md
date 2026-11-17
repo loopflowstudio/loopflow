@@ -28,6 +28,10 @@ bears on Process removal. Speaker: Jack Heart, 2026-11-16.
   things like tokens and time by wave or by skill or other things like that".
   LOO-936 builds that as `usage.db` turn rows.
 
+- 2026-11-17, on whether `lf ps` keeps a refreshing view: "i thikn we delete
+  lf ps?". On `lf graph show <RUN_ID>` vs `lf graph runs show <RUN>`: "what
+  else would it accept".
+
 ## What the OS process list showed (2026-11-16 18:40 PST, macOS)
 
 `lf ps --json` listed 219 Processes, all alive. `LF_STEER_SESSION` named the

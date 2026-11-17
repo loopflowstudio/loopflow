@@ -87,11 +87,13 @@ Settled by the design (no product choice involved):
 - **Dev-only skew** (new runner, older installed child) leaves a step with
   the spawner's exit code and no error. Released installs never run an
   older child than their runner; accept.
-- **`lf ps`** lists idle held conversations (a live agent is a live
-  Session) and has no refreshing mode: `lf top` goes and `--subscribe
-  --json` covers watchers, in line with "i am unconvinced something like lf
-  top and lf ps even really makes sense". `lf graph show <RUN_ID>` stays as
-  the docs have it (UUID and slug cannot collide).
+- **`lf ps` is deleted**, with `lf top` (2026-11-17: "i thikn we delete lf
+  ps?"). What runs on this Machine is `lf session list` (live state per
+  Session) and `lf graph list` (Graphs that ran, live ones marked), both
+  OS-confirmed from owner rows. Docs and operate skills that name `lf ps`
+  move to those. `lf graph show <RUN_ID>` stays as built: today it takes an
+  authored Graph's name, a run id is the only other thing it could take
+  ("what else would it accept"); UUID and slug cannot collide.
 
 Order unchanged: the renames and the 2a fixes above can land now; Session,
 ship, CI-repair and activation slices still wait for LOO-936 (moving at `qa`,
@@ -290,7 +292,7 @@ exit unknown. Wire DTOs keep `outcome` as that derived value.
    `close_dead_processes`, `forget_processes`, receipt pruning and
    `lf process prune`. 238 unfinished rows today → a few dozen owner rows per
    pass, no full-table scan.
-5. **What runs on this Machine.** `lf ps` lists live Sessions and Graph runs
+5. **What runs on this Machine.** `lf session list` and `lf graph list` list live Sessions and Graph runs; `lf ps` is deleted
    (plus Task carriers and ship carriers under their Task) from the owner
    rows, OS-confirmed, as a served read so remote clients get it through the
    server. `lf top`, `lf process list/top/prune` go; `lf process show <run>`
@@ -397,9 +399,9 @@ two live agents on one Session; a `Legacy*` type.
 3. **Session attachment.** Fences, reach, stop/reap on `agent_sessions`;
    `prepare_resume` beside path ends. Test: handoff from one lf to another →
    the old holder's next fenced write is refused; steer reaches the new agent.
-4. **Liveness pass, `lf ps`, doctor strays, deletions** (CLI, DTOs, Swift,
+4. **Liveness pass, delete `lf ps`, doctor strays, deletions** (CLI, DTOs, Swift,
    operate skills, docs). Test: kill a fixture Graph runner with SIGKILL →
-   next pass closes the run with unknown result; `lf ps --json` omits it.
+   next pass closes the run with unknown result; `lf graph list --json` shows it ended.
 5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
    statements) drives an old Graph runner's step discovery against a new step
    → found; old launcher's endpoint update → visible in `lf session list`.

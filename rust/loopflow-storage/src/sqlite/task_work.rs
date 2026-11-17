@@ -317,6 +317,14 @@ fn start_run_in(
     Ok(true)
 }
 
+/// How many times a Task's run was carried again after its carrier died, since
+/// it last finished a step, and when it last was.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TaskRunRestarts {
+    pub count: u32,
+    pub at: Option<i64>,
+}
+
 /// A Task handed off to finish on its own: since when, the process that
 /// approved it, this Machine's process carrying it there, and how many times
 /// in a row that process was started again after it failed.
@@ -574,7 +582,8 @@ fn arrive_in(
     step: &str,
 ) -> StoreResult<bool> {
     let arrived = tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3,
+             restarts=0,restarted_at=NULL
          WHERE task_id=?1 AND lf_process_id=?4",
         rusqlite::params![
             task.as_str(),
@@ -603,7 +612,8 @@ fn arrive_in(
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3,
+             restarts=0,restarted_at=NULL WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
     )? > 0)
 }
@@ -918,8 +928,9 @@ impl SqliteStore {
     }
 
     /// The run `carrier` carries finished a step: its next attempt, or the
-    /// next `lf task run`, sets out from `cursor`. A run that no longer
-    /// carries the Task writes nothing.
+    /// next `lf task run`, sets out from `cursor`, and a later death of its
+    /// carrier is carried again at once. A run that no longer carries the
+    /// Task writes nothing.
     pub fn advance_task_graph_run(
         &self,
         task: &TaskId,
@@ -928,7 +939,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE task_graphs SET run_start=?3,updated_at=?4
+            "UPDATE task_graphs SET run_start=?3,updated_at=?4,restarts=0,restarted_at=NULL
              WHERE task_id=?1 AND lf_process_id=?2 AND run_start IS NOT ?3",
             rusqlite::params![
                 task.as_str(),
@@ -1069,6 +1080,62 @@ impl SqliteStore {
             }
         }
         Ok(shipping)
+    }
+
+    /// Tasks checked out here whose run names a carrier, shipping or not.
+    pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT task_id FROM task_graphs WHERE lf_process_id IS NOT NULL
+             AND task_id IN (SELECT task_id FROM task_checkouts)",
+        )?;
+        let rows = query.query_map([], |row| row.get::<_, String>(0))?;
+        rows.map(|id| {
+            TaskId::parse(&id?).map_err(|error| crate::StoreError::InvalidData(error.to_string()))
+        })
+        .collect()
+    }
+
+    /// How many times the Task's run was carried again since it last finished
+    /// a step, and when it last was.
+    pub fn task_run_restarts(&self, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+        use rusqlite::OptionalExtension;
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
+                [task.as_str()],
+                |row| {
+                    Ok(TaskRunRestarts {
+                        count: row.get(0)?,
+                        at: row.get(1)?,
+                    })
+                },
+            )
+            .optional()?
+            .unwrap_or(TaskRunRestarts { count: 0, at: None }))
+    }
+
+    /// Count one more start of the run `carrier` left, if it still stands
+    /// where the caller read it. Returns false, writing nothing, when another
+    /// start or a new carrier came first.
+    pub fn count_task_run_restart(
+        &self,
+        task: &TaskId,
+        carrier: &LfProcessId,
+        seen: &TaskRunRestarts,
+    ) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn.execute(
+            "UPDATE task_graphs SET restarts=restarts+1,restarted_at=?4
+             WHERE task_id=?1 AND lf_process_id=?2 AND restarts=?3",
+            rusqlite::params![
+                task.as_str(),
+                carrier.as_str(),
+                seen.count,
+                crate::rows::now_unix()
+            ],
+        )? > 0)
     }
 
     /// Count one more restart after a failed ship process, up to

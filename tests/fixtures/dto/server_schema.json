@@ -13327,7 +13327,7 @@
         },
         {
           "const": "waiting",
-          "description": "Its step is waiting out a usage limit until an account frees up.",
+          "description": "Its step is waiting out a usage limit until an account frees up, or\nits run waits to be carried again after its carrier died.",
           "type": "string"
         }
       ]

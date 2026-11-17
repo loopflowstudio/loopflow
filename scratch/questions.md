@@ -132,3 +132,17 @@ worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
   about a minute (60 s unread tick) when nothing else writes.
 - A terminal that outlives its provider (the launcher lingering after a
   provider death) keeps the pass re-reading every second until it ends.
+
+## Slice 3 (implement, 2026-11-17)
+
+- A carrier that catches SIGHUP (its terminal closed) records an interrupted
+  outcome itself, so it reads as a person's stop and is not carried again.
+  ctrlc's hook does not say which signal arrived. If closing a terminal under
+  `lf task run` should count as a death, the carrier would need to record the
+  signal.
+- A person's own `lf task run` after the give-up does not reset
+  `task_graphs.restarts`; only a finished step does. One more death right
+  after would wait again without a restart. Chosen because the restart and a
+  person's run are the same command.
+- The died line reuses `waiting` (documented for limit waits) while a restart
+  is due, and `blocked` after giving up.

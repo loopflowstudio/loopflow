@@ -2994,6 +2994,149 @@ fn task_ship_restarts_after_its_process_dies() {
     assert_eq!(handoffs(&task).len(), 1);
 }
 
+fn debug_run(task: &GraphTask) -> String {
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let mut out = String::new();
+    for sql in [
+        "SELECT json_array(step,run_start,lf_process_id,restarts,restarted_at) FROM task_graphs",
+        "SELECT json_array(p.id,p.pid,p.completed_at,p.outcome,p.exit_code,p.command) FROM processes p WHERE p.id IN (SELECT lf_process_id FROM task_graphs)",
+        "SELECT json_array(lf_process_id,graph,started_at,ended_at,pid,exit_code) FROM graph_processes",
+        "SELECT json_array(id,shipped_at) FROM tasks",
+    ] {
+        let mut query = db.prepare(sql).unwrap();
+        for row in query.query_map([], |row| row.get::<_, String>(0)).unwrap() {
+            out.push_str(&row.unwrap());
+            out.push('\n');
+        }
+    }
+    out
+}
+
+/// Start `lf task run INF-123 <args>` in its own process group, holding at its
+/// stand-in, and once `before` ran, SIGKILL its Graph and steps the way a
+/// crash would, with its carrier too when `carrier`.
+fn kill_a_carried_run(task: &GraphTask, args: &[&str], carrier: bool, before: impl FnOnce()) {
+    use std::os::unix::process::CommandExt;
+    let turns = stand_ins(task).len();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut launcher = command(
+        task.repo.path(),
+        task.home.path(),
+        &[&["task", "run", "INF-123"], args].concat(),
+    )
+    .process_group(0)
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || stand_ins(task).len() > turns);
+    before();
+    // The run's carrier is the detached `lf task run` the launcher let go;
+    // the Graph and its steps run in groups of their own. A crash takes them
+    // all, the carrier first so it cannot start its Graph again.
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let pids: Vec<i32> = db
+        .prepare(
+            "SELECT p.pid FROM task_graphs t JOIN processes p ON p.id=t.lf_process_id
+             WHERE p.pid IS NOT NULL AND ?1
+             UNION ALL SELECT pid FROM graph_processes WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT pid FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL",
+        )
+        .unwrap()
+        .query_map([carrier], |row| row.get(0))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert!(pids.len() > usize::from(carrier), "{pids:?}");
+    for pid in pids {
+        // SAFETY: kill and killpg only send signals to processes this test started.
+        unsafe {
+            libc::kill(pid, libc::SIGKILL);
+            libc::killpg(pid, libc::SIGKILL);
+        }
+    }
+    launcher.wait().unwrap();
+}
+
+#[test]
+fn a_killed_graph_is_started_again_by_its_carrier() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/carried.yaml",
+        "- demo\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a Graph with a step before review");
+    // A SIGKILL is no person's stop: the carrier starts the Graph again.
+    kill_a_carried_run(&task, &["carried"], false, || {});
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    wait_for("the run to stop at review", || {
+        task.graph()["position"] == at("review")
+    });
+    let graphs = support::recorded_graphs(task.home.path());
+    assert_eq!(graphs.len(), 2, "{}", debug_run(&task));
+    assert_eq!(task.status()["execution"]["state"], "idle");
+}
+
+#[test]
+fn a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five() {
+    let task = shipping_task();
+    task.repo.create_file(
+        ".lf/graphs/carried.yaml",
+        "- demo\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a Graph with a step before review");
+    kill_a_carried_run(&task, &["carried"], true, || {});
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    // The recovery pass runs `lf task run` again, which stops at review as
+    // the first one would have; nothing approved Auto-Ship.
+    wait_for("the carried run to stop at review", || {
+        task.graph()["position"] == at("review")
+    });
+    assert_ne!(task.state(), "shipping");
+    let graphs = support::recorded_graphs(task.home.path()).len();
+    assert_eq!(graphs, 2, "one Graph killed, one carried again");
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), graphs);
+
+    // A run carried again five times in a row waits for a person.
+    kill_a_carried_run(&task, &["--from", "demo"], true, || {
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        db.execute(
+            "UPDATE task_graphs SET restarts=5,restarted_at=unixepoch() WHERE task_id=?1",
+            [task.registered.task.id.as_str()],
+        )
+        .unwrap();
+    });
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let execution = loop {
+        let execution = task.status()["execution"].clone();
+        if execution["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("Run died 5 times at"))
+            || Instant::now() > deadline
+        {
+            break execution;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    };
+    assert_eq!(
+        execution["reason"],
+        "Run died 5 times at demo; `lf task run INF-123` starts it again",
+        "{execution} {}",
+        debug_run(&task)
+    );
+    std::thread::sleep(Duration::from_secs(2));
+    assert_eq!(
+        support::recorded_graphs(task.home.path()).len(),
+        graphs + 1,
+        "nothing carried it again"
+    );
+}
+
 #[test]
 fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
     let task = shipping_task();

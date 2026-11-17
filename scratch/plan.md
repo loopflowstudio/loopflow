@@ -216,8 +216,8 @@ clock per Session. Each reading:
      in the same write that records the death.
 
    Both use `restart_lf_in`, the limit-wait check and the backoff below. A
-   carrier that exited on its own clears `task_graphs.lf_process_id` (an
-   interrupt included), so a carrier still named and dead died.
+   carrier that exited on its own wrote its outcome (an interrupt included);
+   one still named with no outcome died.
 
    Continuing never approves Auto-Ship a person did not already approve.
    Approval is written in two places only: at run registration when no
@@ -437,18 +437,47 @@ Must survive:
      restart through the server. All 13 `task_graph_launch_tests::task_ship_` pass.
 
    Not done: the reboot half of the demo on a real Machine restart (qa).
-3. **Task runs.** Pieces:
-   - `restart_ships` → `restart_runs`, covering moving Tasks;
-   - `task_graphs.restarts` (added to `task_conversation_recovery.sql`) and its
-     reset on a finished step;
-   - the died line in the Task run reading;
-   - the `exit_of` signal split;
-   - `lf process prune` / `lf monitor prune` still exist (`lf/commands/top.rs`,
-     `doctor.rs`, `install.rs`, `docs/dev/reference*.md`): delete them once the
-     pass's `settle()` covers `close_dead_processes` and `forget_processes`, or
-     record why they stay.
+3. **Task runs.** Built:
+   - `restart_ships` became `restart_runs` (`ops/task/ship.rs`): ships as
+     before, then each Task checked out here whose `task_graphs` names a
+     carrier that died (`died_run`) gets `lf task run <ID>` again;
+   - died means the carrier never wrote its own outcome: unfinished with a
+     dead identity, or closed with no outcome. A carrier that failed, was
+     interrupted or waits on a limit wrote one and stays stopped, so the
+     3-attempt retry and the repeated-failure stop survive. A Task with live
+     Graph execution (an orphaned Graph whose carrier died) is not carried;
+     the Graph arrives on its own;
+   - `task_graphs.restarts`/`restarted_at` (in `task_conversation_recovery.sql`),
+     counted with a compare-and-set on the dead carrier before the launch,
+     reset by `advance_task_graph_run`, `arrive_in` and `set_step_in`. First
+     start immediate, then `repair_backoff` from `restarted_at`; after 5 the
+     run waits;
+   - the died line overrides the Task run's `idle`/`blocked` execution:
+     `waiting` "Run died at demo; the server's next pass carries it again" or
+     "… in N min (restart k of 5)", `blocked` "Run died 5 times at demo;
+     `lf task run INF-123` starts it again";
+   - `exit_of`: SIGINT/SIGTERM/SIGHUP are 130; any other signal is exit 1 and
+     a failure the carrier retries;
+   - plan correction: a carrier that exits on its own does **not** clear
+     `task_graphs.lf_process_id` (only arrival does); the outcome on its
+     process row is what tells it from a death;
+   - tests: `ship::tests::a_died_run_is_carried_again_at_once_then_later_then_waits_for_a_person`,
+     `task_graph_launch_tests::a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five`
+     (acceptance 4), `task_graph_launch_tests::a_killed_graph_is_started_again_by_its_carrier`.
 
-   Shows: acceptance check 4.
+   Taught: a bare `lf task run` launcher lets go and the carrier is a
+   detached process, and the Graph and its steps run in their own process
+   groups, so killing the launcher's group kills nothing that matters. A
+   SIGKILLed Graph under a live carrier is now retried by that carrier.
+
+   Left: `lf process prune` / `lf monitor prune`. `settle()` reaps agents only;
+   prune also repairs unrecorded agent ancestry, applies store retention
+   (`close_dead_processes`, `forget_processes`, usage compaction, reclaim)
+   and removes stale receipts. Moving those into the pass, then deleting the
+   command, its report, `process_ownership_tests`' sampling-failure check
+   (move it to a reaper unit test), the `monitor prune` alias and the hints in
+   `doctor.rs`, `process/diagnosis.rs`, `install.rs` and `docs/dev/*`, is next.
+
 4. **Surfaces.** Pieces:
    - the Session and Task status DTO fields and fixtures, and `conversation`
      in `lf task status --json`;
@@ -471,7 +500,11 @@ Must survive:
 - `cargo test -p loopflow --test integration context_launch_tests::a_killed_task_conversation`:
   passes 4 of 4 after the ending-terminal fix (implement). `context_launch_tests::a_task_`:
   4 pass. `cargo test -p loopflow --lib task_graph_launch_tests::task_ship_`: 13 pass.
-- Gate: `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
+- `cargo test -p loopflow --lib task_graph_launch_tests::a_task_run_whose_carrier_died`,
+  `…::a_killed_graph_is_started_again_by_its_carrier`, `ship::tests::` (4),
+  `task_graph_launch_tests::task_ship_` and `server::schema::tests::` (21): pass (implement, slice 3).
+- Gate: `test(performance_tests::)` and `test(store::query_plans::tests::)` (new
+  `local_task_runs` read over `task_graphs`), `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
   `test(process_ownership_tests::)` and `test(documented_commands::)` (docs edited).
 - A real reboot with three Tasks (qa; a person runs it).
 

@@ -250,8 +250,11 @@ pub fn run_task_graph_for(
             eprintln!("Task run interrupted; not starting it again.");
             return Err(loopflow_execution::process::CommandExit(130).into());
         }
-        // Only a Graph process that failed is started again.
-        let failed = status.code() == Some(1) && store.graph_run_recorded(&graph_run)?;
+        // Only a Graph process that failed, or that a signal nobody sends to
+        // stop it killed, is started again.
+        let failed = (status.code() == Some(1)
+            || (status.code().is_none() && !interrupted(status)))
+            && store.graph_run_recorded(&graph_run)?;
         if failed {
             if let Some(stash) = loopflow_execution::ops::checkout::retained_edits(checkout)? {
                 eprintln!(
@@ -371,9 +374,24 @@ pub fn carry_task_run(
     Ok(loopflow_execution::ops::task::task_run_finished(&task)?)
 }
 
+/// Whether a Graph process ended on a signal people and lf send to stop one:
+/// ctrl-C, `lf task interrupt`, or its terminal closing. Any other signal,
+/// such as a SIGKILL, killed it.
+fn interrupted(status: std::process::ExitStatus) -> bool {
+    use std::os::unix::process::ExitStatusExt;
+    matches!(
+        status.signal(),
+        Some(libc::SIGINT | libc::SIGTERM | libc::SIGHUP)
+    )
+}
+
 fn exit_of(status: std::process::ExitStatus) -> loopflow_execution::process::CommandExit {
-    let code = status.code().and_then(|code| u8::try_from(code).ok());
-    loopflow_execution::process::CommandExit(code.unwrap_or(130))
+    let code = match status.code().and_then(|code| u8::try_from(code).ok()) {
+        Some(code) => code,
+        None if interrupted(status) => 130,
+        None => 1,
+    };
+    loopflow_execution::process::CommandExit(code)
 }
 
 /// Start `lf <args>` in `checkout` and wait for it, writing to `log` when given

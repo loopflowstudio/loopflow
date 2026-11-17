@@ -133,8 +133,9 @@ inventory". **Nothing removes:**
   transcripts.
 
 Store retention (`close_dead_processes`, `forget_processes`, receipt pruning)
-runs only through `lf process prune`, by hand. Worktree retirement runs every
-minute, from `lf install schedule`'s `lf task retire` job.
+ran only through `lf process prune`, by hand; the server pass now runs it hourly
+(`ops::recovery::retain`, slice 3) and the command is gone. Worktree retirement
+runs every minute, from `lf install schedule`'s `lf task retire` job.
 
 Also seen: **31 `lf server run` processes from `target/debug` builds of other
 checkouts**, up to 20 hours old (fixtures of LOO-932/935/916). Nothing reaps a
@@ -352,8 +353,7 @@ A headless fixture with a `MachineServer` and a stand-in provider:
 - `start_in_background`, `start_task_conversation` and the start half of
   `start_conversation_beside`.
 - `restart_ships` as a ship-only loop: it becomes `restart_runs`.
-- `lf process prune` / `lf monitor prune`, if LOO-953 has not already deleted
-  them: their work is now the pass's.
+- `lf process prune` / `lf monitor prune`: gone (slice 3); the pass does their work.
 - `exit_of` mapping every signal to 130. It becomes SIGINT/SIGTERM/SIGHUP
   interrupted, and anything else a failure the carrier retries
   (`graph.rs:374`, the predicate at `:254`).

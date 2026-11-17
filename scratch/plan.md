@@ -503,6 +503,7 @@ Must survive:
 - `cargo test -p loopflow --lib task_graph_launch_tests::a_task_run_whose_carrier_died`,
   `…::a_killed_graph_is_started_again_by_its_carrier`, `ship::tests::` (4),
   `task_graph_launch_tests::task_ship_` and `server::schema::tests::` (21): pass (implement, slice 3).
+  Main `2593c489d7` merged after them (`a1568e4c59`, 194 files, no conflicts); not re-run since.
 - Gate: `test(performance_tests::)` and `test(store::query_plans::tests::)` (new
   `local_task_runs` read over `task_graphs`), `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
   `test(process_ownership_tests::)` and `test(documented_commands::)` (docs edited).

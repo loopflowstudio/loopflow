@@ -87,24 +87,11 @@ fn claude(machine: &Machine, approver: Option<&Approver>, batch: bool) -> Result
     }
     login.answer(code)?;
     login.finish(code)?;
-    match probe(machine, Provider::Claude, PROBE_DEADLINE) {
-        LoginRow {
-            state: LoginState::SignedIn,
-            account,
-            ..
-        } => {
-            match account {
-                Some(account) => println!("{name}: Claude signed in as {account}"),
-                None => println!("{name}: Claude signed in"),
-            }
-            Ok(())
-        }
-        LoginRow {
-            state: LoginState::SignedOut,
-            ..
-        } => bail!("Claude's login finished but {name} reports signed out"),
-        LoginRow { .. } => bail!("Claude's login finished but {name} could not say who it is"),
+    match confirm(machine, Provider::Claude, LoginState::SignedIn, "login")? {
+        Some(account) => println!("{name}: Claude signed in as {account}"),
+        None => println!("{name}: Claude signed in"),
     }
+    Ok(())
 }
 
 /// Device code login: the person, or the approver command, enters the code
@@ -135,17 +122,33 @@ fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
         }
     }
     login.finish(&code)?;
-    let LoginRow { state, account, .. } = probe(machine, Provider::Codex, PROBE_DEADLINE);
-    match state {
-        LoginState::SignedIn => {
-            println!(
-                "{name}: Codex signed in ({})",
-                account.as_deref().unwrap_or("no account named")
-            );
-            Ok(())
-        }
-        LoginState::SignedOut => bail!("Codex's login finished but {name} reports signed out"),
-        LoginState::Unknown => bail!("Codex's login finished but {name} could not say who it is"),
+    let account = confirm(machine, Provider::Codex, LoginState::SignedIn, "login")?;
+    println!(
+        "{name}: Codex signed in ({})",
+        account.as_deref().unwrap_or("no account named")
+    );
+    Ok(())
+}
+
+/// The client's own answer once its login or logout has run: `want`, with the
+/// account it names, or the error.
+fn confirm(
+    machine: &Machine,
+    provider: Provider,
+    want: LoginState,
+    ran: &str,
+) -> Result<Option<String>> {
+    let row = probe(machine, provider, PROBE_DEADLINE);
+    if row.state == want {
+        return Ok(row.account);
+    }
+    let (display, name) = (provider.display_name(), name(machine));
+    match row.state {
+        LoginState::Unknown => bail!("{display}'s {ran} ran but {name} could not say who it is"),
+        state => bail!(
+            "{display}'s {ran} ran but {name} reports {}",
+            state.as_str()
+        ),
     }
 }
 
@@ -176,14 +179,9 @@ pub async fn logout(machine: &Machine, provider: Provider) -> Result<()> {
         }
         _ => {}
     }
-    match probe(machine, provider, PROBE_DEADLINE).state {
-        LoginState::SignedOut => {
-            println!("{name}: {display} signed out");
-            Ok(())
-        }
-        LoginState::SignedIn => bail!("{display}'s logout ran but {name} still reports signed in"),
-        LoginState::Unknown => bail!("{display}'s logout ran but {name} could not say who it is"),
-    }
+    confirm(machine, provider, LoginState::SignedOut, "logout")?;
+    println!("{name}: {display} signed out");
+    Ok(())
 }
 
 fn logout_argv(provider: Provider) -> Option<&'static [&'static str]> {

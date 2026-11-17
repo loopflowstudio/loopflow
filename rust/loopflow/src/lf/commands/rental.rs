@@ -741,7 +741,7 @@ fn prepare(
 ) -> anyhow::Result<()> {
     use loopflow_execution::machine::login;
     use loopflow_execution::provider_auth::Provider;
-    let named = if logins.is_empty() {
+    let mut named: Vec<Provider> = if logins.is_empty() {
         let here = runtime.block_on(loopflow_execution::machine::connection::local_machine())?;
         runtime
             .block_on(login::logins(&here))?
@@ -752,14 +752,14 @@ fn prepare(
     } else {
         logins.to_vec()
     };
-    let mut logins: Vec<Provider> = Vec::new();
+    // GitHub first: the checkout below clones with it.
+    named.sort_by_key(|provider| *provider != Provider::GitHub);
+    let mut logins = Vec::new();
     for provider in named {
         if !logins.contains(&provider) {
             logins.push(provider);
         }
     }
-    // GitHub first: the checkout below clones with it.
-    logins.sort_by_key(|provider| *provider != Provider::GitHub);
     let machine = runtime.block_on(loopflow_execution::machine::connection::resolve_target(
         label, false,
     ))?;

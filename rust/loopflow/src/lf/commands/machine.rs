@@ -82,17 +82,6 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             refused,
         } => {
             use loopflow_execution::machine::login;
-            if machines.is_empty() && !refused {
-                let machine = local_machine().await?;
-                return login::login(
-                    &machine,
-                    *provider,
-                    chrome_profile.as_deref(),
-                    *api_key,
-                    batch,
-                )
-                .await;
-            }
             let targets = if *refused {
                 let targets = login::refused(*provider).await?;
                 if targets.is_empty() {
@@ -100,7 +89,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 }
                 targets
             } else {
-                resolve_all(machines).await
+                named_or_here(machines).await
             };
             return each(targets, "signed in", |machine| async move {
                 login::login(
@@ -116,11 +105,8 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
         MachineCommand::Logout { provider, machines } => {
             use loopflow_execution::machine::login;
-            if machines.is_empty() {
-                return login::logout(&local_machine().await?, *provider).await;
-            }
             return each(
-                resolve_all(machines).await,
+                named_or_here(machines).await,
                 "signed out",
                 |machine| async move { login::logout(&machine, *provider).await },
             )
@@ -344,7 +330,10 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 }
 
 /// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
-async fn resolve_all(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
+async fn named_or_here(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
+    if targets.is_empty() {
+        return vec![("this Machine".to_string(), local_machine().await)];
+    }
     let mut resolved = Vec::new();
     for target in targets {
         let machine = loopflow_execution::machine::connection::resolve_target(target, false).await;

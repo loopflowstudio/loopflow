@@ -60,6 +60,8 @@ take that job alone: `lf skill customize commit-message`, then set `agent:
 claude:haiku` in its frontmatter.
 Without an answer the title is `lf implement: checkpoint`. `lf commit --step
 implement` runs the same thing by hand; plain `lf commit` has no prefix.
+The commit is no step of the Graph: its recorded steps stay the ones it
+declares.
 
 ## Pick the agent for each step
 

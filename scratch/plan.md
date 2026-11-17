@@ -16,9 +16,10 @@ either runs again or says what stopped it and which one command continues it.
   the server noticing. An open Desktop pane reconnects to it.
 - A Task conversation the person quit (exit 0 or 130, or an lf command they
   ran to stop it) stays quit.
-- A Graph run whose process died is shown as died, on the step it reached. It
-  is continued once if continuing cannot approve Auto-Ship. Otherwise it is
-  offered as `lf task run <ID>`.
+- A Task run whose carrier died (the `lf task run` or `lf ship` process that
+  keeps the Task moving) is shown as died, on the step it reached, and carried
+  again from its checkpoint on the same backoff ship restarts use today. After
+  5 deaths in a row it stops and offers `lf task run <ID>`.
 - After a reboot, the server starts what was running, one start at a time,
   most recently active Task first.
 
@@ -34,7 +35,7 @@ lf task status LOO-x            # conversation: died 12:01 (killed, exit 137) ·
 lf task status LOO-x            # conversation: quit 12:03; `lf resume --task LOO-x` opens it
 # reboot with three Tasks running (one mid-Graph, unapproved)
 lf task status LOO-a            # conversation: running (restarted 09:14 after the Machine restarted)
-lf task status LOO-b            # Graph: died at step implement 08:57; `lf task run LOO-b` continues from implement
+lf task status LOO-b            # run: died at implement 08:57 · carried again 09:14 (attempt 1)
 ```
 
 ## The four questions, answered
@@ -152,8 +153,10 @@ No new registry. The pass reads three things:
 - **Task conversation:** `task_primary_sessions` joined to `agent_sessions`,
   with liveness from LOO-953's Session columns. Until that slice lands, it
   reads through the one existing seam, `session_summary(..).agent_process_evidence`.
-- **Graph run:** `graph_processes` with its own `pid`/`os_started_at`/`ended_at`
-  (LOO-953 slice 2a, built).
+- **Task run:** the carrier that makes the Task `moving` or `shipping`:
+  `task_graphs.lf_process_id` (with LOO-953's `run_pid`/`run_os_started_at`)
+  or the ship event's carrier. The Graph run under it (`graph_processes`, with
+  its own `pid`/`ended_at` from LOO-953 slice 2a) names the step reached.
 - **Task:** open and claimed on this Machine (`task_claimed_here`), and started
   (it has taken up a Graph).
 
@@ -161,10 +164,14 @@ No new registry. The pass reads three things:
 
 A Session's agent ended **by the person** when either:
 - its exit code is 0 or 130 (`/exit`, ctrl-D, ctrl-C at the prompt); or
-- `agent_sessions.stopped_at` is set. lf writes `stopped_at` before it signals,
-  on any command a person runs that ends a Session: Desktop close of a
-  conversation's terminal, `lf task interrupt` when it stops the conversation,
-  and `lf session stop` if it exists.
+- `agent_sessions.agent_stopped_at` is set. lf writes it before it signals, on
+  any command a person runs that ends a Session's agent: Desktop close of a
+  conversation's terminal (if close ends the provider rather than detaching),
+  `lf task interrupt` when it stops the conversation, and `lf session stop` if
+  it exists. It belongs to the agent generation, like LOO-953's other
+  `agent_*` columns, and is cleared when the next agent starts; a Session-wide
+  `stopped_at` would make every later death of a restarted agent read as a
+  quit.
 
 Everything else counts as **died**: exit 137 or any other non-zero code, an
 end with no exit (the holder died, a reboot), or a provider crash.
@@ -173,6 +180,15 @@ The exit-code half needs no new writer, so a released lf that settles an end
 during upgrade skew still records a quit correctly. Slice 1 lists every stop
 command; grep starts from `os_process.rs:170` (terminate group) and `desktop.rs:1787`.
 
+Counterexample to check in slice 1: at logout or shutdown, launchd sends
+SIGTERM to every process. The holder has no handler and dies at once, so
+the end is usually settled with no exit (died). A provider that catches
+SIGTERM and exits 0 before its holder goes would read as a quit, and the
+conversation would stay down after a reboot. Slice 1 sends SIGTERM to a
+stand-in holder's process group and reads what `exit.json` records. If an
+exit 0 can land, the holder records that it was itself told to stop
+(`exit.json` `holder_stopping`), and an exit after that counts as died.
+
 ### The recovery pass
 
 A second watcher thread in the server, shaped like `server/wake.rs`. It
@@ -180,11 +196,14 @@ re-reads on a store change signal and at least every 60 seconds. There is no
 clock per Session. Each reading:
 
 1. **Settle.** Close owner rows whose pid is dead (LOO-953 approach 4), reap
-   orphan agents (`reap_agent_processes`), and run `restart_ships` and
-   `restart_waiting_runs`. These are today's `recover()` work, moved here.
+   orphan agents (`reap_agent_processes`), and run `restart_waiting_runs` and
+   the rental check. These are today's `recover()` work, moved here. A Graph
+   run closed here with no exit reads `Unknown` from `Run::result()`, shown as
+   "died".
 2. **Task conversations that should run.** A Task's primary Session should run
    when all of these hold:
-   - the Task is open, started and claimed here;
+   - the Task is open, claimed here and checked out here (today's starter
+     also runs at `lf task checkout`, before any Graph);
    - the Session's checkout is the Task's;
    - no agent is live and no holder for it is pending;
    - its last end was not by the person.
@@ -194,19 +213,28 @@ clock per Session. Each reading:
    request id is `recover:<session>:<ended agent generation id>`. The
    registry dedupes on the request id, including after a restart (`readopt`
    re-inserts `meta.request`), so one death never starts two providers.
-3. **Graph runs whose process died** (`ended_at` NULL and pid dead) are closed
-   with no exit, so `Run::result()` gives `Unknown`, shown as "died". The step
-   reached is the open or last step. Then:
-   - **continued** once from its checkpoint, by `lf task run <ID>` launched
-     detached, only when the Task is already shipping (`restart_ships` covers
-     this) or an interactive step lies ahead of the checkpoint. In both cases
-     continuing cannot approve Auto-Ship.
-   - **offered** otherwise: the Task's status names
-     `lf task run <ID>`, which continues from the checkpoint.
+3. **Task runs whose carrier died.** `restart_ships` becomes `restart_runs`,
+   one loop over this Machine's open, claimed Tasks whose carrier is dead:
+   - shipping: `lf --task <ID> ship` again, as today;
+   - moving (a `task_graphs` carrier, not shipping): `lf task run <ID>`
+     again, which continues from the checkpoint. The dead carrier is cleared
+     in the same write that records the death.
 
-   The continuation records which run it continues (`graph_processes.continues`).
-   A run that is itself a continuation and dies before finishing a step is
-   offered, not continued again.
+   Both use `restart_lf_in`, the limit-wait check and the backoff below. A
+   carrier that exited on its own clears `task_graphs.lf_process_id` (an
+   interrupt included), so a carrier still named and dead died.
+
+   Continuing never approves Auto-Ship a person did not already approve.
+   Approval is written in two places only: at run registration when no
+   interactive step is left (`task_work.rs:307`, so a Task launched that way
+   is already shipping and `lf ship` carries it), and when a run arrives at
+   `end` (`Approval::Route`, which a person's `lf ship --stop` blocks). A
+   continuation of a run launched with an interactive step ahead still has
+   that step ahead, and stops at it. One case moves approval earlier: an
+   `lf -b task run` that ran an interactive step headless, then died past it.
+   Continuing it registers with no interactive step left and approves at
+   launch instead of at `end`; `-b` already hands the Task off, so the
+   intent is the same.
 
 **Pacing.** At most one start in flight. The next start begins when the
 previous one's held terminal is running, or after 3 seconds. Starts go most
@@ -214,43 +242,64 @@ recently active Task first (`tasks.updated_at`). Today's 55 open Tasks with
 primary Sessions come back in about 3 minutes, and no transaction is longer
 than one Session's start.
 
-**Backoff.** A Session that dies again before finishing a turn waits 1, 2, 4 …
-up to 30 minutes, the same schedule as `ship.rs:120`. After 5 deaths with no
-finished turn, the pass stops and the Task shows "died 5 times since 09:14
-(last: exit 1); `lf resume --task LOO-x`". The count is
-`agent_sessions.recovery_attempts` plus `recovered_at`; a finished turn resets
-it.
+**Backoff.** One schedule for Sessions and carriers: `restart_due`
+(`ship.rs:120`), 1 minute doubling to 30. A Session that dies again before
+finishing a turn waits; after 5 deaths with no finished turn the pass stops
+and the Task shows "died 5 times since 09:14 (last: exit 1); `lf resume --task
+LOO-x`". The count is `agent_sessions.recovery_attempts` plus `recovered_at`;
+a finished turn resets it. A carrier counts restarts in a row as ship
+restarts do today (`count_ship_restart`); a moving Task's carrier gets the
+same counter on `task_graphs` (`restarts`), reset by a finished step
+(`ship_progressed`'s rule). After 5, the Task shows "died 5 times at
+implement; `lf task run LOO-x`".
 
 **Never starts:**
 - bare Sessions (`lf -b`, a person's own terminal);
 - Graph-step Sessions (the Graph owns them);
 - Wave and repository conversations (decision below);
 - a second provider on one thread;
-- a second Graph process for a Task (`select_task_run` already checks with OS
-  evidence).
+- a second carrier for a Task (`select_task_run` already checks with OS
+  evidence, and `restart_ships` already skips a Task a live `lf task run`
+  carries).
 
 ### One start path for Task conversations
 
-`start_in_background` (`ops/human_session/primary.rs:119`, called from
-`graph.rs:343`, `ship.rs:82` and `bin/lf.rs:2797`) starts a prepared Task
-conversation and skips one already opened. The pass's rule covers both cases.
-So `lf task run` stops starting the conversation itself, and its store write
-wakes the pass, which starts it. `start_in_background` and its three call sites
-go. Its no-agent and no-CLI skips move into the pass, where they become a
-recorded launch failure instead of an `info` log line.
+`start_conversation_beside` (`ops/task.rs:2293`, run by `lf task run`,
+`lf ship` and `lf task checkout`) calls `start_task_conversation` →
+`start_in_background` (`ops/human_session/primary.rs:104-119`), which prepares
+the primary Session (`ensure_task`) and starts it unless it was opened
+before. The pass's rule covers the start. So those commands keep only the
+prepare half (`ensure_task`), whose store write wakes the pass, which starts
+the Session. `start_in_background`, `start_task_conversation`, the
+`agent_input_timing` phases they record and the start half of
+`start_conversation_beside` go. The no-agent and no-CLI skips move into the
+pass, where they become a recorded launch failure instead of an `info` log
+line.
 
 ### What people see
 
-`lf task status` (and its JSON and Desktop's Task header) gains one
-`conversation` value: `running`, `quit {at}`, `died {at, exit}`,
-`starting {attempt, next_at}`, or `failed {reason, attempts}`, each with the
-command that continues it. The Graph line shows a died run as
-`died at <step> {at}`, followed by `continued as <run>` or the
-`lf task run` command.
+The facts go on the records they describe, not into a new Task-level state.
 
-It is a wire field: it goes into `tests/fixtures/dto/task_lifecycle.json` and
-each language's fixture test, with no defaults. Desktop decodes it and shows
-the line. No new view.
+- **Session.** `SessionState` (`unknown · active · detached · closed`,
+  `ops/human_session.rs:241`) stays the one answer to "is it running". A
+  closed Session gains `ended: {at, by: person | died, exit_code}` and
+  `recovery: {attempts, next_at, gave_up, failure}`, null when nothing is
+  pending. `failure` carries a launch failure's reason ("no PTY left: 511 in
+  use (kern.tty.ptmx_max)"). A Session being started again reads `closed`
+  with `recovery.next_at` due, until its agent is live.
+- **Task run.** The Task's run line, already derived by
+  `execution_of_latest_graph`, shows a dead carrier as `died at <step> {at}`
+  with `restarts` and `next_at`, or the `lf task run` command after giving up.
+- **Task status** names its primary Session (`primary_session_id`) beside
+  `overview.sessions`, so the conversation line is that Session's state, read
+  the same way `lf session list` reads it.
+
+`lf task status` prints "conversation: died 12:01 (exit 137) · starting
+again" from those fields; "conversation" is the product's word for the Task's
+primary Session, and the code keeps calling it a Session. Wire fields go into
+`tests/fixtures/dto/session.json`, `task_status.json` and each language's
+fixture test, with no defaults. Desktop decodes them and shows the line. No
+new view.
 
 ### Decisions made for review (headless; passed-over options recorded)
 
@@ -258,9 +307,15 @@ the line. No new view.
   conversations, and bare Sessions, are only reported. Passed over: every
   managed conversation. That fits "the task conversation should ~always be
   awake" (LOO-958), but nobody has said it for Waves.
-- **Graph runs continue only when that cannot approve Auto-Ship.** Passed
-  over: always continue and record the approval as the original run's (too
-  easy to get wrong), and never continue (loses the common case).
+- **A dead carrier is always carried again, by generalizing `restart_ships`
+  to moving Tasks.** Passed over: a separate Graph-run continuation keyed on
+  `graph_processes`, continued only when it cannot approve Auto-Ship and
+  otherwise offered, with a `continues` column. Approval is recorded at
+  registration and at `end` (see the pass, step 3), so the predicate was
+  always true except for `-b`, where it matches the intent; the Graph process
+  under a live carrier is already retried by the carrier. Never continuing
+  was passed over too: a conversation restart kills an attached carrier, the
+  commonest death.
 - **No conversation cap and no eviction** (question 1).
 - **The pass lives in the server, and the lazy `recover()` on reads goes.**
   Passed over: keep both. That would mean two schedules for the same work.
@@ -272,16 +327,20 @@ the line. No new view.
 A headless fixture with a `MachineServer` and a stand-in provider:
 1. Start a Task, then SIGKILL its conversation's provider. Within one pass, a
    new held terminal runs `lf session resume` of the same Session, and
-   `lf task status --json` gives `conversation.state` `running` with a
-   recorded death.
-2. The stand-in exits 0. After a pass, no new terminal starts and the state is
-   `quit`.
+   `lf task status --json` gives the primary Session `active` with
+   `recovery.attempts` 1 and the earlier end `by: died`, `exit_code` 137.
+2. The stand-in exits 0. After a pass, no new terminal starts; the Session is
+   `closed` with `ended.by` `person` and `recovery` null.
 3. Stop the server, kill the holder, then start the server. The conversation
    starts once; repeating the pass starts nothing.
-4. Record a Graph run with a dead pid on step `implement`, with no interactive
-   step ahead. Status gives `died at implement` and offers `lf task run`;
-   nothing is launched. With an interactive step ahead, one continuation is
-   launched, and a second pass launches none.
+4. Record a moving Task whose `task_graphs` carrier pid is dead, at step
+   `implement` with an interactive step ahead. One pass launches one
+   `lf task run`, which stops at the interactive step; the Task is not
+   shipping. A second pass launches none. With the carrier dying 5 times in a
+   row, status gives `died 5 times at implement` and `lf task run`, and no
+   pass launches again.
+5. A SIGTERM to a stand-in holder's process group (shutdown) leaves the
+   conversation counted as died, and it starts again with the next server.
 
 ## Exclusions
 
@@ -295,7 +354,9 @@ A headless fixture with a `MachineServer` and a stand-in provider:
 
 - `ops/recovery.rs` lazy recovery and its read hook (`bin/lf.rs:2698-2718`).
   The work moves to the server pass.
-- `start_in_background` and its three call sites.
+- `start_in_background`, `start_task_conversation` and the start half of
+  `start_conversation_beside`.
+- `restart_ships` as a ship-only loop: it becomes `restart_runs`.
 - `lf process prune` / `lf monitor prune`, if LOO-953 has not already deleted
   them: their work is now the pass's.
 - `exit_of` mapping every signal to 130. It becomes SIGINT/SIGTERM/SIGHUP
@@ -314,15 +375,17 @@ Must survive:
 
 1. **A killed Task conversation comes back** (the slice that can prove this
    wrong). Pieces:
-   - the migration for `stopped_at`, `recovery_attempts` and `recovered_at`;
+   - the migration for `agent_sessions.agent_stopped_at`, `recovery_attempts`
+     and `recovered_at`, and `task_graphs.restarts`;
    - the killed-vs-quit predicate;
    - the recovery watcher thread with step 2 only, starting through
      `continuing()` with the deterministic request id;
    - `conversation` in `lf task status --json`.
 
-   Shows: acceptance checks 1–3, the kill half of the demo, and whether the
-   registry's request dedupe really holds across a server restart. If it does
-   not, the dedupe must move into the store.
+   Shows: acceptance checks 1–3 and 5, the kill half of the demo, whether
+   the registry's request dedupe really holds across a server restart (if
+   not, the dedupe moves into the store), and what a shutdown SIGTERM leaves
+   in `exit.json`.
 2. **Restart and reboot.** Pieces:
    - pacing and ordering;
    - backoff and give-up;
@@ -331,15 +394,15 @@ Must survive:
    - `start_in_background` deleted.
 
    Shows: the reboot half of the demo on a real Machine restart.
-3. **Graph runs.** Pieces:
-   - died-run closing;
-   - the step reached;
-   - continue-or-offer with `continues`;
+3. **Task runs.** Pieces:
+   - `restart_ships` → `restart_runs`, covering moving Tasks;
+   - `task_graphs.restarts` and its reset on a finished step;
+   - the died line in the Task run reading;
    - the `exit_of` signal split.
 
    Shows: acceptance check 4.
 4. **Surfaces.** Pieces:
-   - the DTO fixture;
+   - the Session and Task status DTO fields and fixtures;
    - the Desktop line;
    - PTY headroom in `lf machine doctor`;
    - docs (`docs/sessions.md`, `server/README.md` "Logout/reboot",

@@ -6,9 +6,14 @@
   conversations come back too? Jack (LOO-958, 2026-11-17): "if you steer a task
   the task conversation should ~always be awake anyway". That was said about
   Tasks only.
-- A died Graph run is continued only when continuing cannot approve Auto-Ship
-  (the Task is already shipping, or an interactive step lies ahead). Otherwise
-  it is offered.
+- A Task run whose carrier died is always carried again (`restart_ships`
+  generalized to moving Tasks), on the ship backoff, offered after 5 deaths
+  in a row. Concept review: approval is recorded at registration and at
+  `end`, so the kickoff's "only if it cannot approve Auto-Ship" rule held in
+  every case but a `-b` run past its last interactive step.
+- A continued `lf -b task run` is relaunched as plain `lf task run`, so it
+  stops for a person at the next interactive step rather than running it
+  headless.
 - No cap on managed conversations and no eviction. A start that fails records
   why (for PTYs: "no PTY left: 511 in use (kern.tty.ptmx_max)"). Revisit
   eviction of idle conversations, started again when steered, if PTY headroom

@@ -96,6 +96,11 @@ no PR, 2026-11-16). Concept review after the renames: nothing further
 is buildable before LOO-936 merges; `RecordKind::GraphProcess*` in
 `machine_records.rs` names tables, not structs, and goes with the
 export in slice 4.
+Concept review after the QA fixes (`fd5869740a`): nothing further.
+The wire names still saying Process (`GraphStepProcess`,
+`work.graph_processes`, module `graph_process.rs`) rename with the
+Process-line slice, in one DTO change across Rust, Swift and fixtures,
+not piecemeal. LOO-936 still at `qa`, no PR (2026-11-16 late).
 
 ## Problem and outcome
 

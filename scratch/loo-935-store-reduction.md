@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented (additive migration, marks → LOO-954); next is gate.
+Status: split implemented (additive migration, marks → LOO-954), origin/main ffb29c6b29 merged; next is gate.
 
 ## Demo
 
@@ -35,7 +35,11 @@ by them).
 LOO-954 (filed 2026-11-16; LOO-943 is abandoned and `lf task reopen` refuses
 abandoned Tasks) carries the contract: `-- expand: unused_store_members`,
 `-- exports:`, drops only marked members. Its brief points at 8d18764018 for the
-finished draft of the drops, the exporter and the upgrade test helpers.
+finished draft of the drops, the exporter and the upgrade test helpers. Main's
+#1961 added a read of a leaving column: `FORGETTABLE`
+(`rust/loopflow-storage/src/sqlite/processes.rs`) keeps a Process that
+`tasks.ship_lf_process_id` names, for rows released lf wrote; LOO-954 deletes
+that clause with the column (steered onto LOO-954).
 
 Leaving → LOO-954: `tool_responses`, `pm_project_name_cutover`, `project_transition_items`,
 `task_issue_identities`, `task_deletions`, `task_pr_repair_incidents`,
@@ -108,5 +112,5 @@ state; the file is not rewritten.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
 - Compress (after merging main): `cargo clippy -p loopflow --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (30), `check_migrations.py`: pass; `schema_page.py --check` was stale from main's "Provider authentication" rename, regenerated.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
-- Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. `check_migrations.py` fails until origin/main's `task_summaries.sql` is merged in (gate syncs).
+- Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

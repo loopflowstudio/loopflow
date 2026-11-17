@@ -1,6 +1,8 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slice 1 committed (`0cdba4ed89`), slice 2 (`be56185174`) and `opened_at` (`808f3821c7`) committed; Process placement settled (last sections); slice 3 next. `history.rs` has no production writer yet: `SqliteStore::write_history` waits for slice 3's kinds.
+Status: 2026-11-16, slices 1–2 committed; slice 3 code committed (`273e075a4b`
+and the two WIP commits before it); integration fixtures in `rust/loopflow/tests`
+are being repointed; slices 4–5 not started. See "Slice 3 as built".
 Old `provider_session_observed`/`provider_account_selected` rows still sit in
 live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
@@ -199,9 +201,14 @@ lf history list --caller <session>                  # agent-issued commands as b
 
 ## Delete — do not maintain
 
-Remaining: `retention.rs` `compact_usage`, `Cursor`, `.usage-cursor` file
-(slice 3); `store_revision_usage_insert` and the `usage` field of
-`StoreRevisions` once usage rows leave main. Slice 1 removed the rest.
+Slice 3 removed `compact_usage`, `Cursor`, the cursor files' code,
+`native_usage_key`, `provider_session_from_history`, `ProviderFact::Output`
+and its emission in the four decoders, `SessionEventKind::Output`,
+`TurnFacts::final_answer`, `MEMBERSHIP_KIND`, `RetentionReport::usage_rows`,
+`StoreRevisions::usage` (now `history`), `store_revision_usage_insert`, the
+`legacy_review_feedback` write and the unused `process_history` table.
+Remaining: `FORGETTABLE`'s `session_events`/`history.session_history` arms
+(slice 4 retention by age).
 
 ## Forbidden outcomes
 
@@ -218,10 +225,14 @@ Renaming `session_events` (now only inputs) and `agent_sessions`: LOO-937.
 
 - Contract after the staging window: drop the `session_events` move arm, then
   rebuild `session_events` as the inputs table without history-only columns
-  and indexes (`session_turn_*`, `session_observation_receipt`,
-  `session_events_provider_session`, …); expand step = this Task's migration.
+  and indexes (`session_turn_events`, `session_turn_window`,
+  `session_observation_receipt`, `session_events_provider_session`,
+  `session_input_membership`, `session_provider_transitions`,
+  `session_input_outcome_window`, `session_event_input`,
+  `session_events_turn`, …) and the `retain_task_agent_turn` trigger (no
+  `started` rows in main); expand step = this Task's migration.
 - Drop main's `processes` table once its rows have moved (expand step =
-  this Task's migration), and the `usage` revision domain.
+  this Task's migration), and the `usage` revision domain row.
 
 ## Before / after to report
 
@@ -390,11 +401,69 @@ history revision.
 
 2. Done: `history.rs` (writer, read-only attachment, gap). Schema gains
    `processes` (all columns Process readers use) when slice 4 lands.
-3. Session history kinds and the state columns, as planned (`opened_at`
-   done), `output` dropped.
+3. Done in code, see "Slice 3 as built"; integration fixtures pending.
 4. Every Process row in the history file: attachment state onto
    `agent_sessions`, result columns on the pointing records,
    the 15 foreign keys dropped with the cascade tables cleaned up explicitly,
    `task_update_processes_*` deleted (Task state reads the records'
    `ended_at`), the 43 reads
    repointed, `FORGETTABLE` replaced by retention by age.
+
+### Slice 3 as built (2026-11-16)
+
+- `session_events` in `loopflow.db` holds only `captured` rows. Every other
+  kind is written through `SqliteStore::append_history`/`write_history` to
+  `history.session_history` and read only there. Migration
+  `history_apart_from_state.sql` adds `session_events.provider_account` and
+  `.independent` (the captured row's resume reference reuses its
+  `provider_thread` column; backfilled from the newest `provider-session:*`
+  row and the manifest), `agent_sessions.transition` (backfilled from the
+  newest transition, legacy `agent-session:*` shape included), the index
+  `session_capture_provider_thread`, a `preserve_capture_update` trigger that
+  allows only those three columns to change, and drops
+  `store_revision_usage_insert`.
+- A main-store write that also produces history (transition, attachment exit,
+  observation) commits first, then appends history; the history row never
+  fails the caller. Conflicting receipts are gaps that keep the first row.
+- `HistoryFile` carries the store's path, so a history write never takes the
+  store's mutex. Every store connection attaches `history.db` read-only
+  (creating it when missing); one that cannot gets an empty in-memory
+  `history` so reads answer empty instead of failing. Read-only openers now
+  pass `SQLITE_OPEN_URI`. `refresh_statistics` and the query-plan fixtures
+  analyze `main` only.
+- The Session feed (`session_history`, `lf session history <id>`) lists
+  history rows only; inputs stay Session state (`session_inputs`).
+- `output`: `input_answered_turn` names the turn; `transcript::answer`
+  reads its answer from the provider transcript and errors naming the file.
+  Graph routing, `lf run`, ci-fix, `lf session history show --final` and the
+  Task view call it; the Task view shows the error in place.
+- Tests: `history_kinds_are_read_from_the_history_file_only` (storage),
+  `transcript::answer::tests` (Codex, Claude structured and text, gone
+  transcript), plus the existing suites repointed.
+
+Live-run facts (2026-11-16, read-only on this Machine): a headless Claude
+step's transcript keeps its structured answer as an assistant `tool_use`
+named `StructuredOutput` whose `input` is the object, followed by a
+`tool_result` "Structured output provided successfully". The turn lf
+recorded (`c768ee3e-…` in thread `367239b4-…`) is the `uuid` of the request
+row in that transcript. The transcript's object omits null fields the stream
+result carried (`"reason": null`); `GraphOutput::decode` counts non-null
+fields, so both decode alike. Codex rollouts end a turn with
+`event_msg`/`task_complete` carrying `last_agent_message`.
+
+Remaining before ship (slice 5 unless noted):
+- Session History subscriptions do not wake on history writes yet:
+  `changed()` ignores `history`, and no read declares it. Until slice 5 a
+  Desktop view of a running turn refreshes only on other domains' changes.
+- History-file statistics: nothing analyzes `history.db`.
+- Move pass for rows a released lf leaves in `loopflow.db` (they are
+  invisible meanwhile), retention by age, the server's prune clock, docs check.
+- Stand-in providers in fixtures must write transcripts where their provider
+  would (`loopflow-execution/tests/support/task_graph.rs` does).
+
+Check results: `cargo nextest run -p loopflow-storage -p loopflow-execution
+--lib`: 2438 passed, 2 failed; the two were
+`ordinary_task_comments_and_completion_preserve_live_graph_and_arrival`
+(fixed since by the stand-in transcript) and
+`native_runner_is_quiet_until_its_turn_ends_codex_foreground` (sccache
+"cannot find binary path" in this environment; for gate/CI).

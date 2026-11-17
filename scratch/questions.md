@@ -55,3 +55,10 @@
   second reconciles. Also to design before shipping: what a live Session on
   the released lf sees after install, while it still reads and writes
   `processes` and the attachment token in `loopflow.db`.
+- Slice 3 choices (headless, reversible): the independent flag is a column
+  on the input's captured row, not `agent_sessions` (it is per input; a new
+  input resets it by having none); the resume account is
+  `session_events.provider_account` beside `provider_thread`, since
+  `agent/session.rs` resumes on it; the Session feed lists history rows only,
+  because one feed over two files' sequences cannot stay append-only; a
+  rented Machine's record copies carry only captured rows, not its history.

@@ -37,7 +37,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
 | Agent conversation, title, feedback, native identity, when it was opened and its latest provider transition | `agent_sessions` |
 | A Session's captured inputs | `session_events` (`captured` only) |
-| Native starts, outcomes, final answers, retries, provider transitions, usage and recording gaps | `history.session_history`, correlated to native turn and driving Process |
+| Native starts, outcomes, retries, provider transitions, usage and recording gaps | `history.session_history`, correlated to native turn and driving Process |
 | Submitted creation identity and outcome | `creation_receipts`, shared by CLI and server; retained independently of the created resource |
 | Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
@@ -70,10 +70,10 @@ LfProcess can die while it continues. History retains the original Process and
 AgentProcess when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-The provider's own transcript holds the conversation. Loopflow copies one
-piece of it: each turn's final answer, which Graph routing, `lf run`, ci-fix
-and the Task view read without parsing each provider's transcript format.
-Otherwise history keeps Session facts: provider attempts and sessions, how
+The provider's own transcript holds the conversation, and Loopflow keeps no
+copy. Graph routing, headless runs, ci-fix and the Task view read a turn's final
+answer from that transcript; one that is gone or lacks the turn is an error
+naming the file, never an empty answer. History keeps Session facts: provider attempts and sessions, how
 each turn ended, silences longer than ten minutes and recording gaps. Usage is
 the provider's native `usage` row, one per turn, updated as receipts arrive;
 each turn's `completed` receipt carries its prompt context.

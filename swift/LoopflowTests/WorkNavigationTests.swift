@@ -11,41 +11,51 @@ import ViewInspector
 @MainActor
 struct WorkNavigationTests {
     @Test("Every navigator entry restores its caller after a previous accepted navigation")
-    func navigatorFocusResetsForSidebarEntry() {
+    func navigatorFocusResetsForPaletteEntry() {
         let navigation = WorkNavigation()
         navigation.palette = .search
         navigation.restorePaletteFocus = false
         navigation.palette = nil
         #expect(!navigation.restorePaletteFocus)
-        navigation.palette = .sidebarSearch
+        navigation.palette = .search
         #expect(navigation.restorePaletteFocus)
         navigation.palette = nil
         #expect(navigation.restorePaletteFocus)
     }
 
-    @Test("Sidebar search includes its filtered Tasks and Waves without changing the open Work")
-    func sidebarSearchScope() throws {
+    @Test("Sidebar search narrows Task rows by name or identifier without changing the open Work")
+    func sidebarSearchFiltersTasks() throws {
         let snapshot = try JSONDecoder().decode(RoadmapSnapshot.self, from: Data(roadmapJSON().utf8))
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Search is passive") }, repoPath: "/src/loopflow")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
+        func task(_ id: String) -> WorkViewPlan.Content {
+            fixtureViewContent(work: .init(repository: "repo", kind: .task, id: id), title: id)
+        }
+        model.applySelectionPlans([
+            fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
+                            members: [task("issue-now"), task("issue-later")]),
+        ], reason: "")
+        model.applyStartedFixture(working: ["issue-now", "issue-later"])
         model.select(.task(id: "issue-now"))
         let selection = model.selection
-        let order = model.workingTaskIDs
-        let expected = Set(model.sidebarTaskIDs.map { WorkDestination.task($0) }
-            + model.visibleRoadmaps.map { WorkDestination.wave($0.wave.id) })
-        #expect(!expected.isEmpty)
-        #expect(Set(model.searchDestinations("", sidebarOnly: true).map(\.id)) == expected)
-        #expect(model.searchDestinations("", sidebarOnly: true).allSatisfy { $0.id != .repository })
-        model.navigation.sidebarFilter = .available
-        let filtered = model.searchDestinations("", sidebarOnly: true)
-        #expect(filtered.allSatisfy { row in
-            if case .task(let id) = row.id { return model.sidebarTaskIDs.contains(id) }
-            if case .wave = row.id { return true }
-            return false
-        })
-        #expect(model.searchDestinations("", sidebarOnly: false).contains { $0.id == .repository })
+        let all = model.sidebarTaskIDs
+        #expect(all.count > 1)
+        let target = try #require(model.task(id: all[1])?.task.task)
+
+        model.navigation.sidebarQuery = target.name.lowercased()
+        #expect(model.sidebarTaskIDs.contains(all[1]))
+        #expect(model.sidebarTaskIDs.allSatisfy { model.task(id: $0)?.task.task.name.localizedCaseInsensitiveContains(target.name) == true })
+
+        model.navigation.sidebarQuery = "  \(target.identifier) "
+        #expect(model.sidebarTaskIDs.contains(all[1]))
+
+        model.navigation.sidebarQuery = "no task is named this"
+        #expect(model.sidebarTaskIDs.isEmpty)
+        #expect(model.sidebarAutonomousTaskIDs.isEmpty)
+
+        model.navigation.sidebarQuery = ""
+        #expect(model.sidebarTaskIDs == all)
         #expect(model.selection == selection)
-        #expect(model.workingTaskIDs == order)
     }
 
     @Test("Working Tasks are the repository plan's members, not visits; a Wave scopes the sidebar until Back")

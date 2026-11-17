@@ -68,14 +68,9 @@ extension WorkModel {
         return rows
     }
 
-    func searchDestinations(_ text: String, sidebarOnly: Bool = false) -> [WorkPaletteRow] {
+    func searchDestinations(_ text: String) -> [WorkPaletteRow] {
         let query = text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        var rows = paletteRows
-        if sidebarOnly {
-            let sidebar = Set(sidebarTaskIDs.map { WorkDestination.task($0) }
-                + sidebarWaves.map { WorkDestination.wave($0.wave.id) })
-            rows.removeAll { !sidebar.contains($0.id) }
-        }
+        let rows = paletteRows
         let working = Set(workingTaskIDs)
         func rank(_ row: WorkPaletteRow) -> Int {
             if query.isEmpty {
@@ -158,13 +153,12 @@ extension WorkModel {
 
 struct WorkPalette: View {
     @Bindable var model: WorkModel
-    var sidebarOnly = false
     let activate: (WorkDestination) -> Void
     @State private var search = ""
     @State private var highlighted: WorkDestination?
     @Environment(\.palette) private var palette
 
-    private var rows: [WorkPaletteRow] { model.searchDestinations(search, sidebarOnly: sidebarOnly) }
+    private var rows: [WorkPaletteRow] { model.searchDestinations(search) }
 
     private func group(_ row: WorkPaletteRow, working: Set<String>) -> String {
         switch row.id {
@@ -180,13 +174,6 @@ struct WorkPalette: View {
         let working = Set(model.workingTaskIDs)
         let selection = rows.first(where: { $0.id == highlighted })?.id ?? rows.first?.id
         VStack(alignment: .leading, spacing: 12) {
-            if sidebarOnly {
-                HStack {
-                    Text("Search sidebar").font(Typography.caption())
-                    Spacer()
-                    Button("Search all Work") { model.navigation.palette = .search }
-                }
-            }
             PaletteSearchField(text: $search, move: move, submit: {
                 if let id = selection { activate(id) }
             }, cancel: { model.navigation.palette = nil })

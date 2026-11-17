@@ -32,8 +32,12 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    private var emptyListText: String {
-        switch model.navigation.sidebarScope {
+    /// Nil while the window's own status line already says what is loading.
+    private var emptyListText: String? {
+        let query = model.navigation.sidebarQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !query.isEmpty { return "No Tasks match “\(query)”" }
+        if model.taskListIsLoading { return model.workStatus.message == nil ? "Loading Tasks…" : nil }
+        return switch model.navigation.sidebarScope {
         case .repository: "No working Tasks in this list"
         case .wave: "No working Tasks in this Wave"
         case .dashboard(let id): model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
@@ -73,6 +77,7 @@ struct WorkNavigator: View {
                 let scope = model.navigation.sidebarScope
                 VStack(alignment: .leading, spacing: 5) {
                     NewTaskRow(model: model)
+                    SidebarSearchField(navigation: model.navigation)
                     if case .dashboard = scope {
                         HStack {
                             Text(listTitle.uppercased()).lineLimit(1)
@@ -85,7 +90,7 @@ struct WorkNavigator: View {
                     ForEach(Array(taskIDs.enumerated()), id: \.element) { index, id in
                         taskRow(id, slotHint: index < 9 ? "⌘\(index + 1)" : nil)
                     }
-                    if taskIDs.isEmpty {
+                    if taskIDs.isEmpty, let emptyListText {
                         Text(emptyListText)
                             .font(Typography.body(12))
                             .foregroundStyle(palette.textSecondary).padding(10)
@@ -97,6 +102,7 @@ struct WorkNavigator: View {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
                                 model.navigation.sidebarFilter = .working
+                                model.navigation.sidebarQuery = ""
                                 model.navigation.sidebarWaveID = nil
                             }
                         }.font(Typography.body(11)).padding(10)
@@ -116,7 +122,7 @@ struct WorkNavigator: View {
         .onKeyPress("f", phases: .down) { key in
             guard key.modifiers.intersection([.command, .shift, .control, .option]) == .command,
                   focusedWork != nil else { return .ignored }
-            model.navigation.palette = .sidebarSearch
+            model.navigation.sidebarSearchFocusRequested = true
             return .handled
         }
         .onKeyPress(KeyEquivalent("\u{F70D}"), phases: .down) { key in
@@ -556,6 +562,37 @@ extension WorkJumpScope {
         switch self {
         case .repository: "repository"
         case .wave(let id): "wave-" + id
+        }
+    }
+}
+
+/// Under New Task: typing narrows the Task rows by name or identifier
+/// (e.g. "LOO-515"). Esc clears it; ⌘F from a focused row lands here.
+private struct SidebarSearchField: View {
+    @Bindable var navigation: WorkNavigation
+    @Environment(\.palette) private var palette
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "magnifyingglass").foregroundStyle(palette.textTertiary)
+            TextField("Filter Tasks", text: $navigation.sidebarQuery)
+                .textFieldStyle(.plain)
+                .focused($focused)
+                .onExitCommand { navigation.sidebarQuery = ""; focused = false }
+            if !navigation.sidebarQuery.isEmpty {
+                Button { navigation.sidebarQuery = "" } label: {
+                    Image(systemName: "xmark.circle.fill").foregroundStyle(palette.textTertiary)
+                }.buttonStyle(.plain).accessibilityLabel("Clear filter")
+            }
+        }
+        .font(Typography.body(13)).padding(.horizontal, 10).padding(.vertical, 6)
+        .background(palette.background.opacity(focused ? 1 : 0.5), in: RoundedRectangle(cornerRadius: 6))
+        .accessibilityIdentifier("work-sidebar-search")
+        .onChange(of: navigation.sidebarSearchFocusRequested, initial: true) { _, requested in
+            guard requested else { return }
+            focused = true
+            navigation.sidebarSearchFocusRequested = false
         }
     }
 }

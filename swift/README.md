@@ -67,8 +67,9 @@ sidebar header; the rows below are its Tasks, in plan order, until
 **‹ repo** returns to Working Tasks. **⌘1–9** selects the sidebar's Task rows by
 position and **⌃Tab / ⌃⇧Tab** cycles them. Missing slots do nothing. Selecting a
 Dashboard's Task, from any of these, keeps the Dashboard in the path, as its tile does.
-With sidebar focus, **⌘F** searches its visible Tasks and Waves; **Search all Work**
-widens the same navigator. **Shift-F10** opens the focused Task's actions without
+**Filter Tasks**, under New Task, narrows the sidebar's Task rows by name or
+identifier as you type (⌘F from a focused row lands there; Esc clears it).
+**Shift-F10** opens the focused Task's actions without
 changing the open workspace.
 
 The Task action menu moves work into a Wave or back to **No Wave** through the shared planning operation, retaining its workspace and drafts.

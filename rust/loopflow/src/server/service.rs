@@ -1297,6 +1297,11 @@ async fn request(
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
     let write = matches!(operation, Operation::Write(_));
+    // Served reads log no start line, so a failure must name what failed.
+    let kind = serde_json::to_value(&operation)
+        .ok()
+        .and_then(|value| value["kind"].as_str().map(str::to_owned))
+        .unwrap_or_default();
     let started = Instant::now();
     let trace_id = crate::id::TraceId::default();
     let result = match operation {
@@ -1326,7 +1331,7 @@ async fn request(
             },
         },
         Err(refusal) => {
-            tracing::warn!(request = %id, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
+            tracing::warn!(request = %id, %kind, %instance, %trace_id, code = %refusal.code, error = %refusal.message, "Server request failed");
             ServerMessage::error(Some(id.clone()), refusal)
         }
     };

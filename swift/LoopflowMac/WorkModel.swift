@@ -144,6 +144,16 @@ final class WorkModel {
         return entry.reading.value
     }
 
+    /// The sidebar's started list has not answered for its current scope yet.
+    var taskListIsLoading: Bool {
+        guard case .dashboard = navigation.sidebarScope else {
+            let wave: String? = if case .wave(let id) = navigation.sidebarScope { id } else { nil }
+            guard let entry = taskListReadings[repositoryReadingKey(repoPath ?? "")], entry.wave == wave else { return true }
+            return entry.reading.isLoading
+        }
+        return false
+    }
+
     func applySelectionPlans(_ plans: [WorkViewPlan]?, reason: String) {
         guard let plans else {
             selectionPlans = .unavailable(lastGood: selectionPlans.value, reason: reason)
@@ -1315,6 +1325,8 @@ final class WorkModel {
     @ObservationIgnored private var nextRequestId = 0
     @ObservationIgnored private var sentScope: WorkScope?
     @ObservationIgnored private var appliedSequence: [String: Int] = [:]
+    /// A Task frame that arrived before planning knew its Task; planning replays it.
+    @ObservationIgnored private var pendingTaskFrame: WorkFrame?
     /// Frames read before these requests predate a local change and are ignored.
     @ObservationIgnored private var planningFloor = 0
     @ObservationIgnored private var sessionsFloor = 0
@@ -1552,6 +1564,7 @@ final class WorkModel {
                 graphCatalogRevisions = [:]
                 graphCatalogRequests = [:]
                 (planningFloor, sessionsFloor, scopeFloor, taskFloor, sentScope) = (0, 0, 0, 0, nil)
+                pendingTaskFrame = nil
                 syncWorkScope()
                 for try await frame in opened.frames {
                     guard !Task.isCancelled else { break }
@@ -1689,13 +1702,19 @@ final class WorkModel {
         case .planning(let body):
             guard answers >= planningFloor else { return }
             await applyPlanning(body, wire: frame.wire, reason: reason)
-            if body != nil, answers >= scopeFloor { await refreshSelectedView() }
+            // Follow-up reads run beside the frame loop: a Task or list frame
+            // must not queue behind a catalog or view request.
+            if body != nil, answers >= scopeFloor { Task { await refreshSelectedView() } }
             planningSequence = frame.sequence
             resumePlanningWaiters(through: answers)
+            if let pending = pendingTaskFrame {
+                pendingTaskFrame = nil
+                await apply(pending)
+            }
         case .selections(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
             applySelectionPlans(body, reason: reason)
-            if body != nil { await refreshSelectedView() }
+            if body != nil { Task { await refreshSelectedView() } }
         case .taskList(let body):
             guard answers >= max(planningFloor, scopeFloor) else { return }
             applyTaskList(body, wave: sentScope?.taskListWave, reason: reason)
@@ -1736,8 +1755,9 @@ final class WorkModel {
             if let body, let row = body.row, row.task.identifier == body.task, subscribedTaskRow != row {
                 subscribedTaskRow = row
             }
-            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task,
-                  let task = task(id: shown.id)?.task else { return }
+            guard answers >= max(taskFloor, scopeFloor), let shown = selection, shown.kind == .task else { return }
+            guard let task = task(id: shown.id)?.task else { pendingTaskFrame = frame; return }
+            pendingTaskFrame = nil
             guard let body else {
                 taskWork.values[task.id] = .unavailable(lastGood: taskWork[task.id].value, reason: reason)
                 comments.values[task.id] = .unavailable(lastGood: comments[task.id].value, reason: reason)
@@ -1776,7 +1796,7 @@ final class WorkModel {
         }
         appliedSequence[part] = frame.sequence
         // A changed plan may come with changed Workflow definitions.
-        if part == WorkPart.planning.rawValue { await observeDefinitions() }
+        if part == WorkPart.planning.rawValue { Task { await observeDefinitions() } }
     }
 
     private func observeDefinitions() async {
@@ -1994,7 +2014,7 @@ final class WorkModel {
     }
 
     private func setRepoPath(_ path: String?, preservingOpening: Bool) {
-        if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
+        if navigation.palette == .search { navigation.palette = nil }
         if let openRepository, let path,
            repoPath?.normalizedFilePath != WaveOrigin.resolve(path).normalizedFilePath {
             openRepository(path, nil)
@@ -2120,7 +2140,16 @@ final class WorkModel {
             case .available: row.states.contains(.available)
             case .busy: row.states.contains(.busy)
             }
-        }.map(\.id)
+        }.map(\.id).filter(matchesSidebarQuery)
+    }
+
+    /// Whether the Task's name or identifier contains the sidebar's search text.
+    private func matchesSidebarQuery(_ id: String) -> Bool {
+        let query = navigation.sidebarQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return true }
+        guard let task = task(id: id)?.task.task else { return false }
+        return task.name.localizedCaseInsensitiveContains(query)
+            || task.identifier.localizedCaseInsensitiveContains(query)
     }
 
     /// A Wave or repository row's count: its board's Working and Autonomous columns.
@@ -2133,7 +2162,7 @@ final class WorkModel {
     var sidebarAutonomousTaskIDs: [String] {
         guard navigation.sidebarFilter == .working else { return [] }
         if case .dashboard = navigation.sidebarScope { return [] }
-        return taskRows(taskList).filter { $0.states.contains(.autonomous) }.map(\.id)
+        return taskRows(taskList).filter { $0.states.contains(.autonomous) }.map(\.id).filter(matchesSidebarQuery)
     }
 
     func taskSessions(_ id: String) -> [SessionRecord] {
@@ -2177,7 +2206,7 @@ final class WorkModel {
     }
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
-        if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
+        if navigation.palette == .search { navigation.palette = nil }
         if !preservingOpening { dismissTaskLink() }
         historyLookup?.cancel()
         historyLookup = nil
@@ -2786,8 +2815,13 @@ final class WorkModel {
         if selectionPlans.value?.contains(where: { plan in
             plan.contents.contains { $0.work.reference == selection }
         }) == true { return }
+        // A retained workspace keeps its Work selected, unless current planning has
+        // answered without its Task and it holds no conversation: a launch restored a
+        // deleted Task.
         if let repository = workspaceRepository,
-           workspaceRegistry?.retained(workspaceKey(for: selection, repository: repository)) != nil { return }
+           let retained = workspaceRegistry?.retained(workspaceKey(for: selection, repository: repository)),
+           selection.kind != .task || roadmap.value == nil || showsSavedPlanning || task(id: selection.id) != nil
+               || retained.multiplexer.sessionPane?.sessionId != nil { return }
         if selection.kind == .task, navigation.selectedTaskEvidence?.task.id == selection.id { return }
         // The repository's Session reading retains Work even when current
         // planning no longer contains it. Keep that conversation's selection.

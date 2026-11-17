@@ -121,6 +121,8 @@ struct CreationRecoveryView: View {
                 HStack {
                     Text(item.text).textSelection(.enabled)
                     if item.resource != nil { Button(item.complete ? "Show result" : "Inspect") { inspecting = item } }
+                    // An unconfirmed change stays until someone has looked; Dismiss is that look.
+                    if !item.complete { Button("Dismiss") { Task { await recovery.presented([item.id]) } } }
                 }
             }
         }

@@ -261,11 +261,13 @@ final class WorkNavigation {
             if newValue != sidebarFilter { Perf.begin(Perf.hierarchyInteraction, "filter", id: "outline") }
         }
     }
+    /// Text typed in the sidebar's search field; it narrows the Task rows by name or identifier.
+    var sidebarQuery = ""
+    var sidebarSearchFocusRequested = false
     var sidebarFocusRequested = false
     enum Content { case overview, details, terminals }
     enum Palette: Equatable {
         case search
-        case sidebarSearch
         case graph(String)
         case workflow(String)
         case newTask

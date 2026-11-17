@@ -1619,15 +1619,17 @@ struct SessionsContentView: View {
 
     private var navigation: WorkNavigation { model.navigation }
     private var terminalsVisible: Bool {
-        !navigation.showsSelection && workspaces.selectedWork != nil && fileTask?.task.awaitsStart != true
+        !navigation.showsSelection && workspaces.selectedWork != nil
             && showsTerminals(currentKey, fileTask?.task, workspace)
     }
 
-    /// Every primary shows terminals; a Task's show once it is working or once a
-    /// person chose them. A finished Task shows its record until a reveal presents
-    /// its conversation; who owns it says nothing about what there is to show.
+    /// Every primary shows terminals; a Task's show while it awaits Start (its
+    /// Session slot offers Start), once it is working, or once a person chose them.
+    /// A finished Task shows its record until a reveal presents its conversation;
+    /// who owns it says nothing about what there is to show.
     private func showsTerminals(_ key: WorkWorkspaceKey, _ task: RoadmapTask?, _ entry: SessionsWorkspace) -> Bool {
-        key.kind != .task || task?.conversationIntent == .start || entry.presentation.content == .terminals
+        key.kind != .task || task?.awaitsStart == true || task?.conversationIntent == .start
+            || entry.presentation.content == .terminals
     }
     private var fileTask: TaskProjection? {
         // A departing repository view must not mount the next repository's
@@ -1731,8 +1733,6 @@ struct SessionsContentView: View {
                 GraphCatalogInspector(entry: model.graphCatalog.value?.first { $0.name == name }, navigation: navigation, model: model)
             case .search:
                 WorkPalette(model: model, activate: navigate)
-            case .sidebarSearch:
-                WorkPalette(model: model, sidebarOnly: true, activate: navigate)
             case .newTask:
                 NewTaskSheet(model: model)
             case nil:
@@ -1827,19 +1827,7 @@ struct SessionsContentView: View {
                         }
                     }
             }
-            if let task, task.task.awaitsStart, active {
-                // The Session slot offers Start; its brief stays beside it.
-                GeometryReader { geometry in
-                    HStack(spacing: 0) {
-                        TaskStartOffer(model: model, task: task.task)
-                            .frame(width: geometry.size.width * 0.62)
-                            .background(theme.terminal.background.color)
-                        Divider()
-                        WorkSurfaceView(model: model, onOpenSession: openSession, onNewSession: newTaskSession)
-                        if navigation.showsActivity { WorkActivityView(model: model).frame(minWidth: 230, maxWidth: 360) }
-                    }
-                }
-            } else if key.kind != .task, active, let view = navigation.waveView {
+            if key.kind != .task, active, let view = navigation.waveView {
                 // A Wave view, the repository page included: the conversation and the
                 // standup board share the top band; the Tasks run along the bottom.
                 WaveViewLayout(model: model, view: view, workspace: entry) {

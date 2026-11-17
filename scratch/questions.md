@@ -116,3 +116,19 @@ Holders are `setsid` processes, one per build, each with its own lock and
 Jack: "my suggestions: work session, worker / chat, run", then "ok, batch is
 fine for bare headless". managed+typing = work session, managed+headless =
 worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
+
+## Slice 2 (implement, 2026-11-17)
+
+- Conversations the pass starts get the server's environment (`continuing()`),
+  not the CLI's. The old `start_in_background` passed the CLI's environment and
+  `LF_WAVE_ID`; `continuing()` strips every `LF_` variable, as for a phone's
+  continue. Not checked: whether a resumed Task conversation in a Wave still
+  resolves that Wave's settings without it. A provider found only on a shell's custom `PATH` and not
+  in `supervised_path` now records "not installed" instead of starting.
+- Desktop's open of a Task conversation and the pass can race on a prepared
+  Session. Both go through the registry; `run_refusal` refuses a second live
+  agent. Not tested.
+- Settlement runs at most every 10 s, so a dead ship carrier restarts within
+  about a minute (60 s unread tick) when nothing else writes.
+- A terminal that outlives its provider (the launcher lingering after a
+  provider death) keeps the pass re-reading every second until it ends.

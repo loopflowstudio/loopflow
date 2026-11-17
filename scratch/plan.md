@@ -396,20 +396,47 @@ Must survive:
 
    After merging base `e66b21801c`, `server::recovery::tests::` still pass (5).
 
-   Left from slice 1:
-   - `conversation` in `lf task status --json` (moves to slice 4 with the DTOs);
-   - acceptance checks 1–3 and 5 as a `MachineServer` fixture;
-   - a finished turn resetting `recovery_attempts`. Without it a conversation
-     gives up after 5 deaths over its whole life. Check first whether a resumed
-     provider records `yielded` at startup, which would reset it every start.
-2. **Restart and reboot.** Pieces:
-   - the attempt reset on a finished turn (above);
-   - pacing: wait for the held terminal to run or 3 seconds between starts;
-   - launch failures recorded with their reason;
-   - `recover()` moved into the pass and its read hook deleted;
-   - `start_in_background` deleted.
+   Left from slice 1: `conversation` in `lf task status --json` (slice 4,
+   with the DTOs); acceptance check 5.
+2. **Restart and reboot.** Built:
+   - a finished turn (the Stop hook's `yielded`, `record_native_turn`) resets
+     `recovery_attempts`. A resumed provider records no `yielded` at startup
+     (`server/boundary.rs` maps only `Stop` and `UserPromptSubmit`);
+   - pacing: after a start the pass waits until the Session's attachment names
+     a new agent, or 3 s;
+   - `agent_sessions.recovery_failure` (in `task_conversation_recovery.sql`,
+     which no longer adds `agent_stopped_at`): the reason a start failed,
+     cleared by the next that succeeds. The pass checks the provider's CLI on
+     its `PATH` first ("claude is not installed on this Machine's PATH");
+   - `ops::recovery::recover()` became `settle()`, run by the pass at most
+     every 10 s; the read hook in `bin/lf.rs` is gone;
+   - `start_in_background` and `start_task_conversation` are gone;
+     `prepare_conversation_beside` (was `start_conversation_beside`) only runs
+     `ensure_task`, and the pass starts a primary Session that never had an
+     agent (request `recover:<session>:new:<n>`);
+   - tests: `server::recovery::tests::` (7), the steer turn test, and
+     `context_launch_tests::a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit`
+     (acceptance 1–3: SIGKILL the provider, kill the holder across a server
+     restart, quit with exit 0), plus the background-start and
+     "agent not installed" fixtures, which now go through the server.
 
-   Shows: the reboot half of the demo on a real Machine restart.
+   Taught:
+   - A death moves the processes revision, but the pass read while the
+     registry still listed the ending terminal, skipped it as held, and then
+     slept the full minute (2 of 6 fixture runs). It now re-reads after 1 s
+     while a due conversation still has a terminal.
+   - Counting the first start of a prepared conversation made its first death
+     wait the 1-minute backoff. A first start now counts only if it fails; its
+     terminal holds later passes off.
+   - Starts now run with the server's environment, not the CLI's: fixtures
+     whose stand-in provider must start need
+     `MachineServer::start_with_path`. The supervised server's `PATH` already
+     adds the Desktop directories (`server/mod.rs` `supervised_path`).
+   - `GraphTask`'s server gets the fixture's `PATH`, so the ship-restart
+     fixtures (`task_ship_restarts_after_its_process_dies`, `…_after_a_failure_wait_instead_of_at_once`)
+     restart through the server. All 13 `task_graph_launch_tests::task_ship_` pass.
+
+   Not done: the reboot half of the demo on a real Machine restart (qa).
 3. **Task runs.** Pieces:
    - `restart_ships` → `restart_runs`, covering moving Tasks;
    - `task_graphs.restarts` (added to `task_conversation_recovery.sql`) and its
@@ -436,9 +463,12 @@ Must survive:
 
 ## Checks
 
-- `cargo nextest` on the new pass's module and on `transport::registry` tests
-  (implement; runs locally).
-- The acceptance fixture above (implement; runs locally).
+- `cargo test -p loopflow --lib server::recovery::tests::`: 7 pass (implement).
+- `cargo test -p loopflow --test integration context_launch_tests::a_killed_task_conversation`:
+  passes 4 of 4 after the ending-terminal fix (implement). `context_launch_tests::a_task_`:
+  4 pass. `cargo test -p loopflow --lib task_graph_launch_tests::task_ship_`: 13 pass.
+- Gate: `binary(served_reads)` (server startup changed), `test(session_cli_tests::)`,
+  `test(process_ownership_tests::)` and `test(documented_commands::)` (docs edited).
 - A real reboot with three Tasks (qa; a person runs it).
 
 ## Docs written ahead (write-docs)

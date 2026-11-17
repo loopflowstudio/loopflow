@@ -453,7 +453,7 @@ mod tests {
             .into_iter()
             .map(|step| step.name)
             .collect();
-        assert_eq!(steps, ["explore", "concept-review", "verify"]);
+        assert_eq!(steps, ["explore", "human-review", "verify"]);
         let pursue = CapturedGraph::load("pursue", repo.path()).unwrap().unwrap();
         assert!(pursue.interactive_steps().is_empty());
         assert!(CapturedGraph::load("no-such-graph", repo.path())
@@ -469,7 +469,7 @@ mod tests {
             .unwrap();
         let explore = graph.interactive_step("explore").unwrap();
         let next = graph.after(&explore).unwrap();
-        assert_eq!(graph.next_interactive(&next), Some("concept-review"));
+        assert_eq!(graph.next_interactive(&next), Some("human-review"));
         // A composed graph's name finds its first step.
         let plan = graph.find("plan").unwrap();
         assert_eq!(plan.cursor().index, next.cursor().index);
@@ -521,11 +521,11 @@ mod tests {
             position,
         };
         let waiting = at(TaskGraphPosition::At {
-            step: "concept-review".into(),
+            step: "human-review".into(),
         });
         let guidance = waiting.guidance("INF-1");
         assert!(
-            guidance.contains("with the concept-review skill"),
+            guidance.contains("with the human-review skill"),
             "{guidance}"
         );
         assert!(guidance.contains("`lf task run INF-1` continues after it"));

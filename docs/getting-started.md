@@ -93,9 +93,10 @@ lf process list                            # live lf call trees: each Graph, its
 
 ## 4. Pick up the conversation
 
-When the PR is published, the Task waits at its review: a page showing whether
-the change's product concepts and code concepts line up, in the Task's own
-conversation.
+When the PR is published, the Task waits at its review, in the Task's own
+conversation: one page built from what the run produced. It shows what changes,
+whether the product's concepts and the code's line up, how to try it, what was
+checked, the choices made for you and the questions left open.
 
 ```bash
 lf resume --task <ID>            # from any terminal, on whatever agent it ran

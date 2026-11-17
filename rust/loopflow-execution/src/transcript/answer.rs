@@ -287,47 +287,26 @@ mod tests {
             serde_json::json!({"type":kind,"uuid":format!("{kind}-{at}"),"timestamp":at,
                 "message":{"id":at,"role":kind,"stop_reason":"end_turn","content":content}})
         };
+        let write = |rows: &[serde_json::Value]| {
+            let lines: Vec<String> = rows.iter().map(ToString::to_string).collect();
+            std::fs::write(project.join(format!("{thread}.jsonl")), lines.join("\n")).unwrap();
+        };
+        let text = |text: &str| serde_json::json!([{"type":"text","text":text}]);
         // An earlier input's turn in the same thread is not this input's answer.
-        transcript(
-            &project,
-            &[
-                row("user", &at(-60), serde_json::json!("before")),
-                row(
-                    "assistant",
-                    &at(-59),
-                    serde_json::json!([{"type":"text","text":"Earlier answer."}]),
-                ),
-            ],
-        );
-        std::fs::rename(
-            project.join("conversation.jsonl"),
-            project.join(format!("{thread}.jsonl")),
-        )
-        .unwrap();
+        let earlier = [
+            row("user", &at(-60), serde_json::json!("before")),
+            row("assistant", &at(-59), text("Earlier answer.")),
+        ];
+        write(&earlier);
         assert_eq!(input_final_answer(&store, &input).unwrap(), None);
 
-        transcript(
-            &project,
-            &[
-                row("user", &at(-60), serde_json::json!("before")),
-                row(
-                    "assistant",
-                    &at(-59),
-                    serde_json::json!([{"type":"text","text":"Earlier answer."}]),
-                ),
-                row("user", &at(1), serde_json::json!("go")),
-                row(
-                    "assistant",
-                    &at(5),
-                    serde_json::json!([{"type":"text","text":"Unrecorded answer."}]),
-                ),
-            ],
-        );
-        std::fs::rename(
-            project.join("conversation.jsonl"),
-            project.join(format!("{thread}.jsonl")),
-        )
-        .unwrap();
+        let [before, earlier_answer] = earlier;
+        write(&[
+            before,
+            earlier_answer,
+            row("user", &at(1), serde_json::json!("go")),
+            row("assistant", &at(5), text("Unrecorded answer.")),
+        ]);
         assert_eq!(
             input_final_answer(&store, &input).unwrap(),
             Some("Unrecorded answer.".into())

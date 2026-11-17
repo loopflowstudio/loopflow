@@ -83,11 +83,13 @@ write lock, WAL and revision row.
    `history_apart_from_state.sql`): `agent_sessions.opened_at`,
    `agent_sessions.transition`, and on the captured input row
    `session_events.provider_thread`, `.provider_account`, `.independent`.
-4. **Turns** in `usage.db` (to build, see "Turns, settled in concept review").
+4. **Turns** in `usage.db`: one row per turn, inserted at dispatch with the
+   grouping frozen then (`record_session_turn_origin`), completed in place;
+   columns, not JSON; usage resolved before the write (see "Turn table as
+   built").
 5. **Wake-ups.** `StoreRevisions` gains `history` (built) and `turns`.
    `changed()` ignores both except for reads that name `history.*` or
-   `usage.*` (Session History, `lf session history --subscribe`, Session list
-   running state, Telemetry, Task history). Not wired yet. Task updates read
+   `usage.*` (`read_stream::Watch::Journals`, see "Slice 5 as built"). Task updates read
    only `captured`, Graph and Process state, so history writes never advance
    `task_updates`. The `held_terminals` trigger change is built (slice 1).
 6. **Retention** (`lf process prune`, `store/retention.rs`, run by the
@@ -262,8 +264,6 @@ result carried (`"reason": null`); `GraphOutput::decode` counts non-null
 fields, so both decode alike. Codex rollouts end a turn with
 `event_msg`/`task_complete` carrying `last_agent_message`.
 
-Until slice 5 declares the `history`/`turns` revisions, a Desktop view of a
-running turn refreshes only on other domains' changes.
 `opencode_disconnect_after_tool_preserves_unknown_native_completion` expects
 status `interrupted` for the turn OpenCode's store left open, as for a crashed
 Pi turn; whether that is right for an unknown completion is a product call.
@@ -312,75 +312,7 @@ query by skill or model, no join to `loopflow.db`), columns not JSON, one row
 per turn, written by `loopflow-storage` like `history.db`, not under the
 90-day retention. Existing rows (29,440 `usage` / 24,900 `started` / 28,791
 `completed` since 2026-09-30) are converted. `lf usage` grouping flags and
-dashboards are separate work. The next section settles how.
-
-## Turns, settled in concept review (2026-11-16, headless)
-
-The direction above ("one row per turn ... written once when the turn ends")
-meets the slice 3 code at one point it did not account for: a turn is read
-while it runs. `pending_inputs` (running/finished on the Session list and
-Desktop's `SessionHistory`), `input_answered_turn` (Graph routing),
-`session_turn_completed`/`session_completions` (replay guard) and Process Task
-membership (`processes.rs:497`) read the `started` row, and
-`record_session_turn_origin` freezes the turn's Task, Wave, input and Process
-at dispatch on purpose ("Freeze the request's attribution while its attachment
-still owns dispatch"). So:
-
-- **A turn is one row in `usage.turns`, inserted when the turn starts and
-  completed in place when it ends.** The `started`, `usage` and `completed`
-  history kinds are not written anywhere else; `history.session_history`
-  keeps only `observed` rows (its `kind` CHECK narrows to that under
-  `user_version` 2). No reader self-joins three rows into a turn again.
-- **Columns.** Key: Session, provider thread, provider turn (unique). At
-  start: input (`captured_event`), lf and agent Process ids, Task, Wave,
-  Project, repository, skill, Graph and step, `started_at`. At end:
-  `ended_at`, status, provider and model as reported, the token counts
-  (input, cached input, cache write, output, reasoning, context window) and
-  the turn context `completed.context` holds today (first and peak request
-  tokens, tool results, tool output tokens, compactions, compaction tokens),
-  each its own column. Grouping values are the ones frozen at dispatch, not
-  at turn end; they differ only for a bind made mid-turn.
-- **Usage counts are resolved before the write.** `native_usage` turns
-  Codex's thread-cumulative `total`/`last` and OpenCode message readings into
-  one turn's `TurnUsage`; the turn row stores that result, so a report is a
-  `SUM` with no counter logic. A turn whose usage arrives after it completed
-  (replayed snapshot) updates the same row once; a second, different reading
-  is a gap that keeps the first, as receipts do now.
-- **One writer, two files.** `history.rs`'s `HistoryFile` (own connection,
-  read-only `loopflow.db`, `RecordingGap` on failure) is opened once per file
-  with that file's name and schema; `usage.db` gets no second writer type.
-  Every store connection attaches `usage.db` read-only as `usage`, with the
-  same empty in-memory stand-in when it cannot.
-- **Readers repointed:** `pending_inputs` and the summary fragments in
-  `sessions.rs:1100–1200`, `recorded_turn_end`, `session_turn_completed`,
-  `session_completions`, `input_turn_context`, `input_answered_turn`,
-  `session_turn_facts`, `read_history`'s turn arms, `native_usage`'s callers
-  (Telemetry, Task history, `lf usage`), `processes.rs:497` and `:2475`.
-- **`lf session history <id>`** shows the Session's turns (from `usage.turns`)
-  and its observations (from `history.session_history`) as two lists; the
-  observation feed stays append-only by `seq`, and a turn is a record that
-  changes once, so it is not a feed entry. `--json` changes shape on purpose
-  (`turns`, `events`); Desktop's `SessionHistory` DTO keeps its shape and is
-  built from turns.
-- **Wake-ups.** `usage.db` has its own revision row; `StoreRevisions` reads
-  it as `turns`. `changed()` ignores it except for reads that name `usage.*`
-  (Session list running state, Session History, Telemetry, Task history),
-  the same rule as `history`.
-- **Existing rows and skew are one pass.** The backfill that builds turn rows
-  from `started`/`usage`/`completed` (paired per Session, thread and turn,
-  grouping from the `started` row's origin, model where known) reads both
-  `history.session_history` and main `session_events`, then deletes what it
-  converted. Run by slice 5's move pass, it also carries the rows a released
-  lf keeps writing into `loopflow.db` after install.
-- **Retention:** no pass deletes `usage.turns` rows (open in `questions.md`:
-  indefinitely or a long window; the choice is one constant later).
-
-Tests to show it: a turn is readable as running between start and end and
-from `usage.turns` only (`history.session_history` has no turn row); a Codex
-turn's cumulative reading is stored as its own delta; the backfill converts a
-seeded Session's three rows into one turn and `pending_inputs` reads the same
-before and after; a locked `usage.db` makes a gap, not a failed turn.
-
+dashboards are separate work.
 
 ## Turn table as built (2026-11-16)
 
@@ -414,7 +346,7 @@ before and after; a locked `usage.db` makes a gap, not a failed turn.
   text prints turns first. `ProviderHistoryReference::NativeTurn` keeps its
   shape: `start_seq`/`completion_seq` hold the turn's id when started/ended.
 - `StoreRevisions.turns` reads `usage.turns_revision`; `changed()` ignores it
-  like `history` (no read declares either yet: slice 5).
+  like `history`.
 - `convert_turn_rows` (run by `lf process prune`, reported as
   `converted_turns`) turns `started`/`usage`/`completed` rows in main into
   turn rows per Session thread, then deletes them. Compress cut its
@@ -434,37 +366,6 @@ conformance_tests,pi_tests,claude,codex}`, `read_stream`, `ops::task::tests`):
 
 Swift has no reader of turns; its `SessionEvent` kinds narrowed to
 `captured`/`observed` and its fixture test reads `events`.
-
-## Concept review after slice 4 (2026-11-16, headless)
-
-The built turn table matches "Turns, settled in concept review": one row,
-columns not JSON, resolved usage, readers on `usage.turns` only, one writer
-for both files, history narrowed to `observed`. Two things the design
-implies, for slice 5:
-
-- **Name the writer for what it is.** `HistoryFile` now writes `usage.db`
-  too (`HistoryFile::beside(&USAGE, …)` reads wrong). Rename it `JournalFile`
-  and the module `history.rs` → `journals.rs` (it holds `HISTORY`, `USAGE`,
-  `attach`, `open_writer`); `history_path`/`usage_path` stay. 11 uses, 15
-  importing files.
-- **Upgrade skew is detect-and-name**, settled above under "Upgrade skew";
-  no compat reads.
-
-Still open, none blocking slice 5: turn-row retention (one constant), and
-whether reports group by the values frozen at dispatch or follow later binds
-through the Session id (`questions.md`); "interrupted" for an unknown
-OpenCode completion.
-
-## Concept review after slice 5 (2026-11-16, headless)
-
-The build matches the design: three files, one rule per fact, one writer
-type (`JournalFile`), retention and the move pass on the server's hourly
-clock in 10,000-row transactions, reads declaring `Watch::Journals` or
-`State`. Nothing the design implies is left to build. Carried to the PR body,
-not blocking: turn-row retention (none until one constant is chosen),
-report grouping frozen at dispatch versus later binds (no report reads it
-yet; `lf usage` grouping is separate work), "interrupted" for an unknown
-OpenCode completion, and the two skew costs under "Upgrade skew".
 
 ## Concept review after QA fixes (2026-11-16, headless)
 
@@ -559,3 +460,8 @@ Checks: `journals::` 3 passed (the gap test fails without the fix: 20 gapped
 writes > 5×`BUSY`); `transcript::answer::` 4 passed; `session_events::` 7
 passed; clippy on storage+execution clean. Gate: rerun the locked-journals QA
 scenario on a real turn; `test(graph::)` routing after a gap.
+
+Compress after QA (2026-11-16): the unrecorded-answer test writes the
+thread's transcript in place instead of writing and renaming twice; plan
+sections superseded by the "as built" ones cut (git: `edd2df6b44`).
+`transcript::answer::` 4 passed; clippy on execution clean.

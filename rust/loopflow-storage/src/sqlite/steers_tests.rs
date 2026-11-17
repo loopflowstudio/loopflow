@@ -840,8 +840,11 @@ fn a_steer_its_start_would_not_take_starts_nothing() {
     task_with_primary(&store, "primary", "worker");
     {
         let conn = store.conn.lock().unwrap();
-        for (source, text) in [("task", "First"), ("task", "Replaced"), ("shared", "Read")] {
-            let revision = if text == "Replaced" { "2" } else { "1" };
+        for (source, revision, text) in [
+            ("task", "1", "First"),
+            ("task", "2", "Replaced"),
+            ("shared", "1", "Read"),
+        ] {
             save_in(
                 &conn,
                 ("task", "task"),

@@ -3,17 +3,13 @@ import SwiftUI
 
 /// Displays the common status without turning a receipt into convergence.
 struct PeerPlanningView: View {
-    let reading: WorkReading<[PeerPlanningStatus]>
+    let reading: Reading<[PeerPlanningStatus]>
 
     @Environment(\.palette) private var palette
 
     var body: some View {
         DisclosureGroup("Git planning") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                if let error = reading.errorMessage {
-                    Text("Sync status unavailable: \(error)")
-                    if reading.value != nil { Text("Showing the last sync status") }
-                }
                 if let destinations = reading.value {
                     if !destinations.contains(where: \.active) {
                         Text("No active Git planning destination")

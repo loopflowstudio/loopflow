@@ -286,11 +286,13 @@ struct WorkNavigationTests {
         #expect(model.sidebarAutonomousTaskIDs.isEmpty)
     }
 
-    @Test("Abandoning the open Task drops its row and opens the next one before the command returns; a refusal puts it back")
-    func abandonLeavesTheSidebarAtOnce() async throws {
+    @Test("Abandon and Complete drop the open Task's row and open the next one in the click; a refusal puts it back with one Notice",
+          arguments: ["abandon", "complete"])
+    func changesLeaveTheSidebarInTheClick(command: String) async throws {
+        let release = AsyncStream<Void>.makeStream()
         let model = WorkModel(query: RegistryQuery { args, _ in
-            if args.contains("abandon") {
-                try await Task.sleep(for: .milliseconds(50))
+            if args.contains(command) {
+                for await _ in release.stream { break }
                 throw RegistryQueryError("Task has unpushed commits")
             }
             throw RegistryQueryError("unused")
@@ -303,14 +305,20 @@ struct WorkNavigationTests {
                                                    members: [task("issue-review"), task("issue-now")])], reason: "")
         model.applyStartedFixture(working: ["issue-review", "issue-now"])
         model.select(.task(id: "issue-review"))
-        let abandoned = try #require(model.task(id: "issue-review")?.task)
-        let abandon = Task { await model.abandonTask(abandoned) }
-        for _ in 0..<20 where !model.abandoningTaskIDs.contains("issue-review") { await Task.yield() }
+        let changed = try #require(model.task(id: "issue-review")?.task)
+        if command == "abandon" { model.abandonTask(changed) } else { model.completeTask(changed) }
+        // The write is still held: the row is gone and the next Task is open.
         #expect(model.sidebarTaskIDs == ["issue-now"])
         #expect(model.selection == .task(id: "issue-now"))
-        await abandon.value
+        // Abandoned leaves every list; completed stays only in Done.
+        let shown = model.visibleTasks.first { $0.id == "issue-review" }
+        if command == "abandon" { #expect(shown == nil) } else { #expect(shown?.section == .done) }
+        release.continuation.finish()
+        for _ in 0..<200 where !model.pendingChanges.changes.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
         #expect(model.sidebarTaskIDs == ["issue-review", "issue-now"])
-        #expect(model.dashboardError == "Task has unpushed commits")
+        let verb = command == "abandon" ? "abandoned" : "completed"
+        #expect(model.navigation.notices.current?.text
+            == "\(changed.task.identifier) couldn't be \(verb): Task has unpushed commits")
     }
 
     @Test("A row dragged over another lands there on release and leaves no drag behind")
@@ -373,7 +381,7 @@ struct WorkNavigationTests {
         let start = try offer.inspect().find(viewWithAccessibilityIdentifier: "task-start-issue-review").button()
         #expect(!start.isDisabled())
         #expect(throws: Never.self) { try offer.inspect().find(text: task.task.description) }
-        #expect(model.navigation.taskRunDrafts[task.id] == nil)
+        #expect(model.navigation.notices.current == nil)
     }
 
     @Test("Selecting Work closes Find Work and preserves the sidebar preference", arguments: [false, true])
@@ -663,7 +671,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.layout == layout)
     }
 
-    @Test("Failed reads keep last-good work and exact Sessions with a visible error")
+    @Test("Failed reads keep last-good work and exact Sessions; the Notice says why")
     func unavailableIsNotEmpty() async throws {
         let source = try ReadingSource(roadmap: roadmapJSON(), sessions: sessionsJSON())
         let model = WorkModel(query: RegistryQuery { args, _ in try await source.read(args) }, repoPath: "/src/loopflow")
@@ -672,12 +680,13 @@ struct WorkNavigationTests {
         model.select(.task(id: "issue-review"))
         await source.fail()
         await model.refresh()
-        #expect(model.roadmap.errorMessage == "offline")
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.roadmap.failure == "offline")
+        #expect(model.sessions.failure == "offline")
         #expect(model.projection.waves[0].tasks.map(\.id) == keys)
         #expect(model.projection.subject(for: "human") == model.selection)
         let view = WorkNavigator(model: model, onOpenSession: { _ in })
-        #expect(throws: Never.self) { try view.inspect().find(text: "Couldn't update: offline") }
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "Couldn't update: offline") }
+        #expect(model.navigation.notices.current?.text.hasSuffix("couldn't be read: offline") == true)
     }
 
     @Test("Returning to a repository retains its last-good Sessions when refresh fails")
@@ -691,12 +700,12 @@ struct WorkNavigationTests {
         model.setRepoPath("/src/loopflow")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         await model.refreshSessions()
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
         #expect(model.sessions.value?.map(\.id) == ["human"])
         model.setRepoPath("/src/context")
         model.setRepoPath("/src/loopflow")
         #expect(model.sessions.value?.map(\.id) == ["human"])
-        #expect(model.sessions.errorMessage == "offline")
+        #expect(model.sessions.failure == "offline")
     }
 
     @Test("Incomplete planning preserves the repository's selected Task", arguments: [false, true])
@@ -722,7 +731,7 @@ struct WorkNavigationTests {
         #expect(model.selection == .task(id: "issue-review"))
         #expect(model.navigation.content == .details)
         #expect(model.projection.unmatchedSessions.isEmpty)
-        #expect(model.roadmap.errorMessage != nil)
+        #expect(model.roadmap.failure != nil)
         #expect(model.projection.subject(for: "human") == .task(id: "issue-review"))
     }
 
@@ -794,26 +803,50 @@ struct WorkNavigationTests {
         await gate.release()
         try await waitForAttempt("Failed preparation")
         #expect(owner.startingTaskSessions.isEmpty)
-        #expect(other.taskSessionErrors.isEmpty)
+        #expect(other.notices.current?.text.contains("New session failed") != true)
         model.setRepoPath("/src/loopflow")
-        model.select(.task(id: "issue-available"))
-        #expect(throws: (any Error).self) {
-            try view.inspect().find(text: "Preparation failed for the original Task")
-        }
+        // The failure is the asking window's Notice, with "Try again".
+        let failure = try #require(owner.notices.current)
+        #expect(failure.text.contains("Preparation failed for the original Task"))
+        #expect(failure.action?.title == "Try again")
         model.select(.task(id: "issue-review"))
-        #expect(throws: Never.self) {
-            try view.inspect().find(text: "Preparation failed for the original Task")
-        }
         #expect(try !view.inspect().find(button: "New session").isDisabled())
         // A retry clears only this Task's prior failure and settles normally.
         let retry = WorkSurfaceView(model: model, onNewSession: { _ in })
         try retry.inspect().find(button: "New session").tap()
-        #expect(throws: (any Error).self) {
-            try retry.inspect().find(text: "Preparation failed for the original Task")
-        }
+        #expect(owner.notices.current?.key != failure.key)
         try await waitForAttempt("Retry")
-        #expect(owner.taskSessionErrors.isEmpty)
+        #expect(owner.notices.current?.key != failure.key)
         #expect(owner.startingTaskSessions.isEmpty)
+    }
+
+    @Test("A sidebar New session failure posts one Notice with Try again in the asking window")
+    func sidebarNewSessionFailurePostsTheNotice() async throws {
+        let model = try model()
+        await model.refresh()
+        let owner = model.navigation
+        let gate = PlanningGate()
+        var attempts = 0
+        // The sidebar's row action and the Task page's button share this path.
+        let open: @MainActor (String) async throws -> Void = { _ in
+            attempts += 1
+            await gate.wait()
+            throw RegistryQueryError("Checkout refused")
+        }
+        model.newTaskSession("issue-review", open: open)
+        model.newTaskSession("issue-review", open: open)
+        await gate.started()
+        model.setRepoPath("/src/context")
+        let other = model.navigation
+        await gate.release()
+        for _ in 0..<1000 where owner.startingTaskSessions.contains("issue-review") { await Task.yield() }
+        #expect(owner.startingTaskSessions.isEmpty)
+        #expect(attempts == 1)
+        #expect(other.notices.current?.text.contains("New session failed") != true)
+        let failure = try #require(owner.notices.event)
+        #expect(failure.text == "W2-131 New session failed: Checkout refused")
+        #expect(failure.action?.title == "Try again")
+        #expect(owner.notices.conditions.isEmpty)
     }
 
     @Test("Task inspection retains Available links without a Session inventory")
@@ -835,8 +868,8 @@ struct WorkNavigationTests {
         #expect(throws: Never.self) { try view.inspect().find(viewWithAccessibilityIdentifier: "task-available-human") }
     }
 
-    @Test("Work outside the plan remains explained in Wave details")
-    func unavailableTaskLivesInWaveDetails() async throws {
+    @Test("Work outside the plan is one condition Notice while its Wave is open")
+    func outsidePlanIsAConditionNotice() async throws {
         let model = try model()
         await model.refresh()
         let wave = try #require(model.projection.waves.first)
@@ -845,13 +878,14 @@ struct WorkNavigationTests {
         let navigator = WorkNavigator(model: model, onOpenSession: { _ in })
         #expect(throws: (any Error).self) { try navigator.inspect().find(text: text) }
         model.select(wave.id.work)
-        // One quiet line names the Task; Details discloses reason and recovery.
-        let details = WorkSurfaceView(model: model)
-        #expect(throws: Never.self) { try details.inspect().find(text: "\(task.taskIdentifier) is outside the current plan.") }
-        #expect(throws: (any Error).self) { try details.inspect().find(text: text) }
-        try details.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-details-\(task.taskId)").button().tap()
-        #expect(throws: Never.self) { try details.inspect().find(text: text) }
-        #expect(throws: Never.self) { try details.inspect().find(text: task.recovery) }
+        // One condition Notice names the Task while the Wave is open; its action copies the recovery.
+        let notice = try #require(model.navigation.notices.current)
+        #expect(notice.text == "\(task.taskIdentifier) is outside the current plan")
+        #expect(notice.kind == .condition)
+        #expect(notice.action?.title == "Copy recovery")
+        #expect(notice.action?.help == text)
+        model.select(nil)
+        #expect(model.navigation.notices.current == nil)
     }
 
     @Test("Slow planning does not gate Session reading or navigation")
@@ -947,7 +981,7 @@ struct WorkNavigationTests {
         #expect(workspace.multiplexer.focusedPaneId == pane)
     }
 
-    @Test("Workflow loading, unavailable and absent readings remain distinct")
+    @Test("Workflow loading, absent and failed readings: a failure shows the last good one or nothing")
     func workflowReadingStates() async throws {
         let model = try model()
         await model.refresh()
@@ -957,14 +991,14 @@ struct WorkNavigationTests {
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
         #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }
         let missing = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: nil, reason: "Offline"))
-        #expect(try missing.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
+        #expect(throws: (any Error).self) { try missing.inspect().find(text: "Reading workflow…") }
+        #expect(throws: (any Error).self) { try missing.inspect().find(text: "No workflow selected") }
         let absent = TaskWorkflowHeader(model: model, task: found.task, work: .available(empty))
         let selection = found.task.graphName.map { "\($0) · \(found.task.graphSource ?? "")" } ?? "No workflow selected"
         #expect(try absent.inspect().find(text: selection).string() == selection)
         let stale = TaskWorkflowHeader(model: model, task: found.task, work: .unavailable(lastGood: empty, reason: "Offline"))
-        #expect(try stale.inspect().find(text: "Workflow could not be read: Offline").string() == "Workflow could not be read: Offline")
-        #expect(throws: (any Error).self) { try stale.inspect().find(text: "No workflow selected") }
-        #expect(throws: (any Error).self) { try stale.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-start") }
+        #expect(try stale.inspect().find(text: selection).string() == selection)
+        #expect(throws: (any Error).self) { try stale.inspect().find(text: "Workflow could not be read: Offline") }
     }
 
     @Test("Session rename is scoped to its draft without a second breadcrumb")
@@ -1187,7 +1221,7 @@ struct WorkNavigationTests {
             resolution: WorkSelectionResolution(attention: [], members: members + [hidden], unavailable: []),
             arrangement: WorkArrangement(order: members + [hidden], hidden: [hidden], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: review)
+            contents: review, viewer: nil)
         model.applySelectionPlans([
             fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"),
                             members: [content(.task, "issue-review"), content(.task, "issue-now")]),
@@ -1275,6 +1309,10 @@ private actor ReadingSource {
         case "session" where args.dropFirst().first == "list": return #"{"entries":\#(sessions),"next":null}"#
         case "wave" where args.dropFirst().first == "list": return "[]"
         case "session" where args.dropFirst().first == "history": return #"{"truncated":false,"items":[]}"#
+        case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
+        case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
+            return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
+                owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)
         default: throw RegistryQueryError("unexpected command")
         }
     }

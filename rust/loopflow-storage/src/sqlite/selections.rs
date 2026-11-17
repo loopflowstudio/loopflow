@@ -445,6 +445,8 @@ fn plan_in(
             .and_then(|saved| saved.slots.clone())
             .unwrap_or(default_slots),
         contents,
+        // The application resolves the claimant: it reads Git, not the store.
+        viewer: None,
     })
 }
 

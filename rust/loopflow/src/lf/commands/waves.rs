@@ -1039,7 +1039,6 @@ pub(crate) async fn task_detail(
     let row = snapshot_task_details(store, vec![&task], false, &shared)?
         .pop()
         .expect("a registered Task has a row");
-    let capacity = loopflow_execution::provider_account::LaunchCapacity::read(&store.sqlite)?;
     let mut sessions = Vec::new();
     for session in status
         .overview
@@ -1047,12 +1046,14 @@ pub(crate) async fn task_detail(
         .unwrap_or_default()
     {
         if let Some(record) =
-            loopflow_execution::ops::human_session::listed(store, session.id.as_str(), &capacity)?
+            loopflow_execution::ops::human_session::listed(store, session.id.as_str())?
         {
             sessions.push(SessionFacts::of(record));
         }
     }
+    let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
+        summary,
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
         graph_processes: status
@@ -2525,18 +2526,6 @@ fn print_setup(setup: &loopflow_execution::work::wave::setup::WaveSetup) {
     }
     line("tasks machine", &setup.tasks_machine);
     line("session machine", &setup.session_machine);
-    for (provider, route) in &setup.accounts {
-        let accounts = if route.accounts.is_empty() {
-            "unrouted".to_string()
-        } else {
-            route.accounts.join(" -> ")
-        };
-        println!(
-            "  {:<16} {accounts} ({})",
-            format!("{provider} accounts"),
-            route.source.as_str()
-        );
-    }
 }
 
 /// The Wave line `lf wave show` and `lf wave status` open with. A removed Wave

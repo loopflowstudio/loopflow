@@ -11,8 +11,7 @@ Each input contains production-rendered instructions, hypothetical conversation 
 the request, and the same action catalog. Expected actions stay in the case file;
 do not send that file to the evaluated agent. Treat `instructions` as its system
 guidance and the other input fields as the evaluation request. Use a fresh
-conversation for each case. The fixture renderer's `--work-task` selects Work
-guidance without creating or resolving a real Task.
+conversation for each case.
 
 Replies are one JSON object:
 
@@ -34,7 +33,6 @@ selection and filesystem mechanics independently.
 ## Checks
 
 ```bash
-cargo test -p loopflow --lib work_guidance_is_additive
 cargo test -p loopflow --test session_cli_tests instruction_inspection
 uv run pytest python/tests/test_instruction_levels.py
 ```

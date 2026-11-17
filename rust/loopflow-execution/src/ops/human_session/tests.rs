@@ -1,7 +1,87 @@
 use crate::process::attachment;
+struct LiveSessionFixture {
+    store: SharedStore,
+    database: std::path::PathBuf,
+    _env: crate::test_ambient::EnvGuard,
+    _home: SessionHome,
+}
+
+/// A real process standing in for a running provider, reaped even when an
+/// assertion fails.
+struct RunningAgent(std::process::Child);
+
+impl Drop for RunningAgent {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
+impl LiveSessionFixture {
+    async fn new() -> Self {
+        let home = SessionHome::new();
+        let store = home.store().await;
+        let env = crate::test_ambient::EnvGuard::clear(&["CODEX_HOME", "CLAUDE_CONFIG_DIR"]);
+        Self {
+            store,
+            database: home.home.path().join("loopflow.db"),
+            _env: env,
+            _home: home,
+        }
+    }
+
+    fn codex_session(&self, id: &str, model: Option<&str>) -> LfSession {
+        let session = self
+            .store
+            .sqlite
+            .test_session(id, &crate::session_record::new_artifact_key());
+        let thread = format!("thread-{id}");
+        rusqlite::Connection::open(&self.database)
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET provider='codex',provider_thread=?2,model=?3 WHERE id=?1",
+                rusqlite::params![&session.id, &thread, model],
+            )
+            .unwrap();
+        session
+    }
+
+    fn run(&self, session: &LfSession) -> RunningAgent {
+        let parent = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(&self.database)
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
+                [&parent],
+            )
+            .unwrap();
+        let attachment = attachment::claim_session_attachment(
+            &self.store.sqlite,
+            &session.id,
+            None,
+            &parent,
+            true,
+        )
+        .unwrap();
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60");
+        RunningAgent(
+            crate::harness::agent_process::spawn_native(
+                command,
+                &(
+                    self.store.sqlite.clone(),
+                    session.id.to_string(),
+                    attachment,
+                ),
+                crate::session::Holder::Caller,
+            )
+            .unwrap(),
+        )
+    }
+}
+
 fn listed_session(store: &crate::store::SharedStore, id: &str) -> super::SessionRecord {
-    let capacity = crate::provider_account::LaunchCapacity::read(&store.sqlite).unwrap();
-    super::listed(store, id, &capacity).unwrap().unwrap()
+    super::listed(store, id).unwrap().unwrap()
 }
 
 #[test]
@@ -187,7 +267,7 @@ fn session_metadata_keeps_unknown_position_visible() {
         wave_name: Some("Infrastructure".into()),
         task_identifier: Some("INF-123".into()),
     };
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
@@ -203,14 +283,14 @@ fn session_metadata_keeps_unknown_position_visible() {
     ));
     summary.graph_step_latest = true;
     assert!(matches!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Step {
             occurrence: super::SessionGraphOccurrence::Current,
             ..
         }
     ));
     summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert!(matches!(
         row.graph_membership,
         super::SessionGraphMembership::Step {
@@ -225,16 +305,16 @@ fn session_metadata_keeps_unknown_position_visible() {
     );
     summary.graph_lf_process_id = None;
     assert!(matches!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Unknown { .. }
     ));
     summary.independent = true;
     assert_eq!(
-        super::summary_surface(&summary, &LaunchCapacity::default()).graph_membership,
+        super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
     summary.ready_summary = Some("Exact retained feedback".into());
-    let row = super::summary_surface(&summary, &LaunchCapacity::default());
+    let row = super::summary_surface(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
     assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
@@ -265,13 +345,12 @@ fn session_metadata_keeps_unknown_position_visible() {
     }
 }
 
-use crate::provider_account::LaunchCapacity;
 use crate::store::SharedStore;
 
 use super::human_session_argv;
 use crate::session::LfSession;
 use crate::session::SessionOpenIntent;
-pub use crate::test_support::human_session::{Logins, SessionHome};
+pub use crate::test_support::human_session::SessionHome;
 
 use loopflow_storage::work::task::TaskId;
 
@@ -656,127 +735,6 @@ fn session_page_preserves_the_continuation_and_required_entries() {
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
     assert!(serde_json::from_str::<super::SessionPage>(r#"{"next":null}"#).is_err());
-}
-
-fn an_hour_from_now() -> Option<i64> {
-    Some(time::OffsetDateTime::now_utc().unix_timestamp() + 3_600)
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn selectors_read_the_login_a_running_codex_kept() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let provider = crate::provider_auth::Provider::Codex;
-    let work = logins.store_login(provider, "work", an_hour_from_now());
-    let spare = logins.store_login(provider, "spare", None);
-    let on_work = logins.codex_session("on-work", None, &work);
-    let on_spare = logins.codex_session("on-spare", None, &spare);
-    logins.codex_session("stopped", None, &work);
-    let _agents = [logins.run(&on_work), logins.run(&on_spare)];
-
-    // work@ ran out and the next launch moved the home to spare@.
-    logins.sign_in("spare");
-    assert_eq!(logins.selected(true, None).await.unwrap(), ["on-work"]);
-    assert_eq!(
-        logins.selected(false, Some("work@")).await.unwrap(),
-        ["on-work"]
-    );
-    assert_eq!(
-        logins.selected(false, Some("spare@")).await.unwrap(),
-        ["on-spare", "stopped"]
-    );
-
-    // The home's login is out: a running Codex on spare@ keeps working, and a
-    // stopped Session would launch on the home.
-    logins.sign_in("work");
-    assert_eq!(
-        logins.selected(true, None).await.unwrap(),
-        ["on-work", "stopped"]
-    );
-    assert_eq!(
-        logins.selected(false, Some("spare@")).await.unwrap(),
-        ["on-spare"]
-    );
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn on_spells_a_login_as_every_account_command_does() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let provider = crate::provider_auth::Provider::Codex;
-    let work = logins.store_login(provider, "work", None);
-    logins.store_login(provider, "worker", None);
-    logins.store_login(provider, "codex", None);
-    logins.sign_in("work");
-    logins.codex_session("fable", Some("fable"), &work);
-    logins.codex_session("plain", None, &work);
-    let both = ["fable", "plain"];
-
-    for spelling in [
-        "work@",
-        "codex=work@",
-        "work@example.com",
-        "WORK@EXAMPLE.COM",
-    ] {
-        assert_eq!(
-            logins.selected(false, Some(spelling)).await.unwrap(),
-            both,
-            "{spelling}"
-        );
-    }
-    assert!(logins
-        .selected(false, Some("worker@"))
-        .await
-        .unwrap()
-        .is_empty());
-
-    // A harness name keeps its meaning, even beside a login that starts with it.
-    assert_eq!(logins.selected(false, Some("codex")).await.unwrap(), both);
-    assert_eq!(logins.selected(false, Some("CODEX")).await.unwrap(), both);
-    assert_eq!(
-        logins.selected(false, Some("codex:fable")).await.unwrap(),
-        ["fable"]
-    );
-    assert!(logins
-        .selected(false, Some("claude"))
-        .await
-        .unwrap()
-        .is_empty());
-
-    let unknown = logins.selected(false, Some("nobody@")).await.unwrap_err();
-    assert!(unknown.to_string().contains("no stored login matches"));
-    let ambiguous = logins.selected(false, Some("wor")).await.unwrap_err();
-    assert!(ambiguous.to_string().contains("could be"), "{ambiguous}");
-
-    logins.store_login(crate::provider_auth::Provider::Claude, "work", None);
-    let shared = logins.selected(false, Some("work@")).await.unwrap_err();
-    assert!(shared.to_string().contains("--on claude=work@"), "{shared}");
-    assert!(logins
-        .selected(false, Some("claude=work@"))
-        .await
-        .unwrap()
-        .is_empty());
-    assert_eq!(
-        logins.selected(false, Some("codex=work@")).await.unwrap(),
-        both
-    );
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn moving_an_unknown_login_says_so_instead_of_moving_nothing() {
-    let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let filter = crate::session::SessionFilter {
-        on: Some("nobody@".into()),
-        ..Default::default()
-    };
-    let error = super::moves_bulk::move_sessions(&logins.store, &filter, "claude:opus")
-        .await
-        .unwrap_err();
-    assert!(error.to_string().contains("no stored login matches"));
 }
 
 #[test]
@@ -1243,8 +1201,9 @@ fn opening_any_primary_without_a_request_only_reads() {
         loopflow_definitions::builtins::get_builtin_skill("wave-session").unwrap(),
     ] {
         let skill = skill.split_whitespace().collect::<Vec<_>>().join(" ");
-        assert!(skill.contains("request is a reading pass"));
-        assert!(skill.contains("Steers delivered with that turn are recorded direction"));
+        assert!(skill.contains("A first turn without a request"));
+        assert!(skill.contains("with no Work changed"));
+        assert!(skill.contains("report them, and act when asked here"));
         assert!(!skill.contains("without waiting for a greeting"));
     }
 }
@@ -1493,9 +1452,8 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
 #[tokio::test]
 async fn a_held_task_conversation_without_a_view_offers_attach() {
     let _lock = crate::journal::test_env_lock();
-    let logins = Logins::new().await;
-    let work = logins.store_login(crate::provider_auth::Provider::Codex, "work", None);
-    let session = logins.codex_session("held", None, &work);
+    let logins = LiveSessionFixture::new().await;
+    let session = logins.codex_session("held", None);
     let _agent = logins.run(&session);
     let task = TaskId::new();
     let created = logins

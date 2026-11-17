@@ -35,6 +35,8 @@ pub enum Target {
     Skill(Skill),
     Graph(GraphDefinition),
     Xor(XorDef),
+    /// A block that runs again while its last step, a skill, says iterate.
+    Loop(Vec<Step>),
 }
 
 impl Target {
@@ -45,6 +47,7 @@ impl Target {
             Self::Command(command) => command.display_name(),
             Self::Skill(skill) => skill.name.clone(),
             Self::Xor(_) => "xor".to_string(),
+            Self::Loop(_) => "loop".to_string(),
         };
         match self {
             Self::Graph(graph) => graph,

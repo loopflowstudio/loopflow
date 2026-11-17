@@ -28,8 +28,8 @@
           "tokens": 35000,
           "count": 14,
           "authors": [],
-          "budget_tokens": 16000,
-          "over_budget": true
+          "budget_tokens": null,
+          "over_budget": false
         },
         {
           "source": "goal",
@@ -198,7 +198,7 @@
       "count": 14,
       "authors": [],
       "budget_tokens": null,
-      "over_budget": true
+      "over_budget": false
     },
     {
       "source": "goal",

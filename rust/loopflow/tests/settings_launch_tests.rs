@@ -1,9 +1,5 @@
 use crate::support;
-use loopflow_execution::store::{
-    CredentialState, ProviderAccount, ProviderAccountId, RoutingState,
-};
 use loopflow_test_support::TestRepo;
-use sha2::{Digest, Sha256};
 use std::fs;
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -51,7 +47,7 @@ fn bad_config_lines_do_not_stop_graph_commands() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(&[], Some(home.path()));
-    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\n";
+    let preferences = "# default_agent: claude:fable\ndefault_agent: codex\nfuture: {enabled: true}\nbroken: [do-not-print-this-value\nclaude: {model: opus, future: true}\nyolo: perhaps\nskills: {implement: {agent: 'claude:fable', future: true}}\naccount: {claude: [saved]}\naccounts: {claude: {saved: {login_email: saved@example.com}}}\n";
     fs::write(home.path().join("config.yaml"), preferences).unwrap();
     for args in [
         vec!["--context", "graph", "auto"],
@@ -77,6 +73,8 @@ fn bad_config_lines_do_not_stop_graph_commands() {
             "{warnings}"
         );
         assert!(!warnings.contains("do-not-print-this-value"), "{warnings}");
+        // The released lf still reads its account preferences from this file.
+        assert!(!warnings.contains("skipping account"), "{warnings}");
         if args[0] == "config" {
             let settings: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
             assert_eq!(settings[0]["settings"]["agent"]["value"], "claude:fable");
@@ -151,22 +149,16 @@ fn explicit_graph_selection_stays_with_steps_and_child_commands_choose_their_own
             (
                 "claude",
                 r#"#!/usr/bin/python3
-import glob
 import json
 import os
-import shutil
 import subprocess
 import sys
 
 if '--version' in sys.argv:
     print('fixture')
     sys.exit(0)
-# The login the shared home carries: the stand-in Keychain on macOS, else its file.
-stores = glob.glob(os.path.join(os.path.dirname(shutil.which('security')), 'keychain', '*'))
-stores.append(os.path.join(os.environ['CLAUDE_CONFIG_DIR'], '.credentials.json'))
-login = next((text for text in (open(path).read() for path in stores if os.path.isfile(path)) if 'claudeAiOauth' in text), None)
 with open(os.path.join(os.environ['LF_HOME'], 'launches.jsonl'), 'a') as launches:
-    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR'), 'claude_login': login}) + '\n')
+    launches.write(json.dumps({'args': sys.argv[1:], 'claude_home': os.environ.get('CLAUDE_CONFIG_DIR')}) + '\n')
 message = json.loads(sys.stdin.readline())
 message['session_id'] = 'agent-fixture'
 print(json.dumps(message), flush=True)
@@ -192,8 +184,8 @@ for line in sys.stdin:
         "agent-proof",
         &repo.head_sha(),
     );
-    connect_fixture_claude(home.path(), &registered.store);
-    support::managed_codex_account(home.path());
+
+    support::seed_store(home.path());
 
     for (path, content) in [
         (".lf/skills/first.md", "---\nagent: codex\n---\nFirst step."),
@@ -300,19 +292,12 @@ for line in sys.stdin:
             args.windows(2).any(|pair| pair == ["--model", "sonnet"]),
             "{launch}"
         );
-        // Every step ran in the shared home, signed in as the routed account.
+        // Every step uses the configured native home.
         assert_eq!(
             received["claude_home"].as_str().map(Path::new),
             std::env::var_os("CLAUDE_CONFIG_DIR")
                 .as_deref()
                 .map(Path::new)
-        );
-        assert!(
-            received["claude_login"]
-                .as_str()
-                .unwrap()
-                .contains("fixture-only"),
-            "{launch}"
         );
     }
 
@@ -351,49 +336,6 @@ for line in sys.stdin:
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert_eq!(models, ["haiku", "sonnet"]);
-}
-
-fn connect_fixture_claude(home: &Path, store: &loopflow_execution::store::Store) {
-    let name = "fixture";
-    let account_home = home.join("accounts/claude").join(name);
-    fs::create_dir_all(&account_home).unwrap();
-    let account_home = account_home.canonicalize().unwrap();
-    let credential =
-        r#"{"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000}}"#;
-    fs::write(account_home.join(".credentials.json"), credential).unwrap();
-    tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(
-            store.upsert_provider_account(&ProviderAccount {
-                provider: "claude".into(),
-                account_id: ProviderAccountId::parse(name).unwrap(),
-                home: Some(account_home),
-                login_email: Some(
-                    loopflow_execution::profile::EmailAddress::parse(&format!(
-                        "{name}@example.com"
-                    ))
-                    .unwrap(),
-                ),
-                observed_email: Some(format!("{name}@example.com")),
-                observed_subject: Some(name.into()),
-                observed_credential_digest: Some(format!(
-                    "{:x}",
-                    Sha256::digest(credential.as_bytes())
-                )),
-                observed_plan: None,
-                credential_state: CredentialState::Connected,
-                routing_state: RoutingState::Automatic,
-                plan: None,
-                paid_through: None,
-                utilization_percent: None,
-                cooldown_until: None,
-                cooldown_reason: None,
-                last_selected_at: None,
-                created_at: 1,
-                updated_at: 1,
-            }),
-        )
-        .unwrap();
 }
 
 // Record the preferences and documents actually delivered across the provider
@@ -520,7 +462,7 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
             &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
         ))
         .unwrap();
-    connect_fixture_claude(home.path(), &store);
+
     for (path, content) in [
         (".lf/config.yaml", "agent: claude:repo\nyolo: true\nchrome: true\ndocs: [repo.txt]\ncontext: [context.txt]\ndiff: false\ndiff_files: false\n"),
         (".lf/skills/probe.md", "---\nagent: claude:skill\ndocs: [skill.txt]\n---\nReport the selected settings."),
@@ -754,13 +696,8 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
         &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow_execution::store::open_ephemeral_store(
-            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(".lf/config.yaml", "diff: false\ndiff_files: false\n");
     repo.create_file(
         ".lf/skills/probe.md",
@@ -963,18 +900,13 @@ with (home / 'session-children.jsonl').open('a') as output:
         .output()
         .unwrap();
     assert!(pushed.status.success());
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow_execution::store::open_ephemeral_store(
-            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
+    support::seed_store(home.path());
     let _checkouts = TaskCheckouts {
         home: home.path(),
         repo: repo.path(),
     };
-    connect_fixture_claude(home.path(), &store);
-    support::managed_codex_account(home.path());
+
+    support::seed_store(home.path());
     write_preferences(
         home.path(),
         "agent: claude\nskills: {implement: {agent: codex}}\n",
@@ -1082,13 +1014,8 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
         &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
         Some(home.path()),
     );
-    let store = tokio::runtime::Runtime::new()
-        .unwrap()
-        .block_on(loopflow_execution::store::open_ephemeral_store(
-            &loopflow_execution::store::StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    connect_fixture_claude(home.path(), &store);
+    support::seed_store(home.path());
+
     repo.create_file(
         ".lf/config.yaml",
         "agent: codex\ndiff: false\ndiff_files: false\n",
@@ -1099,7 +1026,7 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     );
     repo.create_file(
         ".lf/graphs/inner.yaml",
-        "- step: {name: probe, id: work, agent: codex}\n- loop: work\n",
+        "- loop:\n    - step: {name: probe, id: work, agent: codex}\n    - loop-or-next\n",
     );
     repo.create_file(".lf/graphs/routed.yaml", "- xor:\n    paths:\n      selected:\n        graph: inner\n        description: Run and repeat\n      skipped:\n        description: Skip\n");
     success(command(
@@ -1320,7 +1247,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let home = tempfile::tempdir().unwrap();
     fs::write(
         home.path().join("config.yaml"),
-        "default_agent: codex\nmachine: workstation\naccount:\n  claude: [work]\ntheme: light\nuser:\n  name: Test User\n",
+        "default_agent: codex\nmachine: workstation\nauth_browsers: {linear: {default: [Work]}}\ntheme: light\nuser:\n  name: Test User\n",
     )
     .unwrap();
     repo.create_file(".lf/skills/config-table-proof.md", "Inspect settings.\n");
@@ -1356,7 +1283,7 @@ fn configuration_table_keeps_defaults_and_candidate_details_opt_in() {
     let machines = &table[positions[1]..positions[2]];
     assert!(machines.contains("machine.tasks") && machines.contains("workstation"));
     let accounts = &table[positions[2]..positions[3]];
-    assert!(accounts.contains("account.claude") && accounts.contains("work"));
+    assert!(accounts.contains("auth_browsers") && accounts.contains("Work"));
     assert!(table.contains("SETTING") && table.contains("VALUE") && table.contains("FROM"));
     assert!(
         table.contains("claude") && table.contains("Shared project · skill config-table-proof")

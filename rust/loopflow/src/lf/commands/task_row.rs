@@ -61,6 +61,10 @@ pub struct TaskDetail {
     pub sessions: Vec<SessionFacts>,
     pub graph_processes: Vec<TaskGraphRow>,
     pub comments: Option<TaskThread>,
+    /// What the Task's run came to, written when it completed or was
+    /// abandoned; `null` while it never has.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
 }
 
 /// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.

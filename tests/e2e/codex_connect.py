@@ -232,9 +232,8 @@ def main() -> None:
     parser.add_argument("--launch", action="store_true")
     parser.add_argument("--planning-peers", action="store_true")
     parser.add_argument("--graph-decision-retry", choices=("missing", "replace"))
-    parser.add_argument("--shared-provider-home", action="store_true")
     args = parser.parse_args()
-    args.launch = args.launch or args.shared_provider_home or args.planning_peers
+    args.launch = args.launch or args.planning_peers
     args.output.mkdir(parents=True, exist_ok=True)
     server = Responses()
     if not args.launch:
@@ -249,9 +248,7 @@ def main() -> None:
     try:
         with tempfile.TemporaryDirectory(prefix="lf-connect-", dir="/tmp") as directory:
             root = Path(directory)
-            # The shared-home proof uses the provider's default home: nothing
-            # may need a home override to find a Loopflow conversation.
-            home = root / (".codex" if args.shared_provider_home else "codex")
+            home = root / "codex"
             work = root / "work"
             home.mkdir()
             work.mkdir()
@@ -276,8 +273,6 @@ enabled = false
             # Never inherit credentials, execution authority, or the real provider Machine.
             env = {key: os.environ[key] for key in ("PATH", "TMPDIR", "LANG") if key in os.environ}
             env.update(HOME=str(root), CODEX_HOME=str(home), LF_HOME=str(root / "lf"))
-            if args.shared_provider_home:
-                del env["CODEX_HOME"]
             if args.launch:
                 # Pin bytes: another contributor may build the source path while
                 # this private-Machine proof is running.
@@ -308,11 +303,6 @@ enabled = false
                     + shlex.join([str(binary), "session", "list", "--all", "--json"])
                 )
                 try:
-                    if args.shared_provider_home:
-                        _shared_provider_home_contract(
-                            binary, args.codex, root, work, env, server, results
-                        )
-                        return
                     if args.planning_peers:
                         server.hold_seconds = 90
                         results["planning_peers"] = _live_attachment_contract(
@@ -810,31 +800,11 @@ def _live_attachment_contract(
         }
         profile = Path(env["CODEX_HOME"])
         (profile / "auth.json").write_text(_login("peer-fixture"))
-        now = int(time.time())
         with sqlite3.connect(_database(env)) as database:
-            database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,"
-                "credential_state,created_at,updated_at) "
-                "VALUES('codex','peer-fixture',?,'connected',?,?)",
-                (str(profile), now, now),
-            )
             database.execute(
                 "INSERT INTO task_workflows(task_id,graph,node,updated_at) VALUES(?,?,'review',1)",
                 (task, json.dumps(graph)),
             )
-        declared = _command(
-            [
-                str(binary),
-                "set",
-                "--global",
-                "accounts.codex.peer-fixture",
-                "{login_email: peer-fixture@example.com, routing_state: automatic}",
-            ],
-            work,
-            env,
-            timeout=30,
-        )
-        assert declared.returncode == 0, declared.stderr
     _command([str(binary), "session", "list", "--json"], work, env, timeout=15)
     with sqlite3.connect(_database(env)) as database:
         existing = {row[0] for row in database.execute("SELECT id FROM agent_sessions")}
@@ -1029,282 +999,6 @@ def _login(name: str, refresh: str = "issued") -> str:
     return json.dumps({"tokens": tokens, "last_refresh": last_refresh})
 
 
-def _shared_provider_home_contract(
-    binary: Path,
-    codex: Path,
-    root: Path,
-    work: Path,
-    env: dict[str, str],
-    server: Responses,
-    results: dict,
-) -> None:
-    """Loopflow and plain Codex share one home, signed in as one stored account."""
-    _init_repo(work, env)
-    native = root / ".codex"
-    profiles = Path(env["LF_HOME"]) / "accounts" / "codex"
-    record = root / "launches.jsonl"
-    record.touch()
-    env["LF_PROBE_LAUNCHES"] = str(record)
-    server.command = "true"
-
-    def lf(*args: str, timeout: int = 90) -> str:
-        done = _command([str(binary), *args], work, env, timeout)
-        assert done.returncode == 0, (args, done.stdout, done.stderr)
-        return done.stdout
-
-    def use(name: str) -> None:
-        lf("account", "codex", "use", f"{name}@example.com")
-
-    def rows(query: str, *values: object) -> list[tuple]:
-        with sqlite3.connect(_database(env)) as database:
-            return database.execute(query, values).fetchall()
-
-    def login(home: Path) -> str:
-        token = json.loads((home / "auth.json").read_text())["tokens"]["id_token"]
-        claims = token.split(".")[1]
-        return json.loads(base64.urlsafe_b64decode(claims + "=" * (-len(claims) % 4)))["email"]
-
-    def launches() -> list[dict]:
-        return [json.loads(line) for line in record.read_text().splitlines()]
-
-    def conversations() -> dict[str, str]:
-        """Provider conversation id → Session id, as Loopflow recorded them."""
-        return dict(
-            rows(
-                "SELECT json_extract(payload,'$.evidence.provider_session_id'),session_id "
-                "FROM session_events WHERE kind='observed' "
-                "AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL"
-            )
-        )
-
-    def rollout(home: Path, conversation: str) -> bool:
-        return any(home.glob(f"sessions/*/*/*/rollout-*-{conversation}.jsonl"))
-
-    def converse(*flags: str, prompt: str = "say hi") -> tuple[str, list[dict]]:
-        """Run one headless conversation; its provider id and provider launches."""
-        known, before = conversations(), len(launches())
-        lf(*flags, "--batch", "--agent", "codex", ":", prompt)
-        started = [id for id in conversations() if id not in known]
-        assert len(started) == 1, started
-        agent_processes = [
-            launch for launch in launches()[before:] if "app-server" in launch["argv"]
-        ]
-        assert agent_processes, "the conversation launched no provider process"
-        return started[0], agent_processes
-
-    def shared(agent_processes: list[dict]) -> bool:
-        return all(launch[name] is None for launch in agent_processes for name in PROVIDER_ENV)
-
-    def switches() -> int:
-        return rows("SELECT COUNT(*) FROM provider_account_switches")[0][0]
-
-    lf("session", "list", "--json")
-    now = int(time.time())
-    with sqlite3.connect(_database(env)) as database:
-        for name in ("first", "second"):
-            profile = profiles / name
-            profile.mkdir(parents=True)
-            (profile / "auth.json").write_text(_login(name))
-            database.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,"
-                "credential_state,created_at,updated_at) "
-                "VALUES('codex',?,?,'connected',?,?)",
-                (name, str(profile), now, now),
-            )
-    for name in ("first", "second"):
-        lf(
-            "set",
-            "--global",
-            f"accounts.codex.{name}",
-            f"{{login_email: {name}@example.com, routing_state: automatic}}",
-        )
-
-    # A native login Loopflow has never seen is kept, not overwritten.
-    stranger = _login("stranger")
-    (native / "auth.json").write_text(stranger)
-    use("first")
-    assert login(native) == "first@example.com"
-    kept = [
-        account
-        for account in json.loads(lf("account", "codex", "--cached", "--json"))["accounts"]
-        if account["scope"] == "managed" and account["login"] == "stranger@example.com"
-    ]
-    assert len(kept) == 1 and kept[0]["routing"] == "explicit_only", kept
-    kept_home = rows(
-        "SELECT home FROM provider_accounts WHERE provider='codex' AND account_id=?",
-        kept[0]["account_id"],
-    )[0][0]
-    assert (Path(kept_home) / "auth.json").read_text() == stranger
-    results["unknown_native_login_kept"] = kept_home
-
-    # A launch naming no account, or the active one, changes nothing; neither
-    # hands the provider a home or a credential.
-    credential, switched = (native / "auth.json").read_bytes(), switches()
-    ours, agent_processes = converse()
-    assert shared(agent_processes), agent_processes
-    _, agent_processes = converse("--account", "codex=first@example.com")
-    assert shared(agent_processes), agent_processes
-    assert (native / "auth.json").read_bytes() == credential and switches() == switched
-    assert rollout(native, ours), "the conversation is not in the provider's own home"
-    results["shared_conversation"] = ours
-
-    # A provider's id names the same Session as Loopflow's own.
-    def session(id: str) -> dict:
-        return json.loads(lf("session", "resume", id, "--prepare", "--json"))
-
-    def history(id: str) -> list:
-        return json.loads(lf("session", "history", id, "--json"))
-
-    assert history(ours) and history(ours) == history(conversations()[ours])
-
-    @contextlib.contextmanager
-    def plain_codex(home: Path | None = None):
-        """Codex as a person runs it: no Loopflow, and no home unless given."""
-        plain = {key: value for key, value in env.items() if not key.startswith("LF_")}
-        if home:
-            plain["CODEX_HOME"] = str(home)
-        endpoint = root / f"plain-{len(list(root.glob('plain-*.log')))}.sock"
-        with endpoint.with_suffix(".log").open("w") as log:
-            agent_process = subprocess.Popen(
-                [str(codex), "app-server", "--listen", f"unix://{endpoint}"],
-                cwd=work,
-                env=plain,
-                stdin=subprocess.DEVNULL,
-                stdout=log,
-                stderr=log,
-                start_new_session=True,
-            )
-            client = None
-            try:
-                deadline = time.monotonic() + 10
-                while (
-                    not endpoint.exists()
-                    and agent_process.poll() is None
-                    and time.monotonic() < deadline
-                ):
-                    time.sleep(0.05)
-                client = Client(endpoint)
-                yield client
-            finally:
-                if client:
-                    client.close()
-                os.killpg(agent_process.pid, signal.SIGTERM)
-                agent_process.wait(timeout=10)
-
-    def start(client: Client) -> str:
-        thread = client.call(
-            "thread/start",
-            {
-                "cwd": str(work),
-                "model": "gpt-5.4",
-                "modelProvider": "fixture",
-                "approvalPolicy": "never",
-                "sandbox": "danger-full-access",
-            },
-        )["thread"]["id"]
-        client.wait_turn(client.start_turn(thread))
-        return thread
-
-    # Batch exit closes its provider process: plain Codex can immediately list and
-    # resume the saved conversation without fixture cleanup.
-    with plain_codex() as client:
-        assert ours in json.dumps(client.call("thread/list", {}))
-        assert client.call("thread/resume", {"threadId": ours})["thread"]["id"] == ours
-        theirs = start(client)
-    assert rollout(native, theirs) and theirs not in conversations()
-    results["plain_codex_conversation"] = theirs
-
-    # The id plain Codex gave its own conversation admits a Session for it,
-    # attributed to no Task, and opens it in the native home.
-    def resumed(id: str) -> dict:
-        before = len(launches())
-        lf("session", "resume", id)
-        resumes = [launch for launch in launches()[before:] if "resume" in launch["argv"]]
-        assert len(resumes) == 1 and resumes[0]["argv"][-1] == id, resumes
-        return resumes[0]
-
-    admitted = session(theirs)
-    assert admitted["task_ids"] == [] and admitted["work"] is None, admitted
-    assert session(theirs)["id"] == admitted["id"] == session(admitted["id"])["id"]
-    assert history(theirs) == history(admitted["id"])
-    lf("session", "rename", theirs, "Plain", "conversation")
-    assert session(admitted["id"])["title"] == "Plain conversation"
-    assert shared([resumed(theirs)]) and login(native) == "first@example.com"
-    unknown = _command(
-        [str(binary), "session", "resume", ours[:-4] + "0000", "--json"], work, env, 30
-    )
-    assert unknown.returncode != 0 and "was not found" in unknown.stderr, unknown
-    results["provider_ids_name_sessions"] = [conversations()[ours], admitted["id"]]
-
-    # A → B → A: the token the provider rotated while A was active survives.
-    rotated = _login("first", refresh="rotated")
-    (native / "auth.json").write_text(rotated)
-    use("second")
-    assert login(native) == "second@example.com"
-    assert (profiles / "first" / "auth.json").read_text() == rotated
-    moved, agent_processes = converse()
-    assert shared(agent_processes) and rollout(native, moved)
-    use("first")
-    assert (native / "auth.json").read_text() == rotated
-    results["rotated_login_survived"] = True
-
-    # A switch leaves a running shared agent's process alone, and Codex holds a
-    # login for the life of the process. Codex may still fail the turn in
-    # flight; the headless run resumes it.
-    server.held.clear()
-    server.release.clear()
-    known, before = conversations(), len(launches())
-    log = tempfile.TemporaryFile(mode="w+t")
-    running = subprocess.Popen(
-        [str(binary), "--batch", "--agent", "codex", ":", "held conversation"],
-        stdin=subprocess.DEVNULL,
-        cwd=work,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=log,
-        text=True,
-    )
-    try:
-        if not server.held.wait(30):
-            running.terminate()
-            stdout, stderr = running.communicate(timeout=10)
-            log.seek(0)
-            raise AssertionError(
-                f"the running agent never reached the provider: {stdout}\n{log.read()}"
-            )
-
-        def alive() -> set[int]:
-            pids = {
-                json.loads(record.read_text())[0]
-                for record in Path(env["LF_PROBE_AGENT_PROCESSES"]).glob("*.json")
-            }
-            return {
-                pid
-                for pid in pids
-                if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0
-            }
-
-        agent_processes = alive()
-        assert agent_processes, "the running agent has no provider process"
-        live = [id for id in conversations() if id not in known]
-        assert len(live) == 1 and session(live[0])["id"] == conversations()[live[0]], live
-        use("second")
-        assert login(native) == "second@example.com"
-        assert alive() == agent_processes, "a provider process did not survive the switch"
-        server.release.set()
-        stdout, stderr = running.communicate(timeout=60)
-        log.seek(0)
-        assert running.returncode == 0, (stdout, log.read())
-    finally:
-        server.release.set()
-        if running.poll() is None:
-            running.kill()
-            running.communicate()
-        log.close()
-    assert shared([launch for launch in launches()[before:] if "app-server" in launch["argv"]])
-    results["running_agent_survived_switch"] = True
-
-
 def _command(args: list[str], work: Path, env: dict[str, str], timeout: int):
     with subprocess.Popen(
         args, cwd=work, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
@@ -1359,7 +1053,7 @@ def _graph_decision_retry_contract(
         (work / ".lf" / directory).mkdir(parents=True, exist_ok=True)
     (work / ".lf/skills/native-proof.md").write_text("Run the fixture command.")
     (work / ".lf/graphs/native-proof.yaml").write_text(
-        "- step:\n    id: work\n    name: native-proof\n- loop: work\n  step: native-proof\n"
+        "- loop:\n    - step:\n        id: work\n        name: native-proof\n    - native-proof\n"
     )
     server.fail_request = 4
     server.invalid_decision_output = not replace

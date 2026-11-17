@@ -47,7 +47,6 @@ pub struct AgentProcess {
     pub cwd: Option<String>,
     pub started_at: i64,
     pub completed_at: Option<i64>,
-    pub outcome: Option<String>,
     pub exit_code: Option<i32>,
     pub signal: Option<String>,
     pub error: Option<String>,
@@ -132,10 +131,12 @@ impl ProcessEntry {
         }
     }
 
+    /// How an lf process ended. A provider process records its exit code and
+    /// signal, and no outcome.
     pub fn outcome(&self) -> Option<&str> {
         match self {
             Self::Lf(process) => process.outcome.as_deref(),
-            Self::Agent(process) => process.outcome.as_deref(),
+            Self::Agent(_) => None,
         }
     }
 
@@ -283,9 +284,6 @@ pub enum Departure {
     /// Another terminal on this Machine, on the same login, named as people
     /// see it (`Desktop`, `tmux %3`, `ttys004`) when the mover knew.
     Terminal { to: Option<String> },
-    /// This Machine, relaunched on another login: a running Codex keeps the
-    /// login it started with, so naming another one restarts it.
-    Account { account: crate::ProviderAccountId },
     Machine {
         machine: loopflow_model::durable::MachineId,
         task: Option<TaskId>,

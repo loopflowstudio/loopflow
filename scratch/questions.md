@@ -162,3 +162,9 @@ find strays; it cannot be the only source of "which run is this".
   the Session id kept. Neither was answered.
 - `lf history list` is untouched here; whether it goes is decided with the
   Process table in the other Task.
+- Turn grouping (concept review, headless): `usage.turns` takes Task, Wave,
+  skill and Graph step as frozen at dispatch, because the code already
+  freezes a turn's origin there (`record_session_turn_origin`), not "at turn
+  end" as the direction said; the two differ only for a bind made mid-turn.
+  Still open: whether reports default to these frozen values or follow later
+  binds through the Session id.

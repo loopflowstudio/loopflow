@@ -1,10 +1,8 @@
 # LOO-936: record only what the product reads, history apart from state
 
-Status: 2026-11-16, slices 1–2 committed; slice 3 code committed (`273e075a4b`
-and the two WIP commits before it); integration fixtures in `rust/loopflow/tests`
-are being repointed; slices 4–5 not started. See "Slice 3 as built".
-Old `provider_session_observed`/`provider_account_selected` rows still sit in
-live stores (tests seed them); slice 5's move pass deletes them. The inventory below is the review a person reads before
+Status: 2026-11-16, slices 1–3 committed (through `be4fbbe3d7`); Process rows
+left to their own Task ("Direction after review"); the turn table
+("Turns, settled in concept review") and slice 5 remain. The inventory below is the review a person reads before
 code changes (brief: "Start with an inventory a person reviews before code
 changes").
 
@@ -598,3 +596,71 @@ into `loopflow.db`.
 
 **Demo adds:**
 `sqlite3 -readonly ~/.lf/usage.db "select skill, sum(output_tokens), sum(ended_at-started_at) from turns group by 1 order by 2 desc limit 10"`
+
+## Turns, settled in concept review (2026-11-16, headless)
+
+The direction above ("one row per turn ... written once when the turn ends")
+meets the slice 3 code at one point it did not account for: a turn is read
+while it runs. `pending_inputs` (running/finished on the Session list and
+Desktop's `SessionHistory`), `input_answered_turn` (Graph routing),
+`session_turn_completed`/`session_completions` (replay guard) and Process Task
+membership (`processes.rs:497`) read the `started` row, and
+`record_session_turn_origin` freezes the turn's Task, Wave, input and Process
+at dispatch on purpose ("Freeze the request's attribution while its attachment
+still owns dispatch"). So:
+
+- **A turn is one row in `usage.turns`, inserted when the turn starts and
+  completed in place when it ends.** The `started`, `usage` and `completed`
+  history kinds are not written anywhere else; `history.session_history`
+  keeps only `observed` rows (its `kind` CHECK narrows to that under
+  `user_version` 2). No reader self-joins three rows into a turn again.
+- **Columns.** Key: Session, provider thread, provider turn (unique). At
+  start: input (`captured_event`), lf and agent Process ids, Task, Wave,
+  Project, repository, skill, Graph and step, `started_at`. At end:
+  `ended_at`, status, provider and model as reported, the token counts
+  (input, cached input, cache write, output, reasoning, context window) and
+  the turn context `completed.context` holds today (first and peak request
+  tokens, tool results, tool output tokens, compactions, compaction tokens),
+  each its own column. Grouping values are the ones frozen at dispatch, not
+  at turn end; they differ only for a bind made mid-turn.
+- **Usage counts are resolved before the write.** `native_usage` turns
+  Codex's thread-cumulative `total`/`last` and OpenCode message readings into
+  one turn's `TurnUsage`; the turn row stores that result, so a report is a
+  `SUM` with no counter logic. A turn whose usage arrives after it completed
+  (replayed snapshot) updates the same row once; a second, different reading
+  is a gap that keeps the first, as receipts do now.
+- **One writer, two files.** `history.rs`'s `HistoryFile` (own connection,
+  read-only `loopflow.db`, `RecordingGap` on failure) is opened once per file
+  with that file's name and schema; `usage.db` gets no second writer type.
+  Every store connection attaches `usage.db` read-only as `usage`, with the
+  same empty in-memory stand-in when it cannot.
+- **Readers repointed:** `pending_inputs` and the summary fragments in
+  `sessions.rs:1100–1200`, `recorded_turn_end`, `session_turn_completed`,
+  `session_completions`, `input_turn_context`, `input_answered_turn`,
+  `session_turn_facts`, `read_history`'s turn arms, `native_usage`'s callers
+  (Telemetry, Task history, `lf usage`), `processes.rs:497` and `:2475`.
+- **`lf session history <id>`** shows the Session's turns (from `usage.turns`)
+  and its observations (from `history.session_history`) as two lists; the
+  observation feed stays append-only by `seq`, and a turn is a record that
+  changes once, so it is not a feed entry. `--json` changes shape on purpose
+  (`turns`, `events`); Desktop's `SessionHistory` DTO keeps its shape and is
+  built from turns.
+- **Wake-ups.** `usage.db` has its own revision row; `StoreRevisions` reads
+  it as `turns`. `changed()` ignores it except for reads that name `usage.*`
+  (Session list running state, Session History, Telemetry, Task history),
+  the same rule as `history`.
+- **Existing rows and skew are one pass.** The backfill that builds turn rows
+  from `started`/`usage`/`completed` (paired per Session, thread and turn,
+  grouping from the `started` row's origin, model where known) reads both
+  `history.session_history` and main `session_events`, then deletes what it
+  converted. Run by slice 5's move pass, it also carries the rows a released
+  lf keeps writing into `loopflow.db` after install.
+- **Retention:** no pass deletes `usage.turns` rows (open in `questions.md`:
+  indefinitely or a long window; the choice is one constant later).
+
+Tests to show it: a turn is readable as running between start and end and
+from `usage.turns` only (`history.session_history` has no turn row); a Codex
+turn's cumulative reading is stored as its own delta; the backfill converts a
+seeded Session's three rows into one turn and `pending_inputs` reads the same
+before and after; a locked `usage.db` makes a gap, not a failed turn.
+

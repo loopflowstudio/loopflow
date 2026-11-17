@@ -170,11 +170,9 @@ kind (local, remote) on `start_task`; the report splits by it.
 - Network steps inside creation's checkout: `fetch_task_refs` and the base fetch
   in `resolve_upstream_base` for a new branch, `assert_assignee` inside
   `prepare_task` on this path.
-- Desktop: the sheet's `creating`/"Starting…" wait; post-reply `plan.list`
-  lookups in `openTaskLink`/`openLinkedTask` for a created Task;
-  `prepareTaskSession` and the `startOffer` `lf session resume --explain`
-  fallback for it; `Perf.retarget(.startTask, from: "new-task", …)` (key by
-  request ID from the click).
+- Desktop: `Perf.retarget(.startTask, from: "new-task", …)` (key by request
+  ID from the click). Done: the sheet's wait, post-reply `plan.list`,
+  `prepareTaskSession` and the `--explain` fallback for a created Task.
 - Phone: `createdTask`'s view-plan read before navigation (done for a first
   Start; kept for a request recovered after a restart, whose receipt has no Session).
 
@@ -246,7 +244,7 @@ answer's (retained evidence, "Updating…"), with no Work checkpoint wait, and
 never throws; `StartingTask.filed`, Close and "planning does not show it yet"
 are gone, and only `StartingTaskView.start` closes the palette. A real answer
 showed the admitted Task `unstarted`/Backlog: `task_state_sql` called a Task
-unstarted until it had a checkout. It now needs neither a checkout nor a
+unstarted until it had a checkout. Unstarted now means no checkout and no
 taken-up Graph (every take-up is a start), so the admitted Task is Working.
 
 Slice 2, phone half built. A first Start is `startTask`:
@@ -275,9 +273,10 @@ Concept review of 91a35e2430: the row closes the gap without a new concept.
 `openCreatedTask` reuses `selectedTaskEvidence` (set by `openTaskDestination`,
 kept by `setSelection` through `task(id:)`), so the answer's row is the same
 retained evidence a lookup leaves, replaced when the roadmap lists the Task.
-The row read (`task_create::answer` → `waves::task_row`) runs
-`task_selection_reading` for the whole repository on the answer path, outside
-any `creation_step` span.
+The row read (`task_create::answer` → `waves::task_row`) opens a second
+store handle and a tokio runtime, and runs `SharedTaskReads::read` (the whole
+repository's selection reading) on the answer path, outside any
+`creation_step` span.
 
 Remaining, in order:
 1. `Perf.retarget(.startTask, from: "new-task", …)` and the `Perf.finish(…,

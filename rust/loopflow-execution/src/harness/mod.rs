@@ -111,10 +111,7 @@ mod environment_tests {
 
     #[test]
     fn conversation_tools_observe_sanitized_overrides_and_removals() {
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        });
+        let mut config = crate::agent::AgentConfig::default();
         for key in [
             "LF_DISCORD_TOKEN",
             "LOOPFLOW_DIRECTIVE_FILE",
@@ -152,10 +149,7 @@ mod environment_tests {
         let mut command = tokio::process::Command::new("/bin/sh");
         command.args(["-c", "test -z \"${LF_DISCORD_TOKEN+x}\""]);
         command.env(crate::os_process::DISCORD_TOKEN_ENV, "fixture-token");
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        });
+        let mut config = crate::agent::AgentConfig::default();
         config.env.insert(
             crate::os_process::DISCORD_TOKEN_ENV.into(),
             "fixture-override".into(),
@@ -170,10 +164,7 @@ mod environment_tests {
         command
             .env(crate::session_record::CAPTURE_KEY_ENV, "run_stale")
             .env("LF_RUN_DIR", "/stale/run");
-        let mut config = crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        });
+        let mut config = crate::agent::AgentConfig::default();
         config.env.insert(
             crate::session_record::CAPTURE_KEY_ENV.to_string(),
             "run_fresh".to_string(),
@@ -720,11 +711,11 @@ mod tests {
         for kind in HarnessKind::ALL {
             let name = kind.as_str();
             let config = AgentConfig {
-                agent: crate::config::Agent::parse(name).unwrap(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
+                agent: crate::config::Agent {
+                    harness: kind,
                     model: None,
-                })
+                },
+                ..AgentConfig::default()
             };
             let home = tempfile::tempdir().unwrap();
             let admitted = admit_for_test(home.path());

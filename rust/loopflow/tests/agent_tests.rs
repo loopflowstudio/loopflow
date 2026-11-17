@@ -31,13 +31,8 @@ for line in sys.stdin:
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
         skip_permissions: true,
-        cwd: None,
-        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent {
-            harness: loopflow_execution::harness::HarnessKind::Codex,
-            model: None,
-        })
+        ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
     }
 }
 

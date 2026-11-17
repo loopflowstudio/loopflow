@@ -79,13 +79,19 @@ no viewer, not in what is recorded.
 - A store that can't be read at resume no longer fails the reopen
   (`native_session.rs:177`); the conversation opens Managed, as `works()`
   already assumes.
-- Reopening is Managed whatever started the Session. `SqliteStore::is_bare`
-  is gone, so a conversation begun with `lf <skill>` at a terminal and later
-  opened with `lf resume` is held by the server and outlives its viewer;
-  on main it ran in the terminal and ended with it. Show this at human
-  review: it is the one change here a person meets without touching a Task.
-- `lf resume <ID> 'message'` is a Bare headless turn, with or without
-  `--task`. On main `--task` made that turn report to the server.
+- `lf resume` connects to an existing Session and keeps the state that
+  Session has. A conversation that started Bare (`lf`, `lf <skill>` at a
+  terminal) reopens Bare, in the terminal, and ends with it, as on main. A
+  Task, Wave or repository conversation reopens Managed. Jack, 2026-11-17:
+  "resume connects to existing sessions". The first pass made every reopen
+  Managed and deleted `SqliteStore::is_bare`; undo that. The Session row is
+  the one place this is read, inside `delegate`, into `Run`.
+- `lf -b resume <ID> --message TEXT` keeps main's behavior in this PR: one
+  headless turn. Jack: "lf resume shouldnt take messages, i dont think?" /
+  "that seems like a mixed API". Taking the message off `resume` and giving
+  "send one turn" its own command is a separate Task (Graph retries in
+  `graph.rs`, docs and `.lf/qa/provider-switching.md` use it); don't build on
+  `--message` here or add a second special case for it.
 
 ### What it deletes
 
@@ -127,10 +133,10 @@ for a Task or Wave that nobody views and whose turns the server records:
 `lf task run` steps, the `ci-fix` run `pr_landing.rs` starts
 (`LF_GRAPH_STEP=worker`), and `run::answer_bound` for Discord Wave answers,
 the one `Run` chosen outside `delegate` that isn't Bare (commented in
-`lf/commands/run.rs`). `lf resume <ID> 'message'` is `Bare(Headless)`; with no
-message it is Managed. The transport, harness and server READMEs say so.
+`lf/commands/run.rs`). `lf -b resume <ID> --message` is `Bare(Headless)`; with no
+message, resume keeps the Session's state. The transport, harness and server READMEs say so.
 
-Nothing remains for implement. Gate owns the broader transport,
+Remaining for implement: resume keeps the Session's state (above). Gate owns the broader transport,
 configuration and Task performance suites; demo owns live provider steering
 and the resume-outlives-viewer change.
 

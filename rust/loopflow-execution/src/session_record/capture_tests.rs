@@ -363,10 +363,7 @@ fn helper_capture_admits_a_headless_conversation_with_its_input_and_outcome() {
     let home = tempfile::tempdir().unwrap();
     let process = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "repair the failed operation".into(),
-        ..crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        })
+        ..crate::agent::AgentConfig::default()
     })
     .unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -691,10 +688,7 @@ fn manifest_round_trips_the_exact_prepared_process_without_ambient_authority() {
         skip_permissions: true,
         directive_relay: Some("/tmp/directive-secret".into()),
         env: BTreeMap::from([("TOKEN".to_string(), "ambient-secret".to_string())]),
-        ..crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        })
+        ..crate::agent::AgentConfig::default()
     };
     let expected = AgentProcessRequest::from_prepared(&config).unwrap();
     let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -905,10 +899,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
     let manifest = fs::read(original.artifact_dir().join("manifest.json")).unwrap();
     let request = AgentProcessRequest::from_prepared(&AgentConfig {
         task_prompt: "the next instruction".into(),
-        ..crate::agent::AgentConfig::new(crate::config::Agent {
-            harness: crate::harness::HarnessKind::Codex,
-            model: None,
-        })
+        ..crate::agent::AgentConfig::default()
     })
     .unwrap();
     let context = crate::trace::PreparedTurnContext::from_prompts("", "the next instruction");
@@ -997,13 +988,7 @@ fn continuation_publication_failure_keeps_reservation_without_settling_a_turn() 
             &session.id,
             spec(ledger.home()),
             &crate::trace::PreparedTurnContext::from_prompts("", "next"),
-            AgentProcessRequest::from_prepared(&crate::agent::AgentConfig::new(
-                crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None
-                }
-            ))
-            .unwrap(),
+            AgentProcessRequest::from_prepared(&crate::agent::AgentConfig::default()).unwrap(),
         )
         .is_err());
         let next = store.session(&session.id)?.unwrap();

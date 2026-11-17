@@ -640,10 +640,7 @@ mod activity_tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -833,10 +830,7 @@ mod tests {
                         chrome: settings.chrome,
                         skip_permissions: settings.yolo,
                         cwd: Some(home.into()),
-                        ..crate::agent::AgentConfig::new(crate::config::Agent {
-                            harness: crate::harness::HarnessKind::Codex,
-                            model: None,
-                        })
+                        ..crate::agent::AgentConfig::default()
                     },
                     Admitted {
                         store: store.clone(),
@@ -961,10 +955,7 @@ mod tests {
             agent: crate::config::Agent::parse("claude").unwrap(),
             task_prompt: "task".into(),
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(ledger.home());
@@ -1009,10 +1000,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -1286,10 +1274,7 @@ cat > /dev/null
         AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             cwd: Some(std::env::temp_dir()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         }
     }
 

@@ -915,10 +915,7 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
                 ("FIXTURE_STOP".into(), stop.display().to_string()),
             ]),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
         let database = fixture.database.clone();

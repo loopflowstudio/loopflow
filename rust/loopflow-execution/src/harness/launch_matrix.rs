@@ -153,10 +153,7 @@ fn every_harness_runs_bare_managed_and_worker() {
                             references: vec![],
                         }),
                         env: capture.environment(),
-                        ..crate::agent::AgentConfig::new(crate::config::Agent {
-                            harness: crate::harness::HarnessKind::Codex,
-                            model: None,
-                        })
+                        ..crate::agent::AgentConfig::default()
                     };
                     config.env.insert("LF_BIN".into(), binary.into());
                     let launch = Launch {
@@ -302,10 +299,7 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 cwd: Some(home.into()),
                 task_prompt: "First prompt on the saved thread".into(),
                 env: capture.environment(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
@@ -348,10 +342,7 @@ fn native_limits_and_schemas_require_a_headless_run() {
                 agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
                 max_turns,
                 output_schema,
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,

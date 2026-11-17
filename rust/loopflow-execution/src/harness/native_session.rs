@@ -953,10 +953,7 @@ mod tests {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(cwd.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,
@@ -1193,10 +1190,7 @@ mod tests {
         let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
             task_prompt: "the first turn".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         })
         .unwrap();
         let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -1391,10 +1385,7 @@ mod tests {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,
@@ -1498,10 +1489,7 @@ mod tests {
                 agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             };
             let launch = Launch {
                 config: &config,
@@ -1612,10 +1600,7 @@ mod tests {
                 cwd: Some(temp.path().to_path_buf()),
                 task_prompt: "review it".into(),
                 env: BTreeMap::new(),
-                ..crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..crate::agent::AgentConfig::default()
             },
             Run::Bare(crate::harness::Mode::Headless),
             None,

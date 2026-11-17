@@ -1257,10 +1257,7 @@ mod tests {
                 skill,
                 arguments: "exact \"two words\" 雪".into(),
             }),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
 
         harness.send_input(request).await.unwrap();
@@ -1311,10 +1308,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(home.path()),
             ),
             tx,
@@ -1360,10 +1354,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -1372,10 +1363,7 @@ mod tests {
         let config = AgentConfig {
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1430,10 +1418,7 @@ mod tests {
     fn start_and_resume_add_instructions_without_replacing_native_base() {
         let config = AgentConfig {
             system_prompt: "Fixed additions.".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
@@ -1448,10 +1433,7 @@ mod tests {
     fn pinned_codex_session_uses_thread_resume() {
         let launch = AgentConfig {
             cwd: Some("/tmp/project".into()),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
@@ -1468,14 +1450,8 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(
-            &crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            }),
-            None,
-            true,
-        );
+        let (method, params) =
+            build_thread_request(&crate::agent::AgentConfig::default(), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }
@@ -1493,10 +1469,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             events,
@@ -1691,10 +1664,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             events,

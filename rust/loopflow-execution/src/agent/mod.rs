@@ -222,6 +222,17 @@ impl AgentConfig {
     }
 }
 
+/// Unit tests set the fields they exercise; Codex stands in for the rest.
+#[cfg(test)]
+impl Default for AgentConfig {
+    fn default() -> Self {
+        Self::new(Agent {
+            harness: crate::harness::HarnessKind::Codex,
+            model: None,
+        })
+    }
+}
+
 impl std::fmt::Debug for AgentConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AgentConfig")
@@ -1438,10 +1449,7 @@ mod tests {
     fn default_launch() -> AgentConfig {
         AgentConfig {
             task_prompt: "task".to_string(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         }
     }
 
@@ -1545,10 +1553,7 @@ trust_level = "trusted"
                     sandbox,
                     approval: None,
                 },
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None,
-                }),
+                &crate::agent::AgentConfig::default(),
                 true,
             );
             assert_eq!(
@@ -1566,10 +1571,7 @@ trust_level = "trusted"
                 sandbox: Some(CodexSandboxMode::DangerFullAccess),
                 approval: Some(CodexApprovalPolicy::Never),
             },
-            &crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            }),
+            &crate::agent::AgentConfig::default(),
             true,
         );
         assert_eq!(policy, CodexPermissionConfig::default());
@@ -1582,22 +1584,12 @@ trust_level = "trusted"
             approval: Some(CodexApprovalPolicy::OnRequest),
         };
         assert_eq!(
-            codex_permission_policy(
-                restrictive,
-                &crate::agent::AgentConfig::new(crate::config::Agent {
-                    harness: crate::harness::HarnessKind::Codex,
-                    model: None
-                }),
-                false
-            ),
+            codex_permission_policy(restrictive, &crate::agent::AgentConfig::default(), false),
             CodexPermissionConfig::default()
         );
         let yolo = AgentConfig {
             skip_permissions: true,
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         assert_eq!(
             codex_permission_policy(restrictive, &yolo, false),
@@ -1774,10 +1766,7 @@ trust_level = "trusted"
             agent: crate::config::Agent::parse("claude:fable").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
             task_prompt: "finish the operation".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -1804,10 +1793,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude:fable").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = 0;
         let result = _run_with_retries(
@@ -1837,10 +1823,7 @@ trust_level = "trusted"
     fn pi_failure_keeps_exact_history_without_synthetic_retry_input() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("pi:fixture/model").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = 0;
         let result = _run_with_retries(
@@ -1911,10 +1894,7 @@ trust_level = "trusted"
                 crate::config::Agent::parse("codex").unwrap(),
             ],
             task_prompt: "finish the operation".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = Vec::new();
         let result = _run_with_retries(
@@ -1955,10 +1935,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
             task_prompt: "compress the branch".to_string(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let process = graph_process();
         let mut results = vec![
@@ -2203,10 +2180,7 @@ trust_level = "trusted"
                 crate::config::Agent::parse("claude:opus").unwrap(),
             ],
             task_prompt: "compress the diff".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let refused = || failed_result("codex_error: You've hit your usage limit");
         let mut scripted = vec![refused(), limited_result(), done()].into_iter();
@@ -2237,10 +2211,7 @@ trust_level = "trusted"
     fn a_pinned_agent_refused_on_every_try_stops_after_the_last_wait() {
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("codex").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = 0;
         let mut waits = Vec::new();
@@ -2293,10 +2264,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude:opus").unwrap(),
             task_prompt: "compress the diff".into(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut scripted = vec![limited_result(), done()].into_iter();
         let mut attempts = Vec::new();
@@ -2326,10 +2294,7 @@ trust_level = "trusted"
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             fallback_agents: vec![crate::config::Agent::parse("codex").unwrap()],
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let process = ProcessConfig::default();
         let mut attempts = 0;
@@ -2358,10 +2323,7 @@ trust_level = "trusted"
         };
         let pinned = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
-            ..crate::agent::AgentConfig::new(crate::config::Agent {
-                harness: crate::harness::HarnessKind::Codex,
-                model: None,
-            })
+            ..crate::agent::AgentConfig::default()
         };
         let mut attempts = 0;
         let mut waits = Vec::new();
@@ -2464,10 +2426,7 @@ trust_level = "trusted"
                     },
                     task_prompt: "finish the operation".into(),
                     resume_token: Some("native-thread".into()),
-                    ..crate::agent::AgentConfig::new(crate::config::Agent {
-                        harness: crate::harness::HarnessKind::Codex,
-                        model: None,
-                    })
+                    ..crate::agent::AgentConfig::default()
                 };
                 // Headless here is a Graph step; other headless work
                 // stops at once (its own test).

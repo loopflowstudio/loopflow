@@ -1229,14 +1229,10 @@ for line in sys.stdin:
             repo_root: home.path().to_path_buf(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.path().to_path_buf()),
                 skip_permissions: true,
                 env,
-                ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent {
-                    harness: loopflow_execution::harness::HarnessKind::Codex,
-                    model: None,
-                })
+                ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
             },
             process: ProcessConfig::default(),
             mode: loopflow_execution::harness::Mode::Headless,
@@ -1365,16 +1361,10 @@ for line in sys.stdin:
                 repo_root: repo.to_path_buf(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
                     cwd: Some(repo.to_path_buf()),
                     skip_permissions: true,
                     env,
-                    ..loopflow_execution::agent::AgentConfig::new(
-                        loopflow_execution::config::Agent {
-                            harness: loopflow_execution::harness::HarnessKind::Codex,
-                            model: None,
-                        },
-                    )
+                    ..AgentConfig::new(loopflow_execution::config::Agent::parse("claude").unwrap())
                 },
                 process: ProcessConfig::default(),
                 mode: loopflow_execution::harness::Mode::Headless,

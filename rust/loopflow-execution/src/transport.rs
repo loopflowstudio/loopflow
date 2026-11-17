@@ -225,12 +225,6 @@ pub enum Delegation {
     Here { run: crate::harness::Run },
 }
 
-impl Delegation {
-    pub fn delegated(self) -> bool {
-        matches!(self, Self::Delegated)
-    }
-}
-
 /// Inputs that select the native client or stream driver before delegation.
 #[derive(Debug, Clone, Copy)]
 pub struct LaunchInput {

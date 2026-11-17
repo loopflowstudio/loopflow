@@ -230,8 +230,7 @@ before filing shows there with Try again). `WorkModel.openCreatedTask` seeds
 `taskWork` from `TaskCreated.overview`, starts the workspace's layout without a
 `desktop.layout` read (`SessionsWorkspace.startNewLayout`) and installs
 `TaskCreated.session` as prepared (`installConversation`, `preparedIntent:
-.start`). When the row is not yet in planning it waits for the Work
-subscription checkpoint, never `plan.list`. The position line says
+.start`). The position line says
 "Starting <graph>" for a claimed Task at `start`. `WorkDestinationTests` checks
 the request log after Start holds only `task.create`.
 

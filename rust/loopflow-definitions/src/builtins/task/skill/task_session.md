@@ -23,9 +23,9 @@ remembered.
 
 **Name the step that waits.** At an interactive step the Task waits here for a
 person; say which, and what they decide there. In `code`, the first is
-`concept-review` after `build`: they read its page, and their answer sends the
-change back to `build` or on to delivery. `lf task run <issue>` continues once
-they have answered.
+`human-review` after `build`: they read one page built from what the run
+produced, and their answer sends the change back to `build` or on to delivery.
+`lf task run <issue>` continues once they have answered.
 
 **End a turn when the Task has its disposition.** Merge alone is not done.
 

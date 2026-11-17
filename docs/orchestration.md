@@ -230,20 +230,26 @@ stands at.
 - loop:
     - loop:
         - graph: build      # code and a published PR
-        - interactive: concept-review # you read the page; iterate goes back to build
+        - interactive: human-review # you read the page; iterate goes back to build
     - graph: deliver        # gate, then land and stay until it merges
     - interactive: verify   # you check it on main; fix forward or finish
 ```
 
 ```bash
-lf graph feature                    # explore and concept-review open here with you; the rest runs on its own
-lf -b graph feature                 # every step headless; an agent stands in at explore and concept-review
+lf graph feature                    # explore and human-review open here with you; the rest runs on its own
+lf -b graph feature                 # every step headless; an agent stands in at explore and human-review
 lf task run LOO-12 feature          # runs up to explore and stops; the Task waits in its conversation
-lf task run LOO-12                  # after you're done there: on to concept-review
+lf task run LOO-12                  # after you're done there: on to human-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
 lf ship LOO-12                      # the same, returning once the Task is shipping
 ```
+
+At `human-review` you read one page, `scratch/human-review.html`, built from
+what the run already produced: the plan, the concept review, what `qa` saw, each
+step's commit, the open questions and the PR's checks. Ask for more and the
+change goes back to `build` with your words in the plan; otherwise it goes on to
+`deliver`.
 
 `-i` makes every step of a launch interactive and `-b` every step headless. At an
 interactive step with a loop behind it, you, or the agent standing in, decide
@@ -279,7 +285,7 @@ Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
 | `shipping` | a run carries it and nothing ahead stops it |
 | `done` · `abandoned` | completed, dropped |
 
-Builtins are `feature` (explore, then plan, build, concept-review, deliver, verify), `code`
+Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`
 (the same without explore), `auto` (pursue then deliver, no interactive step: request to merged PR
 without you) and `research` (findings, no PR). To change one, copy it, commit it,
 and select it for a Wave with `graph: feature` in `.lf/wave/product/config.yaml`:

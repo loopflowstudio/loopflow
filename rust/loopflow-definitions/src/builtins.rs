@@ -213,6 +213,7 @@ mod tests {
             "s5-scan",
             "s5-assess",
             "review-design",
+            "pr-review",
         ] {
             assert!(get_builtin_skill(name).is_none(), "{name}");
         }
@@ -246,6 +247,7 @@ mod tests {
             "reduce",
             "polish",
             "concept-review",
+            "human-review",
             "explore",
             "research",
             "qa",

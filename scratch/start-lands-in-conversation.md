@@ -165,8 +165,7 @@ kind (local, remote) on `start_task`; the report splits by it.
 - `run_requested` writes (`advance_creation(id, "run_requested")`) and
   `record_creation_launch`'s `WHERE milestone='run_requested'` gate (gate on
   `admitted`); the Inspect text stays for released rows.
-- `serve_locked`'s exec and its carriers (exact list under Status, concept
-  review of 3d582e361b).
+- Done: `serve_locked`'s exec and its carriers (list under Status).
 - Network steps inside creation's checkout: `fetch_task_refs` and the base fetch
   in `resolve_upstream_base` for a new branch, `assert_assignee` inside
   `prepare_task` on this path.
@@ -342,48 +341,48 @@ Jack Heart on the one-start count: "I guess this is fine, im not sure what the
 one lf start goal is about". Slice 4's test is "the provider's parent is the
 held `session resume`", not a count of `lf` starts.
 
-Concept review of 1122563065 and 3d582e361b: `-a` and the spans hold. Settled
-for the next implement pass, in this order:
-- **One timing target.** lf.log's filter now lists three module paths
-  (`lf::commands::task_create`, `engine::creation`, `human_session::setup`); a
-  module move silently drops Start's timings. `creation_step` and
-  `conversation_setup` events take one explicit target, as
-  `journal::request` does with `loopflow::server::request`, and the filter
-  names that one target. Setup runs in the conversation's process, so the
-  target is not under `loopflow::server`.
-- **Slice 4: the launch is a value, not an argv.** `serve_locked` builds
-  `lf -i --agent … --cwd … [--task X] : <turn>` plus two env vars only because
-  it execs. In-process, it returns a typed launch (agent, cwd, Work selector,
-  skill or `:`, first turn, `HumanSessionToken`, prepared capture key, the held
-  launch lock) to the application's `session resume` handler, which hands it to
-  the `-i` entry in `lf/commands/run.rs` without a Clap re-parse or `set_var`.
-  `active_session_token`/`prepared_artifact_key` take it from the launch on
-  this path; `run_native_session` already takes `launch_lock: Option<File>`, so
-  the lock goes there directly. The `-i` entry also did per-process startup
-  the in-process path must do or drop: `select_invocation(cli.setting_values())`,
-  home canonicalization and `--task` Work binding (read in `bin/lf.rs` main).
-- **One LfProcess.** The exec kept the PID and recorded two LfProcesses for it
-  (`finish_before_exec` closed the resume's, the `-i` admitted another). In
-  process, the held `session resume` LfProcess is the launcher;
-  `finish_before_exec` (its only caller) goes with the exec.
-- **The agent reselect is the one reset that must happen.** `INVOCATION` is a
-  thread-local and the exec'd `-i` selected it from `--agent`. The in-process
-  launch selects its agent on the thread that runs the provider, and setup's
-  `start_graph` reads the creation's agent from the same launch value instead
-  of `invocation_values()` inside an async fn (a worker thread reads Null).
-- **What the delete list removes exactly:** `pass_launch_lock`,
-  `LAUNCH_LOCK_ENV` and its `env_remove`s (`transport.rs` start_held,
-  `os_process/detached.rs`), `inherited_launch_lock` and its fallback in
-  `run_native_session`, `finish_before_exec`, and `serve_locked`'s
-  `transport::carry_across_exec` call. `transport::carry_across_exec` and
-  `journal::carry_across_exec` stay: the relay exec and `installation.rs` use
-  them.
-- **Test both resumes.** `serve_locked` serves every fresh `session resume`,
-  not only creation's. The parent-is-the-held-`session resume` check runs on a
-  creation Start and on a plain `lf session resume` of a prepared Session; the
-  `-a` fixture stays green (the Graph's provider is X).
+Concept review of 1122563065 and 3d582e361b settled the next pass; built:
 
-Remaining, in order: one timing target; slice 4; slice 5's remote sample.
+- **One timing target.** `task_creation`, `creation_step` and
+  `conversation_setup` take `journal::START_TIMING_TARGET`
+  (`loopflow::start_timing`); lf.log's filter names it instead of three module
+  paths.
+- **Slice 4.** `open`, `open_without_replacing` and `fork` return an `Opening`
+  (`Done(SessionRecord)` or `Launch(ConversationLaunch)`), `new_thread` returns
+  its launch beside the Session, and `lf session resume|new` hands a launch back
+  to `bin/lf.rs::launch_conversation`. That builds a `Cli` (no Clap parse:
+  `-i`, the agent, `Inline` or `Skill External`, `prepared_capture`,
+  `launch_lock`), selects the agent on its own thread, enters the cwd, sets
+  `LF_AS`/`LF_WAVE_ID` as `-i`'s placement did, and runs the same
+  `resolve_cli_target` → `execute_target`/`execute_command`. The capture rides
+  `Cli.prepared_capture` into `begin_process_runtime`; the lock rides
+  `Cli.launch_lock` → `AgentConfig.launch_lock` (`LaunchLock`, a take-once
+  shared slot) into `launch_session`. Setup's Graph takes `cli.agent` through
+  `open(…, agent, …)`.
+- **Deleted:** `serve_locked`, `conversation_launch_args`, `pass_launch_lock`,
+  `LAUNCH_LOCK_ENV` and its `env_remove`s, `inherited_launch_lock` and its
+  fallback, `finish_before_exec`, `prepared_artifact_key`, `PREPARED_CAPTURE_ENV`
+  (also Swift's env list), and `active_session_token`. Its only reader gone,
+  `HUMAN_SESSION_ENV`, `HumanSessionToken` and `session_token` went too, with
+  the docs/dev/environment.md row; the launch carries no token.
+- **What the test checks.** In a held terminal the provider execs over its
+  launcher (`exec_native`), so a held claude's parent is `lf holder run`, never
+  the `session resume`. The creation test instead checks the provider's PID has
+  exactly one `kind='lf'` LfProcess and it is `session resume <id>` (the exec
+  path recorded two). The plain resume (`transport_tests::
+  piped_resume_json_runs_here_and_returns_once`) runs unheld, and its provider's
+  parent is the `resume <id>` that opened it, not `lf -i`.
+- `session_cli_tests::boundary_launch_…` lost its block that made an `LF_BIN`
+  reject the exec'd `lf -i`: no exec remains to reject.
+- Two failures that predated this pass (checked on 5cf51f1eb4), fixed:
+  `promotion_explicit_sources_with_run_keep_the_selected_work` (`--worktree`
+  adoption made a new conversation; admission now takes the checkout's open
+  one, `adoption::Source::conversation`), and
+  `served_task_create_survives_a_dropped_connection_and_server_restart`
+  (compared whole answers, whose `row` reading time differs; it compares
+  receipts now, as `task_create_tests::receipt` does).
+
+Remaining: slice 5's remote sample (qa).
 
 ## Slices
 
@@ -411,7 +410,8 @@ Remaining, in order: one timing target; slice 4; slice 5's remote sample.
 
 ## Checks
 
-- `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed (slice 3). Rerun `task_create_` after slice 4; gate.
+- `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed (slice 3).
+- After slice 4: `cargo test -p loopflow --test integration task_create_` 10 passed; `ops::human_session::` 45 passed; nextest `context_launch_tests:: | settings_launch_tests:: | session_lifecycle_tests | session_launch_contract | session_cli_tests:: | task_create_ | adoption::tests:: | piped_resume_json…` 140/141 passed, the one failure (`served_task_create_survives…`) fixed and passed alone; Swift Mac filter (+`ProcessEnvironment`) 153 passed; clippy clean. A run beside another checkout's compile timed out `codex_startup_failures_…` (30 s deadline) and two `settings_launch_tests`; all passed in the unloaded rerun. Gate: `binary(served_reads)` whole, `binary(transport_tests)`.
 - `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests|LaunchJournalTests|InteractionTests'` — 152 passed (Mac).
 - `cargo test -p loopflow --test integration dto_fixtures::task_create` and `task_create_tests::task_create_without_recovery_keeps_the_existing_receipt_and_exit_status` (real row is Working) — passed; `cargo test -p loopflow-storage --lib` 365 passed; `loopflow-execution --lib store::tests::` 47 passed; `server::schema::tests::` 8 passed; clippy clean. Gate: `binary(two_people)`, `test(performance_tests::)`, `test(ops::task::tests::)` for the Task state SQL.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.

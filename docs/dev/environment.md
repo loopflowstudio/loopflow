@@ -38,7 +38,6 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_GRAPH_ID` | Graph process, for each agent step | The step's agent and skills | Names the Graph a step serves: its Graph process's id. Steps of one Graph share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
-| `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |

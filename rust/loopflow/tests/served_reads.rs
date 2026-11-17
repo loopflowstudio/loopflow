@@ -2956,7 +2956,15 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .request(Operation::Write(change.clone()))
         .unwrap()
         .result;
-    assert_eq!(first, second);
+    // A repeat returns the same receipt; the reads beside it are taken again.
+    let receipt = |mut answer: serde_json::Value| {
+        let fields = answer.as_object_mut().unwrap();
+        for read in ["session", "overview", "row"] {
+            fields.remove(read).unwrap();
+        }
+        answer
+    };
+    assert_eq!(receipt(first.clone()), receipt(second));
     std::thread::scope(|scope| {
         let concurrent: Vec<_> = (0..4)
             .map(|_| {
@@ -2971,7 +2979,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
             })
             .collect();
         for retry in concurrent {
-            assert_eq!(retry.join().unwrap(), first);
+            assert_eq!(receipt(retry.join().unwrap()), receipt(first.clone()));
         }
     });
     let found = connection
@@ -2980,7 +2988,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         }))
         .unwrap()
         .result;
-    assert_eq!(found["result"], first);
+    assert_eq!(found["result"], receipt(first.clone()));
     assert_eq!(found["disposition"], "complete");
     assert_eq!(found["explanation"], "Task created");
     let mut changed = change.clone();
@@ -3083,7 +3091,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .result;
     assert_eq!(removed["disposition"], "inspect");
     assert_eq!(removed["explanation"], "The created Task was removed");
-    assert_eq!(removed["result"], first);
+    assert_eq!(removed["result"], receipt(first.clone()));
     assert!(connection.request(Operation::Write(changed)).is_err());
     assert_eq!(
         conn.query_row(

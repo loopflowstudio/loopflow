@@ -111,7 +111,8 @@ repository resolution, lock, store open, receipt check, admission, held
 conversation start and the answer's reads. The conversation logs
 `conversation_setup` spans (`step=checkout|graph`); what follows them in a
 sample is the provider starting. Both keep the creation request ID and elapsed
-time in `<Machine>/logs/lf.log`, with no request text, title or provider output.
+time in `<Machine>/logs/lf.log` under the `loopflow::start_timing` tracing
+target, with no request text, title or provider output.
 New Task creation uses the interaction observation ID as its creation request
 ID, so `timings.py` nests the server and setup steps under their Start → typing
 sample (`machine_steps` in `--json`, medians under the sample in text). A remote

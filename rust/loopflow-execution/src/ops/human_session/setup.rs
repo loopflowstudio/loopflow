@@ -16,6 +16,7 @@ pub(super) async fn finish(
     store: &SharedStore,
     session: LfSession,
     request_id: &str,
+    agent: Option<&str>,
 ) -> Result<LfSession> {
     if let Some(request) = session
         .request
@@ -33,7 +34,7 @@ pub(super) async fn finish(
     match step(
         request_id,
         "graph",
-        start_graph(store, &session, request_id),
+        start_graph(store, &session, request_id, agent),
     )
     .await
     {
@@ -53,11 +54,12 @@ async fn step<T>(
     name: &'static str,
     run: impl std::future::Future<Output = T>,
 ) -> T {
-    let span = tracing::info_span!("conversation_setup", request_id, step = name);
+    let span = tracing::info_span!(target: crate::journal::START_TIMING_TARGET, "conversation_setup", request_id, step = name);
     let started = Instant::now();
     let result = run.instrument(span.clone()).await;
     span.in_scope(|| {
         tracing::info!(
+            target: crate::journal::START_TIMING_TARGET,
             elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
             "Setup step finished"
         )
@@ -100,7 +102,12 @@ async fn checkout(store: &SharedStore, session: LfSession) -> Result<LfSession> 
 /// Start the Task's run the way a terminal would, detached, and record the
 /// launch on the creation so neither a repeat nor a reopened conversation
 /// starts another.
-async fn start_graph(store: &SharedStore, session: &LfSession, request_id: &str) -> Result<String> {
+async fn start_graph(
+    store: &SharedStore,
+    session: &LfSession,
+    request_id: &str,
+    agent: Option<&str>,
+) -> Result<String> {
     let task = session
         .task_id
         .as_ref()
@@ -119,7 +126,7 @@ async fn start_graph(store: &SharedStore, session: &LfSession, request_id: &str)
                 .to_string_lossy()
                 .into_owned()];
             // The agent this conversation was started with runs its Graph too.
-            if let Some(agent) = crate::config::settings::invocation_values()["agent"].as_str() {
+            if let Some(agent) = agent {
                 argv.extend(["--agent".into(), agent.to_owned()]);
             }
             argv.extend(["task".into(), "run".into(), task.identifier.clone()]);

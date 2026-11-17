@@ -29,6 +29,20 @@ pub struct Source {
     _admission: Vec<Arc<std::fs::File>>,
 }
 
+impl Source {
+    /// The conversation adopted work brings: the selected Session, else the
+    /// one last opened in an explicitly adopted checkout.
+    pub(super) fn conversation(&self, store: &SharedStore) -> OpsResult<Option<LfSession>> {
+        match (&self.session, &self.checkout) {
+            (Some(session), _) => Ok(Some(session.clone())),
+            (None, Some(root)) if self.explicit_checkout => {
+                store.sqlite.checkout_conversation(root).map_err(task_error)
+            }
+            (None, _) => Ok(None),
+        }
+    }
+}
+
 pub(super) async fn resolve_source(
     store: &SharedStore,
     repo: &Path,

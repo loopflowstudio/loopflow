@@ -75,15 +75,17 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
 /// Bounded creation stages are visible under the served request's trace. Never
 /// record the request text, title, generated prompt or provider output.
 pub fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
-    tracing::info_span!("creation_step", step = name).in_scope(|| {
-        let started = Instant::now();
-        let result = run();
-        tracing::info!(
-            elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
-            "Creation step finished"
-        );
-        result
-    })
+    tracing::info_span!(target: crate::journal::START_TIMING_TARGET, "creation_step", step = name)
+        .in_scope(|| {
+            let started = Instant::now();
+            let result = run();
+            tracing::info!(
+                target: crate::journal::START_TIMING_TARGET,
+                elapsed_ms = started.elapsed().as_secs_f64() * 1000.0,
+                "Creation step finished"
+            );
+            result
+        })
 }
 
 /// A created Task's receipt, the primary conversation's record and the Task's
@@ -161,7 +163,7 @@ impl Drop for After {
 }
 
 pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
-    let _creation = tracing::info_span!("task_creation", request_id = id).entered();
+    let _creation = tracing::info_span!(target: crate::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
     // CLI and served callers may spell the same checkout through different paths.
     input.directory = step("resolve_repository", || {
         crate::repo::require_repo_root(&input.directory, "task create")

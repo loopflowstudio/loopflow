@@ -23,7 +23,7 @@ pub struct TaskCreateAnswer {
 /// Read the created Task's row after its commit and join it to the answer, as
 /// the `row` step of request `id`'s creation.
 pub(crate) fn answer(id: &str, created: creation::TaskCreated) -> Result<TaskCreateAnswer> {
-    let _creation = tracing::info_span!("task_creation", request_id = id).entered();
+    let _creation = tracing::info_span!(target: loopflow_execution::journal::START_TIMING_TARGET, "task_creation", request_id = id).entered();
     creation::step("row", || {
         tokio::runtime::Runtime::new()?.block_on(async {
             let store = loopflow_execution::store::read_existing_registry()?

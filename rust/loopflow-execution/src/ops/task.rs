@@ -2050,7 +2050,7 @@ async fn file_task_in(
                 &task.id,
                 &task.title,
                 None,
-                source.session.as_ref(),
+                source.conversation(store)?.as_ref(),
                 receipt,
             )
             .await?;
@@ -2102,7 +2102,7 @@ async fn file_task_in(
             &creation.id,
             &creation.title,
             wave_slug.as_deref(),
-            source.session.as_ref(),
+            source.conversation(store)?.as_ref(),
             receipt,
         )
         .await?;

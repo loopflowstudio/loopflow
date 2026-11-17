@@ -388,11 +388,7 @@ fn task_create_with_an_agent_runs_its_conversation_and_graph_on_it() {
     task.repo.push();
     let _service = Service::start(&task);
     let codex = task.home.path().join("bin/codex");
-    fs::write(
-        &codex,
-        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\nexit 99\n",
-    )
-    .unwrap();
+    fs::write(&codex, PARENTED_PROVIDER).unwrap();
     fs::set_permissions(&codex, fs::Permissions::from_mode(0o755)).unwrap();
     // Every `lf` the Start causes, with the agent its environment names.
     let starts = task.home.path().join("lf-starts");
@@ -441,21 +437,13 @@ fn task_create_with_an_agent_runs_its_conversation_and_graph_on_it() {
         )
         .unwrap();
     assert_eq!(provider, "codex");
-    let deadline = Instant::now() + Duration::from_secs(30);
-    let calls = loop {
-        let calls = fs::read_to_string(&starts).unwrap_or_default();
-        if calls.lines().any(|line| line.starts_with("-i ")) {
-            break calls;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "the conversation started no provider: {calls}\n{}",
-            fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default()
-        );
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let provider = calls.lines().find(|line| line.starts_with("-i ")).unwrap();
-    assert!(provider.contains("--agent codex"), "{calls}");
+    let parent = task.provider_parent();
+    assert!(parent.contains("--agent codex session resume"), "{parent}");
+    let calls = fs::read_to_string(&starts).unwrap();
+    assert!(
+        !calls.lines().any(|line| line.starts_with("-i ")),
+        "the conversation exec'd a second lf: {calls}"
+    );
     let graph = calls
         .lines()
         .find(|line| {
@@ -468,7 +456,82 @@ fn task_create_with_an_agent_runs_its_conversation_and_graph_on_it() {
     assert!(graph.contains("--agent codex"), "{calls}");
 }
 
+/// A provider stand-in that records its PID and the command line of the
+/// process that started it, then fails its launch.
+const PARENTED_PROVIDER: &str = "#!/bin/sh
+if [ \"$1\" = --version ]; then echo fixture; exit 0; fi
+echo \"$$ $(ps -o command= -p \"$PPID\")\" >> \"$HOME/provider-parents\"
+exit 99
+";
+
+#[test]
+fn task_create_runs_its_provider_in_the_held_session_resume() {
+    let task = CreationFixture::new();
+    task.repo.push();
+    let _service = Service::start(&task);
+    let output = task.run(&[
+        "task",
+        "create",
+        "Run in the held conversation",
+        "--run",
+        "--graph",
+        "feature",
+        "--json",
+    ]);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session = answer["session_id"].as_str().unwrap();
+    // A held provider replaces the process that launched it.
+    let line = task.provider_parent();
+    let (_, parent) = line.split_once(' ').unwrap();
+    assert!(parent.contains("holder run"), "{line}");
+    // Its PID has one LfProcess: the held `session resume`, no exec'd `lf -i`.
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let launchers: Vec<String> = db
+        .prepare(
+            "SELECT p.command FROM processes a JOIN processes p ON p.pid=a.pid AND p.kind='lf'
+             WHERE a.kind='agent' AND a.agent_session_id=?1",
+        )
+        .unwrap()
+        .query_map([session], |row| row.get(0))
+        .unwrap()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(launchers.len(), 1, "{launchers:?}");
+    assert!(
+        launchers[0].contains(&format!("\"session\",\"resume\",\"{session}\"")),
+        "{launchers:?}"
+    );
+    task.wait_for_graph_start();
+    task.wait_for_graphs();
+}
+
 impl CreationFixture {
+    /// `<pid> <parent's command line>` of the conversation's provider.
+    fn provider_parent(&self) -> String {
+        let parents = self.home.path().join("provider-parents");
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            if let Some(line) = fs::read_to_string(&parents)
+                .unwrap_or_default()
+                .lines()
+                .next()
+            {
+                return line.to_owned();
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the conversation started no provider:\n{}",
+                fs::read_to_string(self.home.path().join("logs/lf.log")).unwrap_or_default()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+    }
+
     fn new() -> Self {
         let fixture = Self {
             repo: TestRepo::new(),
@@ -488,13 +551,7 @@ impl CreationFixture {
         fixture.repo.stage_all();
         fixture.repo.commit("Fixture Graphs");
         fs::create_dir(fixture.home.path().join("bin")).unwrap();
-        for (name, text) in [
-            ("gh", "#!/bin/sh\nexit 1\n"),
-            (
-                "claude",
-                "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\nexit 99\n",
-            ),
-        ] {
+        for (name, text) in [("gh", "#!/bin/sh\nexit 1\n"), ("claude", PARENTED_PROVIDER)] {
             let path = fixture.home.path().join("bin").join(name);
             fs::write(&path, text).unwrap();
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();

@@ -1328,6 +1328,28 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     succeed(Command::new("/bin/kill").args(["-9", &pid.to_string()]));
     let (second, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&first));
     assert_eq!(attempts, 1);
+    let status = || -> serde_json::Value {
+        let detail: serde_json::Value = serde_json::from_str(&succeed(
+            claude_launch(home.path(), &script)
+                .current_dir(repo.path())
+                .args(["task", "status", id, "--json"]),
+        ))
+        .unwrap();
+        let conversation = detail["conversation"].as_str().unwrap().to_string();
+        detail["sessions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|session| session["id"] == conversation.as_str())
+            .unwrap()
+            .clone()
+    };
+    let conversation = status();
+    assert!(
+        ["active", "detached"].contains(&conversation["state"].as_str().unwrap()),
+        "{conversation}"
+    );
+    assert_eq!(conversation["start"]["attempts"], 1, "{conversation}");
     let exit: Option<i64> = rusqlite::Connection::open(&db)
         .unwrap()
         .query_row(
@@ -1386,6 +1408,11 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         )
         .unwrap();
     assert_eq!(current, (third, 1), "a quit conversation stays quit");
+    let conversation = status();
+    assert_eq!(conversation["state"], "closed", "{conversation}");
+    assert_eq!(conversation["ended"]["by"], "person", "{conversation}");
+    assert_eq!(conversation["ended"]["exit_code"], 0, "{conversation}");
+    assert_eq!(conversation["start"], serde_json::Value::Null, "{conversation}");
     drop(running);
 }
 

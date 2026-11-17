@@ -548,3 +548,53 @@ attachment (`attachment_token`, `attached_lf_process_id`) moves to
 
 Overlap: another branch stops writing `processes.outcome` for agent rows;
 whichever lands second reconciles with this design.
+
+## Direction after review, 2026-11-16 evening (supersedes "Slice 4 tables: one per kind" and slice 4)
+
+Quotes and measurements are in `questions.md`.
+
+**This Task ends at Session history plus per-turn accounting. Process rows are
+not moved here.** `processes` stays in `loopflow.db` untouched by this Task
+beyond slice 1; removing it is its own Task ("Remove Process rows: liveness on
+Sessions and Graph runs"). Do not build `history.lf_processes`,
+`history.agent_processes`, the attachment move, or the result columns on Graph
+and ship records in this Task. Drop `process_history` from `history.db`'s
+schema if slice 2 created it and nothing writes it.
+
+**Remaining work here: one row per turn, in its own file.**
+
+- `usage.db` beside the store: its own SQLite file, write lock and schema
+  (`PRAGMA user_version`), opened by `loopflow-storage` like `history.db`.
+  Three files, one rule each: `loopflow.db` what people work on; `history.db`
+  what happened in detail, safe to delete; `usage.db` one row per turn, kept.
+- One table, one row per turn, written once when the turn ends. Columns, not
+  JSON: Session, input, started_at, ended_at; each token count the provider
+  reports as its own column (input, cached input, cache write, output,
+  reasoning, peak input, context window); provider and model as the provider
+  reported them for that turn; and what people group by, as it stood at turn
+  end: Task, Wave, Project, repository, skill, Graph and step when it ran in
+  one. Self-contained: a question like tokens and time by skill or by model
+  is one query on this table with no join to `loopflow.db`.
+- Grouping values are written at turn end and not rewritten; the Session id
+  stays on the row so a later bind can still be joined (`lf usage --binds`).
+  Open in `questions.md`: frozen values or following later binds as the
+  default report.
+- Not under the 90-day retention. No retention pass deletes `usage.db` rows
+  (about 1,900 a day). Open in `questions.md`: indefinitely or a long window.
+- The `usage`, `started` and `completed` history kinds stop being separate
+  rows for this purpose: `lf usage`, Telemetry and Task history read the turn
+  table. Keep in `history.db` only what a Session's detail view needs beyond
+  it; if nothing, stop writing them.
+- Existing rows: build turn rows from the stored `usage`/`started`/`completed`
+  rows (29,440 / 24,900 / 28,791, since 2026-09-30), pairing start and end per
+  input, with the Session's current Task, Wave and skill; model where known.
+- A failed write is a `store::RecordingGap` in `lf.log`, never a failed turn.
+- `lf usage` grouping flags (`--skill`, `--model`, `--step`) and any
+  dashboard are separate work, not this Task.
+
+**Still to design before ship:** upgrade skew (section above) for slice 3 and
+for the turn table: a Process on the released lf keeps writing `usage` rows
+into `loopflow.db`.
+
+**Demo adds:**
+`sqlite3 -readonly ~/.lf/usage.db "select skill, sum(output_tokens), sum(ended_at-started_at) from turns group by 1 order by 2 desc limit 10"`

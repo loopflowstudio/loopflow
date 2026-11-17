@@ -299,6 +299,20 @@ opened) and would find the old one still there.
 
 Remaining: slices 4–5.
 
+Slice 4 shape (read, not built): `serve_locked`
+(`ops/human_session.rs`) builds `lf -i --agent … --cwd … [--task X] : <turn>`
+and execs it; the `-i` path is parsed and assembled in the application
+(`lf/commands/run.rs` → `harness::native_session::launch_session`), a layer
+above execution. Calling it in-process from `serve_locked` would invert the
+crates. Candidate: `serve_locked` returns the launch (args, the two env
+values, the held launch lock) to the application's `session resume` handler,
+which runs it through its own `-i` entry in-process; `pass_launch_lock`,
+`LAUNCH_LOCK_ENV`, `inherited_launch_lock`'s env read and both
+`carry_across_exec` go with the exec. Check first: what the exec resets that
+the provider relies on (`HUMAN_SESSION_ENV`/`PREPARED_CAPTURE_ENV` read from
+process env, `journal::finish_before_exec`, the `lf session resume`
+LfProcess becoming the launcher's).
+
 ## Slices
 
 1. **Admission + conversation setup (Rust).** One transaction, held

@@ -1,5 +1,10 @@
 # LOO-924 implementation notes
 
+- 2026-11-17: Resume classifies binding with `bound_at` and primary scope,
+  rather than restoring the old `Declared | Bound` WorkSource test: a direct
+  `--task` launch records Declared but is Bare. This keeps the plan's attribution
+  rule while restoring `SqliteStore::is_bare`.
+
 - 2026-11-17: Keep WorkSource as attribution provenance: context and primary
   selection still read its variants. Launch lifetime no longer reads it.
 - `codex_service_tier` and `chrome` stay on AgentConfig: they are provider

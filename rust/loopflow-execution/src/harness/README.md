@@ -28,6 +28,8 @@ headless run lf starts for a Task or Wave, which nobody views and whose turns th
 server records: `lf task run` steps, the `ci-fix` run landing starts, and each
 Discord answer for a Wave. In-process callers such as commit messages, PR text
 and replay use `Bare(Headless)`. Task attribution never changes this choice.
+Resume reads the Session's binding and primary scope in delegation: Bare
+conversations reopen Bare; bound and primary conversations reopen Managed.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.
 

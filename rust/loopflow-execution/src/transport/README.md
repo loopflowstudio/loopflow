@@ -27,7 +27,8 @@ records, queued input, the child's control requests and exit settlement.
 |---|---|---|
 | `lf`, a skill or a Graph, with or without `--task`, `--wave` or `LF_AS` | `Bare(Mode)` | its caller or terminal |
 | `lf resume <ID> 'message'` | `Bare(Headless)` | one turn, then exits |
-| Resume a Session with no message, or open a Task, Wave or repository conversation | `Managed` | held interactive terminal, independent of its viewer |
+| Resume a Bare Session with no message | `Bare(Interactive)` | its terminal |
+| Resume a bound or primary Session, or open a Task, Wave or repository conversation | `Managed` | held interactive terminal, independent of its viewer |
 | `lf task run` steps, the `ci-fix` run landing starts, a Discord answer for a Wave | `Worker` | headless until its run ends; nobody views it, the server records its turns |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
@@ -52,15 +53,18 @@ boundaries to the Machine server; Bare launches read their steers directly.
 `delegate` returns either a completed delegation or `Here { run }`. Only Bare
 launches choose a mode: `--batch` selects headless; otherwise `--interactive`,
 a terminal or no prompt selects interactive. Managed conversations always run
-interactive, Workers headless. Reopening a Session with no message is
-Managed without a second Work lookup.
+interactive, Workers headless. Reopening a Session with no message reads its
+binding and primary scope once in `delegate`: Bare stays Bare; bound and primary
+conversations reopen Managed. An unreadable store keeps the Managed fallback
+and logs a recording gap.
 
 ### Bare conversations at a terminal
 
 Bare `lf` and skill launches run as the terminal's foreground process-group
 leader. Closing the terminal ends them. `os_process::foreground` hands over
 the terminal before exec and takes it back after; Ctrl+Z stops lf with its
-provider and `fg` continues both. `lf resume` opens a Managed conversation.
+provider and `fg` continues both. `lf resume` reopens a Bare conversation in
+its terminal too.
 
 ### Identity
 

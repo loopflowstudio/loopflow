@@ -837,7 +837,7 @@ pub mod planning_tasks;
 
 pub mod task_graph;
 
-/// Prepare a conversation with its first input; `resume` supplies the managed launch path.
+/// Prepare a Task-bound conversation with its first input for a Managed resume.
 #[allow(dead_code)] // Shared support is compiled by every application test binary.
 pub fn prepare_native_conversation(
     database: &std::path::Path,
@@ -860,7 +860,42 @@ pub fn prepare_native_conversation(
     session.skill = skill.map(str::to_owned);
     session.request = Some(request.into());
     session.interactive = true;
-    crate::store::sessions::create_session(&store, session, None)
+    let session = crate::store::sessions::create_session(&store, session, None).unwrap();
+    let cwd = cwd.canonicalize().unwrap();
+    let task = store
+        .task_checkouts()
+        .unwrap()
+        .into_iter()
+        .find(|checkout| checkout.worktree.canonicalize().unwrap() == cwd)
+        .map(|checkout| checkout.task_id)
+        .unwrap_or_else(|| {
+            store
+                .create_task(&loopflow_storage::work::task::NewTask {
+                    id: loopflow_model::durable::TaskId::new(),
+                    repository_id: crate::repository::location::ensure_repository(
+                        &store,
+                        &crate::repository::discover(&cwd).unwrap().to_string(),
+                    )
+                    .unwrap(),
+                    project_id: None,
+                    title: "Native conversation".into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id
+        });
+    store
+        .bind_session_prepared(
+            &session.id,
+            session.captured,
+            &task,
+            &session.cwd,
+            &loopflow_storage::sqlite::SessionCaller {
+                agent: None,
+                capture_key: None,
+            },
+        )
         .unwrap()
         .id
         .to_string()

@@ -1510,6 +1510,12 @@ impl SqliteStore {
         Ok(attachment)
     }
 
+    /// A bound or primary conversation reopens managed; attribution alone
+    /// leaves a Session bare.
+    pub fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
+        Ok(session.bound_at.is_none() && self.primary_scope(&session.id)?.is_none())
+    }
+
     /// Whether this interactive Session runs as the foreground program of the
     /// terminal that started it (`lf <skill>`): no holder keeps it,
     /// so nothing else may stop it, and another launch on its thread runs
@@ -1518,7 +1524,9 @@ impl SqliteStore {
         let Some(record) = self.session(session)? else {
             return Ok(false);
         };
-        Ok(record.interactive && self.session_terminal(session)?.is_none())
+        Ok(record.interactive
+            && self.is_bare(&record)?
+            && self.session_terminal(session)?.is_none())
     }
 
     /// Hold attachment transfer across acquisition and the eventual SQL claim.

@@ -149,8 +149,7 @@ pub(crate) fn resume_session(
     )
 }
 
-/// Continue a recorded conversation. `named_work` is the resume command's: a
-/// Task or Wave resume starts only beside the Machine server.
+/// Continue a recorded conversation with the lifetime selected by delegation.
 pub fn resume_session_with_env(
     artifact_key: &String,
     provider_session: Option<&crate::session_record::ProviderSessionRef>,

@@ -1,6 +1,7 @@
 # LOO-924 follow-through: three launch states and a parsed agent choice
 
-Direction from concept review of PR #1966 (`scratch/concept-review.html`).
+Direction from concept review of PR #1966
+(`cd0977a62f:scratch/concept-review.html`; the working file now reviews Session commands).
 Jack, 2026-11-17, quoting the review: "Two product ideas still lack one owner in
 the code: whether a launch is managed, and which agent was chosen." / "this
 seems worth fixing". Both go in this PR.
@@ -108,8 +109,9 @@ replay) are `Bare(Headless)`.
 In a Task checkout: `lf -b research '...' &`, then `lf steer <TASK> 'note'`.
 The bare run prints the steer after its next tool call and the Task's usage
 includes it. `lf task run <TASK>` gets the same steer in its step. Then
-`lf research` at a terminal, quit, `lf resume`: close the viewer and the
-conversation is still there.
+`lf research` at a terminal, quit, `lf resume`: the Bare conversation returns
+in that terminal. Open `lf resume --task <TASK>`: closing its viewer leaves the
+Managed conversation running.
 
 `Run` is not stored or sent, so no process listing names the state; the
 launch matrix prints it per cell.
@@ -136,28 +138,30 @@ the one `Run` chosen outside `delegate` that isn't Bare (commented in
 `lf/commands/run.rs`). `lf -b resume <ID> --message` is `Bare(Headless)`; with no
 message, resume keeps the Session's state. The transport, harness and server READMEs say so.
 
-Remaining for implement: resume keeps the Session's state (above). Gate owns the broader transport,
-configuration and Task performance suites; demo owns live provider steering
-and the resume-outlives-viewer change.
+Resume now reads the Session's binding and primary scope once in `delegate`,
+then carries the resulting `Run` through native launch. A held child keeps the
+parent's Managed decision without rereading it. `SqliteStore::is_bare`
+uses `bound_at` and primary scope, not attribution provenance: a declared Bare
+launch must remain Bare when reopened. An unreadable store logs a recording
+gap and retains the Managed fallback. `runs_in_its_terminal` shares the same
+classification so a managed conversation cannot be treated as an independent
+terminal launch while its held terminal is absent.
 
-Managed native fixtures open through `resume`; direct skills remain Bare
+Gate owns the broader transport, configuration and Task performance suites;
+demo owns live provider steering and the two resume lifetimes.
+
+Managed native fixtures use a real Task binding and open through `resume`,
+retaining their selected cwd and configuration; direct skills remain Bare
 with Task attribution. WorkSource remains for context provenance and primary
 selection, with no launch-lifetime authority. Fresh resume carries invocation
 settings and a literal inline-prompt delimiter across exec.
 
-Checks, 2026-11-17 (inherited `LF_*` cleared):
+Earlier build, launch matrix, agent fallback, steering, native launch/resume and
+lint results: `cd0977a62f:scratch/plan.md`. Current resume checks follow below.
 
-- `cargo build -p loopflow --bin lf`: passed.
-- Focused `cargo nextest run --lib` selections: 11 core tests passed, including
-  the 16-cell launch matrix, agent fallback order, steer attribution and query plans.
-- Focused CLI nextest selections: startup, server-free Task attribution,
-  documented commands, Codex service tiers and document bytes, Claude/Codex/OpenCode
-  launch/resume policy, linked worktrees and all three native Pi cases passed.
-- Task-worker, launch-mode and steer-capability nextest selections: 3 passed.
-  macOS debug libtest linking warned about the size of `__eh_frame`; linking succeeded.
-- The native launch/resume policy test passed after moving its preparation
-  fixture into execution's shared test support.
-- `cargo clippy --all-targets -- -D warnings`: passed on the final tree.
+- `cargo nextest run -p loopflow -p loopflow-execution --lib --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(terminal_launch_and_resume_use_current_policy_and_preserve_native_identity) | test(pi_native_callbacks_retain_identity_final_output_and_usage)'`: 7 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned about `__eh_frame` size and succeeded.
+- `cargo nextest run -p loopflow --test integration -E 'test(documented_commands::)'`: 4 passed in the combined native/docs selection, 2026-11-17, inherited `LF_*` cleared.
+- `cargo fmt` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
 
 ## Delete — do not maintain
 

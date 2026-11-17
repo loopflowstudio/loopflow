@@ -266,7 +266,7 @@ pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> 
     )
 }
 
-/// Reopen a recorded Session as a Managed conversation.
+/// Reopen a recorded Session, retaining its bare or managed lifetime.
 pub(crate) fn delegate_session(
     json_session: Option<&str>,
     preview_session: Option<&str>,
@@ -307,6 +307,38 @@ fn delegate(
     mut argv: Vec<String>,
     replace: bool,
 ) -> Result<Delegation> {
+    // A held child already took up the parent's Managed decision.
+    let run = if current().is_none() && run == crate::harness::Run::Managed {
+        if let Some(id) = preview_session {
+            static GAP: LazyLock<Mutex<crate::store::RecordingGap>> =
+                LazyLock::new(Default::default);
+            let bare = crate::journal::process_ledger().and_then(|store| {
+                store
+                    .session(id)?
+                    .map(|session| store.is_bare(&session))
+                    .transpose()
+            });
+            let mut gap = GAP.lock().expect("resume gap lock poisoned");
+            match bare {
+                Ok(Some(true)) => {
+                    gap.recovered();
+                    crate::harness::Run::Bare(crate::harness::Mode::Interactive)
+                }
+                Ok(_) => {
+                    gap.recovered();
+                    run
+                }
+                Err(error) => {
+                    gap.note("resume lifetime", &error);
+                    run
+                }
+            }
+        } else {
+            run
+        }
+    } else {
+        run
+    };
     if cfg!(test)
         || current().is_some()
         || crate::os_process::detached::launched()
@@ -2869,7 +2901,104 @@ mod launch_mode_tests {
     }
 
     #[test]
-    fn reopening_a_session_is_managed_without_reading_the_store() {
+    fn reopening_keeps_bare_attribution_and_managed_conversations() {
+        use crate::harness::Run;
+        use crate::session::WorkSource;
+        use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        crate::journal::with_process(|| {
+            crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
+            let store = crate::journal::process_ledger().unwrap();
+            for (source, bound, primary, expected) in [
+                (None, false, false, Run::Bare(Mode::Interactive)),
+                (
+                    Some(WorkSource::Checkout),
+                    false,
+                    false,
+                    Run::Bare(Mode::Interactive),
+                ),
+                (
+                    Some(WorkSource::Declared),
+                    false,
+                    false,
+                    Run::Bare(Mode::Interactive),
+                ),
+                (
+                    Some(WorkSource::Inherited),
+                    false,
+                    false,
+                    Run::Bare(Mode::Interactive),
+                ),
+                (Some(WorkSource::Bound), true, false, Run::Managed),
+                (Some(WorkSource::Declared), false, true, Run::Managed),
+            ] {
+                let capture = SessionRecorder::begin_at(
+                    ledger.home(),
+                    SessionCaptureSpec {
+                        harness: "claude".into(),
+                        model: None,
+                        surface: "interactive".into(),
+                        cwd: ledger.home().into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        graph: SessionGraphMembership::Independent,
+                        work: None,
+                    },
+                )
+                .unwrap();
+                let session = store
+                    .session_for_artifact(&capture.artifact_key())
+                    .unwrap()
+                    .unwrap();
+                rusqlite::Connection::open(ledger.home().join("loopflow.db"))
+                    .unwrap()
+                    .execute(
+                        "UPDATE agent_sessions SET work_source=?2,bound_at=?3,
+                         primary_scope=CASE WHEN ?4 THEN 'repository' END,repo=?5 WHERE id=?1",
+                        rusqlite::params![
+                            session.id,
+                            source.map(|value| serde_json::to_value(value)
+                                .unwrap()
+                                .as_str()
+                                .unwrap()
+                                .to_owned()),
+                            bound.then_some(1),
+                            primary,
+                            ledger.home().to_str().unwrap(),
+                        ],
+                    )
+                    .unwrap();
+                assert_eq!(
+                    super::delegate(
+                        Run::Managed,
+                        None,
+                        Some(session.id.as_str()),
+                        Vec::new(),
+                        true
+                    )
+                    .unwrap(),
+                    super::Delegation::Here { run: expected },
+                    "source={source:?}, bound={bound}, primary={primary}",
+                );
+                assert_eq!(
+                    store.runs_in_its_terminal(&session.id).unwrap(),
+                    matches!(expected, Run::Bare(_))
+                );
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn reopening_with_an_unreadable_store_stays_managed() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let database = ledger.home().join("unreadable.db");
+        std::fs::write(&database, "not a database").unwrap();
+        ledger.set_db_path(database);
         assert_eq!(
             super::delegate(
                 crate::harness::Run::Managed,

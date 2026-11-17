@@ -502,12 +502,16 @@ final class ServerSubscription: @unchecked Sendable {
         try Task.checkCancellation()
         let link = try await connect()
         try Task.checkCancellation()
-        let (stopped, resume) = lock.withLock { (self.stopped, consumesEvents ? nil : resumeToken) }
+        // Events need this link's baseline. Clear it before subscribing: the
+        // baseline reading can arrive before `register` returns.
+        let (stopped, resume) = lock.withLock {
+            eventBaseline = false
+            return (self.stopped, consumesEvents ? nil : resumeToken)
+        }
         guard !stopped else { return }
         try await link.register(self, query: query, resume: resume)
         let checkpoint: UInt64? = lock.withLock {
             self.link = link
-            eventBaseline = false
             return pending
         }
         // A failed send ends the link; its failure resumes this watch.

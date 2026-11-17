@@ -18818,8 +18818,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 7,
-  "x-revision": 7,
+  "x-min-revision": 8,
+  "x-revision": 8,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

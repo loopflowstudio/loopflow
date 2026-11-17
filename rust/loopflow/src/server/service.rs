@@ -528,13 +528,13 @@ enum Origin {
     Local,
     /// Another Machine's `lf`: every operation runs here and is never sent
     /// on, in this Machine's checkout of the sender's repository.
-    Machine(Option<Box<Sender>>),
+    Machine(Box<Sender>),
 }
 
 impl Origin {
     /// `read` where it runs: in the sender's repository here.
     fn place(&self, mut read: Read) -> Result<Read, Error> {
-        if let (Self::Machine(Some(sender)), Some(directory)) = (self, read.directory_mut()) {
+        if let (Self::Machine(sender), Some(directory)) = (self, read.directory_mut()) {
             *directory = crate::lf::commands::work_route::repository_path(&sender.repository)
                 .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
         }
@@ -615,33 +615,21 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
         };
-        let origin = |sender: Option<Sender>| match listed.machine {
-            true => Origin::Machine(sender.map(Box::new)),
-            false => Origin::Local,
-        };
-        let (id, start, origin) = match message {
+        let (id, start, sender) = match message {
             ClientMessage::Request {
                 id,
                 operation,
                 select,
                 sender,
                 request_id,
-            } => (
-                id,
-                Start::Request(operation, select, request_id),
-                origin(sender),
-            ),
+            } => (id, Start::Request(operation, select, request_id), sender),
             ClientMessage::Subscribe {
                 id,
                 operation,
                 select,
                 resume,
                 sender,
-            } => (
-                id,
-                Start::Subscribe(operation, select, resume),
-                origin(sender),
-            ),
+            } => (id, Start::Subscribe(operation, select, resume), sender),
             ClientMessage::Checkpoint { id, checkpoint } => {
                 match inflight
                     .get(&id)
@@ -693,6 +681,22 @@ pub(super) async fn session<C: Carrier>(
             .await?;
             continue;
         }
+        let origin = match (listed.machine, sender) {
+            (true, Some(sender)) => Origin::Machine(Box::new(sender)),
+            (true, None) => {
+                send(
+                    lines,
+                    &error(
+                        Some(id),
+                        ErrorCode::Invalid,
+                        "another Machine's request must carry its sender",
+                    ),
+                )
+                .await?;
+                continue;
+            }
+            (false, _) => Origin::Local,
+        };
         if inflight.contains_key(&id) {
             send(
                 lines,
@@ -850,12 +854,10 @@ pub(super) async fn session<C: Carrier>(
             Start::Subscribe(query, select, resume) => {
                 // Only a sender's repository costs a store read.
                 let placed = match origin {
-                    Origin::Machine(Some(_)) => {
-                        tokio::task::spawn_blocking(move || origin.place(query))
-                            .await
-                            .map_err(unavailable)
-                            .and_then(|placed| placed)
-                    }
+                    Origin::Machine(_) => tokio::task::spawn_blocking(move || origin.place(query))
+                        .await
+                        .map_err(unavailable)
+                        .and_then(|placed| placed),
                     origin => origin.place(query),
                 };
                 let query = match placed {
@@ -1343,6 +1345,7 @@ fn measured_result(
     result.map(|result| serde_json::json!({ "result": result, "work": work.receipt() }))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn operate(
     operation: Operation,
     origin: Origin,
@@ -1376,7 +1379,7 @@ async fn operate(
                     loopflow_execution::provider_auth::operations::served(|| {
                         Ok(serde_json::to_value(match origin {
                             Origin::Local => change.run()?,
-                            Origin::Machine(sender) => change.run_here(sender.as_deref())?,
+                            Origin::Machine(sender) => change.run_here(&sender)?,
                         })?)
                     })
                 },
@@ -1722,11 +1725,20 @@ mod tests {
         }
 
         async fn hello(&mut self, revision: u32, min_revision: u32) -> ServerMessage {
+            self.hello_as("test", revision, min_revision).await
+        }
+
+        async fn hello_as(
+            &mut self,
+            kind: &str,
+            revision: u32,
+            min_revision: u32,
+        ) -> ServerMessage {
             self.send(&ClientMessage::Hello(Hello {
                 revision,
                 min_revision,
                 client: ClientIdentity {
-                    kind: "test".into(),
+                    kind: kind.into(),
                     platform: "test".into(),
                     name: "fixture".into(),
                     version: "0".into(),
@@ -1856,6 +1868,85 @@ mod tests {
             .build()
             .unwrap()
             .block_on(body);
+    }
+
+    #[test]
+    fn a_machine_request_without_its_sender_is_invalid() {
+        with_empty_home(async {
+            let mut client = Client::connect();
+            client
+                .hello_as(
+                    loopflow_execution::machine::wire::MACHINE_CLIENT,
+                    REVISION,
+                    REVISION,
+                )
+                .await;
+            client
+                .send(&ClientMessage::Request {
+                    id: "bare".into(),
+                    operation: catalog(),
+                    select: None,
+                    sender: None,
+                    request_id: None,
+                })
+                .await;
+            let answer = client.receive().await.unwrap();
+            assert!(
+                matches!(&answer, ServerMessage::Error { id: Some(id), code: ErrorCode::Invalid, .. } if id == "bare"),
+                "{answer:?}"
+            );
+        });
+    }
+
+    #[test]
+    fn a_machine_request_writes_its_secrets_nowhere_in_lf_log() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
+        );
+        // lf's own writer and format; a current-thread runtime keeps every
+        // async event on the thread this subscriber covers.
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
+            .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)
+            .finish();
+        let _logging = tracing::subscriber::set_default(subscriber);
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let mut client = Client::connect();
+                client
+                    .hello_as(
+                        loopflow_execution::machine::wire::MACHINE_CLIENT,
+                        REVISION,
+                        REVISION,
+                    )
+                    .await;
+                let request = include_str!(
+                    "../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"
+                );
+                assert!(request.contains("sk-fixture"));
+                client
+                    .writer
+                    .write_all(request.trim_end().as_bytes())
+                    .await
+                    .unwrap();
+                client.writer.write_all(b"\n").await.unwrap();
+                // The fixture's repository has no checkout here, so the hold fails and is logged.
+                let answer = client.receive().await.unwrap();
+                assert!(
+                    matches!(&answer, ServerMessage::Error { id: Some(id), .. } if id == "hold-1"),
+                    "{answer:?}"
+                );
+            });
+        let log = std::fs::read_to_string(loopflow_execution::diagnostic_log::log_path()).unwrap();
+        assert!(log.contains("request=hold-1"), "{log}");
+        assert!(!log.contains("sk-fixture"), "{log}");
     }
 
     #[test]

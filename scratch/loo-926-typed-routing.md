@@ -275,29 +275,23 @@ crash, unreachable and unstartable errors, and "What the server must learn":
 - Deleted: `MachineOperation`/`machine.write`, `Write::in_checkout`,
   `forward::take`/`exported`, `forwarding_environment`.
 
-Merged `origin/main` at `2593c489d7` (#1960): `request_id` on `request`,
-revision 7, `MIN_REVISION` 7. `sender` rides on 7 without a bump.
+Merged `origin/main` at `2593c489d7` (#1960): `request_id` on `request`.
 
-Remaining for PR 1 (concept review of `4be26c7113`, headless; none built yet):
+Then, to finish PR 1's concept review of `4be26c7113`:
 
-1. **Bump the protocol to 8.** Revision 7 is unreleased but Desktop and lf
-   built from main speak it without `sender`. `ClientMessage` is
-   `deny_unknown_fields` and `sender` is required, so the two cannot parse
-   each other's requests; at 8 with `MIN_REVISION` 8 an older side answers
-   `incompatible` at `hello`. `machine/wire.rs`, `ServerProtocol.swift`
-   (`revision`, `minRevision`, doc comment), fixtures and
-   `server_schema.json` move together.
-2. **The test that `Secrets` prints nothing.** `Secrets`
-   (`machine/wire.rs:138`) has a names-only `Debug`, but no test holds it.
-   Put a value in a `Sender` and assert it is absent from `Debug` of the
-   `ClientMessage` and from what the served request writes to `logs/lf.log`.
-3. **A Machine's request carries its sender.** Both senders
-   (`Remote::call`, `subscribe_remote_task_status`) always send one, yet
-   `service.rs:619` builds `Origin::Machine(Option<Box<Sender>>)`, and
-   `run_here(None)` (`write.rs:66`) and `place` treat the sender's own path as
-   a directory here. Make it `Origin::Machine(Box<Sender>)`, answer a
-   Machine's null `sender` with `invalid`, and drop the `None` arms
-   (`service.rs:853`, `write.rs:74`).
+- Protocol revision 8, `MIN_REVISION` 8 (`machine/wire.rs`,
+  `ServerProtocol.swift`, `server/` DTO fixtures, `server_schema.json`,
+  server README): Desktop and lf from main speak 7 without `sender` and now
+  answer `incompatible` at `hello`.
+- `Origin::Machine(Box<Sender>)`; a Machine's null `sender` is `invalid`
+  (`a_machine_request_without_its_sender_is_invalid`); `run_here` takes
+  `&Sender`.
+- Secrets stay out of `Debug` (`server::wire::tests::a_request_another_machine_sent_…`)
+  and out of `logs/lf.log` for a served Machine request
+  (`a_machine_request_writes_its_secrets_nowhere_in_lf_log`).
+
+Checks: `cargo test -p loopflow --lib server::` passed (94). Swift
+`scripts/test_desktop.sh --filter 'DTOFixtureTests|ServerClientTests'` passed (74).
 
 Kept on purpose: the plain-command launch (`lf/commands/ssh.rs`) still sends
 `forward.env` as a delivered one-time file, because no server is reached.

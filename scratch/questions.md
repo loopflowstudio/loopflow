@@ -178,4 +178,4 @@ This reverses the headless choice above ("The write another Machine sends is a n
 
 ## Sync onto main #1960 (2026-11-17)
 
-- Main moved the protocol to revision 7 (`request_id` on `request`, MIN 7). This branch's `sender` on `request`/`subscribe` landed on top at revision 7 without a further bump, matching how the branch carried `sender` at 6. The plan's remaining item 1 bumps it to 8.
+- Main moved the protocol to revision 7 (`request_id` on `request`). `sender` on `request`/`subscribe` is revision 8 with `MIN_REVISION` 8, so a side built from main answers `incompatible` at `hello` instead of failing to parse.

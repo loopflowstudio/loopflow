@@ -34,7 +34,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 7
+## Local protocol, revision 8
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -64,11 +64,11 @@ answers `incompatible` itself. The client side is `Connection::open_on`.
 
 Another Machine says so in `hello` (`client.kind` is `machine`), and every
 operation it sends then runs here and is never sent on. Its requests and
-subscriptions carry `sender`, what the receiving server cannot know; a client
-on this Machine sends null:
+subscriptions carry `sender`, what the receiving server cannot know; a
+Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 
 ```text
-→ {"type":"hello","revision":6,"min_revision":5,"client":{"kind":"machine",…}}
+→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
@@ -121,8 +121,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":7,"server_revision":7,"min_revision":7,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":8,"server_revision":8,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -146,7 +146,7 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 7; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 8; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.

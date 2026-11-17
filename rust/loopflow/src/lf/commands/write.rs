@@ -63,16 +63,11 @@ macro_rules! writes {
             /// Run a write another Machine sent here, never sending it on: in
             /// this Machine's checkout of the sender's repository, a launch
             /// it starts running with the sender's selection and secrets.
-            pub(crate) fn run_here(mut self, sender: Option<&Sender>) -> anyhow::Result<WriteResult> {
-                let environment = match sender {
-                    Some(sender) => {
-                        if let Some(directory) = self.directory_mut() {
-                            *directory = super::work_route::repository_path(&sender.repository)?;
-                        }
-                        sender.selection.environment(&sender.secrets)?
-                    }
-                    None => Vec::new(),
-                };
+            pub(crate) fn run_here(mut self, sender: &Sender) -> anyhow::Result<WriteResult> {
+                if let Some(directory) = self.directory_mut() {
+                    *directory = super::work_route::repository_path(&sender.repository)?;
+                }
+                let environment = sender.selection.environment(&sender.secrets)?;
                 self.execute(None, &environment)
             }
 

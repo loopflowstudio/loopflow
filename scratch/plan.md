@@ -27,15 +27,15 @@ either runs again or says what stopped it and which one command continues it.
 
 ```bash
 # kill
-lf task status LOO-x            # conversation: running
+lf task status LOO-x            # Conversation: running
 kill -9 <provider pid>          # the Task conversation's claude
-lf task status LOO-x            # conversation: died 12:01 (killed, exit 137) · started again 12:01
+lf task status LOO-x            # Conversation: died 12:01 (exit 137) · starting again
 # quit
 # type /exit in the pane
-lf task status LOO-x            # conversation: quit 12:03; `lf resume --task LOO-x` opens it
+lf task status LOO-x            # Conversation: quit 12:03; `lf resume --task LOO-x` opens it
 # reboot with three Tasks running (one mid-Graph, unapproved)
-lf task status LOO-a            # conversation: running (restarted 09:14 after the Machine restarted)
-lf task status LOO-b            # run: died at implement 08:57 · carried again 09:14 (attempt 1)
+lf task status LOO-a            # Conversation: running
+lf task status LOO-b            # Run died at implement; the server's next pass carries it again
 ```
 
 ## The four questions, answered
@@ -569,12 +569,9 @@ Must survive:
   (`work_first_entry.json`), `test(performance_tests::)` (`summary_query` gained one PK join).
 - A real reboot with three Tasks (qa; a person runs it).
 
-## Docs written ahead (write-docs)
+## Docs
 
-Intended behavior, written before the build; slice 4 checks them against what shipped:
-- `docs/sessions.md`: the interruption table, and "After a kill, a crash or a reboot" (replaces "After a crash or reboot"; anchor updated in `docs/server.md`)
-- `docs/work.md`: quit stays quit, killed comes back
-- `docs/troubleshooting.md`: "What survives" row and the carried-again note
-- `docs/server.md`: logout/reboot line
-- `rust/loopflow/src/server/README.md`: new "Recovery pass" section
-- `rust/loopflow-execution/src/transport/README.md`: holder "Lifetime"
+Slice 4 checked these against what shipped (`5adee6450c`): `docs/sessions.md`
+("After a kill, a crash or a reboot"), `docs/work.md`, `docs/troubleshooting.md`,
+`docs/server.md`, `rust/loopflow/src/server/README.md` ("Recovery pass") and
+`rust/loopflow-execution/src/transport/README.md` (holder "Lifetime").

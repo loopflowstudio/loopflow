@@ -1,0 +1,70 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-932 QA: Start lands in the conversation</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f4f4f4;padding:.7em;overflow-x:auto;font-size:13px}
+table{border-collapse:collapse;width:100%}td,th{border:1px solid #ddd;padding:.35em .5em;text-align:left;vertical-align:top}
+.ok{color:#176b2c}.no{color:#a33}.gap{color:#8a6100}
+</style>
+<h1>LOO-932 QA: Start lands in the conversation</h1>
+<p>Branch build <code>0.16.0+5e74e2167</code> (debug), 2026-11-16, load average about 49.
+Private Machine from <code>lf-world build one-task</code> under <code>/tmp/lf-qa-932</code>
+(isolated <code>HOME</code>, <code>LF_HOME</code>, provider homes; <code>LF_*</code>/<code>REX_*</code> cleared;
+stand-in <code>claude</code> that echoes). The repository got a Graph <code>qa</code>
+(<code>- cmd: help task</code>, <code>- interactive: demo</code>), committed and pushed to the world's origin.
+The branch's <code>lf server run</code> ran in the foreground; nothing registered with launchd.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>CLI Start</td><td><code>lf task create --title 'Add a dark mode toggle' --run --json</code>, stdin closed</td>
+<td class="ok">Exit 0, <code>milestone: admitted</code>, answer carries <code>session</code> (with <code>open_argv</code>), <code>overview</code> (Graph <code>qa</code> at <code>start</code>) and <code>row</code> (<code>selection_states</code> include <code>working</code>).
+Server steps: resolve 8.8 ms, file_task 73 ms, hold_conversation 499 ms, read_answer 5.6 ms, row 81 ms. Setup: checkout 682 ms, graph 282 ms. The CLI returned after 5.75 s because it joins <code>sync_planning</code> (4.87 s) after the answer.</td></tr>
+<tr><td>What the conversation shows</td><td>Attached with <code>lf session resume &lt;id&gt;</code> in a PTY, typed <code>hello there</code></td>
+<td class="ok"><pre>Make the sidebar collapsible
+Checkout ready  0.9 s
+Graph qa started
+started e5782150-…</pre>then the stand-in echoed the opening turn and <code>hello there</code>. Typing works.
+<span class="gap">With <code>--title</code> and no request, no words line: the Session has no request. Desktop and the phone always send <code>request</code>, so they show it.</span></td></tr>
+<tr><td>Served Start</td><td>Python over the Unix socket: <code>desktop</code> hello, <code>task.create {run: true}</code></td>
+<td class="ok">Answer in 0.37 s (0.20 s on a later one), <code>admitted</code>. Swift probe built against the <code>Loopflow</code> module encoded <code>ServerOperation.command(.taskCreate…)</code>; the live answer (0.374 s) decoded as <code>TaskCreated</code>: Session <code>open_argv</code>, overview Graph <code>qa</code>, row selection <code>working, open, idle</code>.</td></tr>
+<tr><td>Repeat, same request ID</td><td>Sent the identical request after setup</td>
+<td class="ok">Same Task <code>670f77</code> and Session, milestone now <code>started</code>, one Graph run.</td></tr>
+<tr><td>Same ID, different words</td><td>Sent other content under <code>qa-served-1</code></td>
+<td class="ok"><code>conflict</code>: "creation request qa-served-1 has different content"; nothing created.</td></tr>
+<tr><td>Answer lost</td><td>Closed the socket right after sending; <code>lf server receipt</code>; resent</td>
+<td class="ok">Receipt <code>complete</code>, "Task created", Task and Session IDs; the conversation set up on its own (checkout, Graph, milestone <code>started</code>). The resend answered the same Task in 0.20 s. Task list: no duplicate.</td></tr>
+<tr><td>Ready checkout</td><td><code>ls -di</code> of <code>repo.ready</code> before and after the second Start</td>
+<td class="ok">Inode 564583854 became <code>repo.9eb189-make-the-sidebar</code>; a new <code>repo.ready</code> (detached) appeared.</td></tr>
+<tr><td>Cleanup keeps it</td><td><code>lf wt prune --all</code></td><td class="ok">"0 removed, 6 kept"; <code>repo.ready</code> stays and is not listed.</td></tr>
+<tr><td>Deleted by hand</td><td><code>git worktree remove --force</code>, then Start; <code>rm -rf</code>, then Start</td>
+<td class="ok">Both Starts checked out and a new <code>repo.ready</code> appeared each time.</td></tr>
+<tr><td>Origin moved</td><td>Pushed <code>e34d55c</code> from another clone, two Starts</td>
+<td class="ok">First Start based on the last fetch (<code>80b1ac9</code>), as designed; its continuation fetched, the next Start based on <code>e34d55c</code>.</td></tr>
+<tr><td>One <code>lf</code> per provider</td><td>Read <code>processes</code> for two stand-in PIDs</td>
+<td class="ok">Each PID has one <code>kind='lf'</code> row, <code>lf session resume &lt;id&gt;</code>, plus its agent row. The provider's OS parent is <code>lf holder run</code>.</td></tr>
+<tr><td>Reopen after the provider died</td><td>Killed the stand-in, wrote a transcript line, <code>lf session resume</code> in a PTY, typed</td>
+<td class="ok">"claude exited with 143", then <code>resumed …: 1 lines</code> and the reply. No setup lines again, still one Graph run.</td></tr>
+<tr><td>Desktop, headless</td><td><code>scripts/test_desktop.sh --filter 'WorkDestinationTests|NewTaskTests|DTOFixtureTests'</code></td>
+<td class="ok">132 tests in 3 suites passed. Automated checks, not a window.</td></tr>
+<tr><td>Logs</td><td>WARN/ERROR in the private <code>lf.log</code></td><td class="ok">One line, the expected <code>conflict</code>.</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p>Nothing in the product. The repository's <code>qa</code> skill gained a section on starting a Task in an lf-world (<code>.lf/skills/qa.md</code>).</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><b>The click.</b> The screen was locked and another Loopflow Dev app was running, so no window: the sheet closing in the click, the three labels never rendering, and Start → typing in <code>timings.py</code> stay unseen. Covered only by the headless suites above.</li>
+<li><b>Remote Machine Start → typing.</b> Needs a rented or tailnet Machine with a provider; not attempted.</li>
+<li><b>Phone.</b> No iPhone Mirroring session.</li>
+<li><b>Crash between commit and holding the conversation</b>, and a planning-sync failure becoming a Task event: no way to land those from outside without fault injection.</li>
+</ul>
+
+<h2>Still wrong or rough, worst first</h2>
+<ol>
+<li class="gap">The CLI's <code>--run --json</code> answer waits for <code>sync_planning</code> (4.9 s here, 1.4 s on another), so a terminal Start feels slow although the conversation was ready in under a second. By design ("the CLI joins"); worth a second look if the CLI matters for Start.</li>
+<li class="gap">Right after Start, <code>lf task status</code> shows <code>Planning: unstarted</code> and "action: run (run the next work with `lf task run`…)" while the Graph is already at <code>demo</code>. The planning field is the tracker's; the action is the usual one at an interactive step. Pre-existing, not this change.</li>
+<li class="gap"><code>--title</code> without a request prints no words above the setup lines.</li>
+</ol>

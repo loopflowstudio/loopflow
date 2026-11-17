@@ -401,7 +401,7 @@ chain; setup reads the Task once; `launch_conversation`'s Work env is one
 guard. `task_create_tests::` 9/9, `session_cli_tests::` 24/24, transport
 `piped_resume_json_runs_here_and_returns_once` ok (local, debug).
 
-Remaining: slice 5's remote sample (qa).
+Remaining: slice 5's remote sample and a windowed Start → typing (qa could not reach either: screen locked, no remote Machine).
 
 ## Slices
 
@@ -438,8 +438,7 @@ Remaining: slice 5's remote sample (qa).
 - `uv run pytest python/tests/test_desktop_timings.py` — 16 passed (nesting and Machine split).
 - `cargo test -p loopflow --test integration task_create_` — 9 passed after the sync, `-a` and timing assertions; no launchd server left behind. Swift Mac filter (with `InteractionTests`) 153 passed; clippy clean.
 - 120175ea3e: `loopflow-execution --lib definition::` 2 passed; clippy (`loopflow`, `loopflow-execution`) clean. Swift build after the `ProcessEnvironment` edit — gate.
-- Live Start → typing, local and remote Machine — qa (remote needs a rented or
-  tailnet Machine; not a gate requirement).
+- qa (5e74e2167, private lf-world, `scratch/qa.html`): CLI and served Start, repeat, conflict, lost answer, ready take/replace/prune/hand-delete, base after an origin push, one `lf` LfProcess per provider, dead-provider reopen — all as planned; served answer 0.20–0.37 s (debug, load ≈ 49). Desktop headless `WorkDestinationTests|NewTaskTests|DTOFixtureTests` 132 passed. Not seen: the click in a window (screen locked), remote Machine, phone.
 
 ## Done when
 

@@ -149,17 +149,19 @@ OS user the socket already trusts.
 Today's SSH preamble and `--repo-id` give the destination `lf` its context.
 A pipe gives the server none, so the context moves into the protocol:
 
-- **This connection came from another Machine.** `hello`'s client identity
-  already has a `kind`; `machine` marks it. The server runs such a
-  connection's writes with `Write::run_here` and never routes them onward.
-- **Which repository.** Operations carry `directory`, the sender's path.
-  The request needs the repository's id, which the server resolves to its
-  own checkout (`work_route::repository_path`). This is the first field of
-  the `Selection` the earlier plan put in PR 3.
-- **Who is asking and their settings.** The preamble's profile, user name,
-  Task source and agent override become fields of the same selection.
-- **Per-run secrets for a launch.** A served `task.run` starts a detached
-  `lf` from the server, which has no forwarded environment. Open below.
+In PR 1 one operation carries all of it: `machine.write { repository,
+environment, forwarded, change }` (`server/wire.rs`). The server runs `change`
+with `Write::run_here` in its checkout of `repository` and never sends it on;
+`hello`'s kind `machine` only labels the client in `lf server status`.
+`environment` is the preamble's variables (profile, user name, Task source,
+agent override); `forwarded` names the one-time file `forward::deliver`
+wrote, which the server reads once (`forward::take`) for the launch.
+
+`machine.write` is a second envelope around `Write`, and `environment` puts
+environment-variable names on the wire. Both last only until PR 3: there,
+`Request` carries a typed `Selection` (repository, profile, participant,
+Task source, agent, forwarded file), every write is plain `Write` with that
+selection, and `machine.write` is deleted.
 
 ### One way to open SSH to a Machine
 
@@ -181,8 +183,8 @@ Each PR is its own Task. This Task is PR 1.
 Rework #1956 on `main`:
 
 - `Connection` over a carrier; `ssh::open`; `lf server connect`.
-- `hello` kind `machine` makes the server run writes here; the request
-  carries the repository id.
+- `machine.write` carries the repository id, the sender's context and the
+  forwarded file; the server runs its `change` here.
 - Delete `ssh::call`, the request executor in `server/stdio.rs`, and every
   `prepare_launch` call (LOO-913 deleted the function).
 - Kept from #1956: `Write::run` routes and `Write::run_here` runs; engine
@@ -202,8 +204,8 @@ Rework #1956 on `main`:
 
 As the first plan had it. `--machine` sends the operation over
 `Connection::open_on`; a command with no `Operation` takes the plain-command
-launch. The rest of `Selection` moves onto `Request` and the preamble's
-environment goes. `mutation.rs`, CLI `work_route::forward`, `Read::argv`,
+launch. `Selection` moves onto `Request` with typed fields, `machine.write`
+and its `environment` map are deleted, and the preamble's environment goes. `mutation.rs`, CLI `work_route::forward`, `Read::argv`,
 `aliases.rs`, the extra parses and the group A served guards are deleted;
 `transport::delegate_current` and the detached launch send an operation;
 `ssh::request`'s callers get kinds; the Clap → `Invocation` table is
@@ -230,6 +232,15 @@ PR 1 is built on `main` at `e66b21801c`: `Connection::open_on` over
 `machine.write` (`server/wire.rs::MachineOperation`), which the server runs
 with `Write::run_here` in its checkout of the named repository.
 `server/stdio.rs`, `ssh::call` and the `prepare_launch` path are deleted.
+
+## Next implement direction (concept review, 2026-11-17)
+
+- The demo promises that an unstartable server on mini fails "naming mini,
+  the reason and `ssh mini lf server status`". `machine::ssh::Pipe::ended`
+  names mini and what the destination said, but not where to look. A
+  destination `lf` that exits non-zero (not 2, not 255) gets
+  "; check `ssh <route> lf server status`" in its message, with a test
+  beside `an_lf_that_dies_before`.
 
 ## Open
 

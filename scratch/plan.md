@@ -214,8 +214,24 @@ Remaining:
    help names the server start and `-b`; `.lf/qa/provider-switching.md` drives
    `lf -b steer`.
 
-Nothing remains to build. For gate: the Codex question below, and `-b steer`
-to a running Session (saves and returns) has no test.
+4. **One rule for who a steer starts.** *Next.* Post-build concept review
+   (`scratch/concept-review.html`): the server's start set
+   (`read_steer_wakes`, a `COALESCE(session_id, task_primary_sessions)` join)
+   and the started conversation's take (`take_steers_to_start`, a predicate
+   over `unread()`) encode "a steer names this Session" twice, and only the
+   take applies `applicable`'s source-replacement and shared-steer rules. If
+   they disagree, the server starts a Session that takes nothing and sits at
+   its prompt (a resumed Claude never yields idle). Build one SQL fragment in
+   `sqlite/steers.rs`, "unread steers naming ?1", used by
+   `take_steers_to_start`'s EXISTS and by `read_steer_wakes` as the filter on
+   each candidate Session drawn from steers past the cursor (cursor and
+   migration unchanged). Test in `steers_tests.rs`: a steer the old join
+   would start for but `applicable` excludes (a superseded source, or a Task
+   steer another Session read before the primary conversation started)
+   starts nothing; the existing wake and storage tests still pass.
+
+For gate after that: the Codex question below, and `-b steer` to a running
+Session (saves and returns) has no test.
 
 ## Excluded
 

@@ -43,3 +43,6 @@
   nothing starts the Session again for them. Same trade as `-b steer`'s; the
   plan's "a held start that fails leaves the steer undelivered" holds only for
   a start that fails before launch.
+- Post-build concept review 2026-11-17: the start set and the take rule
+  become one SQL predicate in this Task (slice 4). Passed over: leaving both,
+  since they agree for every steer today.

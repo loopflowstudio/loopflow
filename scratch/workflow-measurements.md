@@ -90,3 +90,22 @@ of these edits. No shipping approval or Graph launch.
 The entry-point repair compiled successfully; `scripts/test_desktop.sh --filter
 'InteractionTests|ResponseVisibilityTests|LaunchReadinessTests'` passed 12 tests
 in 2 suites. No new live measurements were produced by these tests.
+
+“get this landed” — current goal direction. Delivery is now authorized.
+Synced onto main 4852348e without conflicts. Review found that the native-response
+reader retained a previous turn when its transcript became unavailable; restored
+the previous clearing behavior and added a regression check. The focused Python
+run exposed the released-schema fixture's moved migration path; updated it to
+loopflow-storage. Final Python/report/bundle checks: 75 passed; Ruff passed.
+Fresh native control still reports cgWindowNotFound for the installed Dev bundle.
+Keep the three missing live workflows and missing repository cases in the report;
+headless checks are not new live latency data. Post-merge live verification must
+use a supported reader/app runtime, without another production-service override.
+Final Rust checks passed after review repair: 3 current-turn tests, 9 native
+transcript tests, cargo fmt --check and all-target Clippy with warnings denied.
+The Machine's configured stream is dev. Green main packages include a signed,
+notarized Desktop and matching CLI; post-merge verification can use normal
+`lf install` after that package exists, with no service debug override. Do not
+mark the missing three workflows or absent repository cases as passing.
+
+Final post-sync Swift build and interaction/response/launch/protocol/client checks: 61 tests in 5 suites passed.

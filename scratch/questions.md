@@ -12,3 +12,10 @@
 - 2026-11-17: Moving the document fixture to managed resume exposed a lost
   `--docs` selection on the fresh conversation's exec. Forward invocation
   settings in the existing conversation argv so the initial prompt keeps it.
+
+- 2026-11-17, concept review: Discord Wave answers (`run::answer_bound`) stay
+  `Run::Worker`. The plan's rule makes in-process callers `Bare(Headless)`,
+  and the Discord bridge's own command is `lf --batch --wave`, which the
+  table calls Bare. Kept Worker because that turn reported to the server on
+  main and nothing shows dropping it is safe. Assumption, reversible: one
+  line in `run.rs`.

@@ -79,6 +79,13 @@ no viewer, not in what is recorded.
 - A store that can't be read at resume no longer fails the reopen
   (`native_session.rs:177`); the conversation opens Managed, as `works()`
   already assumes.
+- Reopening is Managed whatever started the Session. `SqliteStore::is_bare`
+  is gone, so a conversation begun with `lf <skill>` at a terminal and later
+  opened with `lf resume` is held by the server and outlives its viewer;
+  on main it ran in the terminal and ended with it. Show this at human
+  review: it is the one change here a person meets without touching a Task.
+- `lf resume <ID> 'message'` is a Bare headless turn, with or without
+  `--task`. On main `--task` made that turn report to the server.
 
 ### What it deletes
 
@@ -98,9 +105,13 @@ is a Worker.
 ### Demo
 
 In a Task checkout: `lf -b research '...' &`, then `lf steer <TASK> 'note'`.
-The bare run prints the steer after its next tool call, `lf ps` shows it as
-bare, and the Task's usage includes it. `lf task run <TASK>` shows its step
-as a worker and gets the same steer.
+The bare run prints the steer after its next tool call and the Task's usage
+includes it. `lf task run <TASK>` gets the same steer in its step. Then
+`lf research` at a terminal, quit, `lf resume`: close the viewer and the
+conversation is still there.
+
+`Run` is not stored or sent, so no process listing names the state; the
+launch matrix prints it per cell.
 
 ## 2. The agent choice parsed once
 
@@ -113,13 +124,32 @@ CLI, authored preferences and persistence retain string forms at their input
 boundaries. Wire DTOs are unchanged. `chrome` and `codex_service_tier` remain
 separate provider launch options because neither is a model choice.
 
-## Remaining review
+## Next implement slice: say what Worker is
 
-No implementation slice remains. Gate owns the broader transport,
-configuration and Task performance suites; demo owns live provider steering.
-The original demo's `lf ps` Bare/Worker labels do not exist on the process
-surface. Adding labels needs a persistence/display design rather than a
-second derivation of Run from argv; this remains a review choice.
+Concept review of `cb6aee93e5`. The code holds the model: `Run` has one
+definition, `delegate` returns it, `Holder`/`Place`/`is_managed`/`named_work`
+are gone, and attribution no longer reaches lifetime. Two places where the
+words and the code disagree; both are fixed in the words.
+
+1. **Worker is wider than "a Task Graph step".** Three things are Workers:
+   steps under `lf task run`, the `ci-fix` run landing starts
+   (`pr_landing.rs`, `LF_GRAPH_STEP=worker`), and each Discord answer for a
+   Wave (`run::answer_bound`, built in-process, never through `delegate`).
+   What they share: lf started them for a Task or Wave, nobody views them,
+   and the server records their turns. The table above and
+   `transport/README.md`, `harness/README.md`, `server/README.md` say
+   "headless Task Graph step"; make them say that definition and list all
+   three. `answer_bound` keeps `Run::Worker`: it reported turns before this
+   branch, and the same caution that kept Worker's turn reports applies.
+   Give it a one-line comment naming why it is not `Bare(Headless)`, since
+   it is the only `Run` chosen outside `delegate` that isn't Bare.
+2. **Resume with a message is Bare.** `transport/README.md` says every
+   resume is Managed. Add the row: `lf resume <ID> 'message'` is
+   `Bare(Headless)`; `lf resume` with no message is Managed.
+
+No code path changes. After this slice nothing remains for implement; gate
+owns the broader transport, configuration and Task performance suites, demo
+owns live provider steering.
 
 Managed native fixtures open through `resume`; direct skills remain Bare
 with Task attribution. WorkSource remains for context provenance and primary
@@ -146,6 +176,9 @@ Checks, 2026-11-17 (inherited `LF_*` cleared):
 - String agent parsing in launch consumers and `AgentConfig::resolved_agent`; typed selections own harness and model. Keep strings at config, CLI and persistence boundaries.
 
 ## Not in this PR
+
+- A launch-state label in `lf ps`. It needs `Run` recorded at launch, not
+  worked out again from argv. Nothing in this change needs it.
 
 - Transcript methods stay on `Harness`. Asked whether to split them into a
   per-harness `Transcripts` impl, Jack said "no opinion in this one". One

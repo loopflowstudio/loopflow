@@ -1079,9 +1079,12 @@ fn task_conversation(
     store: &SharedStore,
     task: &loopflow_model::durable::TaskId,
 ) -> Result<Option<SessionFacts>> {
-    let Some(session) = store
-        .sqlite
-        .primary_session(&loopflow_execution::session::PrimaryScope::Task(task.clone()))?
+    let Some(session) =
+        store
+            .sqlite
+            .primary_session(&loopflow_execution::session::PrimaryScope::Task(
+                task.clone(),
+            ))?
     else {
         return Ok(None);
     };

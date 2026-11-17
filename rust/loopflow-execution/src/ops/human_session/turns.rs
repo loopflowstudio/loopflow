@@ -209,7 +209,7 @@ fn record(
         turn,
         raw: true,
         ended: None,
-        recovery: None,
+        start: None,
     }
 }
 

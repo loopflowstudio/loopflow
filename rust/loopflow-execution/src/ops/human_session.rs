@@ -468,10 +468,11 @@ pub struct SessionRecord {
     /// Session, before a first start, or when nobody recorded the end.
     #[serde(deserialize_with = "Option::deserialize")]
     pub ended: Option<SessionEnd>,
-    /// The server starting a Task's conversation again after it died; `null`
-    /// when nothing was or will be started.
+    /// The server's starts of a Task's conversation since it last finished a
+    /// turn: after it died, or a first start that failed; `null` when nothing
+    /// was or will be started.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub recovery: Option<SessionRecovery>,
+    pub start: Option<SessionStarts>,
 }
 
 /// A conversation's last agent end.
@@ -497,12 +498,12 @@ pub enum SessionEndedBy {
 
 /// What the server's recovery pass did and will do for a Task conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct SessionRecovery {
+pub struct SessionStarts {
     /// Starts since it last finished a turn.
     pub attempts: u32,
     /// RFC 3339: the pass's last start; `null` before its first.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub started_at: Option<String>,
+    pub last_started_at: Option<String>,
     /// RFC 3339: when the next start is due, while it is down and the pass
     /// has starts left; `null` otherwise.
     #[serde(deserialize_with = "Option::deserialize")]
@@ -515,11 +516,11 @@ pub struct SessionRecovery {
 }
 
 /// How an interactive Session's agent ended, and what the recovery pass does
-/// about a Task conversation that died. A quit conversation has no recovery.
+/// about a Task conversation that died. A quit conversation has no starts.
 fn session_ending(
     session: &crate::session::SessionSummary,
     state: SessionState,
-) -> (Option<SessionEnd>, Option<SessionRecovery>) {
+) -> (Option<SessionEnd>, Option<SessionStarts>) {
     if !session.interactive {
         return (None, None);
     }
@@ -541,26 +542,26 @@ fn session_ending(
         .as_ref()
         .is_some_and(|end| end.by == SessionEndedBy::Person);
     let died = ended.is_some() && !quit;
-    let recovering = session.recovery_attempts > 0 || session.recovery_failure.is_some();
+    let recovering = session.starts_since_turn > 0 || session.start_failure.is_some();
     if !session.task_primary || session.task_terminal || quit || !(died || recovering) {
         return (ended, None);
     }
-    let attempts = session.recovery_attempts;
-    let gave_up = attempts >= loopflow_storage::sqlite::session_recovery::RECOVERY_ATTEMPTS;
+    let attempts = session.starts_since_turn;
+    let gave_up = attempts >= loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
     let down = state == SessionState::Closed;
     let next_at = (down && !gave_up).then(|| {
-        crate::ops::recovery::next_start_at(attempts, session.recovered_at)
+        crate::ops::recovery::next_start_at(attempts, session.last_started_at)
             .or(session.agent_end.map(|end| end.at))
             .and_then(crate::transcript::rfc3339)
     });
-    let recovery = SessionRecovery {
+    let start = SessionStarts {
         attempts,
-        started_at: session.recovered_at.and_then(crate::transcript::rfc3339),
+        last_started_at: session.last_started_at.and_then(crate::transcript::rfc3339),
         next_at: next_at.flatten(),
         gave_up: down && gave_up,
-        failure: session.recovery_failure.clone(),
+        failure: session.start_failure.clone(),
     };
-    (ended, Some(recovery))
+    (ended, Some(start))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -834,7 +835,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         },
     };
     let state = session_state(session);
-    let (ended, recovery) = session_ending(session, state);
+    let (ended, start) = session_ending(session, state);
     let mut actions = projected_actions(session);
     let open_argv = match human_session_argv(&session.id) {
         Ok(argv) => argv,
@@ -884,7 +885,7 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         turn: None,
         raw: false,
         ended,
-        recovery,
+        start,
     }
 }
 
@@ -1800,7 +1801,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
     let metadata = viewed_summary(&store.sqlite, &session.id)?
         .ok_or_else(|| session_not_found(&session.id))?;
     let state = session_state(&metadata);
-    let (ended, recovery) = session_ending(&metadata, state);
+    let (ended, start) = session_ending(&metadata, state);
     let actions = projected_actions(&metadata);
     let open_argv = human_session_argv(&session.id)?;
     let graph_membership = match (&session.graph_lf_process_id, &metadata.graph) {
@@ -1854,7 +1855,7 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         turn: None,
         raw: false,
         ended,
-        recovery,
+        start,
     };
     workspace::associate(store, std::slice::from_mut(&mut reading)).await?;
     turns::read(&store.sqlite, std::slice::from_mut(&mut reading))?;

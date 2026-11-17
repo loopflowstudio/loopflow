@@ -154,7 +154,7 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT recovery_attempts FROM agent_sessions WHERE id='session'",
+                "SELECT starts_since_turn FROM agent_sessions WHERE id='session'",
                 [],
                 |row| row.get(0),
             )
@@ -165,7 +165,7 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE agent_sessions SET recovery_attempts=3 WHERE id='session'",
+            "UPDATE agent_sessions SET starts_since_turn=3 WHERE id='session'",
             [],
         )
         .unwrap();

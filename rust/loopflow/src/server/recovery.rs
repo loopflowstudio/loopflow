@@ -15,7 +15,7 @@ use anyhow::Result;
 
 use loopflow_execution::transport::registry::Registry;
 use loopflow_model::id::LfSessionId;
-use loopflow_storage::sqlite::session_recovery::RecoverableConversation;
+use loopflow_storage::sqlite::session_recovery::ConversationToStart;
 use loopflow_storage::sqlite::{SqliteStore, StoreRevisions};
 
 /// How long the watcher goes without reading when nothing it reads moved:
@@ -107,7 +107,7 @@ impl Watcher {
             terminals.session_terminal(session).is_some()
                 || terminals.pending_terminal(session, None).is_some()
         };
-        let start = |conversation: &RecoverableConversation, request: String| {
+        let start = |conversation: &ConversationToStart, request: String| {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
@@ -132,7 +132,7 @@ impl Watcher {
 }
 
 /// Hold the next start until this one's agent has attached, or [`PACE`].
-fn pace(store: &SqliteStore, conversation: &RecoverableConversation) {
+fn pace(store: &SqliteStore, conversation: &ConversationToStart) {
     let deadline = std::time::Instant::now() + PACE;
     while std::time::Instant::now() < deadline {
         let attached = store
@@ -167,11 +167,11 @@ fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
-    mut start: impl FnMut(&RecoverableConversation, String) -> Result<()>,
+    mut start: impl FnMut(&ConversationToStart, String) -> Result<()>,
 ) -> Result<bool> {
     let mut ending = false;
     for conversation in loopflow_execution::ops::recovery::due_task_conversations(store, now)? {
-        let RecoverableConversation { session, agent, .. } = &conversation;
+        let ConversationToStart { session, agent, .. } = &conversation;
         if held(session) {
             ending = true;
             continue;
@@ -180,25 +180,25 @@ fn recover_conversations(
         // is counted only when it fails: its terminal holds the next pass off,
         // and the first death after it comes back at once.
         let attempt = match agent {
-            Some(agent) => match store.record_recovery_start(session, Some(agent), now)? {
+            Some(agent) => match store.record_conversation_start(session, Some(agent), now)? {
                 Some(attempt) => attempt,
                 None => continue,
             },
-            None => conversation.recovery_attempts + 1,
+            None => conversation.starts_since_turn + 1,
         };
         let generation = agent.as_ref().map_or("new", |agent| agent.as_str());
         let request = format!("recover:{session}:{generation}:{attempt}");
         match start(&conversation, request) {
             Ok(()) => {
-                store.record_recovery_failure(session, None)?;
+                store.record_start_failure(session, None)?;
                 tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started")
             }
             Err(error) => {
                 if agent.is_none() {
-                    store.record_recovery_start(session, None, now)?;
+                    store.record_conversation_start(session, None, now)?;
                 }
                 let failure = format!("{error:#}");
-                store.record_recovery_failure(session, Some(&failure))?;
+                store.record_start_failure(session, Some(&failure))?;
                 tracing::warn!(%session, task = %conversation.task, attempt, error = %failure, "Task conversation did not start")
             }
         }
@@ -360,7 +360,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT recovery_failure FROM agent_sessions WHERE id=?1",
+                    "SELECT start_failure FROM agent_sessions WHERE id=?1",
                     [self.session.as_str()],
                     |row| row.get(0),
                 )
@@ -373,7 +373,7 @@ mod tests {
                 .lock()
                 .unwrap()
                 .query_row(
-                    "SELECT recovery_attempts,recovered_at FROM agent_sessions WHERE id=?1",
+                    "SELECT starts_since_turn,last_started_at FROM agent_sessions WHERE id=?1",
                     [self.session.as_str()],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
@@ -440,7 +440,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE agent_sessions SET recovery_attempts=5,recovered_at=?2 WHERE id=?1",
+                "UPDATE agent_sessions SET starts_since_turn=5,last_started_at=?2 WHERE id=?1",
                 params![fixture.session.as_str(), NOW - 3600],
             )
             .unwrap();

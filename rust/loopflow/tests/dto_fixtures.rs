@@ -394,7 +394,13 @@ fn task_detail_says_each_fact_once() {
         .find(|session| Some(&session.id) == detail.conversation.as_ref())
         .unwrap();
     let next = time::OffsetDateTime::parse(
-        conversation.recovery.as_ref().unwrap().next_at.as_deref().unwrap(),
+        conversation
+            .start
+            .as_ref()
+            .unwrap()
+            .next_at
+            .as_deref()
+            .unwrap(),
         &time::format_description::well_known::Rfc3339,
     )
     .unwrap()

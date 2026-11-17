@@ -9,7 +9,7 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    SessionEnd, SessionEndedBy, SessionRecord, SessionRecovery, SessionState,
+    SessionEnd, SessionEndedBy, SessionRecord, SessionStarts, SessionState,
 };
 use loopflow_execution::session::SessionOpenIntent;
 use loopflow_execution::session_record::SessionTitleSource;
@@ -404,7 +404,7 @@ pub struct SessionFacts {
     pub ended: Option<SessionEnd>,
     /// The server starting it again after a death.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub recovery: Option<SessionRecovery>,
+    pub start: Option<SessionStarts>,
 }
 
 impl SessionFacts {
@@ -419,7 +419,7 @@ impl SessionFacts {
             cwd: session.cwd,
             agent_process_id: session.agent_process_id,
             ended: session.ended,
-            recovery: session.recovery,
+            start: session.start,
         }
     }
 
@@ -428,11 +428,11 @@ impl SessionFacts {
     pub fn conversation_line(&self, task: &str, now: i64) -> String {
         let resume = format!("`lf resume --task {task}` opens it");
         let running = matches!(self.state, SessionState::Active | SessionState::Detached);
-        let recovery = self.recovery.as_ref();
+        let start = self.start.as_ref();
         if running {
-            return match recovery.and_then(|recovery| {
-                Some((recovery.attempts, recovery.started_at.as_deref()?))
-            }) {
+            return match start
+                .and_then(|start| Some((start.attempts, start.last_started_at.as_deref()?)))
+            {
                 Some((attempts, at)) if attempts > 0 => {
                     format!("running (started again {}, attempt {attempts})", clock(at))
                 }
@@ -459,20 +459,20 @@ impl SessionFacts {
             None if self.state == SessionState::Unknown => return "unknown".to_string(),
             None => "closed".to_string(),
         };
-        let Some(recovery) = recovery else {
+        let Some(start) = start else {
             return format!("{ending}; {resume}");
         };
-        let mut line = if recovery.gave_up {
-            format!("{ending} · started {} times; {resume}", recovery.attempts)
+        let mut line = if start.gave_up {
+            format!("{ending} · started {} times; {resume}", start.attempts)
         } else {
-            match recovery.next_at.as_deref() {
+            match start.next_at.as_deref() {
                 Some(at) if seconds(at).is_some_and(|at| at > now) => {
                     format!("{ending} · starts again {}", clock(at))
                 }
                 _ => format!("{ending} · starting again"),
             }
         };
-        if let Some(failure) = &recovery.failure {
+        if let Some(failure) = &start.failure {
             line.push_str(&format!(" · last start failed: {failure}"));
         }
         line
@@ -1246,12 +1246,12 @@ pub(super) fn mutate(
 
 #[cfg(test)]
 mod tests {
-    use super::{SessionEnd, SessionEndedBy, SessionFacts, SessionRecovery, SessionState};
+    use super::{SessionEnd, SessionEndedBy, SessionFacts, SessionStarts, SessionState};
 
     fn conversation(
         state: SessionState,
         ended: Option<SessionEnd>,
-        recovery: Option<SessionRecovery>,
+        start: Option<SessionStarts>,
     ) -> SessionFacts {
         SessionFacts {
             id: "conversation".into(),
@@ -1263,7 +1263,7 @@ mod tests {
             cwd: "/src/loopflow.loo-9".into(),
             agent_process_id: None,
             ended,
-            recovery,
+            start,
         }
     }
 
@@ -1275,10 +1275,10 @@ mod tests {
         })
     }
 
-    fn recovery(attempts: u32, gave_up: bool) -> Option<SessionRecovery> {
-        Some(SessionRecovery {
+    fn starts(attempts: u32, gave_up: bool) -> Option<SessionStarts> {
+        Some(SessionStarts {
             attempts,
-            started_at: Some("2026-11-17T12:01:02Z".into()),
+            last_started_at: Some("2026-11-17T12:01:02Z".into()),
             next_at: None,
             gave_up,
             failure: None,
@@ -1292,7 +1292,7 @@ mod tests {
             conversation(SessionState::Active, None, None).conversation_line("LOO-9", 0),
             "running"
         );
-        assert!(conversation(SessionState::Active, None, recovery(1, false))
+        assert!(conversation(SessionState::Active, None, starts(1, false))
             .conversation_line("LOO-9", 0)
             .starts_with("running (started again "));
         let quit = conversation(
@@ -1302,11 +1302,14 @@ mod tests {
         )
         .conversation_line("LOO-9", 0);
         assert!(quit.starts_with("quit "), "{quit}");
-        assert!(quit.ends_with("; `lf resume --task LOO-9` opens it"), "{quit}");
+        assert!(
+            quit.ends_with("; `lf resume --task LOO-9` opens it"),
+            "{quit}"
+        );
         let gave_up = conversation(
             SessionState::Closed,
             end(SessionEndedBy::Died, None),
-            recovery(5, true),
+            starts(5, true),
         )
         .conversation_line("LOO-9", 0);
         assert!(

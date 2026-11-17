@@ -33,7 +33,7 @@ condition, reason, and actions through the existing Wave Task row.
 session, its explicit readiness state, and its exact Machine-local attach route.
 
 `session_memberships.json` also pins `ended` (a quit, a death with exit 137,
-a death nobody saw) and a Task conversation's `recovery`.
+a death nobody saw) and a Task conversation's `start`.
 
 `session_memberships.json` pins each Session's required `graph_membership`:
 the current Graph step, an earlier step, an independent conversation, a Session that

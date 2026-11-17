@@ -57,7 +57,7 @@ first reading after start is the restart and reboot case. Each reading:
    serves it, and it never had an agent or its last agent did not end by the
    person (exit 0 or 130).
    An unfinished agent whose recorded process is gone died too. The store
-   counts the start (`agent_sessions.recovery_attempts`, `recovered_at`)
+   counts the start (`agent_sessions.starts_since_turn`, `last_started_at`)
    before it goes through `session.continue`'s path with request
    `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
    provider across server restarts. `lf task run`, `lf ship` and
@@ -78,7 +78,7 @@ agent attaches, or after 3 seconds, most recently updated Task first. Sessions
 and carriers share one backoff (1 minute doubling to 30) and stop after 5
 deaths without a finished turn or step; the Session and the Task run then
 show the command that continues. A start that fails records its reason on the
-Session (`agent_sessions.recovery_failure`, for example `claude is not
+Session (`agent_sessions.start_failure`, for example `claude is not
 installed on this Machine's PATH`), cleared by the next start that succeeds, and retries on the
 same backoff. Wave, repository and bare conversations are reported, never
 started.

@@ -7,7 +7,7 @@
 //! still needed. [`due_task_conversations`] names the Task
 //! conversations to start, and [`launch_failure`] what would stop one.
 
-use loopflow_storage::sqlite::session_recovery::RecoverableConversation;
+use loopflow_storage::sqlite::session_recovery::ConversationToStart;
 use loopflow_storage::sqlite::SqliteStore;
 
 use crate::journal::ProcessIdentityEvidence;
@@ -59,7 +59,7 @@ pub fn retain() {
 
 /// Why starting `conversation` would fail before any provider runs: its
 /// agent's CLI is not on this Machine's `PATH`. `None` when it can start.
-pub fn launch_failure(conversation: &RecoverableConversation) -> Option<String> {
+pub fn launch_failure(conversation: &ConversationToStart) -> Option<String> {
     let provider = conversation.provider.as_deref()?;
     (!crate::agent::check_cli_available(provider))
         .then(|| format!("{provider} is not installed on this Machine's PATH"))
@@ -74,16 +74,16 @@ pub fn launch_failure(conversation: &RecoverableConversation) -> Option<String> 
 pub fn due_task_conversations(
     store: &SqliteStore,
     now: i64,
-) -> crate::store::StoreResult<Vec<RecoverableConversation>> {
+) -> crate::store::StoreResult<Vec<ConversationToStart>> {
     let mut due = Vec::new();
-    for conversation in store.recoverable_task_conversations()? {
+    for conversation in store.conversations_to_start()? {
         let died = conversation.agent.is_none()
             || conversation.ended_at.is_some()
             || conversation.identity.is_some_and(|(pid, start)| {
                 crate::journal::process_identity_evidence(pid, start)
                     == ProcessIdentityEvidence::Dead
             });
-        let waited = next_start_at(conversation.recovery_attempts, conversation.recovered_at)
+        let waited = next_start_at(conversation.starts_since_turn, conversation.last_started_at)
             .is_none_or(|at| at <= now);
         if died && waited && store.task_claimed_here(&conversation.task)? {
             due.push(conversation);
@@ -93,9 +93,9 @@ pub fn due_task_conversations(
 }
 
 /// When a Task conversation that died, started `attempts` times since its
-/// last finished turn, last at `recovered_at`, may start again; `None`: at once.
-pub fn next_start_at(attempts: u32, recovered_at: Option<i64>) -> Option<i64> {
-    match (attempts, recovered_at) {
+/// last finished turn, last at `last_started_at`, may start again; `None`: at once.
+pub fn next_start_at(attempts: u32, last_started_at: Option<i64>) -> Option<i64> {
+    match (attempts, last_started_at) {
         (0, _) | (_, None) => None,
         (attempts, Some(at)) => Some(at + crate::ops::pr_landing::repair_backoff(attempts)),
     }

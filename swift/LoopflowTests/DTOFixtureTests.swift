@@ -939,15 +939,15 @@ struct DTOFixtureTests {
         let data = try loadFixtureData("session_memberships.json")
         let sessions = try JSONDecoder().decode([SessionRecord].self, from: data)
         #expect(sessions[1].ended?.by == .person)
-        #expect(sessions[1].recoveryLine == "Quit")
+        #expect(sessions[1].conversationLine == "Quit")
         #expect(sessions[3].ended?.exitCode == 137)
-        #expect(sessions[3].recovery?.attempts == 1)
-        #expect(sessions[3].recoveryLine
+        #expect(sessions[3].start?.attempts == 1)
+        #expect(sessions[3].conversationLine
             == "Died (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH")
         #expect(sessions[4].ended?.exitCode == nil)
-        #expect(sessions[0].recoveryLine == nil)
+        #expect(sessions[0].conversationLine == nil)
         let objects = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])
-        for key in ["ended", "recovery"] {
+        for key in ["ended", "start"] {
             var value = objects[3]
             value.removeValue(forKey: key)
             #expect(throws: DecodingError.self) {

@@ -1223,7 +1223,7 @@ fn task_conversation_agent(db: &Path, task: &str) -> Option<(String, Option<i64>
     rusqlite::Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT s.agent_process_id,p.pid,s.recovery_attempts FROM task_primary_sessions tp
+            "SELECT s.agent_process_id,p.pid,s.starts_since_turn FROM task_primary_sessions tp
              JOIN agent_sessions s ON s.id=tp.session_id
              JOIN processes p ON p.id=s.agent_process_id
              WHERE tp.task_id=?1 AND p.completed_at IS NULL",
@@ -1238,7 +1238,7 @@ fn debug_rows(db: &Path, task: &str) -> String {
     let conn = rusqlite::Connection::open(db).unwrap();
     let mut out = String::new();
     for sql in [
-        "SELECT s.id,s.agent_process_id,s.completed_at,s.interactive,s.cwd,s.recovery_attempts,s.recovered_at,s.recovery_failure,s.held_terminal_id FROM task_primary_sessions tp JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+        "SELECT s.id,s.agent_process_id,s.completed_at,s.interactive,s.cwd,s.starts_since_turn,s.last_started_at,s.start_failure,s.held_terminal_id FROM task_primary_sessions tp JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
         "SELECT p.id,p.pid,p.completed_at,p.exit_code,p.command,l.id,l.pid,l.completed_at,l.exit_code,l.command FROM processes p LEFT JOIN processes l ON l.id=p.parent_lf_process_id JOIN agent_sessions s ON s.agent_process_id=p.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
         "SELECT t.id,t.ended_at,t.exit_code FROM held_terminals t JOIN agent_sessions s ON s.held_terminal_id=t.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
     ] {
@@ -1343,7 +1343,7 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     // dies with it, and the next server starts the conversation once.
     rusqlite::Connection::open(&db)
         .unwrap()
-        .execute("UPDATE agent_sessions SET recovery_attempts=0", [])
+        .execute("UPDATE agent_sessions SET starts_since_turn=0", [])
         .unwrap();
     drop(running.take());
     let holder: i64 = rusqlite::Connection::open(&db)
@@ -1379,7 +1379,7 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     let current: (String, u32) = rusqlite::Connection::open(&db)
         .unwrap()
         .query_row(
-            "SELECT s.agent_process_id,s.recovery_attempts FROM task_primary_sessions tp
+            "SELECT s.agent_process_id,s.starts_since_turn FROM task_primary_sessions tp
              JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
             [id],
             |row| Ok((row.get(0)?, row.get(1)?)),
@@ -1423,7 +1423,7 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
         let failure: Option<String> = rusqlite::Connection::open(&db)
             .unwrap()
             .query_row(
-                "SELECT s.recovery_failure FROM task_primary_sessions tp
+                "SELECT s.start_failure FROM task_primary_sessions tp
                  JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
                 [id],
                 |row| row.get(0),

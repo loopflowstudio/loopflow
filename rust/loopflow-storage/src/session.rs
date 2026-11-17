@@ -347,11 +347,11 @@ pub struct SessionSummary {
     /// runs, before the first, or when nobody recorded the end.
     pub agent_end: Option<AgentEnd>,
     /// Starts by the server's recovery pass since it last finished a turn.
-    pub recovery_attempts: u32,
+    pub starts_since_turn: u32,
     /// When the pass last started it.
-    pub recovered_at: Option<i64>,
+    pub last_started_at: Option<i64>,
     /// Why the pass's last start failed; `None` once one succeeded.
-    pub recovery_failure: Option<String>,
+    pub start_failure: Option<String>,
     /// Available for a person, as of the read's clock.
     pub available: bool,
     pub program_status: Option<loopflow_model::program_status::Records>,

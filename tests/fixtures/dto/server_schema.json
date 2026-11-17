@@ -10294,6 +10294,46 @@
       ],
       "type": "object"
     },
+    "SessionEnd": {
+      "description": "A conversation's last agent end.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339.",
+          "type": "string"
+        },
+        "by": {
+          "$ref": "#/$defs/SessionEndedBy"
+        },
+        "exit_code": {
+          "description": "The provider's exit; `null` when nobody saw it (the holder died, or\nthe Machine restarted).",
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "at",
+        "by",
+        "exit_code"
+      ],
+      "type": "object"
+    },
+    "SessionEndedBy": {
+      "oneOf": [
+        {
+          "const": "person",
+          "description": "`/exit`, Ctrl+D or Ctrl+C at the prompt (exit 0 or 130). It stays quit.",
+          "type": "string"
+        },
+        {
+          "const": "died",
+          "description": "Killed, crashed, or gone with its holder or the Machine.",
+          "type": "string"
+        }
+      ]
+    },
     "SessionGraphMembership": {
       "description": "Whether a Session's conversation is an occurrence of a Graph. Membership\ncomes only from its recorded Graph invocation, never from matching Task, checkout,\nprovider, or skill.",
       "oneOf": [
@@ -10688,6 +10728,17 @@
         "detail": {
           "type": "string"
         },
+        "ended": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionEnd"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How its last agent ended, while none runs; `null` for a headless\nSession, before a first start, or when nobody recorded the end."
+        },
         "graph_membership": {
           "$ref": "#/$defs/SessionGraphMembership"
         },
@@ -10752,6 +10803,17 @@
             "string",
             "null"
           ]
+        },
+        "start": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionStarts"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The server's starts of a Task's conversation since it last finished a\nturn: after it died, or a first start that failed; `null` when nothing\nwas or will be started."
         },
         "state": {
           "$ref": "#/$defs/SessionState"
@@ -10865,7 +10927,9 @@
         "open_argv",
         "terminal_ids",
         "turn",
-        "raw"
+        "raw",
+        "ended",
+        "start"
       ],
       "type": "object"
     },
@@ -10879,6 +10943,50 @@
       },
       "required": [
         "terminal_id"
+      ],
+      "type": "object"
+    },
+    "SessionStarts": {
+      "description": "What the server's recovery pass did and will do for a Task conversation.",
+      "properties": {
+        "attempts": {
+          "description": "Starts since it last finished a turn.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "failure": {
+          "description": "Why the last start failed; `null` once one succeeded.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gave_up": {
+          "description": "The pass made its last start; `lf resume --task <ID>` continues it.",
+          "type": "boolean"
+        },
+        "last_started_at": {
+          "description": "RFC 3339: the pass's last start; `null` before its first.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "next_at": {
+          "description": "RFC 3339: when the next start is due, while it is down and the pass\nhas starts left; `null` otherwise.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "attempts",
+        "last_started_at",
+        "next_at",
+        "gave_up",
+        "failure"
       ],
       "type": "object"
     },
@@ -16750,6 +16858,7 @@
             "availability": "available",
             "cwd": "/src/loopflow.task",
             "detail": "review-design",
+            "ended": null,
             "graph_membership": {
               "graph": "task-design",
               "graph_lf_process_id": "00000000-0000-0000-0000-00000000f10w",
@@ -16776,6 +16885,7 @@
             "provider": "codex",
             "raw": false,
             "ready_summary": "The design now reflects Jack's requested changes.",
+            "start": null,
             "state": "unknown",
             "task_ids": [
               "task_00000000000000000000000000000001"

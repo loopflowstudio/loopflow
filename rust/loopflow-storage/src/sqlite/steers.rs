@@ -192,7 +192,7 @@ impl SqliteStore {
                 // A finished turn is a conversation that runs: the recovery
                 // pass counts its starts again from none.
                 self.conn.lock().expect("store mutex poisoned").execute(
-                    "UPDATE agent_sessions SET recovery_attempts=0 WHERE id=?1 AND recovery_attempts>0",
+                    "UPDATE agent_sessions SET starts_since_turn=0 WHERE id=?1 AND starts_since_turn>0",
                     [&adapter.session],
                 )?;
             }

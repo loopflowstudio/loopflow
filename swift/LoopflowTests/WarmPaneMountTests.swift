@@ -126,7 +126,7 @@ private func warmSession(id: String, argv: [String]) throws -> SessionRecord {
             ["kind": "open", "label": "Start conversation", "help": "Start the conversation", "unavailable_reason": NSNull()],
             ["kind": "reveal", "label": "Show conversation", "help": "Reveal existing history", "unavailable_reason": NSNull()],
         ],
-        "blocked": false, "title_source": "generated", "ended": NSNull(), "recovery": NSNull(), "task_primary": true, "graph_membership": ["kind": "independent"],
+        "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "task_primary": true, "graph_membership": ["kind": "independent"],
         "task_ids": ["task-\(id)"], "agent_process_id": NSNull(), "turn": NSNull(), "raw": false, "terminal_ids": [String](),
         "open_argv": argv,
     ]

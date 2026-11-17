@@ -242,7 +242,7 @@ than one Session's start.
 (`ship.rs:120`), 1 minute doubling to 30. A Session that dies again before
 finishing a turn waits; after 5 deaths with no finished turn the pass stops
 and the Task shows "died 5 times since 09:14 (last: exit 1); `lf resume --task
-LOO-x`". The count is `agent_sessions.recovery_attempts` plus `recovered_at`;
+LOO-x`". The count is `agent_sessions.starts_since_turn` plus `last_started_at`;
 a finished turn resets it. A carrier counts restarts in a row as ship
 restarts do today (`count_ship_restart`); a moving Task's carrier gets the
 same counter on `task_graphs` (`restarts`), reset by a finished step
@@ -369,20 +369,20 @@ Must survive:
 ## Slices
 
 1. **A killed Task conversation comes back.** Built:
-   - migration `task_conversation_recovery.sql`: `agent_sessions.recovery_attempts`
-     and `recovered_at` (no `agent_stopped_at`, see Killed vs quit);
-   - `SqliteStore::recoverable_task_conversations` (storage
+   - migration `task_conversation_recovery.sql`: `agent_sessions.starts_since_turn`
+     and `last_started_at` (no `agent_stopped_at`, see Killed vs quit);
+   - `SqliteStore::conversations_to_start` (storage
      `sqlite/session_recovery.rs`): open Task, primary Session, cwd is the
      Task's checkout here, not completed or moved, launcher exit not 0/130,
      fewer than 5 starts. Index-driven; 24 ms on this Machine's store (54 rows,
      47 of them live agents);
    - `ops::recovery::due_task_conversations`: died (ended, or unfinished with a
-     dead identity), backoff passed (`repair_backoff` from `recovered_at`; the
+     dead identity), backoff passed (`repair_backoff` from `last_started_at`; the
      first start after a death is immediate), claimed here;
    - `server/recovery.rs`: the watcher thread, started beside the registry. It
      reads on a planning/sessions/processes revision change or every 60 s,
      skips Sessions with a live or pending terminal, counts the start
-     (`record_recovery_start`, guarded on the same ended agent), then starts
+     (`record_conversation_start`, guarded on the same ended agent), then starts
      `continuing()` with request `recover:<session>:<agent>:<attempt>`.
      Starts run one at a time; each blocks until the holder reports a pid.
    - Tests: `server::recovery::tests::` (killed starts once per backoff, quit
@@ -400,11 +400,11 @@ Must survive:
    with the DTOs); acceptance check 5.
 2. **Restart and reboot.** Built:
    - a finished turn (the Stop hook's `yielded`, `record_native_turn`) resets
-     `recovery_attempts`. A resumed provider records no `yielded` at startup
+     `starts_since_turn`. A resumed provider records no `yielded` at startup
      (`server/boundary.rs` maps only `Stop` and `UserPromptSubmit`);
    - pacing: after a start the pass waits until the Session's attachment names
      a new agent, or 3 s;
-   - `agent_sessions.recovery_failure` (in `task_conversation_recovery.sql`,
+   - `agent_sessions.start_failure` (in `task_conversation_recovery.sql`,
      which no longer adds `agent_stopped_at`): the reason a start failed,
      cleared by the next that succeeds. The pass checks the provider's CLI on
      its `PATH` first ("claude is not installed on this Machine's PATH");

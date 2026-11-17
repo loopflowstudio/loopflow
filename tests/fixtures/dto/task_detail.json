@@ -33,9 +33,9 @@
         "by": "died",
         "exit_code": 137
       },
-      "recovery": {
+      "start": {
         "attempts": 1,
-        "started_at": "2026-11-17T12:01:02Z",
+        "last_started_at": "2026-11-17T12:01:02Z",
         "next_at": "2026-11-17T12:02:02Z",
         "gave_up": false,
         "failure": null
@@ -51,7 +51,7 @@
       "cwd": "/src/loopflow.loo-2",
       "agent_process_id": null,
       "ended": null,
-      "recovery": null
+      "start": null
     }
   ],
   "conversation": "session_5e55105e000040008000000000000002",

@@ -67,7 +67,7 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "recovery": null
+    "start": null
   },
   "reopened": {
     "actions": [
@@ -128,7 +128,7 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "recovery": null
+    "start": null
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -360,7 +360,7 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "recovery": null
+      "start": null
     },
     {
       "actions": [
@@ -426,7 +426,7 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "recovery": null
+      "start": null
     },
     {
       "actions": [
@@ -486,7 +486,7 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "recovery": null
+      "start": null
     }
   ],
   "task_primary": {
@@ -553,6 +553,6 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "recovery": null
+    "start": null
   }
 }

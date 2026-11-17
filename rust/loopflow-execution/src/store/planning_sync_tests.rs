@@ -141,7 +141,7 @@ fn a_git_title_that_lost_shows_as_conflicted_until_saved_again() {
     assert_eq!(lost.tracker_value, Some(serde_json::json!("Theirs")));
     assert_eq!(
         lost.line(),
-        r#"title · conflicted · lost here: "Mine" · git: "Theirs""#
+        r#"title · conflicted · lost: "Mine" · git: "Theirs""#
     );
 
     record(

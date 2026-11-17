@@ -684,9 +684,8 @@ mod tests {
     async fn a_blocked_creation_costs_the_pass_nothing() {
         const NO_INITIATIVE: &str = "Wave has no Linear Initiative; its Projects stay local";
         let mut fake = Fake::new();
-        fake.blocked = |action| {
-            matches!(action.owner, ActionOwner::Project(_)).then(|| NO_INITIATIVE.into())
-        };
+        fake.blocked =
+            |action| matches!(action.owner, ActionOwner::Project(_)).then(|| NO_INITIATIVE.into());
         let mut f = fixture();
         f.fake = Arc::new(fake);
         f.tracker = Tracker::Fake(f.fake.clone());
@@ -711,9 +710,11 @@ mod tests {
         assert_eq!(f.phases(&task), [ActionPhase::Confirmed]);
         let blocked: Vec<_> = f.store.sqlite.unconfirmed_tracker_actions("/repo").unwrap();
         assert_eq!(blocked.len(), 21);
-        assert!(blocked.iter().all(|action| action.phase == ActionPhase::Queued
-            && action.error.as_deref() == Some(NO_INITIATIVE)
-            && action.sent_at.is_none()));
+        assert!(blocked
+            .iter()
+            .all(|action| action.phase == ActionPhase::Queued
+                && action.error.as_deref() == Some(NO_INITIATIVE)
+                && action.sent_at.is_none()));
         // A later pass decides the same block without writing the rows again.
         let revision = f.store.sqlite.revisions().unwrap().planning;
         let pass = f.pass().await;

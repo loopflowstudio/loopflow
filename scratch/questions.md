@@ -158,7 +158,7 @@ Built, calls taken headless:
 - Git conflicts show in a Task's or Project's `sync` (and `lf task sync`),
   not in `lf repo plan`, which on Git lists destinations. A repo-wide list
   needs every record's journal heads per read; open if wanted.
-- One line rendering for CLI and Desktop: `title · conflicted · lost here:
+- One line rendering for CLI and Desktop: `title · conflicted · lost:
   "A" · linear: "B"`. `lf task sync` prints these, else `synchronized`.
 
 Jack Heart's answers to the page, word for word: "1a 2a 3a for now, possibly

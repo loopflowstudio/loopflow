@@ -2321,15 +2321,20 @@ pub fn start_conversation_beside(task: &Task) {
 
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
 /// look for every sent action and resend what the tracker lacks; Git
-/// exchanges the repository's planning ref.
-pub fn task_sync(issue: &str) -> OpsResult<String> {
+/// exchanges the repository's planning ref, so a peer's Task this Machine
+/// has not fetched yet is found in `repo`'s planning.
+pub fn task_sync(repo: &Path, issue: &str) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
-        let task = store
-            .get_task_by_issue(issue)
-            .await
-            .map_err(task_error)?
-            .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?;
+        let task = match store.get_task_by_issue(issue).await.map_err(task_error)? {
+            Some(task) => task,
+            None => {
+                let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
+                super::planning_sync::find_task(&store, &main.to_string_lossy(), issue)
+                    .await?
+                    .ok_or_else(|| task_error(format!("Task {issue} is unavailable")))?
+            }
+        };
         let repository = repository_for_task(&store, &task)?;
         let repo = repository.to_string_lossy();
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {

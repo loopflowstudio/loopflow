@@ -270,7 +270,7 @@ Planning: linear. 4 open actions.
   LOO-412  title · queued · Offline
   LOO-412  comment · queued · Offline
   LOO-398  complete · sent, waiting for linear to confirm
-  LOO-377  title · conflicted · lost here: "Offline rename" · linear: "Renamed in Linear"
+  LOO-377  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
 ```
 
 When a send failed, the line ends with why: offline, signed out, or the
@@ -498,7 +498,7 @@ the refresh and still succeeds.
 
 ```bash
 lf task sync LOO-403
-# LOO-403: title · conflicted · lost here: "Offline rename" · linear: "Renamed in Linear"
+# LOO-403: title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
 ```
 
 Linear can change an issue or a Project without moving its `updatedAt` (it

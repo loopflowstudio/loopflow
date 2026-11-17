@@ -731,7 +731,7 @@ fn tracker_sync_preserves_sent_actions_and_losing_values() {
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
     assert_eq!(
         sync.lines()[2],
-        r#"title · conflicted · lost here: "Local title" · linear: "Linear title""#
+        r#"title · conflicted · lost: "Local title" · linear: "Linear title""#
     );
     assert!(sync.lines()[3].contains("linear: null"));
     assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
@@ -739,7 +739,7 @@ fn tracker_sync_preserves_sent_actions_and_losing_values() {
     assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
     assert_eq!(
         sync.lines()[5],
-        r#"title · conflicted · lost here: "Mine" · git: "Peer title""#
+        r#"title · conflicted · lost: "Mine" · git: "Peer title""#
     );
     let mut unknown = value;
     unknown["actions"][0]["tracker"] = serde_json::json!("notion");

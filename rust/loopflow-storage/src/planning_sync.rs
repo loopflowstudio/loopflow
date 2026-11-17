@@ -131,7 +131,7 @@ impl TrackerKind {
 }
 
 impl TrackerActionStatus {
-    /// One line: `title · queued`, `title · conflicted · lost here: "A" · linear: "B"`.
+    /// One line: `title · queued`, `title · conflicted · lost: "A" · linear: "B"`.
     pub fn line(&self) -> String {
         let mut line = format!("{} · {}", self.change, self.phase.as_str());
         if self.phase == ActionPhase::Sent {
@@ -146,7 +146,7 @@ impl TrackerActionStatus {
                 .as_ref()
                 .unwrap_or(&serde_json::Value::Null);
             line.push_str(&format!(
-                " · lost here: {} · {}: {won}",
+                " · lost: {} · {}: {won}",
                 self.local_value,
                 self.tracker.as_str()
             ));

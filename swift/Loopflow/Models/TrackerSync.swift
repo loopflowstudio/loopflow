@@ -59,12 +59,12 @@ public struct TrackerActionStatus: Decodable, Sendable, Hashable, Identifiable {
     }
 
     /// The line `lf task sync` prints: `title · queued`,
-    /// `title · conflicted · lost here: "A" · linear: "B"`.
+    /// `title · conflicted · lost: "A" · linear: "B"`.
     public var text: String {
         var text = "\(change) · \(phase.rawValue)"
         if phase == .sent { text += ", waiting for \(tracker.rawValue) to confirm" }
         if phase == .conflicted {
-            text += " · lost here: \(display(localValue)) · \(tracker.rawValue): \(display(trackerValue ?? .null))"
+            text += " · lost: \(display(localValue)) · \(tracker.rawValue): \(display(trackerValue ?? .null))"
         }
         if let error { text += " · \(error)" }
         return text

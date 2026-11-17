@@ -999,7 +999,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync { issue } => {
-            println!("{}", loopflow_execution::ops::task::task_sync(issue)?);
+            println!("{}", loopflow_execution::ops::task::task_sync(repo, issue)?);
             Ok(())
         }
         TaskCommand::List {

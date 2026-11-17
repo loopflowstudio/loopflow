@@ -14,7 +14,9 @@ product language and concrete verbs. Add an area prefix only when it helps
 recognition. Keep proper names and command spelling exact.
 
 Then **What changes**: a short paragraph or a few bullets. Add implementation
-detail only when it helps review. **Why it matters** comes next, only if the
+detail only when it helps review. Say what the change added to and removed from
+the system's model: stored data, public interfaces and lines of code, with
+before and after counts where they can be measured. Skip it when none moved. **Why it matters** comes next, only if the
 opening doesn't already say it. Note real risks or limits. Keep checks that
 can only run after merge: what is still untried, the environment
 or release it needs, and what to look for. A later Task may be created from

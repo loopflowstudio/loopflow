@@ -143,16 +143,14 @@ A member the product stopped using gets a mark in the migration that stops
 using it, naming the Task that will drop it:
 
 ```sql
--- leaving: session_steers LOO-891
--- leaving: tasks.worktree LOO-877
--- leaving: processes.native_input LOO-840
+-- leaving: agent_sessions.work_source LOO-836
+-- leaving: provider_accounts LOO-928
 ```
 
 ```bash
 $ uv run python scripts/due_removals.py
-LOO-840  processes.native_input, …       drop after 2026-12-17  unstarted
-LOO-877  tasks.worktree, tasks.branch, … drop after 2026-12-17  unstarted
-LOO-891  session_steers, …               drop after 2026-12-17  unstarted
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
+LOO-928  provider_accounts, provider_session_accounts, …  drop after 2026-12-17  unstarted
 ```
 
 The clock starts when the marking migration merges to `origin/main`
@@ -167,9 +165,16 @@ A mark must name a table or column that exists and a Task ID; it is a comment,
 so a marked member stays fully readable until the contract runs.
 
 `rust/loopflow-storage/SCHEMA.md` is generated from the migrations and lists
-every table under its product concept, with each leaving member's Task and
-drop date. `uv run python scripts/schema_page.py` rewrites it; `--check`
-runs in CI.
+every table under its product concept, with each leaving member's Task and the
+migration that marked it. `uv run python scripts/schema_page.py` rewrites it;
+`--check` runs in CI. The page names no date, so merging leaves it current;
+`due_removals.py` prints the dates.
+
+`unused_store_members` (LOO-935) is the one contract that dropped without an
+aged expand step: the members the product had stopped using, all at once.
+`check_migrations.py` names that file alone (`UNSTAGED_CONTRACT`) and still
+requires its `-- exports:`; its preflight writes the dropped rows to
+`<lf home>/exports/unused-store-members.json`. Every other contract waits.
 
 Rename and reshape are expand then contract. A process older than the window
 meets a dropped column as an error from the one statement that reads it; the
@@ -199,6 +204,7 @@ f5981e removes the write 30 days after that release.
   where the dropped data went.
 - Every `-- leaving:` mark names a current table or column and a Task ID; a
   contract whose expand step carries marks drops only marked members.
+- `unused_store_members.sql` alone drops without an aged expand step.
 
 ## What a database can be told
 

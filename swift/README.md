@@ -118,10 +118,8 @@ Filtering or opening a Task leaves the order intact. Saved Dashboard arrangement
 search results and Done's completion-date ordering keep their own order.
 
 Each Work keeps one pane layout and document store. The browser offers Files,
-Changes, Task & workflow, Graph processes and web pages. A Task with no saved
-layout inherits its Wave's semantic default; later Wave edits leave saved Task
-layouts alone. Rex reads those defaults for new windows and owns its active
-native layout independently.
+Changes, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
+open only a Task's conversation and never read Desktop's layouts.
 
 Repository and Wave
 entry shows their conversation, opened on load or on selection.

@@ -43,13 +43,13 @@ Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
 
 ```bash
 $ uv run python scripts/model_size.py
-tables                         88
-columns                        727
-storage pub fns (non-test)     930
-SQL call sites outside storage 192 in 49 files
+tables                         74
+columns                        645
+storage pub fns (non-test)     1029
+SQL call sites outside storage 35 in 8 files
 
 $ uv run python scripts/due_removals.py
-LOO-877  tasks.worktree, tasks.branch, …  drop after 2026-12-17  unstarted
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
 
 uv run python scripts/due_removals.py --start      # run each due, unstarted removal Task
 uv run python scripts/schema_page.py               # rewrite rust/loopflow-storage/SCHEMA.md

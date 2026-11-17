@@ -276,7 +276,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
 | `skill.list` | `lf list [<path>…]` | read; `lf::commands::list::list_children` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
-| `desktop.layout`, `.layout.save` | `lf desktop layout query:<id> [--save]` | read, write (Dashboard slots) |
+| `desktop.layout` | `lf desktop layout query:<id>` | read (Dashboard slots) |
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |

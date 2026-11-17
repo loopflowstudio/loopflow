@@ -68,7 +68,24 @@
 <main>
 
 <h1>Do the product's concepts and the code's concepts line up?</h1>
-<p class="lede">LOO-936 as built, PR #1965 at <code>e83f48c89d</code>, reviewed against its base.</p>
+<p class="lede">LOO-936, concept review step, 2026-11-17. PR #1965 at <code>f326e99cbb</code>; built from <code>scratch/loo-936-history.md</code>, <code>scratch/questions.md</code> and the branch diff. The earlier review below was of <code>e83f48c89d</code>.</p>
+
+<h2>After the five answers: review of <code>f326e99cbb</code> (2026-11-17)</h2>
+<p>Jack Heart answered "1b 2b 3b 4b 5b"; all five are built. The concepts now line up: an
+input's outcome is one fact on its row in <code>loopflow.db</code>, each turn's accounting is one
+row in <code>history.db</code>, and routing, the Session list and a failed step read only the
+first. No product choice is open. Three repairs before gate, written into
+<code>scratch/loo-936-history.md</code> as the next implement direction:</p>
+<ol>
+  <li><b><code>turn_error</code> follows the newest ended turn.</b> Today a turn end with no
+      error in the provider's detail overwrites the stream error lf already wrote, and the Graph
+      says "process exited with N" instead of why. A <code>failed</code> end with no error of its
+      own keeps the row's error; a <code>completed</code> end clears it.</li>
+  <li><b>The recorder keeps the history row even when the input-row write fails.</b></li>
+  <li><b><code>SessionRecorder.history</code> becomes <code>store</code></b>: it writes
+      <code>loopflow.db</code> too.</li>
+</ol>
+<p class="note">Below is the earlier review, as Jack answered it.</p>
 
 <p><b>Area taken:</b> what lf records about a Session's work and where it keeps it: the message
 that starts work, the turn that answers it, the history of what happened, and the three store files

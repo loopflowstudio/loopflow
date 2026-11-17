@@ -1,7 +1,8 @@
 # LOO-936: record only what the product reads, history apart from state
 
 Status: 2026-11-17, the five changes from the concept review of the built
-change are built (see "Shape after the concept review"). Remaining: gate.
+change are built (see "Shape after the concept review"). Remaining: the
+three repairs in "Next implement direction", then gate.
 Process rows are LOO-953 ("Remove Process rows: liveness on Sessions and
 Graph runs", its own worktree); nothing here moves them.
 
@@ -59,7 +60,10 @@ read every row; both read the history file after the change.
 Answers quoted in `questions.md` ("1b 2b 3b 4b 5b"); page
 `scratch/concept-review.html`.
 
-**One rule per fact: it lives in exactly one file.** `loopflow.db` holds what
+**One rule per fact: it lives in exactly one file.** An input's outcome (which
+turn answered it, how its newest turn ended, what failed it) is one fact in
+`loopflow.db`; each turn's accounting (tokens, time, its own status) is
+another, in `history.turns`. `loopflow.db` holds what
 the product acts on now; `history.db` holds what a person reads later:
 `session_history` (90 days) and `turns` (kept), one write lock, one writer
 per process (`history.rs` `HistoryFile`), one revision (`history_revision`).
@@ -95,6 +99,29 @@ Session list sees.
    the transcript cannot answer; routing never does.
 5. **`lf machine prune`** is store retention (the server's hourly pass);
    `lf process prune` keeps receipts and orphaned providers only.
+
+## Next implement direction (concept review of `f326e99cbb`, 2026-11-17)
+
+The message row's `turn_*` columns are the one place routing, the Session
+list and a failed step read; three things keep them from being exact.
+
+1. **`turn_error` belongs to the newest ended turn.** Two writers fill it:
+   the recorder on a stream `error` (`record_input_error`) and `FactWriter`
+   at turn end (`record_input_turn_end`), in no fixed order, and the turn end
+   writes `turn_error=?6` unconditionally, so a failed turn whose provider
+   detail carries no error erases the error lf saw and the Graph reports
+   "process exited with N" (the old reader scanned every event, so it never
+   lost one). Rule: a turn end writes its own error; without one, a
+   non-`completed` end keeps the row's error; a `completed` end clears it.
+   Test: stream error, then a `failed` end with no detail error → the failed
+   step names the stream error; stream error, then a `completed` retry →
+   no error.
+2. **The recorder's two writes are independent.** `record_conversation`
+   returns on a failed `record_input_error` before keeping the history row;
+   keep the history row first, and a failed main write is the recorder's
+   usual telemetry warning, not a lost history row.
+3. **Name the recorder's store for what it is.** `SessionRecorder.history`
+   now writes the input row in `loopflow.db` too; call it `store`.
 
 ## Acceptance at gate (headless, private `LF_HOME`)
 

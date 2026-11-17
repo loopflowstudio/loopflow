@@ -70,3 +70,4 @@
 
 - File measurement attribution follows `WorkModel.repoPath` through `SessionsWorkspace.measurementRepository`; it no longer depends on server layout persistence.
 - `swift build --build-tests --package-path swift`: pass; `scripts/test_desktop.sh --skip-build --filter WorkDestinationTests`: 71 pass. Terminal focus checks require a display; gate/CI runs them.
+- Jack Heart: "just always have it take over" (native-client Sessions, every caller). See "lf resume does one thing".

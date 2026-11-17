@@ -226,3 +226,36 @@ editable viewers into the same terminal, so you see drafts from A in B", then
   "Opening… Input paused"), which still carries Reconnecting, Session
   unavailable and Retry.
 - `.lf/qa/desktop.md`: the component probe's limits no longer mention Move here.
+
+## lf resume does one thing (2026-11-17)
+
+Jack Heart, word for word: "i think of it as sort of open sits on top of
+resume", "lets start with maknig resume do what it should do. and then we can
+talk about what opens does", and on an agent running in a terminal app lf
+can't share: "just always have it take over". Earlier: resume is "only about a
+session", "in this eterminal"; "tasks and waves can still be turned into
+sessions".
+
+`lf session resume` / `lf resume` has one implementation (merge
+`ops::human_session::open_without_replacing` and `open`):
+
+1. Takes a Session ID, a Task, a Wave, or nothing (this checkout's); resolves
+   to that scope's Session, creating it if there is none and saying so.
+2. Live held terminal: add a view here (every view types).
+3. Ended or crashed: resume the provider from history in a held terminal, then
+   attach.
+4. Provider in a native client lf can't share: always take it over (end it,
+   continue here held) and say so. This applies to every caller, including
+   `lf open` and Desktop's automatic opening; Desktop's **Take back** and the
+   "controlled elsewhere" refusal go.
+5. `--fork`, `-a <harness>`, `--message` with `-b`, `--prepare` unchanged.
+6. Help (`lf/mod.rs` after_help), `resume_explanation.rs`, docs/sessions.md's
+   table and every "hands it over" / "replacing another terminal" text describe
+   exactly 1-4.
+7. Delete `--start-if-free`, `--reveal-existing` and `SessionOpenIntent` unless
+   a caller still needs "require existing history" (Desktop reveal for
+   non-working Work); if it does, keep only that, named for what it does, and
+   say why in the PR.
+
+`lf open` keeps calling `lf session resume`; what `lf open` itself does is the
+next conversation, not this pass.

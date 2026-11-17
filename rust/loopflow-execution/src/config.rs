@@ -592,13 +592,16 @@ impl std::fmt::Display for Agent {
     }
 }
 
-/// Parse agent string like 'claude:opus' into (harness, model).
+/// Parse agent string like 'claude:opus' into (harness, model). An empty
+/// model (`claude:`) leaves the choice to the provider.
 pub fn parse_agent(agent: &str) -> (String, Option<String>) {
-    if let Some((harness, model)) = agent.split_once(':') {
-        return (harness.to_string(), Some(model.to_string()));
+    match agent.split_once(':') {
+        Some((harness, model)) => (
+            harness.to_string(),
+            Some(model.trim()).filter(|model| !model.is_empty()).map(str::to_string),
+        ),
+        None => (agent.to_string(), None),
     }
-
-    (agent.to_string(), None)
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -1040,6 +1043,12 @@ mod tests {
         for harness in ["claude", "codex", "opencode", "pi"] {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
+    }
+
+    #[test]
+    fn an_empty_model_defers_to_the_provider() {
+        assert_eq!(parse_agent("claude:"), ("claude".to_string(), None));
+        assert_eq!(Agent::parse("codex: ").unwrap().to_string(), "codex");
     }
 
     #[test]

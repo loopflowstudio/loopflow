@@ -3,24 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session commands review</title>
+<title>Launch states as built</title>
 <style>
 :root {
   --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5f5b54; --line: #dedad2; --card: #ffffff;
   --yes: #1f7a4d; --yes-bg: #e6f4ec; --no: #b3361f; --no-bg: #fbe9e4;
-  --prop: #2f5fb3; --prop-bg: #e8effb; --code: #f1eee8;
+  --part: #8a6200; --part-bg: #fbf1d9; --prop: #2f5fb3; --prop-bg: #e8effb; --code: #f1eee8;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
     --yes: #6fcf9b; --yes-bg: #17301f; --no: #f08a73; --no-bg: #3a1d16;
-    --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
+    --part: #e6c160; --part-bg: #33290f; --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
   }
 }
 :root[data-theme="dark"] {
   --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
   --yes: #6fcf9b; --yes-bg: #17301f; --no: #f08a73; --no-bg: #3a1d16;
-  --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
+  --part: #e6c160; --part-bg: #33290f; --prop: #8fb3f5; --prop-bg: #18243a; --code: #262421;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
@@ -39,6 +39,7 @@ th { font-weight: 600; }
 .tag { display: inline-block; font-weight: 600; padding: 1px 8px; border-radius: 999px; font-size: 0.85rem; white-space: nowrap; }
 .yes { color: var(--yes); background: var(--yes-bg); }
 .no { color: var(--no); background: var(--no-bg); }
+.part { color: var(--part); background: var(--part-bg); }
 .prop { color: var(--prop); background: var(--prop-bg); }
 .box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
 .box.proposed { border-left: 4px solid var(--prop); }
@@ -53,101 +54,110 @@ ol.q ol { list-style: lower-alpha; margin-top: 4px; }
 </head>
 <body>
 <main>
-<h1>Getting back to a Session: one idea, how many spellings?</h1>
-<p class="lede">The area: every command, flag and argument that reaches an existing Session, to look at it, type into it, send it text, change what runs it, or move it. Read from <code>lf help</code> on the installed build and from main's docs. No code changed. This is wider than LOO-924; it explains the <code>resume</code> special cases that Task keeps running into.</p>
+<h1>Bare, managed, worker: does the code say what we say?</h1>
+<p class="lede">LOO-924 as built at <code>74a96d6176</code>, PR #1966, 89 files against main. The area is launching an agent: which harness, which agent, who keeps it running, which Task it belongs to. No code changed by this review. The earlier Session-commands review now lives with LOO-958.</p>
 
-<p>A person has five things they want to do with a Session they already have. The CLI has about twenty spellings for them, and three words (<code>resume</code>, <code>move</code>, <code>send</code>) each mean more than one thing.</p>
+<p>Most of it lines up now. <code>Holder</code>, <code>Place</code>, <code>transport::holder</code> and <code>WorkSource::is_managed</code> are gone; one value, <code>Run</code>, comes back from <code>delegate</code>; belonging to a Task no longer changes how a launch lives. What's left is about names: the code's three states are really two yes-or-no questions, and the type is called something it isn't.</p>
 
 <h2>One interaction</h2>
 <div class="box existing">
-<p>A Graph step asked for JSON and the agent answered with something invalid. The Graph wants to say "fix that" to the same conversation.</p>
+<p><code>lf task run LOO-12</code>, and its <code>implement</code> step.</p>
 <ol>
-<li><code>lf steer SESSION 'fix it'</code> is the command for sending text to a Session. But a steer is read at the agent's next tool call, and this agent has stopped. Nothing would read it.</li>
-<li>So the Graph runs <code>lf --batch --output-schema … session resume ID --message '…'</code> (<code>graph.rs</code>). <code>resume</code>, the command for getting back to a conversation, is used here to send one turn and exit.</li>
-<li><strong>Failure:</strong> the answer is invalid again. The Graph repeats step 2, at most twice, then fails.</li>
-<li><strong>Recovery:</strong> a person runs <code>lf resume ID</code> to look. Same command, same ID, entirely different behavior: it opens a terminal, and whether the server holds it depends on <code>--task</code> or the Session row.</li>
+<li>The Graph starts the step with <code>LF_GRAPH_STEP=worker</code>. In the step's process, <code>delegate_current</code> sees <code>journal::worker_step()</code> and picks <code>Run::Worker</code>.</li>
+<li><code>Launch { run: Worker, harness, admitted, start }</code>; <code>Run::mode()</code> says headless, so <code>drive::run</code> drives it.</li>
+<li>Hooks: <code>Run::reports_turns()</code> is true, so each turn boundary is sent to the Machine server, exactly as for a managed conversation.</li>
+<li><strong>Failure:</strong> the answer fails its schema. The Graph runs <code>lf -b session resume ID --message …</code>; that turn is also a <code>Worker</code>.</li>
+<li><strong>Recovery:</strong> a person runs <code>lf resume ID</code> on that step's Session. <code>session_run</code> reads the row: not bound, not a primary conversation, so <code>Bare(Interactive)</code>, in their terminal. A store that can't be read gives <code>Managed</code> and logs one recording gap.</li>
 </ol>
-<p class="muted">That is why <code>--message</code> exists: there is no way to send a turn to a Session that has stopped, so the flag was added to the nearest command.</p>
 </div>
 
-<h2>What a person wants, and how it is spelled today</h2>
+<h2>Product concepts against code concepts</h2>
 <div class="wrap">
 <table>
-<thead><tr><th>What a person wants</th><th>Spellings today</th><th>One owner?</th><th>What's wrong</th></tr></thead>
+<thead><tr><th>What a person knows</th><th>What the code has</th><th>Line up?</th><th>Where not</th></tr></thead>
 <tbody>
-<tr><td><strong>Get back to it</strong>: see it and type</td><td><code>lf resume [ID]</code> · <code>lf session resume</code> · <code>lf open URL</code> · <code>lf open --session ID</code> · <code>lf open --here/--tab/--focus</code> · <code>lf --machine M resume ID</code> · <code>lf resume --prepare</code> (Desktop)</td><td><span class="tag no">no</span></td><td>Two verbs. The difference is real but hidden: <code>open</code> leaves a conversation that is open elsewhere where it is; <code>resume</code> takes its input. Help text uses "get back to", "reconnect", "continue", "attach", "reveal" and "move input" for the same act.</td></tr>
-<tr><td><strong>Say which one</strong></td><td>positional ID that is "Session ID, Task identifier, or provider conversation ID" · <code>--task</code> · <code>--wave</code> · <code>--session</code> · a <code>loopflow://</code> URL · the directory you are in</td><td><span class="tag no">no</span></td><td>Six selectors. On <code>resume</code>, <code>ID --task X</code> means "the ID selects and the Work makes it managed": a selector flag that changes state.</td></tr>
-<tr><td><strong>Send it text</strong></td><td><code>lf steer TARGET 'text'</code> (running) · <code>lf -b resume ID --message</code> (stopped) · <code>lf -b session new --message</code> · a Task comment (becomes a steer) · typing in the terminal</td><td><span class="tag no">no</span></td><td>Which command depends on whether the agent happens to be running, which the sender often can't know. This is the biggest mismatch.</td></tr>
-<tr><td><strong>Change what runs it</strong>: other harness, fresh thread, a copy</td><td><code>lf session new [-a]</code> · <code>lf resume -a codex</code> · <code>lf session move --on X -a Y</code> · <code>lf resume --fork</code></td><td><span class="tag no">no</span></td><td><code>session new</code> makes no new Session; it restarts the thread of this one. <code>resume -a codex</code> is documented as "continue on Codex, seeded with what the last thread knew", which is what <code>session new -a codex</code> says too.</td></tr>
-<tr><td><strong>Move it to another Machine</strong></td><td><code>lf --machine M resume ID</code> · <code>lf session send --to M</code> | <code>lf session receive</code> · <code>lf task move --machine M</code></td><td><span class="tag no">no</span></td><td><code>move</code> means three things: <code>session move</code> changes the agent, <code>task move --machine</code> changes the Machine, <code>task move --wave</code> changes membership. <code>session send</code> sends a Session, not a message.</td></tr>
-<tr><td><strong>Make it the Task's conversation</strong></td><td><code>lf session bind ID --task X</code> · <code>lf resume ID --task X</code></td><td><span class="tag no">no</span></td><td><code>bind</code> is permanent and recorded. <code>resume --task</code> does it for one launch.</td></tr>
-<tr><td>Read it without touching it</td><td><code>lf session card</code> · <code>history</code> · <code>history show</code> · <code>steers</code> · <code>usage</code></td><td><span class="tag yes">yes</span></td><td>Separate questions, separate commands.</td></tr>
+<tr><td>The harness</td><td><code>HarnessKind</code> → <code>&amp;dyn Harness</code>, one file each</td><td><span class="tag yes">yes</span></td><td>—</td></tr>
+<tr><td>The agent I chose (<code>-a claude:opus</code>)</td><td><code>config::Agent { harness, model }</code> on <code>AgentConfig</code>; <code>claude_model</code> folded in</td><td><span class="tag part">mostly</span></td><td><code>parse_agent</code> went from 44 production call sites to 20 and <code>HarnessKind::parse</code> from 36 to 25. The plan said they'd remain only where text comes in (CLI, config files, stored rows). Nobody has checked that the 45 left are all of that kind.</td></tr>
+<tr><td>Which Task it belongs to</td><td>The Session's Task membership; <code>WorkSource</code> kept only to say where the binding came from</td><td><span class="tag yes">yes</span></td><td>Belonging gives counting and Task steers and nothing else, as decided.</td></tr>
+<tr><td>Who keeps it running: bare, managed, worker</td><td><code>enum Run { Bare(Mode), Managed, Worker }</code></td><td><span class="tag no">no</span></td><td>Three names, but the code only ever asks two questions of it. See below.</td></tr>
+<tr><td>Reopening keeps what the Session was</td><td><code>session_run</code> → <code>SqliteStore::is_bare</code>: bound, or a Task/Wave/repository's primary conversation</td><td><span class="tag yes">yes</span></td><td>"resume connects to existing sessions."</td></tr>
+<tr><td>Seeing which state a Session is in</td><td>Nothing. <code>Run</code> is not stored or printed; <code>lf ps</code> and <code>lf session list</code> have no such column</td><td><span class="tag no">no</span></td><td>A concept people are taught and can't look up. The demo written for this Task ("<code>lf ps</code> shows it as bare") can't be run.</td></tr>
+<tr><td>A Graph's run (LOO-953's word)</td><td>LOO-953 has <code>Run</code>, <code>GraphRun</code>, <code>GraphStep</code>; this PR has <code>harness::Run</code></td><td><span class="tag no">no</span></td><td>One name, two ideas, as soon as both land.</td></tr>
 </tbody>
 </table>
 </div>
 
-<h2>The biggest mismatch: <code>resume</code> does five jobs</h2>
+<h2>The biggest mismatch: three names over a two-by-two</h2>
+<div class="box big">
+<p>Everything that reads <code>Run</code> asks one of two questions:</p>
+<pre><code>run.reports_turns()   // !Bare        — hooks, env, thread naming
+run.mode()            // Interactive | Headless — which runner, held terminal or not</code></pre>
+<p>Where the code matches on it, <code>Managed</code> and <code>Worker</code> sit in the same arm (<code>Run::Managed | Run::Worker =&gt;</code> in <code>agent_process.rs</code> and <code>harness/mod.rs</code>). So the four values are a grid:</p>
+<div class="wrap">
+<table>
+<thead><tr><th></th><th>someone typing</th><th>headless</th></tr></thead>
+<tbody>
+<tr><th>the server is told about each turn</th><td><code>Managed</code></td><td><code>Worker</code></td></tr>
+<tr><th>it isn't</th><td><code>Bare(Interactive)</code></td><td><code>Bare(Headless)</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>That is <code>Holder × Mode</code> again under better names. It's fine as code. It's the vocabulary that's off: said earlier, "workers are always headless, so there is basically no point to making them managed", and as built a worker <em>is</em> a managed launch without a terminal. I chose that for this pass because the server records Codex turns and refreshes planning from those turn reports.</p>
+</div>
+
 <div class="cols">
 <div class="box existing">
-<p><strong>Existing</strong></p>
-<pre><code>lf resume ID              # connect and type
-lf resume ID --prepare    # return connection data
-lf -b resume ID --message # one headless turn
-lf resume ID --fork       # copy, then connect
-lf resume -a codex        # switch harness
-lf resume ID --task X     # connect, and make managed</code></pre>
-<p class="muted">Each flag changes what kind of launch it is. In LOO-924 this is the one place where "the command alone decides the state" needed exceptions.</p>
+<p><strong>As built</strong></p>
+<p>Worker = reports turns + headless + runs detached.<br>Managed = reports turns + interactive + held terminal.</p>
+<p class="muted">Honest description: two states, bare and managed, and a managed one is either a conversation or a worker.</p>
 </div>
 <div class="box proposed">
-<p><span class="tag prop">proposed</span></p>
-<pre><code>lf resume [SESSION|TASK]   # connect. Nothing else.
-lf steer SESSION 'text'    # send text, running or not
-lf session restart [-a H]  # fresh thread, same Session
-lf session fork ID         # a copy
-lf session bind ID --task  # make it the Task's</code></pre>
-<p class="muted">One verb per want. <code>resume</code> never changes a Session's state, harness or Task: "resume connects to existing sessions".</p>
+<p><span class="tag prop">proposed, if worker should mean something</span></p>
+<p>Worker = headless, runs detached, <strong>reports its run and its exit, not each turn</strong>. Codex turns are recorded and planning refreshed when the step ends.</p>
+<p class="muted">Then three states are three behaviors. It needs the server's turn-end work moved to step exit, which is its own change with its own risk.</p>
 </div>
+</div>
+<p><strong>Tested:</strong> normal path is the same either way. Failure: a worker killed mid-step. As built, the server has its turns up to the kill. Proposed, it has nothing after the step's start unless the exit path runs, so LOO-959's recovery would have to read the provider's transcript. That counterexample is why this isn't in the PR.</p>
+
+<h2>The name</h2>
+<div class="box proposed">
+<p><span class="tag prop">proposed</span> The comments already call it what it is: "Who keeps the provider running", "Retain the recorded <em>lifetime</em>", "the selected <em>lifetime</em>", "resume <em>lifetime</em>". Rename <code>harness::Run</code> to <code>Lifetime</code>. It reads true (<code>Launch { lifetime }</code>, <code>Delegation::Here { lifetime }</code>) and it leaves <code>Run</code> to LOO-953, where a run is a Graph's execution.</p>
 </div>
 
-<div class="box big">
-<p><strong>Where the proposal has to be tested: sending text.</strong></p>
-<ul>
-<li><em>Normal:</em> the agent is mid-turn. <code>lf steer</code> saves the text and the agent reads it at its next tool call. Same as today.</li>
-<li><em>Stopped Session:</em> <code>lf steer</code> starts its next turn with that text. This replaces <code>--message</code>. The server already does this for an idle held conversation ("waking an idle conversation").</li>
-<li><em>Counterexample, kept:</em> the Graph correction needs to <strong>wait for the answer</strong> and pass <code>--output-schema</code>. A steer returns as soon as it is saved. So "send and wait for the reply" is a real second thing, and it needs either a flag on <code>steer</code> or its own command. See question 2.</li>
-<li><em>Recovery:</em> a steer to a stopped Session whose provider can't start stays unread, and <code>lf session steers</code> shows it waiting. Nothing is lost.</li>
-</ul>
+<h2>Who picks the state</h2>
+<p>The rule was "the command alone". As built there are four inputs, all written by lf and none settable by a flag a person passes:</p>
+<div class="wrap">
+<table>
+<thead><tr><th>Input</th><th>Gives</th></tr></thead>
+<tbody>
+<tr><td><code>LF_GRAPH_STEP=worker</code>, set by a Task's Graph on its steps; or the caller passing <code>worker</code></td><td>Worker</td></tr>
+<tr><td>Running inside a held terminal the server started</td><td>Managed</td></tr>
+<tr><td>On reopen, the Session's row: bound, or a primary conversation</td><td>Managed, else Bare</td></tr>
+<tr><td>Anything else</td><td>Bare, with <code>-b</code> or the terminal choosing interactive or headless</td></tr>
+</tbody>
+</table>
 </div>
-
-<h2>Smaller ones, same pattern</h2>
-<ul>
-<li><strong><code>open</code> and <code>resume</code>.</strong> If <code>resume</code> only connects, the remaining difference is where: this terminal, a sibling tab, or a host such as Desktop or tmux. That is a placement option on one verb.</li>
-<li><strong>One selector.</strong> A positional that takes a Session ID, a Task identifier or a URL already covers every case; with none, the directory decides. <code>--task</code>, <code>--wave</code> and <code>--session</code> on these commands then have nothing left to do.</li>
-<li><strong><code>move</code>.</strong> Changing the agent is not moving. With <code>session restart -a</code> covering one Session, <code>session move --on X -a Y</code> is its bulk form and could carry the same verb.</li>
-</ul>
+<p>That holds. The one exception is still <code>lf -b resume ID --message</code>, where a flag makes a resume a Worker turn; LOO-958 removes it.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Should <code>resume</code> only connect, with every other job moved to its own verb?
-  <ol><li>Yes.</li><li>Yes, except <code>--prepare</code>, which is Desktop asking for the same connection as data.</li><li>No, keep the flags.</li></ol></li>
-<li>Sending text to a Session that has stopped:
-  <ol><li><code>lf steer</code> does it, and <code>lf -b steer</code> waits for the reply (Graph correction uses that).</li>
-  <li><code>lf steer</code> stays "read at the next tool call"; a new <code>lf session turn ID 'text'</code> sends one turn and waits.</li>
-  <li>Keep <code>resume --message</code>.</li></ol></li>
-<li><code>open</code> and <code>resume</code>:
-  <ol><li>One verb, <code>resume</code>, with <code>--tab</code> / <code>--host</code> for where.</li>
-  <li>One verb, <code>open</code>; <code>resume</code> becomes its short form for "here".</li>
-  <li>Keep both, and state the difference in each help text: <code>open</code> shows, <code>resume</code> takes input.</li></ol></li>
-<li>Fresh thread on the same Session, today <code>session new</code> and <code>resume -a</code>:
-  <ol><li><code>lf session restart [-a]</code>; remove <code>resume -a</code>.</li>
-  <li>Keep <code>session new</code>; remove <code>resume -a</code>.</li>
-  <li>Leave both.</li></ol></li>
-<li>Selecting the Session:
-  <ol><li>One positional (Session, Task or URL); drop <code>--task</code>, <code>--wave</code>, <code>--session</code> from these commands.</li>
-  <li>Keep the flags as selectors only; none may change state.</li></ol></li>
-<li>Where does this go?
-  <ol><li>A new Task, designed first, after #1966.</li>
-  <li>Question 1 and 2 join LOO-924; the rest is a new Task.</li></ol></li>
+<li>What is a worker?
+  <ol><li>As built: a managed launch that is headless and has no terminal. Say that in the docs, and keep three names.</li>
+  <li>Something of its own: it reports its run and exit, not each turn. A separate Task, after LOO-959 says how a killed worker is recovered.</li>
+  <li>Drop the third name: bare and managed, where managed is a conversation or a step.</li></ol></li>
+<li>Rename <code>harness::Run</code>:
+  <ol><li>To <code>Lifetime</code>, in this PR.</li>
+  <li>Leave it; LOO-953 picks other names.</li></ol></li>
+<li>Showing the state in <code>lf session list</code> and <code>lf ps</code>:
+  <ol><li>In this PR, derived from the Session row, not stored.</li>
+  <li>A follow-up Task.</li>
+  <li>Not needed.</li></ol></li>
+<li>The 45 remaining <code>parse_agent</code> / <code>HarnessKind::parse</code> call sites:
+  <ol><li>Check each in this PR; keep only those where text comes in.</li>
+  <li>Good enough.</li></ol></li>
+<li>Carried over: <code>Admitted</code> names the step that made it, not the store, Session and attachment it holds.
+  <ol><li>Rename to <code>Recording</code>.</li>
+  <li>Keep it.</li></ol></li>
 </ol>
 </main>
 </body>

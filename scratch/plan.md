@@ -199,3 +199,29 @@ demo owns live steering and terminal lifetime checks.
 - Transcript methods stay on `Harness`. Asked whether to split them into a
   per-harness `Transcripts` impl, Jack said "no opinion in this one". One
   trait keeps the change smaller, and it is still one file per provider.
+
+## Review answers, 2026-11-17 (remaining for implement)
+
+Jack answered `scratch/concept-review.html` with "1c 2b 3c -- give info to the
+"remove process rows" task which delete lf s 4) a 5)a".
+
+- **1c. Two states, not three.** "Drop the third name: bare and managed, where
+  managed is a conversation or a step." `Worker` goes from the type, the docs
+  and `AGENTS.md`. A managed launch is a conversation (interactive, held
+  terminal) or a Graph step (headless, runs detached); both report turns, as
+  built. Shape the type so only the two real questions exist (managed or
+  bare; interactive or headless) and no arm reads `Managed | Worker`.
+  `LF_GRAPH_STEP=worker` and the `worker` argument become "a Task's Graph
+  step", named for what they are. Update `transport/README.md`,
+  `harness/README.md`, `server/README.md` and `docs/sessions.md`.
+- **2b. `harness::Run` keeps its name.** LOO-953 chooses other names for its
+  `Run`/`GraphRun`; it has been told.
+- **3c. No state column** in `lf session list` or `lf ps` (LOO-953 deletes
+  `lf ps`). Remove the `lf ps` line from the demo.
+- **4a. Check every remaining `parse_agent` and `HarnessKind::parse` call
+  site** (20 and 25 in production code at 74a96d6176). Keep only those where
+  text comes in: CLI `-a`, config files, stored rows, wire input. Replace the
+  rest with the typed `Agent`. List what stayed, and why, in the PR body.
+- **5a. Rename `Admitted` to `Recording`** (`Launch.recording`), with a
+  one-line doc comment saying it holds the store, the Session and its
+  attachment that this launch records under.

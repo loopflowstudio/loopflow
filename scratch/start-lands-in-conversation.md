@@ -402,49 +402,31 @@ Built 2026-11-17 from the concept review answers (questions.md), in order:
   the app's `task_create::TaskCreated {receipt, session, row}` (Swift
   `TaskCreated`) is built where the row is read; `overview` is gone. The row
   lacks the Graph's interactive steps and position, so instead of seeding
-  `taskWork`, Desktop's position line reads `RoadmapTask.unreadPosition`
-  ("Starting <graph>" for a started, never-run Task) until the reading arrives.
+  `taskWork`, Desktop's position line reads the row's execution
+  (`RoadmapTask.setupPosition`) until the reading arrives.
   Step `read_answer` is now `read_session`.
-- 1a. `setup::owed`: the Task's Graph row has no run and no GraphProcess
-  history (`lf task run` records the run before holding its conversation, so a
+- 1a. `setup::owed`: `SqliteStore::unrun_task_graph` (Graph row with no run,
+  no GraphProcess history) (`lf task run` records the run before holding its conversation, so a
   backlog run never trips it). Deleted `admitted_task_creation`,
   `record_setup_launch` and migration `creation_receipt_sessions.sql`; the
   held argv carries `session resume --request-id`.
 - 3a. A failed step appends `TaskEventKind::Failed {error: "Setup stopped:
-  <step> failed: …", resumable: true}` (released lf already decodes it). The
-  row reports it as `execution` Blocked while the Task stands at `start` with
-  no Graph process; Desktop's `.at(start)` line shows it (`startPosition`).
+  <step> failed: …", resumable: true}` (released lf already decodes it).
   Test: `task_create_tests::a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it`.
 
-Concept review of 65891dfff5: 1a and 4a hold. One concept, "the Task took up
-its Graph and never ran it", is spelled three ways: `setup::owed` (Rust,
-store), the `snapshot_task_detail` override in `waves.rs` (no graph record +
-resumable `Failed` + step `start`), and Swift's `RoadmapTask.startingGraph` /
-`unreadPosition` / `startPosition`. Meanwhile `execution_of_latest_graph`'s
-no-Graph branch still answers `Idle` "No Task Graph has run; independent
-Sessions may still be active", so `lf task status` on a Task mid-setup says
-that while Desktop says "Starting code".
-
-Next implement direction:
-- The no-Graph branch of `execution_of_latest_graph` reads the taken-up Graph:
-  never run → `Starting` "Starting <graph>"; latest event a resumable `Failed`
-  → `Blocked` with its error (already "Setup stopped: …" for setup; also
-  covers `lf task run`'s own checkout failure, which writes the same event).
-  `Starting` already exists on the wire (Rust and Swift), so no DTO change.
-- Delete the `waves.rs` override; every execution reader gets the reading.
-- Swift: `startingGraph`, `unreadPosition` and `startPosition` go; the
-  unread position and `.at(start)` read `row.execution.reason` when its state
-  is `.starting`/`.blocked`, else "Reading workflow…" / "Not started".
-- `setup::owed` and the projection share one predicate on (Graph row run,
-  GraphProcess history), so "owes setup" and "Starting" cannot disagree.
-- Test: the stopped-setup test also asserts `lf task status --json` reads
-  `starting` before setup and `blocked` after the stop.
+- One reading of "took up its Graph and never ran it" (concept review of
+  65891dfff5): `GraphExecutionFacts::unrun` (`UnrunGraph {graph, stopped}`,
+  one statement over the reading's Tasks, index probes only) is what
+  `setup::owed` and `execution_of_latest_graph`'s no-Graph branch both read:
+  `Starting` "Starting <graph>", or `Blocked` with a latest resumable `Failed`
+  event's error (setup's stop or `lf task run`'s own checkout failure). The
+  `waves.rs` override and Swift's `startingGraph`/`unreadPosition`/
+  `startPosition` are gone; `setupPosition` reads `execution.reason` when it
+  is `.starting`/`.blocked`. Consequence: such a Task's next move and actions
+  follow that execution (owner Task / Wave, no recommended action) instead of
+  Idle's.
 
 Remaining:
-- The "Next implement direction" above (not built at 3612f3a7d4:
-  `ops/task_execution.rs:70` still answers `Idle` "No Task Graph has run…";
-  `waves.rs`'s override and Swift's `startingGraph`/`unreadPosition`/
-  `startPosition` in `WaveWorkMap.swift` remain).
 - Slice 5's remote sample and a windowed Start → typing (qa could not reach
   either: screen locked, no remote Machine).
 
@@ -484,6 +466,8 @@ Remaining:
 - `cargo test -p loopflow --test integration task_create_` — 9 passed after the sync, `-a` and timing assertions; no launchd server left behind. Swift Mac filter (with `InteractionTests`) 153 passed; clippy clean.
 - 120175ea3e: `loopflow-execution --lib definition::` 2 passed; clippy (`loopflow`, `loopflow-execution`) clean. Swift build after the `ProcessEnvironment` edit — gate.
 - qa (5e74e2167, private lf-world, `scratch/qa.html`): CLI and served Start, repeat, conflict, lost answer, ready take/replace/prune/hand-delete, base after an origin push, one `lf` LfProcess per provider, dead-provider reopen — all as planned; served answer 0.20–0.37 s (debug, load ≈ 49). Desktop headless `WorkDestinationTests|NewTaskTests|DTOFixtureTests` 132 passed. Not seen: the click in a window (screen locked), remote Machine, phone.
+
+- One unrun reading: `task_create_tests::` 10 passed (one stopped-setup run needed the status path fix); nextest `ops::task:: | ops::task_execution:: | ops::task_actions:: | ops::human_session:: | lf::commands::waves::` 143 passed; `dto_fixtures::` 52; Swift `WorkDestinationTests|NewTaskTests|DTOFixtureTests` 132; clippy clean. Gate: `test(performance_tests::)` (new statement in execution facts).
 
 ## Done when
 

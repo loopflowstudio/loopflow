@@ -156,8 +156,8 @@
       "graph_source": "builtin",
       "latest_graph_process": null,
       "execution": {
-        "state": "idle",
-        "reason": "No Task Graph has run; independent Sessions may still be active",
+        "state": "starting",
+        "reason": "Starting code",
         "step": null,
         "captured": null
       },

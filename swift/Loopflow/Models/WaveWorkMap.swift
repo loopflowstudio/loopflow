@@ -253,21 +253,10 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
-    /// The Graph a started Task is setting out on, from the row alone: started
-    /// and never run. Its position reads this until the Task's reading arrives.
-    public var startingGraph: String? {
-        awaitsStart || latestGraphProcess != nil ? nil : graphName
-    }
-
-    /// The Task's position before its reading arrives.
-    public var unreadPosition: String {
-        startingGraph.map(startPosition) ?? "Reading workflow…"
-    }
-
-    /// A started Task at the start of `graph`: why its setup stopped, else
-    /// that it is starting.
-    public func startPosition(_ graph: String) -> String {
-        guard let execution, execution.state == .blocked else { return "Starting \(graph)" }
+    /// Where a Task that never ran its Graph stands, as the server reads it:
+    /// starting that Graph, or why its setup stopped.
+    public var setupPosition: String? {
+        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
         return execution.reason
     }
 

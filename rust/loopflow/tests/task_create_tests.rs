@@ -380,14 +380,17 @@ fn a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it() {
     let task = CreationFixture::new();
     task.repo.push();
     let _service = Service::start(&task);
-    // Git refuses every new checkout while the marker exists.
+    // Git refuses every new checkout while the marker exists, once `released`
+    // lets it answer.
     let marker = task.home.path().join("refuse-checkouts");
+    let released = task.home.path().join("checkouts-answer");
     fs::write(&marker, "").unwrap();
     let git = task.home.path().join("bin/git");
     fs::write(
         &git,
         format!(
-            "#!/bin/sh\ncase \"$*\" in *\"worktree add\"*|*\"worktree move\"*) [ -e '{}' ] && exit 1;; esac\nexec /usr/bin/git \"$@\"\n",
+            "#!/bin/sh\ncase \"$*\" in *\"worktree add\"*|*\"worktree move\"*) while [ ! -e '{}' ]; do sleep 0.05; done; [ -e '{}' ] && exit 1;; esac\nexec /usr/bin/git \"$@\"\n",
+            released.display(),
             marker.display()
         ),
     )
@@ -410,11 +413,20 @@ fn a_stopped_setup_shows_on_the_task_and_a_reopened_conversation_retries_it() {
     let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     let issue = answer["task"]["identifier"].as_str().unwrap().to_owned();
     let session = answer["session_id"].as_str().unwrap().to_owned();
+    let reason = |status: &std::process::Output| {
+        let status: serde_json::Value = serde_json::from_slice(&status.stdout).unwrap();
+        status["task"]["reason"].as_str().unwrap().to_owned()
+    };
+    // Until setup answers, the Task is starting the Graph it took up.
+    let before = task.run(&["task", "status", &issue, "--json"]);
+    assert_eq!(reason(&before), "Starting feature");
+    fs::write(&released, "").unwrap();
     let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         let status = task.run(&["task", "status", &issue, "--json"]);
         let text = String::from_utf8_lossy(&status.stdout).into_owned();
         if text.contains("Setup stopped: checkout failed") {
+            assert!(reason(&status).starts_with("Setup stopped"), "{text}");
             break text;
         }
         assert!(

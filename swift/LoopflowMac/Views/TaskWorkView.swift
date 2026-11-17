@@ -74,7 +74,7 @@ struct TaskWorkflowHeader: View {
                     Spacer()
                 } else {
                     if work.isLoading {
-                        Text(task.unreadPosition).foregroundStyle(palette.textSecondary)
+                        Text(task.setupPosition ?? "Reading workflow…").foregroundStyle(palette.textSecondary)
                     }
                     Spacer()
                 }
@@ -404,12 +404,12 @@ struct TaskWorkflowBar: View {
 
     private var position: String {
         guard let workflow = work.value?.graph else {
-            if work.value == nil { return work.isLoading ? task.unreadPosition : "" }
+            if work.value == nil { return work.isLoading ? task.setupPosition ?? "Reading workflow…" : "" }
             return task.graphName.map { "Takes up \($0) when it starts" } ?? "No workflow selected"
         }
         switch workflow.position {
         // A Task that took up its Graph and is waiting for setup to start it.
-        case .at(TaskGraph.start): return task.awaitsStart ? "Not started" : task.startPosition(workflow.name)
+        case .at(TaskGraph.start): return task.setupPosition ?? "Not started"
         case .at(TaskGraph.end): return "At its end"
         case .at(let step): return "At \(step) · yours"
         case .run(let from, let at, let process, let running):
@@ -608,7 +608,7 @@ struct GraphProcessLog: View {
                         TaskRunPosition(workflow: work.graph,
                                         execution: readsWindow ? task?.execution : captured?.row?.execution)
                     } else {
-                        Text(task?.unreadPosition ?? "Reading workflow…")
+                        Text(task?.setupPosition ?? "Reading workflow…")
                     }
                     Spacer()
                     if let openFiles { Button("Files", action: openFiles) }

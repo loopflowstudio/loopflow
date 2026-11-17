@@ -31,7 +31,7 @@ struct NewTaskTests {
         #expect(created.session?.id == created.receipt.sessionId)
         #expect(created.session?.openArgv.isEmpty == false)
         // Until the Task's reading arrives, its row says where it stands.
-        #expect(created.row.unreadPosition == "Starting code")
+        #expect(created.row.setupPosition == "Starting code")
         let shown = try await query.waveGraph(wave: nil, cwd: "/repo")
         #expect(shown.wave == nil)
         #expect(shown.default.name == "code")

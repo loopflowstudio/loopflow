@@ -18,10 +18,7 @@ pub(super) fn owed(store: &SharedStore, session: &LfSession) -> Result<bool> {
     let Some(task) = &session.task_id else {
         return Ok(false);
     };
-    let Some(row) = store.sqlite.task_graph_row(task)? else {
-        return Ok(false);
-    };
-    Ok(row.run.is_none() && store.sqlite.latest_task_graphs(&[task])?.is_empty())
+    Ok(store.sqlite.unrun_task_graph(task)?.is_some())
 }
 
 /// Set up the conversation's Task; `request_id` names the creation whose

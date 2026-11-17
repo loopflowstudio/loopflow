@@ -291,13 +291,14 @@ struct StartingTaskView: View {
     @MainActor
     static func start(model: WorkModel, request: String, wave: WaveSnapshot?, graph: String?) {
         let owner = model.navigation.performanceOwner
-        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: "new-task",
+        let requestID = UUID().uuidString
+        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID,
                         repository: model.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
-            Perf.acknowledged(.startTask, id: "new-task", owner: owner)
+            Perf.acknowledged(.startTask, id: requestID, owner: owner)
             if model.navigation.palette == .newTask { model.navigation.palette = nil }
             Task {
-                do { try await model.createTask(request: request, wave: wave, graph: graph) }
-                catch { Perf.finish(.startTask, id: "new-task", owner: owner, outcome: .failed) }
+                do { try await model.createTask(request: request, wave: wave, graph: graph, requestID: requestID) }
+                catch { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
             }
         }
     }

@@ -2177,6 +2177,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
             },
             cli.batch || cli.interactive,
         )?;
@@ -2821,6 +2822,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
             },
             *json || cli.json,
         );

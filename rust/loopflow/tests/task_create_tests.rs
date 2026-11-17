@@ -165,12 +165,12 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
 }
 
 #[test]
-fn task_create_answers_before_the_checkout_its_conversation_makes() {
+fn task_create_answers_and_its_conversation_checks_out_without_the_network() {
     use loopflow::lf::commands::write::Write as Change;
     use loopflow::server::wire::Operation;
     let task = CreationFixture::new();
     task.repo.push();
-    // Every fetch waits for the test; the answer must not.
+    // Every fetch waits for the test; neither the answer nor the checkout does.
     let release = task.home.path().join("release-fetch");
     let git = task.home.path().join("bin/git");
     fs::write(
@@ -214,15 +214,7 @@ fn task_create_answers_before_the_checkout_its_conversation_makes() {
         db.query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
             .unwrap()
     };
-    assert_eq!(graphs(), 0, "the Graph waits for the checkout");
-    // The Task has its Graph before any checkout exists.
-    assert!(!db
-        .query_row(
-            "SELECT EXISTS(SELECT 1 FROM task_checkouts WHERE task_id=?1)",
-            [answer["task"]["id"].as_str().unwrap()],
-            |row| row.get::<_, bool>(0),
-        )
-        .unwrap());
+    // The admission took up the Graph.
     assert!(db
         .query_row(
             "SELECT EXISTS(SELECT 1 FROM task_graphs WHERE task_id=?1)",
@@ -253,8 +245,10 @@ fn task_create_answers_before_the_checkout_its_conversation_makes() {
     assert_eq!(repeated["session_id"], session.as_str());
     assert_eq!(repeated["session"]["id"], session.as_str());
 
-    fs::write(&release, "").unwrap();
+    // The conversation checks out from local refs and starts the Graph while
+    // every fetch still waits.
     task.wait_for_graph_start();
+    fs::write(&release, "").unwrap();
     task.wait_for_graphs();
     assert_eq!(graphs(), 1);
     let milestone: String = db
@@ -265,6 +259,79 @@ fn task_create_answers_before_the_checkout_its_conversation_makes() {
         )
         .unwrap();
     assert_eq!(milestone, "started");
+}
+
+#[test]
+fn task_create_takes_the_ready_checkout_and_leaves_another() {
+    use std::os::unix::fs::MetadataExt;
+    let task = CreationFixture::new();
+    task.repo.push();
+    let ready = loopflow_execution::git::worktrees::ready_checkout(task.repo.path());
+    // The first Start in a repository without one makes it the slower way.
+    let first = task.start("First Task");
+    task.wait_for_graphs();
+    task.wait_for_ready(&ready);
+    let made = fs::metadata(&ready).unwrap().ino();
+    // Git as Loopflow runs it, from now on.
+    let log = task.home.path().join("git.log");
+    let git = task.home.path().join("bin/git");
+    fs::write(
+        &git,
+        format!(
+            "#!/bin/sh\necho \"$*\" >> '{}'\nexec /usr/bin/git \"$@\"\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&git, fs::Permissions::from_mode(0o755)).unwrap();
+    let second = task.start("Second Task");
+    task.wait_for_graphs();
+    let checkout = task.checkout(&second);
+    assert_ne!(checkout, task.checkout(&first));
+    assert_eq!(
+        fs::metadata(&checkout).unwrap().ino(),
+        made,
+        "the second Task took the ready checkout"
+    );
+    let calls = fs::read_to_string(&log).unwrap();
+    assert!(
+        calls
+            .lines()
+            .any(|line| line.starts_with("-C") && line.contains("worktree move")),
+        "{calls}"
+    );
+    // Only the replacement adds a worktree, detached at the ready path.
+    assert!(
+        calls
+            .lines()
+            .filter(|line| line.contains("worktree add"))
+            .all(|line| line.contains("--detach")),
+        "{calls}"
+    );
+    task.wait_for_ready(&ready);
+    assert_ne!(fs::metadata(&ready).unwrap().ino(), made);
+    // Cleanup sees no Task's checkout there and leaves it alone.
+    // Build cleanup reads open files with lsof.
+    let pruned = task
+        .command()
+        .args(["wt", "prune", "--all"])
+        .env(
+            "PATH",
+            format!(
+                "{}:/usr/bin:/bin:/usr/sbin",
+                task.home.path().join("bin").display()
+            ),
+        )
+        .output()
+        .unwrap();
+    assert!(
+        pruned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&pruned.stderr)
+    );
+    assert!(ready.join(".git").is_file());
+    let listed = task.run(&["wt", "list", "--json"]);
+    assert!(!String::from_utf8_lossy(&listed.stdout).contains(".ready"));
 }
 
 impl CreationFixture {
@@ -327,6 +394,83 @@ impl CreationFixture {
 
     fn run(&self, args: &[&str]) -> Output {
         self.command().args(args).output().unwrap()
+    }
+
+    /// Start a new Task as Desktop does and wait for its conversation's Graph.
+    fn start(&self, request: &str) -> String {
+        let before: i64 = rusqlite::Connection::open(self.home.path().join("loopflow.db"))
+            .unwrap()
+            .query_row("SELECT count(*) FROM graph_processes", [], |row| row.get(0))
+            .unwrap();
+        let output = self.run(&[
+            "task", "create", request, "--run", "--graph", "feature", "--json",
+        ]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while db
+            .query_row("SELECT count(*) FROM graph_processes", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+            == before
+        {
+            assert!(
+                Instant::now() < deadline,
+                "the conversation started no Graph: {}",
+                fs::read_to_string(self.home.path().join("logs/lf.log")).unwrap_or_default()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        answer["task"]["id"].as_str().unwrap().to_owned()
+    }
+
+    fn checkout(&self, task: &str) -> PathBuf {
+        let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
+        let path: String = db
+            .query_row(
+                "SELECT worktree FROM task_checkouts WHERE task_id=?1",
+                [task],
+                |row| row.get(0),
+            )
+            .unwrap();
+        PathBuf::from(path)
+    }
+
+    /// The background `git worktree add` has made the ready checkout: Git
+    /// lists it and no longer holds its initializing lock.
+    fn wait_for_ready(&self, ready: &std::path::Path) {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        loop {
+            let listed = Command::new("/usr/bin/git")
+                .arg("-C")
+                .arg(self.repo.path())
+                .args(["worktree", "list", "--porcelain"])
+                .output()
+                .unwrap();
+            let listed = String::from_utf8_lossy(&listed.stdout).into_owned();
+            let entry = listed.split("\n\n").find(|entry| {
+                entry
+                    .lines()
+                    .next()
+                    .and_then(|line| line.strip_prefix("worktree "))
+                    == Some(ready.to_str().unwrap())
+            });
+            if entry.is_some_and(|entry| !entry.contains("locked")) {
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "no ready checkout at {}: {listed}",
+                ready.display()
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
     }
 
     /// The conversation's detached Task run registers its Graph.
@@ -404,8 +548,8 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
     let retry = task.run(&args);
     assert!(retry.status.success());
     assert_eq!(
-        serde_json::from_slice::<serde_json::Value>(&retry.stdout).unwrap(),
-        receipt
+        self::receipt(serde_json::from_slice(&retry.stdout).unwrap()),
+        self::receipt(receipt.clone())
     );
     assert_eq!(counts(), after);
     let mut changed = args;
@@ -624,8 +768,14 @@ fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
 
 /// An answer's stored receipt: a repeat reads the conversation record and the
 /// Task's overview again, so only the receipt repeats exactly.
+/// The stored receipt: an answer's conversation record, overview and row are
+/// read when answering.
 fn receipt(mut answer: serde_json::Value) -> serde_json::Value {
     let fields = answer.as_object_mut().unwrap();
-    assert!(fields.remove("session").is_some() && fields.remove("overview").is_some());
+    assert!(
+        fields.remove("session").is_some()
+            && fields.remove("overview").is_some()
+            && fields.remove("row").is_some()
+    );
     answer
 }

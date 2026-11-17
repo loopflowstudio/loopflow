@@ -34,8 +34,8 @@ pub use delivery::{
     TaskPrContext,
 };
 use delivery::{
-    authority_store, missing_task_registry, reconcile_task_pr_observation, resolve_managed_task,
-    resolve_upstream_base, ManagedTask,
+    authority_store, local_upstream_base, missing_task_registry, reconcile_task_pr_observation,
+    resolve_managed_task, resolve_upstream_base, ManagedTask,
 };
 mod snapshot;
 pub use snapshot::task_workspace_context;
@@ -100,6 +100,9 @@ pub struct TaskProcessOptions {
     pub directive: Option<String>,
     /// An existing branch the Task takes as its own, with the checkout that has it.
     pub branch: Option<String>,
+    /// Place a new branch from the refs the last fetch left, without the
+    /// network: the caller exchanges planning and the assignee afterwards.
+    pub from_last_fetch: bool,
 }
 
 impl TaskProcessOptions {
@@ -922,6 +925,23 @@ pub fn task_checkout(repo: &Path, issue: &str, options: TaskCheckoutOptions) -> 
     Ok(task)
 }
 
+/// Check out a Task created here with its conversation, as that conversation's
+/// setup: no fetch and no planning call, so a new branch checks out from local
+/// refs, in the ready checkout when one is waiting. Its creation fetches and
+/// exchanges planning after answering.
+pub fn admitted_checkout(repo: &Path, issue: &str) -> OpsResult<Task> {
+    prepare_task(
+        repo,
+        issue,
+        TaskProcessOptions {
+            from_last_fetch: true,
+            ..Default::default()
+        },
+        None,
+        None,
+    )
+}
+
 /// Check out a Task that moved here on its carried branch and commit.
 pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> OpsResult<Task> {
     let issue = source.task_id.to_string();
@@ -1033,8 +1053,10 @@ fn prepare_task(
                 prepare_task_placement(&store, &main, &task, branch.as_deref(), &options).await?;
             let task = place_prepared_task(&store, &task.id, placement, &options).await?;
             // The checkout claimed the Task; Linear learns who took it.
-            let repository = repository_for_task(&store, &task)?;
-            super::task_ownership::assert_assignee(&store.sqlite, &repository, &task.id).await;
+            if !options.from_last_fetch {
+                let repository = repository_for_task(&store, &task)?;
+                super::task_ownership::assert_assignee(&store.sqlite, &repository, &task.id).await;
+            }
             task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
@@ -1148,6 +1170,10 @@ async fn restore_task_checkout(
             }
             task.base_commit.clone()
         };
+        if crate::git::worktrees::take_ready_checkout(&repo, worktree, &task.branch, &base) {
+            crate::git::mark_lf_created(worktree, &|_| {});
+            return finish_task_checkout(store, task).await;
+        }
         args.extend([
             "--no-track".into(),
             "-b".into(),
@@ -1632,7 +1658,9 @@ async fn prepare_task_placement(
 ) -> OpsResult<TaskPlacement> {
     options.validate_directive(None)?;
     let recorded_branch = recorded_branch.filter(|branch| !branch.is_empty());
-    fetch_task_refs(main_repo)?;
+    if !options.from_last_fetch {
+        fetch_task_refs(main_repo)?;
+    }
     let (plan, workspace_slug) = plan_task_placement(main_repo, task, recorded_branch, options)?;
     let stack_parent = match options.stack_on.as_deref() {
         Some(requested) => {
@@ -1645,7 +1673,15 @@ async fn prepare_task_placement(
         None => None,
     };
     let observe_pr = recorded_branch.is_some() || plan.strategy != PlacementStrategy::Create;
-    prepare_placement(main_repo, plan, workspace_slug, stack_parent, observe_pr)
+    let fetch = !options.from_last_fetch;
+    prepare_placement(
+        main_repo,
+        plan,
+        workspace_slug,
+        stack_parent,
+        observe_pr,
+        fetch,
+    )
 }
 
 fn prepare_placement(
@@ -1654,6 +1690,7 @@ fn prepare_placement(
     workspace_slug: String,
     stack_parent: Option<TaskPr>,
     observe_pr: bool,
+    fetch: bool,
 ) -> OpsResult<TaskPlacement> {
     let mut base_commit = match &stack_parent {
         Some(parent) => {
@@ -1662,10 +1699,8 @@ fn prepare_placement(
                 task_error(format!("failed to resolve task base {base_ref}: {error}"))
             })?
         }
-        None => {
-            let (_, base_commit) = resolve_upstream_base(main_repo, &plan.base_ref)?;
-            base_commit
-        }
+        None if fetch => resolve_upstream_base(main_repo, &plan.base_ref)?.1,
+        None => local_upstream_base(main_repo, &plan.base_ref)?.1,
     };
     // An unreadable PR (no GitHub login on this Machine, an origin GitHub
     // does not host) leaves the checkout without one; a later sync finds it.
@@ -1874,6 +1909,12 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
         }
         super::planning_sync::sync_after_save(&store, &repo).await;
         super::task_ownership::assert_assignee(&store.sqlite, main, task).await;
+        // The next Task's base and ready checkout start from this fetch.
+        if let Err(error) = crate::git::integration_base(main)
+            .and_then(|base| crate::git::fetch_tracking_ref(main, &base))
+        {
+            tracing::warn!(%error, "default branch fetch after creation failed");
+        }
         Ok(())
     });
     if let Err(error) = synced {

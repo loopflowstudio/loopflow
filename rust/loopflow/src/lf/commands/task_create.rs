@@ -20,14 +20,18 @@ pub struct TaskCreateAnswer {
     pub row: super::waves::RoadmapTask,
 }
 
-/// Read the created Task's row after its commit and join it to the answer.
-pub(crate) fn answer(created: creation::TaskCreated) -> Result<TaskCreateAnswer> {
-    tokio::runtime::Runtime::new()?.block_on(async {
-        let store = loopflow_execution::store::read_existing_registry()?
-            .map(std::sync::Arc::new)
-            .context("no Loopflow store exists on this Machine")?;
-        let row = super::waves::task_row(&store, &created.receipt.task).await?;
-        Ok(TaskCreateAnswer { created, row })
+/// Read the created Task's row after its commit and join it to the answer, as
+/// the `row` step of request `id`'s creation.
+pub(crate) fn answer(id: &str, created: creation::TaskCreated) -> Result<TaskCreateAnswer> {
+    let _creation = tracing::info_span!("task_creation", request_id = id).entered();
+    creation::step("row", || {
+        tokio::runtime::Runtime::new()?.block_on(async {
+            let store = loopflow_execution::store::read_existing_registry()?
+                .map(std::sync::Arc::new)
+                .context("no Loopflow store exists on this Machine")?;
+            let row = super::waves::task_row(&store, &created.receipt.task).await?;
+            Ok(TaskCreateAnswer { created, row })
+        })
     })
 }
 
@@ -101,7 +105,7 @@ pub fn create(
         )?;
     }
     if *json {
-        let answer = self::answer(answer.clone())?;
+        let answer = self::answer(&id, answer.clone())?;
         writeln!(io.output, "{}", serde_json::to_string_pretty(&answer)?)?;
     } else {
         writeln!(

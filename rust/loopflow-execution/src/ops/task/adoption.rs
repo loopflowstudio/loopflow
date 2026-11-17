@@ -240,6 +240,7 @@ fn prepare(main: &Path, root: &Path) -> OpsResult<TaskPlacement> {
         slug,
         None,
         crate::git::worktrees::github_repo_nwo(main).is_some(),
+        true,
     )
 }
 

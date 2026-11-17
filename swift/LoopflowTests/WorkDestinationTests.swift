@@ -251,7 +251,7 @@ struct WorkDestinationTests {
         let registry = SessionsWorkspaceRegistry(localMachineId: nil)
         model.bindWorkspaces(registry, repository: "repo")
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
         #expect(model.selection == .task(id: task.id))
         let workspace = try #require(registry.retained(model.workspaceKey(for: model.selection, repository: "repo")))
@@ -286,7 +286,7 @@ struct WorkDestinationTests {
         while !requests.withLock({ $0.contains { $0.starts(with: ["desktop", "layout", "repository"]) } }),
               ContinuousClock.now < deadline { await Task.yield() }
         requests.withLock { $0.removeAll() }
-        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil)
+        try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
         #expect(model.selection == .task(id: task.id))
         #expect(model.task(id: task.id)?.task.id == task.id)
@@ -329,7 +329,7 @@ struct WorkDestinationTests {
         let (model, _) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [])
         let originalNavigation = model.navigation
-        let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil) }
+        let creating = Task { try await model.createTask(request: "earlier request", wave: nil, graph: nil, requestID: UUID().uuidString) }
         let deadline = ContinuousClock.now + .seconds(3)
         while !(await barrier.contains("creation")), ContinuousClock.now < deadline { await Task.yield() }
         try #require(await barrier.contains("creation"))
@@ -372,7 +372,7 @@ struct WorkDestinationTests {
             throw SubmittedCreationError(requestID: "original", cause: RegistryQueryError("Outcome unknown"))
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
-        try await model.createTask(request: "fix it", wave: nil, graph: nil)
+        try await model.createTask(request: "fix it", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
     }
 
@@ -383,7 +383,7 @@ struct WorkDestinationTests {
         }
         let (model, _) = destinationModel(query: query, repoPath: "/repo")
         await #expect(throws: RegistryQueryError.self) {
-            try await model.createTask(request: "fix it", wave: nil, graph: nil)
+            try await model.createTask(request: "fix it", wave: nil, graph: nil, requestID: UUID().uuidString)
         }
         #expect(model.navigation.startingTask?.request == "fix it")
         #expect(model.navigation.startingTask?.error == "not a repository")

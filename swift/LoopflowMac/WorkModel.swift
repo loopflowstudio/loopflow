@@ -2557,8 +2557,7 @@ final class WorkModel {
     /// words and Try again; after the answer, the Task exists, so a failure
     /// opening it belongs to its workspace. A submitted request whose answer is
     /// lost hands uncertainty to recovery.
-    func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
+    func createTask(request: String, wave: WaveSnapshot?, graph: String?, requestID: String) async throws {
         let owner = navigation
         let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
         owner.startingTask = starting
@@ -2568,7 +2567,7 @@ final class WorkModel {
         do {
             created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError {
-            Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
+            Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
             if owner.startingTask?.id == requestID { owner.startingTask = nil }
@@ -2578,7 +2577,7 @@ final class WorkModel {
             throw error
         }
         let receipt = created.receipt
-        Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
+        Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id,
                       owner: owner.performanceOwner)
         CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
         if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,

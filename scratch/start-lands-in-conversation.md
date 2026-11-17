@@ -143,10 +143,9 @@ kind (local, remote) on `start_task`; the report splits by it.
   in-process keeps both properties with the lock simply held.
 - Branch-name collision is checked against refs from the last fetch; a
   collision surfaces at first push. Accepted.
-- Unverified: whether checkout cleanup (`checkout-cleanup.lock`, worktree
-  reaping) removes an unknown `<repo>.ready` worktree, and whether
-  `git worktree move` works with this repo's layout (submodules refuse). Check
-  first in slice 3.
+- Cleanup and `<repo>.ready`: listings drop it, so `wt prune --all` keeps it
+  (tested). A repository with submodules refuses `git worktree move`; the take
+  then falls back to `worktree add`.
 
 ## Alternatives
 
@@ -170,8 +169,8 @@ kind (local, remote) on `start_task`; the report splits by it.
 - Network steps inside creation's checkout: `fetch_task_refs` and the base fetch
   in `resolve_upstream_base` for a new branch, `assert_assignee` inside
   `prepare_task` on this path.
-- Desktop: `Perf.retarget(.startTask, from: "new-task", …)` (key by request
-  ID from the click). Done: the sheet's wait, post-reply `plan.list`,
+- Done: Desktop's `"new-task"` Perf key (the click's request ID is the
+  interaction's ID and the pending key), the sheet's wait, post-reply `plan.list`,
   `prepareTaskSession` and the `--explain` fallback for a created Task.
 - Phone: `createdTask`'s view-plan read before navigation (done for a first
   Start; kept for a request recovered after a restart, whose receipt has no Session).
@@ -278,15 +277,27 @@ store handle and a tokio runtime, and runs `SharedTaskReads::read` (the whole
 repository's selection reading) on the answer path, outside any
 `creation_step` span.
 
-Remaining, in order:
-1. `Perf.retarget(.startTask, from: "new-task", …)` and the `Perf.finish(…,
-   id: "new-task")` beside it (`WorkModel.createTask`): key by the request ID
-   from the click (slice 5). Wrap the row read in a `creation_step` span
-   (`step=row`) so the report shows its share of the 300 ms answer.
-2. Slice 3, including checkout without network for a new branch:
-   `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
-   setup (off the answer path, on the typing path).
-3. Slices 4–5.
+Start's request ID is made at the click (`StartingTaskView.start`), passed
+to `createTask(requestID:)`, and names both the Perf pending key and the
+journal Interaction (`Interaction(id:)`; `Perf.begin` uses a UUID-shaped
+Perf ID as the Interaction's). The row read is `creation_step step=row` under
+a `task_creation request_id=…` span (`task_create::answer(id, …)`).
+
+Slice 3 built. Setup's checkout is `ops::task::admitted_checkout`
+(`TaskProcessOptions.from_last_fetch`: no `fetch_task_refs`, base from
+`local_upstream_base`, no `assert_assignee`). `restore_task_checkout` takes
+`git::worktrees::ready_checkout` for any new local branch
+(`take_ready_checkout`: `worktree move --force`, `switch --no-track -c`;
+falls back to `worktree add`, Git refuses a checkout still initializing).
+Setup then calls `prepare_ready_checkout`, a `setsid` shell that backgrounds
+`git worktree add --detach <ready> <integration base>`. `sync_admitted` ends
+with `fetch_tracking_ref` of the default branch. `list_porcelain` drops the
+detached entry at the ready path, so `wt list`, placement inference and
+`wt prune` never see it. Replacement lives in setup, not the continuation:
+the continuation can run before the take (or before the conversation is ever
+opened) and would find the old one still there.
+
+Remaining: slices 4–5.
 
 ## Slices
 
@@ -314,8 +325,8 @@ Remaining, in order:
 
 ## Checks
 
-- `cargo test -p loopflow --test integration task_create_` — slices 1, 3, 4; gate.
-- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests'` — 132 passed (Mac).
+- `cargo test -p loopflow --test integration task_create_` — 8 passed after slice 3 (`task_create_takes_the_ready_checkout_and_leaves_another`; the fetch-blocked test now waits for the Graph before releasing fetch). `loopflow-execution --lib git::worktrees::` 22, `ops::task::tests::` 33 passed; clippy clean. Rerun after slice 4; gate.
+- `swift test --package-path swift --filter 'WorkDestinationTests|NewTaskTests|MobileTaskCreationTests|DTOFixtureTests|LaunchJournalTests|InteractionTests'` — 152 passed (Mac).
 - `cargo test -p loopflow --test integration dto_fixtures::task_create` and `task_create_tests::task_create_without_recovery_keeps_the_existing_receipt_and_exit_status` (real row is Working) — passed; `cargo test -p loopflow-storage --lib` 365 passed; `loopflow-execution --lib store::tests::` 47 passed; `server::schema::tests::` 8 passed; clippy clean. Gate: `binary(two_people)`, `test(performance_tests::)`, `test(ops::task::tests::)` for the Task state SQL.
 - `uv run python scripts/test_ios.py -only-testing:LoopflowiOSTests/MobileTaskCreationTests` — 21 passed; full iOS suite at gate.
 - `uv run pytest python/tests/test_desktop_timings.py` — slice 5; gate.
@@ -338,4 +349,4 @@ conversation"), `docs/dev/server.md`, `rust/loopflow/src/server/README.md`
 (answer shape, milestone table), `tests/fixtures/dto/README.md`,
 `scripts/benchmarks/desktop-performance/README.md` (spans, Machine kind).
 Docs promise: `lf wt prune` (even `--all`) keeps `<repo>.ready`; deleting it by
-hand is safe. Slice 3 must make that true.
+hand is safe. Both hold after slice 3.

@@ -25,7 +25,7 @@ pub(super) async fn finish(
         println!("{request}");
     }
     let started = Instant::now();
-    let session = primary::admit_workspace(store, session)
+    let session = checkout(store, session)
         .instrument(tracing::info_span!("conversation_setup", step = "checkout"))
         .await
         .inspect_err(|error| println!("Checkout failed: {error:#}"))?;
@@ -42,6 +42,38 @@ pub(super) async fn finish(
         }
     }
     Ok(session)
+}
+
+/// Check the Task out from local refs, taking the repository's ready checkout
+/// when one is waiting, move the conversation into it, and start the next ready
+/// checkout.
+async fn checkout(store: &SharedStore, session: LfSession) -> Result<LfSession> {
+    let task = session
+        .task_id
+        .as_ref()
+        .context("the conversation has no Task")?;
+    let task = store
+        .get_task(task)
+        .await?
+        .context("the Task is unavailable")?;
+    let repo = session
+        .repo
+        .as_deref()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| session.cwd.clone());
+    let placed = task.worktree.as_ref().is_some_and(|cwd| cwd.is_dir());
+    let issue = task.id.to_string();
+    crate::journal::request::spawn_blocking(move || -> Result<()> {
+        if !placed {
+            crate::ops::task::admitted_checkout(&repo, &issue)?;
+        }
+        crate::git::worktrees::prepare_ready_checkout(&crate::git::worktrees::main_repo_root(
+            &repo,
+        )?);
+        Ok(())
+    })
+    .await??;
+    primary::admit_workspace(store, session).await
 }
 
 /// Start the Task's run the way a terminal would, detached, and record the

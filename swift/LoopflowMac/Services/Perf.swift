@@ -185,7 +185,9 @@ enum Perf {
             if interval == .coldStart, let ms = PerfClock.millisecondsSinceProcessStart() {
                 input = InteractionInput(uptime: ProcessInfo.processInfo.systemUptime - ms / 1000, source: .processStart)
             } else { input = InteractionTrace.input }
-            interaction = Interaction(name: interval.experience(scenario), scenario: scenario, input: input,
+            // A request's ID names its interaction, so the Machine's spans for
+            // that request join the journal record.
+            interaction = Interaction(id: UUID(uuidString: id) ?? UUID(), name: interval.experience(scenario), scenario: scenario, input: input,
                 context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
                                              liveSessions: liveSessions, repository: repository), sink: journal.append)
         } else { interaction = nil }

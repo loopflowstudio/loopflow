@@ -160,9 +160,9 @@ public final class Interaction {
     private var usabilityPresented = false
     private var visualObservation: Task<Void, Never>?
 
-    public init(name: String, scenario: String, input: InteractionInput?, context: Context,
+    public init(id: UUID = UUID(), name: String, scenario: String, input: InteractionInput?, context: Context,
                 sink: @escaping @Sendable (Record) -> Void) {
-        id = UUID()
+        self.id = id
         self.name = name
         self.scenario = scenario
         self.input = input

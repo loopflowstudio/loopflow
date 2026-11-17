@@ -16,3 +16,9 @@
 - `lf -a X task create --run`: the agent override reaches the held
   conversation and its Graph only through inherited environment; creation no
   longer passes `--agent` to a `task run` argv. Not checked live.
+- `lf wt create ready` would plan the ready checkout's path. Not guarded;
+  `WorktreeSegment` could reserve `ready` if it matters.
+- The ready replacement is a background `git worktree add` from setup; if the
+  Machine sleeps or it is killed mid-checkout, Git leaves a locked
+  registration at the ready path and takes fall back to `worktree add` until
+  someone removes it (`git worktree remove --force <repo>.ready`). No repair.

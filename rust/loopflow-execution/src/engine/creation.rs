@@ -74,7 +74,7 @@ pub fn lookup(id: &str) -> Result<Option<CreationReceipt>> {
 
 /// Bounded creation stages are visible under the served request's trace. Never
 /// record the request text, title, generated prompt or provider output.
-fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
+pub fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
     tracing::info_span!("creation_step", step = name).in_scope(|| {
         let started = Instant::now();
         let result = run();

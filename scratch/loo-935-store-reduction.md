@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: implemented on this branch; gate next.
+Status: implemented on this branch; one implement pass (below), then gate.
 
 ## Demo
 
@@ -45,6 +45,14 @@ replaced). Still marked, still read: `agent_sessions.work_source` → LOO-836,
 the four `provider_*` account tables → LOO-928 (#1953 not on main).
 `provider_routes`/`auth_browser_bindings` are not on main; nothing to mark.
 
+Kept, decided one by one (empty because rare, not dead): `rentals`,
+`machine_records` (rental give-back), `pool_machines`, `task_moves`
+(`lf task move --machine`), `relocated_task_processes` (repository moved on
+disk), `session_moves` (`lf session move --blocked`), `pm_issue_changes`
+(Linear sync), `planning_peer_conflicts` (`lf plan`), `dashboards` and
+`dashboard_arrangements` (`lf desktop dashboard`), `provider_tokens` (GitHub,
+Linear, API keys). The PR body lists these.
+
 LOO-943 (filed for marked members) was abandoned once everything dropped here.
 LOO-946 removes the retired `task_layout` catalog key after release.
 
@@ -62,6 +70,17 @@ Desktop keeps pane layouts under
 `$LF_HOME/desktop-cache/pane-layouts/<machine>/<kind>/<work>.json`
 (`PaneLayoutStore.swift`), beside its existing `WorkCache` files.
 `lf desktop layout` reads only `query:<id>`; `desktop.layout.save` is gone.
+
+**Next implement:** a saved layout keeps every Session it names. Delete
+`WorkPaneLayout.keeping(sessions:)` (`PaneLayoutStore.swift`) and its use in
+`loadPaneIntent` (`SessionsView.swift`), plus `knownSessions` if nothing else
+reads it. The server check it replaces guarded a shared row other clients
+wrote; a file only this Mac writes needs no guard. The filter tested against the
+first page of interactive Sessions, so it emptied panes holding older Sessions
+and headless Runs, and the next save made that permanent. A pane naming a
+Session that is gone shows the Session view's own not-found state; the file is
+not rewritten. Test: a layout naming a Session outside `WorkModel.sessions`
+restores with that Session in its pane.
 
 ## Numbers (`model_size.py`)
 

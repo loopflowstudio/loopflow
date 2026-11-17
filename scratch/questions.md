@@ -12,18 +12,20 @@
 - **Desktop layouts live in `$LF_HOME/desktop-cache/`, not Application Support.**
   The Mac app has no Application Support directory; `workspace.json` and its
   other caches already live under `WorkCache.homeDirectory`.
-- **An unknown Session in a saved layout clears that pane's Session on load.**
-  "Known" is `WorkModel.sessions.value`, the first page of the interactive
-  Session listing. A valid older Session or a headless Run outside that page is
-  cleared, and the next save keeps it cleared. The server used to check the
-  Session against the Work. Open: check against the Work's Sessions instead,
-  or stop clearing.
+- **A saved layout keeps every Session it names** (concept review): the
+  first-page filter destroyed valid references, and a Mac-local file needs no
+  ownership check. See the design's next implement.
 - **`--diff` still adds Changes** beside the conversation in Rex/Herdr/cmux; it
   is an explicit request. A Task without a local checkout shows Task & workflow.
 - **`lf desktop layout` stays as a read of `query:<id>`**; `--save` is gone
   (`lf desktop dashboard slots` writes slots).
-- **Dashboards stay on the Machine** with their planning triggers dropped.
-  Still open: per person, per client or per Machine, and are they used at all?
+- **Dashboards stay on the Machine** with their planning triggers dropped, so
+  edits wake no planning reader. Still open, for LOO-940 rather than this PR:
+  is a dashboard shared per repository (a saved view everyone sees) or one
+  client's screen? `dashboard_arrangements.arrangement_json` is screen state
+  keyed by repository, the shape the outcome says screen state should leave;
+  if dashboards are per client, both tables move to Desktop like pane layouts.
+  Are they used at all?
 - **`tasks.regressed_in` stays** (LOO-730): released peers refuse a Task that
   arrives without `task_regressed_in`, and a peer edit writes the column.
 - **`due_removals.py` schedule**: `install`/`uninstall`, Monday 09:00, log at

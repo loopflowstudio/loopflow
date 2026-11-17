@@ -195,3 +195,11 @@ Built, calls taken headless:
   text prints "N open · M lost", open lines first, and the answer hint.
 - 4a filed as a steer on LOO-955.
 
+
+## Concept review 3 (2026-11-17, at 65981f4ad7, headless)
+
+- Project lost lines had no answer; direction in `tracker-mirror.md` "Next".
+  Headless call, reversible: the one-line spelling is `lf repo plan answer
+  <id>` (beside `lf repo plan journal`), and `lf task sync --action` goes
+  away so one line has one spelling. Alternative: keep `--action` on
+  `lf task sync` and add a Project-level bulk answer to `lf wave sync`.

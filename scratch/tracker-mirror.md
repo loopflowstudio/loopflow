@@ -3,6 +3,7 @@
 Status: built. Concept review round 2 (lost vs open, `--keep-theirs` /
 `--use-mine`, `tracker_actions.tracker`) is built; see `scratch/questions.md`.
 Open choices there keep today's behavior and do not block publishing.
+Concept review 3 found one gap to build: "Next" below.
 The design as built is `docs/dev/planning.md` ("Words", "One outbound queue").
 
 ## Decision: any tracker — Linear and Asana, Notion deleted
@@ -51,6 +52,33 @@ run the same commands: the same rows with `tracker: asana`. Pull the
 network: every command saves, `lf repo plan` lists the actions as queued with
 the tracker's error, and the next connected command drains one bounded pass.
 QA run: `scratch/qa.html`.
+
+## Next: answer a lost line wherever it shows (concept review 3)
+
+Round 2 made a lost value something you answer, but only Tasks can answer.
+Project fields (`ProjectName`, `ProjectSummary`, `ProjectDescription`,
+`ProjectStatus`, `Krs`, `MetricTargets`) and Git's `projects` heads also
+lose: they show in `lf repo plan` and on Desktop's Project views
+(`WaveDetailPane`, `ProjectHistoryView`, `WaveStandupBoard`) with no buttons,
+and `lf repo plan`'s hint sends you to `lf task sync <task>`, which cannot
+reach them. The answer belongs to the line, not the Task:
+
+- Storage: `answer_lost_values(task, …)` becomes `answer_lost(ids, answer)`
+  over action ids of any owner; `lf task sync`'s bulk answer is its slice's
+  lost ids. Only field and state actions reach `conflicted`
+  (`rules::field`/`state`), so `--use-mine` always has a `WorkValue` to save;
+  no per-kind button rule.
+- One line, one spelling: `lf repo plan answer <id> --keep-theirs |
+  --use-mine`, served as `plan.answer`; Desktop's two buttons call it on
+  every `TrackerSyncView` (`onAnswer` stops being Task-only). `lf task sync
+  <task> --keep-theirs | --use-mine` stays the bulk answer (Jack Heart, round
+  2: "2a"); its `--action` moves to `plan.answer`, and `task.sync` drops
+  `action`.
+- `lf repo plan` text prints a lost line's short id so the hint can name it:
+  `Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.`
+- Test: a Project name conflicted by the drain closes from `lf repo plan
+  answer`, and the same call on a Git Project head records a merge; fails
+  with today's Task-only path.
 
 ## Choices built that the code does not explain
 

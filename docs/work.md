@@ -20,8 +20,10 @@ most one pull request. A stacked Task forks from its parent's branch on origin,
 pushing it when absent or when an unpublished parent is ahead; `lf sync`
 carries the child through the parent's updates and squash merge.
 
-`lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
-conversation in the background when an agent is configured and installed.
+`lf task run`, `lf ship`, and an explicit `lf task checkout` prepare the Task's
+conversation, and the Machine server starts it in the background within
+seconds. When its agent is not installed, the server records why on the
+conversation.
 An in-place `lf -i task run` uses its current terminal instead.
 `lf resume` in its worktree reattaches to it. A conversation you quit stays
 quit; one that was killed comes back on its own
@@ -30,7 +32,8 @@ Every checked-out Task can run its conversation; there is no background
 conversation cap.
 A running Graph keeps its conversation alive; abandoning the Task stops its
 unviewed conversation. A conversation you are viewing stays open.
-Preparing a conversation, including Desktop's preload, does not launch an agent.
+Preparing a Wave or repository conversation, including Desktop's preload, does
+not launch an agent; a Task's prepared conversation is started by the server.
 
 Add `--open` to open the Task's primary conversation when launch returns,
 including when the Task is waiting at an interactive step. It reuses the Task's

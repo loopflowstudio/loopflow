@@ -94,8 +94,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
     };
     let id = attachment.agent_process_id.to_string();
-    // Every read of this Machine's processes recovers first, so the orphan is
-    // checked in the store here rather than in a `monitor ps` row.
+    // The orphan is checked in the store here rather than in a `monitor ps` row.
     assert!(before.completed_at.is_none());
     assert!(agent.0.try_wait().unwrap().is_none());
 

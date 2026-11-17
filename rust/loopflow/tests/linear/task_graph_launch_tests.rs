@@ -1165,7 +1165,12 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             &repo.head_sha(),
         );
         let fixture = Self {
-            _server: MachineServer::start(loopflow_test_support::lf_binary(), home.path()),
+            // The server restarts what died, with this fixture's tools.
+            _server: MachineServer::start_with_path(
+                loopflow_test_support::lf_binary(),
+                home.path(),
+                &std::env::var("PATH").unwrap(),
+            ),
             repo,
             home,
             registered,
@@ -2964,7 +2969,7 @@ fn task_ship_takes_a_merged_pr_on_to_its_check_step_instead_of_building() {
 }
 
 #[test]
-fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
+fn task_ship_restarts_after_its_process_dies() {
     let task = shipping_task();
     fs::write(task.home.path().join("hold"), "").unwrap();
     let mut first = command(
@@ -2981,8 +2986,7 @@ fn task_ship_restarts_on_the_next_read_after_its_process_dies() {
     first.kill().unwrap();
     first.wait().unwrap();
     fs::remove_file(task.home.path().join("hold")).unwrap();
-    // Any read of this Machine's Tasks finds the dead ship and starts it again.
-    task.ok(&["task", "list"]);
+    // The server's recovery pass finds the dead ship and starts it again.
     wait_for("the restarted ship to reach end", || {
         task.graph()["position"] == at("end")
     });
@@ -3008,8 +3012,7 @@ fn task_ship_unassigned_mid_ship_waits_and_lets_its_running_step_finish() {
     task.ok(&["task", "unassign", "INF-123"]);
     first.kill().unwrap();
     first.wait().unwrap();
-    // Nobody owns it, so no read of this Machine's Tasks starts its ship again.
-    task.ok(&["task", "list"]);
+    // Nobody owns it, so the server does not start its ship again.
     let shown = task.run(&["wave", "show", "--json"]);
     let shown = String::from_utf8_lossy(&shown.stdout);
     assert!(
@@ -3039,7 +3042,7 @@ sys.exit(3)
 "#;
 
 #[test]
-fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
+fn task_ship_restarts_after_a_failure_wait_instead_of_at_once() {
     let task = GraphTask::with_tools(&[("claude", FAILING_CLAUDE)]);
 
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
@@ -3054,7 +3057,8 @@ fn task_ship_restarts_after_a_failure_wait_instead_of_on_every_read() {
     assert_eq!(attempts, 3);
     // Approved with its ship process exited, it is idle until the restart.
     assert_eq!(task.state(), "idle");
-    // Reads right after the failure leave the restart waiting its minute.
+    // The server's passes right after the failure leave the restart waiting
+    // its minute; reads change nothing.
     for _ in 0..3 {
         task.ok(&["task", "list"]);
     }

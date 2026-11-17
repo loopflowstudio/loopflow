@@ -259,11 +259,10 @@ attempt; the next attempt starts after a backoff, with the earlier summaries.
 
 ### Recovery
 
-There is no schedule. Any lf read of this Machine's Tasks or processes
-(`lf task status`, `lf task list`, `lf process list`, `lf wave status`, Desktop's planning
-reads) first settles AgentProcesses whose lf died and starts the ship process of
-each shipping Task checked out here again when it has exited. A Machine nothing
-reads recovers on its next read.
+The Machine server's recovery pass (`server/recovery.rs`) settles
+AgentProcesses whose lf died and starts the ship process of each shipping Task
+checked out here again when it has exited. It runs when the store changes and
+at least every minute, so a Machine nobody reads recovers too.
 
 A check never transfers green checks from one head to another. A failure is
 confirmed by a second observation before repair. One incident (head, failed check set and provider check URLs) owns one repair

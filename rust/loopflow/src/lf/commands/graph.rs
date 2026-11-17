@@ -340,7 +340,7 @@ pub fn carry_task_run(
         crate::lf::navigation::command_merges,
     )?;
     if !cli.interactive {
-        loopflow_execution::ops::task::start_conversation_beside(&task);
+        loopflow_execution::ops::task::prepare_conversation_beside(&task);
     }
     let issue = task.identifier.clone();
     let announce = |run: &TaskRun| -> Result<()> {

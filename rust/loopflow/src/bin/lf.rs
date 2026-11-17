@@ -2695,28 +2695,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             },
         );
     }
-    // Reading this Machine's Tasks or processes recovers them first.
-    if matches!(
-        &cli.command,
-        Some(Commands::Task {
-            cmd: TaskCommand::Status { .. } | TaskCommand::List { .. } | TaskCommand::Show { .. }
-        }) | Some(Commands::Wave {
-            cmd: WaveCommand::Status { .. }
-                | WaveCommand::Sync { .. }
-                | WaveCommand::List { .. }
-                | WaveCommand::Show { .. }
-                | WaveCommand::Plan { cmd: None, .. }
-        }) | Some(Commands::Plan {
-            cmd: loopflow::lf::PlanCommand::List { .. }
-        }) | Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::History {
-                cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-                ..
-            },
-        }) | Some(Commands::Process { .. })
-    ) {
-        loopflow_execution::ops::recovery::recover();
-    }
     // Placement chooses or rents the Machine and hands the Task to it, from
     // the flags or the scope's default capacity; the ordinary dispatch below
     // then forwards the run to its new owner.
@@ -2794,7 +2772,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                     recover_from: recover_from.clone(),
                 },
             )?;
-            loopflow_execution::ops::task::start_conversation_beside(&task);
+            loopflow_execution::ops::task::prepare_conversation_beside(&task);
             print_task(&task, *json)
         });
     }

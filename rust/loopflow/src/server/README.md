@@ -48,15 +48,17 @@ the pass needs is written before it is needed (`meta.json`, the holder's
 `exit.json`, Session and Graph-run rows with pid and OS start time). Its
 first reading after start is the restart and reboot case. Each reading:
 
-1. **Settles.** Closes rows whose process is gone, reaps orphan agents,
-   continues limit waits and checks rentals. Reads no longer do this.
+1. **Settles**, at most every 10 seconds: reaps orphan agents, starts the
+   ship process of a shipping Task whose ship exited, continues limit waits
+   and checks rentals (`ops::recovery::settle`). Reads no longer do this.
 2. **Starts Task conversations.** A Task's primary Session starts again when
    the Task is open, claimed and checked out here, no agent or pending holder
-   serves it, and its last agent did not end by the person (exit 0 or 130).
+   serves it, and it never had an agent or its last agent did not end by the
+   person (exit 0 or 130).
    An unfinished agent whose recorded process is gone died too. The store
    counts the start (`agent_sessions.recovery_attempts`, `recovered_at`)
    before it goes through `session.continue`'s path with request
-   `recover:<session>:<ended agent>:<attempt>`, so one death starts one
+   `recover:<session>:<ended agent, or new>:<attempt>`, so one death starts one
    provider across server restarts. `lf task run`, `lf ship` and
    `lf task checkout` only prepare the Session; this pass starts it.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
@@ -65,11 +67,12 @@ first reading after start is the restart and reboot case. Each reading:
    carrier died.
 
 One start is in flight at a time: the next begins when the last one's
-terminal runs, or after 3 seconds, most recently updated Task first. Sessions
+agent attaches, or after 3 seconds, most recently updated Task first. Sessions
 and carriers share one backoff (1 minute doubling to 30) and stop after 5
 deaths without a finished turn or step; the Session and the Task run then
 show the command that continues. A start that fails records its reason on the
-Session (`no PTY left: 511 in use (kern.tty.ptmx_max)`) and retries on the
+Session (`agent_sessions.recovery_failure`, for example `claude is not
+installed on this Machine's PATH`), cleared by the next start that succeeds, and retries on the
 same backoff. Wave, repository and bare conversations are reported, never
 started.
 

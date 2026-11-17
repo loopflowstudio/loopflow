@@ -148,10 +148,32 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .unwrap();
     assert_eq!(yielded(&store), None, "headless: lf's stream reports");
     interactive(true);
+    let attempts = |store: &SqliteStore| -> u32 {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT recovery_attempts FROM agent_sessions WHERE id='session'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap()
+    };
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET recovery_attempts=3 WHERE id='session'",
+            [],
+        )
+        .unwrap();
     store
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
     assert_eq!(yielded(&store), Some(false));
+    assert_eq!(attempts(&store), 3, "a started turn has not finished");
     store
         .record_native_turn(&adapter, "native", true, Some(0))
         .unwrap();
@@ -160,6 +182,7 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         Some(true),
         "idle, so the server can wake it"
     );
+    assert_eq!(attempts(&store), 0, "a finished turn resets recovery");
 }
 
 #[test]

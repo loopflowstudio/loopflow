@@ -188,6 +188,14 @@ impl SqliteStore {
             let attachment = self.session_attachment(&adapter.session)?.ok_or_else(|| {
                 StoreError::InvalidAuthority("Native provider has no attachment".into())
             })?;
+            if yielded {
+                // A finished turn is a conversation that runs: the recovery
+                // pass counts its starts again from none.
+                self.conn.lock().expect("store mutex poisoned").execute(
+                    "UPDATE agent_sessions SET recovery_attempts=0 WHERE id=?1 AND recovery_attempts>0",
+                    [&adapter.session],
+                )?;
+            }
             self.record_session_activity(
                 &adapter.session,
                 &attachment,

@@ -128,8 +128,8 @@ lf repo ci --since 7d    # how each failure was detected, repaired and landed
 The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A shipping Task
-whose ship process died starts again on the next read of this Machine's work
-(`lf task status`, `lf ps`, Desktop). After bare `lf land` returns, nothing
+whose ship process died starts again from the Machine server's recovery
+pass, within a minute. After bare `lf land` returns, nothing
 repairs its PR.
 
 `lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.

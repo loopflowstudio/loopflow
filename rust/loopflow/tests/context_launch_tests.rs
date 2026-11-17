@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use loopflow_test_support::TestRepo;
+use rusqlite::OptionalExtension;
 
 fn native_codex_command(repo: &std::path::Path, home: &std::path::Path, args: &[&str]) -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lf"));
@@ -1082,9 +1083,11 @@ fn assert_background_conversation(run_graph: bool) {
     repo.commit("Add a graph that waits for review");
     repo.push();
     let home = tempfile::tempdir().unwrap();
-    let _server = loopflow_test_support::MachineServer::start(
+    // The server's recovery pass starts the conversation, with the stand-in.
+    let _server = loopflow_test_support::MachineServer::start_with_path(
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
+        &format!("{}:/usr/bin:/bin", home.path().join("bin").display()),
     );
     let stop = home.path().join("stop");
     let _release = Release(stop.clone());
@@ -1197,8 +1200,6 @@ fn assert_background_conversation(run_graph: bool) {
             .args(["checkout", id, "--json"]),
     );
     assert_eq!(open_task_conversations(&db, id), 1);
-    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
-    assert_eq!(timing.matches("background_start").count(), 1, "{timing}");
 
     succeed(
         claude_launch(home.path(), &script)
@@ -1217,9 +1218,19 @@ fn assert_background_conversation(run_graph: bool) {
 }
 
 #[test]
-fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
+fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
+    // The server finds no provider on its PATH.
+    let _server = loopflow_test_support::MachineServer::start(
+        env!("CARGO_BIN_EXE_lf"),
+        &home.path().join("machine"),
+    );
+    succeed(
+        claude_launch(home.path(), "exit 0")
+            .current_dir(repo.path())
+            .args(["set", "--global", "default_agent", "claude"]),
+    );
     let created: serde_json::Value = serde_json::from_str(&succeed(
         claude_launch(home.path(), "exit 0")
             .current_dir(repo.path())
@@ -1227,24 +1238,39 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
     ))
     .unwrap();
     let id = created["task"]["id"].as_str().unwrap();
-    // A Machine with no provider installed has nothing to start. A real
-    // Machine always has its logs directory, where the skip is recorded.
-    fs::create_dir_all(home.path().join("machine/logs")).unwrap();
-    let mut checkout = claude_launch(home.path(), "exit 0");
-    fs::remove_file(home.path().join("bin/claude")).unwrap();
     let placed: serde_json::Value = serde_json::from_str(&succeed(
-        checkout
+        claude_launch(home.path(), "exit 0")
             .current_dir(repo.path())
             .args(["checkout", id, "--json"]),
     ))
     .unwrap();
     assert!(Path::new(placed["worktree"].as_str().unwrap()).is_dir());
-    let timing = fs::read_to_string(home.path().join("machine/logs/launch-timing.jsonl")).unwrap();
-    assert!(timing.contains("background_skip"), "{timing}");
-    assert_eq!(
-        open_task_conversations(&home.path().join("machine/loopflow.db"), id),
-        0
-    );
+    let db = home.path().join("machine/loopflow.db");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let failure = loop {
+        let failure: Option<String> = rusqlite::Connection::open(&db)
+            .unwrap()
+            .query_row(
+                "SELECT s.recovery_failure FROM task_primary_sessions tp
+                 JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()
+            .unwrap()
+            .flatten();
+        if let Some(failure) = failure {
+            break failure;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the server recorded no reason\n{}",
+            fs::read_to_string(home.path().join("machine/logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    };
+    assert_eq!(failure, "claude is not installed on this Machine's PATH");
+    assert_eq!(open_task_conversations(&db, id), 0);
 }
 
 #[test]

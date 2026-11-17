@@ -191,6 +191,12 @@ pub struct MachineServer(std::process::Child);
 impl MachineServer {
     /// Run `lf server run` for `home` and wait until it is ready.
     pub fn start(lf: &str, home: &Path) -> Self {
+        Self::start_with_path(lf, home, "/usr/bin:/bin")
+    }
+
+    /// [`MachineServer::start`] with the `PATH` the server, and every
+    /// conversation it starts, finds providers on.
+    pub fn start_with_path(lf: &str, home: &Path, path: &str) -> Self {
         std::fs::create_dir_all(home).expect("create the fixture's Machine home");
         let command = |args: &[&str]| {
             let mut command = Command::new(lf);
@@ -199,7 +205,7 @@ impl MachineServer {
                 .env("HOME", home)
                 .env("LF_HOME", home)
                 .env("LF_BIN", lf)
-                .env("PATH", "/usr/bin:/bin")
+                .env("PATH", path)
                 .env("HTTPS_PROXY", "http://127.0.0.1:1")
                 .env("HTTP_PROXY", "http://127.0.0.1:1")
                 .args(args)

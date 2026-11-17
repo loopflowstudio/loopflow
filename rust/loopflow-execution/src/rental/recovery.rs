@@ -302,7 +302,7 @@ pub fn settle(machine: &MachineId) {
     }
 }
 
-/// Lazy recovery's give-back pass. A rental whose provider this process
+/// The server recovery pass's give-back. A rental whose provider this process
 /// cannot reach is reported only once its soft deadline passes; its provider
 /// deletes it at the hard deadline either way.
 ///

@@ -513,7 +513,7 @@ pub fn reap_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
 }
 
 /// `lf monitor prune`'s AgentProcess pass: reap orphans, then release ancestry
-/// it can prove was never recorded. Lazy recovery only reaps.
+/// it can prove was never recorded. The server's recovery pass only reaps.
 pub fn prune_agent_processes(dry_run: bool) -> Result<AgentProcessReapReport> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let mut report = reap_in(&store, dry_run)?;

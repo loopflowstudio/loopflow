@@ -1,9 +1,10 @@
-//! The recovery pass: Task conversations that died come back. One watcher
-//! reads the store when its planning, Session or process revisions move, and
-//! at least every minute for backoffs and deaths nothing recorded. Each due
+//! The recovery pass: this Machine's work settles, and Task conversations
+//! that died, or were prepared and never started, come back. One watcher reads
+//! the store when its planning, Session or process revisions move, and at
+//! least every minute for backoffs and deaths nothing recorded. Each due
 //! conversation is started the way `session.continue` starts one, in a held
-//! terminal. The store counts each start, so a server restart forgets nothing
-//! and one death never starts two providers.
+//! terminal, one at a time. The store counts each start, so a server restart
+//! forgets nothing and one death never starts two providers.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -19,6 +20,12 @@ use loopflow_storage::sqlite::{SqliteStore, StoreRevisions};
 /// How long the watcher goes without reading when nothing it reads moved:
 /// backoffs come due, and a reboot leaves deaths nobody recorded.
 const UNREAD: Duration = Duration::from_secs(60);
+/// The shortest time between two settlements: each one writes what it
+/// settles, which moves the revisions the watcher reads.
+const SETTLE_EVERY: Duration = Duration::from_secs(10);
+/// The longest one start holds the next: after a reboot, conversations come
+/// back one at a time rather than all at once.
+const PACE: Duration = Duration::from_secs(3);
 
 /// Start the Machine's one recovery watcher. It runs as long as the server.
 pub(super) fn start(terminals: Arc<Registry>) {
@@ -42,11 +49,12 @@ fn watch(terminals: &Registry) {
     }
 }
 
-/// The watcher's store, and what it read last and when.
+/// The watcher's store, what it read last and when, and when it last settled.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
+    settled: Option<SystemTime>,
 }
 
 impl Watcher {
@@ -80,18 +88,48 @@ impl Watcher {
             return;
         }
         self.seen = Some((revisions, now));
+        if self
+            .settled
+            .is_none_or(|at| now.duration_since(at).is_ok_and(|since| since >= SETTLE_EVERY))
+        {
+            self.settled = Some(now);
+            loopflow_execution::ops::recovery::settle();
+        }
         let held = |session: &LfSessionId| {
             terminals.session_terminal(session).is_some()
                 || terminals.pending_terminal(session, None).is_some()
         };
         let start = |conversation: &RecoverableConversation, request: String| {
+            if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
+                anyhow::bail!(failure);
+            }
             let start = super::service::continuing(conversation.session.clone(), request, 0, 0)
                 .map_err(|error| anyhow::anyhow!("{}", error.message))?;
-            terminals.start(start).map(|_| ())
+            terminals.start(start)?;
+            pace(store, conversation);
+            Ok(())
         };
         if let Err(error) = recover_conversations(store, unix(now), held, start) {
             tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
         }
+    }
+}
+
+/// Hold the next start until this one's agent has attached, or [`PACE`].
+fn pace(store: &SqliteStore, conversation: &RecoverableConversation) {
+    let deadline = std::time::Instant::now() + PACE;
+    while std::time::Instant::now() < deadline {
+        let attached = store
+            .session_attachment(conversation.session.as_str())
+            .is_ok_and(|attachment| {
+                attachment.is_some_and(|attachment| {
+                    Some(&attachment.agent_process_id) != conversation.agent.as_ref()
+                })
+            });
+        if attached {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
     }
 }
 
@@ -100,7 +138,8 @@ fn unix(at: SystemTime) -> i64 {
         .map_or(0, |since| since.as_secs() as i64)
 }
 
-/// Start every due Task conversation that has no terminal, one at a time.
+/// Start every due Task conversation that has no terminal, one at a time,
+/// and record why a start failed on its Session.
 /// Each start is counted before it is made, and its request names the ended
 /// agent and the attempt, so the registry answers a repeat with the terminal
 /// it already started.
@@ -115,16 +154,20 @@ fn recover_conversations(
         if held(session) {
             continue;
         }
-        let Some(attempt) = store.record_recovery_start(session, agent, now)? else {
+        let Some(attempt) = store.record_recovery_start(session, agent.as_ref(), now)? else {
             continue;
         };
-        let request = format!("recover:{session}:{agent}:{attempt}");
+        let generation = agent.as_ref().map_or("new", |agent| agent.as_str());
+        let request = format!("recover:{session}:{generation}:{attempt}");
         match start(&conversation, request) {
             Ok(()) => {
-                tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started again")
+                store.record_recovery_failure(session, None)?;
+                tracing::info!(%session, task = %conversation.task, exit = ?conversation.exit_code, attempt, "Task conversation started")
             }
             Err(error) => {
-                tracing::warn!(%session, task = %conversation.task, attempt, error = %format!("{error:#}"), "Task conversation did not start again")
+                let failure = format!("{error:#}");
+                store.record_recovery_failure(session, Some(&failure))?;
+                tracing::warn!(%session, task = %conversation.task, attempt, error = %failure, "Task conversation did not start")
             }
         }
     }
@@ -279,6 +322,19 @@ mod tests {
             started.into_inner()
         }
 
+        fn failure(&self) -> Option<String> {
+            self.store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT recovery_failure FROM agent_sessions WHERE id=?1",
+                    [self.session.as_str()],
+                    |row| row.get(0),
+                )
+                .unwrap()
+        }
+
         fn attempts(&self) -> (u32, Option<i64>) {
             self.store
                 .conn
@@ -368,5 +424,42 @@ mod tests {
             )
             .unwrap();
         assert!(fixture.pass(NOW, false).is_empty(), "abandoned");
+    }
+
+    #[test]
+    fn a_prepared_task_conversation_that_never_ran_is_started() {
+        let fixture = fixture();
+        fixture
+            .store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET agent_process_id=NULL WHERE id=?1",
+                [fixture.session.as_str()],
+            )
+            .unwrap();
+        assert_eq!(
+            fixture.pass(NOW, false),
+            [format!("recover:{}:new:1", fixture.session)]
+        );
+        assert!(fixture.pass(NOW + 30, false).is_empty(), "in flight");
+    }
+
+    #[test]
+    fn a_failed_start_says_why_until_one_succeeds() {
+        let fixture = fixture();
+        fixture.exited(137);
+        recover_conversations(
+            &fixture.store,
+            NOW,
+            |_| false,
+            |_, _| Err(anyhow::anyhow!("no PTY left")),
+        )
+        .unwrap();
+        assert_eq!(fixture.failure().as_deref(), Some("no PTY left"));
+        assert_eq!(fixture.attempts(), (1, Some(NOW)), "a failure is a start");
+        assert_eq!(fixture.pass(NOW + 60, false).len(), 1);
+        assert_eq!(fixture.failure(), None);
     }
 }

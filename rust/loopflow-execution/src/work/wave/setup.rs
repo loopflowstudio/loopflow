@@ -10,7 +10,6 @@ use serde::{Deserialize, Serialize};
 
 use crate::config::{config_layers, ConfigSource};
 use crate::durable::OwningMachineSource;
-use crate::provider_auth::Provider;
 use crate::store::SharedStore;
 use crate::work::wave::Wave;
 use loopflow_model::durable::MachineSetting;
@@ -19,17 +18,6 @@ use loopflow_model::durable::MachineSetting;
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct SetupValue {
     pub value: Option<String>,
-    pub source: ConfigSource,
-    pub scope: Option<crate::config::settings::SettingScope>,
-    pub locator: Option<String>,
-}
-
-/// The accounts a provider's launches try in order; empty means no route, so
-/// launches try every account eligible for automatic routing, else the
-/// provider's own login.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
-pub struct AccountSetup {
-    pub accounts: Vec<String>,
     pub source: ConfigSource,
     pub scope: Option<crate::config::settings::SettingScope>,
     pub locator: Option<String>,
@@ -45,8 +33,6 @@ pub struct WaveSetup {
     pub tasks_machine: SetupValue,
     /// Where the Wave's Session runs.
     pub session_machine: SetupValue,
-    /// Account route by provider.
-    pub accounts: BTreeMap<String, AccountSetup>,
 }
 
 /// Read the setup of `wave` from `checkout`'s config and this Machine's store.
@@ -69,36 +55,12 @@ pub async fn read_wave_setup(
         let selected = crate::config::settings::resolve_layers(&layers, Some(&definition))?;
         skill_agents.insert(skill.to_owned(), effective_setting(&selected, "agent"));
     }
-    let mut accounts = BTreeMap::new();
-    for provider in [Provider::Claude, Provider::Codex] {
-        let setting = resolved
-            .settings
-            .get(&format!("account.{}", provider.as_str()));
-        let selected = setting.and_then(|setting| setting.selected());
-        accounts.insert(
-            provider.as_str().to_owned(),
-            AccountSetup {
-                accounts: resolved
-                    .config
-                    .account
-                    .get(provider.as_str())
-                    .into_iter()
-                    .flat_map(|order| order.iter())
-                    .map(ToString::to_string)
-                    .collect(),
-                source: selected.map_or(ConfigSource::Builtin, |candidate| candidate.source),
-                scope: selected.map(|candidate| candidate.scope),
-                locator: selected.map(|candidate| candidate.locator.clone()),
-            },
-        );
-    }
     Ok(WaveSetup {
         graph: effective_setting(&resolved, "graph"),
         agent: effective_setting(&resolved, "agent"),
         skill_agents,
         tasks_machine: machine(store, wave, MachineSetting::Tasks)?,
         session_machine: machine(store, wave, MachineSetting::Session)?,
-        accounts,
     })
 }
 

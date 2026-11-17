@@ -92,14 +92,13 @@
   <p class="hand">Each session knows how to hand its work to a run in a way that stays faithful to your process: a run follows the workflow you wrote down and stops where you said you want to be involved. Every run, its steps and its result are recorded, so you can watch one live or read what it did afterwards. And the work happens in its own process, off the main thread, so a long run never fills your conversation’s context; the session just reads back the outcome.</p>
   <div class="halves">
     <article>
-      <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
-      <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/orchestration">Skills and Graphs ↗</a><a href="/docs/subscriptions">Accounts and usage ↗</a></p>
+      <p>Run work across your machines through <code>ssh</code>, with persistent conversations and provider-reported usage. Choose the model and harness for each Skill; headless runs can continue through your configured fallback order.</p>
+      <p class="more"><a href="/docs/lf-reference">The CLI ↗</a><a href="/docs/orchestration">Skills and Graphs ↗</a><a href="/docs/subscriptions">Native authentication ↗</a></p>
     </article>
     <article>
 <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create cpu-pods       <span class="c"># a worktree and a branch</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
-     --account claude=you@ \  <span class="c"># whose login pays</span>
      -a claude:opus \         <span class="c"># which agent and model</span>
      --wt cpu-pods \          <span class="c"># in which worktree</span>
      --docs docs/runpod.md \  <span class="c"># what it reads first</span>
@@ -108,11 +107,6 @@
 
 <span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
 <span class="p">$</span> <b>lf</b> land --wait-and-fix      <span class="c"># merge when checks pass; fix if not</span>
-
-<span class="p">$</span> <b>lf</b> account
-<span class="c">  claude  you@    </span><i class="bar"><i style="width:78%"></i></i><span class="c">  78% left</span>
-<span class="c">  claude  work@   </span><i class="bar"><i style="width:21%"></i></i><span class="c">  21% left</span>
-<span class="c">  codex   you@    </span><i class="bar"><i style="width:52%"></i></i><span class="c">  52% left</span>
 
 <span class="p">$</span> <b>lf</b> usage --wt cpu-pods
 <span class="c">  3 sessions · 2 agents · 412k tokens · $4.18</span>

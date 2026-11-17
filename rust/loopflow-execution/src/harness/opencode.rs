@@ -224,7 +224,6 @@ impl OpenCodeHarness {
                 store.clone(),
                 session.clone(),
                 Some(attachment.clone()),
-                None,
                 Default::default(),
             ),
         }));
@@ -324,7 +323,7 @@ impl OpenCodeHarness {
                     {
                         let mut stream = stream.lock().await;
                         let decoded = stream.decoder.event(&raw);
-                        if let Err(error) = stream.writer.write(&decoded).await {
+                        if let Err(error) = stream.writer.write(&decoded) {
                             tracing::warn!(%error, "failed to record OpenCode activity");
                         }
                     }
@@ -342,7 +341,7 @@ impl OpenCodeHarness {
                         let messages = read_messages(&client, &reader_base_url, &reader_session_id).await?;
                         let mut stream = stream.lock().await;
                         let Snapshot { decoded, messages: current_messages } = stream.decoder.messages(&messages);
-                        stream.writer.write(&decoded).await?;
+                        stream.writer.write(&decoded)?;
                         drop(stream);
                         for decoded in decoded {
                             if let Decoded::Display(event) = decoded {

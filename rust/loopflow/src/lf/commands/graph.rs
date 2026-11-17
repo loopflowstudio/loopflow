@@ -468,11 +468,6 @@ fn execute(
     stop_at_interactive: bool,
     task_run: Option<&LfProcessId>,
 ) -> Result<()> {
-    let accounts =
-        loopflow_execution::provider_account::selection::AccountSelection::from_flags_or_env(
-            &cli.account,
-            &cli.only_account,
-        )?;
     report_outcome(block_on(async {
         let store = open_graph_store().await?;
         let task = binding.and_then(|binding| match &binding.work {
@@ -514,7 +509,7 @@ fn execute(
             )
             .context("could not record the Graph; no steps launched")?;
         drop(admission);
-        let outcome = drive(&running, start, accounts, stop_at_interactive).await?;
+        let outcome = drive(&running, start, stop_at_interactive).await?;
         // A Task run's Graph writes where it left the Task. Blocked at an
         // interactive step, the Task waits there: what blocks it is for a
         // person, and nothing before it runs again.
@@ -607,7 +602,6 @@ fn report_outcome(outcome: GraphOutcome) -> Result<()> {
 async fn drive(
     running: &RunningGraph<'_>,
     start: ExecutionCursor,
-    accounts: loopflow_execution::provider_account::selection::AccountSelection,
     stop_at_interactive: bool,
 ) -> Result<GraphOutcome> {
     let fields = |extra: LfEventFields| LfEventFields {
@@ -622,7 +616,6 @@ async fn drive(
     );
     let result = async {
         let _graph_env = EnvVarGuard::set("LOOPFLOW_GRAPH_NAME", running.graph);
-        let _accounts = accounts.activate()?;
         let mut cursor = start;
         let runner = GraphRunner::new(running);
         let runner = if stop_at_interactive {
@@ -1095,8 +1088,6 @@ impl SkillExecutor for &RunningGraph<'_> {
         // spawn carries verbosity for skills, operations, and correction turns.
         step_cli.verbose = false;
         step_cli.output_schema = output.as_ref().map(GraphOutput::schema);
-        step_cli.account.clear();
-        step_cli.only_account.clear();
         // `-i` and `-b` choose for every step. Otherwise a step runs headless,
         // and an interactive step launches the way `lf skill` would: with the
         // person at a terminal, else headless.

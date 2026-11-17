@@ -16,70 +16,23 @@ use loopflow_test_support::{MachineServer, TestRepo};
 fn launch_startup_proof(
     repo: &TestRepo,
     home: &std::path::Path,
-    store: &loopflow_execution::store::sqlite::SqliteStore,
     task: Option<&str>,
 ) -> std::process::Output {
-    launch_startup_proof_through(repo, home, store, env!("CARGO_BIN_EXE_lf").as_ref(), task)
-}
-
-/// A connected managed Claude account, which Task work launches as.
-fn connect_fixture_account(
-    home: &std::path::Path,
-    store: &loopflow_execution::store::sqlite::SqliteStore,
-) {
-    let account_home = home.join("accounts/claude/fixture");
-    fs::create_dir_all(&account_home).unwrap();
-    let credential = serde_json::json!({"claudeAiOauth":{"accessToken":"fixture-only","expiresAt":4102444800000i64}}).to_string();
-    fs::write(account_home.join(".credentials.json"), &credential).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    loopflow_execution::provider_account::catalog::upsert_provider_account(
-        store,
-        &loopflow_execution::store::ProviderAccount {
-            provider: "claude".into(),
-            account_id: loopflow_execution::store::ProviderAccountId::parse("fixture").unwrap(),
-            home: Some(account_home),
-            login_email: Some(
-                loopflow_execution::profile::EmailAddress::parse("fixture@example.com").unwrap(),
-            ),
-            observed_email: Some("fixture@example.com".into()),
-            observed_subject: Some("fixture".into()),
-            observed_credential_digest: Some({
-                use sha2::Digest;
-                format!("{:x}", sha2::Sha256::digest(credential.as_bytes()))
-            }),
-            observed_plan: None,
-            credential_state: loopflow_execution::store::CredentialState::Connected,
-            routing_state: loopflow_execution::store::RoutingState::Automatic,
-            plan: None,
-            paid_through: None,
-            utilization_percent: None,
-            cooldown_until: None,
-            cooldown_reason: None,
-            last_selected_at: None,
-            created_at: now,
-            updated_at: now,
-        },
-    )
-    .unwrap();
+    launch_startup_proof_through(repo, home, env!("CARGO_BIN_EXE_lf").as_ref(), task)
 }
 
 /// The same launch, with `lf_bin` as the `lf` it runs for its own commands.
 fn launch_startup_proof_through(
     repo: &TestRepo,
     home: &std::path::Path,
-    store: &loopflow_execution::store::sqlite::SqliteStore,
     lf_bin: &std::path::Path,
     task: Option<&str>,
 ) -> std::process::Output {
     if task.is_none() {
         fs::write(home.join("expect-bare"), "").unwrap();
     }
-    connect_fixture_account(home, store);
     let bin = home.join("bin");
     fs::create_dir(&bin).unwrap();
-    // Signing the shared Claude home in goes through the Keychain on macOS.
-    fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
-    fs::set_permissions(bin.join("security"), fs::Permissions::from_mode(0o755)).unwrap();
     let skill = repo.path().join(".claude/skills/startup-proof");
     fs::create_dir_all(&skill).unwrap();
     fs::write(
@@ -212,7 +165,7 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     fs::write(home.path().join("expect-steer"), "").unwrap();
     // The startup hook asks the Machine server for the steer.
     let _server = MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
-    let output = launch_startup_proof(&repo, home.path(), &store, Some("INF-123"));
+    let output = launch_startup_proof(&repo, home.path(), Some("INF-123"));
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (native, answer, turn): (String, String, String) = db
@@ -256,8 +209,7 @@ fn a_bare_skill_in_a_task_checkout_takes_a_steer_and_asks_no_server() {
     let home = tempfile::tempdir().unwrap();
     let task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-    let output = launch_startup_proof(&repo, home.path(), &store, None);
+    let output = launch_startup_proof(&repo, home.path(), None);
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     let (counted, source): (String, String) = db
@@ -286,7 +238,6 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     let home = tempfile::tempdir().unwrap();
     let _task =
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-    let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     // The selected installation's `lf install server` reaches no supervisor.
     let lf = home.path().join("lf");
     fs::write(
@@ -298,7 +249,7 @@ fn a_task_launch_with_no_machine_server_fails_naming_it() {
     )
     .unwrap();
     fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
-    let output = launch_startup_proof_through(&repo, home.path(), &store, &lf, Some("INF-123"));
+    let output = launch_startup_proof_through(&repo, home.path(), &lf, Some("INF-123"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(!output.status.success(), "{stderr}");
     assert!(
@@ -324,12 +275,8 @@ impl InteractiveTask {
         let home = tempfile::tempdir().unwrap();
         let _task =
             support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
-        let store =
-            loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
-        connect_fixture_account(home.path(), &store);
         let bin = home.path().join("bin");
         fs::create_dir(&bin).unwrap();
-        fs::write(bin.join("security"), support::FAKE_SECURITY).unwrap();
         fs::write(
             bin.join("claude"),
             "#!/bin/sh
@@ -348,7 +295,7 @@ exit 0\n",
             ),
         )
         .unwrap();
-        for path in [bin.join("security"), bin.join("claude"), lf.clone()] {
+        for path in [bin.join("claude"), lf.clone()] {
             fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
         }
         Self { repo, home, lf }
@@ -493,11 +440,6 @@ fn public_context_capability_survives_claim_changes_and_rejects_children_and_rep
         support::register_task_without_pr(home.path(), repo.path(), "main", &repo.head_sha());
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let mut server = Some(MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path()));
-    connect_fixture_account(home.path(), &store);
-    // Signing the shared Claude home in goes through the Keychain on macOS.
-    let security = home.path().join("security");
-    fs::write(&security, support::FAKE_SECURITY).unwrap();
-    fs::set_permissions(security, fs::Permissions::from_mode(0o755)).unwrap();
     let provider = home.path().join("claude");
     fs::write(&provider, r#"#!/usr/bin/python3
 import json, os, pathlib, sys, time

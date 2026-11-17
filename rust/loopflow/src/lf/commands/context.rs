@@ -292,7 +292,6 @@ pub fn emit_block(
         ContextMoment::Tool => Some(BoundaryMoment::Tool),
         ContextMoment::Stop => Some(BoundaryMoment::Stop),
         ContextMoment::Steer => None,
-        other => anyhow::bail!("{other:?} is not a turn or tool boundary"),
     };
     let read_adapter = |name: &str| -> Result<Option<loopflow_execution::steer::SteerAdapter>> {
         Ok(std::env::var(name)

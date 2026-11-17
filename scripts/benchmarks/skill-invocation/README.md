@@ -69,8 +69,8 @@ instruction to call a tool, leaving the first request without its context.
 Earlier queue, engine-restart and PTY/inbox probes are archived at `1e4ae02a5`;
 provider-only `probe.py`, `continuity.py` and their exclusive tests at `31e0640eb`.
 Exact argument checks read the provider's model request directly.
-Baseline reconnect and plain-provider continuity remain in
-`tests/e2e/codex_connect.py` and `tests/e2e/claude_shared_home.py`.
+Baseline reconnect remains in `tests/e2e/codex_connect.py`. Native login and
+transcript adoption are checked by the isolated Rust launch contract fixtures.
 
 ## Startup comparison (2026-10-08)
 

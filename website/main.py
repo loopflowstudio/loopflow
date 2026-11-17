@@ -227,9 +227,9 @@ DOCS_AREAS = (
             DocPage("lf command reference", "lf-reference", "Commands, flags, and builtins"),
             DocPage("Configuration", "config", "Context, models, profiles, and launch behavior"),
             DocPage(
-                "Subscriptions",
+                "Native authentication",
                 "subscriptions",
-                "Provider identities, routes, health, and remote selection",
+                "Native logins, conversation history, and headless recovery",
             ),
             DocPage(
                 "Security",

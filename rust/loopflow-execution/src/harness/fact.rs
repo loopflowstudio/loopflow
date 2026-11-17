@@ -2,15 +2,14 @@
 //!
 //! Each harness has one decoder that turns a native message into an ordered
 //! `Vec<Decoded>`: `Fact` for what Loopflow records (receipts, availability,
-//! account capacity, native conversation identity) and `Display` for what a
+//! native conversation identity, explicit turn refusals) and `Display` for what a
 //! person watches live. Decoders hold only the cross-message correlation their
-//! provider needs; `FactWriter` owns every store and account effect.
+//! provider needs; `FactWriter` owns receipts and availability writes.
 
 use std::collections::BTreeSet;
 
 use serde_json::Value;
 
-use crate::provider_account::RateLimitSignal;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -82,7 +81,10 @@ pub(crate) enum ProviderFact {
         status: Lifecycle,
         detail: Value,
     },
-    RateLimit(RateLimitSignal),
+    /// Claude explicitly rejected a turn; snapshots alone never refuse work.
+    TurnRejected {
+        reason: String,
+    },
     /// One main-conversation model request and the input it carried, counted
     /// by the provider (cache reads and writes included).
     Request {
@@ -101,7 +103,8 @@ pub(crate) enum Decoded {
 }
 
 impl Decoded {
-    pub fn fact(&self) -> Option<&ProviderFact> {
+    #[cfg(test)]
+    pub(crate) fn fact(&self) -> Option<&ProviderFact> {
         match self {
             Self::Fact(fact) => Some(fact),
             Self::Display(_) => None,
@@ -173,7 +176,7 @@ pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
                 "TurnCompleted {} {status:?}",
                 t.as_ref().map_or("-".to_owned(), turn)
             ),
-            ProviderFact::RateLimit(_) => "RateLimit".to_owned(),
+            ProviderFact::TurnRejected { reason } => format!("TurnRejected {reason}"),
             ProviderFact::Request { input_tokens } => format!("Request {input_tokens}"),
             ProviderFact::Compacted { pre_tokens } => format!("Compacted {pre_tokens:?}"),
         })

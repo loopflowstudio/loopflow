@@ -1,7 +1,6 @@
 """Planning refresh and Graph-boundary recovery against a disposable Linear HTTPS peer."""
 
 import copy
-import hashlib
 import json
 import os
 import queue
@@ -272,36 +271,6 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         with server.lock:
             server.state["offline"] = True
         if mode == "graph":
-            # Graph admission requires a managed login, even with a contained provider.
-            profile = root / "accounts/claude/reconnect"
-            profile.mkdir(parents=True)
-            credential = json.dumps(
-                {"claudeAiOauth": {"accessToken": "fixture-reconnect", "expiresAt": 4102444800000}}
-            )
-            (profile / ".credentials.json").write_text(credential)
-            now = int(time.time())
-            db.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,"
-                "credential_state,created_at,updated_at,observed_email,"
-                "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
-                (
-                    "reconnect",
-                    str(profile),
-                    now,
-                    now,
-                    "reconnect@example.com",
-                    "reconnect",
-                    hashlib.sha256(credential.encode()).hexdigest(),
-                ),
-            )
-            db.commit()
-            run(
-                "set",
-                "--global",
-                "accounts.claude.reconnect",
-                "{login_email: reconnect@example.com, routing_state: automatic}",
-            )
             (repo / ".lf/graphs").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
             (repo / ".lf/graphs/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")

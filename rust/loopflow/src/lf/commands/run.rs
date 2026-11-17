@@ -775,10 +775,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli) -> Result<Option<String>> {
             loopflow_execution::session_record::read_provider_session(&runtime.artifact_dir())
                 .map_err(|error| anyhow!("failed to read provider session: {error}"))?
         {
-            runtime.observe_provider(
-                Some(provider_session.agent_session),
-                provider_session.account_id,
-            );
+            runtime.observe_provider(Some(provider_session.agent_session));
         }
         runtime.finish(
             result
@@ -896,8 +893,14 @@ fn run_headless_prompt(
         eprintln!("The agent's turn was interrupted.");
         Err(loopflow_execution::process::CommandExit(130).into())
     } else if let Some(failure) = &result.failure {
+        let reason = result.stderr.trim();
+        let reason = if reason.is_empty() {
+            String::new()
+        } else {
+            format!("\n{reason}")
+        };
         Err(anyhow!(
-            "agent stopped after {failure}. Check {} for details.",
+            "agent stopped after {failure}.{reason}\nCheck {} for details.",
             runtime.artifact_dir().display()
         ))
     } else {

@@ -687,22 +687,6 @@
       "source": "builtin",
       "scope": null,
       "locator": null
-    },
-    "accounts": {
-      "claude": {
-        "accounts": [
-          "work"
-        ],
-        "source": "personal",
-        "scope": null,
-        "locator": null
-      },
-      "codex": {
-        "accounts": [],
-        "source": "builtin",
-        "scope": null,
-        "locator": null
-      }
     }
   }
 }

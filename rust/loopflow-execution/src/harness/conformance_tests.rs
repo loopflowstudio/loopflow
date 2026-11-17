@@ -355,11 +355,7 @@ fn opencode_display(
     messages: &[Value],
 ) -> Vec<ConversationEvent> {
     let Snapshot { decoded, .. } = decoder.messages(messages);
-    tokio::runtime::Builder::new_current_thread()
-        .build()
-        .unwrap()
-        .block_on(writer.write(&decoded))
-        .unwrap();
+    writer.write(&decoded).unwrap();
     decoded
         .into_iter()
         .filter_map(|decoded| match decoded {
@@ -395,7 +391,6 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
         store.clone(),
         session.clone(),
         Some(attachment),
-        None,
         Default::default(),
     );
     let agent_session = AgentSessionId::from(session.as_str());

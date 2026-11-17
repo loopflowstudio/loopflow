@@ -1,4 +1,4 @@
-//! Chrome access venues and account-first provider routing.
+//! Chrome access venues and service browser preferences.
 
 use std::collections::HashMap;
 use std::fs;

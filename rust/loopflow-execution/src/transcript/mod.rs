@@ -31,7 +31,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::harness::HarnessKind;
-use crate::provider_account::activation::native_home;
 use crate::provider_auth::Provider;
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
@@ -158,8 +157,8 @@ pub fn home(harness: HarnessKind) -> PathBuf {
     let user = || dirs::home_dir().unwrap_or_default();
     let set = |name: &str| std::env::var_os(name).filter(|value| !value.is_empty());
     match harness {
-        HarnessKind::Claude => native_home(Provider::Claude, None),
-        HarnessKind::Codex => native_home(Provider::Codex, None),
+        HarnessKind::Claude => native_home(Provider::Claude),
+        HarnessKind::Codex => native_home(Provider::Codex),
         HarnessKind::Pi => set("PI_CODING_AGENT_DIR")
             .map(PathBuf::from)
             .unwrap_or_else(|| user().join(".pi/agent")),
@@ -168,6 +167,50 @@ pub fn home(harness: HarnessKind) -> PathBuf {
             .unwrap_or_else(|| user().join(".local/share"))
             .join("opencode"),
     }
+}
+
+/// The caller's provider home, or the provider default.
+pub(crate) fn native_home(provider: Provider) -> PathBuf {
+    let variable = match provider {
+        Provider::Claude => "CLAUDE_CONFIG_DIR",
+        _ => "CODEX_HOME",
+    };
+    std::env::var_os(variable)
+        .map(PathBuf::from)
+        .filter(|home| !home.as_os_str().is_empty())
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .unwrap_or_default()
+                .join(if provider == Provider::Claude {
+                    ".claude"
+                } else {
+                    ".codex"
+                })
+        })
+}
+
+/// Bring an older isolated transcript into the native home without touching auth.
+pub(crate) fn adopt_native(provider: Provider, id: &AgentSessionId) -> Result<()> {
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let to = native_home(provider);
+    let from = conversation_home(&store, provider, id)?;
+    if from.as_deref() == Some(to.as_path()) {
+        return Ok(());
+    }
+    let harness = HarnessKind::parse(provider.as_str()).expect("native provider has a harness");
+    if transcript(harness, &to, id.as_str()).is_none() {
+        let copied = from
+            .as_ref()
+            .map(|from| copy_between(harness, id.as_str(), from, &to))
+            .transpose()?
+            .flatten();
+        anyhow::ensure!(
+            copied.is_some(),
+            "cannot resume {provider} conversation {id}: its transcript is missing"
+        );
+    }
+    store.record_native_conversation_home(provider, id)?;
+    Ok(())
 }
 
 /// Why a recorded conversation has no readable transcript here.
@@ -199,7 +242,7 @@ pub(crate) fn conversation_home(
     id: &AgentSessionId,
 ) -> Result<Option<PathBuf>> {
     let Some(account) = store.provider_session_account_home(provider, id)? else {
-        return Ok(Some(native_home(provider, None)));
+        return Ok(Some(native_home(provider)));
     };
     Ok(store
         .provider_account_row(provider.as_str(), &account)?
@@ -846,6 +889,83 @@ mod tests {
     use super::*;
 
     const ID: &str = "0199a213-81c0-7800-8aa1-bbab2a035a53";
+
+    #[test]
+    fn old_account_transcripts_resume_with_native_auth_without_copying_credentials() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let store = crate::store::open_sqlite(&ledger.home().join("loopflow.db")).unwrap();
+        for provider in [Provider::Claude, Provider::Codex] {
+            let native = ledger.home().join(format!("native-{provider}"));
+            let old = ledger.home().join(format!("old-{provider}"));
+            fs::create_dir_all(&native).unwrap();
+            fs::create_dir_all(&old).unwrap();
+            let _env = crate::config::environment::EnvVarGuard::set(
+                if provider == Provider::Claude {
+                    "CLAUDE_CONFIG_DIR"
+                } else {
+                    "CODEX_HOME"
+                },
+                native.to_str().unwrap(),
+            );
+            let credential = if provider == Provider::Claude {
+                ".credentials.json"
+            } else {
+                "auth.json"
+            };
+            fs::write(native.join(credential), "native-A").unwrap();
+            fs::write(old.join(credential), "saved-B").unwrap();
+            let db = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
+            db.execute("INSERT INTO provider_accounts(provider,account_id,home,credential_state,created_at,updated_at) VALUES(?1,'old',?2,'missing',1,1)",
+                rusqlite::params![provider.as_str(), old.to_str().unwrap()]).unwrap();
+            store.record_account_home_conversation(provider, ID, "old");
+            let relative = if provider == Provider::Claude {
+                format!("projects/-work-repo/{ID}.jsonl")
+            } else {
+                format!("sessions/2026/11/15/rollout-2026-11-15T10-00-00-{ID}.jsonl")
+            };
+            let source = old.join(&relative);
+            fs::create_dir_all(source.parent().unwrap()).unwrap();
+            fs::write(
+                &source,
+                format!(r#"{{"type":"session_meta","payload":{{"id":"{ID}"}}}}"#),
+            )
+            .unwrap();
+            adopt_native(provider, &ID.into()).unwrap();
+            assert_eq!(
+                fs::read(native.join(&relative)).unwrap(),
+                fs::read(&source).unwrap()
+            );
+            assert_eq!(
+                fs::read_to_string(native.join(credential)).unwrap(),
+                "native-A"
+            );
+            assert_eq!(fs::read_to_string(old.join(credential)).unwrap(), "saved-B");
+            assert_eq!(
+                conversation_home(&store, provider, &ID.into()).unwrap(),
+                Some(native.clone())
+            );
+            assert_eq!(
+                store
+                    .provider_session_account(provider, &ID.into())
+                    .unwrap()
+                    .unwrap()
+                    .as_str(),
+                "old"
+            );
+            // Existing native history wins even when the old copy changes later.
+            db.execute("UPDATE provider_session_accounts SET isolated=1 WHERE provider=?1 AND provider_session_id=?2", rusqlite::params![provider.as_str(), ID]).unwrap();
+            fs::write(&source, "older-home-change").unwrap();
+            let retained = fs::read(native.join(&relative)).unwrap();
+            adopt_native(provider, &ID.into()).unwrap();
+            assert_eq!(fs::read(native.join(&relative)).unwrap(), retained);
+            let missing = "0199a213-81c0-7800-8aa1-bbab2a035a54";
+            store.record_account_home_conversation(provider, missing, "old");
+            assert!(adopt_native(provider, &missing.into())
+                .unwrap_err()
+                .to_string()
+                .contains("transcript is missing"));
+        }
+    }
 
     #[test]
     fn a_codex_rollout_is_found_by_its_conversation_id_with_its_directory() {

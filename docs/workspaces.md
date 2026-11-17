@@ -69,6 +69,7 @@ reach a Task's recorded Machine; Herdr and cmux workspaces stay local.
 ```bash
 lf open --wave product --workspace  # Product's started, unfinished Tasks
 lf open --workspace                 # this checkout's Wave or repository
+lf open --task ENG-123 --workspace  # ENG-123's Wave or repository, ENG-123 among them
 lf open --available                 # conversations ready for your next turn
 lf task view ENG-123                # only the Task brief and workflow
 lf diff ENG-123                     # only its changes
@@ -76,16 +77,17 @@ lf diff ENG-123                     # only its changes
 
 Without `--workspace`, `lf open --wave product` attaches the Wave's
 conversation. With it, a repository or Wave opens as an overview of its
-started, unfinished Tasks; backlog Tasks appear only when selected. A Task has
-no overview: `lf open --task ENG-123` is its conversation.
+started, unfinished Tasks. A Task has no overview of its own: with
+`--workspace` it opens its Wave's, else its repository's, and appears there even
+from backlog. Without it, `lf open --task ENG-123` is its conversation.
 Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
 Use `lf open --task <task>` to enter a conversation from an overview. Overviews
 and automatic arrivals start no agents and leave existing conversation input
 where it is.
 
-Rex and Herdr place a Task in the current session or workspace; cmux uses the
-current group, or the window if there is no group. A repository or Wave gets a
-new container. External hosts own these arrangements: use their controls to
+An overview gets a new Rex session, Herdr workspace or cmux group. A single
+conversation's tab (`--tab`) joins the current one; cmux uses the current group,
+or the window if there is no group. External hosts own these arrangements: use their controls to
 rearrange, rename, close and restore them. `--host` selects a host;
 `--no-focus` keeps the current tab selected. Hosts without workspace support
 report that limitation; drop `--workspace`, or use `lf task view` or `lf diff`,
@@ -93,11 +95,11 @@ for a single activity.
 
 ## What a Task tab holds
 
-Each Task tab holds the Task's conversation, nothing else. It uses the same
-Session resolution and attachment rules as `lf open`; if the conversation is
-already open elsewhere, the tab reports where instead of moving input.
-`--diff` adds the Task's Changes beside it. A Task without a recorded checkout
-on this Machine shows Task & workflow instead.
+Each Task tab in an overview shows Task & workflow; `--diff` adds the Task's
+Changes beside it when its checkout is on this Machine. `lf open --task ENG-123
+--tab` opens the conversation itself, with the same Session resolution and
+attachment rules as `lf open`: if it is already open elsewhere, the tab reports
+where instead of moving input.
 
 Add shells, editors or splits with the host's own controls; LF builds no layout
 in Rex, Herdr or cmux, and nothing it does there changes Desktop. Desktop

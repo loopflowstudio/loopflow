@@ -1,5 +1,6 @@
-//! Fresh native workspaces. Every `lf open --workspace` launches new Task tabs, each with its
-//! splits, in a Rex session, Herdr workspace or cmux group. The host owns them
+//! Fresh native workspaces. Every `lf open --workspace` launches a repository's
+//! or Wave's Task tabs, each with its splits, in a new Rex session, Herdr
+//! workspace or cmux group. The host owns them
 //! afterwards: LF records no host, container, tab or creation state. Native
 //! handles live only in this command, or in a Rex follower while it runs.
 use loopflow_execution::store::selections;
@@ -17,13 +18,13 @@ use serde_json::Value;
 use super::{
     cmux, herdr,
     rex::{self, Rex},
-    OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Resolved,
+    OpenArgs, OpenHost, OpenReceipt, OpenReport, OpenStatus, Overview, Resolved,
 };
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::selection::{
     Selection, SelectionExpression, SelectionFilter, SelectionId, SelectionState, SplitAxis,
-    ViewContent, ViewPlan, WorkWorkspaceKey, WorkWorkspaceKind,
+    ViewContent, ViewPlan, WorkWorkspaceKind,
 };
 
 /// Where a Task's tools run: its recorded checkout, else the repository.
@@ -191,23 +192,22 @@ impl Native {
         }
     }
 
-    /// Add one Task's tab: its conversation.
+    /// Add one Task's tab: its Task view, beside its changes with `diff`.
     fn add_task_tab(
         &self,
         store: &SqliteStore,
         repo: &Path,
         container: &mut Container,
         content: &ViewContent,
-        presentation: Presentation<'_>,
-    ) -> Result<(String, Option<super::conversation::Attachment>)> {
-        let (native_layout, attachment) = layout(store, content, repo, presentation, self)?;
-        let tab = self.add_tab(
+        diff: bool,
+    ) -> Result<String> {
+        let native_layout = layout(store, content, repo, diff, self)?;
+        self.add_tab(
             container,
             &content.title,
             tool_cwd(content, repo),
             native_layout,
-        )?;
-        Ok((tab, attachment))
+        )
     }
 
     fn focus(&self, container: &Container, tab: &str) -> String {
@@ -227,38 +227,19 @@ impl Native {
 // Opening
 // ---------------------------------------------------------------------------
 
-#[derive(Clone, Copy, Default)]
-struct Presentation<'a> {
-    session: Option<&'a str>,
-    diff: bool,
-    /// Overviews show workflow; selected workspaces open conversations.
-    conversations: bool,
-}
-
 pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, host: OpenHost) -> Result<()> {
     if let Some(session) = &args.follow {
         return follow(cli, session, args);
     }
-    let (targets, unknown) = super::workspace_targets(cli, args)?;
+    let overview = super::overview(cli, &args.selection)?;
     loopflow_execution::store::read_existing_registry()?.context("Work registry is unavailable")?;
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
-    let mut report = OpenReport {
-        receipts: Vec::new(),
-        unknown,
-    };
-    for target in &targets {
-        match open_machines(&store, host, target, args) {
-            Ok(opened) => {
-                report.receipts.extend(opened.receipts);
-                report.unknown.extend(opened.unknown);
-            }
-            Err(error) => report
-                .receipts
-                .push(failed(target, host, format!("{error:#}"))),
-        }
-    }
+    let report = open_machines(&store, host, &overview, args).unwrap_or_else(|error| OpenReport {
+        receipts: vec![failed(&overview.target, host, format!("{error:#}"))],
+        unknown: Vec::new(),
+    });
     if args.selection.json || cli.json {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
@@ -294,47 +275,14 @@ fn failed(target: &Resolved, host: OpenHost, reason: String) -> OpenReceipt {
     target.receipt(Some(host), None, OpenStatus::Failed, Some(reason))
 }
 
-/// Opening a Task starts it, so one without a checkout is placed before its
-/// tools launch. Broad openings never create worktrees, a finished or abandoned
-/// Task's checkout is not rebuilt, and a remote Task is placed by its own Machine.
-fn place_task(
-    store: &SqliteStore,
-    target: &Resolved,
-    plan: &ViewPlan,
-    local: &MachineId,
-) -> Result<bool> {
-    let Some(task) = &target.task else {
-        return Ok(false);
-    };
-    let unplaced = plan.contents.iter().any(|content| {
-        content.location.is_none() && !content.states.contains(&SelectionState::Done)
-    });
-    if !unplaced
-        || loopflow_execution::store::ownership::task_execution_route(store, &task.id)?.machine_id
-            != *local
-    {
-        return Ok(false);
-    }
-    loopflow_execution::ops::task::task_checkout(
-        &target.repository_path,
-        task.id.as_str(),
-        Default::default(),
-    )?;
-    Ok(true)
-}
-
 fn open_machines(
     store: &SqliteStore,
     host: OpenHost,
-    target: &Resolved,
+    overview: &Overview,
     args: &OpenArgs,
 ) -> Result<OpenReport> {
-    if target.task.is_none() && (args.available || target.session.is_some()) {
-        return Ok(OpenReport {
-            receipts: vec![open_conversation(host, target, args)],
-            unknown: Vec::new(),
-        });
-    }
+    let target = &overview.target;
+    let selected_task = overview.selected.as_ref().map(TaskId::as_str);
     let repository = target
         .repository_id
         .as_deref()
@@ -342,37 +290,35 @@ fn open_machines(
     let repository = RepositoryId::parse(repository)?;
     let selected = scope(store, target)?;
     let local = loopflow_execution::store::machines::local_machine(store)?.id;
-    let mut plan = workspace_plan(store, &repository, selected.clone())?;
-    if place_task(store, target, &plan, &local)? {
-        plan = workspace_plan(store, &repository, selected.clone())?;
-    }
-    let explicit = target.task.is_some();
-    let routed = route(
+    let plan = workspace_plan(store, &repository, selected.clone())?;
+    let mut routed = route(
         store,
         plan.contents.iter().filter(|content| {
             args.arrive_task.is_empty() || args.arrive_task.contains(&content.work.id)
         }),
         &local,
-        explicit,
+        selected_task,
     )?;
+    // The Task the overview widened from comes first, so it takes focus.
+    routed
+        .local
+        .sort_by_key(|content| Some(content.work.id.as_str()) != selected_task);
     let mut receipts = Vec::new();
     let mut unknown = plan.resolution.unavailable.clone();
     unknown.extend(routed.unknown);
     // A broad Rex launch is the one follower for every Machine it reaches.
-    let follows = host == OpenHost::Rex && !explicit && !args.local_workspace;
+    let follows = host == OpenHost::Rex && !args.local_workspace;
     let mut remotes = Remotes::default();
     if !args.local_workspace {
         for (peer, candidates) in routed.peers {
-            let mut remote_args = args.clone();
-            remote_args.selection.session = target.session.clone();
-            remote_args.selection.diff |= target.url.diff;
             let outcome = remote_open(
                 store,
                 host,
                 peer.as_str(),
                 repository.as_str(),
                 &selected,
-                &remote_args,
+                selected_task,
+                args,
             );
             let (placement, opened) = settle_remote(&outcome, None, &candidates);
             remotes.seen.extend(opened);
@@ -428,21 +374,24 @@ struct Routed<'a> {
     unknown: Vec<String>,
 }
 
+/// The selected Task opens whatever its state; the rest only once started and
+/// while unfinished.
 fn route<'a>(
     store: &SqliteStore,
     contents: impl Iterator<Item = &'a ViewContent>,
     local: &MachineId,
-    explicit: bool,
+    selected: Option<&str>,
 ) -> Result<Routed<'a>> {
     let mut routed = Routed::default();
-    for content in contents
-        .filter(|content| content.work.kind == WorkWorkspaceKind::Task)
-        .filter(|content| explicit || !content.states.contains(&SelectionState::Done))
-    {
+    for content in contents.filter(|content| content.work.kind == WorkWorkspaceKind::Task) {
+        let chosen = selected == Some(content.work.id.as_str());
+        if !chosen && content.states.contains(&SelectionState::Done) {
+            continue;
+        }
         let task = TaskId::parse(&content.work.id)?;
         match loopflow_execution::store::ownership::task_execution_route(store, &task) {
             Ok(route) if route.machine_id == *local => {
-                if explicit || started(content) {
+                if chosen || started(content) {
                     routed.local.push(content);
                 }
             }
@@ -569,12 +518,15 @@ fn settle_remote(
     (placement, if launch_failed { everything() } else { opened })
 }
 
+/// Ask `machine` for its part of the overview. A selected Task is passed as
+/// `--task`, which that Machine widens to the same scope.
 fn remote_open(
     store: &SqliteStore,
     host: OpenHost,
     machine: &str,
     repository: &str,
     selection: &Selection,
+    selected: Option<&str>,
     args: &OpenArgs,
 ) -> Result<OpenReport> {
     let machine = loopflow_execution::store::machines::machines(store)?
@@ -591,14 +543,13 @@ fn remote_open(
         "--local-workspace".into(),
         "--json".into(),
     ];
-    match &selection.expression {
-        SelectionExpression::Work { work } => argv.extend(["--task".into(), work.id.clone()]),
-        SelectionExpression::Wave { wave } => argv.extend(["--wave".into(), wave.to_string()]),
-        SelectionExpression::Repository => {}
+    match (selected, &selection.expression) {
+        (Some(task), _) => argv.extend(["--task".into(), task.into()]),
+        (None, SelectionExpression::Wave { wave }) => {
+            argv.extend(["--wave".into(), wave.to_string()])
+        }
+        (None, SelectionExpression::Repository) => {}
         _ => bail!("This workspace selection cannot be routed"),
-    }
-    if let Some(session) = &args.selection.session {
-        argv.extend(["--session".into(), session.clone()]);
     }
     if let Some(agent) = loopflow_execution::config::agent_override() {
         argv.extend(["--agent".into(), agent]);
@@ -623,15 +574,7 @@ fn remote_open(
 }
 
 fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
-    let expression = if let Some(task) = &target.task {
-        SelectionExpression::Work {
-            work: WorkWorkspaceKey {
-                repository: task.repository_id.to_string(),
-                kind: WorkWorkspaceKind::Task,
-                id: task.id.to_string(),
-            },
-        }
-    } else if let Some(wave) = &target.wave {
+    let expression = if let Some(wave) = &target.wave {
         SelectionExpression::Wave {
             wave: store
                 .resolve_wave_id(wave, Some(&target.repository_path.to_string_lossy()))?
@@ -646,13 +589,10 @@ fn scope(store: &SqliteStore, target: &Resolved) -> Result<Selection> {
     })
 }
 
-/// The container's name: the selected Wave, else the Task's Wave, else the repository.
+/// The container's name: the Wave, else the repository.
 fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) -> Result<String> {
     let wave = match &selected.expression {
         SelectionExpression::Wave { wave } => Some(wave.clone()),
-        SelectionExpression::Work { work } => store
-            .task(&TaskId::parse(&work.id)?)?
-            .and_then(|task| task.wave_id),
         _ => None,
     };
     Ok(
@@ -668,14 +608,6 @@ fn container_name(store: &SqliteStore, target: &Resolved, selected: &Selection) 
             ),
         },
     )
-}
-
-/// A Session with no Task is one conversation, not a selection of Tasks: one
-/// tab in the caller's container, and nothing arrives after it.
-fn open_conversation(host: OpenHost, target: &Resolved, args: &OpenArgs) -> OpenReceipt {
-    let mut single = args.conversation(true);
-    single.selection.host = host;
-    super::conversation::open(target.clone(), &single, !args.no_focus)
 }
 
 /// One conversation tab, independent of any saved Task layout.
@@ -711,26 +643,12 @@ fn launch(
 ) -> Result<Vec<OpenReceipt>> {
     let host = native.open_host();
     let repo = target.repository_path.as_path();
-    let explicit = target.task.is_some();
-    // An arrival appends to its follower's container. A Task joins the container
-    // the caller is in; a repository or Wave gets its own.
-    let mut container = if let Some(into) = &args.into {
-        Container::existing(into)
-    } else {
-        match native.here()?.filter(|_| explicit) {
-            Some(here) => here,
-            None => native.create_container(&container_name(store, target, selected)?, repo)?,
-        }
+    // An arrival appends to its follower's container; an overview gets its own.
+    let mut container = match &args.into {
+        Some(into) => Container::existing(into),
+        None => native.create_container(&container_name(store, target, selected)?, repo)?,
     };
-    let presentation = if args.arrive_task.is_empty() {
-        Presentation {
-            session: target.session.as_deref(),
-            diff: args.selection.diff || target.url.diff,
-            conversations: explicit,
-        }
-    } else {
-        Presentation::default()
-    };
+    let diff = args.selection.diff && args.arrive_task.is_empty();
     let mut receipts = Vec::new();
     let mut focused = args.no_focus;
     let mut seen = Vec::new();
@@ -747,19 +665,15 @@ fn launch(
         )
         .to_string();
         let opened = native
-            .add_task_tab(store, repo, &mut container, content, presentation)
-            .map(|(tab, attachment)| {
+            .add_task_tab(store, repo, &mut container, content, diff)
+            .inspect(|tab| {
                 let showing = if focused {
                     "Focus preserved".into()
                 } else {
                     focused = true;
-                    native.focus(&container, &tab)
+                    native.focus(&container, tab)
                 };
                 receipt.reason = Some(format!("Created a new Task tab; {showing}"));
-                if let Some(attachment) = attachment {
-                    attachment.settle(&mut receipt);
-                }
-                tab
             });
         settle_receipt(&mut receipt, opened);
         receipts.push(receipt);
@@ -909,10 +823,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
         server: server.into(),
         caller: None,
     };
-    let (targets, _) = super::workspace_targets(cli, args)?;
-    let target = targets
-        .first()
-        .context("Follower selection is unavailable")?;
+    let target = &super::overview(cli, &args.selection)?.target;
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
@@ -969,7 +880,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                     .iter()
                     .filter(|content| !seen.contains(&content.work.id)),
                 &local,
-                false,
+                None,
             )?;
             for content in arriving.local {
                 // Mark before creating: an uncertain create is never retried.
@@ -979,7 +890,7 @@ fn follow(cli: &crate::lf::Cli, session: &str, args: &OpenArgs) -> Result<()> {
                     &target.repository_path,
                     &mut container,
                     content,
-                    Presentation::default(),
+                    false,
                 ) {
                     Ok(_) => println!("Added {}", content.title),
                     Err(error) => eprintln!("{}: {error:#}; not retried", content.title),
@@ -1042,13 +953,12 @@ fn arrive_remote(
         Placement::Unopened => None,
         Placement::Container(container) => Some(container.clone()),
     };
-    // Arrivals select no Session and take no focus.
+    // Arrivals show no changes and take no focus.
     let arrival = OpenArgs {
         arrive_task: candidates.iter().map(|task| task.id.clone()).collect(),
         into: known.clone(),
         no_focus: true,
         selection: super::OpenSelection {
-            session: None,
             diff: false,
             ..args.selection.clone()
         },
@@ -1060,6 +970,7 @@ fn arrive_remote(
         machine,
         repository,
         selected,
+        None,
         &arrival,
     );
     let (next, opened) = settle_remote(&outcome, known.as_deref(), candidates);

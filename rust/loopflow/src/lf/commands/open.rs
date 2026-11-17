@@ -1105,7 +1105,7 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs. A Task opens its Wave's overview, else its repository's, with the Task among them."
 )]
 pub struct OpenArgs {
     #[command(flatten)]
@@ -1247,7 +1247,12 @@ pub fn explain(cli: &crate::lf::Cli, args: &OpenArgs, json: bool) -> Result<()> 
     if args.opens_workspace() {
         let mut selection = args.selection.clone();
         selection.json = json;
-        return print_links(cli, &selection, args.available, route(selection.host));
+        return print_links(
+            cli,
+            workspace_targets(cli, args)?,
+            &selection,
+            route(selection.host),
+        );
     }
     let link = target(cli, &args.selection)?.link(conversation::presentation(args)?);
     if json {
@@ -1273,8 +1278,8 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     if args.selection.link {
         return print_links(
             cli,
+            (vec![target(cli, &args.selection)?], Vec::new()),
             &args.selection,
-            false,
             conversation::presentation(args)?,
         );
     }
@@ -1288,15 +1293,10 @@ pub fn run(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
     )
 }
 
-fn desktop_workspace_url(
-    repository: &Path,
-    task: Option<&str>,
-    wave: Option<&str>,
-) -> reqwest::Url {
-    let expression = match (task, wave) {
-        (Some(task), _) => format!("task:{task}"),
-        (_, Some(wave)) => format!("wave:{wave} state:working"),
-        _ => "state:working".into(),
+fn desktop_workspace_url(repository: &Path, wave: Option<&str>) -> reqwest::Url {
+    let expression = match wave {
+        Some(wave) => format!("wave:{wave} state:working"),
+        None => "state:working".into(),
     };
     let mut url = reqwest::Url::parse("loopflow://open").expect("fixed Desktop URL");
     url.query_pairs_mut()
@@ -1309,42 +1309,34 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
     if args.selection.link {
         return print_links(
             cli,
+            workspace_targets(cli, args)?,
             &args.selection,
-            args.available,
             route(args.selection.host),
         );
+    }
+    if args.available {
+        return open_available(cli, args);
     }
     let host = route(args.selection.host)
         .host
         .expect("host selection always names a host");
     if host == OpenHost::Desktop {
-        let (targets, unknown) = workspace_targets(cli, args)?;
-        let receipts = targets
-            .iter()
-            .enumerate()
-            .map(|(index, target)| {
-                let focus = !args.no_focus && index + 1 == targets.len();
-                if target.session.is_some() || args.available {
-                    return conversation::open(target.clone(), &args.conversation(false), focus);
-                }
-                let url = desktop_workspace_url(
-                    &target.repository_path,
-                    target.task.as_ref().map(|task| task.id.as_str()),
-                    target.wave.as_deref(),
-                );
-                match open_desktop(url.as_str(), focus) {
-                    Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
-                    Err(error) => target.receipt(
-                        Some(host),
-                        None,
-                        OpenStatus::Failed,
-                        Some(format!("{error:#}")),
-                    ),
-                }
-            })
-            .collect();
+        let target = overview(cli, &args.selection)?.target;
+        let url = desktop_workspace_url(&target.repository_path, target.wave.as_deref());
+        let receipt = match open_desktop(url.as_str(), !args.no_focus) {
+            Ok(()) => target.receipt(Some(host), None, OpenStatus::Opening, None),
+            Err(error) => target.receipt(
+                Some(host),
+                None,
+                OpenStatus::Failed,
+                Some(format!("{error:#}")),
+            ),
+        };
         return print_report(
-            OpenReport { receipts, unknown },
+            OpenReport {
+                receipts: vec![receipt],
+                unknown: Vec::new(),
+            },
             args.selection.json || cli.json,
         );
     }
@@ -1360,6 +1352,68 @@ pub(crate) fn run_workspace(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()>
     workspace::run(cli, args, host)
 }
 
+/// Every available conversation, each opened as one conversation.
+fn open_available(cli: &crate::lf::Cli, args: &OpenArgs) -> Result<()> {
+    let (targets, unknown) = available(cli)?;
+    let single = args.conversation(args.selection.host != OpenHost::Desktop);
+    let last = targets.len();
+    let receipts = targets
+        .into_iter()
+        .enumerate()
+        .map(|(index, target)| {
+            conversation::open(target, &single, !args.no_focus && index + 1 == last)
+        })
+        .collect();
+    print_report(
+        OpenReport { receipts, unknown },
+        args.selection.json || cli.json,
+    )
+}
+
+/// What `--workspace` opens: a Wave or repository, and the Task it was widened
+/// from, which the overview shows even before it starts.
+struct Overview {
+    target: Resolved,
+    selected: Option<loopflow_model::durable::TaskId>,
+}
+
+/// A Task or Session widens to its scope: its Wave, else its repository.
+fn overview(cli: &crate::lf::Cli, args: &OpenSelection) -> Result<Overview> {
+    let target = target(cli, args)?;
+    if target.task.is_none() && target.session.is_none() {
+        return Ok(Overview {
+            target,
+            selected: None,
+        });
+    }
+    let store = loopflow_execution::store::read_existing_registry()?;
+    let wave = match &target.task {
+        Some(task) => match &task.wave_id {
+            Some(id) => Some(
+                store
+                    .as_ref()
+                    .context("Wave records are unavailable on this Machine")?
+                    .sqlite
+                    .get_wave(id)?
+                    .context("Wave is no longer recorded")?
+                    .slug()
+                    .to_owned(),
+            ),
+            None => None,
+        },
+        None => target.wave.clone(),
+    };
+    let mut context = work_context(&target.repository_path, None, wave.as_deref(), None)?;
+    if wave.is_none() {
+        context.task = ContextFact::Unbound;
+        context.wave = ContextFact::Unbound;
+    }
+    Ok(Overview {
+        target: describe(store.as_ref(), &context, None, false, None)?,
+        selected: target.task.map(|task| task.id),
+    })
+}
+
 fn workspace_targets(
     cli: &crate::lf::Cli,
     args: &OpenArgs,
@@ -1367,21 +1421,16 @@ fn workspace_targets(
     if args.available {
         available(cli)
     } else {
-        Ok((vec![target(cli, &args.selection)?], Vec::new()))
+        Ok((vec![overview(cli, &args.selection)?.target], Vec::new()))
     }
 }
 
 fn print_links(
     cli: &crate::lf::Cli,
+    (targets, unknown): (Vec<Resolved>, Vec<String>),
     args: &OpenSelection,
-    all: bool,
     presentation: OpenRoute,
 ) -> Result<()> {
-    let (targets, unknown) = if all {
-        available(cli)?
-    } else {
-        (vec![target(cli, args)?], Vec::new())
-    };
     let links: Vec<_> = targets
         .iter()
         .map(|target| target.link(presentation.clone()))
@@ -1389,7 +1438,7 @@ fn print_links(
     if args.json || cli.json {
         println!("{}", serde_json::to_string_pretty(&links)?);
     } else {
-        if all && links.is_empty() {
+        if links.is_empty() {
             println!("No available conversations.");
         }
         for link in &links {
@@ -1461,13 +1510,11 @@ mod tests {
 
     #[test]
     fn desktop_workspace_urls_select_working_tasks_in_repository_and_wave() {
-        for (task, wave, expression) in [
-            (None, None, "state:working"),
-            (None, Some("product"), "wave:product state:working"),
-            (Some("task_123"), Some("product"), "task:task_123"),
+        for (wave, expression) in [
+            (None, "state:working"),
+            (Some("product"), "wave:product state:working"),
         ] {
-            let url =
-                super::desktop_workspace_url(std::path::Path::new("/repo with spaces"), task, wave);
+            let url = super::desktop_workspace_url(std::path::Path::new("/repo with spaces"), wave);
             assert_eq!(url.scheme(), "loopflow");
             assert_eq!(url.host_str(), Some("open"));
             assert_eq!(

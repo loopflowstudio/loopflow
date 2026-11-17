@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented, `lf workspace` folded into `lf open --workspace`; concept review (2026-11-16) found `--workspace` still holds a Task — next is implement (see "Next: --workspace never holds a Task"), then gate.
+Status: split implemented; `lf workspace` folded into `lf open --workspace`, which never holds a Task (2026-11-16). Next is gate.
 
 ## Demo
 
@@ -115,6 +115,7 @@ state; the file is not rewritten.
 - QA: the two `#[ignore]` installed-host tests in `work_open_tests.rs` now expect one Task Session and a Task-view-only arrival; Rex and Herdr pass with `LOOPFLOW_TEST_REX`/`LOOPFLOW_TEST_HERDR` (Rex misses its 2 s answer at load ~500).
 - Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
 - Workspace fold: `nextest -p loopflow --lib` `lf::tests::`, `wave_resolution_matrix::`, `commands::open::`; integration `work_open_tests::`, `cli_discovery::`, `documented_commands::` at `-j 4` (72); `cargo clippy -p loopflow --all-targets -- -D warnings`: pass. `rex_agent_tool_open_uses_the_moved_viewer_instead_of_startup_context` failed once at `-j 4` (load ~38) and passed alone; gate/CI decides whether it is load-sensitive.
+- Workspace widening: `nextest -p loopflow --lib` `commands::open::`, `lf::tests::`, `wave_resolution_matrix::` (57); integration `work_open_tests::` at `-j 4` (32 of 33), `cli_discovery::` + `documented_commands::` (41); `cargo clippy -p loopflow --all-targets -- -D warnings`: pass. `work_open_tests::task_location_uses_the_named_plan_outside_a_checkout` fails here with `location.state` "unavailable" ("not found"), also with this step's `src/` reverted: not this diff; gate/CI decides.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.
 
 ## lf workspace folds into lf open (2026-11-16)
@@ -133,27 +134,17 @@ overviews. `--here/--tab/--focus/--file` conflict with `--workspace`/`--availabl
 PR body, User interface changes: removed `lf workspace`; added `lf open
 --workspace`, `--available`, `--no-focus`.
 
-## Next: --workspace never holds a Task (concept review, 2026-11-16)
+## --workspace never holds a Task (concept review, 2026-11-16)
 
-The fold left a Task inside the overview path. `lf open --workspace` from a Task
-checkout, or `--workspace --task X`, resolves to the Task and `open/workspace.rs`
-opens one Task tab in the caller's container: a second implementation of
-`lf open --task X --tab`, with its own remote routing (`remote_open` passes
-`--task`), checkout creation (`place_task`) and Desktop Task URL. The docs
-already say otherwise ("this checkout's Wave or repository", "A Task has no
-overview"), and the steer was "workspace should just be for waves and repos".
-
-Implement:
-- `--workspace` widens the selection to its scope: a Task (by `--task`, link,
-  Session or checkout) opens its Wave's overview when it has a Wave, else its
-  repository's, with the Task selected so it shows even from backlog. A Session
-  with no Task opens its own scope's overview.
-- Delete the explicit-Task branch of `open/workspace.rs`: `explicit`,
-  `Presentation.conversations`, joining `native.here()`, `place_task`,
-  `open_conversation`, the `Work` arm of `remote_open`, and the Task case of
-  `desktop_workspace_url`. Arrivals (`--arrive-task`) stay: they are Task tabs
-  of an overview. `OpenArgs::conversation` goes if nothing else uses it.
-- Tests that open `--workspace --task INF-123` either become overview tests
-  (the Task appears in its repository's container) or move to
-  `lf open --task INF-123 --tab` when they check single-conversation attachment
-  (`workspace_attachment_failure_keeps_the_created_tab_and_destination`).
+Done: `overview()` (`open.rs`) widens a Task, link or Session to its Wave, else
+its repository, and keeps the Task as `Overview.selected`. Native overviews route
+the selected Task whatever its state, put it first so it takes focus, and send it
+to peers as `--task <id>`, which they widen the same way. Deleted: `explicit`,
+`Presentation`, the `native.here()` join, `place_task`, `open_conversation`, the
+`Work` arms of `scope`/`remote_open`/`container_name`, the Task case of
+`desktop_workspace_url`, and the conversation pane in `layout.rs` (overview tabs
+are Task & workflow, plus Changes with `--diff`). `--available` opens each
+conversation through `conversation::open` (`open_available`), so it keeps
+`OpenArgs::conversation`. Single-conversation tests moved to `--tab`;
+`workspace_from_an_unstarted_task_opens_its_repository_overview` and the
+follower test's `--task` assertion cover the widening.

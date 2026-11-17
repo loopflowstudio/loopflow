@@ -52,7 +52,7 @@ pub fn register_session_attachment_interrupt(
 
 /// Whether a retry resuming `resume` keeps the conversation whose saved
 /// thread is `saved`. The thread goes on under any model; only a move to
-/// another account or provider may leave it behind, and only to start fresh.
+/// another provider may leave it behind, and only to start fresh.
 fn retry_keeps_its_thread(
     saved: Option<&AgentSessionId>,
     resume: Option<&AgentSessionId>,
@@ -315,7 +315,6 @@ impl LfProcessRuntime {
         &self,
         provider: String,
         model: Option<String>,
-        account_id: Option<crate::store::ProviderAccountId>,
         resume_thread: Option<&AgentSessionId>,
     ) -> anyhow::Result<()> {
         let mut runtime = self.0.lock().expect("Process runtime mutex poisoned");
@@ -331,8 +330,7 @@ impl LfProcessRuntime {
             Some(thread) => Some(thread.clone()),
             None => store.session_thread(session)?,
         };
-        let moved = (runtime.account_observed && runtime.account_id != account_id)
-            || runtime.provider != provider;
+        let moved = runtime.provider != provider;
         if !retry_keeps_its_thread(saved_thread.as_ref(), resume_thread, moved) {
             anyhow::bail!("AgentProcess retry must retain its thread");
         }
@@ -344,18 +342,14 @@ impl LfProcessRuntime {
             || close_session_agent_process(store, session),
         )?;
         runtime.owner = Some((store.clone(), session.clone(), next));
-        if let Err(error) = runtime.fail_and_begin_attempt(provider, model, account_id) {
+        if let Err(error) = runtime.fail_and_begin_attempt(provider, model) {
             runtime.recorder.warn_telemetry(error);
         }
         Ok(())
     }
 
-    pub fn observe_provider(
-        &self,
-        session_id: Option<AgentSessionId>,
-        account_id: Option<crate::store::ProviderAccountId>,
-    ) {
-        self.record_best_effort(|execution| execution.observe_provider(session_id, account_id));
+    pub fn observe_provider(&self, session_id: Option<AgentSessionId>) {
+        self.record_best_effort(|execution| execution.observe_provider(session_id));
     }
 
     pub fn finish(&self, outcome: &str) -> StoreResult<()> {
@@ -368,11 +362,7 @@ impl LfProcessRuntime {
 
     pub fn hand_off(&self) -> CaptureHandoff {
         let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        runtime.recorder.hand_off(
-            runtime.account_id.clone(),
-            runtime.account_observed,
-            runtime.agent_session.clone(),
-        )
+        runtime.recorder.hand_off()
     }
 
     fn record_best_effort(&self, operation: impl FnOnce(&mut RuntimeState) -> std::io::Result<()>) {
@@ -403,8 +393,6 @@ struct RuntimeState {
     owner: Option<AttachmentOwner>,
     provider: String,
     model: Option<String>,
-    account_id: Option<crate::store::ProviderAccountId>,
-    account_observed: bool,
     agent_session: Option<AgentSessionId>,
     settled_outcome: Option<String>,
     recorder: SessionRecorder,
@@ -416,67 +404,39 @@ impl RuntimeState {
             owner: None,
             provider: recorder.manifest.harness.clone(),
             model: recorder.manifest.model.clone(),
-            account_id: recorder
-                .manifest
-                .process
-                .as_ref()
-                .and_then(|process| process.account_id.clone()),
-            account_observed: false,
             agent_session: None,
             settled_outcome: None,
             recorder,
         }
     }
 
-    fn observe_provider(
-        &mut self,
-        session: Option<AgentSessionId>,
-        account: Option<crate::store::ProviderAccountId>,
-    ) -> std::io::Result<()> {
-        let account_changed = !self.account_observed || self.account_id != account;
+    fn observe_provider(&mut self, session: Option<AgentSessionId>) -> std::io::Result<()> {
         let thread_changed = session
             .as_ref()
-            .is_some_and(|session| account_changed || self.agent_session.as_ref() != Some(session));
+            .is_some_and(|session| self.agent_session.as_ref() != Some(session));
         // Live identity advances even if keeping its history fails.
-        self.account_id = account;
-        self.account_observed = true;
-        if account_changed {
-            self.agent_session = None;
-        }
         if let Some(session) = session {
             self.agent_session = Some(session);
         }
-        self.recorder.observe_provider(
-            self.agent_session.as_ref(),
-            self.account_id.as_ref(),
-            thread_changed,
-        )
+        self.recorder
+            .observe_provider(self.agent_session.as_ref(), thread_changed)
     }
 
     fn start_attempt(&mut self) -> std::io::Result<()> {
-        self.recorder.start_attempt(
-            &self.provider,
-            self.model.as_deref(),
-            self.account_id.as_ref(),
-        )
+        self.recorder
+            .start_attempt(&self.provider, self.model.as_deref())
     }
 
     fn fail_and_begin_attempt(
         &mut self,
         provider: String,
         model: Option<String>,
-        account_id: Option<crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         self.provider = provider;
         self.model = model;
-        self.account_id = account_id;
-        self.account_observed = false;
         self.agent_session = None;
-        self.recorder.next_attempt(
-            &self.provider,
-            self.model.as_deref(),
-            self.account_id.as_ref(),
-        )
+        self.recorder
+            .next_attempt(&self.provider, self.model.as_deref())
     }
 
     fn finish(&mut self, outcome: &str) -> std::io::Result<()> {

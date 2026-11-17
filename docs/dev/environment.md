@@ -39,7 +39,6 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_GRAPH_ID` | Graph process, for each agent step | The step's agent and skills | Names the Graph a step serves: its Graph process's id. Steps of one Graph share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
 | `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
-| `LF_PROVIDER_ACCOUNT_ID` | Provider launch | provider callback | Records which account a provider child used. |
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
@@ -47,21 +46,22 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_GRAPH_NAME` | Graph process | Skill prose | Names the running Graph for the agent. |
 
-## Account selection and credentials
+## Native authentication and forwarded credentials
 
-Account selection names resident logins; SSH transfers credential bytes on stdin,
-never in environment variables. Detached Session shells scrub transient credentials.
+Native clients own login selection. Explicit `forward.env` and `forward.files`
+settings send named values and home files through SSH stdin, never in command
+arguments. Forwarded variables enter the destination launch environment; detached
+Session shells scrub transient credentials.
 
 | Variable | Policy |
 |---|---|
 | `LF_SETTINGS` | User-supplied YAML preference mapping; below explicit CLI and above database/files. Inherited by child commands and forwarded remotely. Never include credentials. |
 | `LF_AGENT_OVERRIDE` | User-supplied agent preference inherited by children and remote commands. Explicit CLI wins; Loopflow never exports a CLI or resolved default through this variable. Cleared for independent Session shells. Contains no credential. |
-| `LF_ACCOUNT_SELECTION` | Account preference/restriction for this invocation and its children; contains no credential. |
 | `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional provider issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
-| `LF_CREDENTIAL_SOCKET`, `LF_AUTH_BROWSER_FIFO` | Local credential broker and browser handoff for login. |
-| `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. |
-| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Set per provider child to the managed account's directory. |
+| `LF_CREDENTIAL_SOCKET` | Local service credential broker. |
+| `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. Exported API-key variables are removed from Claude and Codex launches. |
+| `CODEX_HOME`, `CLAUDE_CONFIG_DIR` | Native provider homes inherited from the caller. |
 
 ## Installation and tooling
 
@@ -76,9 +76,7 @@ never in environment variables. Detached Session shells scrub transient credenti
 | `LF_RELEASE_*` | Release scripts | Inputs from `lf repo release` to its scripts. |
 
 `LF_TEST_*`, `LF_PROBE_*`, `LOOPFLOW_UI_TEST_*` and
-`LOOPFLOW_TEST_*` exist only in tests and their fixtures. The three
-`LF_TEST_CLAUDE_*_URL` readers in `subscription.rs` are compiled only under
-`cfg(test)`.
+`LOOPFLOW_TEST_*` exist only in tests and their fixtures.
 
 ## Removed
 

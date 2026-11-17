@@ -1,4 +1,4 @@
-use crate::session_record::{read_provider_session, SessionCaptureSpec, TerminalReceipt};
+use crate::session_record::{SessionCaptureSpec, TerminalReceipt};
 use std::fs;
 fn spec(cwd: &std::path::Path) -> SessionCaptureSpec {
     SessionCaptureSpec {
@@ -26,7 +26,7 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
         .0
         .lock()
         .unwrap()
-        .fail_and_begin_attempt("claude".to_string(), None, None)
+        .fail_and_begin_attempt("claude".to_string(), None)
         .unwrap();
     capture.finish("completed").unwrap();
 
@@ -50,65 +50,6 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
     assert_eq!(attempts[1].outcome.as_deref(), Some("completed"));
     assert!(attempts[0].started_at.is_some());
     assert_eq!(history.first_provider_attempt_at, attempts[0].started_at);
-}
-
-#[test]
-fn each_attempt_publishes_its_conversation_with_the_account_it_ran_on() {
-    let _lock = crate::journal::test_env_lock();
-    let _ambient = crate::test_ambient::EnvGuard::new();
-    let _storage = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-    let home = tempfile::tempdir().unwrap();
-    let capture = crate::session_record::SessionRecorder::begin_at(home.path(), spec(home.path()))
-        .map(crate::process::LfProcessRuntime::new)
-        .unwrap();
-    let dir = capture.artifact_dir();
-    let first = crate::store::ProviderAccountId::parse("primary").unwrap();
-    let second = crate::store::ProviderAccountId::parse("fallback").unwrap();
-    capture.mark_spawn_requested();
-    capture.observe_provider(None, Some(first.clone()));
-    assert!(read_provider_session(&dir).unwrap().is_none());
-
-    capture.observe_provider(Some("first-session".into()), Some(first.clone()));
-    capture.observe_provider(Some("first-session".into()), Some(first.clone()));
-    assert_eq!(
-        read_provider_session(&dir).unwrap().unwrap().account_id,
-        Some(first)
-    );
-    capture
-        .0
-        .lock()
-        .unwrap()
-        .fail_and_begin_attempt("proof".into(), None, Some(second.clone()))
-        .unwrap();
-    capture.observe_provider(Some("second-session".into()), Some(second.clone()));
-    let recovered = read_provider_session(&dir).unwrap().unwrap();
-    assert_eq!(recovered.agent_session, "second-session".into());
-    assert_eq!(recovered.account_id, Some(second));
-    capture
-        .0
-        .lock()
-        .unwrap()
-        .fail_and_begin_attempt("proof".into(), None, None)
-        .unwrap();
-    capture.observe_provider(Some("ambient-session".into()), None);
-    capture.finish("completed").unwrap();
-
-    let ambient = read_provider_session(&dir).unwrap().unwrap();
-    assert_eq!(ambient.agent_session, "ambient-session".into());
-    assert_eq!(ambient.account_id, None);
-    assert!(!dir.join("provider-session.json").exists());
-    // The published reference is the only record of which conversation and
-    // account each attempt used; history keeps no second copy.
-    let types: Vec<_> = crate::session_record::row_store(&dir)
-        .unwrap()
-        .input_events(&capture.artifact_key())
-        .unwrap()
-        .into_iter()
-        .map(|event| event["type"].clone())
-        .collect();
-    assert!(!types
-        .iter()
-        .any(|kind| kind == "provider_account_selected" || kind == "provider_session_observed"));
 }
 
 #[test]

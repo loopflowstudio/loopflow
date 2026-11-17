@@ -20,7 +20,6 @@ pub fn parse_artifact_key(
 }
 
 pub const CAPTURE_KEY_ENV: &str = "LF_CAPTURE_KEY";
-pub const PROVIDER_ACCOUNT_ID_ENV: &str = "LF_PROVIDER_ACCOUNT_ID";
 pub const SCHEMA_VERSION: u32 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

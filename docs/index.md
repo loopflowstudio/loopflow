@@ -84,7 +84,7 @@ discuss what's being built while work continues.
 
 **3. Organize Tasks into Waves.** A Wave is an area of work with its own goal,
 memory and plan, and its own setup for every Task in it: the Graph, the agent,
-the machine and the login that pays. Your repository is the Wave for Tasks
+and the machine where it runs. Your repository is the Wave for Tasks
 without one.
 
 ```yaml
@@ -95,14 +95,13 @@ agent: claude:opus
 
 ```bash
 lf --wave infrastructure set machine mini                       # and run on your mini
-lf --wave infrastructure set account.claude work@example.com    # billed to your work login
 lf wave status infrastructure                                   # each setting and where it came from
 ```
 
 **Without a Task,** `lf` still launches any agent or Skill directly:
 
 ```bash
-lf : "fix the flaky retry test"            # an agent, on whichever of your logins has room
+lf : "fix the flaky retry test"            # an agent, using your native login
 lf -a codex : "fix the flaky retry test"   # the same thing on Codex
 lf debug -c                                # a Skill: paste an error, it finds and fixes the cause
 lf resume                                  # return to this scope’s conversation
@@ -233,4 +232,4 @@ carry the operating contract (`LOOPFLOW.md`) — these pages are the long form.
 
 ## Reference
 
-[Glossary](glossary.md) · [`lf` commands](lf-reference.md) · [Configuration](config.md) · [Subscriptions](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)
+[Glossary](glossary.md) · [`lf` commands](lf-reference.md) · [Configuration](config.md) · [Native authentication](subscriptions.md) · [Security](security.md) · [Troubleshooting](troubleshooting.md)

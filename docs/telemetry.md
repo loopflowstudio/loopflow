@@ -72,7 +72,7 @@ agent process (`kind`), with its parent and outcome. Narrow it with `--parent`,
 issued.
 
 `session history show` opens any process or Session by ID. `--events` prints a
-Session's raw input events, including which account it actually ran on.
+Session's raw input events, native conversation identity and provider outcomes.
 `--instructions` explains which instructions were included and which were left out.
 
 Conversation text stays with its provider: `session history show` reads it from Claude,
@@ -103,8 +103,7 @@ a ship or another current record still names stay listed for as long as that
 record exists. Older rows go when `lf process prune` runs; `lf session usage
 --weekly` reads back as far as that.
 
-Replay a captured request as new work, with the same prompt, model, account and
-permissions; the original record is left alone:
+Replay a captured request as new work, with the same prompt, model and permissions, using current native authentication; the original record is left alone:
 
 ```bash
 lf replay <run-id>

@@ -23,7 +23,7 @@ Reserve conversations with `create_session`, retain replacement inputs with
 `sessions`. Read native evidence through `SqliteStore::session_history`.
 An actual command records its Process outcome independently of agent completion.
 
-The cutover retains current Work, account routing and resumable conversations.
+The cutover retains current Work and resumable conversations.
 Retired history stores and intermediate branch schemas have no runtime readers.
 
 ## One owner per fact
@@ -45,7 +45,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | A Task's graph and the step it stands at | `task_graphs`, one row per Task updated in place; written only by `lf task run` and its child Graph process |
 | A Task's state: unstarted, idle, active, moving, shipping, done | Read from its checkout, `task_graphs` step, running Graph and Auto-Ship approval; never stored. `tasks.abandoned_at` is the one mark beside it |
 | Large captured prompts, transcripts and output | Immutable or append-only payloads referenced by their owning records |
-| Credentials and provider-native conversation files | The selected provider account's native Machine |
+| Credentials and provider-native conversation files | The execution Machine and its native client |
 | Current local liveness | OS process evidence matched to exact recorded PID/start identity |
 | Live exclusion | Kernel-held locks and fenced database mutations |
 | Selected executable and installation progress | Installation receipts |

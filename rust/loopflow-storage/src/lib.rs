@@ -3,7 +3,6 @@
 pub mod accounts;
 pub mod address;
 pub mod canonical_ids;
-pub mod capacity;
 pub mod changes;
 pub mod child;
 pub mod copy;

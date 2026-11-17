@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::harness::agent_process::AttachmentOwner;
 use crate::process::SessionAttachment;
 use crate::session_record::CaptureHandoff;
-use crate::store::{ProviderAccountId, StoreError};
+use crate::store::StoreError;
 use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -28,9 +28,6 @@ pub struct NativeExit {
     pub cwd: PathBuf,
     /// The capture whose settlement the launcher's caller owned.
     pub capture: Option<CaptureHandoff>,
-    /// The input whose provider session names the conversation to pin.
-    pub capture_key: Option<String>,
-    pub account: Option<ProviderAccountId>,
     /// The launcher's diagnostics log and its size before the provider ran.
     pub diagnostics: (PathBuf, u64),
 }
@@ -78,11 +75,6 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
             attachment_lost(owner).map_err(Into::into),
         )
     });
-    if let (Some((store, ..)), Some(account), Some(key), false) =
-        (&owner, &exit.account, &exit.capture_key, lost)
-    {
-        pin_account(store, &exit.provider, account, key);
-    }
     let command = crate::harness::native_session::SessionCommandOutcome {
         status,
         interrupted: interrupted || lost,
@@ -208,30 +200,6 @@ pub fn departure((store, session, attachment): &AttachmentOwner) -> Option<Strin
     })
 }
 
-/// Record the account the provider session ran on, now that it has: the
-/// conversation lives in the shared home from here on.
-fn pin_account(
-    store: &SqliteStore,
-    provider: &str,
-    account: &ProviderAccountId,
-    capture_key: &str,
-) {
-    let pinned = (|| -> Result<()> {
-        let Ok(provider) = provider.parse::<crate::provider_auth::Provider>() else {
-            return Ok(());
-        };
-        let dir = crate::session_record::capture_dir(capture_key)?;
-        let Some(session) = crate::session_record::read_provider_session(&dir)? else {
-            return Ok(());
-        };
-        store.pin_provider_session_route(provider, &session.agent_session, account)?;
-        Ok(())
-    })();
-    if let Err(error) = pinned {
-        tracing::warn!(%error, "failed to record the provider session's account");
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use crate::process::attachment;
@@ -281,9 +249,8 @@ mod tests {
                 provider: "codex".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
-                capture_key: Some(capture.artifact_key()),
-                account: None,
+                capture: Some(capture.hand_off()),
+
                 diagnostics: (home.join("absent.log"), 0),
             };
             // The store this build knows is gone by the time the provider quits.
@@ -354,9 +321,8 @@ mod tests {
                     provider: "claude".into(),
                     client: false,
                     cwd: home.into(),
-                    capture: Some(capture.hand_off(None, false, None)),
-                    capture_key: Some(capture.artifact_key()),
-                    account: None,
+                    capture: Some(capture.hand_off()),
+
                     diagnostics: (home.join("absent.log"), 0),
                 };
                 let settled = settle(&exit, ExitStatus::from_raw(status));
@@ -419,9 +385,8 @@ mod tests {
                 provider: "claude".into(),
                 client: false,
                 cwd: home.into(),
-                capture: Some(capture.hand_off(None, false, None)),
-                capture_key: Some(capture.artifact_key()),
-                account: None,
+                capture: Some(capture.hand_off()),
+
                 diagnostics: (home.join("absent.log"), 0),
             };
             attachment::finish_session_attachment(

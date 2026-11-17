@@ -332,7 +332,6 @@ impl SessionRecorder {
     pub fn observe_provider(
         &mut self,
         session: Option<&AgentSessionId>,
-        account: Option<&crate::store::ProviderAccountId>,
         thread_changed: bool,
     ) -> std::io::Result<()> {
         if !(thread_changed || self.provider_observation_pending) {
@@ -342,7 +341,7 @@ impl SessionRecorder {
             return Ok(());
         };
         self.provider_observation_pending = true;
-        write_provider_session(&self.dir, session, account.cloned())?;
+        write_provider_session(&self.dir, session, None)?;
         self.provider_observation_pending = false;
         Ok(())
     }
@@ -351,7 +350,6 @@ impl SessionRecorder {
         &mut self,
         provider: &str,
         model: Option<&str>,
-        account_id: Option<&crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         if self.attempt_started {
             return Ok(());
@@ -360,7 +358,7 @@ impl SessionRecorder {
         self.record_fact(CaptureFact::ProviderAttemptStarted {
             provider: provider.to_owned(),
             model: model.map(str::to_owned),
-            account_id: account_id.cloned(),
+            account_id: None,
             attempt_key: self.attempt_key(),
         })
     }
@@ -379,13 +377,12 @@ impl SessionRecorder {
         &mut self,
         provider: &str,
         model: Option<&str>,
-        account_id: Option<&crate::store::ProviderAccountId>,
     ) -> std::io::Result<()> {
         let finish_error = self.finish_attempt("failed").err();
         self.provider_observation_pending = false;
         self.attempt += 1;
         self.attempt_started = false;
-        let start_error = self.start_attempt(provider, model, account_id).err();
+        let start_error = self.start_attempt(provider, model).err();
         match (finish_error, start_error) {
             (None, None) => Ok(()),
             (Some(error), None) | (None, Some(error)) => Err(error),
@@ -898,7 +895,7 @@ impl AgentProcessRequest {
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
             agent: config.resolved_agent()?,
-            account_id: config.provider_account_id.clone(),
+            account_id: None,
             max_turns: config.max_turns,
             write_scope: config.write_scope,
             execution_boundary: config.execution_boundary.clone(),
@@ -906,13 +903,6 @@ impl AgentProcessRequest {
             chrome: config.chrome,
             codex_service_tier: config.codex_service_tier,
         })
-    }
-
-    pub fn replay_unavailable_reason(&self) -> Option<&'static str> {
-        let (harness, _) = crate::config::parse_agent(&self.agent);
-        matches!(harness.as_str(), "claude" | "codex")
-            .then_some("managed Claude/Codex replay requires a recorded account ID")
-            .filter(|_| self.account_id.is_none())
     }
 }
 

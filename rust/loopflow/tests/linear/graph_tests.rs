@@ -8,7 +8,7 @@ use std::process::Command;
 use loopflow_execution::graph::compile_graph;
 use loopflow_execution::graph::load_graph;
 use loopflow_execution::graph::{ConcreteStep, Step};
-use support::{codex_app_server_script, register_codex_account};
+use support::codex_app_server_script;
 use tempfile::TempDir;
 
 fn session_id_for_capture(home: &Path, artifact: &str) -> String {
@@ -1190,7 +1190,6 @@ fn task_run_history_reads_only_that_tasks_runs_without_starting_it() {
     );
 
     write_skill(repo.path(), "history-work", "Do proof-owned work.");
-    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     write_executable(
         &bin.path().join("codex"),
@@ -1469,7 +1468,6 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
     let stopped = earlier_graph();
     assert_eq!(stopped["entry"]["state"], "stopped");
 
-    register_codex_account(home.path());
     let bin = TempDir::new().unwrap();
     let provider = codex_app_server_script("done", "if [ \"$1\" = --version ]; then exit 0; fi").replace(
         "read -r turn_start",
@@ -1878,7 +1876,6 @@ fn scripted_provider(home: &Path, answers: &[&str]) -> (TempDir, String) {
         provider.contains("$answer\"'"),
         "the stand-in takes a script"
     );
-    register_codex_account(home);
     let bin = TempDir::new().unwrap();
     let provider = provider.replace("@record-context@", record_context_script());
     write_executable(&bin.path().join("codex"), &provider);
@@ -2243,151 +2240,6 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
     // Running the Graph left a file uncommitted; ending kept it.
     assert!(checkout.join(".gitignore").exists());
-}
-
-#[test]
-fn mixed_provider_graph_keeps_launch_accounts_across_steps() {
-    use base64::prelude::*;
-    use loopflow_execution::store::{
-        CredentialState, ProviderAccount, ProviderAccountId, RoutingState, StorageConfig,
-    };
-    use sha2::{Digest, Sha256};
-
-    let repo = loopflow_test_support::TestRepo::new();
-    let home = TempDir::new().unwrap();
-    let _env = support::EnvGuard::with_lf_home(&[], home.path());
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-    let store = runtime
-        .block_on(loopflow_execution::store::open_ephemeral_store(
-            &StorageConfig::sqlite(home.path().join("loopflow.db")),
-        ))
-        .unwrap();
-    for provider in ["claude", "codex"] {
-        for label in ["chosen", "other"] {
-            let id = format!("{provider}-{label}");
-            let email = format!("{id}@example.com");
-            let account_home = home.path().join("accounts").join(provider).join(&id);
-            fs::create_dir_all(&account_home).unwrap();
-            let credential = if provider == "claude" {
-                serde_json::json!({"claudeAiOauth":{"accessToken":format!("fixture-{id}"),"expiresAt":4102444800000i64}}).to_string()
-            } else {
-                let claims = BASE64_URL_SAFE_NO_PAD
-                    .encode(serde_json::json!({"email":email,"sub":id}).to_string());
-                serde_json::json!({"tokens":{"access_token":format!("fixture-{id}"), "id_token":format!("h.{claims}.s")}}).to_string()
-            };
-            fs::write(
-                account_home.join(if provider == "claude" {
-                    ".credentials.json"
-                } else {
-                    "auth.json"
-                }),
-                &credential,
-            )
-            .unwrap();
-            let now = time::OffsetDateTime::now_utc().unix_timestamp();
-            runtime
-                .block_on(
-                    store.upsert_provider_account(&ProviderAccount {
-                        provider: provider.into(),
-                        account_id: ProviderAccountId::parse(&id).unwrap(),
-                        home: Some(account_home),
-                        login_email: Some(
-                            loopflow_execution::profile::EmailAddress::parse(&email).unwrap(),
-                        ),
-                        observed_email: Some(email),
-                        observed_subject: Some(id),
-                        observed_credential_digest: (provider == "claude")
-                            .then(|| format!("{:x}", Sha256::digest(credential.as_bytes()))),
-                        observed_plan: None,
-                        credential_state: CredentialState::Connected,
-                        // Explicit selection must work even when automatic routing prefers another login.
-                        routing_state: if label == "chosen" {
-                            RoutingState::ExplicitOnly
-                        } else {
-                            RoutingState::Automatic
-                        },
-                        plan: None,
-                        paid_through: None,
-                        utilization_percent: None,
-                        cooldown_until: None,
-                        cooldown_reason: None,
-                        last_selected_at: None,
-                        created_at: now,
-                        updated_at: now,
-                    }),
-                )
-                .unwrap();
-        }
-    }
-    for (skill, provider) in [
-        ("c1", "claude"),
-        ("d1", "codex"),
-        ("c2", "claude"),
-        ("d2", "codex"),
-    ] {
-        write_skill(
-            repo.path(),
-            skill,
-            &format!("---\nagent: {provider}\n---\nRun {skill}."),
-        );
-    }
-    write_graph(repo.path(), "pair", "- c1\n- d1\n- c2\n- d2\n");
-    run_git(repo.path(), &["add", "."]);
-    run_git(repo.path(), &["commit", "-m", "mixed provider fixture"]);
-    let bin = TempDir::new().unwrap();
-    write_executable(
-        &bin.path().join("claude"),
-        r#"#!/bin/sh
-case "$1" in --version) exit 0;; esac
-# The shared home's login: the stand-in Keychain on macOS, else its file.
-login=$(cat "$(dirname "$(command -v security)")"/keychain/* "$CLAUDE_CONFIG_DIR/.credentials.json" 2>/dev/null | grep -o 'fixture-claude-[a-z]*' | head -n 1)
-printf 'claude:%s\n' "$login" >> "$LF_HOME/selected"
-read -r input
-echo '{"type":"system","subtype":"init","session_id":"account-fixture"}'
-echo '{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"account-fixture"}'
-"#,
-    );
-    write_executable(
-        &bin.path().join("codex"),
-        &codex_app_server_script(
-            "done",
-            r#"if [ "$1" = --version ]; then exit 0; fi
-printf 'codex:%s\n' "$(grep -o 'fixture-codex-[a-z]*' "$CODEX_HOME/auth.json")" >> "$LF_HOME/selected"
-"#,
-        ),
-    );
-    let path = format!(
-        "{}:{}",
-        bin.path().display(),
-        std::env::var("PATH").unwrap()
-    );
-    let output = run_lf(
-        repo.path(),
-        home.path(),
-        &[
-            "--account",
-            "claude=claude-chosen@",
-            "--account",
-            "codex=codex-chosen@",
-            "--batch",
-            "graph",
-            "pair",
-        ],
-        Some(&path),
-    );
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    let selected = fs::read_to_string(home.path().join("selected")).unwrap();
-    // Each step's shared home was signed in as the chosen account.
-    let expected = ["claude", "codex", "claude", "codex"]
-        .map(|provider| format!("{provider}:fixture-{provider}-chosen"));
-    assert_eq!(
-        selected.lines().collect::<Vec<_>>(),
-        expected.iter().map(String::as_str).collect::<Vec<_>>()
-    );
 }
 
 #[test]

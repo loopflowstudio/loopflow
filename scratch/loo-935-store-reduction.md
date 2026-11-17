@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: implemented on this branch; one implement pass (below), then gate.
+Status: implemented on this branch; next is gate.
 
 ## Demo
 
@@ -71,16 +71,11 @@ Desktop keeps pane layouts under
 (`PaneLayoutStore.swift`), beside its existing `WorkCache` files.
 `lf desktop layout` reads only `query:<id>`; `desktop.layout.save` is gone.
 
-**Next implement:** a saved layout keeps every Session it names. Delete
-`WorkPaneLayout.keeping(sessions:)` (`PaneLayoutStore.swift`) and its use in
-`loadPaneIntent` (`SessionsView.swift`), plus `knownSessions` if nothing else
-reads it. The server check it replaces guarded a shared row other clients
-wrote; a file only this Mac writes needs no guard. The filter tested against the
-first page of interactive Sessions, so it emptied panes holding older Sessions
-and headless Runs, and the next save made that permanent. A pane naming a
-Session that is gone shows the Session view's own not-found state; the file is
-not rewritten. Test: a layout naming a Session outside `WorkModel.sessions`
-restores with that Session in its pane.
+A saved layout keeps every Session it names (`loadPaneIntent`, `SessionsView.swift`,
+loads the file as written). The filter it replaced tested against the first page
+of interactive Sessions, emptying panes that held older Sessions and headless
+Runs. A pane naming a Session that is gone shows the Session view's not-found
+state; the file is not rewritten.
 
 ## Numbers (`model_size.py`)
 
@@ -100,7 +95,8 @@ Upgrade of that copy with the branch: applied, `foreign_key_check` clean,
 - `uv run pytest python/tests/test_check_migrations.py python/tests/test_due_removals.py python/tests/test_lifecycle_scorecard.py`: pass.
 - `cargo nextest` library rows (storage, execution, application) for revisions, rentals, ownership, shells, planning, selections, migration_runner, query_plans, settings, schema: pass.
 - Integration: `work_open_tests::`, `cli_discovery::`, `binary(served_reads)`, `local_planning::`, `binary(two_people)`, `performance_tests::`, `ops::task::tests::`, `documented_commands::`, `binary(golden_prompt)`: pass (with resolved `TMPDIR`; load average ~120 made 2 s host timeouts fail in parallel runs).
-- Swift: `scripts/test_desktop.sh --skip-build --filter 'WorkSelectionTests|ToolTabTests|DashboardWorkspaceTests|MultiplexerStoreTests|DTOFixtureTests'`: 90 pass (subagent run); a wider 14-suite filter, 195 pass.
+- Swift: `scripts/test_desktop.sh --filter DashboardWorkspaceTests` after the layout change: 14 pass.
+- Swift (before it): `scripts/test_desktop.sh --skip-build --filter 'WorkSelectionTests|ToolTabTests|DashboardWorkspaceTests|MultiplexerStoreTests|DTOFixtureTests'`: 90 pass (subagent run); a wider 14-suite filter, 195 pass.
 - `cargo clippy --all-targets -- -D warnings`, `cargo fmt`, `check_architecture.py`, `check_migrations.py`, `schema_page.py --check`: pass.
 - Not run: the two `#[ignore]` installed-host tests in `work_open_tests.rs` (Rex, Herdr) lost their tools-only `task_layout`; gate/QA with installed hosts.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.

@@ -355,7 +355,7 @@ struct DashboardWorkspaceTests {
         let draft = WorkFileDraft(location: .init(machineID: location.machineId, cwd: location.worktree),
             path: "new.txt", baseRevision: "base", baseContent: "base", text: "new draft")
         document.restore(draft, task: workspace.key.id)
-        workspace.startPersistence(layouts: layouts, query: query, sessions: nil)
+        workspace.startPersistence(layouts: layouts, query: query)
         try await eventually { workspace.multiplexer.shell(oldShell.id) != nil && !workspace.isRestoringIntent }
         #expect(workspace.multiplexer.shell(fresh.id) == fresh)
         #expect(workspace.multiplexer.shell(oldShell.id)?.command == nil)
@@ -375,7 +375,7 @@ struct DashboardWorkspaceTests {
         try layouts.save(source.portableLayout(), machineId: fixtureMachineId, work: source.key)
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") }
         let workspace = fixtureWork(try #require(source.location))
-        workspace.startPersistence(layouts: layouts, query: query, sessions: nil)
+        workspace.startPersistence(layouts: layouts, query: query)
         try await eventually { workspace.multiplexer.shell(original.id) != nil && !workspace.isRestoringIntent }
         #expect(workspace.multiplexer.shell(original.id)?.command == nil)
         workspace.multiplexer.newShell(command: ["new-tab"], location: source.location)
@@ -385,8 +385,8 @@ struct DashboardWorkspaceTests {
         #expect(workspace.persistenceError == nil)
     }
 
-    @Test(arguments: [true, false])
-    func savedLayoutRoundTripsThroughItsFileAndEmptiesUnknownSessions(known: Bool) async throws {
+    @Test
+    func savedLayoutRoundTripsThroughItsFileAndKeepsEverySession() async throws {
         let layouts = temporaryLayouts()
         let source = fixtureWork(fixtureWorkspace("/task"))
         let location = try #require(source.location)
@@ -405,10 +405,10 @@ struct DashboardWorkspaceTests {
         #expect(layouts.load(machineId: "another-machine", work: source.key) == nil)
 
         let workspace = fixtureWork(location)
-        workspace.startPersistence(layouts: layouts, query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") },
-                                   sessions: known ? ["primary"] : ["other"])
+        // "primary" is in no Sessions reading; a saved pane keeps it anyway.
+        workspace.startPersistence(layouts: layouts, query: RegistryQuery { _, _ in throw RegistryQueryError("Unexpected execution") })
         try await eventually { workspace.multiplexer.shell(shell.id) != nil && !workspace.isRestoringIntent }
-        #expect(workspace.multiplexer.sessionPane?.sessionId == (known ? "primary" : nil))
+        #expect(workspace.multiplexer.sessionPane?.sessionId == "primary")
         #expect(workspace.multiplexer.zoomedPaneId == source.multiplexer.zoomedPaneId)
         #expect(workspace.multiplexer.layout.allPanes.map(\.id) == source.multiplexer.layout.allPanes.map(\.id))
     }

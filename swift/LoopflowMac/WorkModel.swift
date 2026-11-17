@@ -224,7 +224,7 @@ final class WorkModel {
 
     private func startPersistence(_ workspace: SessionsWorkspace) {
         guard let paneLayouts else { return }
-        workspace.startPersistence(layouts: paneLayouts, query: query, sessions: sessions.value.map { Set($0.map(\.id)) })
+        workspace.startPersistence(layouts: paneLayouts, query: query)
     }
 
     func openSelectedWorkspace(deliberate: Bool = true) {

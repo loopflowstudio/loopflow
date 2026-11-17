@@ -14,7 +14,7 @@
   other caches already live under `WorkCache.homeDirectory`.
 - **A saved layout keeps every Session it names** (concept review): the
   first-page filter destroyed valid references, and a Mac-local file needs no
-  ownership check. See the design's next implement.
+  ownership check. Done: `keeping(sessions:)` is deleted.
 - **`--diff` still adds Changes** beside the conversation in Rex/Herdr/cmux; it
   is an explicit request. A Task without a local checkout shows Task & workflow.
 - **`lf desktop layout` stays as a read of `query:<id>`**; `--save` is gone

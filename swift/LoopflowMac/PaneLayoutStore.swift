@@ -41,22 +41,3 @@ struct PaneLayoutStore: Sendable {
         value.addingPercentEncoding(withAllowedCharacters: .alphanumerics.union(CharacterSet(charactersIn: "-_"))) ?? value
     }
 }
-
-extension WorkPaneLayout {
-    /// The layout with every Session pane naming a Session outside `sessions`
-    /// emptied, so it opens on the conversation placeholder. Other panes keep
-    /// their place; `nil` means no reading has answered yet and keeps every pane.
-    func keeping(sessions: Set<String>?) -> WorkPaneLayout {
-        guard let sessions else { return self }
-        func keep(_ node: WorkPaneTree) -> WorkPaneTree {
-            switch node {
-            case .split(let axis, let ratio, let first, let second):
-                .split(axis: axis, ratio: ratio, first: keep(first), second: keep(second))
-            case .pane(let id, .session(let session?, _)) where !sessions.contains(session):
-                .pane(id: id, content: .session(id: nil, location: nil))
-            case .pane: node
-            }
-        }
-        return WorkPaneLayout(tree: keep(tree), focused: focused, zoomed: zoomed, hidden: hidden, drafts: drafts)
-    }
-}

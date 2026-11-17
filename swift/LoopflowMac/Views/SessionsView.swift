@@ -337,7 +337,6 @@ final class SessionsWorkspace {
     private var persistenceQuery: RegistryQuery?
     private var paneLayouts: PaneLayoutStore?
     /// The Sessions read when persistence started; a saved pane naming another is emptied.
-    private var knownSessions: Set<String>?
     private var persistenceLoaded = false
     @ObservationIgnored private var persistenceTask: Task<Void, Never>?
     private var taskFiles: (store: TaskFilesStore, execution: TaskLocationObservation?)?
@@ -2021,12 +2020,10 @@ private struct SidebarDivider: View {
 
 extension SessionsWorkspace {
     /// Restore this Mac's saved layout for the Work, then save each change to it.
-    /// `sessions` is the current Sessions reading, or `nil` before one answers.
-    func startPersistence(layouts: PaneLayoutStore, query: RegistryQuery, sessions: Set<String>?) {
+    func startPersistence(layouts: PaneLayoutStore, query: RegistryQuery) {
         guard persistenceQuery == nil, localMachineId != nil else { return }
         persistenceQuery = query
         paneLayouts = layouts
-        knownSessions = sessions
         persistenceTask = Task { [weak self] in await self?.loadPaneIntent() }
     }
 
@@ -2053,7 +2050,7 @@ extension SessionsWorkspace {
         }
         let preserveCurrent = persistenceLoaded || persistenceError != nil || hadLocalTools
         persistenceError = nil
-        let saved = layouts.load(machineId: machine, work: key)?.keeping(sessions: knownSessions)
+        let saved = layouts.load(machineId: machine, work: key)
         let needsSave: Bool
         if let saved {
             let current = portableLayout()

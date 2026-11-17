@@ -330,7 +330,11 @@ fn in_directory_runtime<T>(
     with_runtime(&directory, command, || run(&directory))
 }
 
-fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
+fn run_default_agent(
+    mode: loopflow_execution::harness::Mode,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
     let repo_root = loopflow_execution::repo::find_repo_root()?;
     let moved = loopflow_execution::git::worktrees::move_default_agent_to_worktree(&repo_root)?;
     match moved {
@@ -338,11 +342,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(&worktree.path, Some("default"), None, cli)
+                loopflow::lf::commands::run::run(mode, &worktree.path, Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(&repo_root, Some("default"), None, cli)
+            loopflow::lf::commands::run::run(mode, &repo_root, Some("default"), None, cli)
         }),
     }
 }
@@ -451,6 +455,7 @@ fn resolve_cli_target(
 }
 
 fn execute_target(
+    mode: loopflow_execution::harness::Mode,
     target: loopflow_execution::definition::Target,
     message: Option<&str>,
     cli: &Cli,
@@ -478,14 +483,19 @@ fn execute_target(
                         || loopflow::lf::commands::run::implicit_binding(cli)?.is_some();
                     match binding {
                         Some(binding) => loopflow::lf::commands::run::run_bound(
+                            mode,
                             Some(name),
                             message,
                             cli,
                             binding,
                         )?,
-                        None => {
-                            loopflow::lf::commands::run::run(&repo_root, Some(name), message, cli)?
-                        }
+                        None => loopflow::lf::commands::run::run(
+                            mode,
+                            &repo_root,
+                            Some(name),
+                            message,
+                            cli,
+                        )?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
                     if !shared
@@ -1980,7 +1990,12 @@ fn run() -> anyhow::Result<()> {
         } else {
             None
         };
-        return execute_command(&cli, &args, None);
+        return execute_command(
+            loopflow_execution::harness::Mode::Headless,
+            &cli,
+            &args,
+            None,
+        );
     }
     if cli.task.is_none() && cli.wt.is_none() {
         if let Some(result) = loopflow::lf::navigation::inspect(&cli) {
@@ -2543,7 +2558,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             cmd: TaskCommand::Run { .. }
         })
     );
-    if execution {
+    let mode = if execution {
         match loopflow_execution::transport::delegate_current(
             loopflow_execution::transport::LaunchInput {
                 batch: cli.batch,
@@ -2553,11 +2568,11 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             task_run || cli.work_subject_selector().is_some(),
         )? {
             loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-            loopflow_execution::transport::Delegation::Here { mode } => {
-                cli.launch_mode = Some(mode)
-            }
+            loopflow_execution::transport::Delegation::Here { mode } => mode,
         }
-    }
+    } else {
+        loopflow_execution::harness::Mode::Headless
+    };
     // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
     if matches!(
@@ -2963,18 +2978,21 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
 
     let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
         Some((target, message)) => execute_target(
+            mode,
             target,
             message.as_deref(),
             &cli,
             args,
             direct_binding.as_ref(),
         ),
-        None if cli.command.is_some() => execute_command(&cli, args, direct_binding.as_ref()),
+        None if cli.command.is_some() => execute_command(mode, &cli, args, direct_binding.as_ref()),
         None => {
             cli.interactive = !cli.batch;
             match direct_binding.as_ref() {
-                Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
-                None => run_default_agent(&cli, args),
+                Some(binding) => {
+                    loopflow::lf::commands::run::run_bound(mode, None, None, &cli, binding)
+                }
+                None => run_default_agent(mode, &cli, args),
             }
         }
     });
@@ -2983,6 +3001,7 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
 }
 
 fn execute_command(
+    mode: loopflow_execution::harness::Mode,
     cli: &Cli,
     args: &[String],
     binding: Option<&loopflow_execution::ops::WorkBinding>,
@@ -2992,9 +3011,9 @@ fn execute_command(
             let text = prompt.join(" ");
             in_directory_runtime(args, |repo| match binding {
                 Some(binding) => {
-                    loopflow::lf::commands::run::run_bound(None, Some(&text), cli, binding)
+                    loopflow::lf::commands::run::run_bound(mode, None, Some(&text), cli, binding)
                 }
-                None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
+                None => loopflow::lf::commands::run::run(mode, repo, None, Some(&text), cli),
             })
         }
         Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_)) => {

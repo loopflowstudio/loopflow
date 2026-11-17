@@ -93,7 +93,18 @@ impl Table {
     /// `lf FLAGS : hello` in the checkout.
     fn launch(&self, flags: &[&str]) -> anyhow::Result<Launch> {
         let cli = Cli::try_parse_from(std::iter::once("lf").chain(flags.iter().copied()))?;
-        let built = super::build_prompt(self.repo.path(), None, Some("hello"), &cli)?;
+        let built = super::build_prompt(
+            loopflow_execution::transport::LaunchInput {
+                batch: cli.batch,
+                interactive: cli.interactive,
+                has_prompt: true,
+            }
+            .mode(),
+            self.repo.path(),
+            None,
+            Some("hello"),
+            &cli,
+        )?;
         let invocation = if built.mode == loopflow_execution::harness::Mode::Headless
             && built.harness == "claude"
         {
@@ -176,9 +187,9 @@ fn prompt_build_keeps_the_mode_delegation_selected() {
     let table = Table::new();
     table.config(None, "agent: claude");
     for mode in [Mode::Interactive, Mode::Headless] {
-        let mut cli = Cli::parse_from(["lf", "-i"]);
-        cli.launch_mode = Some(mode);
+        let cli = Cli::parse_from(["lf", "-i"]);
         let built = super::build_prompt(
+            mode,
             table.repo.path(),
             None,
             Some("hello"),

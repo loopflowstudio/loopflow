@@ -92,7 +92,7 @@ pub fn resume_session_with_env(
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
     // Reopening a conversation recorded as Task, Wave or repository work is
     // Work whatever command reopened it.
-    config.holder = crate::transport::holder(named_work, None, Some(&session.id));
+    config.holder = crate::transport::holder(store.is_work(named_work, Some(&session))?, None);
     anyhow::ensure!(
         session.provider.as_deref() == Some(crate::config::parse_agent(config.agent()?).0.as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
@@ -1071,6 +1071,53 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::process::Command;
+
+    #[test]
+    fn native_resume_does_not_replace_a_work_read_failure_with_server_ownership() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let temp = tempfile::tempdir().unwrap();
+        let database = temp.path().join("loopflow.db");
+        ledger.set_db_path(database.clone());
+        let _restore = EnvRestore::capture(&["LF_HOME"]);
+        std::env::set_var("LF_HOME", temp.path());
+        let capture = crate::session_record::SessionRecorder::begin_at(
+            temp.path(),
+            crate::session_record::SessionCaptureSpec {
+                harness: "claude".into(),
+                model: None,
+                surface: "tui".into(),
+                cwd: temp.path().to_path_buf(),
+                repo: None,
+                worktree: None,
+                skill: None,
+                subjects: Vec::new(),
+                graph: crate::session_record::SessionGraphMembership::Independent,
+                work: None,
+            },
+        )
+        .unwrap();
+        // Session and settings remain readable; only the Work lookup fails.
+        let db = rusqlite::Connection::open(&database).unwrap();
+        db.execute("UPDATE agent_sessions SET primary_scope='wave'", [])
+            .unwrap();
+        let before: i64 = db
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        let error =
+            resume_session_with_env(&capture.artifact_key(), None, &BTreeMap::new(), None, false)
+                .unwrap_err();
+        assert!(
+            format!("{error:#}").contains("unsupported primary scope \"wave\""),
+            "{error:#}"
+        );
+        let after: i64 = db
+            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            after, before,
+            "a failed Work lookup must not admit a new invocation"
+        );
+    }
 
     #[test]
     fn a_terminal_move_names_the_terminal_it_went_to() {

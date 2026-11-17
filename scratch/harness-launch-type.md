@@ -236,8 +236,8 @@ Second pass, against the working diff (runner deletion):
   `mode` and `holder` as fields.
 - `run_agent` is now headless only, so `ProcessConfig::auto` no longer
   selects anything inside execution. Its remaining reads are dead and go
-  with the field in slice 3 (list under "Delete"). Mode lives in the CLI's
-  `PromptBuild` until the resolver returns it.
+  with the field in slice 3 (list under "Delete"). The CLI passes the resolved Mode into
+  `PromptBuild`.
 - The holder has four derivations today (see "Launch value"); one function
   replaces them.
 - `Outcome` was undefined; see "One entry point".
@@ -267,35 +267,41 @@ native. The resolver now retains that distinction; the matrix needs separate
 headless/native resume-by-ID rows. The earlier blanket statement about reopened
 Sessions was incorrect. This changes the written design, not launch behavior.
 
-Fourth pass, against 1c3af13938 (mode and holder in transport). Two changes
-for the next implement, both before slice 4:
+Fourth-pass design repairs (2026-11-16, against 1c3af13938):
+`transport::holder(work, source)` consumes the Work fact its caller already
+holds; native resume propagates `store.is_work` failures. `Mode` travels as a
+required argument through dispatch and prompt assembly, never on `Cli`.
+`LaunchInput::mode()` owns terminal-based resolution; previews call it without
+delegating. The detailed counterexamples are at
+2c11969a48:scratch/harness-launch-type.md (“Fourth pass”).
 
-- **`transport::holder` takes the Work fact, not a Session id.** Native resume
-  (`native_session.rs:95`) used to call `store.is_work(named_work,
-  Some(&session))?` on the store and record it already holds. It now passes
-  the id, and `transport::works` opens `journal::process_ledger()` again,
-  re-reads the Session, and turns any failure into Work. A store error that
-  used to stop the resume now launches it as `Holder::Server`: a holder that
-  differs from main, which "Forbidden outcomes" rules out. Make it
-  `holder(work: bool, source: Option<WorkSource>)`; native resume passes
-  `store.is_work(named_work, Some(&session))?`, headless resume passes
-  `named_work`, bound launches pass `false` and the source. `works(…, session)`
-  stays private to `delegate`, where no record is in hand and an unreadable
-  store must not block the launch.
-- **Mode is an argument, not a `Cli` field.** `Cli::launch_mode:
-  Option<Mode>` plus the `unwrap_or_else(… .preview_mode())` in
-  `build_prompt_at` is "Option means resolve later" again, with a second
-  `has_prompt` expression (`skill.is_some() || message.is_some()` against
-  dispatch's `command.is_some() || skill_input.is_some()`; equal on every
-  entry checked today, by coincidence of `lf.rs:2974`). `process_options()`
-  copies the field, so a caller that then sets `batch` (`ship.rs:55`) would
-  lose to a stale mode if that command ever delegated. Pass `Mode` from
-  dispatch through `execute_target`/`execute_command` into
-  `run`/`run_bound`/`resume` and `build_prompt*`; callers that never delegate
-  state theirs (preview: `LaunchInput::mode()`; ship and Discord: `Headless`).
-  Delete the field and the fallback. `LaunchInput` keeps one public `mode()`
-  that reads the terminal (today's `preview_mode`, which `delegate` also
-  calls) and a private tty-parameter form for the table test.
+Fifth pass (2026-11-16, against the slice 3a working diff). 3a did what the
+fourth pass asked; `Cli::launch_mode` is gone. Two values are still invented
+where no launch decides them:
+
+- **A `Mode` exists only where a launch does.** `bin/lf.rs::dispatch` ends
+  `else { Mode::Headless }` for every non-execution command, and the
+  planning-read path calls `execute_command(Mode::Headless, …)`. Nothing reads
+  either: `execute_command` uses `mode` only in its `Commands::Inline` arm, and
+  `Inline` is always in the `execution` set. That is the forbidden fallback
+  without the `Option`. Move the `Inline` arm out to the launch arms
+  (`execute_target`, `run_bound`, `run_default_agent`), which run only under
+  `Delegation::Here { mode }`; `execute_command` loses the parameter.
+- **Headless resume has no mode to pass.** `session.rs::resume` builds
+  `LaunchInput { batch: true, .. }`, which can only resolve Headless, then
+  threads it into `run::resume(mode, …)`. `run::resume` is "one more headless
+  turn" by definition, like `answer_bound`: it drops the parameter and names
+  `Mode::Headless` itself; the caller matches `Here { .. }`.
+- `transport::holder(work, source)`: every caller passes exactly one of the
+  two (`(false, Some(source))` or `(fact, None)`). Don't reshape it now. When
+  slice 4 builds `Launch`, its constructor takes the one Work fact and this
+  function goes with `AgentConfig::holder`.
+
+Checked and unchanged: `preview_prompt` is its own command, never under
+`dispatch`'s delegation, so calling `LaunchInput::mode()` there is right.
+Native resume reads `store.is_work` twice (`transport::works` for Place, which
+keeps an unreadable store as Work; `resume_session_with_env` for Holder, which
+fails). The second surfaces the error before admission; leave both.
 
 Checked and unchanged: Graph steps spawn `lf` children from `step_args`, so no
 resolved mode crosses into a step; `place` matches the former inline branch
@@ -332,7 +338,8 @@ changes hooks and the server requirement for those child runs.
   Branch on `Capabilities` instead.
 - `Holder::of` called anywhere but `transport::holder`, or
   `is_interactive_run` anywhere but `delegate`.
-- A resolved `Mode` stored on `Cli`, or an `Option<Mode>` with a fallback.
+- A resolved `Mode` stored on `Cli`, an `Option<Mode>` with a fallback, or a
+  `Mode` literal handed to a command that launches nothing.
 - An entry whose place or holder differs from main.
 - A test-only harness variant or factory trait. Fixtures use the existing
   stand-in provider scripts.
@@ -360,16 +367,13 @@ supplied runtime stays caller-owned. Both optional launch fields, `open_owner` a
 the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
 
 Remaining work:
-3a. **Repair slice 3** per "Fourth pass": `holder(work, source)` with native
-   resume reading its own store, and `Mode` passed as an argument with
-   `Cli::launch_mode` deleted. Focused: the two suites under 3, plus a native
-   resume test where the store read fails and the resume errors.
-3. **Finish moving holder into `Launch`.** Mode now comes from
-   `Delegation::Here { mode }` and reaches `PromptBuild` through `Cli::launch_mode`;
-   prompt previews use `LaunchInput::preview_mode` without delegation.
-   `transport::holder` is the only `Holder::of` caller. Place still reads named
-   Work, independently of reporting ownership; the inherited `LF_AS` row pins
-   here + Server. `ProcessConfig::auto` and its unreachable branches are deleted.
+3. **Finish moving holder into `Launch`.** Mode comes from
+   `Delegation::Here { mode }` and reaches `PromptBuild` as a required argument;
+   previews use `LaunchInput::mode` without delegation. `transport::holder`
+   consumes the caller's Work fact and is the only `Holder::of` caller. Place
+   still reads named Work independently; inherited `LF_AS` stays here + Server.
+   Next (3b, fifth pass): `execute_command` and `run::resume` lose their
+   `Mode` parameter; no `Mode::Headless` literal remains in `bin/lf.rs`.
    Still remove `AgentConfig::holder` and `Holder: Default` with slice 4 so
    reporting ownership travels on `Launch`, through native commands and drivers.
    Focused: `--lib transport::launch_mode_tests::` and
@@ -416,10 +420,10 @@ Earlier admission and runner checks are recorded at
 b9542ecef5:scratch/harness-launch-type.md.
 
 - implement (2026-11-16): `cargo test -p loopflow-execution --lib harness::native_exit::` — 3 passed after the #1955 merge.
-- implement (2026-11-16): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::) | test(agent::tests::native_retry_policy_matrix) | test(harness::claude_decode::tests::result_extracts_turn_usage_tokens) | test(harness::claude_decode::tests::assistant_usage_is_live_and_deduplicated_by_message) | test(harness::claude_decode::tests::result_pairs_peak_assistant_input_with_its_model_window) | test(transcript::live::tests::a_finished_claude_turn_reads_its_end_model_and_usage_once_per_message)'` — 15 passed; macOS ld emitted its compact-unwind size warning.
-- implement (2026-11-16): `cargo +stable fmt --all -- --check` (Rustup tools first on PATH) and `git diff --check` — passed.
-- implement (2026-11-16): `cargo +stable clippy --all-targets -- -D warnings` (Rustup tools first on PATH, inherited `LF_*` unset) — passed with Rust 1.100.0.
-- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::) | binary(lf)'`; CI runs the suites and clippy.
+- implement (2026-11-16, slice 3a): `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::) | test(lf::commands::run::launch_policy_tests::) | test(harness::native_session::tests::native_resume_does_not_replace_a_work_read_failure_with_server_ownership) | test(lf::commands::run::tests::retained_skill_context_keeps_its_source_after_catalog_selection_changes) | test(lf::commands::run::tests::interactive_bound_skill_refreshes_scratch_and_keeps_saved_work_direction) | test(lf::commands::run::tests::explicit_interactive_skill_launch_uses_the_assembled_prompt)'` — 15 passed; macOS ld emitted its compact-unwind size warning. Earlier checks: 2c11969a48:scratch/harness-launch-type.md.
+- implement (2026-11-16, slice 3a): `cargo clippy --all-targets -- -D warnings` — passed (Rust 1.98.1; inherited `LF_*` unset).
+- implement (2026-11-16, slice 3a): `cargo fmt --all -- --check` and `git diff --check` — passed.
+- gate (after the remaining design): `uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::launch_matrix) | test(session_record::capture_tests::) | test(lf::commands::run::launch_policy_tests::) | test(documented_commands::) | test(session_cli_tests::session_cli_uses_one_truthful_resolution_contract) | binary(lf)'`; CI runs the suites and clippy.
 - gate: the two `rg` commands above.
 - demo/qa: real-terminal launches above (needs installed providers).
 

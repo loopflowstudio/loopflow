@@ -247,12 +247,12 @@ pub struct LaunchInput {
 }
 
 impl LaunchInput {
-    /// Preview uses the same mode selection without starting an execution.
-    pub fn preview_mode(self) -> crate::harness::Mode {
-        self.mode(io::stdin().is_terminal() || io::stdout().is_terminal())
+    /// Select the native client or stream driver from the invocation and terminal.
+    pub fn mode(self) -> crate::harness::Mode {
+        self.mode_with_tty(io::stdin().is_terminal() || io::stdout().is_terminal())
     }
 
-    fn mode(self, tty: bool) -> crate::harness::Mode {
+    fn mode_with_tty(self, tty: bool) -> crate::harness::Mode {
         if !self.batch && (self.interactive || tty || !self.has_prompt) {
             crate::harness::Mode::Interactive
         } else {
@@ -262,15 +262,8 @@ impl LaunchInput {
 }
 
 /// Resolve reporting ownership after Work binding, independently of delegation.
-pub fn holder(
-    named: bool,
-    source: Option<crate::session::WorkSource>,
-    session: Option<&str>,
-) -> crate::session::Holder {
-    crate::session::Holder::of(works(
-        named || source.is_some_and(|source| source.is_managed()),
-        session,
-    ))
+pub fn holder(work: bool, source: Option<crate::session::WorkSource>) -> crate::session::Holder {
+    crate::session::Holder::of(work || source.is_some_and(|source| source.is_managed()))
 }
 
 fn place(
@@ -372,7 +365,7 @@ fn delegate(
     replace: bool,
     named_work: bool,
 ) -> Result<Delegation> {
-    let mode = input.preview_mode();
+    let mode = input.mode();
     let batch = input.batch;
     // Library tests do not execute the CLI entry point.
     if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
@@ -2897,7 +2890,7 @@ mod launch_mode_tests {
                 interactive,
                 has_prompt,
             };
-            assert_eq!(input.mode(tty), expected, "{input:?}, tty={tty}");
+            assert_eq!(input.mode_with_tty(tty), expected, "{input:?}, tty={tty}");
         }
     }
 
@@ -2937,17 +2930,32 @@ mod launch_mode_tests {
     }
 
     #[test]
+    fn holder_uses_the_callers_work_fact_without_reading_the_store() {
+        use crate::session::{Holder, WorkSource};
+        for (work, source, expected) in [
+            (false, None, Holder::Caller),
+            (true, None, Holder::Server),
+            (false, Some(WorkSource::Checkout), Holder::Caller),
+            (true, Some(WorkSource::Checkout), Holder::Server),
+            (false, Some(WorkSource::Declared), Holder::Server),
+            (false, Some(WorkSource::Bound), Holder::Server),
+        ] {
+            assert_eq!(super::holder(work, source), expected, "{work}, {source:?}");
+        }
+    }
+
+    #[test]
     fn inherited_declaration_keeps_server_reporting_without_naming_work() {
         // Inherited LF_AS declares reporting ownership but does not name Work
         // on the command line; neither a TTY nor a headless caller delegates it.
         assert_eq!(super::place(false, false, false, true, false), None);
         assert_eq!(super::place(true, false, false, false, false), None);
         assert_eq!(
-            super::holder(false, Some(crate::session::WorkSource::Declared), None),
+            super::holder(false, Some(crate::session::WorkSource::Declared)),
             crate::session::Holder::Server
         );
         assert_eq!(
-            super::holder(false, Some(crate::session::WorkSource::Checkout), None),
+            super::holder(false, Some(crate::session::WorkSource::Checkout)),
             crate::session::Holder::Caller
         );
     }

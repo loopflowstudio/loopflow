@@ -1326,7 +1326,7 @@
       ]
     },
     "Close": {
-      "description": "The last frame before an orderly terminal disconnect. No stream offset or\ncontrol claim transfers to a replacement terminal.",
+      "description": "The last frame before an orderly terminal disconnect. No stream offset\ntransfers to a replacement terminal.",
       "properties": {
         "reason": {
           "$ref": "#/$defs/CloseReason"
@@ -15213,9 +15213,6 @@
     },
     "WorkLinkTarget": {
       "properties": {
-        "diff": {
-          "type": "boolean"
-        },
         "execution_machine": {
           "description": "The execution owner when it is another Machine.",
           "type": [
@@ -15270,7 +15267,6 @@
         "task_id",
         "wave",
         "session",
-        "diff",
         "execution_machine"
       ],
       "type": "object"

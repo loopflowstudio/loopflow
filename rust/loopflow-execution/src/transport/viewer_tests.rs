@@ -114,7 +114,6 @@ fn snapshot_preview_fixture() {
             reply: Reply::Attached {
                 viewer: "viewer".into(),
                 nonce: "nonce".into(),
-                token: Some("claim".into()),
                 terminal: true,
                 owner: Some("viewer".into()),
             },
@@ -222,7 +221,7 @@ fn snapshot_preview_fixture() {
             ));
         }
     });
-    attach_with_terminal(&terminal, None, None, preview, true).unwrap();
+    attach_with_terminal(&terminal, None, preview).unwrap();
     peer.join().unwrap();
     std::fs::write(
         viewer_cwd,

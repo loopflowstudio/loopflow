@@ -58,7 +58,7 @@ final class RemoteMobileClient: MobileTaskCreationClient {
 
     private struct Ticket: Decodable { let ticket: String }
 
-    /// Attaching takes the keyboard and fits the terminal to `size`.
+    /// Attaching fits the terminal to `size`.
     func attach(sessionID: String, size: TerminalGeometry) async throws -> RemoteAttachment {
         let ticket: String
         do { ticket = try decode(Ticket.self, await request(.sessionAttach(session: sessionID))).ticket }
@@ -191,7 +191,7 @@ final class RemoteAttachment {
     private var pendingBytes = 0
     private var nextRequest: UInt64 = 1
     private var closed = false
-    private var controlDeadline: Task<Void, Never>?
+    private var attachDeadline: Task<Void, Never>?
 
     private init(sessionID: String, socket: MachineSocket) {
         self.sessionID = sessionID
@@ -215,22 +215,22 @@ final class RemoteAttachment {
         return link
     }
 
-    /// Take the keyboard and size back after another device took them.
-    func takeControl(size: TerminalGeometry) throws {
+    /// Take the size back after another device took it.
+    func takeSize(_ size: TerminalGeometry) throws {
         guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready") }
         nextRequest += 1
         decoder.expectAttachment(nextRequest)
-        controlDeadline = connection.deadline(seconds: 5)
+        attachDeadline = connection.deadline(seconds: 5)
         try enqueue(attachRequest(id: nextRequest, size: size))
     }
 
     func send(_ bytes: Data) throws {
-        guard !closed, decoder.ready, decoder.inputControl else { throw RegistryQueryError("Keyboard control was released") }
+        guard !closed, decoder.ready else { throw RegistryQueryError("The Session is not ready") }
         try enqueue(OwnerStream.input(bytes))
     }
 
     func resize(columns: Int, rows: Int) throws {
-        guard !closed, decoder.geometryControl else { return }
+        guard !closed, decoder.sizing else { return }
         nextRequest += 1
         try enqueue(OwnerStream.resizeRequest(id: nextRequest, columns: columns, rows: rows))
     }
@@ -241,7 +241,7 @@ final class RemoteAttachment {
         connection.close()
         writer?.cancel()
         heartbeat?.cancel()
-        controlDeadline?.cancel()
+        attachDeadline?.cancel()
         pendingEvents = []
         outgoing.finish()
     }
@@ -252,7 +252,7 @@ final class RemoteAttachment {
         while !closed && !Task.isCancelled {
             if let event = pendingEvents.popFirst() {
                 if pendingEvents.isEmpty { pendingEvents = [] }
-                if case .control = event, decoder.awaitingAttachment { continue }
+                if case .sizing = event, decoder.awaitingAttachment { continue }
                 return event
             }
             if decoder.ended { close(); return nil }
@@ -260,7 +260,7 @@ final class RemoteAttachment {
                 let bytes = try await connection.receiveBytes()
                 guard !closed, !Task.isCancelled else { break }
                 pendingEvents = ArraySlice(try decoder.receive(bytes))
-                if decoder.ready && !decoder.awaitingAttachment { controlDeadline?.cancel() }
+                if decoder.ready && !decoder.awaitingAttachment { attachDeadline?.cancel() }
                 await Task.yield()
             } catch { fail("Session connection closed. Reconnect for a fresh screen; input was not retried.") }
         }

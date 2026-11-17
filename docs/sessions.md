@@ -6,7 +6,7 @@ its name, its Task and its provider's native history, whichever terminal or
 agent it ran in. This page covers finding them, steering them, what keeps
 running through an update, and what comes back after a crash.
 
-## Open without moving another view
+## Open another view
 
 ```bash
 lf open --task LOO-12              # the primary conversation in this terminal
@@ -14,10 +14,13 @@ lf open --session <session> --tab  # an exact Session in a sibling tab
 lf open --task LOO-12 --focus       # reveal its existing view
 ```
 
-`lf open` reports an already-open conversation and offers `--focus`; it does not
-take input from another view. Agent calls default to sibling tabs. To deliberately
-move an existing conversation's input here, use `lf resume`. Both continue an
-ended Session from history without replaying its prompt. Presentation modes and
+A conversation can be open in any number of terminals at once, and every one of
+them types: a draft started in one shows in the others. The view you used last
+(attached, typed in or focused) sets the terminal's size and colors. `lf open` and
+`lf resume` add a view even when the conversation is already open elsewhere;
+`--focus` reveals an existing view and creates nothing. Agent calls default to
+sibling tabs. Both continue an ended Session from history without replaying its
+prompt. Presentation modes and
 host support: [Open conversations and workspaces](workspaces.md).
 
 ## Come back to a conversation
@@ -40,7 +43,7 @@ resend input.
 | The conversation is… | `lf resume` |
 |---|---|
 | running with no terminal showing it (listed as `detached`) | reattaches |
-| shown in another lf terminal | takes it over; that terminal says where it went |
+| shown in another lf terminal | opens one more view here; the other stays open and both type |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
 | started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
 | ended or crashed | continues the same provider thread from its history |
@@ -266,11 +269,9 @@ ready. It keeps the running provider and its editor, and never resends submitted
 input or restarts the Task's Graph. Preparing the view is only the first step;
 input stays paused until the conversation can accept it.
 
-If another view holds input, the pane stays read-only. Choose **Take back** to
-move input here deliberately; Refresh leaves that other view in control. When
-that view closes, the pane accepts typing again within about ten seconds. A
-connected terminal's **Move here** action also requests control explicitly.
-If the provider has ended, use the offered resume action to continue the same
+If the provider runs in a client lf cannot share (started in a plain terminal,
+say), the pane offers **Take back** to resume it here; Refresh leaves that
+client running. If the provider has ended, use the offered resume action to continue the same
 Session from history; an ended provider's unsent editor contents cannot be
 restored from history.
 
@@ -283,7 +284,7 @@ if the server still cannot connect.
 
 A view of a Task, Wave or shell conversation continues from its place in the
 kept output, without redrawing; one that fell behind it gets a fresh screen.
-Another viewer's input and terminal size stay in effect. If the conversation
+Other views stay attached and keep typing. If the conversation
 has ended, recovery stops there; opening the Session again continues it from
 history. Reconnecting a display never starts a provider.
 
@@ -298,7 +299,7 @@ The pane's connection row explains which conversation came back:
 
 `lf session history <session>` keeps the observed provider changes. Unknown
 history stays unknown; a connection alone does not establish continuity. Reading
-that history or a terminal screen grants no input control.
+that history or a terminal screen attaches no view.
 
 Starting a new thread also uses
 [submitted-creation recovery](server.md#recover-a-submitted-creation). Returning
@@ -544,7 +545,7 @@ opening or forking another Session doesn't change it.
 
 **Preparing a terminal.** `lf resume <session> --prepare --json` returns the
 command to open it without starting the provider (with `--fork`, the fork's);
-for a remote machine, an SSH command. Running that command takes over as
+for a remote machine, an SSH command. Running that command opens a view as
 `lf resume` does.
 
 **Native history.** `lf session history <session>` reads the provider's start,

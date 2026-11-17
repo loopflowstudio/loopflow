@@ -138,8 +138,8 @@ links wait for resolution before delivery. Unknown repositories need an initial 
 Every conversation a window can select opens on load, before any selection and
 with no saved recent visits: the repository's, each Wave's and every claimed
 working Task's (idle, active or moving). Selecting any of them shows opening, the
-live conversation, a passive view of a conversation another client controls, or a
-failure with **Retry**; never a **No session** or **Open** gate. Load opens the
+live conversation, **Take back** for a conversation running in a client lf can't
+share, or a failure with **Retry**; never a **No session** or **Open** gate. Load opens the
 selected Work first, then visible tiles, then the repository and Waves, then
 recent working Tasks, two preparations at a time; initial rendering does not wait.
 A prepared conversation starts its provider at once, before any pane shows it;
@@ -170,19 +170,26 @@ repository or Wave operator, or replays consumed input: with no request, the fir
 turn of any primary reads its scope and reports where it stands. A failed
 automatic Start shows its error with **Retry**. A launch that ended with no saved
 history stays closed until **Try again** repeats it; Retry and refresh never do.
-If another client holds input, the pane offers **Take back** and leaves that client
-in control until clicked or until it closes. Close and eviction discard late opening results.
+A held terminal takes any number of views and every view types, so a draft typed
+in one shows in the others. The view that most recently attached, typed or gained
+focus sets the terminal's size; when it leaves, the next most recent live view does.
+If the provider runs in a native client outside a held terminal, the pane offers
+**Take back** and leaves that client running until clicked or until it closes.
+Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes receive their relay's status and send Retry/Move actions over one
+Session panes receive their relay's status and send Retry over one
 private Unix connection. Quiet streams schedule no reads, including in retained
 hidden panes. Status loss pauses input while the relay continues; a fresh status
 connection supplies the current reading without replaying actions. Closing a pane
-stops observation and removes its private socket directory. Native readiness and
-attachment permission share that reading; a saved screen cannot enable input.
+stops observation and removes its private socket directory. Input waits for a
+connected reading with native readiness; a saved screen cannot enable input.
+The terminal view tells Ghostty when it gains or loses focus (first responder in
+the key window); the relay turns Ghostty's focus reports into the holder's
+`focus` requests, so the pane being looked at sets the size.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
@@ -1017,7 +1024,7 @@ becomes usable when its validated workspace receiver registers, even while plann
 loads. Registered Task links report their page/Session outcome on the window instead.
 Each receipt has a revision so a repeated request cannot consume its previous
 result. Session panes report attachment separately from native surface existence;
-`elsewhere` means another client retains input. Failed panes can reconnect in
+`elsewhere` means the provider runs in a native client outside a held terminal. Failed panes can reconnect in
 place, while a pending attachment stays with its current viewer.
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
@@ -1103,7 +1110,7 @@ concurrent request traces in `logs/lf.log`, and no request Process rows or globa
 context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
-Terminal recovery must preserve the exact owner, draft and newer control claims.
+Terminal recovery must preserve the exact owner and draft.
 Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
@@ -1111,13 +1118,13 @@ provider or move its cursor. Both mount layout and pre-mount sizing keep the sam
 viewport while status changes.
 Refresh waits for its previous viewer to retire before preparing a replacement.
 `WarmPaneMountTests` checks this headless with paused input and overlapping
-Refresh requests. Take back replaces read-only and ended attachments; the transport
-fixture `desktop_crash_reopen` checks control loss, read-only Refresh, explicit
-takeover and input returning when the other viewer closes, against a surviving
-provider. `GhosttyTerminalMountTests` checks mounted
+Refresh requests. Take back replaces ended attachments and ones held by a native
+client; the transport fixture `desktop_crash_reopen` checks that the draft survives
+a Desktop crash and new input submits once, against a surviving provider.
+`GhosttyTerminalMountTests` checks mounted
 focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
-one-shot **Move here**, and cancellation on pane closure. An orderly terminal close
+typing from two views at once, and cancellation on pane closure. An orderly terminal close
 ends recovery and shows its replacement or retirement reason; bare EOF keeps the
 reason unknown. Installed-helper replacement must preserve the Session and Graph
 identities and prove continued input and Graph progress; a socket restart alone is insufficient.

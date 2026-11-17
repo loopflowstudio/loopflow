@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status: split implemented; `lf workspace` folded into `lf open --workspace`, which never holds a Task (2026-11-16). Next is gate.
+Status (2026-11-17): `lf task view`, `lf open --diff`, the Rex follower and Task widening are gone (6fb8816a4e, 1efd501812); every view of a held terminal types (Rust, Swift, docs, tests done). Next is gate.
 
 ## Demo
 
@@ -165,9 +165,8 @@ holds input; an ended Session resumes its provider).
   `lf open --task <ID> --here`'s rules. "Overviews start no agents" no longer
   holds; docs say an ended Session resumes when its tab opens.
 - `--diff` in an overview: Changes beside each Session, as with `--task`.
-- Check whether anything else existed only for `lf task view` or the copied
-  layouts (e.g. `swift/Loopflow/Models/MultiplexerLayout.swift`'s `.task`
-  case, `waves::subscribe_task_pane`) and delete it in the same diff.
+- Done. `BrowserTab.task` and `waves::subscribe_task_pane` stay: Desktop's
+  own Task pane uses both. The cmux/Herdr/Rex `split` renderers went with `--diff`.
 
 ## Every view of a managed Session is editable (2026-11-17)
 
@@ -191,11 +190,24 @@ editable viewers into the same terminal, so you see drafts from A in B", then
   teh size back to the old view").
   No geometry owner, no `own: request|take`. Jack Heart, after a Rex-style
   owner was proposed instead: "actually keep that".
-- A held terminal that is Busy (a person typing in a native client the server
-  can't share) is the one case to check by reading the code: keep whatever
-  makes a native client's input safe, and say what in the PR.
-- Delete the `held_terminals.viewer_hold/_at/viewed` reads and writes too if
-  nothing else needs them, and mark them `-- leaving:` for LOO-954.
+- Native client lf can't share: kept. A Session whose provider runs outside a
+  held terminal still refuses `lf open` ("controlled elsewhere") and Desktop
+  keeps **Take back** for it (`SessionActionKind::MoveHere`, `heldElsewhere`).
+  Held terminals never offered Take back (`held_actions`). Say this in the PR.
+- Built: `Sizing` (transport.rs) picks the live view with the latest
+  attach/input/focus; relays turn on DEC 1004 and send `focus {focused}`; the
+  server forwards CSI I/O only when the agent's own mode 1004 is on
+  (`Terminal::focus_reporting`). Only the sizing view's query answers reach the
+  agent (`input::without_reports`); another view's input ends an open paste.
+  Wire: attach drops `control/replace/own/moved`, `own` request and `control`
+  event gone, `attached.token` gone, `controlled.held` → `viewed`; Desktop
+  status drops `input`/`moving`/`move`. `LF_RELAY_IF_FREE`, `--moved` gone;
+  open intents (`--start-if-free`, `--reveal-existing`) stay for whether a
+  provider starts.
+- PR: hosts that report focus: any whose terminal honors DEC 1004 (Ghostty in
+  Desktop, Rex, Herdr, cmux, most terminals); others fall back to attach/typing.
+- `held_terminals.viewer_hold/_at/viewed` stay: they record whether anyone
+  views a terminal (Task retirement's absence clock), not an input claim.
 - Docs: transport/README.md, docs/sessions.md, docs/surfaces.md,
   docs/security.md (a connection is a full editor; access is per person),
   docs/server.md, docs/troubleshooting.md, docs/workspaces.md.
@@ -210,3 +222,9 @@ editable viewers into the same terminal, so you see drafts from A in B", then
 - Jack Heart: "i think we can drop the whoel workspace follower tab concept".
   The Rex Workspace follower, automatic arrivals and the six hidden `lf open`
   flags go; an overview opens its tabs once.
+
+## Checks (viewer policy, 2026-11-17)
+
+- `nextest -p loopflow-execution --lib transport::` (69; two registry tests time out at load ~128 and pass alone), `-p loopflow --lib` open/lf/schema rows, integration `work_open_tests::` (33; three 2 s host deadlines fail only at `-j 2`, pass alone), `dto_fixtures::`, `cli_discovery::`, `documented_commands::`, `binary(transport_tests)` (40), `cargo clippy --all-targets -- -D warnings`, `check_architecture.py`: pass.
+- Swift: `scripts/test_desktop.sh --filter 'OwnerStreamTests|ServerConnectionTests|ProviderTransitionTests|DTOFixtureTests|WorkDestinationTests'` and `test_ios.py SessionTerminalTests`: pass. `GhosttyTerminalInputTests` needs a display (gate/CI); no test covers focus reports reaching the relay.
+- `lf open` keeps its "already open" report for a Session a native client holds outside a held terminal (and for a Desktop pane in Desktop mode).

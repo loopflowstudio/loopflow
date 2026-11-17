@@ -27,11 +27,11 @@ struct GhosttyTerminalMountTests {
         terminal.command = """
         /bin/sh -c \(shellEscape("""
         {
-          printf '%s\\n' '{"generation":1,"state":"connected","input":true,"native_ready":false,"message":null}'
+          printf '%s\\n' '{"generation":1,"state":"connected","native_ready":false,"message":null}'
           for phase in 1 2 3; do
             while [ ! -e "\(directory.path)/$phase" ]; do sleep 0.01; done
-            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; input=false; else state=connected; ready=true; input=true; fi
-            printf '{"generation":%s,"state":"%s","input":%s,"native_ready":%s,"message":null}\\n' "$phase" "$state" "$input" "$ready"
+            if [ "$phase" = 2 ]; then state=reconnecting; ready=false; else state=connected; ready=true; fi
+            printf '{"generation":%s,"state":"%s","native_ready":%s,"message":null}\\n' "$phase" "$state" "$ready"
           done
           cat < /dev/tty
         } | /usr/bin/nc -U "$LF_SERVER_STATUS"

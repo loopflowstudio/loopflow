@@ -282,15 +282,8 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
             "--prepare",
             "--json",
         ]);
-        let automatic = automatic["open_argv"].as_array().unwrap();
-        assert_eq!(
-            &automatic[..2],
-            &[
-                serde_json::json!("/usr/bin/env"),
-                serde_json::json!("LF_RELAY_IF_FREE=1")
-            ]
-        );
-        assert_eq!(&automatic[2..], opened["open_argv"].as_array().unwrap());
+        // Every view types: opening for a reveal attaches the same way.
+        assert_eq!(automatic["open_argv"], opened["open_argv"]);
     }
 }
 
@@ -3953,8 +3946,7 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
     }
     let answer: serde_json::Value = serde_json::from_slice(&answer).unwrap();
     assert_eq!(answer["answer"], "hosted", "{terminal}: {answer}");
-    let request = serde_json::json!({"id":1,"kind":"attach","control":false,"replace":true,"rows":24,"cols":80})
-        .to_string();
+    let request = serde_json::json!({"id":1,"kind":"attach","rows":24,"cols":80}).to_string();
     let mut frame = vec![0x11];
     frame.extend((request.len() as u32).to_be_bytes());
     frame.extend(request.as_bytes());

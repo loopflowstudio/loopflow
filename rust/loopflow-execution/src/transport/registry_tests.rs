@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
+use super::super::wire::{frame, parse_position, Decoder, Incoming, Request, Tag};
 use super::{connect, Registry, Start};
 use crate::journal::TestLedgerGuard;
 use crate::terminal_holder::{serve, Place};
@@ -64,13 +64,9 @@ impl View {
         let attach = Incoming {
             id: 1,
             request: Request::Attach {
-                control: true,
-                replace: true,
-                own: Some(Own::Take),
                 rows: 24,
                 cols: 80,
                 name: None,
-                moved: None,
                 from,
             },
         };
@@ -146,7 +142,7 @@ fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
 
 #[test]
 fn an_interrupted_paste_ends_before_the_next_view_types() {
-    for interruption in ["disconnect", "replace", "restart"] {
+    for interruption in ["disconnect", "another view", "restart"] {
         let _ledger = TestLedgerGuard::new();
         let place = holder();
         let mut registry = Registry::open(BUILD).unwrap();
@@ -157,18 +153,23 @@ fn an_interrupted_paste_ends_before_the_next_view_types() {
                 "stty raw -echo; printf '\\r\\nready\\r\\n'; dd bs=1 count=9 2>/dev/null | od -An -tx1; printf '\\r\\nprefix\\r\\n'; dd bs=1 count=6 2>/dev/null | od -An -tx1; printf '\\r\\nclosed\\r\\n'; read line; printf '\\r\\nreply:%s\\r\\n' \"$line\"",
             ))
             .unwrap();
-        let mut first = View::attach(&terminal);
-        first.wait_for("ready");
-        first.type_in(b"\x1b[200~abc");
-        first.wait_for("prefix");
-        let mut next = if interruption == "replace" {
-            View::attach(&terminal)
+        let mut first = Some(View::attach(&terminal));
+        let pasting = first.as_mut().unwrap();
+        pasting.wait_for("ready");
+        pasting.type_in(b"\x1b[200~abc");
+        pasting.wait_for("prefix");
+        let mut next = if interruption == "another view" {
+            // The first view stays; the second one's keys end its paste.
+            let mut next = View::attach(&terminal);
+            next.wait_for("prefix");
+            next.type_in(b"next\n");
+            next
         } else {
             if interruption == "restart" {
                 registry.close();
                 registry = Registry::open(BUILD).unwrap();
             }
-            drop(first);
+            first = None;
             View::attach(&terminal)
         };
         next.wait_for("closed");
@@ -177,8 +178,11 @@ fn an_interrupted_paste_ends_before_the_next_view_types() {
             .collect::<Vec<_>>()
             .join(" ")
             .contains("1b 5b 32 30 31 7e"));
-        next.type_in(b"next\n");
+        if interruption != "another view" {
+            next.type_in(b"next\n");
+        }
         next.wait_for("reply:next");
+        drop(first);
         wait_until("paste child exit receipt", || {
             crate::terminal_holder::recorded_exit(&place, terminal.as_str())
                 .unwrap()

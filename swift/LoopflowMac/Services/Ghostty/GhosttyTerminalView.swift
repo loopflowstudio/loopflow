@@ -353,9 +353,9 @@ final class GhosttySurfacePool {
     }
 
     /// True only while the surface's child is still running. A provider killed
-    /// from another client (Move here in Warp or a second window) leaves the
-    /// surface displaying an exit banner; that must not read as live, and the
-    /// dead surface is freed so an explicit reopen relaunches.
+    /// from another client leaves the surface displaying an exit banner; that
+    /// must not read as live, and the dead surface is freed so an explicit
+    /// reopen relaunches.
     func hasSurface(_ id: TerminalIdentity) -> Bool {
         guard let view = views[id], let surface = view.surface else { return false }
         if ghostty_surface_process_exited(surface) {
@@ -553,7 +553,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     private var copyDismissal: Task<Void, Never>?
     nonisolated(unsafe) var surface: ghostty_surface_t? {
         // A new surface may reuse a freed address; it starts with nothing applied.
-        didSet { if surface != oldValue { appliedScale = nil; appliedFeedback = nil } }
+        didSet { if surface != oldValue { appliedScale = nil; appliedFeedback = nil; appliedFocus = nil } }
     }
 
     private nonisolated(unsafe) var displayLink: CADisplayLink?
@@ -585,9 +585,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     var connectionAcceptsInput: Bool { serverConnection?.reading.acceptsInput ?? true }
     private let connectionLabel = NSTextField(labelWithString: "")
     private lazy var retryConnection = NSButton(title: "Retry connection", target: self, action: #selector(retryServerConnection))
-    private lazy var moveConnection = NSButton(title: "Move here", target: self, action: #selector(moveServerConnection))
     lazy var connectionBar: NSStackView = {
-        let bar = NSStackView(views: [connectionLabel, moveConnection, retryConnection])
+        let bar = NSStackView(views: [connectionLabel, retryConnection])
         bar.orientation = .horizontal
         bar.spacing = 8
         bar.isHidden = true
@@ -601,10 +600,6 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         serverConnection?.retry()
     }
 
-    @objc private func moveServerConnection() {
-        serverConnection?.moveHere()
-    }
-
     private func showConnection(_ reading: ServerConnectionReading) {
         let readonly = !reading.acceptsInput
         let becameUsable = connectionReadonly && !readonly
@@ -616,7 +611,6 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         connectionLabel.toolTip = reading.title
         connectionBar.isHidden = reading.title == nil
         retryConnection.isHidden = !(serverConnection?.canRetry ?? false)
-        moveConnection.isHidden = !reading.canMoveHere
         superview?.needsLayout = true
         if becameUsable {
             restoreInputFocus()
@@ -629,13 +623,30 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
               !hasMarkedText(), let window,
               window.firstResponder == nil || window.firstResponder === window || window.firstResponder === self else { return }
         if window.firstResponder !== self { window.makeFirstResponder(self) }
-        if window.firstResponder === self, let surface { ghostty_surface_set_focus(surface, true) }
+        syncSurfaceFocus()
+    }
+
+    /// Ghostty sees focus only while this view is first responder in the key
+    /// window. A held Session's relay turns the resulting focus reports into
+    /// `focus` requests, so the view the person is looking at sizes the terminal.
+    private func syncSurfaceFocus(firstResponder: Bool? = nil) {
+        guard let surface else { return }
+        let focused = (firstResponder ?? (window?.firstResponder === self)) && window?.isKeyWindow == true
+        if let applied = appliedFocus, applied.surface == surface, applied.focused == focused { return }
+        appliedFocus = (surface, focused)
+        ghostty_surface_set_focus(surface, focused)
+    }
+
+    @objc private func windowKeyChanged(_ notification: Notification) {
+        guard let window, notification.object as? NSWindow === window else { return }
+        syncSurfaceFocus()
     }
 
     /// Last values sent to the current surface. SwiftUI calls updateNSView on every
     /// parent render; unchanged size, scale and feedback must not reach Ghostty.
     private nonisolated(unsafe) var appliedScale: (surface: ghostty_surface_t, scale: CGFloat)?
     private nonisolated(unsafe) var appliedFeedback: (surface: ghostty_surface_t, visible: Bool, reduceMotion: Bool)?
+    private nonisolated(unsafe) var appliedFocus: (surface: ghostty_surface_t, focused: Bool)?
     /// Open from a key press until the next display-link draw.
     private var keyToDraw: OSSignpostIntervalState?
 
@@ -654,6 +665,9 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             name: NSWorkspace.accessibilityDisplayOptionsDidChangeNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(updateFeedbackPreferences),
             name: NSWindow.didChangeOcclusionStateNotification, object: nil)
+        for name in [NSWindow.didBecomeKeyNotification, NSWindow.didResignKeyNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(windowKeyChanged), name: name, object: nil)
+        }
     }
 
     required init?(coder: NSCoder) {
@@ -716,6 +730,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
             updateFeedbackPreferences()
             if window != nil { setupDisplayLink() }
             setupTrackingArea()
+            syncSurfaceFocus()
             restoreInputFocus()
             onSurfaceCreated()
         } else {
@@ -735,6 +750,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
         super.viewDidMoveToWindow()
         recordMountLifecycle("terminal-window")
         updateFeedbackPreferences()
+        syncSurfaceFocus()
         if window == nil {
             displayLink?.invalidate()
             displayLink = nil
@@ -1066,8 +1082,8 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     override func becomeFirstResponder() -> Bool {
         guard acceptsFirstResponder else { return false }
         let accepted = super.becomeFirstResponder()
-        if accepted, let surface {
-            ghostty_surface_set_focus(surface, true)
+        if accepted, surface != nil {
+            syncSurfaceFocus(firstResponder: true)
             // The Session pane is visible and accepting input.
             if case .session(let id, _) = terminal { Perf.endAfterCommit(Perf.taskWorkspaceReady, id: id) }
         }
@@ -1075,9 +1091,7 @@ final class GhosttyMetalView: NSView, @preconcurrency NSTextInputClient {
     }
 
     override func resignFirstResponder() -> Bool {
-        if let surface {
-            ghostty_surface_set_focus(surface, false)
-        }
+        syncSurfaceFocus(firstResponder: false)
         return super.resignFirstResponder()
     }
 

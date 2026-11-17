@@ -1516,8 +1516,8 @@ fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<
 
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
-    // The relay avoids the command tree. A passive reveal records its terminal
-    // association only after the held terminal acknowledges input control.
+    // The relay avoids the command tree. A reveal records its terminal
+    // association only after the held terminal acknowledges its view.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
         .get(1..4)
@@ -1526,16 +1526,14 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        let replace = std::env::var_os("LF_RELAY_IF_FREE").is_none();
-        std::env::remove_var("LF_RELAY_IF_FREE");
-        return loopflow_execution::transport::relay_over(&raw_args[4..], replace);
+        return loopflow_execution::transport::relay_over(&raw_args[4..]);
     }
     if let Some(relay) = loopflow_execution::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
+        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref())?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;

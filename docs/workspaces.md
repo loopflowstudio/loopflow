@@ -29,17 +29,22 @@ Agent calls never attach recursively inside their tool output, including when
 opening their own Session. An agent's `--here` request fails with a command to
 run from an interactive terminal; it does not change the requested mode.
 
-If the conversation is already open, `--here`, `--tab` and ordinary terminal
-opening report where it is and suggest `--focus`. They neither take its input
-nor create another view. Detection covers known live views across local hosts
-on this Machine and matches the Session and view IDs, even if tabs were renamed.
-It does not search other Machines. A known remote viewer is reported with its
-location; opening does not take it over. To deliberately move input, use
-`lf resume <session>`.
+A conversation takes any number of views, and every one types; a draft typed
+in one shows in the others. If it is already open, `--here` and `--tab` attach
+one more view beside the existing ones. Desktop shows a conversation once:
+opening it there focuses its existing pane. The view used last (attached, typed
+in or focused) sets the terminal's size and colors; when it closes, the one
+used before it takes over.
 
-A view may still be opening or show an attachment error. `--focus` only reveals
-it. After correcting an attachment failure, repeat the opening command to
-reconnect; an attachment still in progress is reported without launching another.
+`--focus` reveals an existing view and creates nothing. Detection covers known
+live views across local hosts on this Machine and matches the Session and view
+IDs, even if tabs were renamed. It does not search other Machines. A view may
+still be opening or show an attachment error; `--focus` only reveals it. After
+correcting an attachment failure, repeat the opening command.
+
+A conversation whose provider runs in a client lf cannot share, such as one
+started in a plain terminal before, still refuses a second opener with
+"controlled elsewhere"; quit it there or use Desktop's **Take back**.
 
 `--focus` reports **Not open** when no view exists, including while Desktop is
 still resolving an opening before creating its pane. A view the host cannot
@@ -127,9 +132,9 @@ splits again.
 A successful conversation open means the Session attached, not just that the
 host created a tab. Attachment failures return a failure to the opening command
 and leave readable diagnostics in the destination. Correct the reported cause
-and retry the same command; LF rechecks the Session's live view rather than
-blindly adding another conversation tab. If attachment completed before the
-reply was lost, the retry reports its location and offers `--focus`.
+and retry the same command. Desktop rechecks its pane before opening another;
+a terminal retry attaches one more view, so if attachment completed before the
+reply was lost, `--focus` reveals the first one.
 
 Starting a Task's first conversation needs a harness. With no `default_agent` and
 several harnesses installed, choose one for this invocation or set a default:

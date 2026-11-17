@@ -1045,8 +1045,8 @@ pub async fn open(
             // not: a stopped server never means a second agent for the Session.
             if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
                 if crate::transport::current() != Some(&terminal) {
-                    // This viewer takes control, so the conversation is now
-                    // shown where it runs, not where it was launched.
+                    // The newest view shows where the conversation runs,
+                    // not where it was launched.
                     if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {
                         store.sqlite.record_session_terminal(
                             &session.id,
@@ -1056,15 +1056,9 @@ pub async fn open(
                                 .as_deref(),
                         )?;
                     }
-                    let moved = crate::harness::native_session::departure_notice(
-                        &store.sqlite,
-                        &session.id,
-                        departure_here(),
-                    )?;
                     crate::transport::attach(
                         &terminal,
                         Some(&session.id),
-                        Some(moved),
                         json.then_some(session.id.as_str()),
                     )?;
                     return surface(store, session).await;
@@ -1074,7 +1068,6 @@ pub async fn open(
         if crate::transport::delegate_session(
             json.then_some(session.id.as_str()),
             session.interactive.then_some(session.id.as_str()),
-            true,
             named_work,
         )? {
             return surface(store, session).await;
@@ -1211,7 +1204,7 @@ pub async fn open_without_replacing(
     // again; a bare conversation opens here, in this terminal.
     let lock = if crate::transport::current().is_none() {
         drop(lock);
-        if crate::transport::delegate_session(json.then_some(id), Some(id), false, named_work)? {
+        if crate::transport::delegate_session(json.then_some(id), Some(id), named_work)? {
             return Ok(record);
         }
         let lock_id = id.to_owned();
@@ -1656,7 +1649,7 @@ pub(crate) fn end_earlier_owner(
 /// Whether a held terminal answers the server. This observes reachability,
 /// not whether its provider can safely be replaced.
 fn answering(terminal: &loopflow_model::id::TerminalId) -> bool {
-    match crate::transport::controlled(terminal) {
+    match crate::transport::viewed(terminal) {
         Ok(_) => true,
         Err(error) => {
             tracing::warn!(%error, %terminal, "Session terminal does not answer");
@@ -1668,7 +1661,7 @@ fn answering(terminal: &loopflow_model::id::TerminalId) -> bool {
 /// One Session's summary, with its viewers confirmed by its held terminal.
 /// The server records the terminal's viewers, but a server from an earlier lf
 /// cannot write a store a newer lf has advanced: after an upgrade and a
-/// Desktop restart its record still says viewed. Its controlling viewer is the
+/// Desktop restart its record still says viewed. Its attached views are the
 /// truth, and a terminal that does not answer has no viewer anyone can reach.
 pub(crate) fn viewed_summary(
     store: &SqliteStore,
@@ -1682,7 +1675,7 @@ pub(crate) fn viewed_summary(
         && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
         && store
             .session_terminal(id)?
-            .is_some_and(|terminal| !matches!(crate::transport::controlled(&terminal), Ok(true)));
+            .is_some_and(|terminal| !matches!(crate::transport::viewed(&terminal), Ok(true)));
     if released {
         summary.unviewed = true;
         summary.terminal_id = None;

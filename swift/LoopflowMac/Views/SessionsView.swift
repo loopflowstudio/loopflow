@@ -1313,7 +1313,7 @@ final class SessionsStore {
     }
 
     func moveHere(_ id: String) async {
-        // A retained viewer can be read-only or ended; Take back replaces its attachment.
+        // A retained viewer can be ended, or its provider held by a native client; Take back replaces its attachment.
         guard let index = _index(id) else { return }
         if sessions[index].state != .pending, [.failed, .elsewhere].contains(attachment(id)) {
             await replaceViewer(id, intent: .resume)

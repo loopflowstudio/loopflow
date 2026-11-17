@@ -498,8 +498,8 @@ nonce, so unfinished terminal escapes cannot swallow the reason.
 | `retired` | Task cleanup or shell Close ended this terminal. | Stop automatic attachment; deliberately resume when needed. |
 
 Attachment finds existing execution. It never launches a provider or replays
-keystrokes. A replacement terminal requires fresh input and geometry claims;
-request them without replacement so another viewer keeps control. Desktop's
+keystrokes. A replacement terminal needs a fresh attach; every attached view
+of it types, beside any already there. Desktop's
 decoded relay shows the reason, disables input and stops recovery; it does not
 automatically follow a replacement.
 
@@ -828,14 +828,14 @@ operation returns in `response.result`.
 | --- | --- |
 | `plan.board` | `tasks` evidence with each Task's `id`, `identifier`, `title`, `section`, `state`, `pr.url` and nullable `waiting_on` actor/reason; `generated_at` |
 | `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
-| `session.card` | Session, liveness, control holder and last line |
+| `session.card` | Session, liveness, occupied terminal and last line |
 
 Use `section` to place a Task in Backlog, Working, Autonomous, Done or
 Abandoned; `state` describes its progress within that grouping. To populate a
 board row's detail, request `task.detail`; for its Session, request `session.card`.
 A card observes the Session: reading it does not resume a provider, attach a
-terminal or claim input control. Its `liveness` is `live`, `dead` or `unknown`;
-`control_holder` is the recorded occupied terminal ID, never an input token.
+terminal or add a view. Its `liveness` is `live`, `dead` or `unknown`;
+`control_holder` is the recorded occupied terminal ID.
 `last_line` is the final nonempty line of the current provider preview, or null
 when there is none; the Session's preview retains its source and observation time.
 
@@ -1118,10 +1118,8 @@ Terminal continuation addresses the held terminal, separately from Work
 reads. A view resumes from its PTY byte position, served from the holder's
 2 MiB ring; a server restart does not invalidate the position, and one older
 than the ring falls back to a fresh screen. Uncertain input is never
-replayed. Recovery takes only free claims or those held by the viewer's
-own stale connection; a newer viewer keeps input and geometry. Replacing that
-stale socket cannot let its later close revoke the replacement's claims.
-A stalled bridge cannot block another viewer or Work control traffic.
+replayed. A recovering view attaches beside the others; every view types, and
+the one used most recently sizes the terminal. A stalled bridge cannot block another viewer or Work control traffic.
 
 If the Session has moved to another terminal, attaching to the old one
 returns `not_found` with `terminal_id` and `current_terminal_id`. Attaching by
@@ -1133,8 +1131,8 @@ Desktop reconnects to the same held terminal with bounded backoff. See
 [connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
 for connection status and recovery controls outside terminal bytes.
 
-The Loopflow Session, provider conversation, serving AgentProcess and viewer's
-control claims are distinct. `SessionRecord.transition` reports the latest
+The Loopflow Session, provider conversation, serving AgentProcess and the
+views attached to its terminal are distinct. `SessionRecord.transition` reports the latest
 observed provider change, or null when none is known; `session.history` keeps
 the changes. Reserving a process is not a successful transition.
 

@@ -1,4 +1,4 @@
-//! One Session, presented without replacing another viewer's input.
+//! One Session, presented as one more view: every view of it types.
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, SystemTime};
@@ -125,7 +125,10 @@ fn present(target: &mut Resolved, args: &OpenArgs, focus_new: bool) -> Result<Op
                 Some(view.reason),
             ));
         }
-        if view.retains_attachment() {
+        // Desktop shows a conversation once, and a native client lf cannot share
+        // keeps it; a held terminal takes another view.
+        let stays = (mode == Mode::Desktop && view.in_desktop) || !view.held;
+        if stays && view.retains_attachment() {
             return Ok(target.receipt(
                 destination.map(|(host, _)| host),
                 view.placement.clone(),

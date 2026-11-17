@@ -955,6 +955,11 @@ struct ConversationView {
     reason: String,
     placement: Option<String>,
     attachment: super::desktop::DesktopOpeningStatus,
+    /// Desktop shows it, even before its pane exists.
+    in_desktop: bool,
+    /// A held terminal serves it, so another view may attach. Otherwise a native
+    /// client lf cannot share has it, and opening reports where it is.
+    held: bool,
 }
 
 impl ConversationView {
@@ -984,6 +989,8 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
                     reason: "Still opening in Desktop; no conversation pane exists yet".into(),
                     placement: None,
                     attachment,
+                    in_desktop: true,
+                    held: true,
                 });
             };
             let description = match attachment {
@@ -996,6 +1003,8 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
                 reason: format!("{description} in Desktop (window {}, pane {}); reveal it with `lf open --session {id} --focus`", view.window, view.pane),
                 placement: Some(format!("desktop:{}", serde_json::to_string(&view)?)),
                 attachment,
+                in_desktop: true,
+                held: true,
             })
         }).transpose()?;
     if desktop
@@ -1013,8 +1022,9 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
     };
     // The terminal's stored viewer flag can lag the attachment handshake.
     // Ask the live terminal before using that flag to decide whether to attach.
-    let (viewed, ready) = if let Some(terminal) = store.sqlite.session_terminal(id)? {
-        loopflow_execution::transport::attachment(&terminal)
+    let held = store.sqlite.session_terminal(id)?;
+    let (viewed, ready) = if let Some(terminal) = &held {
+        loopflow_execution::transport::attachment(terminal)
             .context("read conversation attachment")?
     } else {
         (
@@ -1043,6 +1053,8 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         } else {
             DesktopOpeningStatus::Opening
         },
+        in_desktop: false,
+        held: held.is_some(),
     }))
 }
 
@@ -1101,7 +1113,7 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs, each the Task's conversation."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. A conversation takes any number of views and each one types: --here and --tab add one, --focus reveals an existing one. --workspace opens the repository or Wave overview instead: its started, unfinished Tasks as tabs, each the Task's conversation."
 )]
 pub struct OpenArgs {
     #[command(flatten)]

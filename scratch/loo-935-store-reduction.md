@@ -149,3 +149,24 @@ conversation through `conversation::open` (`open_available`), so it keeps
 `OpenArgs::conversation`. Single-conversation tests moved to `--tab`;
 `workspace_from_an_unstarted_task_opens_its_repository_overview` and the
 follower test's `--task` assertion cover the widening.
+
+## lf task view goes; overview tabs hold the Task's Session (2026-11-17)
+
+Jack Heart, word for word: "i think we can kill lf task view. I think its
+kinda reasonable idea but its not the right shape and other things need to
+change before i can figure out the right shae." Asked what an overview tab
+holds instead, the answer picked: "The Task's Session" (each tab runs the same
+path as `lf open --task X --here`; read-only with Move here when another view
+holds input; an ended Session resumes its provider).
+
+- Delete `lf task view` (`commands/task_view.rs`, its Clap variant, tests,
+  docs, help text and every caller). Desktop's own Task & workflow pane stays.
+- Overview Task tabs and Rex follower arrivals attach the Task's Session by
+  `lf open --task <ID> --here`'s rules. "Overviews start no agents" no longer
+  holds; docs say an ended Session resumes when its tab opens.
+- `--diff` in an overview: Changes beside each Session, as with `--task`.
+- Check whether anything else existed only for `lf task view` or the copied
+  layouts (e.g. `swift/Loopflow/Models/MultiplexerLayout.swift`'s `.task`
+  case, `waves::subscribe_task_pane`) and delete it in the same diff.
+- The input policy itself (many editable viewers per managed Session) is not
+  this Task; see questions.md "Task tabs and viewers".

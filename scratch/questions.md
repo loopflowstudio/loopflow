@@ -53,3 +53,14 @@
   scope has no Task, and `describe` refuses `diff` without one.
 - **`lf open --available`** opens each conversation through the single-
   conversation path on any host, rather than only Desktop, Rex, Herdr and cmux.
+
+## Task tabs and viewers (2026-11-17, word for word)
+
+- Jack Heart, on `lf task view`: "What even is this"
+- Jack Heart: "a task tab was meant to be the task session, with an editable
+  input. i think our policy for managed sessions is just you get many editable
+  viewers into the same terminal, so you see drafts from A in B"
+- Built today (transport/README.md, docs/sessions.md, docs/security.md, #1882):
+  one viewer holds input; others attach read-only with **Move here**; `lf open`
+  reports an already-open conversation instead of attaching; `lf resume` moves
+  input. Overview tabs run `lf task view` (#1814, layout era).

@@ -762,7 +762,7 @@ impl World {
             }
         }
         let start = |process: &loopflow_storage::process::LfProcess| {
-            loopflow_storage::graph_process::RunStart::reserved(process.started_at)
+            loopflow_storage::graph_process::ExecutionStart::reserved(process.started_at)
         };
         let finish = |process: &loopflow_storage::process::LfProcess| {
             store.sqlite.finish_run(

@@ -13,7 +13,7 @@ use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreResult};
 use loopflow_model::durable::TaskId;
-use loopflow_storage::graph_process::GraphRun;
+use loopflow_storage::graph_process::GraphExecution;
 use loopflow_storage::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
 use loopflow_storage::work::task::Task;
 
@@ -60,7 +60,7 @@ pub async fn task_execution(
 pub async fn execution_of_latest_graph(
     sqlite: &SqliteStore,
     task: &Task,
-    graph: Option<&GraphRun>,
+    graph: Option<&GraphExecution>,
     facts: &GraphExecutionFacts,
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
@@ -230,7 +230,7 @@ fn apply_limit_recovery(
 /// A Graph runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
-    graph: &GraphRun,
+    graph: &GraphExecution,
     state: GraphProcessSummaryState,
     graph_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
@@ -263,7 +263,7 @@ fn project_execution(
             format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            if process.result() == loopflow_storage::graph_process::RunResult::Succeeded {
+            if process.result() == loopflow_storage::graph_process::ExecutionResult::Succeeded {
                 (
                     TaskExecutionState::Idle,
                     format!("Graph stopped after {label}; inspect its history and effects before launching fresh work"),

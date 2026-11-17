@@ -740,7 +740,7 @@ fn print_task_snapshot(
         {
             // How it ended, by the rule run rows use: exit 130 with no error is an interrupt.
             let result = process.as_lf().map(|process| {
-                loopflow_storage::graph_process::RunResult::of(
+                loopflow_storage::graph_process::ExecutionResult::of(
                     process.completed_at,
                     process.exit_code,
                     process.error.as_deref(),

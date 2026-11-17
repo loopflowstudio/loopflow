@@ -1713,7 +1713,8 @@ struct DetailReads<'a> {
     /// validates every setting, so each distinct configuration resolves once.
     agents: std::sync::Mutex<HashMap<String, Option<String>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
-    graphs: HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphRun>,
+    graphs:
+        HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
     execution: loopflow_storage::sqlite::GraphExecutionFacts,
 }
 

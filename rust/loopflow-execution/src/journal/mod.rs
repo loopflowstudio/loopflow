@@ -30,7 +30,7 @@ pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 /// The id a spawner minted for this process and already recorded on the run
 /// it owns (a Graph run or step). Taken once at start; children never see it.
-pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_EXECUTION_ID_ENV: &str = "LF_EXECUTION_ID";
 
 /// Serializes tests that mutate process-global store or Process identity variables.
 /// Every test in the crate that touches these variables must hold this lock.
@@ -735,8 +735,8 @@ fn start_record(context: &ProcessContext) -> LfProcess {
 }
 
 /// What this process's own run record says at its start.
-pub fn current_run_start() -> Option<loopflow_storage::graph_process::RunStart> {
-    current_context().map(|context| loopflow_storage::graph_process::RunStart {
+pub fn current_execution_start() -> Option<loopflow_storage::graph_process::ExecutionStart> {
+    current_context().map(|context| loopflow_storage::graph_process::ExecutionStart {
         started_at: context.started_at,
         pid: Some(std::process::id()),
         os_started_at: context.process_started_at,
@@ -1015,10 +1015,10 @@ fn create_process_context(
             .flatten()
             .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
-    let minted = std::env::var(LF_RUN_ID_ENV)
+    let minted = std::env::var(LF_EXECUTION_ID_ENV)
         .ok()
         .and_then(|value| LfProcessId::parse(&value).ok());
-    std::env::remove_var(LF_RUN_ID_ENV);
+    std::env::remove_var(LF_EXECUTION_ID_ENV);
     let minted = minted.filter(|_| inherits);
     let owns_run = Arc::new(AtomicBool::new(minted.is_some()));
     let lf_process_id = minted.unwrap_or_default();
@@ -1293,7 +1293,7 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
 
 /// Whether a Graph run or step is still running: one OS lookup against the
 /// pid it recorded. A run with no end and no pid cannot be confirmed.
-pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdentityEvidence {
+pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> ProcessIdentityEvidence {
     match (run.ended_at, run.pid, run.os_started_at) {
         (Some(_), _, _) => ProcessIdentityEvidence::Dead,
         (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
@@ -1305,8 +1305,8 @@ pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdenti
 /// not started yet has no pid; it stands or falls with the Graph that would
 /// start it.
 pub fn step_evidence(
-    step: &loopflow_storage::graph_process::Run,
-    graph: &loopflow_storage::graph_process::Run,
+    step: &loopflow_storage::graph_process::Execution,
+    graph: &loopflow_storage::graph_process::Execution,
 ) -> ProcessIdentityEvidence {
     if step.ended_at.is_none() && step.pid.is_none() {
         return run_evidence(graph);
@@ -1698,7 +1698,7 @@ mod tests {
 
     #[test]
     fn a_reserved_step_ends_with_the_graph_that_would_start_it() {
-        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Run {
+        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Execution {
             id: LfProcessId::default(),
             started_at: 1,
             ended_at,
@@ -1708,7 +1708,7 @@ mod tests {
             error: None,
         };
         let reserved = run(None);
-        let live_graph = loopflow_storage::graph_process::Run {
+        let live_graph = loopflow_storage::graph_process::Execution {
             pid: Some(std::process::id()),
             os_started_at: super::process_started_at(std::process::id()).unwrap(),
             ..run(None)

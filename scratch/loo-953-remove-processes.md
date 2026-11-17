@@ -1,5 +1,8 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
+Status 2026-11-17 (later): the Execution renames are built. Next: the
+Session slice.
+
 Status 2026-11-17: stacked on LOO-936's branch
 (`jack/loo-936-record-only-what-the-product-reads-apart-from`, PR #1965,
 "close to landing") and merged with it; the remaining slices build now on
@@ -456,13 +459,12 @@ Dropping other dead columns (LOO-935). `lf server stop` keeps its own path.
 ## Direction from neighbouring Tasks (2026-11-17)
 
 - **Names.** LOO-924 (#1966) adds `loopflow_execution::harness::Run`, a
-  launch's lifetime (`Bare(Mode)` or managed, `Delegation::Here { run }`,
-  `Launch.run`). It keeps the name: "Leave it; LOO-953 picks other names."
-  Rename here, next implement pass: storage `Run` → `Execution`,
-  `RunResult` → `ExecutionResult`, both `RunStart`s → `ExecutionStart`,
-  `GraphRun` → `GraphExecution`, `LF_RUN_ID` → `LF_EXECUTION_ID`
-  (branch-only, nothing released reads it). `GraphStep` stays. Prose keeps
-  "Graph run".
+  launch's lifetime. It keeps the name: "Leave it; LOO-953 picks other
+  names." Built 2026-11-17: storage `Run` → `Execution`, `RunResult` →
+  `ExecutionResult`, `RunStart` → `ExecutionStart`, `GraphRun` →
+  `GraphExecution`, `LF_RUN_ID` → `LF_EXECUTION_ID`. `GraphStep`,
+  `ops::task::RunStart` (where a Task run sets out, a different thing) and
+  `Write::GraphRun` keep their names. Prose keeps "Graph run".
 - **No launch-state column.** On showing bare vs managed in `lf session list`
   / `lf ps`: "Not needed". LOO-924 derives it from the Session row
   (`SqliteStore::is_bare`); nothing to carry over.

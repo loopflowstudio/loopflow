@@ -343,7 +343,7 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::ops::human_session::HUMAN_SESSION_ENV,
     crate::ops::human_session::PREPARED_CAPTURE_ENV,
     "LF_RUN_DIR",
-    "LF_RUN_ID",
+    "LF_EXECUTION_ID",
     "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
@@ -458,13 +458,13 @@ mod tests {
         let argv = vec![
             "sh".into(),
             "-c".into(),
-            "printf '%s' \"${LF_RUN_ID-}${LF_RUN_DIR-}${LF_GRAPH_ID-}${LF_BIN-}${LF_HOME-unset}\""
+            "printf '%s' \"${LF_EXECUTION_ID-}${LF_RUN_DIR-}${LF_GRAPH_ID-}${LF_BIN-}${LF_HOME-unset}\""
                 .into(),
         ];
         let command = shell_command(std::path::Path::new("."), &argv, &[]);
         let output = std::process::Command::new("sh")
             .args(["-c", &command])
-            .env("LF_RUN_ID", "run_dead")
+            .env("LF_EXECUTION_ID", "run_dead")
             .env("LF_RUN_DIR", "/dead/run")
             .env("LF_GRAPH_ID", "stale-graph")
             .env("LF_BIN", "/stale/lf")

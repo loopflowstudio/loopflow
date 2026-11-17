@@ -126,3 +126,8 @@ order, both env variables, dev-only skew accepted).
   would say it).
 - Missing tests: spawner-written end for a child that died without writing
   one; `graph_failure_cause` driving the repeated-failure stop.
+
+## Rename checks (2026-11-17)
+
+- `cargo build -p loopflow --bin lf`, `cargo clippy --all-targets -- -D warnings`: passed. `sqlite::graph_inventory::` (5), `journal::tests::a_reserved_step_ends_with_the_graph_that_would_start_it`: passed.
+- Call: the plan said "both `RunStart`s"; `ops::task::RunStart` is where a Task run sets out in its Graph, not an execution's start, so it keeps its name.

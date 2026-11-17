@@ -7,7 +7,7 @@ use std::collections::BTreeMap;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
-use crate::graph_process::GraphRun;
+use crate::graph_process::GraphExecution;
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
 
@@ -53,7 +53,7 @@ pub struct TaskSummary {
 /// Returns each loop decider took, across every Graph process of one Task. A
 /// decider returned when the next step its Graph process started stands at or
 /// before it with different loop counts; a retried step keeps its counts.
-fn loop_passes(graphs: &[GraphRun]) -> BTreeMap<String, u32> {
+fn loop_passes(graphs: &[GraphExecution]) -> BTreeMap<String, u32> {
     let mut passes = BTreeMap::new();
     for graph in graphs {
         for pair in graph.steps.windows(2) {
@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn an_abandoned_task_keeps_one_summary_of_its_run() {
         let (_dir, store, task) = crate::test_fixture::store_with_task();
-        let start = crate::graph_process::RunStart::reserved(1);
+        let start = crate::graph_process::ExecutionStart::reserved(1);
         // One Graph whose only step sent its loop around twice before going on.
         let graph = LfProcessId::new();
         let compiled = crate::graph::CompiledGraph {

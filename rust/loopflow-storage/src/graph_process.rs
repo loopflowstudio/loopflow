@@ -6,7 +6,7 @@ use loopflow_model::id::LfProcessId;
 /// its steps. `pid` and `os_started_at` name the OS process while it runs
 /// and are cleared at its end.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Run {
+pub struct Execution {
     pub id: LfProcessId,
     pub started_at: i64,
     pub ended_at: Option<i64>,
@@ -18,7 +18,7 @@ pub struct Run {
 
 /// How a run ended, derived from its end, exit code and error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum RunResult {
+pub enum ExecutionResult {
     Running,
     Succeeded,
     /// Exit 130 with no error: someone interrupted it.
@@ -28,7 +28,7 @@ pub enum RunResult {
     Unknown,
 }
 
-impl RunResult {
+impl ExecutionResult {
     pub fn of(ended_at: Option<i64>, exit_code: Option<i32>, error: Option<&str>) -> Self {
         match (ended_at, exit_code, error) {
             (None, _, _) => Self::Running,
@@ -53,13 +53,13 @@ impl RunResult {
 
 /// What a run's spawner, or the run itself, knows as it starts.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RunStart {
+pub struct ExecutionStart {
     pub started_at: i64,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
 }
 
-impl RunStart {
+impl ExecutionStart {
     /// A run its spawner records before it has an OS process.
     pub fn reserved(started_at: i64) -> Self {
         Self {
@@ -70,16 +70,16 @@ impl RunStart {
     }
 }
 
-impl Run {
-    pub fn result(&self) -> RunResult {
-        RunResult::of(self.ended_at, self.exit_code, self.error.as_deref())
+impl Execution {
+    pub fn result(&self) -> ExecutionResult {
+        ExecutionResult::of(self.ended_at, self.exit_code, self.error.as_deref())
     }
 }
 
 /// One step its Graph run started.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GraphStep {
-    pub run: Run,
+    pub run: Execution,
     /// The step's node in the compiled Graph, counted in preorder.
     pub key: u32,
     /// Returns taken on each loop edge, per nesting level, outermost first.
@@ -88,8 +88,8 @@ pub struct GraphStep {
 
 /// One Graph run as it recorded itself.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GraphRun {
-    pub run: Run,
+pub struct GraphExecution {
+    pub run: Execution,
     /// The repository and directory the Graph ran in.
     pub repo: Option<String>,
     pub cwd: Option<String>,
@@ -99,7 +99,7 @@ pub struct GraphRun {
     pub steps: Vec<GraphStep>,
 }
 
-impl GraphRun {
+impl GraphExecution {
     pub fn id(&self) -> &LfProcessId {
         &self.run.id
     }

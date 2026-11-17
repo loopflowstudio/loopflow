@@ -200,3 +200,7 @@ Jack Heart, 2026-11-07:
 > this isnt going to make the live website, so feel free to make it aspirational, along with a task list to make it true
 
 Aspirational version at 1.50x the original height; the claims that are not yet true are listed in scratch/homepage-tasks.md.
+
+Jack Heart, 2026-11-07, on whether UX details belong to Desktop or also work in other terminals:
+
+> Best-effort for other terminals, but Loopflow desktop is indeed how you get the BEST experience in our opinion

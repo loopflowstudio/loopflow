@@ -266,21 +266,23 @@ pub fn delegate_current(input: LaunchInput, worker: bool) -> Result<Delegation> 
     )
 }
 
-/// Reopen a recorded Session, retaining its bare or managed lifetime.
+/// Reopen a recorded Session, retaining its bare or managed lifetime. Only
+/// an interactive Session has a last screen to preview.
 pub(crate) fn delegate_session(
-    json_session: Option<&str>,
-    preview_session: Option<&str>,
+    id: &str,
+    json: bool,
+    preview: bool,
     replace: bool,
 ) -> Result<Delegation> {
     let mut argv: Vec<String> = std::env::args().collect();
-    if json_session.is_some() {
+    if json {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
     delegate(
-        session_run(preview_session),
-        json_session,
-        preview_session,
+        session_run(id),
+        json.then_some(id),
+        preview.then_some(id),
         argv,
         replace,
     )
@@ -290,7 +292,7 @@ pub(crate) fn delegate_session(
 /// repeating the command that prepared it.
 pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        session_run(Some(id)),
+        session_run(id),
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
@@ -299,12 +301,12 @@ pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegati
 }
 
 /// Retain the recorded lifetime; a held child keeps its parent's decision.
-fn session_run(id: Option<&str>) -> crate::harness::Run {
+fn session_run(id: &str) -> crate::harness::Run {
     use crate::harness::{Mode, Run};
 
-    let Some(id) = id.filter(|_| current().is_none()) else {
+    if current().is_some() {
         return Run::Managed;
-    };
+    }
     static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
     let bare = crate::journal::process_ledger().and_then(|store| {
         store
@@ -2910,35 +2912,59 @@ mod launch_mode_tests {
         crate::journal::with_process(|| {
             crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
             let store = crate::journal::process_ledger().unwrap();
-            for (source, bound, primary, expected) in [
-                (None, false, false, Run::Bare(Mode::Interactive)),
+            // A Session recorded headless (`lf -b research`) reopens Bare at
+            // a terminal, though it has no screen to preview.
+            for (surface, source, bound, primary, expected) in [
+                ("headless", None, false, false, Run::Bare(Mode::Interactive)),
                 (
+                    "interactive",
+                    None,
+                    false,
+                    false,
+                    Run::Bare(Mode::Interactive),
+                ),
+                (
+                    "interactive",
                     Some(WorkSource::Checkout),
                     false,
                     false,
                     Run::Bare(Mode::Interactive),
                 ),
                 (
+                    "interactive",
                     Some(WorkSource::Declared),
                     false,
                     false,
                     Run::Bare(Mode::Interactive),
                 ),
                 (
+                    "interactive",
                     Some(WorkSource::Inherited),
                     false,
                     false,
                     Run::Bare(Mode::Interactive),
                 ),
-                (Some(WorkSource::Bound), true, false, Run::Managed),
-                (Some(WorkSource::Declared), false, true, Run::Managed),
+                (
+                    "interactive",
+                    Some(WorkSource::Bound),
+                    true,
+                    false,
+                    Run::Managed,
+                ),
+                (
+                    "interactive",
+                    Some(WorkSource::Declared),
+                    false,
+                    true,
+                    Run::Managed,
+                ),
             ] {
                 let capture = SessionRecorder::begin_at(
                     ledger.home(),
                     SessionCaptureSpec {
                         harness: "claude".into(),
                         model: None,
-                        surface: "interactive".into(),
+                        surface: surface.into(),
                         cwd: ledger.home().into(),
                         repo: None,
                         worktree: None,
@@ -2972,9 +2998,10 @@ mod launch_mode_tests {
                     )
                     .unwrap();
                 assert_eq!(
-                    super::delegate_session(None, Some(session.id.as_str()), true).unwrap(),
+                    super::delegate_session(&session.id, false, surface == "interactive", true)
+                        .unwrap(),
                     super::Delegation::Here { run: expected },
-                    "source={source:?}, bound={bound}, primary={primary}",
+                    "surface={surface}, source={source:?}, bound={bound}, primary={primary}",
                 );
                 assert_eq!(
                     super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
@@ -2983,7 +3010,7 @@ mod launch_mode_tests {
                 );
                 assert_eq!(
                     store.runs_in_its_terminal(&session.id).unwrap(),
-                    matches!(expected, Run::Bare(_))
+                    surface == "interactive" && matches!(expected, Run::Bare(_))
                 );
             }
             Ok(())

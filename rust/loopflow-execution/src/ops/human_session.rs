@@ -1080,14 +1080,12 @@ pub async fn open(
                 }
             }
         }
-        run = match crate::transport::delegate_session(
-            json.then_some(session.id.as_str()),
-            session.interactive.then_some(session.id.as_str()),
-            true,
-        )? {
-            crate::transport::Delegation::Delegated => return surface(store, session).await,
-            crate::transport::Delegation::Here { run, .. } => run,
-        };
+        run =
+            match crate::transport::delegate_session(&session.id, json, session.interactive, true)?
+            {
+                crate::transport::Delegation::Delegated => return surface(store, session).await,
+                crate::transport::Delegation::Here { run, .. } => run,
+            };
     }
     if session.captured.is_none() {
         if resume {
@@ -1223,7 +1221,7 @@ pub async fn open_without_replacing(
     } else {
         Some(lock)
     };
-    let run = match crate::transport::delegate_session(json.then_some(id), Some(id), false)? {
+    let run = match crate::transport::delegate_session(id, json, true, false)? {
         crate::transport::Delegation::Delegated => return Ok(record),
         crate::transport::Delegation::Here { run, .. } => run,
     };

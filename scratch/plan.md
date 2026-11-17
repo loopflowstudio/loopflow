@@ -160,26 +160,18 @@ lint results: `6797c65b41:scratch/plan.md` (also links prior checks).
 - `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration --test session_launch_contract -E 'test(transport::launch_mode_tests::) | test(lf::tests::) | test(a_prepared_task_resume_opens_managed_and_fails_naming_a_missing_server) | test(a_task_pane_reopened_by_session_id_fails_naming_a_missing_server) | test(session_cli_uses_one_truthful_resolution_contract) | test(contextual_resume_uses_scope_and_recovers_unassociated_checkouts) | test(documented_commands::)'`: 51 passed, 2026-11-17, inherited `LF_*` cleared; macOS libtest linking warned and succeeded.
 - `cargo fmt --check`, `git diff --check` and `cargo clippy --all-targets -- -D warnings`: passed, 2026-11-17, inherited `LF_*` cleared for Clippy.
 
-## Next implement: classify the resumed Session, not the previewed one
+## Resume classifies the Session it reopens
 
-Concept review of `f395d72f06`: the work flag is gone and both resume entry
-points call `session_run` before `delegate`. One mismatch remains.
-`delegate_session(json_session, preview_session, replace)` passes
-`preview_session` to `session_run`, so one argument answers two questions:
-whose last screen to show, and whose row decides the lifetime.
-`human_session::open` passes `session.interactive.then_some(id)`
-(`ops/human_session.rs:1085`), so a Session recorded headless reaches
-`session_run(None)` and opens Managed whatever its row says. `lf -b research
-'...'` in a plain checkout, then `lf resume <ID>` at a terminal, asks for a
-held terminal and the Machine server; the table says it reopens Bare, as on
-main (main's `delegate(false, ..)` ran an unviewed, unnamed resume here).
-Read from the code, not run: `cfg!(test)` returns before delegation.
+`delegate_session(id, json, preview, replace)` classifies the resumed
+Session's own row through `session_run(id)`; `preview` only chooses whether a
+last screen is shown (interactive Sessions). Previously the preview ID did
+both, so a headless-recorded Session (`lf -b research` in a plain checkout)
+resumed at a terminal opened Managed. `launch_mode_tests` now has that row:
+headless, unbound, not primary, expecting `Bare(Interactive)`.
 
-- `delegate_session` takes the Session ID being resumed and classifies that;
-  the preview stays a separate, optional answer (interactive Sessions only).
-- `launch_mode_tests`: add a row whose capture surface is headless, unbound,
-  not primary, expecting `Bare(Interactive)` through `delegate_session`.
-- One focused run of `transport::launch_mode_tests::`.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(transport::launch_mode_tests::)'`: 5 passed, 2026-11-17, `LF_*` cleared.
+- `cargo fmt` and `cargo clippy -p loopflow-execution --all-targets -- -D warnings`: passed, 2026-11-17. Gate runs workspace Clippy and the suites.
+- Still read from the code, not run: `cfg!(test)` returns before real delegation, so a live `lf -b research` → `lf resume <ID>` belongs to demo.
 
 The Session command review's six open questions remain outside this PR
 (`scratch/concept-review.html`).

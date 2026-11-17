@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next: one resume decision (below), then gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done) and main through #1960 is merged (conflict notes in `questions.md`); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next: one resume decision (below), then gate.
 
 ## Demo
 
@@ -310,6 +310,8 @@ under an Action of View.
   View reads "Reconnect" when unviewed, else "Open here"; Start reads "Try
   again" after a consumed launch, else "Start conversation"; TakeOver reads
   "Take over"; Resume reads "Open here".
+- `NewThread` (a different harness, `-a`) is decided per invocation, so a
+  listed record never carries it; it needs no label.
 - `projected_action`, `held_action` and `session_action` fold into it;
   `explain_resume` takes `opening` from the same value it reports as `intent`.
 - Test: a label table keyed by intent, and one explain row whose intent and

@@ -82,3 +82,8 @@
 - **A Session record carries one `action`** (label, help) instead of a kind-tagged list; nothing sets an unavailable reason now.
 - **Desktop's automatic opening keeps its lifecycle gate** (`opensConversationAutomatically`, from `lifecycle.isWorking`): a Task opens by itself only when its pane names a Session, it is working, selected, or a remembered visit. Selecting a finished Task with no conversation now starts one.
 - **A consumed first launch** ("Try again") is opened like any other by Desktop's warm opening, so its request gets one more attempt per Desktop start. A flag on the wire would be needed to hold it back; none added.
+
+## Sync with main #1960 (2026-11-17)
+
+- Conflicts combined both sides: `prepare_plan` sets main's `viewer` and keeps the branch's `primary_session` argv; `SessionRecord` keeps `action` with main's `var title`; the `WorkViewPlan` codec extension from main stays, `Content` without pane fields; `WorkModel` keeps `paneLayouts` beside main's `pendingChanges`, and drops `conversationStart` with main's `failure` rename; the placeholder reads "Open the conversation here."; WorkModelTests takes main's "planning is not a second list".
+- `cargo check --workspace --all-targets`: pass; `swift build --build-tests --package-path swift`: pass; `cargo test -p loopflow-execution --lib store::selections::`: 23 pass.

@@ -179,7 +179,7 @@ struct RoadmapView: View {
                             onTaskAction: { row, action in
                                 perform(action, task: row.task)
                             },
-                            onOpenWorktree: openWorktree
+                            onOpenWorktree: model.openWorktree
                         )
                     }
                 }
@@ -214,7 +214,7 @@ struct RoadmapView: View {
             onTaskAction: { task, action in
                 perform(action, task: task)
             },
-            onOpenWorktree: openWorktree
+            onOpenWorktree: model.openWorktree
         )
     }
 
@@ -231,18 +231,6 @@ struct RoadmapView: View {
             }
         case .run:
             model.startTask(nil, task: task)
-        }
-    }
-
-    private func openWorktree(_ workspace: TaskWorktreeSnapshot) {
-        var components = URLComponents()
-        components.scheme = "warp"
-        components.host = "action"
-        components.path = "/new_window"
-        components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
-        guard let url = components.url, NSWorkspace.shared.open(url) else {
-            model.navigation.notices.post(Notice("Warp could not open \(workspace.worktree)."))
-            return
         }
     }
 }

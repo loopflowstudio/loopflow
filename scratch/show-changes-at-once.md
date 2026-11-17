@@ -281,6 +281,12 @@ identically on 86841cc327: pre-existing, left to demo/CI.
 
 ## Next implement direction (concept review, pass 4)
 
+Built in pass 5: `WorkModel.newTaskSession(_:open:)` is the one New session
+path; `WorkModel.openWorktree` the one Warp open; `WorkModel.machines` a
+reported reading. Check: `scripts/test_desktop.sh --filter
+'PendingChangesTests|WorkModelTests|WorkNavigationTests|TaskSessionLaunchProofTests'`
+— 111 passed; native-display launch proof stays with demo/CI.
+
 Pass 3's three directions are built (`66067dc588`). Its text is in
 `86841cc327`. The same rule, that an action's failure posts one event Notice
 and no view keeps its own error string, still misses four places:

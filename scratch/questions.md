@@ -51,3 +51,7 @@
 - "Blocked Sessions" result stays an alert (multi-line report of outcomes,
   not a failure); only its failure moves to the Notice. `ProjectHistoryView`'s
   read failure stays inline with the other model-less on-demand reads.
+- Pass 5 Notice texts: "Could not move blocked Sessions: …", "<ID> Could not
+  prepare checkout: …", "Could not complete the action: …", "Could not change
+  pane: …", "Could not run on <Machine>: …". The Machines list is one
+  `WorkModel` reading per window, shared by every Machine control in it.

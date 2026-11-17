@@ -461,8 +461,7 @@ struct WorkBreadcrumbs: View {
 struct WorkMachineControl: View {
     let model: WorkModel
     let target: WorkMachineTarget
-    @State private var machines: [Machine] = []
-    @State private var error: String?
+    private var machines: [Machine] { model.machines.value ?? [] }
 
     var body: some View {
         let current = model.machine(of: target)
@@ -472,10 +471,9 @@ struct WorkMachineControl: View {
                     .disabled(id == current.id)
                     .accessibilityIdentifier("work-machine-" + id)
             }
-            if let error { Text(error) }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
             .font(Typography.caption())
@@ -484,7 +482,7 @@ struct WorkMachineControl: View {
         .fixedSize()
         .help("Machine this Work runs on")
         .accessibilityIdentifier("work-machine")
-        .task(id: target) { await load() }
+        .task(id: target) { await model.loadMachines() }
     }
 
     /// This Machine first, then your registered Machines.
@@ -500,19 +498,12 @@ struct WorkMachineControl: View {
         return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
     }
 
-    private func load() async {
-        error = nil
-        // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines() }
-        catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
-    }
-
+    /// A failure posts to the window that asked.
     private func use(_ id: String) async {
-        error = nil
+        let notices = model.navigation.notices
         do { try await model.useMachine(id, for: target) }
         catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
+        catch { notices.post(Notice("Could not run on \(name(id)): \(error.localizedDescription)")) }
     }
 }
 

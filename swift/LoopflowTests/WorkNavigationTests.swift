@@ -820,6 +820,35 @@ struct WorkNavigationTests {
         #expect(owner.startingTaskSessions.isEmpty)
     }
 
+    @Test("A sidebar New session failure posts one Notice with Try again in the asking window")
+    func sidebarNewSessionFailurePostsTheNotice() async throws {
+        let model = try model()
+        await model.refresh()
+        let owner = model.navigation
+        let gate = PlanningGate()
+        var attempts = 0
+        // The sidebar's row action and the Task page's button share this path.
+        let open: @MainActor (String) async throws -> Void = { _ in
+            attempts += 1
+            await gate.wait()
+            throw RegistryQueryError("Checkout refused")
+        }
+        model.newTaskSession("issue-review", open: open)
+        model.newTaskSession("issue-review", open: open)
+        await gate.started()
+        model.setRepoPath("/src/context")
+        let other = model.navigation
+        await gate.release()
+        for _ in 0..<1000 where owner.startingTaskSessions.contains("issue-review") { await Task.yield() }
+        #expect(owner.startingTaskSessions.isEmpty)
+        #expect(attempts == 1)
+        #expect(other.notices.current?.text.contains("New session failed") != true)
+        let failure = try #require(owner.notices.event)
+        #expect(failure.text == "W2-131 New session failed: Checkout refused")
+        #expect(failure.action?.title == "Try again")
+        #expect(owner.notices.conditions.isEmpty)
+    }
+
     @Test("Task inspection retains Available links without a Session inventory")
     func inspectorKeepsExactAvailableConversation() async throws {
         var records = try JSONSerialization.jsonObject(with: Data(sessionsJSON().utf8)) as! [[String: Any]]

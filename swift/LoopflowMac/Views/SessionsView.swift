@@ -1616,8 +1616,8 @@ struct SessionsContentView: View {
     private let workspaces: SessionsWorkspaceRegistry
     private let query: RegistryQuery
     private let store: SessionsStore
-    @State private var launchError: String?
-    @State private var launchErrorTitle = "Could not start conversation"
+    /// The multi-line report of a Move blocked Sessions run.
+    @State private var blockedSessionsReport: String?
     @State private var actionTaskID: String?
     @State private var movingBlockedSessions = false
     @State private var blockedSessionsTarget = ""
@@ -1692,7 +1692,7 @@ struct SessionsContentView: View {
                 if navigation.showsNavigator {
                     SidebarColumn(navigation: navigation, availableWidth: geometry.size.width) {
                         WorkNavigator(model: model, onOpenSession: openSession, onNewTaskSession: { id in
-                            newTaskSessionFromInput(id)
+                            model.newTaskSession(id, open: newTaskSession)
                         })
                         .equatable()
                     }
@@ -1732,7 +1732,7 @@ struct SessionsContentView: View {
                 VStack(alignment: .leading, spacing: 10) {
                     TaskActionItems(model: model, task: found.task, wave: found.wave?.wave,
                         newConversation: {
-                            newTaskSessionFromInput(id)
+                            model.newTaskSession(id, open: newTaskSession)
                         }, openSession: openSession)
                 }.padding(12).onExitCommand { actionTaskID = nil }
             }
@@ -1799,26 +1799,24 @@ struct SessionsContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .openSessions)) { _ in
             navigation.content = .terminals
         }
-        .alert(launchErrorTitle, isPresented: Binding(
-            get: { launchError != nil },
-            set: { if !$0 { launchError = nil } }
+        .alert("Blocked Sessions", isPresented: Binding(
+            get: { blockedSessionsReport != nil },
+            set: { if !$0 { blockedSessionsReport = nil } }
         )) {
-            Button("OK") { launchError = nil }
-        } message: { Text(launchError ?? "") }
+            Button("OK") { blockedSessionsReport = nil }
+        } message: { Text(blockedSessionsReport ?? "") }
         .accessibilityIdentifier("sessions-surface")
     }
 
     /// `lf session move --blocked -a <agent>` for every repository, reported in place.
     private func moveBlockedSessions(to agent: String) {
         let agent = agent.trimmingCharacters(in: .whitespaces)
+        let notices = navigation.notices
         Task {
             do {
-                let report = try await query.moveBlockedSessions(agent: agent, cwd: store.repoPath)
-                launchErrorTitle = "Blocked Sessions"
-                launchError = report.summary
+                blockedSessionsReport = try await query.moveBlockedSessions(agent: agent, cwd: store.repoPath).summary
             } catch {
-                launchErrorTitle = "Could not move blocked Sessions"
-                launchError = error.localizedDescription
+                notices.post(Notice("Could not move blocked Sessions: \(error.localizedDescription)"))
             }
         }
     }
@@ -1937,6 +1935,7 @@ struct SessionsContentView: View {
 
     private func prepareTaskWorkspace() {
         guard let task = fileTask else { return }
+        let notices = navigation.notices
         Task { @MainActor in
             do {
                 let repo = store.repoPath
@@ -1944,8 +1943,7 @@ struct SessionsContentView: View {
                 let path = try await LocalWaveAgentLauncher.checkoutTask(repoPath: repo, issue: issue)
                 navigation.preparedTaskWorktrees[task.task.id] = path
             } catch {
-                launchErrorTitle = "Could not prepare checkout"
-                launchError = error.localizedDescription
+                notices.post(Notice("\(task.task.task.identifier) Could not prepare checkout: \(error.localizedDescription)"))
             }
         }
     }
@@ -1982,21 +1980,6 @@ struct SessionsContentView: View {
     /// An independent conversation with Task context in the Task's checkout.
     /// Resolving the checkout prepares Task Work only; it never starts a
     /// Graph or replaces another Session.
-    private func newTaskSessionFromInput(_ taskId: String) {
-        let owner = navigation.performanceOwner
-        Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: taskId,
-                        repository: store.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
-            Perf.acknowledged(.newConversation, id: taskId, owner: owner)
-            Task {
-                do { try await newTaskSession(taskId) }
-                catch {
-                    Perf.finish(.newConversation, id: taskId, owner: owner, outcome: .failed)
-                    launchError = error.localizedDescription
-                }
-            }
-        }
-    }
-
     private func newTaskSession(_ taskId: String) async throws {
         guard let found = model.task(id: taskId) else { return }
         let origin = navigation
@@ -2045,8 +2028,7 @@ struct SessionsContentView: View {
     }
 
     private func actionFailed(_ error: Error) {
-        launchErrorTitle = "Could not complete the action"
-        launchError = error.localizedDescription
+        navigation.notices.post(Notice("Could not complete the action: \(error.localizedDescription)"))
     }
 }
 

@@ -2582,6 +2582,43 @@ final class WorkModel {
         }
     }
 
+    /// An independent conversation with Task context in the Task's checkout,
+    /// opened by `open`. A failure posts to the window that asked, with "Try again".
+    func newTaskSession(_ taskID: String, open: @escaping @MainActor (String) async throws -> Void) {
+        let owner = navigation
+        guard owner.startingTaskSessions.insert(taskID).inserted else { return }
+        let key = "new-session-\(taskID)"
+        let identifier = task(id: taskID)?.task.task.identifier ?? taskID
+        owner.notices.clear(key: key)
+        Perf.userAction(.newConversation, scenario: "new_session_to_typing", id: taskID,
+                        repository: repoPath, liveSessions: liveSessionCount, owner: owner.performanceOwner) {
+            Perf.acknowledged(.newConversation, id: taskID, owner: owner.performanceOwner)
+            Task { @MainActor in
+                defer { owner.startingTaskSessions.remove(taskID) }
+                do { try await open(taskID) }
+                catch {
+                    Perf.finish(.newConversation, id: taskID, owner: owner.performanceOwner, outcome: .failed)
+                    owner.notices.post(Notice(
+                        "\(identifier) New session failed: \(error.localizedDescription)", key: key,
+                        action: Notice.Action("Try again") { [weak self] in self?.newTaskSession(taskID, open: open) }))
+                }
+            }
+        }
+    }
+
+    /// A Warp window at the Task's checkout.
+    func openWorktree(_ workspace: TaskWorktreeSnapshot) {
+        var components = URLComponents()
+        components.scheme = "warp"
+        components.host = "action"
+        components.path = "/new_window"
+        components.queryItems = [URLQueryItem(name: "path", value: workspace.worktree)]
+        guard let url = components.url, NSWorkspace.shared.open(url) else {
+            navigation.notices.post(Notice("Warp could not open \(workspace.worktree)."))
+            return
+        }
+    }
+
     func startTask(_ graph: String?, from: String? = nil, task: RoadmapTask, refused: @escaping @MainActor () -> Void = {}) {
         request(task, "Start", .taskRun(directory: directory(task), issue: task.task.identifier, graph: graph,
                                         from: from, agent: nil, approve: false), refused: refused)
@@ -2671,8 +2708,18 @@ final class WorkModel {
         }
     }
 
-    func machines() async throws -> [Machine] {
-        try await query.machines()
+    /// The Machines Work can run on, read when a Machine control appears.
+    private(set) var machines: Reading<[Machine]> = .loading {
+        didSet { reported("machines", "Machines", from: oldValue, to: machines) }
+    }
+
+    func loadMachines() async {
+        let result: Result<[Machine], Error>
+        do { result = .success(try await query.machines()) }
+        // A newer load or a navigation cancels this one; that is not a failure to show.
+        catch is CancellationError { return }
+        catch { result = .failure(error) }
+        machines = reading(from: result, lastGood: machines.value)
     }
 
     /// Hand off the Task or set the Wave's default, then confirm the Work update

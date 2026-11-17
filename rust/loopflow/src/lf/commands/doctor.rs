@@ -95,6 +95,7 @@ pub fn report() -> Result<DoctorReport> {
         time::OffsetDateTime::now_utc().unix_timestamp() - CONTENTION_WINDOW_SECONDS,
     ));
     checks.push(loopflow_execution::desktop_exits::check());
+    checks.push(check_ptys());
     Ok(DoctorReport {
         store: store_report,
         rows,
@@ -134,6 +135,79 @@ fn check_running_binaries() -> Check {
             )
         }
     }
+}
+
+const PTYS: &str = "ptys";
+
+/// PTYs in use against the Machine's limit. Each Task conversation's held
+/// terminal takes one, as does every terminal tab; they run out first.
+fn check_ptys() -> Check {
+    match pty_usage() {
+        Some(usage) => pty_check(usage),
+        None => Check::warn(PTYS, "cannot read this Machine's PTY limit"),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PtyUsage {
+    in_use: u64,
+    max: u64,
+    /// The setting that holds `max`.
+    limit: &'static str,
+}
+
+/// Fewer PTYs left than this warns: a reboot starts every Task conversation again.
+const PTY_HEADROOM: u64 = 32;
+
+fn pty_check(usage: PtyUsage) -> Check {
+    let PtyUsage { in_use, max, limit } = usage;
+    let left = max.saturating_sub(in_use);
+    let detail = format!(
+        "{in_use} of {max} PTYs in use ({limit}), {left} left; each Task conversation holds one"
+    );
+    if left < PTY_HEADROOM.min(max / 10).max(1) {
+        Check::warn(
+            PTYS,
+            format!("{detail}. A conversation that cannot get one says so in `lf task status`"),
+        )
+    } else {
+        Check::ok(PTYS, detail)
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn pty_usage() -> Option<PtyUsage> {
+    let output = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.tty.ptmx_max"])
+        .output()
+        .ok()?;
+    let max = String::from_utf8_lossy(&output.stdout).trim().parse().ok()?;
+    // devfs lists a `ttysNNN` node for each PTY while it is allocated.
+    let in_use = std::fs::read_dir("/dev")
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.strip_prefix("ttys")
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
+        })
+        .count() as u64;
+    Some(PtyUsage {
+        in_use,
+        max,
+        limit: "kern.tty.ptmx_max",
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pty_usage() -> Option<PtyUsage> {
+    let read = |path: &str| std::fs::read_to_string(path).ok()?.trim().parse().ok();
+    Some(PtyUsage {
+        in_use: read("/proc/sys/kernel/pty/nr")?,
+        max: read("/proc/sys/kernel/pty/max")?,
+        limit: "kernel.pty.max",
+    })
 }
 
 const CONTENTION_WINDOW_SECONDS: i64 = 86_400;
@@ -499,11 +573,30 @@ fn print_checks(store: &StoreReport, checks: &[Check], rows: usize) {
 #[cfg(test)]
 mod tests {
     use super::{
-        check_attribution, check_contention, check_identity, check_lineage, inspect_store, Status,
+        check_attribution, check_contention, check_identity, check_lineage, inspect_store,
+        pty_check, PtyUsage, Status,
     };
     use loopflow_execution::process::LfProcess;
 
     const DAY: i64 = 86_400;
+
+    /// Headroom is the room left under the limit; little of it warns.
+    #[test]
+    fn pty_headroom_counts_what_is_left_and_warns_when_little_is() {
+        let usage = |in_use| PtyUsage {
+            in_use,
+            max: 511,
+            limit: "kern.tty.ptmx_max",
+        };
+        let roomy = pty_check(usage(144));
+        assert_eq!(roomy.status, Status::Ok);
+        assert_eq!(
+            roomy.detail,
+            "144 of 511 PTYs in use (kern.tty.ptmx_max), 367 left; each Task conversation holds one"
+        );
+        assert_eq!(pty_check(usage(490)).status, Status::Warn);
+        assert_eq!(pty_check(usage(511)).status, Status::Warn);
+    }
 
     #[test]
     fn store_report_admits_a_newer_migration_tail() {

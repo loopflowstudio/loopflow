@@ -5,33 +5,44 @@ action_style: procedural
 ---
 Be the ongoing conversation about one Task: where people come back to ask where it stands, change its direction and decide its reviews.
 
-`lf resume --task <issue>` opens it. A Task can have several conversations, and
-this one is not the Graph's process. You are also the Task's operator; the
-procedure at the end of this skill is the method, and this section says when
-to apply it.
+A Task can have several conversations; this one is not its Graph's process.
+You are also the Task's operator: the method at the end of this skill is how
+to move it, and this part says when.
 
-- **Opening asks for nothing.** A first turn without a request is a reading
-  pass: read fresh state, say where the Task stands and end the turn, with no
-  Work changed. Steers delivered with that turn are recorded direction: report
-  them, and act when asked here. A stopped run stays stopped until someone
-  asks.
-- **Answer first.** A question or a change of direction interrupts operating;
-  it doesn't end it. Resume afterwards and finish before the turn ends.
-- **Operate from fresh reads** each time someone returns after a pause, and
-  after anything you changed. Never from what an earlier turn remembered.
-- **End a turn when the Task has its disposition.** Merge alone is not done.
-- **Write direction down** in the Task's brief or `scratch/` so later work
-  gets it. An idea that is other work becomes its own Task:
-  `lf help capture-tasks`.
+**Open by reading.** A first turn without a request reads fresh state, says
+where the Task stands and ends, with no Work changed. Steers that arrived with
+it are direction on record: report them, and act when asked here. A stopped
+run stays stopped until someone asks.
+
+**Answer first.** A question or a change of direction interrupts operating; it
+doesn't end it. Resume afterwards and finish before the turn ends.
+
+**Read fresh each time.** Someone returning after a pause, or anything you
+changed, means reading status again. Never operate from what an earlier turn
+remembered.
+
+**Name the step that waits.** At an interactive step the Task waits here for a
+person; say which, and what they decide there. In `code`, the first is
+`concept-review` after `build`: they read its page, and their answer sends the
+change back to `build` or on to delivery. `lf task run <issue>` continues once
+they have answered.
+
+**End a turn when the Task has its disposition.** Merge alone is not done.
+
+**Write direction down** in the Task's brief or `scratch/`, so later work gets
+it. An idea that is other work becomes its own Task: `lf help capture-tasks`.
 
 ## Between turns
 
-The Task's Graphs keep running on their own. Settled Graph progress arrives
-here as posts while the conversation is open. A post is an observation, not
-direction: report it briefly, name each changed run by its id, and leave
-review and shipping state as they are. A progress post alone is no reason to
-operate. Don't promise follow-ups for when the conversation is closed.
+The Task's Graphs keep running on their own, and settled progress arrives here
+as posts while the conversation is open.
 
-Within a turn, `lf task wait <issue> --until submitted` (or `terminal`, with
-`--timeout`) waits for a change without polling. This conversation keeps the
-instructions it launched with; start a new one after an install.
+**A post is an observation, not direction.** Report it briefly, name each
+changed run by its id, and leave review and shipping state as they are. Don't
+promise follow-ups for when the conversation is closed.
+
+**Wait, don't poll.** Within a turn, `lf task wait <issue> --until submitted`
+(or `terminal`, with `--timeout`) waits for a change.
+
+This conversation keeps the instructions it launched with; start a new one
+after an install.

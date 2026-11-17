@@ -15,6 +15,11 @@ page in a browser, the API over the network, the simulator or device. Drive it
 the way a person would. Internal setters, test-only endpoints, mocks and
 fixtures do not count.
 
+Earlier runs left notes on reaching each part of the product in `.lf/qa/`, one
+file per surface, whose first line says when to read it. List them with
+`head -n 1 .lf/qa/*.md` and read the ones for the surfaces this change touches
+before you start.
+
 Getting there is your job. Build it, start its services, create accounts and
 realistic data, sign in, set up the state a real user would already have. When
 no route exists, make one. Hand back only what truly needs a person (their own
@@ -41,10 +46,11 @@ Run tests only where they tell you something the real path can't reach.
 
 ## Keep what you learned
 
-How to launch and drive this product belongs in this skill. When you had to
-work out a step it doesn't describe, or one it describes no longer works, write
-the working version here with `lf skill customize qa`, replacing what was
-wrong.
+How to launch and drive the product belongs in `.lf/qa/<surface>.md`. When you
+had to work out a step no note describes, or one a note describes no longer
+works, write the working version into that surface's file, replacing what was
+wrong. A surface with no file gets one, whose first line says when to read it:
+`Read when the change touches …`. Commit the notes with the change.
 
 Show the run in `scratch/qa.html`: each scenario, what you did, what you saw
 with screenshots or transcripts, and what you fixed. Finish with what works

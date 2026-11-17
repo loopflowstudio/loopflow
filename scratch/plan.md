@@ -151,31 +151,18 @@ is saved. `lf -b steer` exits with the turn's failure.
 
 ## What goes
 
-- `SessionConnectionArgs::message` (`lf/mod.rs`) and every `conflicts_with =
-  "message"`; the `--message` branch of `session::resume` and its
-  "a headless connection requires --message TEXT" / "a next-turn message
-  requires -b" checks; `session new`'s "continue it with `lf -b resume
-  --message`" refusal and the `--prepare` refusal of a message.
-- `lf -b resume` (no `--message`) becomes an error naming `lf -b steer`.
-- `Cli::resume`'s doc comment naming `--message`.
-- The `run_refusal` text "`lf resume` takes only Sessions" stays for `resume`;
-  `run::resume` moves behind `-b steer`.
-- Tests and callers: `session_lifecycle_tests.rs` (390, 1134–1141),
-  `served_reads.rs` (2396–2595), `context_launch_tests.rs`,
-  `session_launch_contract.rs`, `session_cli_tests.rs`, `transport_tests.rs`,
-  the `lf/mod.rs` parser test at 4081, `python/tests/test_build_provenance.py`,
-  `scripts/benchmarks/pi/probe.py` (no-ID `-b resume --message` becomes
-  `lf -b :`), `scripts/benchmarks/crate-rebuild/*.py`.
+Done in slice 1: `--message` on `resume`, `session new` and ssh dispatch,
+with its checks, callers and tests (`served_reads.rs`, `transport_tests.rs`
+and the benchmark scripts' remaining `--message` are other commands' flags).
+Remaining:
+
 - `public_commands_save_steers_without_launching_providers`: the command
   itself still launches nothing; its stopped-Session and Task halves move to
-  the server wake tests.
-- Docs: `docs/sessions.md`, `docs/config.md`, `docs/dev/execution.md`,
-  `docs/dev/planning.md`, `docs/dev/reference-models.md`,
-  `rust/loopflow/src/server/README.md` (the watcher's third reach; `session.continue`
-  is no longer the only server-started process besides `session.start`),
-  `.lf/qa/provider-switching.md`, and `lf steer`'s Clap help ("No turn
-  starts" becomes "A stopped Session it wakes is started again by the Machine
-  server; `-b` runs the turn here and prints the reply").
+  the server wake tests (slice 2).
+- `lf steer`'s Clap help says only `-b` reads a stopped Session; slice 2 adds
+  that the Machine server starts a stopped Session a steer names.
+- `rust/loopflow/src/server/README.md` already describes the server start
+  (write-docs); check it against slice 2's code.
 - Release notes under `release/` are shipped records and stay.
 
 ## Slices

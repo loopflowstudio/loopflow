@@ -115,8 +115,8 @@ uses outbound REST requests. Remote execution reaches the target Machine through
 
 ## Add a provider
 
-A provider is one harness file. Core code never compares a harness name; it
-branches on what the harness declares.
+A provider is one harness file. Launch and transcript decisions branch on what
+the harness declares.
 
 1. Add `harness/<name>.rs` with a unit struct implementing `Harness`: its
    `Capabilities`, `open` for the native interactive client and `driver` for

@@ -106,7 +106,7 @@ pub fn checkout_execution_boundary(
 ) -> anyhow::Result<AgentExecutionBoundary> {
     let (harness, _) = parse_agent(agent);
     if !crate::harness::HarnessKind::parse(&harness)
-        .is_some_and(|kind| kind.harness().supports_execution_boundary())
+        .is_some_and(|kind| kind.harness().capabilities().supports_execution_boundary)
     {
         return Err(anyhow::anyhow!(format!(
             "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
@@ -171,7 +171,7 @@ pub struct AgentConfig {
     pub fallback_agents: Vec<String>,
     /// Max turn budget when supported by the harness.
     pub max_turns: Option<u32>,
-    /// Opaque provider continuation token for this launch.
+    /// Retry continuation state, converted to `harness::Start` at the launch boundary.
     pub resume_token: Option<AgentSessionId>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
@@ -1009,7 +1009,7 @@ fn _run_with_retries(
         let mut result = run(&attempt, launched)?;
         launched = true;
         if !crate::harness::HarnessKind::parse(&provider)
-            .is_some_and(|kind| kind.harness().classifies_failures())
+            .is_some_and(|kind| kind.harness().capabilities().classifies_failures)
         {
             return Ok(result);
         }
@@ -1395,7 +1395,11 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        mode: crate::harness::Mode::Headless,
+        harness: crate::harness::HarnessKind::parse(&provider)
+            .ok_or_else(|| {
+                CoreError::ExecutionFailed(format!("unsupported session harness: {provider}"))
+            })?
+            .harness(),
         holder,
         admitted: &admitted,
         start: launch
@@ -1497,13 +1501,13 @@ mod tests {
 
     fn terminal_args(config: &AgentConfig) -> Vec<String> {
         let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
-        let launch = crate::harness::Launch {
-            mode: crate::harness::Mode::Interactive,
-            ..crate::harness::launch_for_test(config, &admitted)
-        };
+        let launch = crate::harness::launch_for_test(
+            crate::harness::HarnessKind::parse(&parse_agent(config.agent().unwrap()).0).unwrap(),
+            config,
+            &admitted,
+        );
         launch
-            .harness()
-            .unwrap()
+            .harness
             .open(&launch)
             .unwrap()
             .process
@@ -2138,13 +2142,16 @@ trust_level = "trusted"
         };
         let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
         let value = crate::harness::Launch {
-            mode: crate::harness::Mode::Interactive,
             start: crate::harness::Start::Resume {
                 thread: launch.resume_token.as_ref().unwrap(),
             },
-            ..crate::harness::launch_for_test(&launch, &admitted)
+            ..crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &launch,
+                &admitted,
+            )
         };
-        let command = value.harness().unwrap().open(&value).unwrap();
+        let command = value.harness.open(&value).unwrap();
         let claude = command
             .process
             .get_args()

@@ -9,9 +9,9 @@ at turn boundaries, interjects through hooks and records what happened.
 ```rust
 let launch = Launch {
     config: &config,
-    mode,               // from transport::delegate
+    harness,            // resolved once from the selected agent
     holder,             // resolved after Work binding
-    admitted: &admitted, // required before selecting the harness
+    admitted: &admitted, // required before opening the provider
     start: Start::Resume { thread: &thread },
     context_file: Some(&context),
 };
@@ -22,9 +22,9 @@ Native and headless launches share `Launch` and the same per-harness `Harness`.
 one headless provider turn. Native results retain the provider's OS exit status;
 headless results retain answer text and typed turn failures for retry policy.
 
-`transport::delegate` decides `Mode`; after Work binding, `transport::holder`
-decides `Holder` once. In-process callers such as commit messages, PR text and
-replay choose Headless + Caller. A Task Graph step goes through `delegate`.
+`transport::delegate` decides `Mode`, which selects the native or headless runner.
+After Work binding, `transport::holder` decides `Holder` once. In-process callers
+such as commit messages, PR text and replay choose Headless + Caller. A Task Graph step goes through `delegate`.
 `admit` creates the capture and claims its attachment before a native launch;
 headless admission claims the runtime's attachment before constructing `Launch`.
 
@@ -32,7 +32,7 @@ Each harness file answers the rest:
 
 | method | answers |
 |---|---|
-| `capabilities()` | who names the thread, same-turn input, native skills, turn limit, output schema, respawn after crash, install hint |
+| `capabilities()` | who names the thread, same-turn input, initial prompt on resume, execution boundary, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
 | `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 

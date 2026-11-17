@@ -321,10 +321,7 @@ impl Driver {
             current_turn_id: Arc::new(Mutex::new(None)),
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
-            launch: AgentConfig {
-                resume_token: launch.start.thread(),
-                ..launch.config.clone()
-            },
+            launch: launch.config.clone(),
             should_seed_prompt: true,
             child_group: None,
             agent_directory: None,
@@ -652,10 +649,6 @@ impl StreamDriver for Driver {
             .lock()
             .expect("codex provider session id lock poisoned")
             .clone()
-    }
-
-    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
-        self.resume_agent_session = agent_session;
     }
 }
 
@@ -1309,6 +1302,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
                 &AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1354,6 +1348,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
                 &AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1467,6 +1462,7 @@ mod tests {
         let (events, event_rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
                 &AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1661,6 +1657,7 @@ mod tests {
         let (events, _event_rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
                 &AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1705,12 +1702,6 @@ mod tests {
 pub struct Codex;
 
 impl super::Harness for Codex {
-    fn initial_prompt_on_resume(&self) -> bool {
-        true
-    }
-    fn classifies_failures(&self) -> bool {
-        true
-    }
     fn sign_in_advice(&self) -> &'static str {
         "run `codex login`"
     }
@@ -1751,6 +1742,9 @@ impl super::Harness for Codex {
                 server: super::ThreadName::Reported,
             },
             same_turn_input: true,
+            initial_prompt_on_resume: true,
+            supports_execution_boundary: true,
+            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
             turn_limit: false,
             output_schema: false,
@@ -1799,14 +1793,16 @@ impl super::Harness for Codex {
             if matches!(launch.start, super::Start::New) {
                 config.skill_invocation = None;
             }
-            config.resume_token = launch.start.thread();
             let opened = std::thread::scope(|scope| {
                 scope
                     .spawn(|| {
                         tokio::runtime::Builder::new_current_thread()
                             .enable_all()
                             .build()?
-                            .block_on(open_native(&config, launch.admitted, launch.holder))
+                            .block_on(open_native(&super::Launch {
+                                config: &config,
+                                ..*launch
+                            }))
                     })
                     .join()
                     .map_err(|_| anyhow!("Codex startup worker panicked"))?
@@ -1833,33 +1829,23 @@ struct OpenedCodex {
 
 /// Start the app-server and open the conversation with lf's configuration, so
 /// the native client only joins it. Nothing here outlives the client's start.
-async fn open_native(
-    launch: &crate::agent::AgentConfig,
-    owner: &crate::harness::Admitted,
-    holder: Holder,
-) -> Result<OpenedCodex> {
+async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
     use crate::harness::{codex_connection, ApprovalPolicy};
 
     let Admitted {
         store,
         session,
         attachment,
-    } = owner;
-    let saved = launch
-        .resume_token
-        .clone()
-        .or(store.session_thread(session)?);
+    } = launch.admitted;
+    let saved = launch.start.thread().or(store.session_thread(session)?);
     let (events, _events) = tokio::sync::mpsc::unbounded_channel();
     let launch_value = super::Launch {
-        config: launch,
-        mode: super::Mode::Interactive,
-        holder,
-        admitted: owner,
-        start: super::Start::New,
-        context_file: None,
+        start: saved
+            .as_ref()
+            .map_or(super::Start::New, |thread| super::Start::Resume { thread }),
+        ..*launch
     };
     let mut harness = Driver::new(&launch_value, events, ApprovalPolicy::NativeClient);
-    harness.set_agent_session(saved.clone());
 
     match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start()).await {
         Ok(result) => result?,
@@ -1889,14 +1875,14 @@ async fn open_native(
         .unwrap_or_else(|| "Loopflow".to_string());
     let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
     store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
-    if let Some(context) = &launch.conversation_context {
+    if let Some(context) = &launch.config.conversation_context {
         // Hooks run on the app-server, which never inherits the terminal's
         // launch file. Bind before the client can send a turn.
         let mut context = context.clone();
         context.identify(store, session)?;
         context.bind_codex_session(thread.as_str())?;
     }
-    if turns == 0 && !launch.task_prompt.is_empty() {
+    if turns == 0 && !launch.config.task_prompt.is_empty() {
         // Provider history settles on the next read whether it ran, so a
         // broken store cannot stop the turn.
         codex_connection::start_turn(
@@ -1905,7 +1891,7 @@ async fn open_native(
             attachment,
             &endpoint,
             &thread,
-            &launch.task_prompt,
+            &launch.config.task_prompt,
         )
         .await
         .context("Codex first turn was not sent")?;

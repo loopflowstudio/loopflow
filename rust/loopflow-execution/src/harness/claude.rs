@@ -99,10 +99,7 @@ impl Driver {
     ) -> Self {
         Self {
             events,
-            config: AgentConfig {
-                resume_token: launch.start.thread(),
-                ..launch.config.clone()
-            },
+            config: launch.config.clone(),
             owner: launch.admitted.clone(),
             holder: launch.holder,
             runtime: None,
@@ -614,13 +611,6 @@ impl StreamDriver for Driver {
             .expect("claude provider session id lock poisoned")
             .clone()
     }
-
-    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
-        *self
-            .agent_session
-            .lock()
-            .expect("claude provider session id lock poisoned") = agent_session;
-    }
 }
 
 fn remember_stderr(lines: &mut VecDeque<String>, line: String) {
@@ -645,6 +635,7 @@ mod activity_tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -722,7 +713,14 @@ mod tests {
                     attachment: attachment.clone(),
                 },
             );
-            let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+            let mut harness = Driver::new(
+                &crate::harness::launch_for_test(
+                    crate::harness::HarnessKind::Claude,
+                    &config,
+                    &admitted,
+                ),
+                tx,
+            );
             harness.send_input("one turn").await.unwrap();
             let (pid, birth) = store
                 .agent_process_identity(id)
@@ -836,8 +834,14 @@ mod tests {
                         attachment: first.clone(),
                     },
                 );
-                let mut harness =
-                    Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+                let mut harness = Driver::new(
+                    &crate::harness::launch_for_test(
+                        crate::harness::HarnessKind::Claude,
+                        &config,
+                        &admitted,
+                    ),
+                    tx,
+                );
                 harness.set_runtime(Some(capture.clone()));
                 harness.send_input("first request").await.unwrap();
                 // Pipe acceptance precedes provider execution. Interrupt only
@@ -856,7 +860,7 @@ mod tests {
                 ));
                 observed_input(home, "same conversation").await;
                 // The native conversation survives the OS process's interruption.
-                harness.set_agent_session(Some("native-conversation".into()));
+                *harness.agent_session.lock().unwrap() = Some("native-conversation".into());
                 harness.interrupt().await.unwrap();
                 assert!(other_store.agent_processes().unwrap().is_empty());
                 drop(selection);
@@ -955,7 +959,14 @@ mod tests {
         std::env::set_var("PATH", ledger.home());
         std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
         let (config, admitted) = (config, admitted);
-        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
 
         let first = harness
             .send_input("first")
@@ -984,6 +995,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1114,7 +1126,14 @@ done
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let (config, admitted) = claude.attach("first");
-        let mut first = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut first = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
         first.send_input("remember").await.unwrap();
         let (status, answer, _) =
             tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
@@ -1127,8 +1146,17 @@ done
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let (config, admitted) = claude.attach("second");
-        let mut resumed = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
-        resumed.set_agent_session(Some(agent_session.clone()));
+        let launch = crate::harness::Launch {
+            start: crate::harness::Start::Resume {
+                thread: &agent_session,
+            },
+            ..crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            )
+        };
+        let mut resumed = Driver::new(&launch, tx);
         resumed.send_input("recall").await.unwrap();
         let (status, answer, _) =
             tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
@@ -1167,7 +1195,14 @@ done
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let (config, admitted) = claude.attach("step");
-        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
         harness.send_input("run the suites").await.unwrap();
         let (status, _, _) = tokio::time::timeout(Duration::from_secs(30), drive_turn(&mut rx))
             .await
@@ -1205,7 +1240,14 @@ cat > /dev/null
         let (tx, mut rx) = mpsc::unbounded_channel();
 
         let (config, admitted) = claude.attach("step");
-        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
         harness.send_input("run the suites").await.unwrap();
         assert!(matches!(
             harness.send_current("also lint").await,
@@ -1263,7 +1305,14 @@ cat > /dev/null
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
-        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
         harness.start().await.expect("start");
 
         harness
@@ -1300,7 +1349,14 @@ cat > /dev/null
         let config = live_config();
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
-        let mut harness = Driver::new(&crate::harness::launch_for_test(&config, &admitted), tx);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Claude,
+                &config,
+                &admitted,
+            ),
+            tx,
+        );
         harness.start().await.expect("start");
 
         harness
@@ -1355,9 +1411,6 @@ impl super::Harness for Claude {
                     .parent()
                     .is_some_and(|dir| dir.file_name().is_some_and(|name| name == "claude"))
         })
-    }
-    fn classifies_failures(&self) -> bool {
-        true
     }
     fn model_rungs(&self) -> &'static [&'static str] {
         &crate::config::CLAUDE_MODEL_RUNGS
@@ -1433,6 +1486,9 @@ impl super::Harness for Claude {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Assigned },
             same_turn_input: true,
+            initial_prompt_on_resume: false,
+            supports_execution_boundary: true,
+            classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             turn_limit: true, output_schema: true, respawns_after_crash: true,
             install_hint: "Install it with `npm install -g @anthropic-ai/claude-code`, then open `claude` to sign in.",

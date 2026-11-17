@@ -1,5 +1,5 @@
 //! One headless provider turn from an already admitted launch.
-use super::{ApprovalPolicy, Launch, Mode};
+use super::{ApprovalPolicy, Launch};
 use crate::agent::{AgentFailure, AgentProcessResult, ProcessConfig};
 use crate::error::CoreError;
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
@@ -7,17 +7,8 @@ use std::io::Write;
 use std::time::Duration;
 
 pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessResult, CoreError> {
-    if launch.mode != Mode::Headless {
-        return Err(CoreError::ExecutionFailed(
-            "stream driver requires a headless launch".into(),
-        ));
-    }
     let runtime = process.runtime.as_ref();
-    let provider = launch
-        .harness()
-        .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
-        .kind()
-        .as_str();
+    let provider = launch.harness.kind().as_str();
     let mut config = launch.config.clone();
     let prompt = std::mem::take(&mut config.task_prompt);
     let launch_worktree = config.cwd.clone().or_else(|| std::env::current_dir().ok());
@@ -32,8 +23,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
     let result = executor.block_on(async {
         let (event_tx, mut event_rx) = tokio::sync::mpsc::unbounded_channel();
         let launch_value = Launch { config: &config, ..*launch };
-        let mut harness = launch_value.harness()
-            .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?
+        let mut harness = launch_value.harness
             .driver(&launch_value, event_tx, ApprovalPolicy::AutoApprove);
         harness.set_runtime(process.runtime.clone());
         harness
@@ -89,7 +79,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
                                 limited |= code == "provider_rate_limited";
-                                if launch.harness().expect("validated launch").terminal_error(&code)
+                                if launch.harness.terminal_error(&code)
                                 {
                                     exit_code = Some(1);
                                 }

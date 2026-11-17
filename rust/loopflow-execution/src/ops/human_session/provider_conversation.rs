@@ -245,7 +245,10 @@ pub async fn select(
 async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> {
     let accounts = store.list_provider_accounts(None).await?;
     let mut found: Vec<NativeConversation> = Vec::new();
-    for provider in [Provider::Codex, Provider::Claude] {
+    for harness in HarnessKind::ALL {
+        let Some(provider) = harness.provider() else {
+            continue;
+        };
         let stored = accounts
             .iter()
             .filter(|account| account.provider == provider.as_str())
@@ -258,10 +261,6 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
             {
                 continue;
             }
-            let harness = match provider {
-                Provider::Codex => HarnessKind::Codex,
-                _ => HarnessKind::Claude,
-            };
             if let Some(transcript) = transcript(harness, &home, id) {
                 found.push(NativeConversation {
                     provider,

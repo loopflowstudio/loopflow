@@ -151,7 +151,7 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
                     config.env.insert("LF_BIN".into(), binary.into());
                     let launch = Launch {
                         config: &config,
-                        mode,
+                        harness: kind.harness(),
                         holder,
                         admitted: &admitted,
                         start: Start::New,
@@ -246,6 +246,83 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
 }
 
 #[test]
+fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    providers(home);
+    let binary = loopflow_test_support::lf_binary();
+    let _environment = crate::test_ambient::EnvGuard::clear(&["LF_BIN", "PATH", "CODEX_HOME"]);
+    std::env::set_var("LF_BIN", binary);
+    std::env::set_var(
+        "PATH",
+        format!("{}:/usr/bin:/bin", home.join("bin").display()),
+    );
+    let _server = loopflow_test_support::MachineServer::start(binary, home);
+    std::fs::write(home.join("native-thread"), "saved-empty-thread").unwrap();
+    crate::journal::with_runtime(
+        home,
+        &["lf".into(), "resume".into()],
+        || -> anyhow::Result<()> {
+            let capture = SessionRecorder::begin_at(
+                home,
+                SessionCaptureSpec {
+                    harness: "codex".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .map(LfProcessRuntime::new)?;
+            capture.claim_session_attachment()?;
+            let admitted = Admitted::from_runtime(&capture)?;
+            admitted.store.record_session_agent_session(
+                &admitted.session,
+                &admitted.attachment,
+                &"saved-empty-thread".into(),
+            )?;
+            let config = AgentConfig {
+                agent: Some("codex".into()),
+                cwd: Some(home.into()),
+                task_prompt: "First prompt on the saved thread".into(),
+                env: capture.environment(),
+                ..Default::default()
+            };
+            // Native launch recovers the stored thread even when the entry has no explicit resume token.
+            let launch = Launch {
+                harness: HarnessKind::Codex.harness(),
+                config: &config,
+                holder: Holder::Server,
+                admitted: &admitted,
+                start: Start::New,
+                context_file: None,
+            };
+            let outcome = super::native_session::run(&launch, None, Some(&capture))?;
+            anyhow::ensure!(!outcome.failed(), "{:?}", outcome.status);
+            let turns: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(home.join("native-turns.json"))?)?;
+            assert_eq!(
+                turns[0]["items"][0]["content"][0]["text"], config.task_prompt,
+                "the first prompt must reach the saved thread"
+            );
+            assert_eq!(
+                admitted.store.session_thread(&admitted.session)?,
+                Some("saved-empty-thread".into())
+            );
+            capture.finish("completed")?;
+            Ok(())
+        },
+    )
+    .unwrap();
+}
+
+#[test]
 fn native_limits_and_schemas_require_a_headless_run() {
     let home = tempfile::tempdir().unwrap();
     let admitted = super::admit_for_test(home.path());
@@ -262,7 +339,7 @@ fn native_limits_and_schemas_require_a_headless_run() {
             };
             let launch = Launch {
                 config: &config,
-                mode: Mode::Interactive,
+                harness: kind.harness(),
                 holder: Holder::Caller,
                 admitted: &admitted,
                 start: Start::New,

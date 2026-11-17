@@ -7,7 +7,7 @@ use std::fs::File;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::{Launch, Mode, Start};
+use super::{Launch, Start};
 use crate::agent::missing_agent_message;
 use crate::agent::AgentConfig;
 use crate::harness::native_exit::{attachment_lost, departure};
@@ -96,6 +96,10 @@ pub fn launch_session(
     context_file: Option<&Path>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
+    let (name, _) = crate::config::parse_agent(config.agent()?);
+    let harness = super::HarnessKind::parse(&name)
+        .ok_or_else(|| anyhow::anyhow!("unsupported session harness: {name}"))?
+        .harness();
     let cwd = config
         .cwd
         .clone()
@@ -116,7 +120,7 @@ pub fn launch_session(
             run(
                 &Launch {
                     config: &config,
-                    mode: Mode::Interactive,
+                    harness,
                     holder,
                     admitted: &admitted,
                     start: Start::New,
@@ -162,6 +166,10 @@ pub fn resume_session_with_env(
         .ok_or_else(|| anyhow!("Session input {artifact_key} is not recorded"))?;
     let mut config =
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
+    let (name, _) = crate::config::parse_agent(config.agent()?);
+    let harness = super::HarnessKind::parse(&name)
+        .ok_or_else(|| anyhow::anyhow!("unsupported session harness: {name}"))?
+        .harness();
     // Reopening a conversation recorded as Task, Wave or repository work is
     // Work whatever command reopened it.
     let holder = crate::transport::holder(store.is_work(named_work, Some(&session))?, None);
@@ -173,12 +181,7 @@ pub fn resume_session_with_env(
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
-    let held_codex = session
-        .provider
-        .as_deref()
-        .and_then(super::HarnessKind::parse)
-        .is_some_and(|kind| kind.harness().initial_prompt_on_resume())
-        && holder != Holder::Caller;
+    let held_codex = harness.capabilities().initial_prompt_on_resume && holder != Holder::Caller;
     if provider_session.is_some() && !held_codex {
         config.task_prompt.clear();
     }
@@ -204,7 +207,7 @@ pub fn resume_session_with_env(
         let result = run(
             &Launch {
                 config: &config,
-                mode: Mode::Interactive,
+                harness,
                 holder,
                 admitted: &admitted,
                 start: provider_session.map_or(Start::New, |provider| Start::Resume {
@@ -216,12 +219,7 @@ pub fn resume_session_with_env(
             capture.as_ref(),
         );
         finish_admission(&admitted, capture, &result);
-        result?.result(
-            super::HarnessKind::parse(&crate::config::parse_agent(config.agent()?).0)
-                .expect("resolved harness"),
-            provider_session.is_some(),
-            holder,
-        )
+        result?.result(harness.kind(), provider_session.is_some(), holder)
     })
 }
 
@@ -545,10 +543,6 @@ pub fn run(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    anyhow::ensure!(
-        launch.mode == Mode::Interactive,
-        "native client requires an interactive launch"
-    );
     let cwd = launch
         .config
         .cwd
@@ -556,7 +550,7 @@ pub fn run(
         .map(Ok)
         .unwrap_or_else(std::env::current_dir)?;
     let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&cwd)?;
-    let harness = launch.harness()?;
+    let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));
     // Admission and Task checks precede provider setup, including private servers
@@ -598,7 +592,7 @@ fn run_client(
     progress: &mut crate::startup::Startup,
 ) -> Result<NativeOutcome> {
     let environment = &launch.config.env;
-    let program = launch.harness()?.kind().as_str();
+    let program = launch.harness.kind().as_str();
     let cwd = launch
         .config
         .cwd
@@ -615,7 +609,7 @@ fn run_client(
         .get(crate::session_record::CAPTURE_KEY_ENV)
         .map(|key| crate::session_record::capture_dir(key))
         .transpose()?;
-    if let (Some(provider), Some(thread)) = (launch.harness()?.kind().provider(), agent_session) {
+    if let (Some(provider), Some(thread)) = (launch.harness.kind().provider(), agent_session) {
         crate::transcript::adopt_native(provider, thread)?;
     }
     progress.stage(format!("Opening {program} terminal"));
@@ -832,7 +826,7 @@ mod tests {
     use crate::process::attachment;
 
     use super::{departure_notice, launch_session, resume_session_with_env};
-    use super::{Launch, Mode, NativeClient, Start};
+    use super::{Launch, NativeClient, Start};
     use crate::agent::AgentConfig;
     use crate::provider_auth::Provider;
     use crate::session::Holder;
@@ -1019,7 +1013,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                mode: Mode::Interactive,
+                harness: super::super::HarnessKind::Claude.harness(),
                 holder: Holder::Caller,
                 admitted: &admitted,
                 start: Start::New,
@@ -1443,7 +1437,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                mode: Mode::Interactive,
+                harness: super::super::HarnessKind::Claude.harness(),
                 holder: Holder::Caller,
                 admitted: &admitted,
                 start: Start::New,
@@ -1547,7 +1541,7 @@ mod tests {
             };
             let launch = Launch {
                 config: &config,
-                mode: Mode::Interactive,
+                harness: super::super::HarnessKind::Claude.harness(),
                 holder: Holder::Caller,
                 admitted: &admitted,
                 start: Start::New,

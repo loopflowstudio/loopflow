@@ -83,10 +83,7 @@ impl Driver {
             owner: launch.admitted.clone(),
             holder: launch.holder,
             stream: None,
-            config: AgentConfig {
-                resume_token: launch.start.thread(),
-                ..launch.config.clone()
-            },
+            config: launch.config.clone(),
             should_seed_prompt: true,
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
@@ -581,10 +578,6 @@ impl StreamDriver for Driver {
         // Admission makes this child the leader of its own group.
         self.pid().filter(|pid| *pid > 1)
     }
-
-    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
-        self.agent_session = agent_session;
-    }
 }
 
 /// A saved conversation must remain the same conversation after a retry.
@@ -964,7 +957,11 @@ mod tests {
         let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
-            &crate::harness::launch_for_test(&AgentConfig::default(), &owner),
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::OpenCode,
+                &AgentConfig::default(),
+                &owner,
+            ),
             tx,
             ApprovalPolicy::AutoApprove,
         );
@@ -1183,7 +1180,11 @@ mod tests {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
-            &crate::harness::launch_for_test(&config, &admitted),
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::OpenCode,
+                &config,
+                &admitted,
+            ),
             tx,
             ApprovalPolicy::AutoApprove,
         );
@@ -1209,7 +1210,11 @@ mod tests {
         let _ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
-            &crate::harness::launch_for_test(&config, &admitted),
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::OpenCode,
+                &config,
+                &admitted,
+            ),
             tx,
             ApprovalPolicy::AutoApprove,
         );
@@ -1307,9 +1312,6 @@ fn environment(
 pub struct OpenCode;
 
 impl super::Harness for OpenCode {
-    fn supports_execution_boundary(&self) -> bool {
-        false
-    }
     fn provider_env(&self) -> &'static [&'static str] {
         &["OPENCODE_API_KEY"]
     }
@@ -1319,6 +1321,12 @@ impl super::Harness for OpenCode {
     fn recognizes_driver(&self, command: &str) -> bool {
         super::command_program(command, "opencode")
             && command.split_whitespace().any(|arg| arg == "serve")
+    }
+    fn transcript_watch_store(&self, home: &std::path::Path) -> Option<std::path::PathBuf> {
+        Some(crate::transcript::opencode::store(home))
+    }
+    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
+        (home.to_path_buf(), 0)
     }
     fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
         crate::transcript::opencode::read
@@ -1379,6 +1387,9 @@ impl super::Harness for OpenCode {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Reported, server: super::ThreadName::Reported },
             same_turn_input: true,
+            initial_prompt_on_resume: false,
+            supports_execution_boundary: false,
+            classifies_failures: false,
             native_skills: None,
             turn_limit: false, output_schema: false, respawns_after_crash: false,
             install_hint: "Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.",
@@ -1409,9 +1420,15 @@ fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::Nati
     crate::agent::validate_terminal_turn(&prompt)?;
     let mut config = launch.config.clone();
     config.task_prompt = prompt.clone();
-    config.resume_token = launch.start.thread();
-    let owner = launch.admitted.clone();
-    let holder = launch.holder;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut driver = Driver::new(
+        &super::Launch {
+            config: &config,
+            ..*launch
+        },
+        tx,
+        super::ApprovalPolicy::AutoApprove,
+    );
     let diagnostics = config
         .env
         .get(crate::session_record::CAPTURE_KEY_ENV)
@@ -1426,9 +1443,6 @@ fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::Nati
             .enable_all()
             .build()?;
         runtime.block_on(async move {
-            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-            let launch = super::Launch { config: &config, mode: super::Mode::Interactive, holder, admitted: &owner, start: config.resume_token.as_ref().map_or(super::Start::New, |thread| super::Start::Resume { thread }), context_file: None };
-            let mut driver = Driver::new(&launch, tx, super::ApprovalPolicy::AutoApprove);
             driver.prepare_terminal();
             // The private server receives the original config and adds its plugin once.
             driver.start().await?;

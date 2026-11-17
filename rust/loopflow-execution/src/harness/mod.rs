@@ -271,9 +271,6 @@ pub trait Driver: Send + Sync {
     fn process_group_id(&self) -> Option<u32> {
         None
     }
-    /// Seed a previously persisted vendor session id so the next turn resumes
-    /// it. Harnesses that take resume state at `start` instead ignore this.
-    fn set_agent_session(&mut self, _agent_session: Option<AgentSessionId>) {}
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -381,6 +378,9 @@ impl ThreadNaming {
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub same_turn_input: bool,
+    pub initial_prompt_on_resume: bool,
+    pub supports_execution_boundary: bool,
+    pub classifies_failures: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub turn_limit: bool,
     pub output_schema: bool,
@@ -406,7 +406,7 @@ impl Start<'_> {
 #[derive(Debug, Clone, Copy)]
 pub struct Launch<'a> {
     pub config: &'a AgentConfig,
-    pub mode: Mode,
+    pub harness: &'static dyn Harness,
     pub holder: Holder,
     pub admitted: &'a Admitted,
     pub start: Start<'a>,
@@ -414,22 +414,11 @@ pub struct Launch<'a> {
 }
 
 impl Launch<'_> {
-    pub fn harness(&self) -> Result<&'static dyn Harness> {
-        let (name, _) = crate::config::parse_agent(self.config.agent()?);
-        HarnessKind::parse(&name)
-            .map(HarnessKind::harness)
-            .ok_or_else(|| anyhow::anyhow!("unsupported session harness: {name}"))
-    }
-
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
         match self.start {
             Start::Resume { thread } => Ok(Some(thread.clone())),
             Start::New
-                if self
-                    .harness()?
-                    .capabilities()
-                    .thread
-                    .for_holder(self.holder)
+                if self.harness.capabilities().thread.for_holder(self.holder)
                     == ThreadName::Assigned =>
             {
                 self.admitted.assigned_thread().map(Some)
@@ -467,7 +456,7 @@ pub(crate) fn command_program(command: &str, program: &str) -> bool {
     })
 }
 
-pub trait Harness: Sync {
+pub trait Harness: Sync + std::fmt::Debug {
     fn kind(&self) -> HarnessKind;
     fn capabilities(&self) -> Capabilities;
     fn open(&self, launch: &Launch<'_>) -> Result<native_session::NativeClient>;
@@ -490,15 +479,6 @@ pub trait Harness: Sync {
 
     fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
         process.command == self.kind().as_str()
-    }
-    fn initial_prompt_on_resume(&self) -> bool {
-        false
-    }
-    fn supports_execution_boundary(&self) -> bool {
-        true
-    }
-    fn classifies_failures(&self) -> bool {
-        false
     }
     fn model_rungs(&self) -> &'static [&'static str] {
         &[]
@@ -548,6 +528,9 @@ pub trait Harness: Sync {
     }
     fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
         (home.join("projects"), 1)
+    }
+    fn transcript_watch_store(&self, _home: &std::path::Path) -> Option<std::path::PathBuf> {
+        None
     }
     fn direct_transcript(
         &self,
@@ -607,11 +590,15 @@ pub trait Harness: Sync {
 }
 
 #[cfg(any(test, feature = "test-support"))]
-pub fn launch_for_test<'a>(config: &'a AgentConfig, admitted: &'a Admitted) -> Launch<'a> {
+pub fn launch_for_test<'a>(
+    kind: HarnessKind,
+    config: &'a AgentConfig,
+    admitted: &'a Admitted,
+) -> Launch<'a> {
     Launch {
         config,
         admitted,
-        mode: Mode::Headless,
+        harness: kind.harness(),
         holder: Holder::Caller,
         start: config
             .resume_token
@@ -684,7 +671,7 @@ mod tests {
             let admitted = admit_for_test(home.path());
             let launch = Launch {
                 config: &config,
-                mode: Mode::Headless,
+                harness: HarnessKind::parse(name).unwrap().harness(),
                 holder: Holder::Caller,
                 admitted: &admitted,
                 start: Start::New,
@@ -692,8 +679,7 @@ mod tests {
             };
             let mut harness =
                 launch
-                    .harness()
-                    .unwrap()
+                    .harness
                     .driver(&launch, tx.clone(), ApprovalPolicy::AutoApprove);
             assert_eq!(
                 harness.send_current("direction").await,

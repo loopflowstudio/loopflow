@@ -167,9 +167,8 @@ impl Table {
         let admitted =
             loopflow_execution::harness::admit_for_test(tempfile::tempdir().unwrap().path());
         let launch = Launch {
-            mode,
             start,
-            ..loopflow_execution::harness::launch_for_test(config, &admitted)
+            ..loopflow_execution::harness::launch_for_test(kind, config, &admitted)
         };
         Ok(kind
             .harness()

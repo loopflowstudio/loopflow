@@ -25,7 +25,7 @@ construction clones the required configuration and frozen admission.
 
 `Launch<'a>` borrows `AgentConfig` and required `Admitted`; it carries its
 `Harness`, `Holder`, `Start::{New, Resume { thread }}` and optional
-context-file path (built today with `Mode` and without the harness; slice 6).
+context-file path. Mode selects the native or headless runner; it is not a field.
 `Admitted` retains the store, Session and exact `SessionAttachment`. Assigned
 native thread IDs come from the admission's capture UUID; callers do not name
 them. Capabilities include a Caller/Server thread-naming pair, native skill
@@ -38,7 +38,7 @@ Use the original design's two-runner option over the same `Launch` and `Harness`
 and move notice. `drive::run` returns `AgentProcessResult`: a provider turn's
 answer and typed failure for retry policy. No synthetic OS status or mode-tagged
 result joins them. `run_agent` owns retries/admission and builds a new `Launch`
-for each attempt; native entry points admit before selecting their harness.
+for each attempt; native entry points admit before opening their provider.
 
 `NativeClient` holds a prepared `std::process::Command`, optional remote endpoint,
 thread, title, reported-thread path and owned companion. The shared runner may
@@ -57,58 +57,71 @@ recognition are answered by the owning harness. Shared context helpers keep
 hook persistence; they do not dispatch by provider name. Claude stream syntax
 and usage decoding each have one implementation.
 
-## Next implement direction: slice 6, one representation per launch fact
+## Slice 6 (2026-11-16)
 
-Concept review of the implemented slices 4–5 (2026-11-16). Launch behavior is
-right; four launch facts still have two or three forms. Each item removes a
-form and changes no behavior. Do them in this order; 1–3 unlock each other.
+The launch carries its resolved harness. `Start` alone selects a driver's
+resume thread; `AgentConfig::resume_token` remains retry state read at the
+launch boundary. Native helpers retain the launch with field updates rather
+than reconstructing it. Capabilities include initial prompt on resume,
+execution boundary and failure classification. Transcript watches and provider
+conversation discovery iterate `HarnessKind::ALL` and ask the owning harness;
+Pi's transcript root is `sessions`, OpenCode watches its home for store hints.
 
-1. **Mode is the runner, not a field.** No harness reads `Launch::mode`. Its
-   only readers are `drive::run` and `native_session::run`, each refusing the
-   other value, and `codex.rs::open_native` / `opencode.rs::open_native`
-   hand-write `Mode::Interactive` to build a `Driver`. Mode is still resolved
-   once at `transport::delegate` (`Delegation::Here { mode }`) and selects
-   `native_session::run` or `drive::run`; the harness learns it by being asked
-   for `open` or `driver`. Delete `Launch::mode` and both refusals.
-   `harness::Mode` stays for transport and prompt assembly.
-2. **Resume is `Start`.** It is also `AgentConfig::resume_token` and
-   `Driver::set_agent_session`. Every `Driver::new` copies
-   `launch.start.thread()` back into a cloned config; Codex `open_native`
-   builds `Start::New` and then calls `set_agent_session(saved)`, its only
-   production caller. Drivers read `launch.start`; a native Codex open whose
-   store has a thread passes `Start::Resume`; `set_agent_session` leaves the
-   `Driver` trait. `resume_token` remains only as `run_agent`'s retry state,
-   read where the attempt's `Launch` is built; harness files do not read it.
-   Check that a held Codex with a stored thread and a first prompt still sends
-   that prompt (`initial_prompt_on_resume`).
-3. **Harnesses do not build Launches.** After 1 and 2, `open` passes the
-   Launch it received, with a replaced config where needed
-   (`Launch { config: &config, ..*launch }`, as `drive::run` does). The two
-   literal constructions in `codex.rs` and `opencode.rs` go, and with them
-   their dropped `context_file`.
-4. **Launch carries its harness.** `Launch::harness()` re-parses the agent
-   string on every call and returns `Result`; `drive::run` calls it three
-   times, once behind `expect("validated launch")`, and
-   `resume_session_with_env` re-parses behind `expect("resolved harness")`.
-   Add `harness: &'static dyn Harness`, parsed once where each Launch is built
-   (`agent/mod.rs`, `native_session::{launch_session, resume_session_with_env}`);
-   delete the method and the expects.
-5. **Capabilities are one struct.** `initial_prompt_on_resume`,
-   `supports_execution_boundary` and `classifies_failures` are yes/no
-   capabilities answered as trait methods beside `Capabilities`. Move them in.
-6. **Sweep the last kind tables.** `transcript/watch.rs::watch` lists four
-   homes and their subdirectories beside `Harness::transcript_root`. Pi
-   inherits the trait's `projects` root, but that root is never read for Pi:
-   Pi's `transcript_id` is the default `None`, so `transcript::{transcript,scan}`
-   match nothing, and Pi's files are found under `sessions` by
-   `transcript/raw.rs` and `pi.rs`. Merging means Pi's root becomes `sessions`
-   and `watch` asks each harness. `ops/human_session/provider_conversation.rs`
-   (line ~263) maps `Provider` back to a kind with `_ => Claude`, the inverse
-   of `Harness::provider()`. A fifth
-   harness must not need a line in either.
+The detailed slice direction and earlier check results are at
+6b51cfc07c:scratch/harness-launch-type.md.
 
-The launch matrix and conformance tests are the check: same 16 cells, same
-commands and threads, with `mode` gone from the fixtures.
+## Next implement direction: slice 7, the last names outside `HarnessKind`
+
+Concept review of slice 6 (2026-11-16): the launch facts each have one form
+now. The Task outcome also says "`HarnessKind` is the only place a harness
+name is compared", and five production sites in execution still decide by
+name or variant outside a harness file. A fifth harness with a shared server,
+a skill dialect or its own input history would need a line in each. Each move
+changes no behavior.
+
+1. `harness/agent_process.rs:441` — `agent.provider == Some("codex")` before
+   closing an AgentProcess whose server may host other conversations. The
+   owning harness answers the close check (default: nothing to check); Codex's
+   calls `codex_connection::validate_agent_process_close`.
+2. `ops/human_session/provider_conversation.rs::human_input_times` — maps
+   `session.provider` strings to `Provider` (the inverse of
+   `HarnessKind::provider()`), then branches Codex `history.jsonl` against
+   Claude's transcript. Parse the kind once and ask the harness for input
+   times of the wanted threads under a home; `codex_input_times` and
+   `claude_input_time` move to their files. Keep the per-home batching: Codex
+   reads one history file for many Sessions.
+3. `skills/invocation.rs::{translated_input, ported_text}` take a harness
+   `&str` and pick the tool-name note by `(dialect, "codex" | "claude")`. The
+   target is already resolved as `Capabilities::native_skills` in
+   `terminal_input`; key the note on `(source dialect, target dialect)` and
+   keep the name only for the warning text.
+4. `transcript/facts.rs:159` — `harness == HarnessKind::Claude` selects the
+   retained turn-detail keys. It joins the transcript policy the harness
+   already answers (reader, layout, retention).
+5. `transcript/raw.rs:101` — `claude_owners(home(Claude), …)` runs ahead of
+   the per-harness loop. Ask each harness for the conversations its live
+   processes own (default: none).
+
+These stay, with the reason:
+
+- `AgentConfig::resolved_agent` and `agent/session.rs:98` compare `"claude"`
+  to apply `claude_model`. `claude_model` and `codex_service_tier` are
+  settings named for one harness; folding them into the harness is a settings
+  change, not a launch change.
+- `loopflow-storage` (`Provider` parsing, `session_record::native_usage_key`)
+  sits below execution and reads recorded payloads; it cannot ask a harness.
+- A harness file comparing its own name (`codex.rs::resolve_model`, process
+  recognition) is the owner answering.
+
+Check: the awk listing below prints only the "stay" lines, and the slice 6
+nextest filter plus `test(skills::invocation::)`, `test(transcript::facts::)`
+and `test(harness::agent_process::)` pass.
+
+```
+for f in $(grep -rlE '"(claude|codex|opencode|pi)"|HarnessKind::(Claude|Codex|OpenCode|Pi)\b' --include='*.rs' rust/loopflow-execution/src | grep -vE 'tests?\.rs|test_support|launch_matrix'); do
+  awk -v f="$f" '/#\[cfg\(test\)\]/{exit} /"(claude|codex|opencode|pi)"|HarnessKind::(Claude|Codex|OpenCode|Pi)/ && /==|!=|=>|Some\("|home\(/ {print f":"NR": "$0}' "$f"
+done | grep -vE 'harness/(claude|codex|opencode|pi|mod)\.rs'
+```
 
 ## Decisions that must remain true
 
@@ -150,6 +163,9 @@ The surviving paths replace these; their coverage belongs on Harness/Launch:
 - `default_create_harness`, `canonical_harness`, terminal-error string table;
 - context native_args table, title-argument match, skill native-name tables,
   raw process-name table, settings OpenCode model rule and install-hint match;
+- `Launch::mode`, `Launch::harness()`, `Driver::set_agent_session`, driver
+  config resume copies, separate boolean capability methods, watch-root table
+  and provider-to-kind fallback;
 - saved-transcript reader, layout and retention dispatch, and KNOWN_AGENTS.
   The final deletion sweep found these remaining HarnessKind authorities;
   they now ask the same harness for transcript policy and use ALL for discovery.
@@ -159,7 +175,7 @@ Do not remove store `Provider`, Clap `SessionCommand`, transcript's parsed
 
 ## Remaining gate and demo checks
 
-Slices 4–5 are implemented; slice 6 above is not. Local checks cover the 16-cell native/headless ×
+Slices 1–6 are implemented; slice 7 above is not. Local checks cover the 16-cell native/headless ×
 Caller/Server matrix, command policy, recorded threads, OpenCode diagnostics,
 mode/holder decisions, bare native resume and saved-transcript policy.
 
@@ -170,13 +186,11 @@ matrix prints waited rows; it does not claim held-terminal exec coverage.
 
 ## Checks
 
-- `cargo test -p loopflow-execution --lib harness::conformance_tests` — 10 passed.
-- Combined nextest decision filter (`test(harness::launch_matrix::) | test(lf::commands::run::launch_policy_tests::) | test(transport::launch_mode_tests::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn)`) — all 12 settings/mode/holder rows and bare resume passed; the stand-in's missing bare Codex hook report was repaired and the final matrix passed below.
-- Combined nextest transcript filter (`test(harness::launch_matrix::) | test(transcript::tests::) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory) | test(transcript::summary::tests::)`) — 10 transcript tests passed; history rendering's `a_turn_prints_one_line_then_its_requests_and_what_the_agent_did` reported LEAK. Gate owns that observation. Pi's provider-only sandbox rejection was retained; the matrix now uses Pi's existing configured policy.
-- `cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory)'` — 4 passed, including every one of the 16 launch cells, native policy refusals and the OpenCode diagnostic-log assertion (2026-11-16).
-- `cargo clippy --all-targets -- -D warnings` — passed on the finished Rust changes; `cargo fmt` and `git diff --check` passed.
-- `cargo build -p loopflow --bin lf` — passed on the finished source; `target/debug/lf --version` ran successfully.
-- Obsolete-symbol check — no provider SessionCommand, ProviderInvocation, default_create_harness, canonical_harness or run_interactive; Holder::of has one caller, transport::holder. Runtime and exit-record optional owners remain outside launch admission.
+- `cargo nextest run -p loopflow-execution --lib -E 'test(harness::launch_matrix::) | test(harness::conformance_tests::) | test(harness::native_session::tests::bare_codex_resume_does_not_resend_its_first_turn) | test(harness::claude::tests::agent_session_resumes_on_a_fresh_process) | test(harness::pi_tests::pi_turns_resume_the_exact_conversation_and_capture_tools_usage) | test(transcript::watch::tests::) | test(transcript::raw::tests::a_pi_process_takes_the_newest_session_file_of_its_directory) | test(ops::human_session::provider_conversation::tests::)'` — 24 passed, including the 16 launch cells and saved empty-thread first prompt (2026-11-16).
+- `cargo test -p loopflow-execution --lib --no-run` and `cargo build -p loopflow --bin lf` — passed; the built CLI reports its version.
+- `cargo nextest run -p loopflow --lib -E 'test(lf::commands::run::launch_policy_tests::)'` — 6 passed; macOS linker warned that the test binary's unwind section exceeds 16 MB.
+- `cargo clippy --all-targets -- -D warnings` — passed.
+- `cargo fmt --all -- --check` and `git diff --check` — passed.
 
-Earlier admission/runner checks: b9542ecef5:scratch/harness-launch-type.md.
-Slice 3b checks: 58a4135e40:scratch/harness-launch-type.md.
+Gate/CI owns broader suites. Earlier checks:
+6b51cfc07c:scratch/harness-launch-type.md.

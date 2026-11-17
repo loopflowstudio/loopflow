@@ -159,10 +159,7 @@ impl Driver {
         Self {
             events,
             state: Arc::default(),
-            config: AgentConfig {
-                resume_token: launch.start.thread(),
-                ..launch.config.clone()
-            },
+            config: launch.config.clone(),
             owner: launch.admitted.clone(),
             holder: launch.holder,
             session: launch.start.thread(),
@@ -236,12 +233,7 @@ impl Driver {
 
     async fn start_process(&mut self, config: &AgentConfig) -> Result<()> {
         let owner = self.owner.clone();
-        let resumed = self
-            .session
-            .as_ref()
-            .or(config.resume_token.as_ref())
-            .map(validate_resume)
-            .transpose()?;
+        let resumed = self.session.as_ref().map(validate_resume).transpose()?;
         let context = crate::agent::write_system_prompt_file(config, "pi")?;
         let mut command = Command::new("pi");
         command
@@ -293,7 +285,7 @@ impl Driver {
             .as_str()
             .filter(|f| Path::new(f).is_absolute())
             .ok_or_else(|| anyhow!("Pi did not report a persistent conversation file"))?;
-        if let Some(expected) = self.session.as_ref().or(config.resume_token.as_ref()) {
+        if let Some(expected) = self.session.as_ref() {
             anyhow::ensure!(
                 file == expected.as_str(),
                 "Pi opened a different conversation than requested"
@@ -376,9 +368,6 @@ impl Driver {
 
 #[async_trait]
 impl StreamDriver for Driver {
-    fn set_agent_session(&mut self, session: Option<AgentSessionId>) {
-        self.session = session;
-    }
     fn agent_session(&self) -> Option<AgentSessionId> {
         self.session.clone()
     }
@@ -687,6 +676,9 @@ impl super::Harness for Pi {
             None => (crate::transcript::RetentionState::Facts, None),
         }
     }
+    fn transcript_root(&self, home: &Path) -> (std::path::PathBuf, usize) {
+        (home.join("sessions"), 1)
+    }
     fn recent_transcripts(
         &self,
         home: &Path,
@@ -719,6 +711,9 @@ impl super::Harness for Pi {
         super::Capabilities {
             thread: super::ThreadNaming { caller: super::ThreadName::Assigned, server: super::ThreadName::Reported },
             same_turn_input: true,
+            initial_prompt_on_resume: false,
+            supports_execution_boundary: true,
+            classifies_failures: false,
             native_skills: None,
             turn_limit: false, output_schema: false, respawns_after_crash: false,
             install_hint: "Install Pi 1.3 or later with `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`. Configure its model and credentials in Pi.",

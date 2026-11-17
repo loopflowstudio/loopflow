@@ -108,7 +108,7 @@ pub fn resolve_session_config(
     if let Some(request) = request {
         if !importing
             && crate::harness::HarnessKind::parse(provider)
-                .is_some_and(|kind| kind.harness().initial_prompt_on_resume())
+                .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
         {
             config.task_prompt = request.codex_initial_input();
         }

@@ -4,7 +4,7 @@
 - A fifth harness needs one file, one `HarnessKind` variant and one registry line; no link-time registration.
 - Stacked 2026-11-16 on `jack-heart/cli-prox` (#1953). Jack: "yeah thats fine". #1953 has since merged (4a0691a9a0) and main is merged in, so the PR base is main. Earlier dependency investigations are in 3b735e67d6:scratch/questions.md.
 - The deletion check for provider `SessionCommand` must be scoped to execution code: `loopflow::lf::SessionCommand` is the unrelated Clap command enum and remains.
-- No `Placement` wrapper: `Launch` carries `mode` and `holder`; `Delegation::Here` carries the resolved `mode`. `Placement` already names the `machine:` setting and a pane container.
+- No `Placement` wrapper: `Launch` carries `holder`; `Delegation::Here` carries the resolved `mode`. `Placement` already names the `machine:` setting and a pane container.
 - Slice 3 finding (2026-11-16): `implicit_binding` cannot produce `Bound`; `select_execution_work` produces `Checkout` or calls `select_work` for inherited `LF_AS`, which produces `Declared`. Outside a Task checkout, `LF_AS=task:<id> lf <prompt>` has no CLI selector: `bin/lf.rs` passes `named_work=false` to delegate, but `run_bound_prompt` later uses `Declared.is_managed()=true` and `Holder::Server`. Resolving Place from that same managed fact would change today's bare placement into held/detached. Call made headless (concept-review, 2026-11-16): this Task keeps the entry as it is, so Place reads `named` and Holder reads the Work source; slice 3 proceeds. Still open for a person, outside this Task: should that entry be bare, as `server/README.md` and `transport/README.md` say of every unlisted launch, or stay `Holder::Server` because `LF_AS` is also lf's own declaration for workers it starts (`pr_landing.rs:354`)? Relevant paths: `ops/run.rs::{select_execution_work,select_work}`, `run.rs::{implicit_binding,run_bound_prompt}`, `bin/lf.rs` delegate call.
 
 - Slice 3 counterexample (2026-11-16): headless `lf -b resume ID --message TEXT`
@@ -41,3 +41,10 @@
   selects the runner and the harness receives it as `open` or `driver`; the
   field had no reader but two refusals. Simpler option taken; reversible by
   restoring one field.
+
+- Concept review (2026-11-16, headless): slice 7 leaves `claude_model` and
+  `codex_service_tier` as settings named for one harness, so
+  `AgentConfig::resolved_agent` still compares `"claude"`. The outcome's
+  "only place a harness name is compared" is read as launch and transcript
+  decisions, not named settings. Simpler option taken; a settings change
+  that moves them into the harness would be its own Task.

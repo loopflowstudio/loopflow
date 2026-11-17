@@ -151,8 +151,8 @@ Task, noted in `questions.md`.
 
 No new registry. The pass reads three things:
 - **Task conversation:** `task_primary_sessions` joined to `agent_sessions`,
-  with liveness from LOO-953's Session columns. Until that slice lands, it
-  reads through the one existing seam, `session_summary(..).agent_process_evidence`.
+  with liveness from LOO-953's Session identity columns (pid and OS start time,
+  read by `ops::recovery::due_task_conversations`).
 - **Task run:** the carrier that makes the Task `moving` or `shipping`:
   `task_graphs.lf_process_id` (with LOO-953's `run_pid`/`run_os_started_at`)
   or the ship event's carrier. The Graph run under it (`graph_processes`, with
@@ -442,7 +442,11 @@ Must survive:
    - `task_graphs.restarts` (added to `task_conversation_recovery.sql`) and its
      reset on a finished step;
    - the died line in the Task run reading;
-   - the `exit_of` signal split.
+   - the `exit_of` signal split;
+   - `lf process prune` / `lf monitor prune` still exist (`lf/commands/top.rs`,
+     `doctor.rs`, `install.rs`, `docs/dev/reference*.md`): delete them once the
+     pass's `settle()` covers `close_dead_processes` and `forget_processes`, or
+     record why they stay.
 
    Shows: acceptance check 4.
 4. **Surfaces.** Pieces:

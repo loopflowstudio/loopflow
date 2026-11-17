@@ -89,7 +89,7 @@ struct DashboardWorkspaceTests {
         let row = try #require(model.workingTaskWorkID(row: "task_c"))
         let dragged = try #require(TaskOrderDrag.taskID(TaskOrderDrag.token(row)))
         await model.reorderWorkingTask(dragged, to: "task_a").value
-        #expect(model.dashboardError == nil)
+        #expect(model.navigation.notices.current == nil)
         #expect(model.workingTaskIDs == ["task_c", "task_a", "task_b"])
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
     }
@@ -148,7 +148,7 @@ struct DashboardWorkspaceTests {
         model.applySelectionPlans([try JSONDecoder().decode(WorkViewPlan.self, from: Data(initial.utf8))], reason: "")
         let key = { WorkWorkspaceKey(repository: repo, kind: .task, id: $0) }
         await model.reorderDashboard("picked", member: key("task_c"), to: key("task_a"))
-        #expect(model.dashboardError == nil)
+        #expect(model.navigation.notices.current == nil)
         let dashboard = try #require(model.dashboard("picked"))
         #expect(dashboard.arrangement.order.map(\.work.id) == ["task_c", "task_a", "task_b"])
         #expect(dashboard.arrangement.mode == .touched)
@@ -257,7 +257,7 @@ struct DashboardWorkspaceTests {
             resolution: WorkSelectionResolution(attention: [], members: members, unavailable: []),
             arrangement: WorkArrangement(order: members, hidden: [], mode: .touched),
             projection: WorkArrangementProjection(visible: members, suppressed: []), slots: DashboardSlotLayout(root: .slot(0)),
-            contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) })
+            contents: [a, b].map { fixtureViewContent(work: $0, title: $0.id) }, viewer: nil)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("No execution allowed") }, repoPath: "/repo")
         let registry = SessionsWorkspaceRegistry(localMachineId: fixtureMachineId)
         model.bindWorkspaces(registry, repository: "repo")

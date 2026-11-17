@@ -79,7 +79,7 @@ func fixtureViewPlan(owner: WorkWorkspaceKey, members: [WorkViewPlan.Content],
         selection: WorkSelection(id: owner.id, expression: owner.kind == .repository ? .repository : .wave(owner.id)), savedRevision: nil,
         resolution: WorkSelectionResolution(attention: [], members: refs, unavailable: []),
         arrangement: WorkArrangement(order: refs, hidden: [], mode: .auto),
-        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members)
+        projection: WorkArrangementProjection(visible: refs, suppressed: []), slots: slots, contents: members, viewer: nil)
 }
 extension WorkModel {
     /// The sidebar's started list as the server reads it for `wave`: each Task with its states, in order.

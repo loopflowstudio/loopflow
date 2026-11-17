@@ -544,8 +544,10 @@ struct WorkCacheTests {
         #expect(returning.roadmap.value != nil)
         #expect(returning.sessions.value?.isEmpty == false)
         let navigator = WorkNavigator(model: returning, onOpenSession: { _ in })
+        // The Notice says the read failed; the sidebar keeps no status of its own.
         let status = try navigator.inspect().findAll(where: { (try? $0.accessibilityIdentifier()) == "work-status" })
-        #expect(status.count == 1)
+        #expect(status.isEmpty)
+        #expect(returning.navigation.notices.current?.text.hasSuffix("couldn't be read: offline") == true)
 
         await source.recover()
         await returning.refresh()

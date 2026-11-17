@@ -40,8 +40,11 @@ automatically from the last retained reading. An unchanged list does not need
 to be downloaded again. If Work changed or the server restarted, Desktop receives
 a complete current reading. If recovery fails, the window reports unavailability
 and retries. Task and Session creations recover through their saved request and
-server receipt. Other changes submitted before the connection dropped are never
-repeated automatically; check the current Work before submitting them again.
+server receipt. Other Task changes (Complete, Claim, Move, …) show at once and
+are sent again under the same request ID when the connection returns, so the
+server runs each one once. After about ten seconds without the server, change
+controls are disabled and lists show their last reading until it is back. See
+[Changes show at once](surfaces.md#changes-show-at-once).
 
 Desktop reconnects automatically to the same running conversation when the
 server is replaced or its connection drops. Its native status row shows
@@ -100,8 +103,9 @@ while stopping the earlier provider. **Inspect** shows the conversation and its
 receipt; recovery does not repeat the stop. Newer input also prevents finishing
 an older unpublished conversation change.
 
-Other changes have no automatic retry contract. If their reply is lost, refresh
-the affected Work to see what happened before making another change.
+Other changes keep their request ID only while Desktop stays open. A change
+whose answer was lost when Desktop quit shows in the next reading or not at
+all; check the Task before making it again.
 
 ## Updates and disabled background access
 

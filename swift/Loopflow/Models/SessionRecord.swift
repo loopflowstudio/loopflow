@@ -218,7 +218,7 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public let workPath: String?
     /// What opening it here does; nil for a Run.
     public let action: SessionAction?
-    public let title: String
+    public var title: String
     public let titleSource: SessionTitleSource
     public let graphMembership: SessionGraphMembership
     public let detail: String

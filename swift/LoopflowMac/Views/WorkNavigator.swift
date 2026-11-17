@@ -32,14 +32,14 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    /// Nil while the list loads: the work status above already says so, and an empty list is not yet known.
+    /// Nil until the list is read: the work status above says it is loading, and
+    /// a failed read is the Notice's.
     private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
-            if model.taskListReading.isLoading { return nil }
-            if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
+            if model.taskListReading.value == nil { return nil }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
         }
@@ -60,13 +60,8 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
-                WorkReadStatus(model: model, status: status)
-            }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
-               ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
-                .compactMap({ $0 }).contains(error) {
-                Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            if let status = model.workStatus.progress {
+                WorkReadStatus(status: status)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -205,14 +200,11 @@ struct WorkNavigator: View {
         return Button {
             Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
                             repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
-                // Keep the input timestamp through the deliberate selection animation.
-                guard !reduceMotion else { model.select(reference); return }
+                // Select in the click; the pressed highlight animates over the selected row.
+                model.select(reference)
+                guard !reduceMotion else { return }
                 withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-                Task {
-                    try? await Task.sleep(for: .milliseconds(120))
-                    model.select(reference)
-                    pressedScope = nil
-                }
+                withAnimation(.easeOut(duration: 0.12).delay(0.12)) { pressedScope = nil }
             }
         } label: {
             HStack {
@@ -262,7 +254,7 @@ struct WorkNavigator: View {
         let selected = model.isSelected(.task(id: id))
         let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
-        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
+        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.failure)
         let presentation = model.taskPresentation(id: id)
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
@@ -469,8 +461,7 @@ struct WorkBreadcrumbs: View {
 struct WorkMachineControl: View {
     let model: WorkModel
     let target: WorkMachineTarget
-    @State private var machines: [Machine] = []
-    @State private var error: String?
+    private var machines: [Machine] { model.machines.value ?? [] }
 
     var body: some View {
         let current = model.machine(of: target)
@@ -480,10 +471,9 @@ struct WorkMachineControl: View {
                     .disabled(id == current.id)
                     .accessibilityIdentifier("work-machine-" + id)
             }
-            if let error { Text(error) }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
             .font(Typography.caption())
@@ -492,7 +482,7 @@ struct WorkMachineControl: View {
         .fixedSize()
         .help("Machine this Work runs on")
         .accessibilityIdentifier("work-machine")
-        .task(id: target) { await load() }
+        .task(id: target) { await model.loadMachines() }
     }
 
     /// This Machine first, then your registered Machines.
@@ -508,19 +498,12 @@ struct WorkMachineControl: View {
         return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
     }
 
-    private func load() async {
-        error = nil
-        // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines() }
-        catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
-    }
-
+    /// A failure posts to the window that asked.
     private func use(_ id: String) async {
-        error = nil
+        let notices = model.navigation.notices
         do { try await model.useMachine(id, for: target) }
         catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
+        catch { notices.post(Notice("Could not run on \(name(id)): \(error.localizedDescription)")) }
     }
 }
 
@@ -927,15 +910,8 @@ struct WorkTaskIdentity: View {
 }
 
 struct WorkReadStatus: View {
-    let model: WorkModel
     let status: String
     var body: some View {
-        HStack {
-            Text(status)
-            if case .failed = model.workStatus {
-                Button("Retry") { Task { await model.refresh() } }
-                    .accessibilityIdentifier("work-retry")
-            }
-        }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
     }
 }

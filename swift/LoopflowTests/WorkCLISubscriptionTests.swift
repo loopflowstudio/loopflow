@@ -31,13 +31,13 @@ struct WorkCLISubscriptionTests {
         do {
             try await eventually { model.task(id: id)?.task.task.name == "Before outage" }
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             #expect(model.task(id: id)?.task.task.name == "Before outage")
 
             _ = try await fixture.run(["task", "update", id, "--title", "Changed while offline"])
             _ = try await server.status()
             try await eventually {
-                model.roadmap.errorMessage == nil
+                model.roadmap.failure == nil
                     && model.task(id: id)?.task.task.name == "Changed while offline"
             }
             // Recovery must leave a live observation, not just refresh once.
@@ -45,7 +45,7 @@ struct WorkCLISubscriptionTests {
             try await eventually { model.task(id: id)?.task.task.name == "Changed after recovery" }
 
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             keeping.cancel()
             await keeping.value
             // Cancelling the window's reader must not reopen the replacement.
@@ -276,14 +276,14 @@ struct WorkCLISubscriptionTests {
         let layout = workspace.multiplexer.layout
         _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
-        await model.moveTask(before, toWave: "product")
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(before, toWave: "product")
+        #expect(model.navigation.notices.current == nil,
+                "\(model.peerPlanning.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
-        await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
+        #expect(model.navigation.notices.current == nil,
+                "\(model.peerPlanning.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))
         #expect(registry.selectedWork == key)

@@ -104,7 +104,7 @@ public struct WorkArrangementProjection: Codable, Equatable, Sendable {
         public let member: WorkMemberRef
         public let winner: WorkMemberRef
     }
-    public let visible: [WorkMemberRef]
+    public var visible: [WorkMemberRef]
     public let suppressed: [Suppressed]
 }
 
@@ -168,7 +168,7 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public struct Content: Codable, Equatable, Sendable {
         public let work: WorkWorkspaceKey
         public let title: String
-        public let states: [WorkSelectionState]
+        public var states: [WorkSelectionState]
         /// A Task's short name, as people say it: `LOO-809`.
         public let identifier: String?
         public let primarySession: String?
@@ -188,17 +188,61 @@ public struct WorkViewPlan: Codable, Equatable, Sendable {
     public let savedRevision: Int64?
     public var resolution: WorkSelectionResolution
     public let arrangement: WorkArrangement
-    public let projection: WorkArrangementProjection
+    public var projection: WorkArrangementProjection
     /// The page geometry visible members fill, in projection order.
     public let slots: DashboardSlotLayout
-    public let contents: [Content]
+    public var contents: [Content]
+    /// Who a Claim on this Machine makes owner; nil when the repository has no
+    /// Git `user.email`, and a Claim then moves the Task's section only.
+    public let viewer: TaskOwner?
     enum CodingKeys: String, CodingKey {
         case repository = "repo", selection, resolution, arrangement, projection, slots, contents, name, pinned
         case dashboardID = "dashboard_id", savedRevision = "saved_revision", repositoryPath = "repo_path"
+        case viewer
     }
 
     /// The name people see for the repository: its directory's.
     public var repositoryName: String { URL(fileURLWithPath: repositoryPath).lastPathComponent }
+}
+
+extension WorkViewPlan {
+    /// Every key is required; a nullable one is present as null.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            name: try c.decode(String?.self, forKey: .name),
+            pinned: try c.decode(Bool.self, forKey: .pinned),
+            dashboardID: try c.decode(String?.self, forKey: .dashboardID),
+            repository: try c.decode(String.self, forKey: .repository),
+            repositoryPath: try c.decode(String.self, forKey: .repositoryPath),
+            selection: try c.decode(WorkSelection.self, forKey: .selection),
+            savedRevision: try c.decode(Int64?.self, forKey: .savedRevision),
+            resolution: try c.decode(WorkSelectionResolution.self, forKey: .resolution),
+            arrangement: try c.decode(WorkArrangement.self, forKey: .arrangement),
+            projection: try c.decode(WorkArrangementProjection.self, forKey: .projection),
+            slots: try c.decode(DashboardSlotLayout.self, forKey: .slots),
+            contents: try c.decode([Content].self, forKey: .contents),
+            viewer: try c.decode(TaskOwner?.self, forKey: .viewer)
+        )
+    }
+
+    /// Writes a nil as null, so the decoder above reads it back.
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(name, forKey: .name)
+        try c.encode(pinned, forKey: .pinned)
+        try c.encode(dashboardID, forKey: .dashboardID)
+        try c.encode(repository, forKey: .repository)
+        try c.encode(repositoryPath, forKey: .repositoryPath)
+        try c.encode(selection, forKey: .selection)
+        try c.encode(savedRevision, forKey: .savedRevision)
+        try c.encode(resolution, forKey: .resolution)
+        try c.encode(arrangement, forKey: .arrangement)
+        try c.encode(projection, forKey: .projection)
+        try c.encode(slots, forKey: .slots)
+        try c.encode(contents, forKey: .contents)
+        try c.encode(viewer, forKey: .viewer)
+    }
 }
 
 /// One Work's pane layout as Desktop saves it on this Mac. Portable intent only:

@@ -90,6 +90,9 @@ pub struct SubscriptionFrame<'a, T> {
     pub unavailable: Option<String>,
     pub body: Option<&'a T>,
     pub work: Option<loopflow_storage::instrumentation::SqlReceipt>,
+    /// Every store domain's revision in the snapshot this reading used; null
+    /// without a store. A write whose answered revisions this reaches shows here.
+    pub read_at: Option<loopflow_storage::sqlite::Revisions>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -369,6 +372,7 @@ where
                 unavailable: Some(error),
                 body: None,
                 work: None,
+                read_at: None,
             })
             .ok(),
             events: Vec::new(),
@@ -569,11 +573,12 @@ where
                 .as_ref()
                 .map(|store| store.sqlite.read_snapshot())
                 .transpose()?;
-            let revisions = self
+            let read_at = self
                 .store
                 .as_ref()
-                .map(|store| store.sqlite.revisions())
+                .map(|store| store.sqlite.revision_map())
                 .transpose()?;
+            let revisions = read_at.as_ref().map(|map| map.to_store_revisions());
             let began = Instant::now();
             let (reading, dependencies) = self.observations.capture(|| match &self.refused {
                 Some(reason) => Err(anyhow::anyhow!("Loopflow store cannot be read: {reason}")),
@@ -604,6 +609,7 @@ where
                     unavailable,
                     body: body.as_ref(),
                     work: None,
+                    read_at,
                 })?);
             }
             self.failures = if body.is_none() {
@@ -679,6 +685,7 @@ fn encode<T: Serialize>(frame: &SubscriptionFrame<'_, T>) -> Result<Vec<u8>> {
             unavailable: Some("subscription frame exceeds the 64 MiB transport limit".into()),
             body: None,
             work: frame.work.clone(),
+            read_at: frame.read_at.clone(),
         })?;
     }
     bytes.push(b'\n');

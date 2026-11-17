@@ -735,6 +735,9 @@ public struct RegistryQuery: Sendable {
     /// What a `ServedWrite`'s `argv` prints: made in the app when the
     /// transport can, else run.
     private var write: @Sendable (ServedWrite) async throws -> String
+    /// A change under its request ID, answered with the revisions it advanced;
+    /// nil where the transport cannot say (the CLI).
+    private var change: @Sendable (ServedWrite, String) async throws -> Revisions?
     private let observeFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)?
     private var observeRead: (@Sendable ([String], String?) async throws -> LineSubscription)?
     private let observeWork: (@Sendable () async throws -> WorkObservation)?
@@ -745,6 +748,7 @@ public struct RegistryQuery: Sendable {
         },
         serve: (@Sendable (ServedRead) async throws -> String)? = nil,
         write: (@Sendable (ServedWrite) async throws -> String)? = nil,
+        change: (@Sendable (ServedWrite, String) async throws -> Revisions?)? = nil,
         watchFiles: (@Sendable ([String], String?) async throws -> TaskFilesObservation)? = nil,
         subscribeRead: (@Sendable ([String], String?) async throws -> LineSubscription)? = nil,
         subscribeWork: (@Sendable () async throws -> WorkObservation)? = nil,
@@ -760,9 +764,14 @@ public struct RegistryQuery: Sendable {
             }
             return output
         }
-        self.write = write ?? { change in
+        let write = write ?? { change in
             if let input = change.input { return try await runWithInput(change.argv, change.cwd, input) }
             return try await run(change.argv, change.cwd)
+        }
+        self.write = write
+        self.change = change ?? { change, _ in
+            _ = try await write(change)
+            return nil
         }
         self.run = run
         self.observeFiles = watchFiles
@@ -1119,20 +1128,12 @@ public struct RegistryQuery: Sendable {
         try Self.decode(WaveGraph.self, from: await serve(.waveGraph(directory: cwd ?? "/", wave: wave)))
     }
 
-    /// Ship the Task: run the rest of its graph to the end headless, standing
-    /// in at each interactive step. Returns once it is shipping; it runs on until the Task lands.
-    public func shipTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskShip(directory: cwd ?? "/", issue: issue))
-    }
 
-    /// Withdraw a Task's Auto-Ship approval: its ship process stops and any
-    /// auto-merge Loopflow armed is disabled.
-    public func stopShipping(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskHold(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func moveTask(issue: String, wave: String?, cwd: String?) async throws {
-        _ = try await write(.taskMove(directory: cwd ?? "/", issue: issue, wave: wave, machine: nil))
+    /// Send `change` under `requestID`; a repeat under it gets the first answer.
+    /// Returns the revisions it advanced. A refusal throws a `ServerError` whose
+    /// `revisions` is nil; a change that failed partway carries what it advanced.
+    public func change(_ change: ServedWrite, requestID: String) async throws -> Revisions? {
+        try await self.change(change, requestID)
     }
 
     /// Your registered Machines. This Machine appears only when a default names it.
@@ -1149,23 +1150,6 @@ public struct RegistryQuery: Sendable {
         }
     }
 
-    /// `lf task claim` or `lf task unassign`.
-    public func assignTask(issue: String, claimed: Bool, cwd: String?) async throws {
-        _ = try await write(claimed ? .taskClaim(directory: cwd ?? "/", issue: issue)
-                               : .taskUnassign(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func completeTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskComplete(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func reopenTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskReopen(directory: cwd ?? "/", issue: issue))
-    }
-
-    public func abandonTask(issue: String, cwd: String?) async throws {
-        _ = try await write(.taskAbandon(directory: cwd ?? "/", issue: issue))
-    }
 
     /// Complete Task-attributed Session input/provider history. Read-only; querying
     /// an unstarted Task neither prepares nor starts it.

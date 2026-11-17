@@ -680,7 +680,7 @@ struct WorkDestinationTests {
             // Preparation cannot establish provider input readiness.
             #expect(model.taskOpening?.status != .usable)
             if outcome == "unavailable-inventory" {
-                #expect(model.sessions.errorMessage == "Opening cannot wait for unrelated Session pages")
+                #expect(model.sessions.failure == "Opening cannot wait for unrelated Session pages")
             }
             if outcome == "updated-inventory" {
                 #expect(model.sessions.value?.first { $0.id == retained.id }?.title == "Updated conversation")
@@ -956,7 +956,7 @@ struct WorkDestinationTests {
         #expect(model.selection == .task(id: selectedID))
         #expect(model.navigation.selectedSessionId == "retained-conversation")
         #expect(model.navigation.content == .terminals)
-        #expect(model.taskLinkReading.errorMessage == nil)
+        #expect(model.taskLinkReading.failure == nil)
         #expect(!model.showsTaskLink)
 
         // Reopening what is already open changes nothing, so nothing redraws.
@@ -1015,7 +1015,7 @@ struct WorkDestinationTests {
         await model.openTaskLink(url)
         #expect(installedSession(model, workspaceRegistry)?.id == record.id)
         #expect(model.navigation.selectedSessionId == record.id)
-        #expect(model.taskLinkReading.errorMessage == nil)
+        #expect(model.taskLinkReading.failure == nil)
         // Inventory still reads every page; opening needs only its addressed record.
         await model.refreshSessions()
         await model.openTaskLink(url)
@@ -1064,7 +1064,7 @@ struct WorkDestinationTests {
         // Retrying through the chooser uses the same failure receipt as a direct link.
         await model.chooseLinkedTask(wave: wave, task: task)
         #expect(model.taskOpening?.status == .failed)
-        #expect(model.taskOpening?.reason == model.taskLinkReading.errorMessage)
+        #expect(model.taskOpening?.reason == model.taskLinkReading.failure)
     }
 
     @Test(arguments: ["usable", "connection", "surface", "closed", "hidden", "replaced"])
@@ -1275,7 +1275,7 @@ struct WorkDestinationTests {
         for session in ["missing", unrelated.id] {
             await model.openTaskLink(TaskLink(issue: task.task.identifier, repo: nil, session: session))
             #expect(model.navigation.selectedSessionId == record.id)
-            #expect(model.taskLinkReading.errorMessage?.contains(session) == true)
+            #expect(model.taskLinkReading.failure?.contains(session) == true)
             #expect(model.showsTaskLink)
         }
     }
@@ -1447,11 +1447,11 @@ struct WorkDestinationTests {
             if response == current {
                 #expect(!model.paletteRows.contains { $0.id == .task(task.id) })
             } else {
-                #expect(model.taskLinkReading.errorMessage != nil)
+                #expect(model.taskLinkReading.failure != nil)
                 #expect(model.paletteRows.contains { $0.id == .task(task.id) })
                 await model.retryTaskLink()
                 #expect(model.selection == .wave(id: wave.wave.id))
-                #expect(model.taskLinkReading.errorMessage != nil)
+                #expect(model.taskLinkReading.failure != nil)
             }
         }
     }
@@ -1512,9 +1512,9 @@ struct WorkDestinationTests {
             #expect(model.selection == .wave(id: wave.wave.id))
             #expect(model.showsTaskLink)
             if response == "transport-error" {
-                #expect(model.taskLinkReading.errorMessage == "Machine unavailable")
+                #expect(model.taskLinkReading.failure == "Machine unavailable")
             } else {
-                #expect(model.taskLinkReading.errorMessage == nil)
+                #expect(model.taskLinkReading.failure == nil)
             }
         }
     }

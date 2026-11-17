@@ -737,6 +737,10 @@ pub struct ViewPlan {
     /// The page geometry visible members fill, in projection order.
     pub slots: SlotLayout,
     pub contents: Vec<ViewContent>,
+    /// Who a Claim run on this Machine names as owner; `None` without a Git
+    /// `user.email` in the repository, which claiming needs.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub viewer: Option<loopflow_model::durable::TaskOwner>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]

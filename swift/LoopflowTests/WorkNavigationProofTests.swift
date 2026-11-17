@@ -215,7 +215,7 @@ struct WorkNavigationProofTests {
             #expect(workspace.multiplexer.layout == layout)
             #expect(window.firstResponder === terminals[1])
             if failing {
-                guard case .unavailable(_, let reason) = model.sessions else {
+                guard let reason = model.sessions.failure else {
                     Issue.record("Failed page lost its unavailable state")
                     return
                 }
@@ -332,12 +332,11 @@ struct WorkNavigationProofTests {
         model.navigation.renaming?.text = "Second conversation"
         await named.rejectNextRename()
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        // The save starts asynchronously; wait for the refusal itself.
-        for _ in 0..<10 where model.navigation.renaming?.error == nil { try await settle(window) }
-        #expect(model.navigation.renaming?.text == "Second conversation")
-        #expect(model.navigation.renaming?.error == "Rename refused")
+        // The name shows in the click; the refusal restores it and says why.
+        #expect(model.navigation.renaming == nil)
+        for _ in 0..<10 where !model.pendingChanges.changes.isEmpty { try await settle(window) }
+        #expect(model.navigation.notices.current?.text == "lyric-cadenza couldn't be renamed: Rename refused")
         #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
-        model.cancelSessionRename()
 
         try clickTerminal(0)
         try await settle(window)
@@ -345,8 +344,7 @@ struct WorkNavigationProofTests {
         model.navigation.renaming?.text = "Pinned rename target"
         await named.holdNextRename()
         try view.inspect().find(viewWithAccessibilityIdentifier: "session-rename-save").button().tap()
-        try await settle(window)
-        #expect(model.navigation.renaming?.submitting == true)
+        #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
         try clickTerminal(1)
         try await settle(window)
         #expect(model.navigation.selectedSessionId == "second")
@@ -355,7 +353,7 @@ struct WorkNavigationProofTests {
         #expect(model.navigation.selectedSessionId == "second")
         #expect(window.firstResponder === terminals[2])
         await named.releaseRename()
-        for _ in 0..<10 where model.navigation.renaming != nil { try await settle(window) }
+        for _ in 0..<10 where !model.pendingChanges.changes.isEmpty { try await settle(window) }
         #expect(model.sessions.value?.first { $0.id == "first" }?.title == "Pinned rename target")
         #expect(model.sessions.value?.first { $0.id == "second" }?.title == "lyric-cadenza")
         #expect(model.navigation.selectedSessionId == "second")

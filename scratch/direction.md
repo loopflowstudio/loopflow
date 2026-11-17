@@ -24,3 +24,5 @@ Questions 3 to 5 there (open vs resume, fresh-thread verb, selectors) have no an
   - Waking: `lf steer TASK 'text'` wakes two Sessions, the Task's primary conversation and its worker, as a steer naming each would. A quit primary conversation is started again to read it.
   - Reading: unchanged. Every running Session that belongs to the Task still reads the steer at its next boundary. The Task's other stopped Sessions are not woken.
   - Open, to settle in design: which Session is "the worker" when no Graph step is running. Candidates: none (only the primary conversation is woken), or the Task's next step when it starts. Waking the last finished step would re-run work in the checkout; don't assume that.
+- On two agents acting on one Task steer (a running worker and the woken primary conversation): "i am not worried about this concern". Add no guard for it.
+- Candidate simplification, not confirmed: a worker is headless and never idle, so "wake the worker" only applies to a stopped one. If a stopped worker is not woken, the rule is: a Task steer goes to every running Session of the Task and wakes its primary conversation.

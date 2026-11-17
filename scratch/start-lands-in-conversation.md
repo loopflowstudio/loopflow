@@ -235,26 +235,12 @@ subscription checkpoint, never `plan.list`. The position line says
 "Starting <graph>" for a claimed Task at `start`. `WorkDestinationTests` checks
 the request log after Start holds only `task.create`.
 
-Concept review of 149dbbfae3: the stand-in pane keyed by request ID holds, and
-the answer is the only read. Two things to change, then the phone:
-- **Once `task.create` answers, the Task exists; nothing may offer to file it
-  again.** Today a throw from `openCreatedTask` (planning never shows the row,
-  or `installConversation` fails) lands in `createTask`'s generic `catch`, sets
-  `startingTask.error`, and `StartingTaskView` offers Try again, which files a
-  second Task under a new request ID. After the answer, clear `startingTask`,
-  select the Task, and put the failure on its workspace
-  (`conversationError`), the same place an existing Task's failed open shows.
-  Try again stays only for a failure before filing. Test in
-  `WorkDestinationTests`: answer arrives, `installConversation`'s prepare
-  fails → no `startingTask`, selection is the Task, the workspace carries the
-  error.
-- Small: `StartingTaskView.start` and `createTask` both close the palette.
-  `start` closes it synchronously inside `Perf.userAction`, beside
-  `Perf.acknowledged`; `createTask` runs in a `Task {}` a main-actor turn
-  later. Keep one close without leaving the click frame: either `start` sets
-  `startingTask` and closes the palette before spawning, or `createTask`'s
-  close stays and `start`'s goes only if the frame check still passes.
-  (Doc comment "One resolved opening…" is back on `LinkedSession`.)
+After the answer, no Try again (1f8eb5476e): `createTask` throws only before
+filing (`StartingTaskView` keeps the words and Try again); an opening failure
+lands on the selected Task's `conversationError`
+(`WorkDestinationTests`: one `task.create`, `startingTask` nil). If planning
+never shows the filed Task, the words stay with the error and Close
+(`StartingTask.filed`), no Try again.
 
 Slice 2, phone half built. A first Start is `startTask`:
 `CreationSubmissions.submit` saves, sends once and decodes `TaskCreated`
@@ -272,11 +258,8 @@ Start's log is `task.create` alone and the opening names the answer's Session
 Concept review of 4d6ec717da: the phone model holds (`MobileTask` is the one
 value both Start and the Task list open; recovery alone reads `task:<id>`).
 
-After the answer, no Try again: `createTask` throws only before filing; an
-opening failure lands on the selected Task's `conversationError`. If planning
-never shows the filed Task, the words stay with the error and Close
-(`StartingTask.filed`), no Try again. Phone: `MobileTaskCreation.starting`
-covers only the first send ("Starting…"); recovery reads "Checking your Task…".
+The first send reads "Starting…" (`MobileTaskCreation.starting`); recovery
+reads "Checking your Task…".
 
 Concept review of 1f8eb5476e: the split holds (Try again only before filing;
 after the answer the failure is the workspace's). One state is left that the
@@ -284,31 +267,31 @@ answer can remove: `StartingTask.filed`, words plus Close for a Task that
 exists but this window cannot show. It exists because Desktop selects from a
 planning row the answer lacks, so `openCreatedTask` waits on a Work checkpoint
 (up to 10 s, on the typing path whenever the answer beats the subscription)
-and throws "planning does not show it yet". Next implement:
-- `task.create`'s answer carries the Task's planning row, the same shape the
-  Work projection emits for it (Swift `RoadmapTask`, wave by ID). DTO rule:
-  required key, fixture `task_create_receipt.json` and each language's
-  fixture test.
-- `openCreatedTask` selects from that row at once: it joins `taskRecords` as
-  retained evidence ("Updating…" until the subscription's row replaces it),
-  no `confirmWorkUpdate`. `openCreatedTask` no longer throws; delete
-  `StartingTask.filed`, the Close label and the "planning does not show it"
-  error. `StartingTaskView` goes back to one failure: before filing.
-- Test: the existing after-answer test with planning that never lists the
-  Task → selection is the Task, `startingTask` nil, log is `task.create`
-  alone (no checkpoint wait).
-- Phone: `MobileTask` already comes from the answer; nothing to change.
-- Still open from 149dbbfae3: the palette closes twice (`StartingTaskView.start`
-  inside the click, `createTask` a turn later). Keep `start`'s; drop
-  `createTask`'s.
+and throws "planning does not show it yet".
 
 Remaining, in order:
-1. `Perf.retarget(.startTask, from: "new-task", …)`: key by request ID from the
-   click (slice 5).
-2. Slice 3, including checkout without network for a new branch:
+1. **The answer carries the Task's planning row** (concept review of
+   1f8eb5476e). `task.create`'s answer adds the Task's row in the shape the
+   Work projection emits (Swift `RoadmapTask`, wave by ID); DTO rule: required
+   key, fixture `task_create_receipt.json` and each language's fixture test.
+   `openCreatedTask` selects from it at once: it joins `taskRecords` as
+   retained evidence ("Updating…" until the subscription's row replaces it),
+   no `confirmWorkUpdate` (today up to 10 s on the typing path whenever the
+   answer beats the subscription). `openCreatedTask` stops throwing; delete
+   `StartingTask.filed`, the Close label and the "planning does not show it
+   yet" error, so `StartingTaskView` has one failure: before filing. Test: the
+   after-answer test with planning that never lists the Task → selection is
+   the Task, `startingTask` nil, log is `task.create` alone. Phone: nothing
+   (its `MobileTask` already comes from the answer).
+   Same pass: the palette closes twice (`StartingTaskView.start` inside the
+   click, `createTask` a turn later, `WorkModel.swift:2567`). Keep `start`'s;
+   drop `createTask`'s.
+2. `Perf.retarget(.startTask, from: "new-task", …)` (`WorkModel.swift:2584`):
+   key by request ID from the click (slice 5).
+3. Slice 3, including checkout without network for a new branch:
    `fetch_task_refs`, the base fetch and `assert_assignee` still run inside
    setup (off the answer path, on the typing path).
-3. Slices 4–5.
+4. Slices 4–5.
 
 ## Slices
 

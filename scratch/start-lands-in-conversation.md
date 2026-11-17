@@ -331,6 +331,14 @@ Slice 4 removes the 0.58 s; prompt build is the larger cost.
 
 Remaining, in order: slice 4; slice 5's remote sample.
 
+Slice 4's reset check (read in `bin/lf.rs` main, not built): the exec'd `lf -i`
+redoes per-process startup that an in-process launch must do itself or drop:
+`journal::admit_process` (a new LfProcess after `finish_before_exec` closed the
+resume's), `select_invocation(cli.setting_values())`, home canonicalization,
+`--task` Work binding, and the env reads `prepared_artifact_key` and
+`active_session_token` make (each removes its variable). `transport::HANDOFF`
+and tracing are already set in the resume process.
+
 Concept review of e01c813a0a found the ready checkout's owner split (only
 setup replaced it, so a backlog `lf task run` that took it left none) and a
 hand-deleted one never returning (its registration made plain `worktree add`

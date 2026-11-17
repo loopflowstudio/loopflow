@@ -382,6 +382,18 @@ Concept review of 1122563065 and 3d582e361b settled the next pass; built:
   (compared whole answers, whose `row` reading time differs; it compares
   receipts now, as `task_create_tests::receipt` does).
 
+Concept review of 5dcaed292b: the model holds. `Opening`/`ConversationLaunch`
+is the one typed value between opening and running; the provider runs in the
+held process and its one LfProcess. `launch_conversation` still sets `LF_AS` /
+`LF_WAVE_ID` with `EnvGuard`: that is how ordinary `lf --task X -i` hands Work
+to the provider's environment (`process/runtime.rs`), so the launch matches it.
+Moving Work declaration off process env is its own change, not this Task's.
+`LaunchLock` is a shared take-once slot only because `Cli` derives `Clone`.
+
+Next implement: delete the leftover `LF_HUMAN_SESSION` names, which nothing
+sets or reads now (`rust/loopflow/tests/session_cli_tests.rs:24,152`,
+`rust/loopflow-execution/tests/support/ambient.rs:20`).
+
 Remaining: slice 5's remote sample (qa).
 
 ## Slices

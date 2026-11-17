@@ -24,8 +24,8 @@ case". Then, after reading that released lf 0.16.0 still queries
 
 Done: `unused_store_members.sql` is additive. It marks each member below
 `-- leaving: <member> LOO-954`, rebuilds `pool_machines` without its FK to
-`pools` (nothing writes `pools` now), and drops the dashboard planning
-triggers. The `UNSTAGED_CONTRACT` exemption, `migration_exports.rs` and the
+`pools` (nothing writes `pools` now). Dashboard planning triggers stay: a
+served Desktop watch needs them to see another client's Dashboard edits. The `UNSTAGED_CONTRACT` exemption, `migration_exports.rs` and the
 `until_unused_store_members` test helpers are gone. `task_ownership.written_here`
 is written again (1 here, 0 ingested), as base did; base already wrote none of
 the `tasks` checkout, primary Session or `ship_*` columns, so nothing else

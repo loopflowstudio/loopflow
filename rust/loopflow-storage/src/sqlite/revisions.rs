@@ -106,9 +106,6 @@ mod tests {
     const NEVER_DISPLAYED: &[&str] = &[
         "creation_receipts",
         "access_profiles",
-        // Screen state: Desktop shows its own Dashboard edits from the reply.
-        "dashboards",
-        "dashboard_arrangements",
         "planning_user",
         "planning_peer_changes",
         "planning_peer_observed",

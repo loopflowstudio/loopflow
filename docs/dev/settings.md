@@ -90,8 +90,7 @@ applicability/lifecycle reason, not an adapter that advertises an omission.
 | Explicit CLI and environment choices | The invocation; never persisted as preferences |
 | Account identity, credentials and observed availability | Existing account/secret domain owners |
 | Current machine identity and observed process/execution state | Runtime domain owners |
-| Reusable layout templates and selected defaults | Configuration |
-| Actual saved Task layout | Persisted live workspace state |
+| Desktop pane layouts | Desktop's per-Mac cache (`$LF_HOME/desktop-cache/pane-layouts/`) |
 | Remote delivery origin/version/last-applied evidence | Operational metadata, never a preference override |
 
 Ordinary edits carry one typed destination: personal global, personal/shared

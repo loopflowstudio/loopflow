@@ -1,5 +1,5 @@
 //! Conversation selection and host presentation. `open` reaches one Session;
-//! `workspace` applies layouts and follows Task arrivals. Both use the shared
+//! `workspace` opens Task tabs and overviews and follows Task arrivals. Both use the shared
 //! non-replacing Session connection; explicit resume owns input takeover.
 
 use loopflow_execution::store::session_projection;
@@ -1105,7 +1105,7 @@ pub struct OpenSelection {
 
 #[derive(Debug, Clone, clap::Args)]
 #[command(
-    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Layouts and overviews: lf workspace."
+    after_help = "Direct CLI calls attach here; agent calls open a sibling tab. An already-open conversation stays where it is: use --focus to reveal it, or lf resume to move input. Task tabs and overviews: lf workspace."
 )]
 pub struct OpenArgs {
     #[command(flatten)]

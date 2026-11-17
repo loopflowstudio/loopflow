@@ -1,0 +1,60 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-935 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.3em .6em;border-bottom:1px solid #ddd;text-align:left;vertical-align:top}</style></head><body>
+<h1>LOO-935 QA, 2026-11-16</h1>
+<p>Branch <code>lf</code> 0.16.0+528ccd8ed, then rebuilt with the fixes below. Private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-935</code>, a git-planning repository with a local bare origin, and the installed <code>lf</code> 0.16.0 for the "before" side. Load average was about 57.</p>
+
+<h2>1. Upgrade a store the release created</h2>
+<p>The installed <code>lf</code> created a Task and a prepared Session. Then the branch opened the same store.</p>
+<pre>schema_migrations: 122 → 123 (unused_store_members)
+pool_machines: "pool TEXT REFERENCES pools(name)" → "pool TEXT"
+pragma integrity_check: ok   pragma foreign_key_check: (none)
+branch lf task list:   1b479e · — · Before upgrade
+release lf task list:  reads the migrated store; created 723c01 "After upgrade by release"
+branch lf task list:   both Tasks</pre>
+<p>Works: the migration is additive, and the released <code>lf</code> keeps reading and writing the store after it. I repeated this on a fresh home after the trigger fix: 6 dashboard triggers are present, and the release still lists Tasks.</p>
+
+<h2>2. <code>lf open</code> / <code>lf workspace</code> in Rex</h2>
+<p>I ran a private <code>rex server run</code> and gave the Task a checkout (<code>lf wt create</code> + <code>task create --worktree</code>).</p>
+<pre>lf open --task … --tab --host rex   → status usable; session "Open in Rex · fd73b3": ["Conversation"]
+lf workspace --task … --host rex    → new session "repo": ["Conversation"], tab prints
+  "Already open at rex:{…}; reveal it with `lf open --session 9f86… --focus`"
+lf open --task … --diff --host rex  → failed: "--diff requires --host desktop; use lf diff …"</pre>
+<p>Each Task tab holds only its conversation. When the conversation is already open, the tab points at it and leaves the input alone. The block ran real Claude at its first-run screen: Rex's panes don't inherit the stand-in <code>PATH</code>.</p>
+<p><b>Still wrong (on main too, not fixed):</b> <code>lf workspace --task … --diff</code> sends a split with a "Changes" block running <code>lf task diff &lt;id&gt; --base parent</code>. I confirmed this by logging the layout JSON sent to Rex. That command prints and exits, so Rex removes the block, and only "Conversation" remains. Main's <code>layout.rs</code> sends the same argv.</p>
+<p><b>Fixed:</b> help and docs still described configured layouts that this branch removed:</p>
+<ul>
+<li><code>lf workspace</code> about: "Open configured Task layouts…" → "Open Task tabs, or a repository/Wave overview"</li>
+<li><code>lf open</code> after_help and the module doc: "Layouts and overviews" → "Task tabs and overviews"</li>
+<li><code>docs/workspaces.md</code>: removed "the Task's configured panes" and "A Task's configured workspace can hide Conversation"</li>
+<li><code>docs/dev/settings.md</code>: the layout-template rows → a Desktop pane layouts row</li>
+<li><code>server/README.md</code>: <code>desktop.*</code> no longer claims saved pane layouts</li>
+</ul>
+
+<h2>3. Dashboards</h2>
+<p><code>lf desktop dashboard query 'QA view' task:&lt;id&gt;</code>, <code>pin</code>/<code>unpin --revision</code> and <code>rename</code> all write and print the record. <code>lf desktop layout 'query:QA view'</code> reads it back. A CLI <code>lf desktop view list --subscribe</code> printed a new frame after a pin.</p>
+<p><b>Changed:</b> the migration dropped the six <code>store_revision_dashboard*</code> planning triggers. A served <code>desktop.view.list</code> watch (desktop hello over the socket) showed no frame after a CLI <code>unpin</code>. But that probe had a bug: Python's socket file stops reading after its first timeout. So the drop is <b>not shown</b> to cause the miss. With the triggers kept, the fixed probe got a frame after <code>unpin --revision 3</code>. I couldn't re-run the dropped variant, because lf refuses a store whose triggers were changed by hand ("migration history or schema differs"). I kept the triggers because that is main's behavior and it is known to work. The lines are removed from <code>unused_store_members.sql</code>, and <code>dashboards</code>/<code>dashboard_arrangements</code> are back out of <code>NEVER_DISPLAYED</code>.</p>
+
+<h2>Checks</h2>
+<table>
+<tr><td><code>cargo nextest run -p loopflow-storage --lib -E 'test(revisions)|test(migration_runner)|test(planning_update_triggers)|test(selections)'</code></td><td>135 pass</td></tr>
+<tr><td><code>scripts/schema_page.py --check</code>, <code>scripts/check_migrations.py</code></td><td>pass</td></tr>
+<tr><td><code>scripts/due_removals.py</code></td><td>LOO-836, LOO-928, LOO-954 listed, not merged</td></tr>
+<tr><td><code>scripts/model_size.py</code></td><td>88 tables, 732 columns, 1009 storage pub fns, 35 SQL sites in 8 files (main grew since the plan's 87/723)</td></tr>
+<tr><td><code>cargo fmt --check</code></td><td>clean</td></tr>
+<tr><td>Swift, full Rust suites, clippy</td><td>left to gate/CI</td></tr>
+</table>
+
+<h2>Not reached</h2>
+<ul>
+<li>Desktop window: pane layouts in <code>desktop-cache/pane-layouts/</code> were not seen in a live window. They are covered only by the earlier headless <code>DashboardWorkspaceTests</code> run.</li>
+<li>Herdr and cmux tabs were not opened in this run.</li>
+<li><code>due_removals.py install</code> on the Machine that runs Tasks is left for verify.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li><code>--diff</code> in Rex/Herdr/cmux shows no Changes: <code>lf task diff</code> exits and the host closes the block. This happens on main too. <code>docs/workspaces.md</code> says "--diff adds the Task's Changes beside it".</li>
+<li>Each <code>lf workspace --task</code> run from outside Rex creates a new Rex session, even when the conversation is already open in one. This is consistent with the docs ("a new container").</li>
+</ol>
+</body></html>

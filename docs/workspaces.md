@@ -61,13 +61,13 @@ A plain terminal supports `--here`. With no sibling-tab support, `--tab` fails
 and prints a command to run in a terminal you open yourself. The same applies
 to an agent call without a supported host; it does not fall back to attaching
 inside the tool call. Use `--host desktop` to choose Desktop navigation.
-`--server <endpoint>` selects a Rex Unix socket. Rex workspace layouts can
-reach a Task's recorded Machine; Herdr and cmux workspace layouts stay local.
+`--server <endpoint>` selects a Rex Unix socket. Rex workspaces can
+reach a Task's recorded Machine; Herdr and cmux workspaces stay local.
 
 ## Open a workspace
 
 ```bash
-lf workspace --task ENG-123         # the Task's configured panes in your host
+lf workspace --task ENG-123         # the Task's tab in your host
 lf workspace --wave product        # Product's started, unfinished Tasks
 lf workspace                       # this checkout's Task, Wave or repository
 lf workspace --available           # conversations ready for your next turn
@@ -75,13 +75,12 @@ lf task view ENG-123                # only the Task brief and workflow
 lf diff ENG-123                     # only its changes
 ```
 
-`lf workspace` opens arrangements and overviews. In a repository or Wave, it
+`lf workspace` opens Task tabs and overviews. In a repository or Wave, it
 shows started, unfinished Tasks; backlog Tasks appear only when selected.
 Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
 Use `lf open --task <task>` to enter a conversation from an overview. Overviews
 and automatic arrivals start no agents and leave existing conversation input
-where it is. A Task's configured workspace can hide Conversation; ordinary
-`lf open` always reaches the requested conversation regardless of that layout.
+where it is.
 
 Rex and Herdr place a Task in the current session or workspace; cmux uses the
 current group, or the window if there is no group. A repository or Wave gets a

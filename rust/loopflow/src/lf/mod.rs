@@ -488,7 +488,7 @@ pub enum Commands {
     },
     /// Open one conversation here, in a sibling tab, or focus its existing view
     Open(commands::open::OpenArgs),
-    /// Open configured Task layouts or a repository/Wave overview
+    /// Open Task tabs, or a repository/Wave overview
     Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]

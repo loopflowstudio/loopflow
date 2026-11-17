@@ -23,8 +23,9 @@
   is an explicit request. A Task without a local checkout shows Task & workflow.
 - **`lf desktop layout` stays as a read of `query:<id>`**; `--save` is gone
   (`lf desktop dashboard slots` writes slots).
-- **Dashboards stay on the Machine** with their planning triggers dropped, so
-  edits wake no planning reader. Still open, for LOO-940 rather than this PR:
+- **Dashboards stay on the Machine** and keep their planning triggers (QA
+  2026-11-16: with them dropped, a served `desktop.view.list` watch sent no
+  frame after `lf desktop dashboard unpin` from the CLI). Still open, for LOO-940 rather than this PR:
   is a dashboard shared per repository (a saved view everyone sees) or one
   client's screen? `dashboard_arrangements.arrangement_json` is screen state
   keyed by repository, the shape the outcome says screen state should leave;

@@ -293,8 +293,8 @@ Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
 settings, `desktop` for the app and `plan` for every Wave's plan at once;
 nothing gets a namespace of its own for a client.
 
-`desktop.*` is Desktop's own arrangement state: saved pane layouts and
-Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
+`desktop.*` is Desktop's shared arrangement state: Dashboards. Pane layouts
+stay in Desktop's per-Mac cache. The portfolio is the Machine's repository set: Desktop's sidebar,
 the phone's `view.select` Task list and its creation destinations all read it.
 
 - `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`

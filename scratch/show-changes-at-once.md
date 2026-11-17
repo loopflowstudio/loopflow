@@ -124,9 +124,10 @@ one frame, with accepted and confirmed times beside it.
 - **Answers.** Success: store `revisions`, send a checkpoint for the parts the
   command touches (forces a frame even if the body did not change, so the drop
   needs no second mechanism). Error with no revisions = refused: remove the
-  change, the row returns, raise the Notice. Error with revisions = partly
-  done (Abandon cleanup): keep the patch until covered, raise the Notice with
-  the error.
+  change, the row returns, raise the Notice. Error with revisions: the
+  same Notice; the patch stays until a reading covers them. Other writes (an
+  earlier write's planning sync) land inside a failing write's window, so
+  revisions on an error never mean it took effect (QA, 2026-11-16).
 - **Link state per Machine**: connected, blip (lost, under ~10 s), away.
   Fed by `ServerLink`/subscription disconnects and the first frame after
   reconnect. Blip: outstanding changes stay in memory and are resent with

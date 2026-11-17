@@ -315,8 +315,8 @@ pub enum ServerMessage {
         message: String,
         /// Structured detail a client can act on, such as the missing resource.
         data: Option<serde_json::Value>,
-        /// The domains a failed write advanced before it failed (Abandon whose
-        /// cleanup failed after its save); null when it changed nothing.
+        /// The domains that advanced while a failed write ran, by it or by
+        /// another write; null when none did.
         #[serde(deserialize_with = "Option::deserialize")]
         revisions: Option<Revisions>,
     },
@@ -381,7 +381,7 @@ impl ServerMessage {
         Self::written_error(id, error, None)
     }
 
-    /// The `error` that answers a write which advanced `revisions` first.
+    /// The `error` that answers a write during which `revisions` advanced.
     pub fn written_error(id: Option<String>, error: Error, revisions: Option<Revisions>) -> Self {
         Self::Error {
             id,

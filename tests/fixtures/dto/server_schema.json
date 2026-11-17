@@ -10422,7 +10422,7 @@
                   "type": "null"
                 }
               ],
-              "description": "The domains a failed write advanced before it failed (Abandon whose\ncleanup failed after its save); null when it changed nothing."
+              "description": "The domains that advanced while a failed write ran, by it or by\nanother write; null when none did."
             },
             "type": {
               "const": "error",

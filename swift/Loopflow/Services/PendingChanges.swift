@@ -75,8 +75,9 @@ public final class PendingChanges {
 
     /// Show `command` on every list now and send `write` under its request ID,
     /// again while the link is lost. The change stays until a reading covers what
-    /// the answer advanced; a refusal removes it and the Notice says
-    /// "LOO-4 couldn't be completed: … · Show", `show` going to the Task.
+    /// the answer advanced. A refusal says "LOO-4 couldn't be completed: … · Show",
+    /// `show` going to the Task, and removes the change, or keeps it until a
+    /// reading covers what moved while the refused write ran.
     /// `answered` runs after an answer, to ask for the readings that show it.
     @discardableResult
     public func make(_ command: PendingCommand, subject: String, verb: String, write: ServedWrite, notices: NoticeCenter,
@@ -88,13 +89,16 @@ public final class PendingChanges {
             case .answered(let revisions):
                 self.answered(requestID, revisions: revisions)
                 await answered()
-            case .partlyDone(let revisions, let reason):
-                self.answered(requestID, revisions: revisions)
-                notices.post(Notice("\(subject) was \(verb), but \(reason)", key: requestID, action: show))
-                await answered()
-            case .refused(let reason):
-                changes.removeAll { $0.requestID == requestID }
+            case .refused(let reason, let revisions):
                 notices.post(Notice("\(subject) couldn't be \(verb): \(reason)", key: requestID, action: show))
+                // Domains moved while it failed, by it or by another write: the
+                // reading that covers them shows which.
+                guard let revisions else {
+                    changes.removeAll { $0.requestID == requestID }
+                    return
+                }
+                self.answered(requestID, revisions: revisions)
+                await answered()
             }
         }
         return requestID
@@ -110,9 +114,9 @@ public final class PendingChanges {
         notices.post(Notice("\(subject) \(name) requested", key: requestID, action: undo))
         Task {
             switch await deliver(write, requestID: requestID) {
-            case .answered, .partlyDone:
+            case .answered:
                 await answered()
-            case .refused(let reason):
+            case .refused(let reason, _):
                 notices.post(Notice("\(subject) \(name) couldn't be requested: \(reason)", key: requestID))
                 refused()
             }
@@ -121,8 +125,9 @@ public final class PendingChanges {
 
     private enum Delivery {
         case answered(Revisions)
-        case partlyDone(Revisions, String)
-        case refused(String)
+        /// `revisions` are the domains that advanced while the write ran; the
+        /// Machine cannot say whether this write moved them.
+        case refused(String, revisions: Revisions?)
     }
 
     /// Send `write` until the Machine answers it. A lost link sends it again under
@@ -136,14 +141,13 @@ public final class PendingChanges {
                 return .answered(revisions ?? Revisions([:]))
             } catch let error as ServerError {
                 linkReturned()
-                if let revisions = error.revisions { return .partlyDone(revisions, error.message) }
-                return .refused(error.message)
+                return .refused(error.message, revisions: error.revisions)
             } catch where ServerLink.lostLink(error) && !Task.isCancelled {
                 linkLost()
                 try? await Task.sleep(for: delay)
                 delay = min(delay * 2, .seconds(4))
             } catch {
-                return .refused(describe?(error) ?? error.localizedDescription)
+                return .refused(describe?(error) ?? error.localizedDescription, revisions: nil)
             }
         }
     }

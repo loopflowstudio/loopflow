@@ -301,6 +301,11 @@ A Swift command-line probe can import the built module with
 `swiftc -I swift/.build/debug/Modules probe.swift swift/.build/debug/Loopflow.build/*.o -o probe`.
 Encode `ServerClientMessage` values in the probe, then send those exact JSON
 lines to the private server. This exercises production encoding, not a window.
+To run `ServerLink` and `PendingChanges` themselves, give the probe its own
+`ServerCarrier` over the socket (Desktop's `UnixSocketCarrier` is private to
+`LoopflowMac`) and build `ServerEndpoint(client:control:ticketed:)` from it.
+Stopping the private server mid-change shows blip, away at ten seconds, and
+the resend under the same request ID once it starts again.
 
 To delay a report, SIGSTOP the launched command before it reports, leaving its
 execution owner running. Check that a live owner waits beyond the unknown grace.

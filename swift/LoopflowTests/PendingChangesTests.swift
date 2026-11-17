@@ -154,16 +154,16 @@ struct PendingChangesTests {
         #expect(shown)
     }
 
-    @Test func aPartlyDoneChangeIsKeptUntilCovered() async throws {
+    @Test func aRefusalWhileOtherWritesMovedTheStoreWaitsForTheReading() async throws {
         let changes = changes()
-        changes.make(.abandon(task: "LOO-1"), subject: "LOO-1", verb: "abandoned",
-                     write: .taskAbandon(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
-        // Abandon saved, then failed to delete its branch: the answer still advanced planning.
-        await machine.fail(ServerError(code: "conflict", message: "its branch is still checked out", data: .null,
+        changes.make(.complete(task: "LOO-1"), subject: "LOO-1", verb: "completed",
+                     write: .taskComplete(directory: "/repo", issue: "LOO-1"), notices: notices, show: nil)
+        // Another write's planning sync advanced planning while this one failed.
+        await machine.fail(ServerError(code: "outcome_unknown", message: "its PR #12 is open", data: .null,
                                        revisions: Revisions(["planning": 6])))
         changes.read("tasks", try plan(at: 5))
         #expect(identifiers(changes.apply(to: try plan(at: 5))) == ["LOO-2", "LOO-3"])
-        #expect(notices.current?.text == "LOO-1 was abandoned, but its branch is still checked out")
+        #expect(notices.current?.text == "LOO-1 couldn't be completed: its PR #12 is open")
         changes.read("tasks", try plan(at: 6))
         #expect(changes.changes.isEmpty)
     }

@@ -129,8 +129,10 @@ a claim's Linear assignee run after the answer. Each `reading` frame carries
 on screen drops it at the first reading at or past the write's `revisions`. A
 write may carry `request_id`; for a day a repeat under that ID gets the first
 answer and runs nothing, and a different operation under it is `invalid`. An
-`error` whose `revisions` is not null advanced those domains before failing
-(Abandon whose branch cleanup failed after its save). Older clients must update.
+`error`'s `revisions`, when not null, are the domains that advanced while the
+write ran: other writes, such as an earlier write's planning sync, land in the
+same window, so they do not say the failed write took effect. Older clients
+must update.
 
 ```text
 → {"type":"request","id":"c-1","operation":{"kind":"task.complete","directory":"/repo","issue":"LOO-2"},"select":null,"request_id":"6f1c…"}

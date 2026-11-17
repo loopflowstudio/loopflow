@@ -53,3 +53,13 @@
   prepare checkout: …", "Could not complete the action: …", "Could not change
   pane: …", "Could not run on <Machine>: …". The Machines list is one
   `WorkModel` reading per window, shared by every Machine control in it.
+- QA 2026-11-16: an `error`'s `revisions` are whatever advanced while the write
+  ran; on the private Machine a refused Complete right after a Reopen came back
+  with `{"planning": 184}` from the Reopen's deferred sync. Every refusal now
+  reads "… couldn't be …"; revisions only keep the patch until covered. On a
+  busy Machine nearly every error carries revisions, so the wire field may be
+  worth dropping.
+- Untyped write refusals (`OpsError::Message`, e.g. the open-PR completion
+  refusal) reach clients as `outcome_unknown`, message suffixed "; inspect the
+  affected work before retrying". Not changed here: retyping refusals touches
+  every command's error classification.

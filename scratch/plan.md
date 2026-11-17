@@ -167,8 +167,13 @@ not parse. So in this PR:
 
 ## Slices
 
-All six are built (commits f10c0b6a74, a36284d737, b38466264c and the docs
-commit after them). What is left is gate: publish so CI runs the suites.
+All six are built: f10c0b6a74, a36284d737, b38466264c, the docs commits
+f0d09dcf57 and 5c0f8290ee, and 30bda8534b (native authentication QA guidance
+moved from `init`/`repo_operate` into `.lf/qa/account-routing.md` and
+`hooks.md`). The only remaining scorecard and `work` guidance mentions are in
+`release/*/NOTES.md`, which are shipped records. origin/main has nothing new
+since the last merge. What is left is gate: on PR #1955 every suite reports
+"skipping" while `scratch/` is non-empty, so the suites run once gate clears it.
 
 User docs: `docs/orchestration.md` (extensions and `lf list skill`, step
 commits, `.lf/qa/` notes), `docs/ops.md`, `docs/agent-api.md`.

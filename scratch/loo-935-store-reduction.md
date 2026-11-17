@@ -1,6 +1,6 @@
 # LOO-935: remove what the product no longer uses, and keep it removed
 
-Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next is gate.
+Status (2026-11-17): `lf resume` does one thing (Rust, Swift, docs done); before it, `lf task view`, `lf open --diff`, the Rex follower and Task widening went and every view of a held terminal types. Next: one resume decision (below), then gate.
 
 ## Demo
 
@@ -295,3 +295,25 @@ only in the loaded `-j 6` run and passed alone at load ~60-115:
 missed "Attachment failed"; gate/CI decides). Swift: `swift build --build-tests`
 and `test_desktop.sh --skip-build` over 20 session/workspace/DTO suites (309):
 pass; display suites left to gate/CI.
+
+## One resume decision (concept review, 2026-11-17: next implement)
+
+Resume does one thing, but three functions still decide what it will do, from
+different evidence: `session_action` (process evidence → "Take over"),
+`held_action` (`unviewed` → "Reconnect"/"Open here") and `read_resume`'s
+`SessionResumeIntent` (`is_running(state)`, `session_terminal`). `--explain`
+prints both the intent and the record's `opening`, so it can say "Take over"
+under an Action of View.
+
+- One function decides `SessionResumeIntent` from a Session's summary;
+  `SessionAction` (label, help) is a function of that intent. Labels stay:
+  View reads "Reconnect" when unviewed, else "Open here"; Start reads "Try
+  again" after a consumed launch, else "Start conversation"; TakeOver reads
+  "Take over"; Resume reads "Open here".
+- `projected_action`, `held_action` and `session_action` fold into it;
+  `explain_resume` takes `opening` from the same value it reports as `intent`.
+- Test: a label table keyed by intent, and one explain row whose intent and
+  opening come from one decision. Wire shapes unchanged.
+
+Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig
+resume do what it should do. and then we can talk about what opens does".

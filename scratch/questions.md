@@ -4,8 +4,8 @@
 
 - **Any tracker, not Linear-only.** Linear and Asana stay as bridges; Notion is
   deleted. Jack Heart, 2026-11-16: "lets keep asana but dropping notion is fine".
-- **Table name `tracker_effects`.** Alternatives: `planning_outbox`,
-  `tracker_queue`.
+- **Table name `tracker_actions`** (was `tracker_effects` before the
+  vocabulary pass). Alternatives: `planning_outbox`, `tracker_queue`.
 - **Drain bound: 20 provider requests or 5 s per pass, concurrency 4.** The
   Linear allowance is 5,000/h shared by every lf process on a Machine (~11 live
   on 2026-11-05); 20 per pass keeps a pass well under it. Tune from

@@ -10,8 +10,8 @@ use serde_json::{json, Value};
 
 use super::{completed, rich_text, AsanaClient, Task, IDENTITY_LABEL};
 use crate::ops::tracker::{
-    creation_id, ingest_task, message, now, observed_task, remote_project, remote_task,
-    repository_scope, value, values, visible_text, Sent, TrackerError,
+    creation_id, ingest_task, message, now, observed_task, opening_state, remote_project,
+    remote_task, repository_scope, target_state, value, values, visible_text, Sent, TrackerError,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -112,12 +112,7 @@ impl AsanaClient {
                 value => fields(&mut data, &value),
             }
         }
-        let state = store
-            .get_task(task)
-            .await
-            .map_err(message)?
-            .and_then(|task| task.state)
-            .unwrap_or_else(|| "unstarted".into());
+        let state = opening_state(store, task).await?;
         data["completed"] = json!(completed(&state).map_err(message)?);
         data["projects"] = json!(projects);
         let created: Task = match self.send(Method::POST, "/tasks", Some(data)).await {
@@ -204,12 +199,7 @@ impl AsanaClient {
     /// Asana has open and completed tasks; a canceled Task is closed there too.
     async fn state(&self, store: &Store, task: &TaskId, action: &TrackerAction) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let WorkValue::Disposition(disposition) = value(action)? else {
-            return Err(message("state action holds no Disposition"));
-        };
-        let target = disposition
-            .planning_state
-            .ok_or_else(|| message("state action names no state"))?;
+        let target = target_state(action)?;
         match self.set_state(&external, &target).await {
             Ok(item) => Ok(Sent::Acknowledged {
                 revision: item.revision,
@@ -227,8 +217,8 @@ impl AsanaClient {
         action: &TrackerAction,
     ) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let body = action.value["value"]["body"]
-            .as_str()
+        let body = action
+            .comment_body()
             .ok_or_else(|| message("comment action holds no body"))?;
         match self
             .sync_comment(&external, &super::comment_markdown(&visible_text(body)))
@@ -325,8 +315,8 @@ impl AsanaClient {
         action: &TrackerAction,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_task(store, task).await?;
-        let claimed = action.value["value"]["body"]
-            .as_str()
+        let claimed = action
+            .comment_body()
             .map(|body| super::comment_markdown(&visible_text(body)));
         let observation = self.observe(&external).await.map_err(message)?;
         let mut comments = Vec::new();

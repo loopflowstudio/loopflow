@@ -137,7 +137,7 @@ fn field(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
     }
 }
 
-fn adopt(observed: &Observed, remote: &WorkValue) -> Decision {
+fn adopt(observed: &Observed, remote: impl serde::Serialize) -> Decision {
     Decision::Resolve(Resolution::Conflicted {
         remote: serde_json::json!({"revision": observed.revision, "value": remote}),
     })
@@ -194,9 +194,7 @@ fn order(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
         .as_ref()
         .and_then(|base| serde_json::from_value(base["value"].clone()).ok());
     match base {
-        Some(base) if !same_order(&base, order) => Decision::Resolve(Resolution::Conflicted {
-            remote: serde_json::json!({"revision": observed.revision, "value": order}),
-        }),
+        Some(base) if !same_order(&base, order) => adopt(observed, order),
         _ => Decision::Send,
     }
 }
@@ -210,7 +208,7 @@ pub fn same_order(left: &[String], right: &[String]) -> bool {
 }
 
 fn comment(action: &TrackerAction, observed: Option<&Observed>) -> Decision {
-    let body = action.value["value"]["body"].as_str();
+    let body = action.comment_body();
     match observed {
         Some(observed)
             if observed.comments.iter().any(|seen| {

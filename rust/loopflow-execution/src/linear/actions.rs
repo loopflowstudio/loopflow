@@ -9,8 +9,8 @@ use serde_json::{json, Value};
 
 use super::{LinearClient, OrderedIssue, PlanningResponse};
 use crate::ops::tracker::{
-    creation_id, ingest_task, message, now, observed_project, observed_task, remote_project,
-    remote_task, repository_scope, value, values, Sent,
+    creation_id, ingest_task, message, now, observed_project, observed_task, opening_state,
+    remote_project, remote_task, repository_scope, target_state, value, values, Sent,
 };
 use crate::ops::OpsResult;
 use crate::store::Store;
@@ -80,7 +80,7 @@ impl LinearClient {
                 self.look_created_project(store, repo, project).await
             }
             (ActionOwner::Task(task), ActionKind::Delete) => {
-                self.look_deletion(store, repo, task).await
+                self.look_deletion(store, repo, task, action).await
             }
             (ActionOwner::Task(task), ActionKind::Comment) => self.look_comments(store, task).await,
             (ActionOwner::Task(task), _) => self.look_task(store, repo, task, action).await,
@@ -118,12 +118,7 @@ impl LinearClient {
                 _ => {}
             }
         }
-        let state = store
-            .get_task(task)
-            .await
-            .map_err(message)?
-            .and_then(|task| task.state)
-            .unwrap_or_else(|| "unstarted".into());
+        let state = opening_state(store, task).await?;
         input["stateId"] = json!(self.team_state_id(&team, &state).await.map_err(message)?);
         let response =
             match crate::linear::urgent(self.deliver_planning_creation(false, input)).await {
@@ -174,7 +169,7 @@ impl LinearClient {
             }
             Err(error) => return Ok(Sent::failed(error)),
         };
-        let project = match self.attached(&wave, &initiative, project).await {
+        let project = match self.attached(&initiative, project).await {
             Ok(project) => project,
             Err(error) => return Ok(Sent::Unknown(error.to_string())),
         };
@@ -189,7 +184,6 @@ impl LinearClient {
     /// id derived from both, so repeating it after a lost reply is safe.
     async fn attached(
         &self,
-        _wave: &WaveId,
         initiative: &str,
         project: TrackerProject,
     ) -> OpsResult<TrackerProject> {
@@ -271,12 +265,7 @@ impl LinearClient {
     // look and this mutation can be overwritten.
     async fn state(&self, store: &Store, task: &TaskId, action: &TrackerAction) -> OpsResult<Sent> {
         let external = remote_task(store, task).await?;
-        let WorkValue::Disposition(disposition) = value(action)? else {
-            return Err(message("state action holds no Disposition"));
-        };
-        let target = disposition
-            .planning_state
-            .ok_or_else(|| message("state action names no state"))?;
+        let target = target_state(action)?;
         let state = self
             .item_state_id(&external, &target)
             .await
@@ -302,8 +291,8 @@ impl LinearClient {
             .subject
             .as_deref()
             .ok_or_else(|| message("comment action names no comment"))?;
-        let body = action.value["value"]["body"]
-            .as_str()
+        let body = action
+            .comment_body()
             .ok_or_else(|| message("comment action holds no body"))?;
         match self.sync_comment(id, &external, body).await {
             Ok(()) => Ok(Sent::Acknowledged {
@@ -390,7 +379,7 @@ impl LinearClient {
         let (wave, initiative) = project_scope(store, repo, project).await?;
         let external = remote_project(store, project).await?;
         let observed = self.project_ownership(&external).await.map_err(message)?;
-        let observed = match self.attached(&wave, &initiative, observed).await {
+        let observed = match self.attached(&initiative, observed).await {
             Ok(observed) => observed,
             Err(error) => return Ok(Sent::Unknown(error.to_string())),
         };
@@ -535,7 +524,7 @@ impl LinearClient {
             return Ok(None);
         };
         let (wave, initiative) = project_scope(store, repo, project).await?;
-        let found = self.attached(&wave, &initiative, found).await?;
+        let found = self.attached(&initiative, found).await?;
         accept_project(store, &wave, &initiative, &found)?;
         Ok(Some(observed_project(&found)))
     }
@@ -592,6 +581,7 @@ impl LinearClient {
         store: &Store,
         repo: &Path,
         task: &TaskId,
+        action: &TrackerAction,
     ) -> OpsResult<Option<Observed>> {
         let external = remote_task(store, task).await?;
         match self.issue_trash(&external).await.map_err(message)? {
@@ -601,21 +591,8 @@ impl LinearClient {
                 deleted: true,
                 ..Observed::default()
             })),
-            Some((false, _)) => self.look_task_plain(store, repo, &external).await,
+            Some((false, _)) => self.look_task(store, repo, task, action).await,
         }
-    }
-
-    async fn look_task_plain(
-        &self,
-        store: &Store,
-        repo: &Path,
-        external: &str,
-    ) -> OpsResult<Option<Observed>> {
-        let Some((item, project)) = self.issue_ownership(external).await.map_err(message)? else {
-            return Ok(None);
-        };
-        ingest_task(store, repo, &item, project.as_ref(), now()).await?;
-        Ok(Some(observed_task(store, &item).await))
     }
 
     async fn look_comments(&self, store: &Store, task: &TaskId) -> OpsResult<Option<Observed>> {

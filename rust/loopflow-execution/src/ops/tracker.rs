@@ -307,6 +307,29 @@ pub(crate) fn values(action: &TrackerAction) -> OpsResult<Vec<WorkValue>> {
     serde_json::from_value(action.value.clone()).map_err(message)
 }
 
+/// The state a `state` action moves its Task to.
+pub(crate) fn target_state(action: &TrackerAction) -> OpsResult<String> {
+    let WorkValue::Disposition(disposition) = value(action)? else {
+        return Err(message("state action holds no Disposition"));
+    };
+    disposition
+        .planning_state
+        .ok_or_else(|| message("state action names no state"))
+}
+
+/// The state a Task's tracker item is created in: the Task's own, else open.
+pub(crate) async fn opening_state(
+    store: &Store,
+    task: &loopflow_model::durable::TaskId,
+) -> OpsResult<String> {
+    Ok(store
+        .get_task(task)
+        .await
+        .map_err(message)?
+        .and_then(|task| task.state)
+        .unwrap_or_else(|| "unstarted".into()))
+}
+
 /// The uuid a creation carries as the provider id: the owner's own.
 pub(crate) fn creation_id(local: &str) -> OpsResult<String> {
     let raw = local.split_once('_').map_or(local, |(_, id)| id);

@@ -197,6 +197,11 @@ impl TrackerAction {
             url: url.to_owned(),
         })
     }
+
+    /// The text a `comment` action posts.
+    pub fn comment_body(&self) -> Option<&str> {
+        self.value["value"]["body"].as_str()
+    }
 }
 
 /// How an action leaves the queue.
@@ -520,30 +525,20 @@ fn field_baseline(
     let mut query = conn.prepare(&format!(
         "SELECT {revision},{column} FROM {source} AND {presence}"
     ))?;
+    // KRs and targets are stored as JSON; every other column is the value's text.
+    let json = matches!(edit, WorkValue::Krs(_) | WorkValue::MetricTargets(_));
     let baseline = query
         .query_and_then([owner.id()], |row| -> StoreResult<PlanningBaseline> {
-            let value = match edit {
-                WorkValue::TaskTitle(_) => WorkValue::TaskTitle(row.get(1)?),
-                WorkValue::ProjectName(_) => WorkValue::ProjectName(row.get(1)?),
-                WorkValue::TaskDescription(_) => WorkValue::TaskDescription(row.get(1)?),
-                WorkValue::ProjectDescription(_) => WorkValue::ProjectDescription(row.get(1)?),
-                WorkValue::ProjectSummary(_) => WorkValue::ProjectSummary(row.get(1)?),
-                WorkValue::ProjectStatus(_) => {
-                    WorkValue::ProjectStatus(serde_json::from_value(Value::String(row.get(1)?))?)
-                }
-                WorkValue::Krs(_) => {
-                    WorkValue::Krs(serde_json::from_str(&row.get::<_, String>(1)?)?)
-                }
-                WorkValue::MetricTargets(_) => {
-                    WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(1)?)?)
-                }
-                WorkValue::TaskAssignee(_) => WorkValue::TaskAssignee(row.get(1)?),
-                WorkValue::TaskProject(_) => WorkValue::TaskProject(row.get(1)?),
-                _ => unreachable!("baseline field was selected above"),
+            let raw: Option<String> = row.get(1)?;
+            let value = match raw {
+                Some(raw) if json => serde_json::from_str(&raw)?,
+                raw => Value::from(raw),
             };
             Ok(PlanningBaseline {
                 revision: row.get(0)?,
-                value: Some(value),
+                value: Some(serde_json::from_value(
+                    serde_json::json!({"field": edit.field(), "value": value}),
+                )?),
             })
         })?
         .next()

@@ -340,8 +340,9 @@ fn process_skill_agent(
         },
     )?;
 
-    let agent = prepared.config.agent()?;
-    let (provider, model) = crate::config::parse_agent(agent);
+    let agent = &prepared.config.agent;
+    let provider = agent.harness.as_str().to_owned();
+    let model = agent.model.clone();
     let cwd = prepared
         .config
         .cwd

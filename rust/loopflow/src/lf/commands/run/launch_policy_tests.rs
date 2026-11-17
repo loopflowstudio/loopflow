@@ -151,9 +151,8 @@ impl Table {
         mode: loopflow_execution::harness::Mode,
         start: loopflow_execution::harness::Start<'_>,
     ) -> anyhow::Result<Vec<String>> {
-        use loopflow_execution::harness::{HarnessKind, Launch, Mode};
-        let kind = HarnessKind::parse(&loopflow_execution::config::parse_agent(config.agent()?).0)
-            .unwrap();
+        use loopflow_execution::harness::{Launch, Mode};
+        let kind = config.agent.harness;
         if kind.harness().capabilities().turn_limit && mode == Mode::Headless {
             return loopflow_execution::harness::claude::stream_args(
                 config,
@@ -267,7 +266,7 @@ fn launch_bypass_and_chrome_take_the_command_line_then_personal_then_repository(
             table.config(None, &format!("agent: {harness}\nyolo: {repository_yolo}"));
             let flags = [&["-i"][..], flags].concat();
             let launch = table.launch(&flags).unwrap();
-            assert_eq!(launch.config.agent.as_deref(), Some(harness));
+            assert_eq!(launch.config.agent.to_string(), harness);
             assert_eq!(
                 launch.config.skip_permissions, expected,
                 "{harness} yolo: {repository_yolo} {flags:?}"
@@ -332,8 +331,8 @@ fn resume_keeps_the_provider_and_takes_a_model_only_from_a_matching_choice() {
     ] {
         let resumed = table.resume(&session, flags).unwrap();
         assert_eq!(
-            resumed.config.agent.as_deref(),
-            Some(format!("claude:{expected}").as_str()),
+            resumed.config.agent.to_string(),
+            format!("claude:{expected}").as_str(),
             "{flags:?}"
         );
         assert_eq!(resumed.pair("--model"), Some(expected), "{flags:?}");
@@ -361,8 +360,8 @@ fn resume_applies_current_policy_and_command_line_overrides() {
             let resumed = table.resume(&session, flags).unwrap();
             let row = format!("{provider} {flags:?}: {:?}", resumed.args);
             assert_eq!(
-                resumed.config.agent.as_deref(),
-                Some(format!("{provider}:{model}").as_str()),
+                resumed.config.agent.to_string(),
+                format!("{provider}:{model}").as_str(),
                 "{row}"
             );
             assert_eq!(resumed.config.skip_permissions, bypass, "{row}");

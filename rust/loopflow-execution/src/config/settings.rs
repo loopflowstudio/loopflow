@@ -1872,7 +1872,7 @@ mod tests {
                 },
             )
             .unwrap();
-            assert_eq!(prepared.config.agent().unwrap(), expected);
+            assert_eq!(prepared.config.agent.to_string(), expected);
             assert_eq!(prepared.config.chrome, Some(index % 2 != 0));
         }
         repo.create_file(

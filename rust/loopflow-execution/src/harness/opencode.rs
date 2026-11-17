@@ -14,7 +14,6 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::config::parse_agent;
 use crate::harness::common::TurnInProgressGuard;
 use crate::harness::fact::Decoded;
 use crate::harness::fact_writer::FactWriter;
@@ -216,7 +215,7 @@ impl Driver {
         let messages = read_messages(&self.client, &base_url, &agent_session).await?;
         let reader_model = opencode_model(config)
             .map(|(provider_id, model_id)| format!("{provider_id}/{model_id}"))
-            .or_else(|| config.agent.clone());
+            .or_else(|| Some(config.agent.to_string()));
         let mut decoder = OpenCodeDecoder::new(agent_session.clone(), reader_model);
         decoder.seed(&messages, self.interactive);
         let stream = Arc::new(tokio::sync::Mutex::new(OpenCodeStream {
@@ -840,12 +839,11 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
 }
 
 fn opencode_model(config: &AgentConfig) -> Option<(String, String)> {
-    let agent_str = config.agent.as_deref()?;
-    let (harness, variant) = parse_agent(agent_str);
-    if harness != "opencode" {
+    let agent = &config.agent;
+    if agent.harness != super::HarnessKind::OpenCode {
         return None;
     }
-    let variant = variant?;
+    let variant = agent.model.as_deref()?;
     let (provider_id, model_id) = variant.split_once('/')?;
     if provider_id.is_empty() || model_id.is_empty() {
         return None;
@@ -914,8 +912,8 @@ mod tests {
     #[test]
     fn bare_opencode_sends_no_model_and_a_pinned_variant_names_provider_and_model() {
         let launch = |agent: &str| AgentConfig {
-            agent: Some(agent.into()),
-            ..AgentConfig::default()
+            agent: crate::config::Agent::parse(&agent).unwrap(),
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         assert_eq!(super::opencode_model(&launch("opencode")), None);
         assert_eq!(
@@ -959,7 +957,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::OpenCode,
-                &AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &owner,
             ),
             tx,
@@ -1021,7 +1019,7 @@ mod tests {
             "",
             &AgentConfig {
                 task_prompt: "task".to_string(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             },
             true,
         );
@@ -1099,7 +1097,7 @@ mod tests {
                 &client,
                 &base_url,
                 Some(&"live".into()),
-                &AgentConfig::default()
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             )
             .await
             .unwrap(),
@@ -1109,12 +1107,12 @@ mod tests {
             &client,
             &base_url,
             Some(&"gone".into()),
-            &AgentConfig::default()
+            &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         )
         .await
         .is_err());
         assert_eq!(
-            open_agent_session(&client, &base_url, None, &AgentConfig::default())
+            open_agent_session(&client, &base_url, None, &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }))
                 .await
                 .unwrap(),
             "new".into()
@@ -1130,9 +1128,9 @@ mod tests {
 
     fn live_config() -> AgentConfig {
         AgentConfig {
-            agent: Some("opencode".to_string()),
+            agent: crate::config::Agent::parse("opencode").unwrap(),
             cwd: Some(std::env::temp_dir()),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         }
     }
 

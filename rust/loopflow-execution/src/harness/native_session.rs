@@ -92,10 +92,7 @@ impl NativeClient {
 }
 
 fn session_harness(config: &AgentConfig) -> Result<&'static dyn super::Harness> {
-    let (name, _) = crate::config::parse_agent(config.agent()?);
-    Ok(super::HarnessKind::parse(&name)
-        .ok_or_else(|| anyhow!("unsupported session harness: {name}"))?
-        .harness())
+    Ok(config.agent.harness.harness())
 }
 
 pub fn launch_session(
@@ -117,7 +114,7 @@ pub fn launch_session(
                 environment.extend(capture.environment());
                 (Admitted::from_runtime(capture)?, None)
             }
-            None => admit(config.agent()?, &cwd, &mut environment)?,
+            None => admit(&config.agent.to_string(), &cwd, &mut environment)?,
         };
         let result = {
             let mut config = config.clone();
@@ -145,14 +142,14 @@ pub fn launch_session(
 pub(crate) fn resume_session(
     artifact_key: &String,
     provider_session: &crate::session_record::ProviderSessionRef,
-    named_work: bool,
+    holder: Holder,
 ) -> Result<()> {
     resume_session_with_env(
         artifact_key,
         Some(provider_session),
         &BTreeMap::new(),
         None,
-        named_work,
+        holder,
     )
 }
 
@@ -163,7 +160,7 @@ pub fn resume_session_with_env(
     provider_session: Option<&crate::session_record::ProviderSessionRef>,
     extra_environment: &BTreeMap<String, String>,
     launch_lock: Option<File>,
-    named_work: bool,
+    holder: Holder,
 ) -> Result<()> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
     let session = store
@@ -172,14 +169,11 @@ pub fn resume_session_with_env(
     let mut config =
         crate::agent::resolve_session_config(&session, serde_yaml_ng::Value::Null, None, false)?;
     let harness = session_harness(&config)?;
-    // Reopening a conversation recorded as Task, Wave or repository work is
-    // Work whatever command reopened it.
-    let holder = crate::transport::holder(store.is_work(named_work, Some(&session))?, None);
     anyhow::ensure!(
         session.provider.as_deref() == Some(harness.kind().as_str()),
         "native history cannot resume in {}; continue it with lf resume -a {}",
-        config.agent()?,
-        config.agent()?,
+        &config.agent,
+        &config.agent,
     );
     // A held Codex sends its first turn only to a thread with none; any other
     // resumed thread already has it.
@@ -204,7 +198,7 @@ pub fn resume_session_with_env(
         .expect("resolved session config has a working directory");
     crate::journal::with_runtime(cwd, &std::env::args().collect::<Vec<_>>(), || {
         let mut environment = config.env.clone();
-        let (admitted, capture) = admit(config.agent()?, cwd, &mut environment)?;
+        let (admitted, capture) = admit(&config.agent.to_string(), cwd, &mut environment)?;
         let mut config = config.clone();
         config.env = environment;
         let result = run(
@@ -839,53 +833,6 @@ mod tests {
     use std::process::Command;
 
     #[test]
-    fn native_resume_does_not_replace_a_work_read_failure_with_server_ownership() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let temp = tempfile::tempdir().unwrap();
-        let database = temp.path().join("loopflow.db");
-        ledger.set_db_path(database.clone());
-        let _restore = EnvRestore::capture(&["LF_HOME"]);
-        std::env::set_var("LF_HOME", temp.path());
-        let capture = crate::session_record::SessionRecorder::begin_at(
-            temp.path(),
-            crate::session_record::SessionCaptureSpec {
-                harness: "claude".into(),
-                model: None,
-                surface: "tui".into(),
-                cwd: temp.path().to_path_buf(),
-                repo: None,
-                worktree: None,
-                skill: None,
-                subjects: Vec::new(),
-                graph: crate::session_record::SessionGraphMembership::Independent,
-                work: None,
-            },
-        )
-        .unwrap();
-        // Session and settings remain readable; only the Work lookup fails.
-        let db = rusqlite::Connection::open(&database).unwrap();
-        db.execute("UPDATE agent_sessions SET primary_scope='wave'", [])
-            .unwrap();
-        let before: i64 = db
-            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
-            .unwrap();
-        let error =
-            resume_session_with_env(&capture.artifact_key(), None, &BTreeMap::new(), None, false)
-                .unwrap_err();
-        assert!(
-            format!("{error:#}").contains("unsupported primary scope \"wave\""),
-            "{error:#}"
-        );
-        let after: i64 = db
-            .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
-            .unwrap();
-        assert_eq!(
-            after, before,
-            "a failed Work lookup must not admit a new invocation"
-        );
-    }
-
-    #[test]
     fn a_terminal_move_names_the_terminal_it_went_to() {
         use crate::process::Departure;
         let home = tempfile::tempdir().unwrap();
@@ -1007,10 +954,10 @@ mod tests {
             let (admitted, capture) = super::admit(program, cwd, &mut environment)?;
             let admitted = admitted.clone();
             let config = AgentConfig {
-                agent: Some("claude".into()),
+                agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(cwd.into()),
                 env: environment.clone(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             };
             let launch = Launch {
                 config: &config,
@@ -1167,7 +1114,7 @@ mod tests {
                     Some(&session),
                     &BTreeMap::new(),
                     None,
-                    false,
+                    Holder::Caller,
                 )
             };
             if index % 2 == 0 {
@@ -1241,9 +1188,9 @@ mod tests {
             .unwrap(),
         );
         let request = crate::session_record::AgentProcessRequest::from_prepared(&AgentConfig {
-            agent: Some("codex".into()),
+            agent: crate::config::Agent::parse("codex").unwrap(),
             task_prompt: "the first turn".into(),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         })
         .unwrap();
         let capture = crate::session_record::SessionRecorder::begin_at_with_request(
@@ -1275,7 +1222,7 @@ mod tests {
             Some(&session),
             &BTreeMap::new(),
             None,
-            false,
+            Holder::Caller,
         )
         .unwrap();
 
@@ -1431,10 +1378,10 @@ mod tests {
                 attachment: attached.clone(),
             };
             let config = AgentConfig {
-                agent: Some("claude".into()),
+                agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             };
             let launch = Launch {
                 config: &config,
@@ -1535,10 +1482,10 @@ mod tests {
             let environment = capture.environment();
             let admitted = Admitted::from_runtime(&capture)?;
             let config = AgentConfig {
-                agent: Some("claude".into()),
+                agent: crate::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.into()),
                 env: environment.clone(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             };
             let launch = Launch {
                 config: &config,
@@ -1645,11 +1592,11 @@ mod tests {
 
         launch_session(
             &AgentConfig {
-                agent: Some("opencode".to_string()),
+                agent: crate::config::Agent::parse("opencode").unwrap(),
                 cwd: Some(temp.path().to_path_buf()),
                 task_prompt: "review it".into(),
                 env: BTreeMap::new(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             },
             Holder::Caller,
             None,

@@ -640,7 +640,7 @@ mod activity_tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -826,11 +826,11 @@ mod tests {
 
                 let (config, admitted) = (
                     AgentConfig {
-                        agent: settings.agent,
+                        agent: crate::config::Agent::parse(settings.agent().unwrap()).unwrap(),
                         chrome: settings.chrome,
                         skip_permissions: settings.yolo,
                         cwd: Some(home.into()),
-                        ..AgentConfig::default()
+                        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
                     },
                     Admitted {
                         store: store.clone(),
@@ -952,10 +952,10 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
 
         let config = AgentConfig {
-            agent: Some("claude".into()),
+            agent: crate::config::Agent::parse("claude").unwrap(),
             task_prompt: "task".into(),
             cwd: Some(format!("/tmp/loopflow-missing-{}", uuid::Uuid::new_v4()).into()),
-            ..AgentConfig::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         let ledger = crate::journal::TestLedgerGuard::new();
         let admitted = super::super::admit_for_test(ledger.home());
@@ -1000,7 +1000,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Claude,
-                &crate::agent::AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -1272,9 +1272,9 @@ cat > /dev/null
     //   cargo test -p loopflow --lib claude::tests::live_ -- --ignored --nocapture
     fn live_config() -> AgentConfig {
         AgentConfig {
-            agent: Some("claude".into()),
+            agent: crate::config::Agent::parse("claude").unwrap(),
             cwd: Some(std::env::temp_dir()),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         }
     }
 
@@ -1589,7 +1589,7 @@ impl super::Harness for Claude {
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let mut client = super::native_session::NativeClient::new(launch)?;
         let (mut args, input) = launch.terminal_input()?;
-        let (_, model) = crate::config::parse_agent(&launch.config.resolved_agent()?);
+        let model = launch.config.agent.model.clone();
         args.extend(crate::agent::claude_options(
             launch.config,
             model.as_deref(),
@@ -1639,7 +1639,7 @@ pub fn stream_args(
     thread: Option<&AgentSessionId>,
     context_file: Option<&std::path::Path>,
 ) -> Result<Vec<String>> {
-    let (_, model) = crate::config::parse_agent(&config.resolved_agent()?);
+    let model = config.agent.model.clone();
     let mut args = vec![
         "-p".into(),
         "--replay-user-messages".into(),

@@ -6,7 +6,6 @@ use loopflow_execution::agent::missing_agent_message;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
-use loopflow_execution::config::parse_agent;
 use loopflow_execution::graph::Skill;
 use loopflow_execution::harness::native_session::{launch_session, NativeOutcome};
 use loopflow_execution::harness::Mode;
@@ -36,13 +35,14 @@ use tracing::{debug, info, instrument, trace};
 #[instrument(skip(cli, message), fields(skill = ?skill, has_message = message.is_some()))]
 pub fn run(
     mode: Mode,
+    holder: loopflow_execution::session::Holder,
     repo_root: &Path,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
 ) -> Result<()> {
     if let Some(binding) = implicit_binding(cli)? {
-        return run_bound_prompt(mode, skill, message, cli, &binding).map(|_| ());
+        return run_bound_prompt(mode, holder, skill, message, cli, &binding).map(|_| ());
     }
     let mut built = build_prompt(mode, repo_root, skill, message, cli)?;
     built.subjects = cli.work_subject_selector().into_iter().collect();
@@ -52,11 +52,9 @@ pub fn run(
         Some(loopflow_execution::session::SessionWork {
             task_id: None,
             wave_id: Some(loopflow_model::id::WaveId::parse(&id).ok()?),
-            source: loopflow_execution::session::WorkSource::Declared,
+            source: loopflow_execution::session::WorkSource::Bound,
         })
     });
-    let holder =
-        loopflow_execution::transport::holder(false, built.work.as_ref().map(|work| work.source));
 
     print_context_header(&built, cli);
     run_prompt(&built, cli, holder).map(|_| ())
@@ -110,7 +108,7 @@ pub(crate) fn preview_prompt(
 /// `lf -b resume ID --message TEXT`: one more headless turn of a conversation,
 /// using `message` and the provider's own history without re-executing its skill.
 /// `named_work` when the resume command named a Task or Wave.
-pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()> {
+pub fn resume(id: &str, message: &str, cli: &Cli, holder: loopflow_execution::session::Holder) -> Result<()> {
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env()?,
     )?;
@@ -140,13 +138,11 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         cli.batch,
     )?;
     let mut turn = cli.process_options();
-    turn.agent = resolved.agent.clone();
+    turn.agent = Some(resolved.agent.to_string());
     let message = if session.captured.is_some()
         && session.provider.as_deref()
             != Some(
-                loopflow_execution::config::parse_agent(resolved.agent()?)
-                    .0
-                    .as_str(),
+                resolved.agent.harness.as_str(),
             ) {
         let request = loopflow_execution::ops::human_session::conversation_log::continuation(
             &store, &session,
@@ -193,7 +189,6 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         }
         (saved, current) => saved.or(current),
     };
-    let holder = loopflow_execution::transport::holder(named_work, None);
     built.agent_config = AgentConfig {
         system_prompt: prepared.system_prompt,
         conversation_context,
@@ -202,7 +197,8 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
         env: prepared.env,
         ..resolved
     };
-    (built.harness, built.model) = parse_agent(&built.agent_config.resolved_agent()?);
+    built.harness = built.agent_config.agent.harness.as_str().to_owned();
+    built.model = built.agent_config.agent.model.clone();
     print_context_header(&built, &turn);
     run_prompt(&built, &turn, holder).map(|_| ())
 }
@@ -210,12 +206,13 @@ pub fn resume(id: &str, message: &str, cli: &Cli, named_work: bool) -> Result<()
 #[doc(hidden)]
 pub fn run_bound(
     mode: Mode,
+    holder: loopflow_execution::session::Holder,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<()> {
-    run_bound_prompt(mode, skill, message, cli, binding).map(|_| ())
+    run_bound_prompt(mode, holder, skill, message, cli, binding).map(|_| ())
 }
 
 /// Run a channel request through the ordinary attributed launch and settlement path.
@@ -224,11 +221,12 @@ pub(crate) fn answer_bound(
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<Option<String>> {
-    run_bound_prompt(Mode::Headless, None, Some(message), cli, binding)
+    run_bound_prompt(Mode::Headless, loopflow_execution::session::Holder::Server, None, Some(message), cli, binding)
 }
 
 fn run_bound_prompt(
     mode: Mode,
+    holder: loopflow_execution::session::Holder,
     skill: Option<&str>,
     message: Option<&str>,
     cli: &Cli,
@@ -249,7 +247,7 @@ fn run_bound_prompt(
     run_prompt(
         &built,
         cli,
-        loopflow_execution::transport::holder(false, Some(binding.source)),
+        holder,
     )
 }
 
@@ -261,6 +259,7 @@ fn build_bound_prompt(
     cli: &Cli,
     binding: &loopflow_execution::ops::WorkBinding,
 ) -> Result<PromptBuild> {
+    let named_work = cli.work_subject_selector().is_some();
     let mut launch = cli.process_options();
     launch.wave = binding.wave_name.clone();
     let arguments = message.unwrap_or_default();
@@ -292,7 +291,7 @@ fn build_bound_prompt(
             | loopflow_model::durable::WorkRef::Project(_) => None,
         },
         wave_id: binding.wave_id.clone(),
-        source: binding.source,
+        source: if named_work { loopflow_execution::session::WorkSource::Bound } else { binding.source },
     });
 
     Ok(built)
@@ -628,8 +627,8 @@ fn build_prompt_at(
         "prepared launch prompt"
     );
     loopflow_execution::agent_input_timing::record("prompt_end", subject);
-    let agent = prepared.config.resolved_agent()?;
-    let (harness, model) = parse_agent(&agent);
+    let harness = prepared.config.agent.harness.as_str().to_owned();
+    let model = prepared.config.agent.model.clone();
 
     let skill_name = discovered_skill
         .as_ref()
@@ -653,7 +652,7 @@ fn build_prompt_at(
         agent_config.execution_boundary =
             Some(loopflow_execution::agent::checkout_execution_boundary(
                 &repo_root,
-                agent_config.agent()?,
+                &agent_config.agent,
             )?);
         agent_config.skip_permissions = true;
     }
@@ -707,7 +706,7 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
         built.components.wave.as_deref(),
         &cli.docs,
         cli.clipboard,
-        built.agent_config.agent.as_deref(),
+        Some(&built.agent_config.agent.to_string()),
     );
     eprintln!(
         "{dim}{header}\n\n  {command}{reset}",
@@ -748,8 +747,7 @@ fn run_prompt(
         )?;
         return result
             .and_then(|outcome| {
-                let kind = loopflow_execution::harness::HarnessKind::parse(&built.harness)
-                    .expect("resolved harness");
+                let kind = built.agent_config.agent.harness;
                 let assigned = kind.harness().capabilities().thread.for_holder(holder)
                     == loopflow_execution::harness::ThreadName::Assigned;
                 outcome.result(kind, assigned, holder)
@@ -1227,11 +1225,11 @@ for line in sys.stdin:
             repo_root: home.path().to_path_buf(),
             agent_config: AgentConfig {
                 task_prompt: task.to_string(),
-                agent: Some("claude".to_string()),
+                agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
                 cwd: Some(home.path().to_path_buf()),
                 skip_permissions: true,
                 env,
-                ..AgentConfig::default()
+                ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
             },
             process: ProcessConfig::default(),
             mode: loopflow_execution::harness::Mode::Headless,
@@ -1358,11 +1356,11 @@ for line in sys.stdin:
                 repo_root: repo.to_path_buf(),
                 agent_config: AgentConfig {
                     task_prompt: task.to_string(),
-                    agent: Some("claude".to_string()),
+                    agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
                     cwd: Some(repo.to_path_buf()),
                     skip_permissions: true,
                     env,
-                    ..AgentConfig::default()
+                    ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
                 },
                 process: ProcessConfig::default(),
                 mode: loopflow_execution::harness::Mode::Headless,

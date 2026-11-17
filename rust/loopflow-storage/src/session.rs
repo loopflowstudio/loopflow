@@ -243,7 +243,7 @@ impl WorkSource {
     /// only counts toward the Task. What each kind gets is in
     /// `server/README.md` ("Turn and tool boundaries").
     pub fn is_managed(self) -> bool {
-        matches!(self, Self::Declared | Self::Bound)
+        matches!(self, Self::Bound)
     }
 }
 

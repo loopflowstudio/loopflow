@@ -300,12 +300,10 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         let launch = AgentConfig {
             chrome: config.chrome,
             codex_service_tier: config.codex.service_tier,
-            claude_model: config.claude.model.clone(),
-            task_prompt: prompt.clone(),
-            agent: Some(agent.clone()),
+                task_prompt: prompt.clone(),
             cwd: Some(repo.to_path_buf()),
             skip_permissions: true,
-            ..Default::default()
+            ..AgentConfig::new(crate::config::Agent::parse(&agent)?.with_configured_model(&config))
         };
         match run_agent(&launch, &process, crate::session::Holder::Caller) {
             Ok(result) if result.exit_code == 0 => {

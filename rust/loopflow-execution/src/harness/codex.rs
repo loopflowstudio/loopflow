@@ -1257,7 +1257,7 @@ mod tests {
                 skill,
                 arguments: "exact \"two words\" 雪".into(),
             }),
-            ..AgentConfig::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
 
         harness.send_input(request).await.unwrap();
@@ -1308,7 +1308,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(home.path()),
             ),
             tx,
@@ -1354,7 +1354,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             tx,
@@ -1363,7 +1363,7 @@ mod tests {
         let config = AgentConfig {
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1418,7 +1418,7 @@ mod tests {
     fn start_and_resume_add_instructions_without_replacing_native_base() {
         let config = AgentConfig {
             system_prompt: "Fixed additions.".into(),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
@@ -1433,7 +1433,7 @@ mod tests {
     fn pinned_codex_session_uses_thread_resume() {
         let launch = AgentConfig {
             cwd: Some("/tmp/project".into()),
-            ..AgentConfig::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
@@ -1450,7 +1450,7 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(&AgentConfig::default(), None, true);
+        let (method, params) = build_thread_request(&crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }
@@ -1468,7 +1468,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             events,
@@ -1663,7 +1663,7 @@ mod tests {
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
                 crate::harness::HarnessKind::Codex,
-                &AgentConfig::default(),
+                &crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None }),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
             events,
@@ -1941,15 +1941,3 @@ async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
     Ok(OpenedCodex { thread, endpoint })
 }
 
-/// Resolve a model string to a Codex model override.
-///
-/// For `codex:<variant>`, returns `<variant>`. For bare `codex`, returns `None`
-/// so Codex can pick its own default. Non-codex model strings pass through.
-pub fn resolve_model(model: &str) -> Option<String> {
-    let (harness, model_variant) = crate::config::parse_agent(model);
-    if harness == "codex" {
-        model_variant
-    } else {
-        Some(model.to_string())
-    }
-}

@@ -43,7 +43,7 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
-        agent: Some(request.agent.clone()),
+        agent: loopflow_execution::config::Agent::parse(&request.agent)?,
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
         write_scope: request.write_scope,
@@ -51,16 +51,17 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
-        ..AgentConfig::default()
+        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
     };
-    config.apply_agent_override();
-    let (selected_harness, model) = loopflow_execution::config::parse_agent(config.agent()?);
+    config.apply_agent_override()?;
+    let selected_harness = config.agent.harness.as_str().to_owned();
+    let model = config.agent.model.clone();
     if !check_cli_available(&selected_harness) {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    request.agent = config.agent()?.to_owned();
+    request.agent = config.agent.to_string();
     request.account_id = None;
     let spec = SessionCaptureSpec {
         harness: selected_harness,

@@ -518,6 +518,22 @@ impl Config {
             .collect()
     }
 
+    /// Resolve launch choices before provider effects, including configured models.
+    pub fn resolve_agents(&self) -> Result<(Agent, Vec<Agent>), LoadError> {
+        let first = Agent::parse(self.agent()?)?;
+        let mut fallback: Vec<Agent> = self.fallback_agents().iter()
+            .map(|agent| Agent::parse(agent).map(|agent| agent.with_configured_model(self)))
+            .collect::<Result<_, _>>()?;
+        if fallback.is_empty() && first.model.is_none() {
+            fallback.extend(first.harness.harness().model_rungs().iter().map(|model| Agent {
+                harness: first.harness, model: Some((*model).to_owned()),
+            }));
+        }
+        let first = first.with_configured_model(self);
+        fallback.retain(|agent| agent != &first);
+        Ok((first, fallback))
+    }
+
     /// The agents a headless step may move to when a usage limit refuses its
     /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
     pub fn fallback_agents(&self) -> Vec<String> {
@@ -531,6 +547,39 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
         .split(',')
         .map(str::trim)
         .filter(|agent| !agent.is_empty())
+}
+
+/// A selected harness and its provider model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Agent {
+    pub harness: crate::harness::HarnessKind,
+    pub model: Option<String>,
+}
+
+impl Agent {
+    pub fn parse(value: &str) -> Result<Self, LoadError> {
+        let (name, model) = parse_agent(value);
+        let harness = crate::harness::HarnessKind::parse(&name)
+            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        Ok(Self { harness, model })
+    }
+
+    pub fn with_configured_model(mut self, config: &Config) -> Self {
+        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+            self.model = config.claude.model.clone();
+        }
+        self
+    }
+}
+
+impl std::fmt::Display for Agent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.harness.as_str())?;
+        if let Some(model) = &self.model {
+            write!(f, ":{model}")?;
+        }
+        Ok(())
+    }
 }
 
 /// Parse agent string like 'claude:opus' into (harness, model).
@@ -926,6 +975,25 @@ mod tests {
         assert_eq!(installed_agent(|agent| agent == "claude"), Some("claude"));
         assert_eq!(installed_agent(|_| true), None);
         assert_eq!(installed_agent(|_| false), None);
+    }
+
+    #[test]
+    fn resolved_choices_keep_configured_models_and_fallback_order() {
+        let mut config = Config::default();
+        config.agent = Some("claude".into());
+        config.claude.model = Some("sonnet".into());
+        let (agent, fallback) = config.resolve_agents().unwrap();
+        assert_eq!(agent.to_string(), "claude:sonnet");
+        assert_eq!(fallback.iter().map(ToString::to_string).collect::<Vec<_>>(), ["claude:opus", "claude:haiku"]);
+        config.agent = Some("claude:fable".into());
+        assert!(config.resolve_agents().unwrap().1.is_empty());
+        config.agent = None;
+        config.default_agent = Some("codex".into());
+        config.agents = vec!["codex".into(), "claude".into(), "pi:fixture/model".into()];
+        let (_, fallback) = config.resolve_agents().unwrap();
+        assert_eq!(fallback.iter().map(ToString::to_string).collect::<Vec<_>>(), ["claude:sonnet", "pi:fixture/model"]);
+        config.agent = Some("unknown:model".into());
+        assert!(matches!(config.resolve_agents(), Err(LoadError::InvalidAgent(_))));
     }
 
     // ==========================================================================

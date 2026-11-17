@@ -51,13 +51,13 @@ fn fixture(
     std::env::set_var("PATH", format!("{}:/usr/bin:/bin", ledger.home().display()));
     std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     config.cwd = Some(ledger.home().to_owned());
-    config.agent = Some("pi:fixture/model".into());
+    config.agent = crate::config::Agent::parse("pi:fixture/model").unwrap();
     (ledger, env, admitted)
 }
 
 #[tokio::test]
 async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -120,7 +120,7 @@ async fn pi_turns_resume_the_exact_conversation_and_capture_tools_usage() {
 // that conversation by the file Pi keeps under the id.
 #[tokio::test]
 async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (ledger, _env, admitted) = fixture(&mut config);
     let _dir = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
     std::env::set_var("PI_CODING_AGENT_DIR", ledger.home());
@@ -146,7 +146,7 @@ async fn pi_headless_resumes_a_conversation_recorded_by_its_id() {
 
 #[tokio::test]
 async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_success() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -192,7 +192,7 @@ async fn pi_interrupt_keeps_the_conversation_alive_and_auth_failure_is_not_succe
 
 #[tokio::test]
 async fn pi_crash_closes_open_tools_and_fails_the_turn() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -281,7 +281,7 @@ fn pi_missing_conversation_is_not_recreated() {
 
 #[tokio::test]
 async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -321,7 +321,7 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
         ("dialog", "interactive input"),
         ("extension error", "context delivery failed"),
     ] {
-        let mut config = AgentConfig::default();
+        let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
         let (_ledger, _env, admitted) = fixture(&mut config);
         let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -347,7 +347,7 @@ async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
 
 #[tokio::test]
 async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (ledger, _env, admitted) = fixture(&mut config);
     std::fs::remove_file(ledger.home().join("pi")).unwrap();
     let (tx, _rx) = mpsc::unbounded_channel();
@@ -377,9 +377,9 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
     std::fs::write(&path, "{\"type\":\"session\",\"id\":\"native\"}\n").unwrap();
     let token = path.display().to_string().into();
     let config = AgentConfig {
-        agent: Some("pi:openai/gpt-5:high".into()),
+        agent: crate::config::Agent::parse("pi:openai/gpt-5:high").unwrap(),
         cwd: Some(directory.path().into()),
-        ..Default::default()
+        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
     };
     let cmd = crate::harness::HarnessKind::Pi
         .harness()
@@ -424,7 +424,7 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
 
 #[tokio::test]
 async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, _rx) = mpsc::unbounded_channel();
 
@@ -517,7 +517,7 @@ fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover()
 
 #[tokio::test]
 async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
-    let mut config = AgentConfig::default();
+    let mut config = crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None });
     let (_ledger, _env, admitted) = fixture(&mut config);
     let (tx, mut rx) = mpsc::unbounded_channel();
 
@@ -620,9 +620,9 @@ fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     let agent_dir = tempfile::tempdir().unwrap();
     std::env::set_var("PI_CODING_AGENT_DIR", agent_dir.path());
     let config = AgentConfig {
-        agent: Some("pi".into()),
+        agent: crate::config::Agent::parse("pi").unwrap(),
         cwd: Some(agent_dir.path().into()),
-        ..Default::default()
+        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
     };
     // A bare Pi's thread is the one its admission assigned.
     let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());

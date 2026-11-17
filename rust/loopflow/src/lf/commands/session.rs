@@ -810,7 +810,7 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            match loopflow_execution::transport::delegate_current(
+            let holder = match loopflow_execution::transport::delegate_current(
                 loopflow_execution::transport::LaunchInput {
                     batch: true,
                     interactive: false,
@@ -819,9 +819,9 @@ async fn resume(
                 named_work,
             )? {
                 loopflow_execution::transport::Delegation::Delegated => return Ok(()),
-                loopflow_execution::transport::Delegation::Here { .. } => {}
+                loopflow_execution::transport::Delegation::Here { holder, .. } => holder
             };
-            crate::lf::commands::run::resume(&id, message, cli, named_work)
+            crate::lf::commands::run::resume(&id, message, cli, holder)
         });
     }
     let session = reopen(

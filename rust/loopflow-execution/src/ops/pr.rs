@@ -538,12 +538,10 @@ pub fn generate_pr_copy(
     let launch = AgentConfig {
         chrome: config.chrome,
         codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
         task_prompt: prompt,
-        agent: Some(agent),
         cwd: Some(repo.to_path_buf()),
         skip_permissions: config.yolo,
-        ..Default::default()
+        ..AgentConfig::new(crate::config::Agent::parse(&agent)?.with_configured_model(&config))
     };
     let process = ProcessConfig {
         stream: false,

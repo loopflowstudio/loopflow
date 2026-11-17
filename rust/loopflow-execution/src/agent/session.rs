@@ -88,22 +88,16 @@ pub fn resolve_session_config(
             .as_deref()
             .is_none_or(|harness| harness == provider);
     let mut config = AgentConfig {
-        agent: Some(agent),
         cwd: Some(session.cwd.clone()),
         skip_permissions: current.yolo,
         chrome: current.chrome,
         codex_service_tier: current.codex.service_tier,
-        claude_model: if importing
-            || selected
-                .is_some_and(|agent| crate::config::parse_agent(agent) == ("claude".into(), None))
-        {
-            current.claude.model.clone()
-        } else {
-            None
-        },
         output_schema: output_schema.cloned(),
-        ..Default::default()
+        ..AgentConfig::new(crate::config::Agent::parse(&agent)?)
     };
+    if importing || selected.is_some_and(|agent| agent == "claude") {
+        config.agent = config.agent.with_configured_model(current);
+    }
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing
@@ -134,7 +128,7 @@ pub fn resolve_session_config(
     if needs_execution_boundary {
         config.execution_boundary = Some(super::checkout_execution_boundary(
             &session.cwd,
-            config.agent()?,
+            &config.agent,
         )?);
     }
     if resumes_native {

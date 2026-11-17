@@ -908,14 +908,14 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
             crate::session::Holder::Caller
         };
         let launch = crate::agent::AgentConfig {
-            agent: Some(agent.into()),
+            agent: crate::config::Agent::parse(&agent).unwrap(),
             cwd: Some(repo.to_path_buf()),
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
                 ("FIXTURE_STOP".into(), stop.display().to_string()),
             ]),
-            ..Default::default()
+            ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
         };
         let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
         let database = fixture.database.clone();

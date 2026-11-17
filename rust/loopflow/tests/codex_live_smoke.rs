@@ -74,9 +74,9 @@ async fn codex_live_one_turn_smoke() {
     let attachment = attachment::claim_session_attachment(&store, "smoke", None, &parent, true)
         .expect("attachment");
     let config = AgentConfig {
-        agent: Some("codex".to_string()),
+        agent: loopflow_execution::config::Agent::parse("codex").unwrap(),
         cwd: Some(dir.path().to_path_buf()),
-        ..AgentConfig::default()
+        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
     };
     let mut harness = CodexDriver::new(
         &loopflow_execution::harness::launch_for_test(

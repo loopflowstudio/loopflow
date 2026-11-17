@@ -1961,6 +1961,10 @@ fn task_configuration_refusal(
         }
         Err(error) => return Some(error.to_string()),
     };
+    let agent = match crate::config::Agent::parse(&agent) {
+        Ok(agent) => agent,
+        Err(error) => return Some(error.to_string()),
+    };
     checkout_execution_boundary(worktree, &agent)
         .err()
         .map(|error| error.to_string())

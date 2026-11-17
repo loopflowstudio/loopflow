@@ -31,10 +31,10 @@ for line in sys.stdin:
 fn base_launch() -> AgentConfig {
     AgentConfig {
         task_prompt: "prompt".to_string(),
-        agent: Some("claude".to_string()),
+        agent: loopflow_execution::config::Agent::parse("claude").unwrap(),
         skip_permissions: true,
         cwd: None,
-        ..Default::default()
+        ..loopflow_execution::agent::AgentConfig::new(loopflow_execution::config::Agent { harness: loopflow_execution::harness::HarnessKind::Codex, model: None })
     }
 }
 
@@ -241,7 +241,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
         let _directory = support::InDirectory::enter(home.path());
         let launches = home.path().join("launches");
         let launch = AgentConfig {
-            agent: Some("claude:fable".into()),
+            agent: loopflow_execution::config::Agent::parse("claude:fable").unwrap(),
             fallback_agents: fallbacks.into_iter().map(str::to_owned).collect(),
             cwd: Some(home.path().to_path_buf()),
             env: BTreeMap::from([

@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Launch states</title>
+<style>
+:root {
+  --bg: #fbfaf7; --fg: #1d1c1a; --muted: #5f5b54; --line: #dedad2; --card: #ffffff;
+  --prop: #2f5fb3; --prop-bg: #e8effb; --warn: #b3361f; --warn-bg: #fbe9e4; --code: #f1eee8;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
+    --prop: #8fb3f5; --prop-bg: #18243a; --warn: #f08a73; --warn-bg: #3a1d16; --code: #262421;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #161514; --fg: #ebe8e2; --muted: #a39e95; --line: #34312d; --card: #1e1d1b;
+  --prop: #8fb3f5; --prop-bg: #18243a; --warn: #f08a73; --warn-bg: #3a1d16; --code: #262421;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 ui-sans-serif, -apple-system, "Segoe UI", sans-serif; }
+main { max-width: 960px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 1.7rem; margin: 0 0 6px; }
+h2 { font-size: 1.25rem; margin: 40px 0 10px; }
+p.lede { color: var(--muted); margin-top: 0; }
+code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.88em; }
+code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; line-height: 1.45; }
+pre code { background: none; padding: 0; }
+table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 0.94rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+th { font-weight: 600; }
+.wrap { overflow-x: auto; }
+.box { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin: 14px 0; }
+.box.proposed { border-left: 4px solid var(--prop); }
+.box.warn { border-left: 4px solid var(--warn); }
+.tag { display: inline-block; font-weight: 600; padding: 1px 8px; border-radius: 999px; font-size: 0.85rem; }
+.prop { color: var(--prop); background: var(--prop-bg); }
+.muted { color: var(--muted); }
+blockquote { margin: 10px 0; padding: 2px 14px; border-left: 3px solid var(--line); color: var(--muted); }
+ol.q > li { margin-bottom: 14px; }
+ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+</style>
+</head>
+<body>
+<main>
+<h1>Bare, managed, detached: how others draw these lines</h1>
+<p class="lede">For LOO-924. The prior art below is from memory of each tool's documented behavior, not re-read today. Everything marked proposed is a sketch, and nothing here has changed the plan or the running implement.</p>
+
+<h2>What was said</h2>
+<blockquote>
+<p>"lf skill/graph: Bare" / "lf task run ...: not bare"</p>
+<p>"and we should try to avoid having too many different knobs that allow you to confuse the system"</p>
+<p>"for the purposes of e.g. usage numbers, bare runs in a task checkout do count against a task worker"</p>
+<p>"i will also note that workers are always headless, so there is basically no point to making them managed"</p>
+<p>"maybe we want bare [better name available?], managed, and detached as the three states?"</p>
+<p>"oh right task workers do need to be steerable" / "right but the worker run should definitely get the task steers"</p>
+<p>"i think its reasoanble if LF_AS or --task or in the worktree, you get the steers as well, but at that point i think simplicity and clarity and reliability of the system are most importanat"</p>
+</blockquote>
+<div class="box proposed">
+<p><span class="tag prop">proposed, after those last two</span> <strong>One fact: this run belongs to Task X.</strong> The checkout, <code>--task</code> and <code>LF_AS</code> are three ways to say it, and they mean exactly the same thing. Belonging gives two things, always together: the run counts toward the Task, and it gets the Task's steers. Belonging never decides who keeps the run alive; only the command does. So <code>WorkSource</code>'s variants stop changing behavior, <code>is_managed</code> goes, and <code>LF_AS</code> can stay because it can no longer mean something different from the checkout. This replaces questions 2 and 3 below: <code>--task</code> on a skill is bare and belongs to the Task.</p>
+</div>
+
+<h2>Prior art</h2>
+<div class="wrap">
+<table>
+<thead><tr><th>Tool</th><th>Its states</th><th>What picks the state</th><th>What env is for</th></tr></thead>
+<tbody>
+<tr><td><strong>tmux</strong></td><td>A session lives in the server. It is <em>attached</em> or <em>detached</em> depending on whether a client is looking. Outside tmux, a shell is just a shell.</td><td>Commands: <code>new</code>, <code>attach</code>, <code>detach</code>. One flag, <code>new -d</code>, starts it without a client.</td><td><code>TMUX</code> is written by tmux inside its panes. It says where you are. A person doesn't set it; nested tmux reads it and refuses to nest.</td></tr>
+<tr><td><strong>Docker</strong></td><td><em>Foreground</em> (the default) or <em>detached</em> (<code>-d</code>). Both are owned by the daemon; the difference is whether your terminal is connected.</td><td>A flag on one command, plus <code>attach</code> to reconnect.</td><td><code>DOCKER_HOST</code> picks which daemon. It never changes what <code>run</code> means.</td></tr>
+<tr><td><strong>systemd</strong></td><td>A <em>service</em>: systemd starts it and supervises it. A <em>scope</em>: you started it yourself, systemd only groups and accounts for it.</td><td>The unit type. <code>systemd-run</code> makes a service; <code>systemd-run --scope</code> runs the program as your own child and registers it.</td><td>Almost nothing. Identity is the cgroup the process sits in.</td></tr>
+<tr><td><strong>Kubernetes</strong></td><td>A <em>bare Pod</em> has no controller: nothing restarts or replaces it. A managed Pod belongs to a Deployment or Job.</td><td>The kind of object you create.</td><td><code>KUBECONFIG</code> picks the cluster.</td></tr>
+<tr><td><strong>Codex / Claude Code</strong></td><td>Interactive or non-interactive.</td><td>Codex uses a command (<code>codex exec</code>). Claude Code uses a flag (<code>claude -p</code>).</td><td>Credentials and config location.</td></tr>
+<tr><td><strong>git</strong> (the cautionary one)</td><td>Which repository a command acts on.</td><td>The directory you are in.</td><td><code>GIT_DIR</code> overrides that. It is inherited by hooks and children, and it is a well-known way to make a command act on the wrong repository.</td></tr>
+</tbody>
+</table>
+</div>
+
+<div class="box">
+<p><strong>Three things these tools agree on.</strong></p>
+<ol>
+<li><strong>Who keeps a process alive is chosen by the command</strong> or the kind of thing you create, sometimes by one flag. It is never chosen by an inherited environment variable.</li>
+<li><strong>Accounting is separate from supervision.</strong> A systemd scope is counted and grouped without being started or restarted by systemd. That is the line "bare runs in a task checkout do count against a task worker": it belongs to the Task without being kept by the server.</li>
+<li><strong>Environment variables carry where you are, written by the system for its children.</strong> One that a person sets to change what a command means is the <code>GIT_DIR</code> mistake. <code>LF_AS</code> and <code>--as</code> are that kind of knob. <code>LF_CAPTURE_KEY</code> is the <code>TMUX</code> kind.</li>
+</ol>
+</div>
+
+<h2>The names</h2>
+<div class="wrap">
+<table>
+<thead><tr><th>Name</th><th>Precedent</th><th>Fit</th></tr></thead>
+<tbody>
+<tr><td><strong>bare</strong></td><td>Kubernetes uses exactly this word for "nothing manages it".</td><td>Keep it. "Foreground" is the usual alternative, but <code>lf -b</code> run as an agent's child is bare and not in anyone's foreground.</td></tr>
+<tr><td><strong>managed</strong></td><td>Common (Kubernetes, pm2).</td><td>Fine as the word people read. The code calls the same thing <code>Place::Held</code> and <code>Holder::Server</code>, and the docs say "held terminal". Pick one of managed or held and use it in both places.</td></tr>
+<tr><td><strong>detached</strong></td><td>tmux and Docker: a thing the server still keeps, with nobody attached.</td><td class="warn-cell">It collides twice. lf already shows <code>"state": "detached"</code> on an interactive Session with no viewer, and in tmux a detached session is still a managed one. For a headless run that nobody will ever attach to, <strong>worker</strong> (the word used above) or <strong>background</strong> says it without the clash.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>Proposed shape</h2>
+<div class="box proposed">
+<p><span class="tag prop">proposed</span> Three questions, each with one owner and no knob.</p>
+<div class="wrap">
+<table>
+<thead><tr><th>Question</th><th>Answers</th><th>Decided by</th></tr></thead>
+<tbody>
+<tr><td>Who keeps it running?</td><td>bare · managed · worker</td><td>The command, alone</td></tr>
+<tr><td>Which Task does it count toward?</td><td>a Task, or none</td><td>Where it runs: the checkout, or the Session it was started from</td></tr>
+<tr><td>Is someone typing?</td><td>interactive · headless</td><td><code>-b</code>, else whether there is a terminal. Only a bare run has this choice.</td></tr>
+</tbody>
+</table>
+</div>
+<div class="wrap">
+<table>
+<thead><tr><th>Command</th><th>State</th><th>Lives until</th><th>Counts toward the checkout's Task</th></tr></thead>
+<tbody>
+<tr><td><code>lf</code>, <code>lf &lt;skill&gt;</code>, <code>lf graph &lt;g&gt;</code>, <code>lf -b …</code></td><td>bare</td><td>its terminal closes or its caller exits</td><td>yes</td></tr>
+<tr><td><code>lf resume --task</code>, a Task or Wave conversation, a Desktop pane</td><td>managed (always interactive)</td><td>someone quits it; survives its viewer</td><td>yes</td></tr>
+<tr><td><code>lf task run</code> and each Graph step it starts</td><td>worker (always headless)</td><td>the step ends; outlives the command that started it</td><td>yes</td></tr>
+</tbody>
+</table>
+</div>
+<p>Six combinations of state and mode become four that can be written:</p>
+<pre><code>enum Run { Bare(Mode), Managed, Worker }   // replaces Holder × Place × Mode</code></pre>
+<p>What that deletes: <code>Holder</code>, <code>Place</code>, <code>transport::holder</code>, <code>WorkSource::is_managed</code>, the <code>named_work</code> parameter threaded through <code>delegate</code>, and, if question 3 says so, <code>LF_AS</code>, <code>--as</code> and <code>WorkSource::Declared</code>.</p>
+</div>
+
+<div class="box warn">
+<p><strong>Where today's code differs from the rule.</strong> <code>server/README.md</code> says a launch is managed when it is "<code>lf task run</code> and its Graph's steps, <code>--task</code>, <code>--wave</code>, …". So a Graph step is managed today (<code>Holder::Server</code>: its hooks report each turn to the Machine server), and <code>lf --task X &lt;skill&gt;</code> is managed because of a flag. Making steps workers means deciding what a worker still reports: today the server uses those turn reports to record Codex turns and refresh planning.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>The three names:
+  <ol>
+  <li>bare · managed · worker</li>
+  <li>bare · managed · background</li>
+  <li>bare · managed · detached, and rename the Session view state that is called detached today</li>
+  </ol></li>
+<li><code>lf --task X &lt;skill&gt;</code> typed at a terminal:
+  <ol>
+  <li>Bare. It is <code>lf &lt;skill&gt;</code>; the flag only says which Task it counts toward.</li>
+  <li>Managed, as today.</li>
+  <li>Remove <code>--task</code> from skill launches. Run it from the Task's checkout, or use <code>lf task run</code>.</li>
+  </ol></li>
+<li><code>LF_AS</code> and <code>--as</code>:
+  <ol>
+  <li>Remove both in this PR. A nested <code>lf</code> finds its Task from the Session it inherited, then the checkout.</li>
+  <li>Remove them in a follow-up Task.</li>
+  <li>Keep them, as attribution only.</li>
+  </ol></li>
+<li>A worker's turn reports to the Machine server:
+  <ol>
+  <li>None. A worker records its own run and exit, like a bare run.</li>
+  <li>Keep them. Worker differs from managed only in having no held terminal.</li>
+  </ol></li>
+<li>How much of this goes in PR #1966:
+  <ol>
+  <li>All of it: the three-state type replaces <code>Holder</code> and <code>Place</code> here.</li>
+  <li>#1966 keeps "holder decided once" and "agent parsed once". The three states are a new Task stacked on it.</li>
+  </ol></li>
+</ol>
+</main>
+</body>
+</html>

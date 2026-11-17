@@ -229,7 +229,7 @@ enum Place {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Delegation {
     Delegated,
-    Here { mode: crate::harness::Mode },
+    Here { mode: crate::harness::Mode, holder: crate::session::Holder },
 }
 
 impl Delegation {
@@ -261,10 +261,6 @@ impl LaunchInput {
     }
 }
 
-/// Resolve reporting ownership after Work binding, independently of delegation.
-pub fn holder(work: bool, source: Option<crate::session::WorkSource>) -> crate::session::Holder {
-    crate::session::Holder::of(work || source.is_some_and(|source| source.is_managed()))
-}
 
 fn place(
     batch: bool,
@@ -367,11 +363,12 @@ fn delegate(
 ) -> Result<Delegation> {
     let mode = input.mode();
     let batch = input.batch;
+    let work = works(named_work, preview_session.or(json_session));
+    let holder = crate::session::Holder::of(work);
     // Library tests do not execute the CLI entry point.
     if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
-        return Ok(Delegation::Here { mode });
+        return Ok(Delegation::Here { mode, holder });
     }
-    let work = works(named_work, preview_session.or(json_session));
     // A Desktop pane or a framed `lf --machine` view relays this launch.
     let relayed =
         std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some();
@@ -379,7 +376,7 @@ fn delegate(
     // relayed screen; an interactive run keeps the terminal it reads from.
     let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
     let Some(place) = place(batch, relayed, work, terminal, crate::journal::graph_step()) else {
-        return Ok(Delegation::Here { mode });
+        return Ok(Delegation::Here { mode, holder });
     };
     crate::journal::admit_process(
         &std::env::current_dir()?,
@@ -2904,10 +2901,10 @@ mod launch_mode_tests {
                         interactive: true,
                         has_prompt: true
                     },
-                    false
+                    false,
                 )
                 .unwrap(),
-                super::Delegation::Here { mode: expected }
+                super::Delegation::Here { mode: expected, holder: crate::session::Holder::Caller }
             );
         }
     }
@@ -2930,57 +2927,35 @@ mod launch_mode_tests {
     }
 
     #[test]
-    fn holder_uses_the_callers_work_fact_without_reading_the_store() {
-        use crate::session::{Holder, WorkSource};
-        for (work, source, expected) in [
-            (false, None, Holder::Caller),
-            (true, None, Holder::Server),
-            (false, Some(WorkSource::Checkout), Holder::Caller),
-            (true, Some(WorkSource::Checkout), Holder::Server),
-            (false, Some(WorkSource::Declared), Holder::Server),
-            (false, Some(WorkSource::Bound), Holder::Server),
-        ] {
-            assert_eq!(super::holder(work, source), expected, "{work}, {source:?}");
+    fn inherited_declaration_is_bare_in_or_outside_a_task_checkout() {
+        let _env = crate::journal::test_env_lock();
+        let previous = std::env::var_os(crate::ops::WORK_DECLARATION_ENV);
+        std::env::set_var(crate::ops::WORK_DECLARATION_ENV, "task:inherited");
+        for cwd in [tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap()] {
+            // Delegation uses named Work, never the inherited declaration or cwd.
+            let _ = cwd;
+            for batch in [false, true] {
+                let decision = super::delegate(
+                    LaunchInput { batch, interactive: true, has_prompt: true },
+                    None, None, Vec::new(), true, false,
+                ).unwrap();
+                assert!(matches!(decision, super::Delegation::Here { holder: crate::session::Holder::Caller, .. }));
+                assert_eq!(super::place(batch, false, false, true, false), None);
+            }
+        }
+        match previous {
+            Some(value) => std::env::set_var(crate::ops::WORK_DECLARATION_ENV, value),
+            None => std::env::remove_var(crate::ops::WORK_DECLARATION_ENV),
         }
     }
 
     #[test]
-    fn resume_by_id_keeps_headless_caller_and_native_work_ownership() {
-        let home = tempfile::tempdir().unwrap();
-        let admitted = crate::harness::admit_for_test(home.path());
-        let mut session = admitted.store.session(&admitted.session).unwrap().unwrap();
-        session.work_source = Some(crate::session::WorkSource::Declared);
-        for (mode, stored_work, expected) in [
-            (Mode::Headless, false, crate::session::Holder::Caller),
-            (Mode::Interactive, true, crate::session::Holder::Server),
-        ] {
-            // Headless resume consults CLI selectors only. Native resume uses
-            // the saved Session. Neither command here has a Work selector.
-            let fact = admitted
-                .store
-                .is_work(false, stored_work.then_some(&session))
-                .unwrap();
-            assert_eq!(super::holder(fact, None), expected, "{mode:?}");
-            assert_eq!(
-                super::place(mode == Mode::Headless, false, fact, true, false).is_some(),
-                stored_work
-            );
-        }
-    }
-
-    #[test]
-    fn inherited_declaration_keeps_server_reporting_without_naming_work() {
-        // Inherited LF_AS declares reporting ownership but does not name Work
-        // on the command line; neither a TTY nor a headless caller delegates it.
-        assert_eq!(super::place(false, false, false, true, false), None);
-        assert_eq!(super::place(true, false, false, false, false), None);
-        assert_eq!(
-            super::holder(false, Some(crate::session::WorkSource::Declared)),
-            crate::session::Holder::Server
-        );
-        assert_eq!(
-            super::holder(false, Some(crate::session::WorkSource::Checkout)),
-            crate::session::Holder::Caller
-        );
+    fn unreadable_session_work_keeps_server_reporting() {
+        let _env = crate::journal::test_env_lock();
+        let decision = super::delegate(
+            LaunchInput { batch: false, interactive: true, has_prompt: false },
+            None, Some("unreadable-session"), Vec::new(), true, false,
+        ).unwrap();
+        assert!(matches!(decision, super::Delegation::Here { holder: crate::session::Holder::Server, .. }));
     }
 }

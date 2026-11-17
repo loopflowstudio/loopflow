@@ -886,7 +886,7 @@ impl AgentProcessRequest {
             task_prompt: config.task_prompt.clone(),
             skill_invocation: config.skill_invocation.clone(),
             output_schema: config.output_schema.clone(),
-            agent: config.resolved_agent()?,
+            agent: config.agent.to_string(),
             account_id: None,
             max_turns: config.max_turns,
             write_scope: config.write_scope,

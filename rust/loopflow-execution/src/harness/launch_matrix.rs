@@ -124,7 +124,7 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
                     capture.claim_session_attachment()?;
                     let admitted = Admitted::from_runtime(&capture)?;
                     let mut config = AgentConfig {
-                        agent: Some(kind.as_str().into()),
+                        agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
                         cwd: Some(cwd.into()),
                         system_prompt: "fixed instructions".into(),
                         chrome: Some(true),
@@ -146,7 +146,7 @@ fn every_harness_runs_native_and_headless_for_each_holder() {
                             references: vec![],
                         }),
                         env: capture.environment(),
-                        ..Default::default()
+                        ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
                     };
                     config.env.insert("LF_BIN".into(), binary.into());
                     let launch = Launch {
@@ -288,11 +288,11 @@ fn held_codex_with_a_saved_empty_thread_sends_its_first_prompt() {
                 &"saved-empty-thread".into(),
             )?;
             let config = AgentConfig {
-                agent: Some("codex".into()),
+                agent: crate::config::Agent::parse("codex").unwrap(),
                 cwd: Some(home.into()),
                 task_prompt: "First prompt on the saved thread".into(),
                 env: capture.environment(),
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             };
             // Native launch recovers the stored thread even when the entry has no explicit resume token.
             let launch = Launch {
@@ -332,10 +332,10 @@ fn native_limits_and_schemas_require_a_headless_run() {
             (None, Some(serde_json::json!({"type":"object"}))),
         ] {
             let config = AgentConfig {
-                agent: Some(kind.as_str().into()),
+                agent: crate::config::Agent::parse(kind.as_str()).unwrap(),
                 max_turns,
                 output_schema,
-                ..Default::default()
+                ..crate::agent::AgentConfig::new(crate::config::Agent { harness: crate::harness::HarnessKind::Codex, model: None })
             };
             let launch = Launch {
                 config: &config,

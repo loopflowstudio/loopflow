@@ -1,12 +1,9 @@
 //! Fresh native workspaces. Every `lf open --workspace` launches a repository's
-//! or Wave's Task tabs, each with its splits, in a new Rex session, Herdr
-//! workspace or cmux group. The host owns them
-//! afterwards: LF records no host, container, tab or creation state. Native
-//! handles live only in this command, or in a Rex follower while it runs.
+//! or Wave's Task tabs in a new Rex session, Herdr workspace or cmux group: each
+//! tab is the Task view, beside its changes with `--diff`. The host owns them
+//! afterwards: LF records no host, container, tab, layout or creation state.
+//! Native handles live only in this command, or in a Rex follower while it runs.
 use loopflow_execution::store::selections;
-mod layout;
-
-use layout::layout;
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::{IsTerminal, Read};
@@ -201,13 +198,32 @@ impl Native {
         content: &ViewContent,
         diff: bool,
     ) -> Result<String> {
-        let native_layout = layout(store, content, repo, diff, self)?;
-        self.add_tab(
-            container,
-            &content.title,
-            tool_cwd(content, repo),
-            native_layout,
-        )
+        let cwd = tool_cwd(content, repo);
+        let id = content.work.id.as_str();
+        let mut layout = self.block("Task & workflow", cwd, lf_argv(cwd, &["task", "view", id])?);
+        if let Some(location) = &content.location {
+            anyhow::ensure!(
+                location.machine_id
+                    == loopflow_execution::store::machines::local_machine(store)?
+                        .id
+                        .as_str(),
+                "Task runs on Machine {}; no local tool was created",
+                location.machine_id
+            );
+            anyhow::ensure!(
+                cwd.is_dir(),
+                "Recorded Task checkout is unavailable; no home-directory fallback"
+            );
+            if diff {
+                let changes = self.block(
+                    "Changes",
+                    cwd,
+                    lf_argv(cwd, &["task", "diff", id, "--base", "parent"])?,
+                );
+                layout = self.split(SplitAxis::Vertical, 0.618, layout, changes);
+            }
+        }
+        self.add_tab(container, &content.title, cwd, layout)
     }
 
     fn focus(&self, container: &Container, tab: &str) -> String {

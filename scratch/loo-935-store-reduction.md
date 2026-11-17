@@ -77,7 +77,7 @@ Jack Heart, 2026-11-16: "we can drop the thing where lf open does anything
 other than just open the task session in other surfaces." and "we dont need to
 try to copy our desktop layouts". Rex, Herdr and cmux tabs hold the
 conversation (plus Changes with `--diff`, Task & workflow without a local
-checkout). `layout.rs` kept only that; `tools.rs`, `Templates`, the storage
+checkout). `Native::add_task_tab` (`open/workspace.rs`) builds that; `layout.rs`, `tools.rs`, `Templates`, the storage
 `panes` modules and `WorkPaneLayout`/`TaskLayoutTemplate` are gone. `task_layout`
 stays readable and ignored (shared-file rule).
 
@@ -116,6 +116,7 @@ state; the file is not rewritten.
 - Split: `nextest -p loopflow-storage --lib` revisions/task_ownership/migration_runner/rentals/canonical_ids/query_plans (172), `cargo clippy --all-targets -- -D warnings`, `pytest test_check_migrations.py test_due_removals.py` (29), `schema_page.py --check`: pass. After merging ffb29c6b29 (`task_summaries.sql`), `check_migrations.py` and `schema_page.py --check`: pass.
 - Workspace fold: `nextest -p loopflow --lib` `lf::tests::`, `wave_resolution_matrix::`, `commands::open::`; integration `work_open_tests::`, `cli_discovery::`, `documented_commands::` at `-j 4` (72); `cargo clippy -p loopflow --all-targets -- -D warnings`: pass. `rex_agent_tool_open_uses_the_moved_viewer_instead_of_startup_context` failed once at `-j 4` (load ~38) and passed alone; gate/CI decides whether it is load-sensitive.
 - Workspace widening: `nextest -p loopflow --lib` `commands::open::`, `lf::tests::`, `wave_resolution_matrix::` (57); integration `work_open_tests::` at `-j 4` (32 of 33), `cli_discovery::` + `documented_commands::` (41); `cargo clippy -p loopflow --all-targets -- -D warnings`: pass. `work_open_tests::task_location_uses_the_named_plan_outside_a_checkout` fails here with `location.state` "unavailable" ("not found"), also with this step's `src/` reverted: not this diff; gate/CI decides.
+- Compress (layout fold): `cargo clippy -p loopflow --all-targets -- -D warnings`, `nextest -p loopflow --lib commands::open::` (17), integration `work_open_tests::` at `-j 4` (32 of 33, the same `task_location_uses_the_named_plan_outside_a_checkout`): pass.
 - Verify: `uv run python scripts/due_removals.py install` on the Machine that runs Tasks.
 
 ## lf workspace folds into lf open (2026-11-16)
@@ -141,7 +142,7 @@ the selected Task whatever its state, put it first so it takes focus, and send i
 to peers as `--task <id>`, which they widen the same way. Deleted: `explicit`,
 `Presentation`, the `native.here()` join, `place_task`, `open_conversation`, the
 `Work` arms of `scope`/`remote_open`/`container_name`, the Task case of
-`desktop_workspace_url`, and the conversation pane in `layout.rs` (overview tabs
+`desktop_workspace_url`, and the conversation pane of the old `layout.rs` (overview tabs
 are Task & workflow, plus Changes with `--diff`). `--available` opens each
 conversation through `conversation::open` (`open_available`), so it keeps
 `OpenArgs::conversation`. Single-conversation tests moved to `--tab`;

@@ -228,7 +228,7 @@ value stays in `lf repo plan journal`, ready to copy back.
 ### Linear, Asana or Notion
 
 ```bash
-lf account connect linear                  # or asana, or notion
+lf machine login linear                    # or asana, or notion
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 

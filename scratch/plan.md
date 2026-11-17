@@ -306,3 +306,18 @@ By a person at gate: `lf machine login claude mini` and `… codex mini` for rea
 - Fixture SSH sign-in test (slice 1) — implement.
 - Real sign-in on mini, both providers — a person, at gate.
 - Swift `ServerProtocolTests` after removing account cases — CI.
+
+## Docs (written first, 2026-11-17)
+
+Changed: `docs/subscriptions.md` ("Sign in on any Machine" replaces "Remote
+Machines and rentals"; "Choose who approves", "Rentals", "Per-run secrets",
+"Service authentication"), `docs/security.md`, `docs/dev/machines.md`,
+`docs/ops.md`, `docs/config.md` ("Sign-in approvers"), `docs/work.md`,
+`docs/dev/codebase.md`, `docs/dev/reference.md`, `README.md`, builtin
+`init.md` and `repo_operate.md`. `server/README.md` and `security.md`'s service
+transfer text untouched until slice 4.
+
+Settled while writing: on-demand templates live in the store, so `logins` is
+`lf ondemand add … --logins claude,github` and an `ondemands` column (this
+Task's migration). `LF_APPROVE_CODE` is set for any device-code page (Codex,
+GitHub, OpenCode), not only Codex.

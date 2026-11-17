@@ -30,3 +30,8 @@ Choices made headless for review; the plan says what each passed over.
   skip a provider that is already signed in and not refused.
 - Not tested: whether device code login works on the ChatGPT plan in use, and
   whether either approval page tolerates an automated browser.
+- Docs: `logins` is a `--logins` flag on `lf ondemand add` stored in an
+  `ondemands` column, since templates live in the store, not config. Passed
+  over: a `logins` config key beside the store template.
+- Docs: `LF_APPROVE_CODE` is passed whenever the page asks for a device code
+  (Codex, GitHub, OpenCode). Passed over: Codex only.

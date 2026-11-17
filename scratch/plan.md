@@ -219,23 +219,14 @@ Remaining:
    `take_steers_to_start` asks it and `read_steer_wakes` keeps each
    candidate (steer, Session) past the cursor only when it holds. Test
    `a_steer_its_start_would_not_take_starts_nothing` (superseded Task steer,
-   shared steer another Session read first). Was: Post-build concept review
-   (`scratch/concept-review.html`): the server's start set
-   (`read_steer_wakes`, a `COALESCE(session_id, task_primary_sessions)` join)
-   and the started conversation's take (`take_steers_to_start`, a predicate
-   over `unread()`) encode "a steer names this Session" twice, and only the
-   take applies `applicable`'s source-replacement and shared-steer rules. If
-   they disagree, the server starts a Session that takes nothing and sits at
-   its prompt (a resumed Claude never yields idle). Build one SQL fragment in
-   `sqlite/steers.rs`, "unread steers naming ?1", used by
-   `take_steers_to_start`'s EXISTS and by `read_steer_wakes` as the filter on
-   each candidate Session drawn from steers past the cursor (cursor and
-   migration unchanged). Test in `steers_tests.rs`: a steer the old join
-   would start for but `applicable` excludes (a superseded source, or a Task
-   steer another Session read before the primary conversation started)
-   starts nothing; the existing wake and storage tests still pass.
+   shared steer another Session read first). The candidate join no longer
+   filters `update:` sources or delivery itself; `naming()` does.
 
-For gate after that: the Codex question below, and `-b steer` to a running
+Checks run 2026-11-17 (realign): `cargo test -p loopflow-storage --lib
+steers` 21 passed; `cargo test -p loopflow --lib
+steers_start_a_stopped_session_once` passed. CI runs the suites at gate.
+
+Next: gate. For gate: the Codex question below, and `-b steer` to a running
 Session (saves and returns) has no test.
 
 ## Excluded

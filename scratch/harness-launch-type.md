@@ -153,8 +153,9 @@ pub struct Admitted { store: SqliteStore, session: String, attachment: SessionAt
   row in the launch matrix so the next change to it is deliberate.
 - `delegate` runs before the binding is resolved, so it cannot know the
   source. `Delegation::Here { mode }` carries the mode; one
-  `transport::holder(named, source, session)` returns the `Holder` once the
-  binding exists, and it is the only caller of `Holder::of`. It replaces the
+  `transport::holder(work, source)` returns the `Holder` once the
+  binding exists, and it is the only caller of `Holder::of`. A caller that
+  holds a Session record reads `store.is_work` itself and passes the answer. It replaces the
   four derivations (`run.rs:52`, `:205`, `:285`, `native_session.rs:96`). A
   held or detached child re-executes the same argv and reaches the same
   function. Do not resolve the implicit binding before `delegate` to merge the
@@ -265,6 +266,40 @@ native. The resolver now retains that distinction; the matrix needs separate
 headless/native resume-by-ID rows. The earlier blanket statement about reopened
 Sessions was incorrect. This changes the written design, not launch behavior.
 
+Fourth pass, against 1c3af13938 (mode and holder in transport). Two changes
+for the next implement, both before slice 4:
+
+- **`transport::holder` takes the Work fact, not a Session id.** Native resume
+  (`native_session.rs:95`) used to call `store.is_work(named_work,
+  Some(&session))?` on the store and record it already holds. It now passes
+  the id, and `transport::works` opens `journal::process_ledger()` again,
+  re-reads the Session, and turns any failure into Work. A store error that
+  used to stop the resume now launches it as `Holder::Server`: a holder that
+  differs from main, which "Forbidden outcomes" rules out. Make it
+  `holder(work: bool, source: Option<WorkSource>)`; native resume passes
+  `store.is_work(named_work, Some(&session))?`, headless resume passes
+  `named_work`, bound launches pass `false` and the source. `works(…, session)`
+  stays private to `delegate`, where no record is in hand and an unreadable
+  store must not block the launch.
+- **Mode is an argument, not a `Cli` field.** `Cli::launch_mode:
+  Option<Mode>` plus the `unwrap_or_else(… .preview_mode())` in
+  `build_prompt_at` is "Option means resolve later" again, with a second
+  `has_prompt` expression (`skill.is_some() || message.is_some()` against
+  dispatch's `command.is_some() || skill_input.is_some()`; equal on every
+  entry checked today, by coincidence of `lf.rs:2974`). `process_options()`
+  copies the field, so a caller that then sets `batch` (`ship.rs:55`) would
+  lose to a stale mode if that command ever delegated. Pass `Mode` from
+  dispatch through `execute_target`/`execute_command` into
+  `run`/`run_bound`/`resume` and `build_prompt*`; callers that never delegate
+  state theirs (preview: `LaunchInput::mode()`; ship and Discord: `Headless`).
+  Delete the field and the fallback. `LaunchInput` keeps one public `mode()`
+  that reads the terminal (today's `preview_mode`, which `delegate` also
+  calls) and a private tty-parameter form for the table test.
+
+Checked and unchanged: Graph steps spawn `lf` children from `step_args`, so no
+resolved mode crosses into a step; `place` matches the former inline branch
+row for row.
+
 Open, outside this Task (not blocking): what inherited `LF_AS` outside a Task
 checkout should be. `server/README.md` "Turn and tool boundaries" and
 `transport/README.md` "Which launches are managed" list the managed entries
@@ -296,6 +331,7 @@ changes hooks and the server requirement for those child runs.
   Branch on `Capabilities` instead.
 - `Holder::of` called anywhere but `transport::holder`, or
   `is_interactive_run` anywhere but `delegate`.
+- A resolved `Mode` stored on `Cli`, or an `Option<Mode>` with a fallback.
 - An entry whose place or holder differs from main.
 - A test-only harness variant or factory trait. Fixtures use the existing
   stand-in provider scripts.
@@ -323,6 +359,10 @@ supplied runtime stays caller-owned. Both optional launch fields, `open_owner` a
 the unattached-launch test are deleted. `admit_for_test(home)` returns `Admitted`.
 
 Remaining work:
+3a. **Repair slice 3** per "Fourth pass": `holder(work, source)` with native
+   resume reading its own store, and `Mode` passed as an argument with
+   `Cli::launch_mode` deleted. Focused: the two suites under 3, plus a native
+   resume test where the store read fails and the resume errors.
 3. **Finish moving holder into `Launch`.** Mode now comes from
    `Delegation::Here { mode }` and reaches `PromptBuild` through `Cli::launch_mode`;
    prompt previews use `LaunchInput::preview_mode` without delegation.

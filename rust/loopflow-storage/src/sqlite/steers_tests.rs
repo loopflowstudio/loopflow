@@ -719,3 +719,151 @@ fn a_hook_check_after_the_marker_waits_for_the_steer_commit() {
     tx.commit().unwrap();
     assert_eq!(read(&store, &adapter, "native")[0].text, "keep this");
 }
+
+/// A Task with `primary` as its conversation and `worker` as another of its
+/// interactive Sessions, both in its checkout.
+fn task_with_primary(store: &SqliteStore, primary: &str, worker: &str) {
+    for session in [primary, worker] {
+        store.test_session(session, &crate::session_record::new_artifact_key());
+    }
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch(&format!(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_00000000000040008000000000000001','/repo',1);
+            INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
+            VALUES('repo_00000000000040008000000000000001','task','T-1',1);
+            INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task');
+            INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task','{primary}');
+            UPDATE agent_sessions SET cwd='/task',interactive=1 WHERE id IN ('{primary}','{worker}');"
+        ))
+        .unwrap();
+}
+
+fn woken(store: &SqliteStore) -> Vec<(String, bool)> {
+    store
+        .read_steer_wakes()
+        .unwrap()
+        .into_iter()
+        .map(|wake| (wake.session, wake.identity.is_some()))
+        .collect()
+}
+
+/// The server reads each steer once: one naming a Session wakes it, a Task's
+/// wakes only its primary conversation, and a Task update, a Wave's or a
+/// read one wakes no one.
+#[test]
+fn each_steer_wakes_the_session_it_names_once() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    assert!(woken(&store).is_empty(), "nothing saved yet");
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    store
+        .save_session_steer("worker", "Author", "Again")
+        .unwrap();
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "update:-:pr",
+            "1",
+            &Author::Named("Loopflow".into()),
+            "Task update",
+        )
+        .unwrap();
+    }
+    let (read_steer, _) = store
+        .take_session_steers("primary", "Author", "Read in its own turn")
+        .unwrap();
+    assert_eq!(read_steer.text, "Read in its own turn");
+    // `primary` read the Task's steer in that turn: nothing wakes it.
+    assert_eq!(
+        woken(&store),
+        [("worker".to_string(), false), ("worker".to_string(), false)]
+    );
+    assert!(woken(&store).is_empty(), "each steer is read once");
+    // A running Session is named with its AgentProcess, for the caller to see.
+    store
+        .save_session_steer("session", "Author", "Running")
+        .unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE agent_sessions SET interactive=1 WHERE id='session'",
+            [],
+        )
+        .unwrap();
+    assert_eq!(woken(&store), [("session".to_string(), true)]);
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task-2",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+    }
+    assert_eq!(woken(&store), [("primary".to_string(), false)]);
+}
+
+/// A conversation starting again takes its unread steers as its first input
+/// only when one names it.
+#[test]
+fn a_starting_conversation_takes_its_steers_when_one_names_it() {
+    let (_home, store, _adapter) = fixture();
+    task_with_primary(&store, "primary", "worker");
+    {
+        let conn = store.conn.lock().unwrap();
+        save_in(
+            &conn,
+            ("task", "task"),
+            "task",
+            "1",
+            &Author::Named("Author".into()),
+            "Task direction",
+        )
+        .unwrap();
+    }
+    assert!(
+        store.take_steers_to_start("worker").unwrap().is_empty(),
+        "a Task steer names only the primary conversation"
+    );
+    assert_eq!(store.session_steers("worker", 0, 32).unwrap().pending, 1);
+    store
+        .save_session_steer("worker", "Author", "Direct")
+        .unwrap();
+    let texts = |steers: Vec<Steer>| {
+        steers
+            .into_iter()
+            .map(|steer| steer.text)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        texts(store.take_steers_to_start("worker").unwrap()),
+        ["Task direction", "Direct"]
+    );
+    assert_eq!(store.session_steers("worker", 0, 32).unwrap().pending, 0);
+    assert_eq!(
+        texts(store.take_steers_to_start("primary").unwrap()),
+        ["Task direction"]
+    );
+    assert!(store.take_steers_to_start("primary").unwrap().is_empty());
+}

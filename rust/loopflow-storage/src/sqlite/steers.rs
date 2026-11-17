@@ -17,6 +17,15 @@ pub struct IdleCandidate {
     pub identity: Option<(u32, i64)>,
 }
 
+/// A steer the server read that names `session`, an interactive Session
+/// that has not read it; `identity` is its unfinished AgentProcess, if any.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SteerWake {
+    pub steer: String,
+    pub session: String,
+    pub identity: Option<(u32, i64)>,
+}
+
 impl SqliteStore {
     pub fn reserve_steer_adapter(
         &self,
@@ -721,21 +730,77 @@ impl SqliteStore {
             &loopflow_model::durable::Author::Named(author.into()),
             text,
         )?;
-        let steers = tx
-            .prepare(&format!("{} ORDER BY p.seq", unread()))?
-            .query_map([session], read_steer)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for read in &steers {
-            tx.execute(
-                "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
-                VALUES(?1,?2,unixepoch(),unixepoch())
-                ON CONFLICT(session_id,steer_id) DO UPDATE
-                SET claimed_at=unixepoch(),delivered_at=unixepoch()",
-                params![session, read.id],
-            )?;
-        }
+        let steers = take_unread_in(&tx, session)?;
         tx.commit()?;
         Ok((steer, steers))
+    }
+
+    /// The first input of a stopped conversation starting again: every steer
+    /// it has not read, oldest first, taken as read, when one of them names
+    /// it (its own, or its Task's for the Task's primary conversation).
+    /// Otherwise nothing, and its hooks hear the rest at its boundaries.
+    pub fn take_steers_to_start(&self, session: &str) -> StoreResult<Vec<Steer>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let named: bool = tx.query_row(
+            &format!(
+                "SELECT EXISTS({} AND (p.session_id=?1 OR p.source NOT LIKE 'update:%'
+                    AND p.task_id IN (SELECT task_id FROM task_primary_sessions WHERE session_id=?1)))",
+                unread()
+            ),
+            [session],
+            |row| row.get(0),
+        )?;
+        if !named {
+            return Ok(Vec::new());
+        }
+        let steers = take_unread_in(&tx, session)?;
+        tx.commit()?;
+        Ok(steers)
+    }
+
+    /// The steers saved since the server last read, each read once: those
+    /// that name an interactive Session which has not read them, with that
+    /// Session's unfinished AgentProcess identity. A Task's steer names its
+    /// primary conversation; Task updates and Wave and repository steers
+    /// name no one.
+    pub fn read_steer_wakes(&self) -> StoreResult<Vec<SteerWake>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let (after, newest): (i64, i64) = conn.query_row(
+            "SELECT r.seq,COALESCE((SELECT MAX(seq) FROM steers),r.seq)
+             FROM steer_wake_reading r WHERE r.id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if newest <= after {
+            return Ok(Vec::new());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let wakes = tx
+            .prepare(
+                "SELECT p.id,s.id,pr.pid,pr.os_started_at FROM steers p
+                 LEFT JOIN task_primary_sessions t
+                   ON t.task_id=p.task_id AND p.source NOT LIKE 'update:%'
+                 JOIN agent_sessions s ON s.id=COALESCE(p.session_id,t.session_id)
+                 LEFT JOIN processes pr ON pr.id=s.agent_process_id AND pr.completed_at IS NULL
+                 WHERE p.seq>?1 AND p.seq<=?2 AND s.interactive=1
+                   AND NOT EXISTS(SELECT 1 FROM steer_delivered d
+                     WHERE d.session_id=s.id AND d.steer_id=p.id AND d.delivered_at IS NOT NULL)
+                 ORDER BY p.seq",
+            )?
+            .query_map(params![after, newest], |row| {
+                Ok(SteerWake {
+                    steer: row.get(0)?,
+                    session: row.get(1)?,
+                    identity: row
+                        .get::<_, Option<u32>>(2)?
+                        .zip(row.get::<_, Option<i64>>(3)?),
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        tx.execute("UPDATE steer_wake_reading SET seq=?1 WHERE id=1", [newest])?;
+        tx.commit()?;
+        Ok(wakes)
     }
 
     /// The caller printed these claimed steers: the Session has read them.
@@ -756,6 +821,24 @@ impl SqliteStore {
         tx.commit()?;
         Ok(())
     }
+}
+
+/// Take every steer `session` has not read as read by the caller, oldest first.
+fn take_unread_in(tx: &Connection, session: &str) -> StoreResult<Vec<Steer>> {
+    let steers = tx
+        .prepare(&format!("{} ORDER BY p.seq", unread()))?
+        .query_map([session], read_steer)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for read in &steers {
+        tx.execute(
+            "INSERT INTO steer_delivered(session_id,steer_id,claimed_at,delivered_at)
+            VALUES(?1,?2,unixepoch(),unixepoch())
+            ON CONFLICT(session_id,steer_id) DO UPDATE
+            SET claimed_at=unixepoch(),delivered_at=unixepoch()",
+            params![session, read.id],
+        )?;
+    }
+    Ok(steers)
 }
 
 #[cfg(test)]

@@ -239,6 +239,20 @@ canonical ids). DTO fields that carry Process data: `processes[]` in
 (`swift/Loopflow/Models/LfProcess.swift`); `GraphStepProcess` and
 `GraphProcessSummary` fields are read from Process columns today.
 
+**Gap found in review (2026-11-17): Task retirement's ancestry walk.**
+`unsettled_work` (`loopflow-execution/src/ops/task/retirement.rs:308`) lets a
+Task retire while open work runs only if that work descends, by
+`parent_lf_process_id`, from a Desktop shell's launcher
+(`desktop_shells.launcher_lf_process_id`, read by `desktop::shells::hosts`) or
+from an lf started inside a held terminal (`held_terminal_processes`). With no
+Process rows there is no parent chain. Replacement: membership by terminal.
+Open work is the Task's live Sessions and Graph runs. Each belongs to a shell
+when its own `terminal_id` / `held_terminal_id` is one of the Task's
+`desktop_shells.terminal_id`. Then `launcher_lf_process_id` and
+`held_terminal_processes` are D, and the walk goes. Lands with the Session
+slice; test: a Task with a Desktop shell running an agent retires and closes
+the shell, and a Task whose Graph run is outside any shell does not.
+
 ## Target records
 
 Process ids stay as opaque UUIDs (`LF_PROCESS_ID`, Graph run id, step id,

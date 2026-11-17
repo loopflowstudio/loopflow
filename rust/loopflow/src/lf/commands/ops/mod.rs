@@ -383,6 +383,31 @@ pub fn run_commit(
     Ok(())
 }
 
+/// A step commit runs under a skill run or a Graph, whose stdout carries the
+/// answer, so its progress goes to stderr.
+struct StepCommitProgress;
+
+impl Progress for StepCommitProgress {
+    fn status(&self, msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    fn error(&self, msg: &str) {
+        eprintln!("{msg}");
+    }
+
+    fn confirm(&self, _msg: &str) -> bool {
+        false
+    }
+}
+
+/// `lf commit --step <skill>`: everything a finished skill step left, as one commit.
+pub fn run_step_commit(step: &str, agent_override: Option<&str>) -> Result<()> {
+    let repo_root = find_repo_root()?;
+    loopflow_execution::ops::commit_step(&repo_root, step, agent_override, &StepCommitProgress)?;
+    Ok(())
+}
+
 pub fn connect_wave(
     repo_root: &std::path::Path,
     wave: Option<&str>,

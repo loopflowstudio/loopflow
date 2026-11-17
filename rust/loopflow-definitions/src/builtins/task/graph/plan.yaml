@@ -1,0 +1,4 @@
+# Settle what to build before any code.
+- kickoff
+- concept-review            # the plan's premise
+- write-docs

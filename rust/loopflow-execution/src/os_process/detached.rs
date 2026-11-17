@@ -351,7 +351,6 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     crate::process::AGENT_CALLER_ENV,
-    crate::session_record::PROVIDER_ACCOUNT_ID_ENV,
     crate::ops::graph_process::GRAPH_ID_ENV,
     crate::installation::INSTALL_SWITCH_ENV,
     crate::machine::ssh::EXPECTED_MACHINE_ID_ENV,
@@ -363,17 +362,9 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_HOME",
 ];
 
-/// Credentials and account choices a new Session must receive explicitly.
-const SESSION_AUTH_ENV: &[&str] = &[
-    crate::provider_account::selection::ACCOUNT_SELECTION_ENV,
-    DISCORD_TOKEN_ENV,
-    "GH_TOKEN",
-    "OPENCODE_API_KEY",
-    "CLAUDE_CODE_OAUTH_TOKEN",
-    "ANTHROPIC_API_KEY",
-    "CODEX_ACCESS_TOKEN",
-    "OPENAI_API_KEY",
-];
+/// Service credentials a new Session must receive explicitly. Native agent
+/// configuration and credentials follow the caller's environment.
+const SESSION_AUTH_ENV: &[&str] = &[DISCORD_TOKEN_ENV, "GH_TOKEN", "OPENCODE_API_KEY"];
 
 #[cfg(test)]
 mod tests {
@@ -456,7 +447,6 @@ mod tests {
         let command = shell_command(std::path::Path::new("."), &argv, &[("LF_WAVE_ID", "infra")]);
 
         assert!(command.contains("unset "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.contains("LF_DISCORD_TOKEN"));
         assert!(command.contains("GH_TOKEN OPENCODE_API_KEY"));
         assert!(command
@@ -492,7 +482,6 @@ mod tests {
         let command = shell_command(std::path::Path::new("."), &argv, &[]);
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with("exec 'lf' 'wave' 'child'"));
     }
 
@@ -522,13 +511,31 @@ mod tests {
     }
 
     #[test]
-    fn detached_lf_drops_parent_credentials_and_account_choices() {
+    fn detached_lf_keeps_native_authentication_environment() {
+        let command = shell_command(std::path::Path::new("."), &[
+            "/bin/sh".into(), "-c".into(),
+            "test \"$CODEX_HOME\" = /native/codex && test \"$CLAUDE_CONFIG_DIR\" = /native/claude && test \"$ANTHROPIC_API_KEY\" = native-claude && test \"$OPENAI_API_KEY\" = native-codex".into(),
+        ], &[]);
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", &command])
+            .env("CODEX_HOME", "/native/codex")
+            .env("CLAUDE_CONFIG_DIR", "/native/claude")
+            .env("ANTHROPIC_API_KEY", "native-claude")
+            .env("OPENAI_API_KEY", "native-codex")
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+        assert!(output.stdout.is_empty());
+    }
+
+    #[test]
+    fn detached_lf_drops_parent_service_credentials() {
         let command = shell_command(
             std::path::Path::new("."),
             &[
                 "/bin/sh".into(),
                 "-c".into(),
-                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}${LF_ACCOUNT_SELECTION-}\"".into(),
+                "printf '%s' \"${LF_AGENT_OVERRIDE-}${LF_DISCORD_TOKEN-}${GH_TOKEN-}\"".into(),
             ],
             &[],
         );
@@ -537,7 +544,6 @@ mod tests {
             .env("LF_AGENT_OVERRIDE", "claude")
             .env("LF_DISCORD_TOKEN", "fixture-chat-token")
             .env("GH_TOKEN", "fixture-github-token")
-            .env("LF_ACCOUNT_SELECTION", "parent-selection")
             .output()
             .unwrap();
         assert!(output.status.success());
@@ -564,7 +570,6 @@ mod tests {
         );
 
         assert!(command.contains("LF_WAVE_ID LF_CAPTURE_KEY "));
-        assert!(command.contains("LF_ACCOUNT_SELECTION LF_DISCORD_TOKEN"));
         assert!(command.ends_with(
             "exec env 'LF_TRACE_ID'='run-1' 'LF_PROCESS_ID'='process-1' 'LF_HOME'='/tmp/lf' 'lf' 'work' 'execute' 'task' 'tsk_123'"
         ));

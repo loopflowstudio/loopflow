@@ -21,6 +21,15 @@ struct Cutover {
     edits: Vec<Edit>,
 }
 
+/// Retain retired account preferences when exporting a released database.
+#[derive(Debug, Serialize)]
+struct HistoricalAccountDeclaration {
+    login_email: Option<crate::profile::EmailAddress>,
+    routing_state: String,
+    plan: Option<String>,
+    paid_through: Option<String>,
+}
+
 fn home(conn: &Connection) -> Result<PathBuf> {
     Ok(Path::new(
         conn.path()
@@ -260,15 +269,13 @@ fn export(conn: &Connection) -> Result<Export> {
             ))
         })? {
             let (provider, id, email, routing, plan, paid) = row?;
-            let declaration = super::placement::AccountDeclaration {
+            let declaration = HistoricalAccountDeclaration {
                 login_email: email
                     .as_deref()
                     .map(crate::profile::EmailAddress::parse)
                     .transpose()
                     .map_err(anyhow::Error::msg)?,
-                routing_state: Some(
-                    crate::store::RoutingState::from_db(&routing).map_err(anyhow::Error::msg)?,
-                ),
+                routing_state: routing,
                 plan,
                 paid_through: paid
                     .map(time::Date::from_julian_day)
@@ -649,7 +656,7 @@ mod tests {
         assert!(journal.contains("claude"));
     }
     #[test]
-    fn exported_routes_name_accounts_the_way_launches_select_them() {
+    fn exported_legacy_routes_retain_account_names() {
         let home = tempfile::tempdir().unwrap();
         let conn = fixture(home.path());
         conn.execute_batch(

@@ -230,9 +230,8 @@ mod tests {
     const GONE: &str = "0199a213-81c0-4800-8aa1-bbab2a035a03";
 
     fn account(store: &SqliteStore, provider: &str, name: &str, home: &std::path::Path) {
-        crate::provider_account::catalog::upsert_provider_account(
-            store,
-            &crate::store::ProviderAccount {
+        store
+            .upsert_provider_account_row(&crate::store::ProviderAccount {
                 provider: provider.into(),
                 account_id: ProviderAccountId::parse(name).unwrap(),
                 home: Some(home.to_path_buf()),
@@ -242,18 +241,14 @@ mod tests {
                 observed_credential_digest: None,
                 observed_plan: None,
                 credential_state: crate::store::CredentialState::Missing,
-                routing_state: crate::store::RoutingState::Disabled,
-                plan: None,
-                paid_through: None,
                 utilization_percent: None,
                 cooldown_until: None,
                 cooldown_reason: None,
                 last_selected_at: None,
                 created_at: 1,
                 updated_at: 1,
-            },
-        )
-        .unwrap();
+            })
+            .unwrap();
     }
 
     /// A Session on `provider` whose conversation `thread` ran on its account

@@ -78,10 +78,7 @@ impl Provider {
 
     /// Whether this provider can refresh without user interaction.
     pub fn supports_automatic_refresh(self) -> bool {
-        matches!(
-            self,
-            Self::GitHub | Self::Codex | Self::Linear | Self::Asana
-        )
+        matches!(self, Self::GitHub | Self::Linear | Self::Asana)
     }
 }
 

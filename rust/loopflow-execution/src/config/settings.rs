@@ -251,11 +251,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             "choose machine.tasks or machine.capacity in one declaration",
         ));
     }
-    for provider in parsed.account.keys() {
-        if !["claude", "codex"].contains(&provider.as_str()) {
-            return Err(invalid("account routes require claude or codex"));
-        }
-    }
     for (provider, browsers) in &parsed.auth_browsers {
         provider
             .parse::<crate::provider_auth::Provider>()
@@ -286,13 +281,6 @@ pub(crate) fn validate_value(path: &[&str], value: &Value) -> Result<(), LoadErr
             .provider
             .offer(&template.hardware)
             .map_err(invalid)?;
-    }
-    for accounts in parsed.accounts.values() {
-        for declaration in accounts.values() {
-            if let Some(date) = &declaration.paid_through {
-                super::placement::parse_date(date).map_err(|error| invalid(error.to_string()))?;
-            }
-        }
     }
     if path[0] == "context" {
         crate::prompt::context_budget::ContextBudgets::resolve(&parsed)
@@ -535,6 +523,10 @@ fn _normalize_preferences(value: &mut Value) {
     }
 }
 
+/// Account routing preferences the released lf still reads from personal
+/// files. This lf ignores them without a warning; LOO-919 deletes this list.
+const RETIRED_SETTINGS: &[&[&str]] = &[&["account"], &["accounts"]];
+
 fn _filter_file_settings(
     value: &mut Value,
     path: &mut Vec<String>,
@@ -575,6 +567,10 @@ fn _filter_file_settings(
                 definition.accepts(&preference.iter().map(String::as_str).collect::<Vec<_>>())
             });
         if known && !selector && value.is_null() {
+            path.pop();
+            return false;
+        }
+        if !known && RETIRED_SETTINGS.contains(&parts.as_slice()) {
             path.pop();
             return false;
         }
@@ -784,15 +780,6 @@ pub fn resolve_layers(
             if let Some(value) = map.get_mut("machine") {
                 super::placement::expand_shorthand(value)
                     .map_err(|error| invalid(error.to_string()))?;
-            }
-            if let Some(accounts) = map.get_mut("account").and_then(Value::as_mapping_mut) {
-                for value in accounts.values_mut() {
-                    *value = serde_yaml_ng::to_value(
-                        serde_yaml_ng::from_value::<super::placement::AccountOrder>(value.clone())
-                            .map_err(|error| invalid(error.to_string()))?,
-                    )
-                    .expect("account order serializes");
-                }
             }
             map.retain(|key, _| {
                 key.as_str().is_some_and(|key| {
@@ -1780,12 +1767,12 @@ mod tests {
                 layer(
                     ConfigSource::Repository,
                     SettingScope::Repository,
-                    "docs: [a.md]\ncontext_budgets: {scratch_tokens: 100, scratch_bytes: 200}",
+                    "docs: [a.md]\ncontext_budgets: {memory_tokens: 100, memory_bytes: 200}",
                 ),
                 layer(
                     ConfigSource::Personal,
                     SettingScope::Global,
-                    "docs: [b.md]\ncontext_budgets: {scratch_tokens: 50}",
+                    "docs: [b.md]\ncontext_budgets: {memory_tokens: 50}",
                 ),
             ],
             None,
@@ -1793,11 +1780,11 @@ mod tests {
         .unwrap();
         assert_eq!(resolved.config.context.docs, ["a.md", "b.md"]);
         assert_eq!(
-            resolved.settings["context.budgets.scratch_tokens"].value,
+            resolved.settings["context.budgets.memory_tokens"].value,
             Value::from(50)
         );
         assert_eq!(
-            resolved.settings["context.budgets.scratch_bytes"].value,
+            resolved.settings["context.budgets.memory_bytes"].value,
             Value::from(200)
         );
         let mut layers = resolved.config.setting_layers.unwrap();
@@ -1831,7 +1818,7 @@ mod tests {
             ("agent", "Explore"),
             ("default_agent", "Explore"),
             ("missing", "false"),
-            ("context.budgets.scratch_tokens", "0"),
+            ("context.budgets.memory_tokens", "0"),
             ("session", "{unknown: true}"),
         ] {
             assert!(super::parse_value(key, value).is_err(), "{key}");

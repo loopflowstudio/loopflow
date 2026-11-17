@@ -107,7 +107,7 @@ resume per harness:
 | `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
 | `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
 
-The rest of `session_launch_contract` covers accounts, provider switches,
+The rest of `session_launch_contract` covers native authentication, provider switches,
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
@@ -385,18 +385,13 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing.
-`--shared-provider-home` proves Loopflow and plain Codex share one home signed
-in as one stored account at a time: switching, saved-back logins and provider
-conversation IDs in `lf session`.
-`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
-target/debug/lf --output <dir>` proves the same for Claude with synthetic
-logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, and a launch gets no account home or credential variable.
-On macOS it writes and removes one Keychain item scoped to its temporary config
-directory. The fixture copies the candidate, uses private Machines and stops
-only its identified provider process children. Native execution uses synthetic
-Responses, not configured accounts or installed data. Ordinary retry, usage,
-binding and review behavior belong in `session_lifecycle_tests`.
+Shared-home acceptance checks that native clients and lf find the same
+conversations, while native authentication stays authoritative. Retired managed
+homes supply transcripts only. Account switching and saved-back credentials are
+outside launch behavior. Use isolated homes and synthetic provider endpoints;
+ordinary retry, usage, binding and review behavior belong in
+`session_lifecycle_tests`.
+
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
@@ -762,18 +757,17 @@ After Session-history or schema changes, run `lf session history list --json`,
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove an unmerged migration.
 
-## Codex daemon account switching
+## Native authentication and retry policy
 
-```bash
-cargo test -p loopflow --lib lf::commands::account::daemon_tests
-cargo test -p loopflow --lib expired_grace_restarts_even_when_activity_becomes_unreadable -- --ignored
-```
-
-Run the second check explicitly at gate when changing daemon login reconciliation.
-It takes the real five-minute grace period, bounded by a 315-second test timeout.
-Both checks use disposable Unix sockets and a stand-in restart executable, without
-credentials or a live provider. They cover busy-to-idle, unreadable probes, expiry,
-and adoption after restart; configured Codex behavior remains demo/review evidence.
+`session_launch_contract::native_auth_owns_launches_with_a_populated_catalog`
+checks native launch/resume with unusable saved accounts, transcript-only adoption,
+sandboxed Tasks and remote preparation. Credential markers stay private to the
+fixture. `agent::tests::native_retry_policy_matrix` checks bare/Task ×
+interactive/headless refusal handling: only headless Graph steps follow
+configured model/harness fallbacks and wait out a usage limit, explicit pins
+stop, a revoked login skips its provider's models, and quota snapshots or
+successful answers mentioning limits do not trigger fallback. Fixtures use isolated homes,
+provider stand-ins and no live inference or credential refresh.
 
 ## Boundary-specific checks
 
@@ -928,10 +922,9 @@ Every integration test binary except the deliberate real-provider `codex_live_sm
 `CODEX_HOME` and `CLAUDE_CONFIG_DIR`: agent shells export the developer's real
 provider home, and a fixture launch would swap its login there.
 
-Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
-native home: verification observes the native login before polling managed
-accounts. Put managed homes below the fixture root so their sibling login locks
-cannot collide in the shared temporary directory.
+Native-auth fixtures pin `CLAUDE_CONFIG_DIR` and `CODEX_HOME` to disposable
+homes. Seed retained managed homes below the fixture root and assert that launch
+leaves their credentials unchanged.
 
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
 the test runner. CLI fixtures must select their own disposable Machine. Upgrade
@@ -939,9 +932,9 @@ proofs open a temporary shared store through the promotion boundary.
 
 Machine command changes also require `cargo test -p loopflow --test global_commands`
 to preserve repository-independent commands and explicit Machine isolation.
-When changing remote account-selection docs, run `cd website && uv run python
-dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
-guide must retain the current invocation, laptop account selection, and target-resident login contract.
+Rendered authentication docs must describe destination-native login, headless
+model/harness fallback, explicit interactive recovery and no subscription
+credential transfer. Website checks should assert that contract.
 
 `scripts/test.py` and `test_network.py` clear all inherited `LF_*` authority.
 The prepared `LOOPFLOW_TEST_LF` candidate survives the network boundary; provider

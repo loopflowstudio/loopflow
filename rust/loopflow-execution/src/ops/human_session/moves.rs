@@ -672,7 +672,7 @@ async fn receive_move(store: &SharedStore, moved: Move) -> Result<Option<LfSessi
     };
     let home =
         crate::transcript::conversation_home(&store.sqlite, provider, &history.agent_session_id)?
-            .unwrap_or_else(|| crate::provider_account::activation::native_home(provider, None));
+            .unwrap_or_else(|| crate::transcript::native_home(provider));
     let base = match provider {
         Provider::Claude => crate::transcript::live::claude_project(&home, &cwd),
         _ => home,

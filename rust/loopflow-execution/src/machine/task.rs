@@ -1,7 +1,6 @@
 //! Task routing and preparation of ordinary commands sent over SSH.
 use crate::durable::TaskExecutionRoute;
 use crate::ops::task::remote::TaskSource;
-use crate::provider_account::selection::AccountSelection;
 use anyhow::{anyhow, Result};
 use loopflow_model::durable::{Machine, TaskId};
 use loopflow_storage::sqlite::SqliteStore;
@@ -11,14 +10,12 @@ pub fn resident_args(
     args: &[String],
     task: Option<&String>,
     path_selected: bool,
-    account_flags: usize,
     routed: bool,
     source: Option<&TaskSource>,
 ) -> Vec<String> {
     // Automatic Work routing carries the resolved plan, not a path on this Machine.
     let task_flag = task.map(|task| format!("--task={task}"));
     let mut remove_repo = routed && path_selected;
-    let mut remaining = account_flags;
     let mut result = Vec::new();
     let mut iter = args.iter();
     while let Some(arg) = iter.next() {
@@ -32,13 +29,6 @@ pub fn resident_args(
             remove_repo = false;
         } else if remove_repo && arg.starts_with("--repo=") {
             remove_repo = false;
-        } else if remaining > 0 && matches!(arg.as_str(), "--account" | "--only-account") {
-            iter.next();
-            remaining -= 1;
-        } else if remaining > 0
-            && (arg.starts_with("--account=") || arg.starts_with("--only-account="))
-        {
-            remaining -= 1;
         } else if let Some(source) = source.filter(|_| {
             (arg == "--task" && iter.as_slice().first() == task) || task_flag.as_ref() == Some(arg)
         }) {
@@ -127,7 +117,6 @@ pub fn current_repository(
 pub fn forwarding_environment(
     directory: &Path,
     target: &Machine,
-    selection: Option<&str>,
     source: Option<&TaskSource>,
 ) -> Result<Vec<(String, String)>> {
     let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
@@ -145,12 +134,6 @@ pub fn forwarding_environment(
         ),
         (crate::config::USER_NAME_ENV.into(), user_name),
     ];
-    if let Some(selection) = selection {
-        environment.push((
-            crate::provider_account::selection::ACCOUNT_SELECTION_ENV.into(),
-            selection.into(),
-        ));
-    }
     for name in [crate::config::AGENT_OVERRIDE_ENV, "LF_SETTINGS"] {
         if let Ok(value) = std::env::var(name) {
             environment.push((name.into(), value));
@@ -243,6 +226,9 @@ pub fn run_remote(
     args: &[String],
     operation: RemoteTaskOperation<'_>,
 ) -> Result<serde_json::Value> {
+    let forwarded = matches!(operation, RemoteTaskOperation::Run { .. })
+        .then(|| crate::machine::forward::read(directory))
+        .transpose()?;
     let runtime = tokio::runtime::Runtime::new()?;
     let resident = matches!(operation, RemoteTaskOperation::Ownership);
     let task = matches!(operation, RemoteTaskOperation::Ship).then(|| route.task_id.to_string());
@@ -264,29 +250,7 @@ pub fn run_remote(
             false,
         ))?
     };
-    let selection = if resident {
-        None
-    } else {
-        let (launching, agent, batch) = match operation {
-            RemoteTaskOperation::Run { agent, approve } => (true, agent, approve),
-            _ => (false, None, false),
-        };
-        Some(
-            runtime
-                .block_on(crate::machine::credentials::prepare_launch(
-                    &target,
-                    &AccountSelection::from_env()?,
-                    &AccountSelection::default(),
-                    launching,
-                    agent,
-                    batch,
-                    directory,
-                ))?
-                .env_value()?,
-        )
-    };
-    let environment =
-        forwarding_environment(directory, &target, selection.as_deref(), source.as_ref())?;
+    let environment = forwarding_environment(directory, &target, source.as_ref())?;
     let mut command = vec![
         "lf".into(),
         "--repo-id".into(),
@@ -296,7 +260,6 @@ pub fn run_remote(
         args,
         task.as_ref(),
         false,
-        0,
         true,
         source.as_ref(),
     ));
@@ -304,7 +267,14 @@ pub fn run_remote(
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))
         .collect();
-    let preamble = crate::machine::ssh::build_preamble(&command, &environment);
+    let mut preamble = crate::machine::ssh::build_preamble(&command, &environment);
+    if let Some(forwarded) = &forwarded {
+        let mut notices = Vec::new();
+        preamble = crate::machine::forward::deliver(&target, forwarded, &preamble, &mut notices)?;
+        for line in String::from_utf8_lossy(&notices).lines() {
+            crate::journal::request::diagnostic(format_args!("{line}"));
+        }
+    }
     let (mut output, mut error) = (Vec::new(), Vec::new());
     let ran = crate::machine::ssh::run_ssh_io(
         &target.route,

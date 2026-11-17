@@ -154,6 +154,11 @@ impl SqliteStore {
                 params![task_id.as_str(), reason],
             )?;
             super::task_state::decide_in(&tx, task_id, "canceled")?;
+            super::task_summaries::write_in(
+                &tx,
+                task_id,
+                super::task_summaries::TaskEnd::Abandoned,
+            )?;
         }
         tx.commit()?;
         Ok(AbandonReceipt {

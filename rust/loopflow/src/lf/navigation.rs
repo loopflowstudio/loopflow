@@ -262,7 +262,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
                     boundary = true;
                 }
             } else if leading_value(current, &values_before_subcommand, value) {
-                // `lf account codex --cached`: the provider is a value, not an owner.
+                // `lf account linear --json`: the provider is a value, not an owner.
                 values_before_subcommand.push(value.clone());
                 positions.push(output.len());
                 path.push(value.clone());
@@ -402,10 +402,10 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
                 )?;
             }
             Commands::Skill {
-                cmd: SkillCommand::Customize { name },
+                cmd: SkillCommand::Customize { name, full },
             } => println!(
                 "{}",
-                loopflow_execution::skills::customize(name, &repo)?.display()
+                loopflow_execution::skills::customize(name, &repo, *full)?.display()
             ),
             _ => unreachable!("inspection command selected above"),
         }
@@ -414,7 +414,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
 }
 
 /// Whether `word` is the next positional value of a command that also has
-/// subcommands, as the provider in `lf account codex --cached`. No subcommand
+/// subcommands, as the provider in `lf account linear --json`. No subcommand
 /// follows a value. The root's skill name is not one, and a value the
 /// positional rejects is an unknown child.
 fn leading_value(command: &Command, taken: &[String], word: &str) -> bool {
@@ -636,7 +636,7 @@ fn definition_help(
 ) -> Result<String> {
     let target = resolve_definition(repo, name, kind)?;
     let (name, kind, description, source) = match &target {
-        Target::Command(_) | Target::Xor(_) => {
+        Target::Command(_) | Target::Xor(_) | Target::Loop(_) => {
             anyhow::bail!("{name} is not a named skill or graph")
         }
         Target::Skill(skill) => (

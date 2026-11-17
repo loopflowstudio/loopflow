@@ -1495,6 +1495,43 @@ pub fn diff_names(repo: &Path, old: &str, new: &str) -> Result<Vec<PathBuf>, Git
         .collect())
 }
 
+/// Keep `entry` out of every commit in this checkout through its own
+/// `info/exclude`, for files lf writes into a repository that may not ignore
+/// them. The repository's `.gitignore` is left alone.
+///
+/// # Errors
+/// Returns the I/O failure when Git can't run or the exclude file can't be written.
+pub fn exclude(repo_root: &Path, entry: &str) -> Result<(), std::io::Error> {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repo_root)
+        .args(["rev-parse", "--git-path", "info/exclude"])
+        .output()?;
+    // Outside a Git checkout nothing can commit the file.
+    if !output.status.success() {
+        return Ok(());
+    }
+    // `--git-path` answers relative to the repo when run at its root (main
+    // repos) and absolute for linked worktrees — absolutize before writing.
+    let mut path = std::path::PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
+    if path.is_relative() {
+        path = repo_root.join(path);
+    }
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut text = std::fs::read_to_string(&path).unwrap_or_default();
+    if text.lines().any(|line| line.trim() == entry) {
+        return Ok(());
+    }
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
+    }
+    text.push_str(entry);
+    text.push('\n');
+    std::fs::write(path, text)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -171,7 +171,6 @@ fn record(
         provider: Some(provider),
         account: None,
         model: turn.as_ref().and_then(|turn| turn.model.clone()),
-        blocked: false,
         cwd: cwd.display().to_string(),
         state: SessionState::Active,
         ready_summary: None,

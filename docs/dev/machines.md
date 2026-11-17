@@ -174,9 +174,11 @@ ssh mini lf server status               # while it runs, the laptop is a connect
 
 The sender runs `lf server connect` on the writer over SSH, a pipe to the
 writer's server that checks its Machine identity and starts the server when
-none is running. The write goes as `machine.write`, naming the repository and
-carrying the sender's profile, participant name and agent override; a run or
-ship also carries what `forward` names, delivered first as a one-time file.
+none is running. The write goes as itself, with a `sender` naming the
+repository and the sender's profile, participant name and agent override; a
+run or ship also carries the values `forward.env` names, and the files
+`forward.files` names are delivered first. `lf task status <issue>
+--subscribe` for a Task mini runs subscribes to mini's server the same way.
 The writer's server runs it in its own checkout and answers; an operation that
 arrives this way is never forwarded again. An older `lf` there fails naming
 its version and `ssh mini 'lf install'`; one that dies, or SSH that cannot

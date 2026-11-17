@@ -22,7 +22,7 @@ stand-in checks per host (exit 255, "Connection refused") makes either side
 unreachable without touching the other's store.
 
 Typed writes travel as `exec 'lf' 'server' 'connect'`, a pipe to mini's
-server; `hello` and a `machine.write` request follow on stdin: have the
+server; `hello` and a request with its `sender` follow on stdin: have the
 stand-in `ssh` `tee` its stdin to a file to read them. A plain `tee | bash -c`
 pipeline never ends when mini's `lf` exits without answering (its server
 cannot start): the stand-in waits on `tee`, which waits on the sender. End

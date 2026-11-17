@@ -158,3 +158,20 @@ Settled by these: the destination's resident server runs every routed operation 
 5. Reads and `--subscribe` for a Task on another Machine. **a**: in this PR.
 
 This reverses the headless choice above ("The write another Machine sends is a new operation, `machine.write`").
+
+## Sender rework choices (2026-11-17, headless)
+
+- `repository`, `selection` and `secrets` travel as one required nullable
+  `sender` object, not three top-level fields: a client on this Machine sends
+  one null, and they are present or absent together.
+- `subscribe` carries `sender` too: a Machine's reads need its repository's
+  checkout as much as its writes.
+- `Selection` also carries `settings` (`LF_SETTINGS`, command-line settings),
+  which the environment map forwarded.
+- A `sender` from a connection that is not a Machine is ignored, not refused.
+- The SSH answer bound is 120 s; the SSH handshake uses the same bound, since
+  the entry may start the server first. Over the bound a request is
+  `outcome_unknown`, a handshake `unavailable`.
+- `lf task status --subscribe` for a Task another Machine runs prints that
+  server's frames and ignores stdin requests (`{"id":…,"args":…}`), which the
+  local `--subscribe` takes.

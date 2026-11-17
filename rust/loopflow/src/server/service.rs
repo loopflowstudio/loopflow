@@ -22,9 +22,9 @@ use super::remote::Control;
 use super::subscriptions::{Member, Subscriptions};
 use super::ticket::{Admission, Purpose, Tickets};
 use super::wire::{
-    ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, ServerMessage,
-    ServerOperation, SessionAttached, SessionStarted, Status, Welcome, MAX_BULK, MAX_CONNECTIONS,
-    MAX_MESSAGE, MIN_REVISION, REVISION, TICKET_LIFETIME,
+    ClientIdentity, ClientMessage, ConnectedClient, Hello, Limits, Operation, Sender,
+    ServerMessage, ServerOperation, SessionAttached, SessionStarted, Status, Welcome, MAX_BULK,
+    MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION, TICKET_LIFETIME,
 };
 use crate::lf::commands::read::Read;
 use loopflow_execution::engine::{Error, ErrorCode};
@@ -70,6 +70,8 @@ pub(super) struct ClientState {
 pub(super) struct Listed {
     clients: Clients,
     id: String,
+    /// Another Machine connected: its operations run here.
+    machine: bool,
     _permit: tokio::sync::OwnedSemaphorePermit,
     outbox: Outbox,
     open: Arc<Semaphore>,
@@ -84,6 +86,7 @@ impl Listed {
         open: Arc<Semaphore>,
     ) -> Self {
         let id = uuid::Uuid::new_v4().to_string();
+        let machine = client.kind == loopflow_execution::machine::wire::MACHINE_CLIENT;
         let connected_at = time::OffsetDateTime::now_utc()
             .format(&time::format_description::well_known::Rfc3339)
             .expect("the current time formats as RFC 3339");
@@ -105,6 +108,7 @@ impl Listed {
         Self {
             clients: clients.clone(),
             id,
+            machine,
             _permit: permit,
             outbox,
             open,
@@ -515,6 +519,28 @@ enum Start {
     Subscribe(Read, Option<Vec<String>>, Option<String>),
 }
 
+/// Where a connection's operations run.
+#[derive(Debug, Clone)]
+enum Origin {
+    /// A client on this Machine: a write for Work another Machine runs is
+    /// sent there.
+    Local,
+    /// Another Machine's `lf`: every operation runs here and is never sent
+    /// on, in this Machine's checkout of the sender's repository.
+    Machine(Option<Box<Sender>>),
+}
+
+impl Origin {
+    /// `read` where it runs: in the sender's repository here.
+    fn place(&self, mut read: Read) -> Result<Read, Error> {
+        if let (Self::Machine(Some(sender)), Some(directory)) = (self, read.directory_mut()) {
+            *directory = crate::lf::commands::work_route::repository_path(&sender.repository)
+                .map_err(|error| Error::new(ErrorCode::NotFound, format!("{error:#}")))?;
+        }
+        Ok(read)
+    }
+}
+
 /// Requests until the client closes. Terminal bytes and messages over the
 /// control limit never travel here: `session.attach` and `request.upload`
 /// answer with tickets for connections of their own.
@@ -588,18 +614,28 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
         };
-        let (id, start) = match message {
+        let origin = |sender: Option<Sender>| match listed.machine {
+            true => Origin::Machine(sender.map(Box::new)),
+            false => Origin::Local,
+        };
+        let (id, start, origin) = match message {
             ClientMessage::Request {
                 id,
                 operation,
                 select,
-            } => (id, Start::Request(operation, select)),
+                sender,
+            } => (id, Start::Request(operation, select), origin(sender)),
             ClientMessage::Subscribe {
                 id,
                 operation,
                 select,
                 resume,
-            } => (id, Start::Subscribe(operation, select, resume)),
+                sender,
+            } => (
+                id,
+                Start::Subscribe(operation, select, resume),
+                origin(sender),
+            ),
             ClientMessage::Checkpoint { id, checkpoint } => {
                 match inflight
                     .get(&id)
@@ -796,6 +832,23 @@ pub(super) async fn session<C: Carrier>(
                 continue;
             }
             Start::Subscribe(query, select, resume) => {
+                // Only a sender's repository costs a store read.
+                let placed = match origin {
+                    Origin::Machine(Some(_)) => {
+                        tokio::task::spawn_blocking(move || origin.place(query))
+                            .await
+                            .map_err(unavailable)
+                            .and_then(|placed| placed)
+                    }
+                    origin => origin.place(query),
+                };
+                let query = match placed {
+                    Ok(query) => query,
+                    Err(refusal) => {
+                        send(lines, &ServerMessage::error(Some(id), refusal)).await?;
+                        continue;
+                    }
+                };
                 let (member, delivery) =
                     match subscriptions.join(&id, query.clone(), select.clone()) {
                         Ok(joined) => joined,
@@ -848,6 +901,7 @@ pub(super) async fn session<C: Carrier>(
                     request(
                         request_id,
                         operation,
+                        origin,
                         select,
                         instance,
                         outgoing,
@@ -1183,9 +1237,11 @@ pub(super) fn unavailable(error: impl Into<anyhow::Error>) -> Error {
     Error::refused(&error.into(), ErrorCode::Unavailable)
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn request(
     id: String,
     operation: Operation,
+    origin: Origin,
     select: Option<Vec<String>>,
     instance: Arc<str>,
     outgoing: Outbox,
@@ -1204,6 +1260,7 @@ async fn request(
         operation => {
             operate(
                 operation,
+                origin,
                 &id,
                 &instance,
                 &trace_id,
@@ -1266,6 +1323,7 @@ fn measured_result(
 
 async fn operate(
     operation: Operation,
+    origin: Origin,
     id: &str,
     instance: &str,
     trace_id: &loopflow_model::id::TraceId,
@@ -1300,6 +1358,7 @@ async fn operate(
         | Operation::Measured(super::wire::MeasuredOperation::Read { query }) => {
             tokio::task::spawn_blocking(move || {
                 let _held = reservation;
+                let query = origin.place(query)?;
                 measured_result(measured, || {
                     loopflow_execution::journal::request::isolate(|| {
                         loopflow_execution::observe::Cache::shared()
@@ -1318,27 +1377,10 @@ async fn operate(
             effect(target, id, instance, trace_id, measured, move || {
                 let _held = reservation;
                 loopflow_execution::provider_auth::operations::served(|| {
-                    Ok(serde_json::to_value(change.run()?)?)
-                })
-            })
-            .await
-        }
-        Operation::Machine(super::wire::MachineOperation::Write {
-            repository,
-            environment,
-            forwarded,
-            change,
-        }) => {
-            let target = telemetry(&change).map_err(unavailable)?;
-            effect(target, id, instance, trace_id, measured, move || {
-                let _held = reservation;
-                let change = change.in_checkout(&repository)?;
-                let mut environment: Vec<(String, String)> = environment.into_iter().collect();
-                if let Some(file) = forwarded {
-                    environment.extend(loopflow_execution::machine::forward::take(&file)?);
-                }
-                loopflow_execution::provider_auth::operations::served(|| {
-                    Ok(serde_json::to_value(change.run_here(&environment)?)?)
+                    Ok(serde_json::to_value(match origin {
+                        Origin::Local => change.run()?,
+                        Origin::Machine(sender) => change.run_here(sender.as_deref())?,
+                    })?)
                 })
             })
             .await
@@ -1689,6 +1731,7 @@ mod tests {
                         query: Read::ConfigCatalog,
                     }),
                     select: None,
+                    sender: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -1720,6 +1763,7 @@ mod tests {
                         },
                     }),
                     select: None,
+                    sender: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -1764,6 +1808,7 @@ mod tests {
                     select: None,
                     id: "u".into(),
                     operation: Operation::Server(ServerOperation::RequestUpload { bytes: 200 }),
+                    sender: None,
                 })
                 .await;
             let ticket = ticket_reply(&mut client, "u").await;
@@ -1773,6 +1818,7 @@ mod tests {
                     select: None,
                     id: "r".into(),
                     operation: catalog(),
+                    sender: None,
                 })
                 .await;
             let ServerMessage::Response { id, result, .. } = client.receive().await.unwrap() else {
@@ -1939,6 +1985,7 @@ mod tests {
                     select: None,
                     id: "a".into(),
                     operation: catalog(),
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2031,6 +2078,7 @@ mod tests {
                         id: id.into(),
                         operation: catalog(),
                         select: None,
+                        sender: None,
                     })
                     .await;
             }
@@ -2051,6 +2099,7 @@ mod tests {
                     id: "a".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             let response = client.receive().await.unwrap();
@@ -2082,6 +2131,7 @@ mod tests {
                         id: "held-completion".into(),
                         operation: catalog(),
                         select: None,
+                        sender: None,
                     })
                     .await;
                 let response = client.receive().await.unwrap();
@@ -2204,6 +2254,7 @@ mod tests {
                     id: "a".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             desktop.receive().await.unwrap();
@@ -2229,6 +2280,7 @@ mod tests {
                     operation: Read::ProcessList,
                     select: None,
                     resume: None,
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2254,6 +2306,7 @@ mod tests {
                 operation: Read::ProcessList,
                 select: None,
                 resume: Some(checkpoint.clone()),
+                sender: None,
             })
             .await;
             assert!(matches!(
@@ -2297,6 +2350,7 @@ mod tests {
                     operation: Read::ProcessList,
                     select,
                     resume,
+                    sender: None,
                 })
                 .await;
                 assert!(matches!(
@@ -2377,6 +2431,7 @@ mod tests {
                     operation: Read::ProcessList,
                     resume: None,
                     select: None,
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2397,6 +2452,7 @@ mod tests {
                     id: "ps".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2421,6 +2477,7 @@ mod tests {
                     id: "after".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             // Nothing follows the cancel for `ps`; the sibling still answers.
@@ -2444,6 +2501,7 @@ mod tests {
                     id: "ps".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2481,7 +2539,7 @@ mod tests {
             ));
             client
             .writer
-            .write_all(b"{\"type\":\"request\",\"id\":\"new\",\"operation\":{\"kind\":\"task.teleport\"}}\n")
+            .write_all(b"{\"type\":\"request\",\"id\":\"new\",\"operation\":{\"kind\":\"task.teleport\"},\"sender\":null}\n")
             .await
             .unwrap();
             let ServerMessage::Error { id, code, data, .. } = client.receive().await.unwrap()
@@ -2496,6 +2554,7 @@ mod tests {
                     id: "next".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             let ServerMessage::Response { id, .. } = client.receive().await.unwrap() else {
@@ -2518,6 +2577,7 @@ mod tests {
                     id: "keys".into(),
                     operation: catalog(),
                     select: Some(vec!["key".into()]),
+                    sender: None,
                 })
                 .await;
             let ServerMessage::Response { result, .. } = client.receive().await.unwrap() else {
@@ -2535,6 +2595,7 @@ mod tests {
                     operation: Read::ProcessList,
                     resume: None,
                     select: Some(vec!["absent".into()]),
+                    sender: None,
                 })
                 .await;
             assert!(matches!(
@@ -2548,7 +2609,7 @@ mod tests {
             // A write has no answer to select from.
             client
                 .writer
-                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"]}\n")
+                .write_all(b"{\"type\":\"request\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"select\":[\"x\"],\"sender\":null}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {
@@ -2573,7 +2634,7 @@ mod tests {
             ));
             client
                 .writer
-                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"}}\n")
+                .write_all(b"{\"type\":\"subscribe\",\"id\":\"w\",\"operation\":{\"kind\":\"task.complete\",\"directory\":\"/r\",\"issue\":\"A-1\"},\"sender\":null}\n")
                 .await
                 .unwrap();
             let ServerMessage::Error {
@@ -2666,6 +2727,7 @@ mod tests {
                         },
                         select: Some(vec!["reached".into()]),
                         resume: None,
+                        sender: None,
                     })
                     .await;
                 assert!(matches!(
@@ -2762,6 +2824,7 @@ mod tests {
                     id: "sibling".into(),
                     operation: catalog(),
                     select: None,
+                    sender: None,
                 })
                 .await;
             assert!(
@@ -2788,6 +2851,7 @@ mod tests {
                             id: n.to_string(),
                             operation: catalog(),
                             select: None,
+                            sender: None,
                         }
                     } else {
                         ClientMessage::Subscribe {
@@ -2795,6 +2859,7 @@ mod tests {
                             operation: Read::ProcessList,
                             select: None,
                             resume: None,
+                            sender: None,
                         }
                     };
                     let mut line = serde_json::to_vec(&message).unwrap();
@@ -2914,6 +2979,7 @@ mod tests {
                         until: loopflow_execution::ops::task::TaskWaitUntil::Terminal,
                     },
                     select: None,
+                    sender: None,
                 })
                 .await;
             pause.entered.await.unwrap();
@@ -2974,6 +3040,7 @@ mod tests {
                         id: "slow".into(),
                         operation: Read::ProcessList,
                         select: None,
+                        sender: None,
                     })
                     .await;
                 pause.queued.await.unwrap();
@@ -2989,6 +3056,7 @@ mod tests {
                         id: "peer".into(),
                         operation: Read::ProcessList,
                         select: Some(vec!["id".into()]),
+                        sender: None,
                     })
                     .await;
                 assert!(
@@ -3017,6 +3085,7 @@ mod tests {
                         id: "slow".into(),
                         operation: catalog(),
                         select: None,
+                        sender: None,
                     })
                     .await;
                 assert!(
@@ -3062,6 +3131,7 @@ mod tests {
                     id: "shared".into(),
                     operation: Read::ProcessList,
                     select: None,
+                    sender: None,
                 })
                 .await;
             setup.entered.await.unwrap();
@@ -3071,6 +3141,7 @@ mod tests {
                     id: "same-socket".into(),
                     operation: Read::ProcessList,
                     select: None,
+                    sender: None,
                 })
                 .await;
             second
@@ -3079,6 +3150,7 @@ mod tests {
                     id: "shared".into(),
                     operation: Read::ProcessList,
                     select: None,
+                    sender: None,
                 })
                 .await;
             for client in [&mut first, &mut second] {
@@ -3169,6 +3241,7 @@ mod tests {
                     id: "queued".into(),
                     operation: Read::ProcessList,
                     select: None,
+                    sender: None,
                 })
                 .await;
             pause.queued.await.unwrap();
@@ -3294,6 +3367,7 @@ mod tests {
                 operation,
                 select: None,
                 resume: None,
+                sender: None,
             })
             .await;
         assert!(matches!(
@@ -3340,6 +3414,7 @@ mod tests {
                 id: id.into(),
                 operation: Operation::Read(operation),
                 select: None,
+                sender: None,
             })
             .await;
         loop {

@@ -62,20 +62,24 @@ records each request. An SSH login is the same OS user the socket trusts. An
 reports as the destination's version and its update command; an older server
 answers `incompatible` itself. The client side is `Connection::open_on`.
 
-A Task or Session write another Machine sends is `machine.write`, the write
-wrapped with what the receiving server cannot know:
+Another Machine says so in `hello` (`client.kind` is `machine`), and every
+operation it sends then runs here and is never sent on. Its requests and
+subscriptions carry `sender`, what the receiving server cannot know; a client
+on this Machine sends null:
 
 ```text
 → {"type":"hello","revision":6,"min_revision":5,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
-→ {"type":"request","id":"…","operation":{"kind":"machine.write","repository":"repo_…","environment":{"LF_USER_NAME":"…",…},"forwarded":null,"change":{"kind":"task.hold",…}},"select":null}
+→ {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
 ```
 
-The server runs `change` in its own checkout of `repository`, never routes it
-onward, and starts any launch (`task.run`, `task.ship`) with `environment`
-plus the secrets in `forwarded`: a file under this Machine's home the sender
-delivered over SSH first, read once and removed.
+The server runs the operation in its own checkout of `repository` (the
+operation's `directory` is the sender's), and starts any launch (`task.run`,
+`task.ship`) with `selection` and `secrets`: the values `forward.env` names,
+which nothing prints (`Debug` shows names). Files `forward.files` names are
+delivered over SSH first. The sender waits 120 s for an answer; past that the
+request fails, naming the Machine and `ssh <route> lf server status`.
 
 `machine/wire.rs` owns the envelope, endpoint and native request types;
 `server/wire.rs` instantiates the envelope with the CLI read/write operations.
@@ -403,7 +407,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
   `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
-  server as `machine.write` and returns its answer; it never falls back to
+  server over SSH and returns its answer; it never falls back to
   local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing

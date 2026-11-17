@@ -15,7 +15,6 @@ pub type ClientMessage = loopflow_execution::machine::wire::ClientMessage<Operat
 pub enum Operation {
     Server(ServerOperation),
     Measured(MeasuredOperation),
-    Machine(MachineOperation),
     Read(Read),
     Write(Write),
 }
@@ -24,31 +23,9 @@ impl Operation {
     pub(super) fn is_write(&self) -> bool {
         matches!(
             self,
-            Self::Write(_)
-                | Self::Measured(MeasuredOperation::Write { .. })
-                | Self::Machine(MachineOperation::Write { .. })
+            Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
         )
     }
-}
-
-/// A write another Machine sent over SSH. It runs here, in this Machine's
-/// checkout of `repository`, and is never sent on.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", deny_unknown_fields)]
-pub enum MachineOperation {
-    #[serde(rename = "machine.write")]
-    Write {
-        /// The repository `change` names; its `directory` is the sender's.
-        repository: loopflow_model::durable::RepositoryId,
-        /// What the sending `lf` runs with: its profile, participant name,
-        /// agent override and Task source. A launch the write starts carries it.
-        environment: std::collections::BTreeMap<String, String>,
-        /// The one-time file under this Machine's home the sender delivered
-        /// its forwarded secrets in, for the launch the write starts.
-        #[serde(deserialize_with = "Option::deserialize")]
-        forwarded: Option<String>,
-        change: Write,
-    },
 }
 
 /// The ordinary operation and its per-request work receipt in one response.
@@ -74,23 +51,24 @@ mod tests {
     use super::ClientMessage;
 
     #[test]
-    fn a_write_another_machine_sent_round_trips_with_its_context() {
-        let raw = r#"{"type":"request","id":"1","operation":{"kind":"machine.write","repository":"repo_30115cfb3a8ecb51494082029703a1fa","environment":{"LF_USER_NAME":"Ada"},"forwarded":".lf/forward/0f","change":{"kind":"task.hold","directory":"/laptop/repo","issue":"LOO-1"}},"select":null}"#;
+    fn a_request_another_machine_sent_carries_its_secrets_and_never_prints_them() {
+        let raw = include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"
+        );
         let message: ClientMessage = serde_json::from_str(raw).unwrap();
         let loopflow_execution::machine::wire::ClientMessage::Request {
-            operation: super::Operation::Machine(super::MachineOperation::Write { change, .. }),
+            sender: Some(sender),
             ..
         } = &message
         else {
-            panic!("not a machine write: {message:?}");
+            panic!("no sender: {message:?}");
         };
-        assert!(change.directory().ends_with("repo"));
+        assert_eq!(sender.secrets.0[0].0, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert!(!format!("{message:?}").contains("sk-fixture"));
         assert_eq!(
             serde_json::to_value(&message).unwrap(),
             serde_json::from_str::<serde_json::Value>(raw).unwrap()
         );
-        let missing = raw.replace(r#""forwarded":".lf/forward/0f","#, "");
-        assert!(serde_json::from_str::<ClientMessage>(&missing).is_err());
     }
 
     #[test]

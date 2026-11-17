@@ -153,17 +153,19 @@ The request carries it, typed (concept review of the built PR, 2026-11-17;
 answers in `scratch/questions.md`):
 
 ```
-hello   { client: { kind: "machine" } }
-request { repository, selection: { profile, participant, agent, source },
-          secrets: { NAME: value }, operation: <any Operation>, select }
+hello     { client: { kind: "machine" } }
+request   { id, operation: <any Operation>, select,
+            sender: { repository, selection: { profile, participant, agent,
+                      settings, source }, secrets: { NAME: value } } }
+subscribe { …, resume, sender }
 ```
 
 - **The connection says where it runs.** A client whose `hello` kind is
   `machine` has every operation run here, in this Machine's checkout of
   `repository`, and never sent on: `Write::run_here`, and reads and
   subscriptions through the same rule. The operation's kind decides nothing.
-- **`repository` and `selection` are fields of `Request`**, required and
-  nullable like `select`; a local client sends null. `selection` is the
+- **`sender` is a field of `request` and `subscribe`**, required and
+  nullable; a local client sends null. `selection` is the
   sender's profile, participant name, agent override and Task source as their
   own types, not environment-variable names.
 - **`secrets` are the run's forwarded values, in the request.** It is on SSH
@@ -251,18 +253,29 @@ sites and the CLI entry code PR 3 rewrites.
 
 ### State of the branch (2026-11-17)
 
-Built on `main` at `e66b21801c` (head `60895c2e30`): `Connection::open_on`
-over `machine::ssh::Pipe`, `lf server connect` (`server/connect.rs`), and the
-skew, crash, unreachable and unstartable errors. These stay.
+Built on `main` at `e66b21801c`: `Connection::open_on` over
+`machine::ssh::Pipe`, `lf server connect` (`server/connect.rs`), the skew,
+crash, unreachable and unstartable errors, and "What the server must learn":
 
-Built and now replaced by "What the server must learn" above:
-`machine.write` (`server/wire.rs::MachineOperation`), `Write::in_checkout`,
-`forward::take`/`exported`, `Remote`'s `environment` and `forwarded`.
+- `machine/wire.rs`: `Sender`, `Selection`, `Secrets` (`Debug` names only),
+  `MACHINE_CLIENT`; `sender` on `request` and `subscribe`; DTO fixtures,
+  Swift's encoder and `server_schema.json` carry it.
+- `server/service.rs`: `Origin` from the `hello` kind; a Machine's writes
+  `Write::run_here(sender)`, its reads and subscriptions `Read::directory_mut`
+  into the sender's checkout.
+- `Selection::capture` / `environment` replace `forwarding_environment`, also
+  for the plain-command launch in `lf/commands/ssh.rs`.
+- `Read::TaskStatus` (`task.status`); `lf task status <issue> --subscribe`
+  for a Task another Machine runs subscribes there
+  (`waves::subscribe_remote_task_status`).
+- A request over SSH waits 120 s (`client::ANSWER`, a timed pipe reader),
+  then fails `outcome_unknown` naming the Machine and `ssh <route> lf server
+  status`; the SSH handshake shares that bound.
+- `Write::TaskHold` has `reason`; the CLI hold runs `Write::run`.
+- Deleted: `MachineOperation`/`machine.write`, `Write::in_checkout`,
+  `forward::take`/`exported`, `forwarding_environment`.
 
-Found reading the built branch, not yet done:
-- `server/service.rs::operate` runs a plain `Write` from any client with
-  `Write::run`, which may route onward, and accepts `machine.write` from any
-  admitted client with any environment names. The connection rule closes both.
+Not done here:
 - `Write::remote_session` builds a Clap command line (`session_spelling`) to
   ask `work_route::forward` which Machine. PR 3.
 - `ContinueRun` is passed through `move_session`/`move_task` because `Write`
@@ -285,12 +298,13 @@ Found reading the built branch, not yet done:
 
 ## Checks (PR 1)
 
-- `cargo nextest run -p loopflow --test integration -E 'test(served_ownership_routes_to_its_writer) | test(a_hold_for_a_task_mini_runs) | test(a_served_run_for_a_task_mini) | test(an_lf_without_the_entry) | test(an_lf_that_dies_before) | test(a_served_resume_opens_the_session_on_your)'`: 6 pass; the three SSH-entry ones rerun after the status hint, pass (mini's real server answers the hold and the claim).
-- `--lib` `machine::forward:: | machine::client:: | machine::ssh:: | server::schema:: | server::wire:: | lf::commands::write:: | lf::tests::`, `documented_commands::`: pass; clippy clean on both crates.
-- compress (2026-11-17): `Socket`'s far end is one `End` enum; `Write::execute` takes the `Option<Remote>` it routes to. `machine::client::` 5, `lf::commands::write::` 3, the three SSH-entry tests: pass; clippy clean.
-- A stopped destination server started by the entry: QA, not automated (`ensure` registers a supervisor job). QA 2026-11-17 (`scratch/qa.html`): started (3.3 s), unstartable, replaced after an upgrade, older lf, unreachable, wrong Machine; served claim/hold/unassign/run/session.resume.
-- `machine_commands::an_unreachable_destination_names_the_ssh_check_not_its_server` plus the six above: 7 pass; `--lib machine::` 16; clippy clean.
-- Swift `ServerProtocolTests` against the regenerated schema: gate/CI.
+- `--lib` `server::wire:: | server::schema:: | machine:: | lf::commands::write:: | lf::commands::read:: | server::service:: | server::remote:: | lf::tests::`: 106 pass.
+- `--test integration` the six SSH-entry/served tests, `an_unreachable_destination_names_the_ssh_check_not_its_server`, `a_status_subscription_for_a_task_mini_runs_reads_minis_server`, `documented_commands::`: pass.
+- `--test served_reads server_operations_match_their_lf_commands` (covers `task.status`): pass.
+- clippy `-p loopflow -p loopflow-execution --all-targets -D warnings`: clean.
+- The 120 s answer bound: unit test of the timed pipe reader only; a silent destination end to end is QA.
+- A stopped destination server started by the entry: QA (`ensure` registers a supervisor job); `scratch/qa.html` from before the `sender` rework.
+- Swift `ServerProtocolTests`/`RegistryQueryTests` (`sender: null`, `task.hold` `reason`): gate/CI.
 
 ## Done when (PR 1)
 

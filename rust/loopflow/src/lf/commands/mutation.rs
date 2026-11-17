@@ -120,13 +120,14 @@ fn local(
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
             // A Task another Machine runs is held there.
-            let write = super::write::Write::TaskHold {
+            let super::write::WriteResult::TaskHold(held) = super::write::Write::TaskHold {
                 directory: directory.to_path_buf(),
                 issue: issue.to_owned(),
-            };
-            let held: loopflow_execution::engine::task::Hold = match write.remote()? {
-                Some(remote) => remote.call()?,
-                None => loopflow_execution::engine::task::hold(issue, reason.as_deref())?,
+                reason: reason.clone(),
+            }
+            .run()?
+            else {
+                unreachable!("task.hold answers with a hold")
             };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&held)?)?;

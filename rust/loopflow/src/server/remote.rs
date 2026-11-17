@@ -693,6 +693,7 @@ mod tests {
                     select: None,
                     id: id.into(),
                     operation,
+                    sender: None,
                 }))
                 .await
                 .unwrap();
@@ -711,6 +712,7 @@ mod tests {
                     session: loopflow_model::id::LfSessionId::from("session_missing"),
                     terminal_id: None,
                 }),
+                sender: None,
             }))
             .await
             .unwrap();

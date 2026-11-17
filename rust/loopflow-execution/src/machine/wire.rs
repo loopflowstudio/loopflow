@@ -45,6 +45,10 @@ pub enum ClientMessage<O = serde_json::Value, R = serde_json::Value> {
         id: String,
         operation: O,
         select: Option<Vec<String>>,
+        /// What the Machine that sent the request runs with; null from a
+        /// client on this Machine.
+        #[serde(deserialize_with = "Option::deserialize")]
+        sender: Option<Sender>,
     },
     /// A read with a subscription; answers a null `response`, then `reading` messages
     /// until cancelled. The id follows the same rules as a request's. `select`
@@ -55,6 +59,9 @@ pub enum ClientMessage<O = serde_json::Value, R = serde_json::Value> {
         select: Option<Vec<String>>,
         /// The last applied reading's opaque checkpoint; null starts fresh.
         resume: Option<String>,
+        /// As for a request.
+        #[serde(deserialize_with = "Option::deserialize")]
+        sender: Option<Sender>,
     },
     /// Ask the live subscription `id` for a reading now; the next reading's
     /// `answers` carries `checkpoint`, changed or not.
@@ -71,7 +78,8 @@ pub struct Hello {
     pub client: ClientIdentity,
 }
 
-/// Who connected, for diagnostics; it grants nothing.
+/// Who connected; it grants nothing. A `kind` of [`MACHINE_CLIENT`] is
+/// another Machine: every operation it sends runs here and is never sent on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ClientIdentity {
@@ -79,6 +87,91 @@ pub struct ClientIdentity {
     pub platform: String,
     pub name: String,
     pub version: String,
+}
+
+/// The [`ClientIdentity::kind`] of another Machine's `lf`.
+pub const MACHINE_CLIENT: &str = "machine";
+
+/// What the Machine that sent a request runs with. An operation names the
+/// sender's own directory; it runs in this Machine's checkout of `repository`.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Sender {
+    pub repository: loopflow_model::durable::RepositoryId,
+    pub selection: Selection,
+    pub secrets: Secrets,
+}
+
+/// Who asks, and how: what a launch the request starts runs with.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Selection {
+    /// The sender's personal settings and definitions.
+    #[schemars(with = "Untyped")]
+    pub profile: crate::config::remote::Profile,
+    /// The name its person's Task claims carry.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub participant: Option<String>,
+    /// `--agent` as the sender selected it.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub agent: Option<String>,
+    /// Command-line settings (`LF_SETTINGS`), as YAML.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub settings: Option<String>,
+    /// A shipped Task's branch and Linear mapping, which resolve here.
+    #[serde(deserialize_with = "Option::deserialize")]
+    #[schemars(with = "Option<Untyped>")]
+    pub source: Option<crate::ops::task::remote::TaskSource>,
+}
+
+/// The values `forward.env` names, by name, for the launch a request starts.
+/// Nothing prints them: `Debug` shows names, and only the wire carries values.
+#[derive(Clone, Default)]
+pub struct Secrets(pub Vec<(String, secrecy::SecretString)>);
+
+impl std::fmt::Debug for Secrets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("Secrets")
+            .field(&self.0.iter().map(|(name, _)| name).collect::<Vec<_>>())
+            .finish()
+    }
+}
+
+impl Serialize for Secrets {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use secrecy::ExposeSecret;
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(self.0.len()))?;
+        for (name, value) in &self.0 {
+            map.serialize_entry(name, value.expose_secret())?;
+        }
+        map.end()
+    }
+}
+
+impl<'de> Deserialize<'de> for Secrets {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let values = std::collections::BTreeMap::<String, String>::deserialize(deserializer)?;
+        Ok(Self(
+            values
+                .into_iter()
+                .map(|(name, value)| (name, secrecy::SecretString::new(value)))
+                .collect(),
+        ))
+    }
+}
+
+impl JsonSchema for Secrets {
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "Secrets".into()
+    }
+    fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        schemars::json_schema!({
+            "description": "Values by environment variable name; never logged.",
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+        })
+    }
 }
 
 /// Operations the server owns rather than a shared read or write.

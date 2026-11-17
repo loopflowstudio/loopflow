@@ -190,11 +190,14 @@ pub(super) fn run_with_io(
         None if cli.repo.is_some() => None,
         None => loopflow_execution::machine::task::current_repository(directory)?,
     };
-    let environment = loopflow_execution::machine::task::forwarding_environment(
-        directory,
-        &target,
-        source.as_ref(),
-    )?;
+    // A plain command reads what it runs with from its environment.
+    let mut environment =
+        loopflow_execution::machine::wire::Selection::capture(directory, source.clone())?
+            .environment(&loopflow_execution::machine::wire::Secrets::default())?;
+    environment.push((
+        loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV.into(),
+        target.id.to_string(),
+    ));
     let mut extra_env: Vec<(&str, &str)> = environment
         .iter()
         .map(|(name, value)| (name.as_str(), value.as_str()))

@@ -1304,7 +1304,7 @@
     },
     "ClientIdentity": {
       "additionalProperties": false,
-      "description": "Who connected, for diagnostics; it grants nothing.",
+      "description": "Who connected; it grants nothing. A `kind` of [`MACHINE_CLIENT`] is\nanother Machine: every operation it sends runs here and is never sent on.",
       "properties": {
         "kind": {
           "type": "string"
@@ -1411,6 +1411,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the Machine that sent the request runs with; null from a\nclient on this Machine."
+            },
             "type": {
               "const": "request",
               "type": "string"
@@ -1420,7 +1431,8 @@
             "type",
             "id",
             "operation",
-            "select"
+            "select",
+            "sender"
           ],
           "type": "object"
         },
@@ -1450,6 +1462,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "As for a request."
+            },
             "type": {
               "const": "subscribe",
               "type": "string"
@@ -1460,7 +1483,8 @@
             "id",
             "operation",
             "select",
-            "resume"
+            "resume",
+            "sender"
           ],
           "type": "object"
         },
@@ -4333,49 +4357,6 @@
       ],
       "type": "object"
     },
-    "MachineOperation": {
-      "description": "A write another Machine sent over SSH. It runs here, in this Machine's\ncheckout of `repository`, and is never sent on.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "change": {
-              "$ref": "#/$defs/Write"
-            },
-            "environment": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "description": "What the sending `lf` runs with: its profile, participant name,\nagent override and Task source. A launch the write starts carries it.",
-              "type": "object"
-            },
-            "forwarded": {
-              "description": "The one-time file under this Machine's home the sender delivered\nits forwarded secrets in, for the launch the write starts.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "kind": {
-              "const": "machine.write",
-              "type": "string"
-            },
-            "repository": {
-              "description": "The repository `change` names; its `directory` is the sender's.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "repository",
-            "environment",
-            "forwarded",
-            "change"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "MachineRef": {
       "description": "A Machine for display; a missing id reads as \"Machine unknown\".",
       "properties": {
@@ -5543,9 +5524,6 @@
         },
         {
           "$ref": "#/$defs/MeasuredOperation"
-        },
-        {
-          "$ref": "#/$defs/MachineOperation"
         },
         {
           "$ref": "#/$defs/Read"
@@ -7382,6 +7360,31 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf --cwd <directory> task status <issue> --json`: one Task's status\nand its planning.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Untyped"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.",
           "properties": {
             "base": {
@@ -9122,6 +9125,13 @@
         "boolean"
       ]
     },
+    "Secrets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Values by environment variable name; never logged.",
+      "type": "object"
+    },
     "Selection": {
       "properties": {
         "expression": {
@@ -9134,6 +9144,56 @@
       "required": [
         "id",
         "expression"
+      ],
+      "type": "object"
+    },
+    "Selection2": {
+      "additionalProperties": false,
+      "description": "Who asks, and how: what a launch the request starts runs with.",
+      "properties": {
+        "agent": {
+          "description": "`--agent` as the sender selected it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participant": {
+          "description": "The name its person's Task claims carry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "$ref": "#/$defs/Untyped",
+          "description": "The sender's personal settings and definitions."
+        },
+        "settings": {
+          "description": "Command-line settings (`LF_SETTINGS`), as YAML.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Untyped"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A shipped Task's branch and Linear mapping, which resolve here."
+        }
+      },
+      "required": [
+        "profile",
+        "participant",
+        "agent",
+        "settings",
+        "source"
       ],
       "type": "object"
     },
@@ -9394,6 +9454,27 @@
           "type": "string"
         }
       ]
+    },
+    "Sender": {
+      "additionalProperties": false,
+      "description": "What the Machine that sent a request runs with. An operation names the\nsender's own directory; it runs in this Machine's checkout of `repository`.",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "secrets": {
+          "$ref": "#/$defs/Secrets"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection2"
+        }
+      },
+      "required": [
+        "repository",
+        "selection",
+        "secrets"
+      ],
+      "type": "object"
     },
     "ServerMessage": {
       "description": "One message from the server.",
@@ -16404,7 +16485,14 @@
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.hold"
+              "kind": "task.hold",
+              "reason": null
+            },
+            {
+              "directory": "/laptop/repo",
+              "issue": "LOO-1",
+              "kind": "task.hold",
+              "reason": null
             }
           ],
           "properties": {
@@ -16417,12 +16505,20 @@
             "kind": {
               "const": "task.hold",
               "type": "string"
+            },
+            "reason": {
+              "description": "Why, as `--reason` records it.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
-            "issue"
+            "issue",
+            "reason"
           ],
           "type": "object",
           "x-result": {

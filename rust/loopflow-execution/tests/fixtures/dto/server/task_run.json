@@ -10,5 +10,6 @@
     "approve": false,
     "graph": null
   },
-  "select": null
+  "select": null,
+  "sender": null
 }

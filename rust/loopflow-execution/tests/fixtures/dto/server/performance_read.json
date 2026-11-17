@@ -7,5 +7,6 @@
       "kind": "machine.self"
     }
   },
-  "select": null
+  "select": null,
+  "sender": null
 }

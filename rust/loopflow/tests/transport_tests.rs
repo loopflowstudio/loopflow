@@ -2671,7 +2671,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         assert!(welcome["machine"]["id"].is_string(), "{welcome}");
         reader
             .send(Message::Text(
-                json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
+                json!({"type":"subscribe","id":"remote-watch","operation":roadmap,"sender":null})
                     .to_string()
                     .into(),
             ))

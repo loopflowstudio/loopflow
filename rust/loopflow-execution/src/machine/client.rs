@@ -11,8 +11,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 
 use super::wire::{
-    ClientIdentity, ConnectedClient, Hello, ServerMessage, ServerOperation, SessionAttached,
-    Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
+    ClientIdentity, ConnectedClient, Hello, Sender, ServerMessage, ServerOperation,
+    SessionAttached, Welcome, MAX_BULK, MAX_MESSAGE, MIN_REVISION, REVISION,
 };
 use crate::engine::{Error, ErrorCode};
 use loopflow_model::durable::Machine;
@@ -24,6 +24,9 @@ type ClientMessage = super::wire::ClientMessage;
 /// a ticket. A session's later waits are unbounded unless the caller sets its
 /// own limit.
 const HANDSHAKE: Duration = Duration::from_secs(10);
+/// How long another Machine's server has to answer a request over SSH. A
+/// subscription's quiet stream is not bounded.
+const ANSWER: Duration = Duration::from_secs(120);
 
 /// `lf server status`: readiness observed without opening Work.
 #[derive(Debug, serde::Serialize)]
@@ -137,10 +140,11 @@ impl Carrier {
             Self::Socket(path) => Socket::local(connect(path)?, capacity),
             Self::Ssh(machine) => {
                 let (pipe, output, input) = super::ssh::Pipe::open(machine)?;
+                let output = Timed::new(output);
                 Ok(Socket {
+                    end: End::Pipe(pipe, output.timeout.clone()),
                     reader: BufReader::with_capacity(capacity, Box::new(output)),
                     writer: Box::new(input),
-                    end: End::Pipe(pipe),
                 })
             }
         }
@@ -173,17 +177,20 @@ impl Connection {
     }
 
     /// `machine`'s server, over SSH. Its `lf server connect` starts the
-    /// server when none is running.
+    /// server when none is running. Every operation sent here runs there.
     pub fn open_on(machine: &Machine) -> Result<Self> {
-        Self::start(
+        let connection = Self::start(
             Carrier::Ssh(machine.clone()),
-            identity("machine", "lf"),
-            HANDSHAKE,
-        )
+            identity(super::wire::MACHINE_CLIENT, "lf"),
+            // The entry may start the server first.
+            ANSWER,
+        )?;
+        connection.set_read_timeout(None)?;
+        Ok(connection)
     }
 
     /// Hello and welcome within `within`, which stays set until the caller
-    /// has what it opened the connection for. SSH bounds its own connection.
+    /// has what it opened the connection for.
     fn start(carrier: Carrier, client: ClientIdentity, within: Duration) -> Result<Self> {
         let mut socket = carrier.open(64 * 1024)?;
         socket.set_read_timeout(Some(within))?;
@@ -192,9 +199,10 @@ impl Connection {
             min_revision: MIN_REVISION,
             client,
         }))?;
-        let answer = socket
-            .receive()
-            .map_err(|error| stalled(error, "welcome the connection", within))?;
+        let answer = socket.receive().map_err(|error| match &carrier {
+            Carrier::Ssh(machine) => unanswered(error, machine, within, ErrorCode::Unavailable),
+            Carrier::Socket(_) => stalled(error, "welcome the connection", within),
+        })?;
         match answer.map(accepted).transpose()? {
             Some(ServerMessage::Welcome(welcome)) => Ok(Self {
                 socket,
@@ -231,11 +239,20 @@ impl Connection {
     /// [`Self::request`] or [`Self::reading`]. A request over the control limit
     /// travels on a ticketed connection and is answered here like any other.
     pub fn send(&mut self, operation: impl serde::Serialize) -> Result<String> {
+        self.send_from(operation, None)
+    }
+
+    fn send_from(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: Option<&Sender>,
+    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         let line = Socket::line(&ClientMessage::Request {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
             select: None,
+            sender: sender.cloned(),
         })?;
         if line.len() <= MAX_MESSAGE {
             self.socket.write(&line)?;
@@ -275,8 +292,38 @@ impl Connection {
 
     /// One request and its answer; other ids' messages wait in `pending`.
     pub fn request(&mut self, operation: impl serde::Serialize) -> Result<Response> {
-        let id = self.send(operation)?;
-        match self.wait(|message| answers(message, &id))? {
+        self.request_with(operation, None)
+    }
+
+    /// [`Self::request`] for another Machine's server, which runs `operation`
+    /// with what `sender` says this `lf` runs with.
+    pub fn request_from(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: &Sender,
+    ) -> Result<Response> {
+        self.request_with(operation, Some(sender))
+    }
+
+    fn request_with(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: Option<&Sender>,
+    ) -> Result<Response> {
+        let id = self.send_from(operation, sender)?;
+        let answer = match &self.carrier {
+            Carrier::Ssh(machine) => {
+                let machine = machine.clone();
+                self.set_read_timeout(Some(ANSWER))?;
+                let answer = self.wait(|message| answers(message, &id)).map_err(|error| {
+                    unanswered(error, &machine, ANSWER, ErrorCode::OutcomeUnknown)
+                });
+                self.set_read_timeout(None)?;
+                answer?
+            }
+            Carrier::Socket(_) => self.wait(|message| answers(message, &id))?,
+        };
+        match answer {
             ServerMessage::Response {
                 trace_id, result, ..
             } => Ok(Response { trace_id, result }),
@@ -297,12 +344,31 @@ impl Connection {
 
     /// Start a subscription and return its id once the server confirms it.
     pub fn subscribe(&mut self, operation: impl serde::Serialize) -> Result<String> {
+        self.subscribe_with(operation, None)
+    }
+
+    /// [`Self::subscribe`] on another Machine's server, as for
+    /// [`Self::request_from`].
+    pub fn subscribe_from(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: &Sender,
+    ) -> Result<String> {
+        self.subscribe_with(operation, Some(sender))
+    }
+
+    fn subscribe_with(
+        &mut self,
+        operation: impl serde::Serialize,
+        sender: Option<&Sender>,
+    ) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string();
         self.socket.send(&ClientMessage::Subscribe {
             id: id.clone(),
             operation: serde_json::to_value(operation)?,
             select: None,
             resume: None,
+            sender: sender.cloned(),
         })?;
         match self.wait(|message| answers(message, &id))? {
             ServerMessage::Response { .. } => Ok(id),
@@ -507,19 +573,49 @@ pub fn attach(path: &Path, session: &LfSessionId) -> Result<UnixStream> {
     Ok(stream)
 }
 
+/// A wait for another Machine's answer that `within` cut short. `code` says
+/// whether the work may have happened there.
+fn unanswered(
+    error: anyhow::Error,
+    machine: &Machine,
+    within: Duration,
+    code: ErrorCode,
+) -> anyhow::Error {
+    if !timed_out(&error) {
+        return error;
+    }
+    let message = anyhow::anyhow!(
+        "{} did not answer within {}s; check `ssh {} lf server status`",
+        machine.name(),
+        within.as_secs(),
+        machine.route
+    );
+    match code {
+        ErrorCode::OutcomeUnknown => Error::outcome_unknown(&message),
+        code => Error::new(code, message.to_string()),
+    }
+    .into()
+}
+
+fn timed_out(error: &anyhow::Error) -> bool {
+    matches!(
+        error
+            .root_cause()
+            .downcast_ref::<std::io::Error>()
+            .map(std::io::Error::kind),
+        Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)
+    )
+}
+
 /// A wait that `within` cut short, named for the answer it waited for.
 fn stalled(error: anyhow::Error, answer: &str, within: Duration) -> anyhow::Error {
-    match error
-        .root_cause()
-        .downcast_ref::<std::io::Error>()
-        .map(std::io::Error::kind)
-    {
-        Some(std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => anyhow::anyhow!(
-            "Loopflow server did not {answer} within {}s; check `lf server status`",
-            within.as_secs()
-        ),
-        _ => error,
+    if !timed_out(&error) {
+        return error;
     }
+    anyhow::anyhow!(
+        "Loopflow server did not {answer} within {}s; check `lf server status`",
+        within.as_secs()
+    )
 }
 
 fn connect(path: &Path) -> Result<UnixStream> {
@@ -542,9 +638,75 @@ struct Socket {
 enum End {
     /// This Machine's socket, which bounds reads.
     Socket(UnixStream),
-    /// SSH to another Machine, which bounds its own connection and says why
-    /// it closed.
-    Pipe(super::ssh::Pipe),
+    /// SSH to another Machine, which says why it closed, and the bound on a
+    /// read from it.
+    Pipe(super::ssh::Pipe, Timeout),
+}
+
+type Timeout = std::sync::Arc<std::sync::Mutex<Option<Duration>>>;
+
+/// A pipe's reads, bounded like a socket's: a thread reads, and a read that
+/// waits past the timeout fails as `TimedOut`.
+struct Timed {
+    chunks: std::sync::mpsc::Receiver<std::io::Result<Vec<u8>>>,
+    unread: Vec<u8>,
+    timeout: Timeout,
+}
+
+impl Timed {
+    fn new(mut source: impl Read + Send + 'static) -> Self {
+        let (sent, chunks) = std::sync::mpsc::sync_channel(1);
+        std::thread::spawn(move || {
+            let mut buffer = vec![0; 64 * 1024];
+            loop {
+                let chunk = match source.read(&mut buffer) {
+                    Ok(read) => Ok(buffer[..read].to_vec()),
+                    Err(error) => Err(error),
+                };
+                let ended = !matches!(&chunk, Ok(chunk) if !chunk.is_empty());
+                if sent.send(chunk).is_err() || ended {
+                    return;
+                }
+            }
+        });
+        Self {
+            chunks,
+            unread: Vec::new(),
+            timeout: Timeout::default(),
+        }
+    }
+}
+
+impl Read for Timed {
+    fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+        use std::sync::mpsc::RecvTimeoutError;
+        if self.unread.is_empty() {
+            let timeout = *self.timeout.lock().expect("pipe timeout lock poisoned");
+            let chunk = match timeout {
+                Some(timeout) => self
+                    .chunks
+                    .recv_timeout(timeout)
+                    .map_err(|error| match error {
+                        RecvTimeoutError::Timeout => std::io::ErrorKind::TimedOut,
+                        RecvTimeoutError::Disconnected => std::io::ErrorKind::UnexpectedEof,
+                    }),
+                None => self
+                    .chunks
+                    .recv()
+                    .map_err(|_| std::io::ErrorKind::UnexpectedEof),
+            };
+            match chunk {
+                Ok(chunk) => self.unread = chunk?,
+                // The reader thread ended after an end of file it sent.
+                Err(std::io::ErrorKind::UnexpectedEof) => return Ok(0),
+                Err(kind) => return Err(kind.into()),
+            }
+        }
+        let read = buffer.len().min(self.unread.len());
+        buffer[..read].copy_from_slice(&self.unread[..read]);
+        self.unread.drain(..read);
+        Ok(read)
+    }
 }
 
 impl std::fmt::Debug for Socket {
@@ -565,8 +727,9 @@ impl Socket {
     }
 
     fn set_read_timeout(&self, timeout: Option<Duration>) -> Result<()> {
-        if let End::Socket(stream) = &self.end {
-            stream.set_read_timeout(timeout)?;
+        match &self.end {
+            End::Socket(stream) => stream.set_read_timeout(timeout)?,
+            End::Pipe(_, bound) => *bound.lock().expect("pipe timeout lock poisoned") = timeout,
         }
         Ok(())
     }
@@ -574,7 +737,7 @@ impl Socket {
     /// Why the server closed before answering: SSH says, the socket cannot.
     fn ended(&mut self, local: &str, code: ErrorCode) -> anyhow::Error {
         match &mut self.end {
-            End::Pipe(pipe) => pipe.ended(code),
+            End::Pipe(pipe, _) => pipe.ended(code),
             End::Socket(_) => anyhow::anyhow!("{local}"),
         }
     }
@@ -656,6 +819,27 @@ mod tests {
         Limits, ServerMessage, Welcome, MAX_CONNECTIONS, MAX_MESSAGE, MIN_REVISION, REVISION,
     };
     use loopflow_model::id::LfSessionId;
+
+    #[test]
+    fn a_pipe_that_stays_silent_past_its_bound_times_out_and_keeps_what_arrived() {
+        use std::io::Read;
+        let (reader, mut writer) = std::os::unix::net::UnixStream::pair().unwrap();
+        let mut timed = super::Timed::new(reader);
+        *timed.timeout.lock().unwrap() = Some(std::time::Duration::from_millis(50));
+        writer.write_all(b"answer").unwrap();
+        let mut buffer = [0; 3];
+        timed.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"ans");
+        timed.read_exact(&mut buffer).unwrap();
+        assert_eq!(&buffer, b"wer");
+        let started = Instant::now();
+        let error = timed.read(&mut buffer).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+        assert!(super::timed_out(&error.into()));
+        assert!(started.elapsed() < HANDSHAKE);
+        drop(writer);
+        assert_eq!(timed.read(&mut buffer).unwrap(), 0);
+    }
 
     /// A server that accepts one connection and answers nothing until the
     /// client gives up; `welcome` first when `after_hello`.

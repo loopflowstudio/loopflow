@@ -75,6 +75,12 @@ const AGENT_LOGIN_ENV: [&str; 2] = ["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOK
 const AGENT_LOGIN_FILES: [&str; 2] = [".claude/.credentials.json", ".codex/auth.json"];
 
 impl Forwarded {
+    /// The environment values, which a request carries itself; the files stay
+    /// for [`deliver`].
+    pub fn take_secrets(&mut self) -> crate::machine::wire::Secrets {
+        crate::machine::wire::Secrets(std::mem::take(&mut self.env))
+    }
+
     fn carries_agent_login(&self) -> bool {
         self.env
             .iter()
@@ -110,8 +116,8 @@ const UNREAD_MINUTES: u32 = 10;
 /// script carries only names and lengths; the values travel on its stdin. A
 /// destination that already has a named file keeps its own; when its copy
 /// differs, `notices` says so. Returns the one-time file under the
-/// destination's home that holds the environment: a command there reads it
-/// with [`sourced`], its server with [`take`].
+/// destination's home that holds the environment, which a command there
+/// reads with [`sourced`].
 pub fn deliver(
     machine: &Machine,
     forwarded: &Forwarded,
@@ -200,63 +206,10 @@ pub fn sourced(env_file: &str, preamble: &str) -> String {
     )
 }
 
-/// The environment a delivered file holds, read here and removed: what a
-/// launch another Machine sent runs with, its values going straight into the
-/// launched process's environment.
-pub fn take(env_file: &str) -> Result<Vec<(String, String)>> {
-    let name = env_file
-        .strip_prefix(FORWARD_DIRECTORY)
-        .and_then(|name| name.strip_prefix('/'))
-        .filter(|name| !name.is_empty() && name.chars().all(|c| c.is_ascii_alphanumeric()))
-        .ok_or_else(|| anyhow!("{env_file:?} is not a forwarded environment file"))?;
-    let path = dirs::home_dir()
-        .context("this user has no home directory")?
-        .join(FORWARD_DIRECTORY)
-        .join(name);
-    let block = std::fs::read_to_string(&path)
-        .with_context(|| format!("forwarded environment ~/{env_file} is gone"))?;
-    std::fs::remove_file(&path)?;
-    Ok(exported(&block)?
-        .into_iter()
-        .map(|(name, value)| (name, value.expose_secret().clone()))
-        .collect())
-}
-
 fn exports(env: &[(String, SecretString)]) -> String {
     env.iter()
         .map(|(name, value)| format!("export {name}={}\n", sh_quote(value.expose_secret())))
         .collect()
-}
-
-/// Each `export NAME='value'` line [`exports`] wrote; a value may span lines.
-fn exported(block: &str) -> Result<Vec<(String, SecretString)>> {
-    let malformed = || anyhow!("a forwarded environment file is malformed");
-    let mut values = Vec::new();
-    let mut rest = block;
-    while !rest.is_empty() {
-        let (name, quoted) = rest
-            .strip_prefix("export ")
-            .and_then(|line| line.split_once("='"))
-            .ok_or_else(malformed)?;
-        let mut value = String::new();
-        let mut quoted = quoted;
-        loop {
-            let (part, after) = quoted.split_once('\'').ok_or_else(malformed)?;
-            value.push_str(part);
-            match after.strip_prefix("\\''") {
-                Some(after) => {
-                    value.push('\'');
-                    quoted = after;
-                }
-                None => {
-                    rest = after.strip_prefix('\n').ok_or_else(malformed)?;
-                    break;
-                }
-            }
-        }
-        values.push((name.to_owned(), SecretString::new(value)));
-    }
-    Ok(values)
 }
 
 fn remote_path(relative: &str) -> String {
@@ -300,8 +253,8 @@ fn doppler_value(name: &str, directory: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{exported, exports, home_relative, sourced, take, valid_name, Forwarded};
-    use secrecy::{ExposeSecret, SecretString};
+    use super::{home_relative, sourced, valid_name, Forwarded};
+    use secrecy::SecretString;
     use std::path::PathBuf;
 
     #[test]
@@ -337,20 +290,6 @@ mod tests {
         for entry in ["/etc/passwd", "../x", "~/a/../../b", ""] {
             assert!(home_relative(entry).is_err(), "{entry}");
         }
-    }
-
-    #[test]
-    fn a_server_reads_the_environment_a_command_would_source() {
-        let env = [("TOKEN", "it's\nmulti-line"), ("PLAIN", "")]
-            .map(|(name, value)| (name.to_owned(), SecretString::new(value.into())));
-        let read = exported(&exports(&env)).unwrap();
-        let read: Vec<_> = read
-            .iter()
-            .map(|(name, value)| (name.as_str(), value.expose_secret().as_str()))
-            .collect();
-        assert_eq!(read, [("TOKEN", "it's\nmulti-line"), ("PLAIN", "")]);
-        assert!(exported("export TOKEN='open\n").is_err());
-        assert!(take("../.ssh/id_ed25519").is_err());
     }
 
     #[test]

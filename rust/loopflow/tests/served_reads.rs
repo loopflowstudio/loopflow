@@ -430,7 +430,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     assert_eq!(receive().unwrap()["type"], "welcome");
 
     write(
-        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "sender": null}),
         true,
     );
     let answer = receive().unwrap();
@@ -441,7 +441,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null}),
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null, "sender": null}),
         true,
     );
     let mut subscribed = false;
@@ -472,7 +472,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
-        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "sender": null}),
         false,
     );
     let refused = loop {
@@ -491,7 +491,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null}),
         true,
     );
     let after = loop {
@@ -920,6 +920,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::ViewSelect { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
+        | Read::TaskStatus { .. }
         | Read::TaskDetail { .. }
         | Read::PlanBoard { .. }
         | Read::SessionCard { .. }
@@ -964,6 +965,10 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(true),
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
                 Read::TaskDetail {
                     directory: repo.path().to_owned(),
                     issue: "INF-123".into(),
@@ -1146,6 +1151,10 @@ fn server_operations_match_their_lf_commands() {
                     directory: work_folder,
                 },
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
             ],
         ),
     };
@@ -1604,6 +1613,7 @@ fn server_operations_match_their_lf_commands() {
     let stop = Write::TaskHold {
         directory: directory.clone(),
         issue: "INF-123".into(),
+        reason: None,
     };
     let stopped = || {
         Read::TaskGet {
@@ -2082,8 +2092,16 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold { directory, issue } => {
-            (path(directory), words(&["task", "hold", issue, "--json"]))
+        Write::TaskHold {
+            directory,
+            issue,
+            reason,
+        } => {
+            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            if let Some(reason) = reason {
+                spelled.extend(words(&["--reason", reason]));
+            }
+            (path(directory), spelled)
         }
         Write::TaskRun {
             directory,
@@ -2921,7 +2939,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"operation":change})
     )
     .unwrap();
     // Deliberately do not read the answer. Admission is observed in the receipt.
@@ -3149,7 +3167,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"operation":change})
     )
     .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);

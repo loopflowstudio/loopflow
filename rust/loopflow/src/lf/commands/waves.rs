@@ -941,6 +941,42 @@ pub fn subscribe_task_status(
     })
 }
 
+/// `lf task status <issue> --subscribe` for a Task another Machine runs: the
+/// readings of that Machine's server, over SSH. `false` when it runs here.
+pub fn subscribe_remote_task_status(repo: &Path, issue: &str) -> Result<bool> {
+    use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+    use std::io::Write as _;
+    let Some(route) = loopflow_execution::machine::task::remote_task(issue)? else {
+        return Ok(false);
+    };
+    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let sender = Sender {
+        repository: route.repository_id,
+        selection: Selection::capture(repo, None)?,
+        secrets: Secrets::default(),
+    };
+    let mut connection = loopflow_execution::machine::client::Connection::open_on(&machine)?;
+    let id = connection.subscribe_from(
+        super::read::Read::TaskStatus {
+            directory: repo.to_owned(),
+            issue: route.task_id.to_string(),
+        },
+        &sender,
+    )?;
+    let mut stdout = std::io::stdout().lock();
+    while let Some(frame) = connection.reading(&id)? {
+        serde_json::to_writer(&mut stdout, &frame)?;
+        if stdout
+            .write_all(b"\n")
+            .and_then(|()| stdout.flush())
+            .is_err()
+        {
+            break;
+        }
+    }
+    Ok(true)
+}
+
 /// `lf task show <issue> --subscribe`: `lf task show --json` now and each time it
 /// changes.
 pub fn subscribe_task_pane(
@@ -1024,6 +1060,18 @@ pub fn print_task_detail(status: loopflow_execution::ops::task::TaskStatus) -> R
             )?)?
         );
         Ok(())
+    })
+}
+
+/// `lf --cwd <directory> task status <issue> --json`, read from the store.
+pub(crate) fn read_task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
+    let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        task_detail(&store, status).await
     })
 }
 

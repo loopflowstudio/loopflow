@@ -4050,10 +4050,59 @@ tee -a '{record}/input' | env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$re
     assert!(!commands.contains("hold"), "{commands}");
     let (hello, request) = entry_input(&record);
     assert_eq!(hello["client"]["kind"], "machine");
-    assert_eq!(request["operation"]["kind"], "machine.write");
-    assert_eq!(request["operation"]["repository"], plan.repository.as_str());
-    assert_eq!(request["operation"]["change"]["kind"], "task.hold");
-    assert_eq!(request["operation"]["change"]["issue"], task.as_str());
+    assert_eq!(request["sender"]["repository"], plan.repository.as_str());
+    assert_eq!(request["operation"]["kind"], "task.hold");
+    assert_eq!(request["operation"]["issue"], task.as_str());
+}
+
+/// `lf task status --subscribe` for a Task mini runs prints the readings of
+/// mini's server, over the same pipe a write takes.
+#[test]
+fn a_status_subscription_for_a_task_mini_runs_reads_minis_server() {
+    use std::io::BufRead;
+    let fixture = preview_machines();
+    let (plan, task) = task_on_mini(&fixture);
+    let _mini = served_mini(&fixture);
+    let remote = fixture.root.path().join("remote");
+    let record = fixture.root.path().join("ssh-record");
+    fs::create_dir_all(&record).unwrap();
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!(
+            r#"#!/bin/sh
+for arg in "$@"; do remote_command="$arg"; done
+printf '%s\n' "$remote_command" >> '{record}/commands'
+cd '{remote}' || exit 1
+exec env -i HOME='{remote}' PATH=/usr/bin:/bin bash -c "$remote_command"
+"#,
+            record = record.display(),
+            remote = remote.display(),
+        ),
+    );
+    let mut watching = Child(
+        fixture
+            .command(&["task", "status", task.as_str(), "--subscribe"])
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap(),
+    );
+    let mut line = String::new();
+    std::io::BufReader::new(watching.0.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let frame: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(frame["body"]["task"]["id"], task.as_str(), "{frame}");
+    let commands = fs::read_to_string(record.join("commands")).unwrap();
+    assert!(
+        commands
+            .lines()
+            .any(|line| line == "exec 'lf' 'server' 'connect'"),
+        "{commands}"
+    );
+    assert!(!commands.contains("status"), "{commands}");
 }
 
 /// A served `task.run` for a Task mini runs is mini's `task.run`: the laptop
@@ -4095,11 +4144,10 @@ fn a_served_run_for_a_task_mini_runs_starts_it_there() {
 
     assert_eq!(started, running["result"]);
     let (_, request) = entry_input(&record);
-    assert_eq!(request["operation"]["kind"], "machine.write");
-    assert_eq!(request["operation"]["change"]["kind"], "task.run");
-    assert_eq!(request["operation"]["change"]["issue"], task.as_str());
+    assert_eq!(request["operation"]["kind"], "task.run");
+    assert_eq!(request["operation"]["issue"], task.as_str());
     assert_eq!(
-        request["operation"]["environment"]["LF_USER_NAME"], "Jack",
+        request["sender"]["selection"]["participant"], "Jack",
         "{request}"
     );
     assert_eq!(
@@ -4246,10 +4294,9 @@ fn a_served_resume_opens_the_session_on_your_session_machine_as_a_typed_operatio
         .result;
 
     let (_, request) = entry_input(&record_dir);
-    assert_eq!(request["operation"]["kind"], "machine.write");
-    assert_eq!(request["operation"]["repository"], repository.trim());
-    assert_eq!(request["operation"]["change"]["kind"], "session.resume");
-    assert_eq!(request["operation"]["change"]["intent"], "resume");
+    assert_eq!(request["sender"]["repository"], repository.trim());
+    assert_eq!(request["operation"]["kind"], "session.resume");
+    assert_eq!(request["operation"]["intent"], "resume");
     let argv: Vec<&str> = opened["open_argv"]
         .as_array()
         .unwrap()

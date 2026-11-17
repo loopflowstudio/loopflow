@@ -2,7 +2,7 @@
 //! calls the shared functions the CLI handlers call and returns the value the
 //! CLI prints with `--json`; the carrier owns its trace. A write for a Task or
 //! Session another Machine runs goes to that Machine's server as this same
-//! value, over SSH ([`crate::server::wire::MachineOperation`]).
+//! value, over SSH, with the [`Sender`] it runs with there.
 
 use std::path::{Path, PathBuf};
 
@@ -10,6 +10,7 @@ use anyhow::anyhow;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
+use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
 use loopflow_execution::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
@@ -59,10 +60,20 @@ macro_rules! writes {
                 self.execute(self.remote()?, &[])
             }
 
-            /// Run the shared operation here, a launch it starts carrying
-            /// `environment`: one that arrived from another Machine is never sent on.
-            pub(crate) fn run_here(&self, environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
-                self.execute(None, environment)
+            /// Run a write another Machine sent here, never sending it on: in
+            /// this Machine's checkout of the sender's repository, a launch
+            /// it starts running with the sender's selection and secrets.
+            pub(crate) fn run_here(mut self, sender: Option<&Sender>) -> anyhow::Result<WriteResult> {
+                let environment = match sender {
+                    Some(sender) => {
+                        if let Some(directory) = self.directory_mut() {
+                            *directory = super::work_route::repository_path(&sender.repository)?;
+                        }
+                        sender.selection.environment(&sender.secrets)?
+                    }
+                    None => Vec::new(),
+                };
+                self.execute(None, &environment)
             }
 
             /// `remote` is the Machine a Task or Session write goes to instead.
@@ -210,10 +221,16 @@ writes! {
 
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
-    TaskHold { directory: PathBuf, issue: String } => task::Hold;
-    { issue, .. } => match remote {
+    TaskHold {
+        directory: PathBuf,
+        issue: String,
+        /// Why, as `--reason` records it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        reason: Option<String>,
+    } => task::Hold;
+    { issue, reason, .. } => match remote {
         Some(remote) => remote.call()?,
-        None => task::hold(issue, None)?,
+        None => task::hold(issue, reason.as_deref())?,
     },
 
     /// `lf steer <issue> <message> --json`: direction for the Task's
@@ -1040,10 +1057,79 @@ writes! {
     },
 }
 
+/// The directory a write runs in, borrowed as `$write` is: none for a
+/// Machine-wide write.
+macro_rules! directory_of {
+    ($write:expr) => {
+        match $write {
+            Write::TaskCreate { directory, .. }
+            | Write::TaskComplete { directory, .. }
+            | Write::TaskReopen { directory, .. }
+            | Write::TaskAbandon { directory, .. }
+            | Write::TaskUpdate { directory, .. }
+            | Write::TaskClaim { directory, .. }
+            | Write::TaskUnassign { directory, .. }
+            | Write::TaskRun { directory, .. }
+            | Write::TaskShip { directory, .. }
+            | Write::TaskHold { directory, .. }
+            | Write::TaskSteer { directory, .. }
+            | Write::TaskReport { directory, .. }
+            | Write::TaskInterrupt { directory, .. }
+            | Write::TaskMove { directory, .. }
+            | Write::TaskSave { directory, .. }
+            | Write::SessionSteer { directory, .. }
+            | Write::SessionRename { directory, .. }
+            | Write::SessionBind { directory, .. }
+            | Write::SessionStatus { directory, .. }
+            | Write::SessionResume { directory, .. }
+            | Write::SessionNew { directory, .. }
+            | Write::SessionMove { directory, .. }
+            | Write::WaveCreate { directory, .. }
+            | Write::WaveRename { directory, .. }
+            | Write::WaveRemove { directory, .. }
+            | Write::WaveMachine { directory, .. }
+            | Write::WaveSync { directory, .. }
+            | Write::WavePlanBind { directory, .. }
+            | Write::WavePlanConnect { directory, .. }
+            | Write::WavePlanReteam { directory, .. }
+            | Write::GraphCustomize { directory, .. }
+            | Write::RepoRelease { directory, .. }
+            | Write::CheckoutCommit { directory, .. }
+            | Write::CheckoutSync { directory, .. }
+            | Write::CheckoutCreate { directory, .. }
+            | Write::GraphRun { directory, .. }
+            | Write::SkillRun { directory, .. }
+            | Write::PrPublish { directory, .. }
+            | Write::PrOpen { directory, .. }
+            | Write::PrSubmit { directory, .. }
+            | Write::PrArm { directory, .. }
+            | Write::PrLand { directory, .. }
+            | Write::PrAbandon { directory, .. }
+            | Write::PrReconcile { directory }
+            | Write::PrRequestReview { directory, .. }
+            | Write::DesktopDashboardQuery { directory, .. }
+            | Write::DesktopDashboardPin { directory, .. }
+            | Write::DesktopDashboardUnpin { directory, .. }
+            | Write::DesktopDashboardRename { directory, .. }
+            | Write::DesktopDashboardHide { directory, .. }
+            | Write::DesktopDashboardShow { directory, .. }
+            | Write::DesktopDashboardSlots { directory, .. }
+            | Write::DesktopDashboardMove { directory, .. }
+            | Write::DesktopLayoutSave { directory, .. } => Some(directory),
+            Write::DesktopPortfolioSet { .. }
+            | Write::AccountDisconnect { .. }
+            | Write::AccountConnect { .. }
+            | Write::ConfigSet { .. }
+            | Write::ConfigUnset { .. }
+            | Write::ConfigTheme { .. } => None,
+        }
+    };
+}
+
 impl Write {
     /// The Machine a Task or Session write goes to when its Work runs
     /// elsewhere, with the write naming that Work exactly. `None` runs it here.
-    pub(super) fn remote(&self) -> anyhow::Result<Option<Remote>> {
+    fn remote(&self) -> anyhow::Result<Option<Remote>> {
         use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
         // A run or ship starts agents there, which carry what `forward` names.
         let (route, launching) = match self {
@@ -1084,14 +1170,7 @@ impl Write {
                 .unwrap_or_else(|| route.task_id.to_string());
         }
         let machine = find_machine(route.machine_id.as_str())?;
-        Remote::new(
-            machine,
-            route.repository_id,
-            write,
-            launching,
-            source.as_ref(),
-        )
-        .map(Some)
+        Remote::new(machine, route.repository_id, write, launching, source).map(Some)
     }
 
     /// A resume of a conversation that lives on another Machine, carrying the
@@ -1249,81 +1328,12 @@ impl Write {
         }
     }
 
-    /// This write in this Machine's checkout of `repository`, for one another
-    /// Machine sent naming its own path.
-    pub(crate) fn in_checkout(
-        &self,
-        repository: &loopflow_model::durable::RepositoryId,
-    ) -> anyhow::Result<Self> {
-        let mut change = serde_json::to_value(self)?;
-        change["directory"] =
-            serde_json::to_value(super::work_route::repository_path(repository)?)?;
-        Ok(serde_json::from_value(change)?)
+    pub(crate) fn directory(&self) -> &Path {
+        directory_of!(self).map_or(Path::new("/"), PathBuf::as_path)
     }
 
-    pub(crate) fn directory(&self) -> &Path {
-        match self {
-            Self::TaskCreate { directory, .. }
-            | Self::TaskComplete { directory, .. }
-            | Self::TaskReopen { directory, .. }
-            | Self::TaskAbandon { directory, .. }
-            | Self::TaskUpdate { directory, .. }
-            | Self::TaskClaim { directory, .. }
-            | Self::TaskUnassign { directory, .. }
-            | Self::TaskRun { directory, .. }
-            | Self::TaskShip { directory, .. }
-            | Self::TaskHold { directory, .. }
-            | Self::TaskSteer { directory, .. }
-            | Self::TaskReport { directory, .. }
-            | Self::TaskInterrupt { directory, .. }
-            | Self::TaskMove { directory, .. }
-            | Self::TaskSave { directory, .. }
-            | Self::SessionSteer { directory, .. }
-            | Self::SessionRename { directory, .. }
-            | Self::SessionBind { directory, .. }
-            | Self::SessionStatus { directory, .. }
-            | Self::SessionResume { directory, .. }
-            | Self::SessionNew { directory, .. }
-            | Self::SessionMove { directory, .. }
-            | Self::WaveCreate { directory, .. }
-            | Self::WaveRename { directory, .. }
-            | Self::WaveRemove { directory, .. }
-            | Self::WaveMachine { directory, .. }
-            | Self::WaveSync { directory, .. }
-            | Self::WavePlanBind { directory, .. }
-            | Self::WavePlanConnect { directory, .. }
-            | Self::WavePlanReteam { directory, .. }
-            | Self::GraphCustomize { directory, .. }
-            | Self::RepoRelease { directory, .. }
-            | Self::CheckoutCommit { directory, .. }
-            | Self::CheckoutSync { directory, .. }
-            | Self::CheckoutCreate { directory, .. }
-            | Self::GraphRun { directory, .. }
-            | Self::SkillRun { directory, .. }
-            | Self::PrPublish { directory, .. }
-            | Self::PrOpen { directory, .. }
-            | Self::PrSubmit { directory, .. }
-            | Self::PrArm { directory, .. }
-            | Self::PrLand { directory, .. }
-            | Self::PrAbandon { directory, .. }
-            | Self::PrReconcile { directory }
-            | Self::PrRequestReview { directory, .. }
-            | Self::DesktopDashboardQuery { directory, .. }
-            | Self::DesktopDashboardPin { directory, .. }
-            | Self::DesktopDashboardUnpin { directory, .. }
-            | Self::DesktopDashboardRename { directory, .. }
-            | Self::DesktopDashboardHide { directory, .. }
-            | Self::DesktopDashboardShow { directory, .. }
-            | Self::DesktopDashboardSlots { directory, .. }
-            | Self::DesktopDashboardMove { directory, .. }
-            | Self::DesktopLayoutSave { directory, .. } => directory,
-            Self::DesktopPortfolioSet { .. }
-            | Self::AccountDisconnect { .. }
-            | Self::AccountConnect { .. }
-            | Self::ConfigSet { .. }
-            | Self::ConfigUnset { .. }
-            | Self::ConfigTheme { .. } => Path::new("/"),
-        }
+    fn directory_mut(&mut self) -> Option<&mut PathBuf> {
+        directory_of!(self)
     }
 }
 
@@ -1331,49 +1341,42 @@ impl Write {
 #[derive(Debug)]
 pub(super) struct Remote {
     machine: loopflow_model::durable::Machine,
-    operation: crate::server::wire::MachineOperation,
+    change: Write,
+    sender: Sender,
 }
 
 impl Remote {
-    /// `write` for `machine`'s checkout of `repository`, with what this `lf`
-    /// runs with and, for a launch, the secrets `forward` names.
+    /// `change` for `machine`'s checkout of `repository`, with what this `lf`
+    /// runs with and, for a launch, the secrets `forward` names. Its files are
+    /// delivered to `machine` now.
     fn new(
         machine: loopflow_model::durable::Machine,
         repository: loopflow_model::durable::RepositoryId,
         change: Write,
         launching: bool,
-        source: Option<&loopflow_execution::ops::task::remote::TaskSource>,
+        source: Option<loopflow_execution::ops::task::remote::TaskSource>,
     ) -> anyhow::Result<Self> {
-        let environment = loopflow_execution::machine::task::forwarding_environment(
-            change.directory(),
-            &machine,
-            source,
-        )?
-        .into_iter()
-        .collect();
-        let forwarded = match launching {
+        let selection = Selection::capture(change.directory(), source)?;
+        let secrets = match launching {
             true => {
-                let forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let mut forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let secrets = forwarded.take_secrets();
                 let mut notices = Vec::new();
-                let file = loopflow_execution::machine::forward::deliver(
-                    &machine,
-                    &forwarded,
-                    &mut notices,
-                )?;
+                loopflow_execution::machine::forward::deliver(&machine, &forwarded, &mut notices)?;
                 for line in String::from_utf8_lossy(&notices).lines() {
                     loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
                 }
-                file
+                secrets
             }
-            false => None,
+            false => Secrets::default(),
         };
         Ok(Self {
             machine,
-            operation: crate::server::wire::MachineOperation::Write {
+            change,
+            sender: Sender {
                 repository,
-                environment,
-                forwarded,
-                change,
+                selection,
+                secrets,
             },
         })
     }
@@ -1382,9 +1385,10 @@ impl Remote {
     pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
         let mut connection =
             loopflow_execution::machine::client::Connection::open_on(&self.machine)?;
-        let answer = connection.request(crate::server::wire::Operation::Machine(
-            self.operation.clone(),
-        ))?;
+        let answer = connection.request_from(
+            crate::server::wire::Operation::Write(self.change.clone()),
+            &self.sender,
+        )?;
         Ok(serde_json::from_value(answer.result)?)
     }
 }
@@ -1409,7 +1413,7 @@ pub(super) fn run_task(
     Ok(*run)
 }
 
-fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
+pub(crate) fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
     let registry = loopflow_execution::store::read_existing_registry()?
         .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
     tokio::runtime::Runtime::new()?.block_on(loopflow_execution::machine::connection::find_machine(
@@ -1500,7 +1504,7 @@ mod tests {
             r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#,
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,

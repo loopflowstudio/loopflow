@@ -2,7 +2,7 @@
 use crate::durable::TaskExecutionRoute;
 use crate::ops::task::remote::TaskSource;
 use anyhow::{anyhow, Result};
-use loopflow_model::durable::{Machine, TaskId};
+use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::SqliteStore;
 use std::path::Path;
 
@@ -112,38 +112,53 @@ pub fn current_repository(
     Ok(store.sqlite.repository_id(&repo.to_string())?)
 }
 
-pub fn forwarding_environment(
-    directory: &Path,
-    target: &Machine,
-    source: Option<&TaskSource>,
-) -> Result<Vec<(String, String)>> {
-    let user_name = crate::config::participant_name_in(directory)?.unwrap_or_default();
-    let origin =
-        tokio::runtime::Runtime::new()?.block_on(crate::machine::connection::local_machine())?;
-    let profile = crate::config::remote::outgoing(Some(directory), origin.id.as_str())?;
-    let mut environment = vec![
-        (
+impl crate::machine::wire::Selection {
+    /// What this `lf` runs with in `directory`, for a request it sends to
+    /// another Machine.
+    pub fn capture(directory: &Path, source: Option<TaskSource>) -> Result<Self> {
+        let origin =
+            tokio::runtime::Runtime::new()?.block_on(crate::machine::connection::local_machine())?;
+        Ok(Self {
+            profile: crate::config::remote::outgoing(Some(directory), origin.id.as_str())?,
+            participant: crate::config::participant_name_in(directory)?,
+            agent: std::env::var(crate::config::AGENT_OVERRIDE_ENV).ok(),
+            settings: std::env::var("LF_SETTINGS").ok(),
+            source,
+        })
+    }
+
+    /// The environment a launch it starts here runs with, `secrets` included.
+    pub fn environment(
+        &self,
+        secrets: &crate::machine::wire::Secrets,
+    ) -> Result<Vec<(String, String)>> {
+        use secrecy::ExposeSecret;
+        let mut environment = vec![(
             crate::config::remote::PROFILE_ENV.into(),
-            serde_json::to_string(&profile)?,
-        ),
-        (
-            crate::machine::ssh::EXPECTED_MACHINE_ID_ENV.into(),
-            target.id.to_string(),
-        ),
-        (crate::config::USER_NAME_ENV.into(), user_name),
-    ];
-    for name in [crate::config::AGENT_OVERRIDE_ENV, "LF_SETTINGS"] {
-        if let Ok(value) = std::env::var(name) {
-            environment.push((name.into(), value));
+            serde_json::to_string(&self.profile)?,
+        )];
+        let named = [
+            (crate::config::USER_NAME_ENV, self.participant.clone()),
+            (crate::config::AGENT_OVERRIDE_ENV, self.agent.clone()),
+            ("LF_SETTINGS", self.settings.clone()),
+            (
+                crate::ops::task::TASK_SOURCE_ENV,
+                self.source
+                    .as_ref()
+                    .map(serde_json::to_string)
+                    .transpose()?,
+            ),
+        ];
+        for (name, value) in named {
+            if let Some(value) = value {
+                environment.push((name.into(), value));
+            }
         }
+        for (name, value) in &secrets.0 {
+            environment.push((name.clone(), value.expose_secret().clone()));
+        }
+        Ok(environment)
     }
-    if let Some(source) = source {
-        environment.push((
-            crate::ops::task::TASK_SOURCE_ENV.into(),
-            serde_json::to_string(source)?,
-        ));
-    }
-    Ok(environment)
 }
 
 /// The route of the Task `selector` names, when its Work lives on another

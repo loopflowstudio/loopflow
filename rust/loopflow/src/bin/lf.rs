@@ -1105,6 +1105,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 let task = status
                     .task
                     .context("only a registered Task can be subscribed")?;
+                // A Task another Machine runs is read where it runs.
+                if loopflow::lf::commands::waves::subscribe_remote_task_status(
+                    repo,
+                    &task.identifier,
+                )? {
+                    return Ok(());
+                }
                 return loopflow::lf::commands::waves::subscribe_task_status(
                     repo,
                     task.identifier,

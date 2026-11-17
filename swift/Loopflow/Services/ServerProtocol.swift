@@ -92,7 +92,7 @@ public enum ServerClientMessage: Encodable, Sendable {
     /// The server answers `bridged`, and the connection then speaks the owner protocol.
     case attach(ticket: String)
 
-    private enum Keys: String, CodingKey { case type, id, operation, select, resume, checkpoint, ticket, revision, client, minRevision = "min_revision" }
+    private enum Keys: String, CodingKey { case type, id, operation, select, resume, sender, checkpoint, ticket, revision, client, minRevision = "min_revision" }
     public func encode(to encoder: Encoder) throws {
         var box = encoder.container(keyedBy: Keys.self)
         switch self {
@@ -107,12 +107,15 @@ public enum ServerClientMessage: Encodable, Sendable {
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
+            // Another Machine's `lf` names what it runs with; a client here never does.
+            try box.encodeNil(forKey: .sender)
         case .subscribe(let id, let operation, let select, let resume):
             try box.encode("subscribe", forKey: .type)
             try box.encode(id, forKey: .id)
             try box.encode(operation, forKey: .operation)
             try box.encode(select, forKey: .select)
             try box.encode(resume, forKey: .resume)
+            try box.encodeNil(forKey: .sender)
         case .checkpoint(let id, let checkpoint):
             try box.encode("checkpoint", forKey: .type)
             try box.encode(id, forKey: .id)

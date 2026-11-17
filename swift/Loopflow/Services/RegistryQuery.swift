@@ -601,7 +601,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
         case .taskHold(let directory, let issue):
-            TaggedFields("task.hold", ["directory": directory, "issue": issue])
+            TaggedFields("task.hold", ["directory": directory, "issue": issue, "reason": String?.none])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):

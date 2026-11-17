@@ -315,8 +315,10 @@ Also merge the two copies of `openWorktree` (Warp URL and Notice) in
 `RoadmapView` and `WorkSurfaceView` into one function.
 
 These stay: `conversationError`, `completionPending`, the retained-Task
-banner, sheet input validation (`saveError`, `CreateWaveSheet`,
-`NewWaveRow`), the "Workspace unavailable" content view (it is the page),
+banner, failures shown inside a sheet, where a window Notice would sit
+behind the modal (`saveError`, `CreateWaveSheet`, `NewWaveRow`, the catalog
+inspectors' Customize `sourceError`), the app-level deep-link and snapshot
+reports that have no window yet, the "Workspace unavailable" content view (it is the page),
 the on-demand reads that have no `WorkModel` (`ProjectHistoryView`,
 `GraphRunStep`, telemetry), the "Move blocked Sessions" confirmation, and two
 phone alerts outside the Task feed: Keychain pairing

@@ -3441,6 +3441,13 @@
             "null"
           ]
         },
+        "error": {
+          "description": "Why the step failed, as the step recorded it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "exit_code": {
           "format": "int32",
           "type": [
@@ -3489,7 +3496,8 @@
         "started_at",
         "completed_at",
         "outcome",
-        "exit_code"
+        "exit_code",
+        "error"
       ],
       "type": "object"
     },

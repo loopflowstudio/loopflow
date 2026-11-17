@@ -2160,6 +2160,20 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
         .unwrap()
         .to_string();
     assert_eq!(attempts(task.home.path(), &carrier).len(), 1);
+    // Status reads the interrupted carrier as interrupted, not failed.
+    let status = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .output()
+    .unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    let line = status
+        .lines()
+        .find(|line| line.contains(&format!("Process: {carrier}")))
+        .unwrap_or_else(|| panic!("{status}"));
+    assert!(line.contains("  interrupted"), "{status}");
 }
 
 #[test]

@@ -780,7 +780,7 @@ mod tests {
     }
 
     #[test]
-    fn a_failed_graph_names_its_last_failed_steps_error() {
+    fn a_failed_graph_names_and_shows_its_last_failed_steps_error() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         let graph = store.test_graph(
@@ -808,9 +808,15 @@ mod tests {
             store.graph_failure_cause(&graph).unwrap(),
             Some((7, "gate: tests failed".into()))
         );
-        let (graph, _) = store.graph_process(&graph.as_str()[..8]).unwrap().unwrap();
+        let (graph, entry) = store.graph_process(&graph.as_str()[..8]).unwrap().unwrap();
         assert_eq!(graph.steps[1].run.ended_at, Some(5));
         assert_eq!(graph.steps[1].run.pid, None);
+        // `lf graph show <RUN_ID> --json` shows why the step failed.
+        let shown = &graph.detail(entry).steps[1];
+        assert_eq!(
+            (shown.exit_code, shown.error.as_deref()),
+            (Some(1), Some("gate: tests failed"))
+        );
     }
 
     #[test]

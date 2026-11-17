@@ -126,6 +126,7 @@ impl GraphRun {
             completed_at: step.run.ended_at,
             outcome: step.run.result().outcome().map(str::to_owned),
             exit_code: step.run.exit_code,
+            error: step.run.error.clone(),
         }
     }
 

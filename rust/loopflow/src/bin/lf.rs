@@ -725,12 +725,34 @@ fn print_task_snapshot(
                 log(&graph.summary.id),
             );
         }
-        for process in &snapshot.work.processes {
+        // A Graph run is its Graph line above, read from its own row.
+        let runs: std::collections::HashSet<&str> = snapshot
+            .work
+            .graph_processes
+            .iter()
+            .map(|graph| graph.summary.id.as_str())
+            .collect();
+        for process in snapshot
+            .work
+            .processes
+            .iter()
+            .filter(|process| !runs.contains(process.id()))
+        {
+            // How it ended, by the rule run rows use: exit 130 with no error is an interrupt.
+            let result = process.as_lf().map(|process| {
+                loopflow_storage::graph_process::RunResult::of(
+                    process.completed_at,
+                    process.exit_code,
+                    process.error.as_deref(),
+                )
+            });
             println!(
                 "  Process: {}  {}  {}{}",
                 process.id(),
                 process.command().unwrap_or("unknown command"),
-                process.outcome().unwrap_or("unknown"),
+                result
+                    .map(|result| result.outcome().unwrap_or("running"))
+                    .unwrap_or("unknown"),
                 log(process.id()),
             );
         }

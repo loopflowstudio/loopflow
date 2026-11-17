@@ -94,4 +94,7 @@ order, both env variables, dev-only skew accepted).
 ## QA (2026-11-16)
 
 - `lf graph show <RUN_ID>` failed with "graph not found" though docs and `task_operate` use it; now falls back to the recorded run. Walkthrough in `scratch/qa.html`.
-- Docs and operate skills already describe `lf ps` as live Sessions and Graph runs and `lf machine doctor` strays; neither is built. Land them with those slices or trim before an early merge.
+- Docs and operate skills already describe `lf ps` as live Sessions and Graph runs and `lf machine doctor` strays; neither is built, and both wait on LOO-936 (unmerged; origin/main `4852348e5c` has no LOO-936 commit). Call: keep the docs untrimmed. One Task is one PR, and this branch merges only after the Session slices land.
+- `lf graph show <RUN_ID> --json` steps now carry `error` (DTO `GraphStepProcess.error`, Rust and Swift, fixtures and schema).
+- `lf task status` labelled the interrupted carrier (`lf task run`, a Process with no run row) "failed" from `processes.outcome`. Process lines now take their label from the row's end, exit and error by `RunResult::of`, so it reads `interrupted`; a Process line repeating a Graph run's line is omitted. `processes.outcome` itself and the remaining Process lines go with the Process-line slice.
+- Checks: `cargo test -p loopflow-storage --lib sqlite::graph_inventory::` (5), `cargo test -p loopflow --test integration dto_fixtures::` (52), `cargo test -p loopflow --lib server::schema::tests::` (8), `task_graph_launch_tests::an_interrupt_during_an_operation_stops_the_graph_before_its_next_step`, `scripts/test_desktop.sh --filter 'DTOFixtureTests|TaskGraphProofTests|DesktopHeadlessTests'` (82), clippy and fmt: passed.

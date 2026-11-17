@@ -227,6 +227,8 @@ pub struct GraphStepProcess {
     pub completed_at: Option<i64>,
     pub outcome: Option<String>,
     pub exit_code: Option<i32>,
+    /// Why the step failed, as the step recorded it.
+    pub error: Option<String>,
 }
 
 impl GraphStepProcess {

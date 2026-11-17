@@ -42,7 +42,8 @@ struct DesktopHeadlessTests {
     func nestedRunHistory() throws {
         func step(_ id: String, _ iterations: [[UInt32]], outcome: String = "succeeded") -> GraphStepProcess {
             GraphStepProcess(lfProcessId: id, label: "implement", key: 0, iterations: iterations,
-                             startedAt: 10, completedAt: 15, outcome: outcome, exitCode: outcome == "failed" ? 1 : 0)
+                             startedAt: 10, completedAt: 15, outcome: outcome, exitCode: outcome == "failed" ? 1 : 0,
+                             error: nil)
         }
         let steps = [step("a", [[0], [1]]), step("b", [[0], [1]]),
                      step("c", [[0, 1]]), step("d", [[0], [1]], outcome: "failed")]

@@ -82,6 +82,7 @@
           {
             "completed_at": 1793156345,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -94,6 +95,7 @@
           {
             "completed_at": 1793156346,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -606,6 +608,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -618,6 +621,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -780,6 +784,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -792,6 +797,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1104,6 +1110,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -1596,6 +1603,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1758,6 +1766,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2070,6 +2079,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -2536,6 +2546,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2698,6 +2709,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],

@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-931 concept review</title>
+<style>
+  :root { --bg:#fbfaf7; --fg:#1e1d1a; --dim:#6b675e; --line:#dedad0; --code:#f1eee6; --new:#2f6f4f; --old:#9a4a2c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#17171a; --fg:#e8e6e1; --dim:#9c988f; --line:#33332f; --code:#222226; --new:#7fc49d; --old:#e0937a; } }
+  body { background:var(--bg); color:var(--fg); font:16px/1.55 -apple-system, "Iowan Old Style", Georgia, serif; margin:0; }
+  main { max-width:44rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  h1 { font-size:1.5rem; margin:0 0 .25rem; }
+  h2 { font-size:1.1rem; margin:2.2rem 0 .6rem; }
+  .meta { color:var(--dim); font-size:.9rem; }
+  code, pre { font:13px/1.45 ui-monospace, Menlo, monospace; background:var(--code); border-radius:4px; }
+  code { padding:0 .25em; }
+  pre { padding:.8rem 1rem; overflow-x:auto; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  th, td { text-align:left; vertical-align:top; padding:.4rem .5rem; border-bottom:1px solid var(--line); }
+  .old { color:var(--old); } .new { color:var(--new); }
+  .callout { border-left:3px solid var(--old); padding:.2rem 0 .2rem 1rem; margin:1rem 0; }
+  ol li { margin-bottom:.5rem; }
+</style>
+</head>
+<body><main>
+<h1>LOO-931: what the built change path still misses</h1>
+<p class="meta">Task LOO-931 · step concept-review pass 2 (headless) · 2026-11-16 · built from
+<code>scratch/show-changes-at-once.md</code>, <code>scratch/questions.md</code>,
+<code>swift/Loopflow/Services/PendingChanges.swift</code>, <code>Notice.swift</code>, <code>Reading.swift</code>,
+<code>swift/LoopflowMac/WorkModel.swift</code>, <code>rust/loopflow-model/src/durable.rs</code></p>
+
+<p><strong>Decision needed: none.</strong> The seven directions from pass 1 are built: one
+<code>PendingChanges</code> per Machine owns make, request, resend and the link; <code>Reading</code> carries
+<code>readAt</code>; <code>NoticeCenter</code> holds conditions under one event. Four gaps remain, each settled by
+the brief. They go back to implement.</p>
+
+<h2>The biggest mismatch</h2>
+<div class="callout">
+<p>The brief: "Move, Claim, Unassign, Reopen and Session rename show their result in the click." Claim on an
+unstarted Task shows nothing: the client has no person to put in <code>owner</code>, so only the section moves,
+and only when the Task was started. The Machine already knows who a claim names. It should say so on the
+reading.</p>
+</div>
+<table>
+<tr><th></th><th>Click Claim on unstarted LOO-3</th></tr>
+<tr><td class="old">built</td><td>Row unchanged until the next reading names the owner.</td></tr>
+<tr><td class="new">proposed</td><td>Repository <code>task_list</code> reading carries <code>viewer: TaskOwner?</code>;
+Claim sets <code>runtime.owner = viewer</code> in the click. No Git identity → section move only.</td></tr>
+</table>
+
+<h2>Actions → concepts → APIs (what changes)</h2>
+<table>
+<tr><th>Action</th><th>Concept</th><th>API</th></tr>
+<tr><td>Claim</td><td>Pending change, owner from the Machine</td><td class="new"><code>task_list.viewer</code> (DTO, required nullable)</td></tr>
+<tr><td>A read fails</td><td>Notice event keyed by part; none while away</td><td class="new">one assignment function in <code>WorkModel</code>; ~50 inline sites go</td></tr>
+<tr><td>Launch</td><td>Saved reading</td><td class="new"><code>SavedReadings</code> for Desktop <code>task_list</code>; <code>sidebarTaskRows</code> planning fallback goes</td></tr>
+<tr><td>Change refused</td><td>Notice with one action</td><td class="new"><code>make(…, action:)</code> "Show" selects / opens the Task</td></tr>
+</table>
+
+<h2>Why the bridge must go</h2>
+<p><code>sidebarTaskRows</code> falls back to planning rows' sections before the list reads. That is a second
+list evaluator, which the plan forbids; a saved reading draws the same first frame from the Machine's own answer.</p>
+
+<h2>Questions</h2>
+<ol>
+<li>Phone Abandon (open since kickoff): the phone gains the four actions the brief names; Abandon stays
+Desktop-only. a) keep, b) add Abandon to the phone's swipe.</li>
+</ol>
+</main></body></html>

@@ -201,10 +201,17 @@ fn a_turn_takes_its_steer_with_the_unread_ones_before_it() {
     let earlier = store
         .save_session_steer("session", "Author", "First")
         .unwrap();
-    let (steer, taken) = store
+    let taken = store
         .take_session_steers("session", "Graph", "Second")
         .unwrap();
-    assert_eq!(taken, vec![earlier, steer]);
+    assert_eq!(taken[0], earlier);
+    assert_eq!(
+        taken
+            .iter()
+            .map(|steer| steer.text.as_str())
+            .collect::<Vec<_>>(),
+        ["First", "Second"]
+    );
     let page = store.session_steers("session", 0, 32).unwrap();
     assert_eq!(page.pending, 0);
     assert!(page.items.iter().all(|row| row.delivered_at.is_some()));
@@ -785,10 +792,10 @@ fn each_steer_wakes_the_session_it_names_once() {
         )
         .unwrap();
     }
-    let (read_steer, _) = store
+    let taken = store
         .take_session_steers("primary", "Author", "Read in its own turn")
         .unwrap();
-    assert_eq!(read_steer.text, "Read in its own turn");
+    assert_eq!(taken.last().unwrap().text, "Read in its own turn");
     // `primary` read the Task's steer in that turn: nothing wakes it.
     assert_eq!(
         woken(&store),

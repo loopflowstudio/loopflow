@@ -30,3 +30,9 @@
 - The server's record of what it has read for starts is one cursor over
   `steers.seq`, not a per-steer column: a steer to a running Session is read
   past too, so if that Session quits before reading it, nothing starts it.
+- Steer 119ddcde (2026-11-17) settles the launch names: "managed+typing = work
+  session, managed+headless = worker, bare+typing = chat, bare+headless =
+  batch", "Use these words in docs". This branch's text still says "Run" for a
+  headless Session (`lf steer`'s "is a finished Run", `docs/sessions.md`, the
+  server README). Compress left them; the rename follows LOO-924's, which
+  owns the `Run` type.

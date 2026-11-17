@@ -710,10 +710,10 @@ impl SqliteStore {
         session: &str,
         author: &str,
         text: &str,
-    ) -> StoreResult<(Steer, Vec<Steer>)> {
+    ) -> StoreResult<Vec<Steer>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let steer = save_in(
+        save_in(
             &tx,
             ("session", session),
             &uuid::Uuid::new_v4().to_string(),
@@ -723,7 +723,7 @@ impl SqliteStore {
         )?;
         let steers = take_unread_in(&tx, session)?;
         tx.commit()?;
-        Ok((steer, steers))
+        Ok(steers)
     }
 
     /// The first input of a stopped conversation starting again: every steer

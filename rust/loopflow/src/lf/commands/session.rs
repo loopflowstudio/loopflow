@@ -72,8 +72,10 @@ pub fn steer(
         };
         anyhow::Ok((store, session))
     })?;
-    if let (Some(session), true) = (session.clone(), cli.batch) {
-        return steer_turn(cli, &runtime, &store, session, &directory, message, json);
+    if let (Some(session), true) = (&session, cli.batch) {
+        if steer_turn(cli, &runtime, &store, session, &directory, message)? {
+            return Ok(());
+        }
     }
     let scope = match (&session, target, cli.wave.as_deref()) {
         (Some(session), _, _) => SteerScope::Session(&session.id),
@@ -132,26 +134,24 @@ fn steer_reader(
         } else if session.interactive {
             format!("the Machine server starts {id} to read it")
         } else {
-            format!("{id} {FINISHED_RUN}")
+            format!("{id} is a finished Run; nothing reads it until its Graph continues it")
         },
     )
 }
 
-const FINISHED_RUN: &str = "is a finished Run; nothing reads it until its Graph continues it";
-
 /// `lf -b steer SESSION TEXT`: a Session whose agent is stopped reads its
 /// unread steers, this one last, in one headless turn here, and the reply
-/// prints. A running Session reads it at its next boundary, and a finished Run
-/// only when its own Graph continues it, so for those it is only saved.
+/// prints. False when there is no turn to run here: a running Session reads
+/// the steer at its next boundary, and a finished Run only when its own Graph
+/// continues it, so the caller only saves it.
 fn steer_turn(
     cli: &crate::lf::Cli,
     runtime: &tokio::runtime::Runtime,
     store: &Arc<Store>,
-    session: loopflow_execution::session::LfSession,
+    session: &loopflow_execution::session::LfSession,
     directory: &Path,
     message: &str,
-    json: bool,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<bool> {
     use loopflow_execution::ops::human_session as human;
     use loopflow_execution::transport::{delegate_current, Delegation, LaunchInput};
     let input = LaunchInput {
@@ -160,40 +160,24 @@ fn steer_turn(
         has_prompt: true,
     };
     let run = match delegate_current(input, false)? {
-        Delegation::Delegated => return Ok(()),
+        Delegation::Delegated => return Ok(true),
         Delegation::Here { run } => run,
     };
     // One process per Session: this turn holds the launch lock to its end.
     let _launch = human::lock_session_process(&session.id)?;
     let sqlite = &store.sqlite;
-    let reader = if human::agent_running(sqlite, &session)? {
-        Some("reads it at its next boundary")
-    } else if !super::run::continues_own_step(sqlite, &session)?
-        && human::run_refusal(sqlite, &session)?.is_some()
+    if human::agent_running(sqlite, session)?
+        || !session.interactive && !super::run::continues_own_step(sqlite, session)?
     {
-        Some(FINISHED_RUN)
-    } else {
-        None
-    };
-    if let Some(reader) = reader {
-        let steer = runtime.block_on(loopflow_execution::engine::session::steer(
-            store,
-            directory,
-            loopflow_execution::engine::session::SteerScope::Session(&session.id),
-            message,
-        ))?;
-        match json {
-            true => println!("{}", serde_json::to_string(&steer)?),
-            false => println!("Saved {}; {} {reader}", steer.id, session.id),
-        }
-        return Ok(());
+        return Ok(false);
     }
-    let session = runtime.block_on(human::admit_workspace(store, session))?;
+    let session = runtime.block_on(human::admit_workspace(store, session.clone()))?;
     let author = loopflow_execution::config::participant_name_in(directory)?
         .unwrap_or_else(|| "attribution unresolved".into());
-    let (_, steers) = sqlite.take_session_steers(&session.id, &author, message)?;
+    let steers = sqlite.take_session_steers(&session.id, &author, message)?;
     let prompt = loopflow_execution::steer::render_complete(&steers);
-    super::run::resume(sqlite, &session, &prompt, cli, run)
+    super::run::resume(sqlite, &session, &prompt, cli, run)?;
+    Ok(true)
 }
 
 async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {

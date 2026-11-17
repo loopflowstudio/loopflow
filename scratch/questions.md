@@ -41,3 +41,9 @@
   behavior); unverified whether any held-terminal launcher passes `-b`.
   Pairing `current()` with `mode()` (headless → Worker) would restore main's
   behavior.
+  QA at `c41dabf1f7`: unreachable. Only the holder's direct child adopts the
+  handoff, and the holder now receives only resumes; `lf -b` typed in a held
+  Desktop shell ran as a batch (`scratch/qa.html`).
+- 2026-11-17, QA: `lf desktop shell --checkout` needs the canonical path
+  (`/private/tmp/…`); `/tmp/…` refuses with "The Task checkout changed". Not
+  added to the qa skill: this branch has no repository `qa.md` to extend.

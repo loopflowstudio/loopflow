@@ -102,6 +102,9 @@ QA on 2026-11-17 drove both demo checks live with a stand-in Claude
 tool call and lists under the Task in `lf usage`, a worker received the same
 kind of steer, a chat reopened in its terminal, and a work session reattached to
 its held provider after the viewer closed. Codex, OpenCode and Pi were not run live.
+A second QA pass at `c41dabf1f7` repeated all four kinds and checked that bare
+`lf task run` returns while its worker step runs, `lf -b task run` waits for it,
+the worker received a steer, and `lf -b` in a held shell stays a batch.
 
 Earlier local checks are in `81925194af:scratch/plan.md`. The launch matrix now
 specifies each launch kind's expected mode and turn reporting independently and

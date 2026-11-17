@@ -467,3 +467,79 @@ Check results: `cargo nextest run -p loopflow-storage -p loopflow-execution
 (fixed since by the stand-in transcript) and
 `native_runner_is_quiet_until_its_turn_ends_codex_foreground` (sccache
 "cannot find binary path" in this environment; for gate/CI).
+
+### Upgrade skew of slice 3 (to design before ship)
+
+A Process still running the released lf after `lf install` keeps its old
+reads and writes while new Processes use the history file:
+
+- It writes history kinds into `loopflow.db`; new readers do not see them
+  until the move pass carries them over (a live turn's usage, start and end
+  vanish from Session History meanwhile).
+- An old Graph process reads its step's answer from `output` rows in
+  `loopflow.db`; a step run by the new lf writes none, so the old Graph sees
+  "final output is absent" and spends its correction turns. An old
+  `lf session resume` reads the resume thread from `provider-session:*` rows,
+  which the new lf no longer writes, so it starts a fresh provider
+  conversation instead of resuming.
+- New readers of the resume reference, the independent flag and the latest
+  transition see what the migration backfilled, plus what new Processes write.
+
+Open: whether install waits for, or names, released-lf Graph processes and
+Sessions still running (the 2026-11-04 incident: install cannot see live
+processes), or whether the new lf also answers old readers until they exit.
+The same question decides slice 4 (`processes` and the attachment token).
+
+### Slice 4 tables: one per kind (draft, 2026-11-16)
+
+From a survey of production readers of every `processes` column (paths under
+`loopflow-storage/src/sqlite/` unless named). Live store: 161,633 lf rows,
+22,443 agent rows.
+
+`history.lf_processes` (an `lf` invocation):
+
+| Column | Reader |
+| --- | --- |
+| `id`, `trace_id` | every lookup; `agent_parent` (`processes.rs:1681`), receipt match (`journal/mod.rs:1376`), `lf doctor` lineage |
+| `parent_lf_process_id` | `process_starter`, `failure_cause`, Graph inventory and runner, terminal retention, `lf top` tree, `lf history --parent` |
+| `caller_session_id` | `process_starter` (ship's "started by"), `lf context`, `lf history --caller` |
+| `caller_agent_process_id` | `lf history --parent <agent>` only |
+| `command`, `repo`, `cwd` | `lf ps/top/history`, Task membership by checkout (`task_work.rs`), relocation, ci-fix blockers |
+| `started_at`, `completed_at` | paging, liveness, Task moving/shipping until the pointing records carry `ended_at` |
+| `exit_code`, `error` | `lf task create --run`, Task view, Blocked reason, `failure_cause`, Graph step detail |
+| `pid`, `os_started_at`, `receipt_locator`, `journal_trace_locator` | liveness, receipt cleanup, inherited trace directory |
+| `terminal_id`, `held_terminal_id` | Session summary terminal, terminal retention |
+
+No `outcome`: readers derive it. Running while `completed_at` is NULL;
+exit 0 succeeded; 130 with no error interrupted; any other exit failed; a
+completed row with no exit is unknown (crash-closed). Two writers break this
+today and change with the slice: `native_exit.rs:146` writes an interrupt
+with an error line (the line goes to `lf.log`), and `terminal_holder/client.rs:351`
+writes "failed" with no exit for a signal-killed holder (it records 128+N).
+Left out: `kind`, `outcome`, `signal` (never set), `via_agent` (only
+`FORGETTABLE`, replaced by age), `caller_provider_generation`, `viewed`,
+`native_input`, `viewer_hold`, `viewer_hold_at` (no reader).
+
+`history.agent_processes` (a provider OS process serving a Session):
+
+| Column | Reader |
+| --- | --- |
+| `id`, `trace_id`, `parent_lf_process_id` | ancestry repair (`trace_id=id`), launcher liveness, reaping owner, replaced-provider check |
+| `agent_session_id`, `provider`, `interactive` | settlement lock, reaping and terminate path, Task membership, Codex endpoint vs Claude inbox |
+| `command`, `repo`, `cwd` | `lf ps`, Task membership by checkout |
+| `started_at`, `completed_at`, `pid`, `os_started_at` | liveness (`journal/mod.rs:1247`, `:1340`), boot check, reserved-but-unspawned |
+| `endpoint`, `inbox` | reconnect and Codex close (`attachment.rs:15`, `agent_process.rs:429`), Claude inbox reach (`steers.rs:241`) |
+| `exit_code` | how it ended: the provider's exit status, 130 for an interrupt; read by `native_exit.rs:184` (was the exit an interrupt) |
+
+How an AgentProcess ends: `completed_at` plus `exit_code` as the launcher
+observed it; NULL `exit_code` on a completed row means lf did not see the
+exit (crash-closed); no `pid` on a completed row means it never started
+(today's `spawn_failed`). `spawn_state` goes: its only reader asks "reserved
+with no pid", which `pid IS NULL AND completed_at IS NULL` answers. The
+attachment (`attachment_token`, `attached_lf_process_id`) moves to
+`agent_sessions` (settled). Left out: `outcome`, `error`, `signal`
+(never written for agents), `attachment_exit_seq`, `receipt_locator`
+(agents ignore receipts), `journal_trace_locator`.
+
+Overlap: another branch stops writing `processes.outcome` for agent rows;
+whichever lands second reconciles with this design.

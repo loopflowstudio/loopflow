@@ -134,7 +134,7 @@ struct WorkSurfaceView: View {
                             .foregroundStyle(palette.textSecondary)
                     }
                     TrackerSyncView(sync: task.task.sync) { action, answer in
-                        Task { await model.answerLost(task, action: action, answer: answer) }
+                        model.answerLost(task, action: action, answer: answer)
                     }
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)

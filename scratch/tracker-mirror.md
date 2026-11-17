@@ -70,7 +70,12 @@ reach them. The answer belongs to the line, not the Task:
   no per-kind button rule.
 - One line, one spelling: `lf repo plan answer <id> --keep-theirs |
   --use-mine`, served as `plan.answer`; Desktop's two buttons call it on
-  every `TrackerSyncView` (`onAnswer` stops being Task-only). `lf task sync
+  every `TrackerSyncView` (`onAnswer` stops being Task-only). Since #1960
+  (merged at f5a6e4b686) Desktop writes go through `PendingChanges.request`
+  with a `ServedWrite` (`RegistryQuery.swift`); the answer becomes a
+  `ServedWrite.planAnswer(directory:, action:, answer:)` case, and
+  `.taskSync` drops `action`. Today `WorkModel.answerLost` sends
+  `.taskSync(…, action:)`. `lf task sync
   <task> --keep-theirs | --use-mine` stays the bulk answer (Jack Heart, round
   2: "2a"); its `--action` moves to `plan.answer`, and `task.sync` drops
   `action`.

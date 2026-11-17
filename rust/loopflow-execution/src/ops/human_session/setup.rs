@@ -93,15 +93,15 @@ async fn start_graph(store: &SharedStore, session: &LfSession, request_id: &str)
     let launch = match &row.run {
         Some((_, process)) => serde_json::json!({ "lf_process_id": process.id }),
         None => {
-            let argv = [
-                crate::os_process::execution_context()?
-                    .lf_bin
-                    .to_string_lossy()
-                    .into_owned(),
-                "task".into(),
-                "run".into(),
-                task.identifier.clone(),
-            ];
+            let mut argv = vec![crate::os_process::execution_context()?
+                .lf_bin
+                .to_string_lossy()
+                .into_owned()];
+            // The agent this conversation was started with runs its Graph too.
+            if let Some(agent) = crate::config::settings::invocation_values()["agent"].as_str() {
+                argv.extend(["--agent".into(), agent.to_owned()]);
+            }
+            argv.extend(["task".into(), "run".into(), task.identifier.clone()]);
             let process = crate::os_process::detached::start_lf(&session.cwd, &argv, &[], &|_| {})?;
             serde_json::json!({ "lf_process_id": process })
         }

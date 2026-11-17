@@ -42,7 +42,6 @@
       "provider": "claude",
       "account": null,
       "model": null,
-      "blocked": false,
       "cwd": "/src/loopflow",
       "state": "active",
       "ready_summary": null,

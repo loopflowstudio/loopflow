@@ -162,24 +162,28 @@ async fn start_in_background(
     if Path::new(&session.cwd) != worktree.as_path() {
         return Ok(None);
     }
-    Ok(hold(store, &session.id, Path::new(&session.cwd), wave)
-        .await?
-        .then(|| session.id.to_string()))
+    Ok(
+        hold(store, &session.id, Path::new(&session.cwd), wave, None)
+            .await?
+            .then(|| session.id.to_string()),
+    )
 }
 
 /// Start a new Task's recorded conversation in a held terminal, where it
 /// makes its checkout and starts its Graph before its provider. Setup needs
 /// no agent; a missing one is reported in the terminal once setup is done.
+/// The creation's `agent` runs the conversation and its Graph.
 pub(crate) async fn hold_task_conversation(
     store: &SharedStore,
     task: &loopflow_storage::work::task::Task,
     session: &LfSession,
+    agent: Option<&str>,
 ) -> Result<bool> {
     let wave = match &task.wave_id {
         Some(id) => store.get_wave(id).await?,
         None => None,
     };
-    hold(store, &session.id, &session.cwd, wave).await
+    hold(store, &session.id, &session.cwd, wave, agent).await
 }
 
 async fn hold(
@@ -187,19 +191,19 @@ async fn hold(
     session: &loopflow_model::id::LfSessionId,
     cwd: &Path,
     wave: Option<crate::work::wave::Wave>,
+    agent: Option<&str>,
 ) -> Result<bool> {
     // Prepared conversations can start; previously opened ones stay as they are.
     if opened(store, session.as_str())? {
         return Ok(false);
     }
-    let argv = [
-        crate::os_process::resolve_lf_binary()?
-            .to_string_lossy()
-            .into_owned(),
-        "session".into(),
-        "resume".into(),
-        session.to_string(),
-    ];
+    let mut argv = vec![crate::os_process::resolve_lf_binary()?
+        .to_string_lossy()
+        .into_owned()];
+    if let Some(agent) = agent {
+        argv.extend(["--agent".into(), agent.into()]);
+    }
+    argv.extend(["session".into(), "resume".into(), session.to_string()]);
     let (held, cwd) = (session.clone(), cwd.to_path_buf());
     tokio::task::spawn_blocking(move || {
         crate::transport::start_held(&argv, &cwd, Some(&held), &|command| {

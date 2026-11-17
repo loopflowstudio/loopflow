@@ -300,7 +300,10 @@ fn start_conversation(
     // A conversation that does not start here starts, and sets up, when opened.
     step("hold_conversation", || {
         match runtime.block_on(crate::ops::human_session::primary::hold_task_conversation(
-            store, &task, &session,
+            store,
+            &task,
+            &session,
+            input.agent.as_deref(),
         )) {
             Ok(true) => {}
             Ok(false) => tracing::info!("new Task conversation waits for its first open"),

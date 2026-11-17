@@ -17,6 +17,7 @@ struct CreationFixture {
 struct Service {
     child: std::process::Child,
     socket: PathBuf,
+    home: PathBuf,
 }
 
 impl Service {
@@ -33,7 +34,11 @@ impl Service {
             .stderr(fs::File::create(fixture.home.path().join("service.stderr")).unwrap())
             .spawn()
             .unwrap();
-        let mut service = Self { child, socket };
+        let mut service = Self {
+            child,
+            socket,
+            home,
+        };
         let deadline = Instant::now() + Duration::from_secs(20);
         loop {
             if Connection::open_at(&service.socket).is_ok() {
@@ -59,6 +64,23 @@ impl Service {
 
 impl Drop for Service {
     fn drop(&mut self) {
+        // A process still running would install its own server for this home
+        // once this one stops. The terminal holder outlives its terminals.
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while let Ok(db) = rusqlite::Connection::open(self.home.join("loopflow.db")) {
+            let running: i64 = db
+                .query_row(
+                    "SELECT count(*) FROM processes WHERE completed_at IS NULL
+                     AND command != '[\"lf\",\"holder\",\"run\"]'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if running == 0 || Instant::now() > deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
         let _ = self.child.kill();
         let _ = self.child.wait();
         let _ = fs::remove_dir_all(self.socket.parent().unwrap());
@@ -266,6 +288,7 @@ fn task_create_takes_the_ready_checkout_and_leaves_another() {
     use std::os::unix::fs::MetadataExt;
     let task = CreationFixture::new();
     task.repo.push();
+    let _service = Service::start(&task);
     let ready = loopflow_execution::git::worktrees::ready_checkout(task.repo.path());
     // The first Start in a repository without one makes it the slower way.
     let first = task.start("First Task");
@@ -337,6 +360,92 @@ fn task_create_takes_the_ready_checkout_and_leaves_another() {
     task.start("Third Task");
     task.wait_for_graphs();
     task.wait_for_ready(&ready);
+}
+
+#[test]
+fn task_create_with_an_agent_runs_its_conversation_and_graph_on_it() {
+    let task = CreationFixture::new();
+    task.repo.push();
+    let _service = Service::start(&task);
+    let codex = task.home.path().join("bin/codex");
+    fs::write(
+        &codex,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo fixture; exit 0; fi\nexit 99\n",
+    )
+    .unwrap();
+    fs::set_permissions(&codex, fs::Permissions::from_mode(0o755)).unwrap();
+    // Every `lf` the Start causes, with the agent its environment names.
+    let starts = task.home.path().join("lf-starts");
+    let lf = task.home.path().join("bin/lf-recorder");
+    fs::write(
+        &lf,
+        format!(
+            "#!/bin/sh\necho \"$*|${{LF_AGENT_OVERRIDE-}}\" >> '{}'\nexec '{}' \"$@\"\n",
+            starts.display(),
+            env!("CARGO_BIN_EXE_lf")
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&lf, fs::Permissions::from_mode(0o755)).unwrap();
+    let output = task
+        .command()
+        .env("LF_BIN", &lf)
+        .args([
+            "-a",
+            "codex",
+            "task",
+            "create",
+            "Run on codex",
+            "--run",
+            "--graph",
+            "feature",
+            "--json",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let session = answer["session_id"].as_str().unwrap().to_owned();
+    task.wait_for_graph_start();
+    task.wait_for_graphs();
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let provider: String = db
+        .query_row(
+            "SELECT provider FROM agent_sessions WHERE id=?1",
+            [session.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(provider, "codex");
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let calls = loop {
+        let calls = fs::read_to_string(&starts).unwrap_or_default();
+        if calls.lines().any(|line| line.starts_with("-i ")) {
+            break calls;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the conversation started no provider: {calls}\n{}",
+            fs::read_to_string(task.home.path().join("logs/lf.log")).unwrap_or_default()
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    let provider = calls.lines().find(|line| line.starts_with("-i ")).unwrap();
+    assert!(provider.contains("--agent codex"), "{calls}");
+    let graph = calls
+        .lines()
+        .find(|line| {
+            line.contains(&format!(
+                "task run {}",
+                answer["task"]["identifier"].as_str().unwrap()
+            ))
+        })
+        .unwrap_or_else(|| panic!("no Task run: {calls}"));
+    assert!(graph.contains("--agent codex"), "{calls}");
 }
 
 impl CreationFixture {
@@ -523,6 +632,7 @@ impl CreationFixture {
 fn task_create_request_recovers_lost_replies_without_repeating_start() {
     let task = CreationFixture::new();
     task.repo.push();
+    let service = Service::start(&task);
     let id = uuid::Uuid::new_v4().to_string();
     let args = [
         "task",
@@ -588,7 +698,7 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
     let saved: serde_json::Value = serde_json::from_slice(&retry.stdout).unwrap();
     assert_eq!(saved["task"]["id"], receipt["task"]["id"]);
     assert_eq!(counts(), after);
-    let lookup = Service::start(&task)
+    let lookup = service
         .connect()
         .request(loopflow::server::wire::Operation::Read(
             loopflow::lf::commands::read::Read::CreationGet { request_id: id },
@@ -601,6 +711,7 @@ fn task_create_request_recovers_lost_replies_without_repeating_start() {
 #[test]
 fn task_create_request_preserves_a_filed_task_after_start_failure() {
     let task = CreationFixture::new();
+    let _service = Service::start(&task);
     assert!(Command::new("git")
         .args(["push", "origin", "main"])
         .current_dir(task.repo.path())
@@ -651,6 +762,7 @@ fn task_create_request_preserves_a_filed_task_after_start_failure() {
 #[test]
 fn batch_creation_returns_the_original_runs_success_after_a_failed_attempt() {
     let task = CreationFixture::new();
+    let _service = Service::start(&task);
     task.repo.push();
     let shim = task.home.path().join("bin/lf");
     fs::write(
@@ -721,6 +833,7 @@ exec {} "$@"
 #[test]
 fn task_create_without_recovery_keeps_the_existing_receipt_and_exit_status() {
     let task = CreationFixture::new();
+    let _service = Service::start(&task);
     task.repo.push();
     let refused = task.run(&[
         "task",

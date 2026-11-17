@@ -54,7 +54,7 @@ pub async fn connect(
         Provider::GitHub => {
             let token = gh_token()?;
             let login = github_login(token.expose_secret()).await?;
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             Credential::Github {
@@ -68,7 +68,7 @@ pub async fn connect(
                 .await?
                 .ok_or_else(|| anyhow!("Linear is not connected on this laptop"))?;
             let login = linear_login(&current.access_token).await?;
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             let renewed = crate::ops::linear::renewed_planning_token(provider).await?;
@@ -94,7 +94,7 @@ pub async fn connect(
             if !oauth {
                 zen_check(opencode_token(active)).await?;
             }
-            if remote_has(machine, provider, &login)? {
+            if remote_has(machine, provider, &login).await? {
                 return Ok(());
             }
             require_foreground(batch)?;
@@ -180,14 +180,16 @@ pub(crate) fn require_foreground(batch: bool) -> Result<()> {
     Ok(())
 }
 
-fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
-    remote_inspect(machine, &[provider.as_str(), login])
-}
-
-fn remote_inspect(machine: &Machine, args: &[&str]) -> Result<bool> {
-    let args = [&["machine", "credentials", "inspect"], args].concat();
-    let output = remote_command(machine, &args, None)?;
-    serde_json::from_slice(&output).context("remote credential inspection returned invalid JSON")
+/// Whether the target's own `lf machine logins` already shows `login`.
+async fn remote_has(machine: &Machine, provider: Provider, login: &str) -> Result<bool> {
+    Ok(crate::machine::login::logins(machine)
+        .await?
+        .into_iter()
+        .any(|row| {
+            row.provider == provider
+                && row.state == crate::machine::login::LoginState::SignedIn
+                && row.account.as_deref() == Some(login)
+        }))
 }
 
 pub(crate) fn remote_command(
@@ -244,11 +246,6 @@ pub(crate) fn remote_command(
     Ok(output.stdout)
 }
 
-pub async fn inspect(provider: Provider, login: &str) -> Result<bool> {
-    let store = crate::provider_auth::operations::local_store().await?;
-    installed(&store, provider, login).await
-}
-
 pub async fn receive(bytes: &[u8]) -> Result<()> {
     let store = crate::provider_auth::operations::local_store().await?;
     if bytes.len() > 1024 * 1024 {
@@ -262,21 +259,9 @@ pub async fn receive(bytes: &[u8]) -> Result<()> {
 async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Result<bool> {
     match provider {
         Provider::GitHub => {
-            let directory = std::env::var_os("GH_CONFIG_DIR")
-                .map(std::path::PathBuf::from)
-                .unwrap_or_else(|| {
-                    dirs::home_dir()
-                        .expect("OS user has a home")
-                        .join(".config/gh")
-                });
-            let path = directory.join("hosts.yml");
-            let content = match fs::read_to_string(path) {
-                Ok(content) => content,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
-                Err(error) => return Err(error.into()),
+            let Some(config) = gh_hosts()? else {
+                return Ok(false);
             };
-            let config: serde_yaml_ng::Value = serde_yaml_ng::from_str(&content)
-                .map_err(|_| anyhow!("invalid GitHub credential file"))?;
             let github = &config["github.com"];
             Ok(github["users"][login]["oauth_token"]
                 .as_str()
@@ -314,6 +299,39 @@ async fn installed(store: &SharedStore, provider: Provider, login: &str) -> Resu
         }
         _ => bail!("unsupported machine login provider"),
     }
+}
+
+/// gh's hosts file on this Machine, if it has one.
+fn gh_hosts() -> Result<Option<serde_yaml_ng::Value>> {
+    let directory = std::env::var_os("GH_CONFIG_DIR")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| {
+            dirs::home_dir()
+                .expect("OS user has a home")
+                .join(".config/gh")
+        });
+    let content = match fs::read_to_string(directory.join("hosts.yml")) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    serde_yaml_ng::from_str(&content)
+        .map(Some)
+        .map_err(|_| anyhow!("invalid GitHub credential file"))
+}
+
+/// The GitHub account gh is signed in as on this Machine.
+pub(crate) fn github_user() -> Result<Option<String>> {
+    Ok(gh_hosts()?.and_then(|config| config["github.com"]["user"].as_str().map(str::to_string)))
+}
+
+/// The OpenCode account active on this Machine, as a transfer names it; none
+/// when OpenCode 2 is missing or has no active login.
+pub(crate) fn opencode_login() -> Option<String> {
+    let entries = opencode_export(None, "machine").ok()?;
+    opencode_active(&entries)
+        .and_then(opencode_identity)
+        .map(str::to_string)
 }
 
 async fn install(store: &SharedStore, credential: Credential) -> Result<()> {

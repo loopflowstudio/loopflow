@@ -330,10 +330,6 @@ pub enum Read {
         wave: Option<String>,
         repo: Option<String>,
     },
-    /// `lf account [<provider>] --json`: saved service authentication.
-    #[serde(rename = "account.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::provider_auth::operations::account_status::AccountReport>()))]
-    AccountList { target: Option<String> },
     /// `lf --cwd <directory> list [<path>…] --json`: the commands, skills,
     /// graphs and Waves under `path`.
     #[serde(rename = "skill.list")]
@@ -569,13 +565,6 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::AccountList { target } => {
-                let mut argv = words(&["account"]);
-                argv.extend(target.iter().cloned());
-                argv.push("--json".into());
-                argv
-            }
-
             Self::SkillList { directory, path } => {
                 let mut argv = at(directory, &["list"]);
                 argv.extend(path.iter().cloned());
@@ -846,9 +835,6 @@ impl Read {
                 since,
                 wave.as_deref(),
                 repo.as_deref(),
-            )?),
-            Self::AccountList { target } => value(&loopflow_execution::engine::account::list(
-                target.as_deref(),
             )?),
             Self::SkillList { directory, path } => {
                 let repo = loopflow_execution::repo::discover_repo_root(directory)

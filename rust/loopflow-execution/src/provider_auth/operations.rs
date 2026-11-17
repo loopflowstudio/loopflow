@@ -1,7 +1,5 @@
-//! Service authentication through `lf account`. Claude and Codex logins belong
-//! to their native clients.
-pub mod account_status;
-
+//! Service sign-in on this Machine for `lf machine login`. Claude and Codex
+//! logins belong to their native clients.
 use crate::config::placement::Approver;
 use crate::machine::login::{send, Page, Sent};
 use crate::profile::LocalChromeProfile;
@@ -21,48 +19,20 @@ use tokio::io::AsyncBufReadExt;
 const AUTH_BROWSER_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
 const AUTH_CODE_FLOW_TIMEOUT_SECS: u64 = 600;
 
-tokio::task_local! { static SERVED: (); }
-pub fn served<T>(operation: impl FnOnce() -> T) -> T {
-    SERVED.sync_scope((), operation)
-}
-fn is_served() -> bool {
-    SERVED.try_with(|()| ()).is_ok()
-}
-macro_rules! narrate {
-    ($($line:tt)*) => {
-        if is_served() { tracing::info!($($line)*); } else { println!($($line)*); }
-    };
-}
-
 /// Connect a service: through its browser login, or from its API key variable.
-pub async fn connect_target(
-    target: &str,
+pub async fn connect(
+    provider: Provider,
     chrome_profile: Option<&str>,
     api_key: bool,
 ) -> Result<()> {
-    let provider = parse_provider(target)?;
     if api_key {
-        configure(provider.as_str()).await
+        configure(provider).await
     } else {
-        connect(provider.as_str(), chrome_profile).await
+        sign_in(provider, chrome_profile).await
     }
 }
 
-pub async fn disconnect_target(target: &str) -> Result<()> {
-    disconnect(target).await
-}
-
-fn parse_provider(raw: &str) -> Result<Provider> {
-    let provider: Provider = raw.parse()?;
-    anyhow::ensure!(
-        !matches!(provider, Provider::Claude | Provider::Codex),
-        "{provider} authentication belongs to the native client"
-    );
-    Ok(provider)
-}
-
-async fn connect(raw_provider: &str, chrome_profile: Option<&str>) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+async fn sign_in(provider: Provider, chrome_profile: Option<&str>) -> Result<()> {
     let approver = crate::machine::login::approver(provider, chrome_profile)?;
     let service = local_auth_service().await?;
     let flow = service
@@ -74,9 +44,9 @@ async fn connect(raw_provider: &str, chrome_profile: Option<&str>) -> Result<()>
             .verification_uri_complete
             .clone()
             .unwrap_or_else(|| flow.verification_uri.clone());
-        narrate!("Connecting local {}...", provider.display_name());
+        println!("Connecting local {}...", provider.display_name());
         if matches!(flow.completion, AuthCompletion::Manual) {
-            narrate!("Manual authorization is required.");
+            println!("Manual authorization is required.");
         }
         approve(provider, approver, url, flow.user_code.clone()).await?;
         tokio::select! {
@@ -89,7 +59,7 @@ async fn connect(raw_provider: &str, chrome_profile: Option<&str>) -> Result<()>
     .await;
     service.abort_pending(provider).await;
     result?;
-    narrate!("Connected local {}", provider.display_name());
+    println!("Connected local {}", provider.display_name());
     Ok(())
 }
 
@@ -112,21 +82,19 @@ async fn approve(
     })
     .await??;
     if let Sent::Opened(place) = sent {
-        narrate!("Approve {} {place}.", provider.display_name());
+        println!("Approve {} {place}.", provider.display_name());
     }
     Ok(())
 }
 
-async fn disconnect(raw_provider: &str) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+pub async fn disconnect(provider: Provider) -> Result<()> {
     let service = local_auth_service().await?;
     service.disconnect(provider).await?;
-    narrate!("Disconnected local {}", provider.display_name());
+    println!("Disconnected local {}", provider.display_name());
     Ok(())
 }
 
-async fn configure(raw_provider: &str) -> Result<()> {
-    let provider = parse_provider(raw_provider)?;
+async fn configure(provider: Provider) -> Result<()> {
     if let Some(message) = provider.api_key_configure_error() {
         return Err(anyhow!(message));
     }
@@ -139,7 +107,7 @@ async fn configure(raw_provider: &str) -> Result<()> {
         .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             anyhow!(
-                "{env_name} is not set. Export it, then run `lf account connect {} --api-key`.",
+                "{env_name} is not set. Export it, then run `lf machine login {} --api-key`.",
                 provider.as_str()
             )
         })?;
@@ -159,9 +127,9 @@ async fn configure(raw_provider: &str) -> Result<()> {
         .await?;
 
     if provider.api_key_bills_per_token() {
-        narrate!("API key auth bills per token. OAuth uses your existing subscription.");
+        println!("API key auth bills per token. OAuth uses your existing subscription.");
     }
-    narrate!("Stored {} API key", provider.display_name());
+    println!("Stored {} API key", provider.display_name());
     Ok(())
 }
 
@@ -233,7 +201,7 @@ pub async fn fresh_opencode_login(approver: Option<&Approver>, home: &Path) -> R
                     None,
                 )
                 .await?;
-                narrate!("OpenCode's login completes once it is approved.");
+                println!("OpenCode's login completes once it is approved.");
             }
         }
         let status = child.wait().await?;
@@ -285,7 +253,7 @@ where
                 ));
             }
             _ = heartbeat.tick() => {
-                narrate!(
+                println!(
                     "Still waiting for browser approval ({}s elapsed); the login listener is still running. Press Ctrl-C to cancel.",
                     started_at.elapsed().as_secs()
                 );

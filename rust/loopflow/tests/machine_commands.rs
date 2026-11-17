@@ -347,9 +347,26 @@ case "$1 $2" in
 "login status")
   [ -f "$HOME/codex-auth" ] && exec cat "$HOME/codex-auth"
   echo 'Not logged in' >&2; exit 1;;
+"logout ")
+  rm -f "$HOME/codex-auth"; echo 'Successfully logged out';;
 *) exit 2;;
 esac
 "#,
+    );
+}
+
+/// The remote runs this build of `lf` over its own store.
+fn remote_lf(fixture: &Machines) {
+    let remote = fixture.root.path().join("remote");
+    support::seed_store(&remote.join("store"));
+    executable(
+        &remote.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
+            remote.join("store").display(),
+            env!("CARGO_BIN_EXE_lf"),
+            env!("CARGO_BIN_EXE_lf"),
+        ),
     );
 }
 
@@ -374,16 +391,7 @@ fn command_approvers_sign_machines_in_to_codex_and_claude_without_a_terminal() {
     let fixture = Machines::new();
     let root = fixture.root.path();
     let remote = root.join("remote");
-    support::seed_store(&remote.join("store"));
-    executable(
-        &remote.join(".local/bin/lf"),
-        &format!(
-            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{}'\nexec '{}' \"$@\"\n",
-            remote.join("store").display(),
-            env!("CARGO_BIN_EXE_lf"),
-            env!("CARGO_BIN_EXE_lf"),
-        ),
-    );
+    remote_lf(&fixture);
     remote_claude(&fixture);
     fake_codex(&remote.join(".local/bin/codex"));
     fake_codex(&root.join("bin/codex"));
@@ -484,6 +492,53 @@ exit 0
         login_states(&fixture, &["machine", "logins", "--json"])[1].1,
         "signed_in"
     );
+}
+
+#[test]
+fn refused_signs_in_again_only_the_machines_that_signed_out_or_refused_a_launch() {
+    let fixture = Machines::new();
+    let remote = fixture.root.path().join("remote");
+    remote_lf(&fixture);
+    fake_codex(&remote.join(".local/bin/codex"));
+    fs::write(remote.join("codex-auth"), "Logged in using ChatGPT\n").unwrap();
+    fs::write(remote.join("codex-approved"), "").unwrap();
+    assert_success(&fixture.run(&["machine", "add", "mini"]));
+    assert_success(&fixture.run(&["set", "--global", "approvers.codex.command", "exit 0"]));
+    let refused = |fixture: &Machines| {
+        let output = fixture.run(&["machine", "login", "codex", "--refused"]);
+        assert_success(&output);
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    };
+    assert_eq!(refused(&fixture), "No Machine needs a Codex login");
+
+    let logout = fixture.run(&["machine", "logout", "codex", "mini"]);
+    assert_success(&logout);
+    assert_eq!(
+        String::from_utf8_lossy(&logout.stdout).trim(),
+        "mini: Codex signed out"
+    );
+    assert!(!remote.join("codex-auth").exists());
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
+
+    // Signed in, but the last Codex launch there was refused with none since.
+    rusqlite::Connection::open(remote.join("store/loopflow.db"))
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES('step','trace',1);
+             INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
+             VALUES('step','codex','mini has no Codex login',1);",
+        )
+        .unwrap();
+    let rows = fixture.json(&["machine", "logins", "mini", "--json"]);
+    let codex = rows
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["provider"] == "codex")
+        .unwrap();
+    assert_eq!(codex["state"], "signed_in");
+    assert_eq!(codex["refused"]["reason"], "mini has no Codex login");
+    assert_eq!(refused(&fixture), "mini: Codex signed in (ChatGPT)");
 }
 
 #[test]

@@ -35,12 +35,7 @@ pub async fn login(
     batch: bool,
 ) -> Result<()> {
     if here(machine) && !matches!(provider, Provider::Claude | Provider::Codex) {
-        return crate::provider_auth::operations::connect_target(
-            provider.as_str(),
-            chrome_profile,
-            api_key,
-        )
-        .await;
+        return crate::provider_auth::operations::connect(provider, chrome_profile, api_key).await;
     }
     let approver = approver(provider, chrome_profile)?;
     match provider {
@@ -154,6 +149,74 @@ fn codex(machine: &Machine, approver: Option<&Approver>) -> Result<()> {
     }
 }
 
+/// Sign `machine` out of `provider` with the provider's own logout; its client
+/// saying it is signed out afterwards is the result.
+pub async fn logout(machine: &Machine, provider: Provider) -> Result<()> {
+    let name = name(machine);
+    let display = provider.display_name();
+    let Some(argv) = logout_argv(provider) else {
+        if here(machine) {
+            crate::provider_auth::operations::disconnect(provider).await?;
+        } else {
+            crate::machine::credentials::remote_command(
+                machine,
+                &["machine", "logout", provider.as_str()],
+                None,
+            )?;
+        }
+        println!("{name}: {display} signed out");
+        return Ok(());
+    };
+    match crate::os_process::bounded_output(&mut command(machine, argv)?, PROBE_DEADLINE) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Err(not_installed(provider, &name))
+        }
+        Ok(output) if output.status.code() == Some(127) => {
+            return Err(not_installed(provider, &name))
+        }
+        _ => {}
+    }
+    match probe(machine, provider, PROBE_DEADLINE).state {
+        LoginState::SignedOut => {
+            println!("{name}: {display} signed out");
+            Ok(())
+        }
+        LoginState::SignedIn => bail!("{display}'s logout ran but {name} still reports signed in"),
+        LoginState::Unknown => bail!("{display}'s logout ran but {name} could not say who it is"),
+    }
+}
+
+fn logout_argv(provider: Provider) -> Option<&'static [&'static str]> {
+    match provider {
+        Provider::Claude => Some(&["claude", "auth", "logout"]),
+        Provider::Codex => Some(&["codex", "logout"]),
+        _ => None,
+    }
+}
+
+/// The added Machines `lf machine login <provider> --refused` signs in: those
+/// whose `provider` login reads signed out, or refused a launch with none
+/// since. A Machine that cannot answer comes back as its error.
+pub async fn refused(provider: Provider) -> Result<Vec<(String, Result<Machine>)>> {
+    let store = crate::provider_auth::operations::local_store().await?;
+    let mut selected = Vec::new();
+    for machine in store.machines().await? {
+        let name = name(&machine);
+        match logins(&machine).await {
+            Ok(rows) => {
+                if rows.iter().any(|row| {
+                    row.provider == provider
+                        && (row.state == LoginState::SignedOut || row.refused.is_some())
+                }) {
+                    selected.push((name, Ok(machine)));
+                }
+            }
+            Err(error) => selected.push((name, Err(error))),
+        }
+    }
+    Ok(selected)
+}
+
 fn url_in(line: &str) -> Option<String> {
     let start = line.find("https://")?;
     line[start..].split_whitespace().next().map(str::to_string)
@@ -184,6 +247,18 @@ pub struct LoginRow {
     /// The account the client names: Claude's email and plan, a service login.
     #[serde(deserialize_with = "Option::deserialize")]
     pub account: Option<String>,
+    /// The provider's last refusal here, when no launch of it has come since.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub refused: Option<Refusal>,
+}
+
+/// A launch the provider refused: no login, a usage limit, a model it would not run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Refusal {
+    pub reason: String,
+    /// Unix seconds.
+    pub at: i64,
 }
 
 /// `unknown`: the client could not answer. Shown, never refused on.
@@ -217,24 +292,51 @@ pub async fn logins(machine: &Machine) -> Result<Vec<LoginRow>> {
         return serde_json::from_slice(&output)
             .with_context(|| format!("{}'s logins were unreadable", name(machine)));
     }
-    let mut rows = vec![
-        probe(machine, Provider::Claude, PROBE_DEADLINE),
-        probe(machine, Provider::Codex, PROBE_DEADLINE),
-    ];
-    for service in crate::provider_auth::operations::account_status::report(None)
+    let store = crate::provider_auth::operations::local_store().await?;
+    let mut rows = Vec::new();
+    // The agents first, then the services.
+    let agents = [Provider::Claude, Provider::Codex];
+    let services = Provider::all()
+        .into_iter()
+        .filter(|provider| !agents.contains(provider));
+    for provider in agents.into_iter().chain(services) {
+        let mut row = match provider {
+            Provider::Claude | Provider::Codex => probe(machine, provider, PROBE_DEADLINE),
+            service => service_login(&store, service).await?,
+        };
+        row.refused = crate::store::run_sqlite(&store.sqlite, move |store| {
+            store.unanswered_refusal(provider.as_str())
+        })
         .await?
-        .accounts
-    {
-        rows.push(LoginRow {
-            provider: service.provider,
-            state: match service.state.as_str() {
-                "active" => LoginState::SignedIn,
-                _ => LoginState::SignedOut,
-            },
-            account: service.login,
-        });
+        .map(|(reason, at)| Refusal { reason, at });
+        rows.push(row);
     }
     Ok(rows)
+}
+
+/// A service's login where its client keeps one (gh's hosts file, OpenCode's
+/// own store), else what this Machine's store saved for it.
+async fn service_login(store: &crate::store::SharedStore, provider: Provider) -> Result<LoginRow> {
+    let installed = match provider {
+        Provider::GitHub => crate::machine::credentials::github_user()?,
+        Provider::OpenCodeZen => crate::machine::credentials::opencode_login(),
+        _ => None,
+    };
+    let (state, account) = match installed {
+        Some(account) => (LoginState::SignedIn, Some(account)),
+        None => match store.provider_auth_snapshot(provider).await? {
+            Some(snapshot) if snapshot.status.as_str() == "active" => {
+                (LoginState::SignedIn, snapshot.status.login())
+            }
+            _ => (LoginState::SignedOut, None),
+        },
+    };
+    Ok(LoginRow {
+        provider,
+        state,
+        account,
+        refused: None,
+    })
 }
 
 pub async fn print_logins(machine: &Machine, json: bool) -> Result<()> {
@@ -244,11 +346,19 @@ pub async fn print_logins(machine: &Machine, json: bool) -> Result<()> {
         return Ok(());
     }
     for row in rows {
-        let line = format!("{:<12} {:<11}", row.provider.as_str(), row.state.as_str());
-        match row.account {
-            Some(account) => println!("{line}  {account}"),
-            None => println!("{}", line.trim_end()),
+        let mut line = format!(
+            "{:<12} {:<11}  {}",
+            row.provider.as_str(),
+            row.state.as_str(),
+            row.account.unwrap_or_default()
+        );
+        if let Some(refusal) = row.refused {
+            line.push_str(&format!(
+                "  refused {}",
+                crate::output::format_time(refusal.at)
+            ));
         }
+        println!("{}", line.trim_end());
     }
     Ok(())
 }
@@ -265,6 +375,7 @@ pub fn probe(machine: &Machine, provider: Provider, deadline: Duration) -> Login
         provider,
         state,
         account,
+        refused: None,
     }
 }
 

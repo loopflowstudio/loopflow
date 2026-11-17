@@ -79,15 +79,52 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             machines,
             chrome_profile,
             api_key,
+            refused,
         } => {
-            return login(
-                *provider,
-                machines,
-                chrome_profile.as_deref(),
-                *api_key,
-                batch,
+            use loopflow_execution::machine::login;
+            if machines.is_empty() && !refused {
+                let machine = local_machine().await?;
+                return login::login(
+                    &machine,
+                    *provider,
+                    chrome_profile.as_deref(),
+                    *api_key,
+                    batch,
+                )
+                .await;
+            }
+            let targets = if *refused {
+                let targets = login::refused(*provider).await?;
+                if targets.is_empty() {
+                    println!("No Machine needs a {} login", provider.display_name());
+                }
+                targets
+            } else {
+                resolve_all(machines).await
+            };
+            return each(targets, "signed in", |machine| async move {
+                login::login(
+                    &machine,
+                    *provider,
+                    chrome_profile.as_deref(),
+                    *api_key,
+                    batch,
+                )
+                .await
+            })
+            .await;
+        }
+        MachineCommand::Logout { provider, machines } => {
+            use loopflow_execution::machine::login;
+            if machines.is_empty() {
+                return login::logout(&local_machine().await?, *provider).await;
+            }
+            return each(
+                resolve_all(machines).await,
+                "signed out",
+                |machine| async move { login::logout(&machine, *provider).await },
             )
-            .await
+            .await;
         }
         MachineCommand::Logins { machine, json } => {
             let machine = match machine {
@@ -288,6 +325,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             println!("Removed {label}");
         }
         MachineCommand::Login { .. }
+        | MachineCommand::Logout { .. }
         | MachineCommand::Logins { .. }
         | MachineCommand::Credentials { .. }
         | MachineCommand::Self_ { .. }
@@ -306,36 +344,46 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
 }
 
 /// Each named Machine in turn, or this one; one Machine failing leaves the rest to try.
-async fn login(
-    provider: loopflow_execution::provider_auth::Provider,
-    targets: &[String],
-    chrome_profile: Option<&str>,
-    api_key: bool,
-    batch: bool,
-) -> anyhow::Result<()> {
-    use loopflow_execution::machine::{connection::resolve_target, login};
-    if targets.is_empty() {
-        let machine = local_machine().await?;
-        return login::login(&machine, provider, chrome_profile, api_key, batch).await;
-    }
-    let mut failed = Vec::new();
+async fn resolve_all(targets: &[String]) -> Vec<(String, anyhow::Result<Machine>)> {
+    let mut resolved = Vec::new();
     for target in targets {
-        let result = match resolve_target(target, false).await {
-            Ok(machine) => login::login(&machine, provider, chrome_profile, api_key, batch).await,
+        let machine = loopflow_execution::machine::connection::resolve_target(target, false).await;
+        resolved.push((target.clone(), machine));
+    }
+    resolved
+}
+
+/// Runs `act` on every Machine, then names each that was not `done`. A single
+/// Machine's error is the whole error.
+async fn each<F, Fut>(
+    targets: Vec<(String, anyhow::Result<Machine>)>,
+    done: &str,
+    act: F,
+) -> anyhow::Result<()>
+where
+    F: Fn(Machine) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<()>>,
+{
+    let single = targets.len() == 1;
+    let mut failed = Vec::new();
+    for (name, machine) in targets {
+        let result = match machine {
+            Ok(machine) => act(machine).await,
             Err(error) => Err(error),
         };
         if let Err(error) = result {
-            if targets.len() == 1 {
+            if single {
                 return Err(error);
             }
-            eprintln!("{target}: {error:#}");
-            failed.push(target.as_str());
+            eprintln!("{name}: {error:#}");
+            failed.push(name);
         }
     }
-    if !failed.is_empty() {
-        return Err(anyhow!("not signed in: {}", failed.join(", ")));
+    if failed.is_empty() {
+        Ok(())
+    } else {
+        Err(anyhow!("not {done}: {}", failed.join(", ")))
     }
-    Ok(())
 }
 
 fn print_machine(machine: &Machine, json: bool) -> anyhow::Result<()> {

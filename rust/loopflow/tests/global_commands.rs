@@ -92,29 +92,24 @@ fn context_targets_measure_checkout_wave_and_refresh_local_edits() {
     assert_eq!(report["wave"], "local");
     assert!(report.get("goal_status").is_none());
     let budgets = &report["context"]["budgets"];
-    for (key, value, source) in [
-        ("memory_tokens", 500, home.path().join(".lf/config.yaml")),
-        ("scratch_tokens", 600, home.path().join(".lf/config.yaml")),
-        ("scratch_bytes", 10000, repo.path().join(".lf/config.yaml")),
-    ] {
-        assert_eq!(budgets[key]["value"], value);
-        assert_eq!(
-            Path::new(budgets[key]["source"].as_str().unwrap())
-                .canonicalize()
-                .unwrap(),
-            source.canonicalize().unwrap()
-        );
+    assert_eq!(budgets["memory_tokens"]["value"], 500);
+    assert_eq!(
+        Path::new(budgets["memory_tokens"]["source"].as_str().unwrap())
+            .canonicalize()
+            .unwrap(),
+        home.path().join(".lf/config.yaml").canonicalize().unwrap()
+    );
+    // Both files still set the retired scratch targets: they load and report none.
+    for retired in ["scratch_tokens", "scratch_bytes", "input_tokens"] {
+        assert!(budgets.get(retired).is_none(), "{retired}");
     }
     let usage = report["context"]["usage"].as_array().unwrap();
-    for source in &usage[..2] {
-        let limit = source["token_limit"].as_u64().unwrap();
-        assert!(source["tokens"].as_u64().unwrap() > limit);
-    }
-    assert!(budgets.get("input_tokens").is_none());
+    assert_eq!(usage.len(), 1, "{usage:?}");
+    assert!(usage[0]["tokens"].as_u64().unwrap() > usage[0]["token_limit"].as_u64().unwrap());
     fs::write(memory, "Live decision retained.").unwrap();
     fs::write(scratch, "Pending work retained.").unwrap();
     let refreshed = query();
-    for source in &refreshed["context"]["usage"].as_array().unwrap()[..2] {
+    for source in refreshed["context"]["usage"].as_array().unwrap() {
         assert!(source["tokens"].as_u64().unwrap() < 100);
     }
 }

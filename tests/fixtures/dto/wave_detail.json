@@ -62,6 +62,7 @@
         "repo": "/src/loopflow",
         "worktree": "/src/loopflow.task",
         "skill": "task/pursue",
+        "skill_version": null,
         "usage": {
           "streams": 1,
           "final_streams": 1,

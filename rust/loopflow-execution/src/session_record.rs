@@ -991,6 +991,7 @@ pub(crate) fn project_input_history(
             .as_ref()
             .map(|m| m.skill.clone())
             .unwrap_or_else(|| current.then(|| session.skill.clone()).flatten()),
+        skill_version: session.skill_version.clone(),
         recorded_outcome: terminal.as_ref().map(|receipt| receipt.outcome.clone()),
         recorded_at: terminal
             .as_ref()

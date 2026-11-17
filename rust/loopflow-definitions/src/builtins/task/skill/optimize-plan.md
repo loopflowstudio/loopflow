@@ -15,7 +15,7 @@ repeating it, do less of it, do it later, then make it cheaper. Do not retry a
 rejected idea unless something new suggests it will work. After several rejects in a row, change
 category, combine near-misses or reread the source before concluding anything.
 
-Write the hypothesis in the working design, so the next step can act on it.
+Write the hypothesis in the plan, so the next step can act on it.
 
 When the caller gives you a decision protocol:
 

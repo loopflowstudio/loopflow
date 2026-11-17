@@ -2,7 +2,6 @@ use std::path::Path;
 use std::process::Command;
 
 use serde::Deserialize;
-use serde_json::json;
 
 use crate::agent::{run_agent, AgentConfig, ProcessConfig};
 use crate::config::load_config_or_default;
@@ -14,7 +13,6 @@ use crate::graph::load_skill;
 
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::progress::Progress;
-use crate::ops::trace::{MockResponses, Tracer};
 
 #[derive(Debug, Clone)]
 pub struct CommitOptions {
@@ -101,6 +99,7 @@ pub fn commit_workflow(
     if is_clean(repo)? {
         progress.status("Nothing to commit");
         if options.push {
+            progress.status("Pushing...");
             push_with_upstream_if_needed(repo, inherit_git)?;
             if options.create_draft_pr {
                 ensure_draft_pr(repo, progress)?;
@@ -131,18 +130,17 @@ pub fn commit_workflow(
         message.to_string()
     } else {
         progress.status("Generating commit message...");
-        let generated = generate_commit_message(repo, options.agent.as_deref());
-        format_commit_message(
-            &options.task,
-            &options.sources,
-            generated.as_ref().map(|m| m.title.as_str()).ok(),
-        )
+        match generate_commit_message(repo, MessageAgent::Chosen(options.agent.as_deref())) {
+            Ok(message) => message.text(),
+            Err(_) => format_commit_message(&options.task, &options.sources),
+        }
     };
 
     progress.status("Committing...");
     commit(repo, &message, inherit_git)?;
 
     if options.push {
+        progress.status("Pushing...");
         push_with_upstream_if_needed(repo, inherit_git)?;
         if options.create_draft_pr {
             ensure_draft_pr(repo, progress)?;
@@ -152,30 +150,115 @@ pub fn commit_workflow(
     Ok(true)
 }
 
-fn format_commit_message(task: &str, sources: &[String], title: Option<&str>) -> String {
-    let prefix = if sources.is_empty() {
+fn format_commit_message(task: &str, sources: &[String]) -> String {
+    if sources.is_empty() {
         format!("lf {task}")
     } else {
         format!("lf {} {task}", sources.join(" "))
-    };
-
-    match title {
-        Some(title) if !title.is_empty() => format!("{prefix}: {title}"),
-        _ => prefix,
     }
 }
 
 #[derive(Debug, Deserialize)]
 struct CommitMessage {
     title: String,
-    #[allow(dead_code)]
     body: String,
 }
 
-fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResult<CommitMessage> {
-    let template = load_skill("commit-message", repo)
-        .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?
+impl CommitMessage {
+    fn text(&self) -> String {
+        match self.body.trim() {
+            "" => self.title.trim().to_string(),
+            body => format!("{}\n\n{body}", self.title.trim()),
+        }
+    }
+}
+
+/// Commit what a skill left as `lf <step>: <what changed>` with a body, and
+/// push the branch unless it is the default branch, including commits the
+/// skill made itself. The `commit-message` skill writes the message on its
+/// own configured agents, and on `agent` (the run's `-a`) only when it has
+/// none; without an answer the title is `lf <step>: checkpoint`.
+///
+/// # Errors
+/// Returns the Git failure when staging, committing or pushing fails.
+pub fn commit_step(
+    repo: &Path,
+    step: &str,
+    agent: Option<&str>,
+    progress: &impl Progress,
+) -> OpsResult<bool> {
+    stage_all(repo, &|_| {})?;
+    let staged = !git_stdout(repo, &["diff", "--cached", "--name-only"])?
+        .trim()
+        .is_empty();
+    let written = if staged {
+        progress.status("Writing the commit message...");
+        generate_commit_message(repo, MessageAgent::Fallback(agent))
+            .inspect_err(|error| progress.error(&error.to_string()))
+            .ok()
+    } else {
+        None
+    };
+    commit_workflow(
+        repo,
+        &CommitOptions {
+            push: off_default_branch(repo)?,
+            message: Some(step_commit_message(step, written.as_ref())),
+            ..CommitOptions::for_task(step)
+        },
+        progress,
+        &|_| {},
+    )
+}
+
+/// Whether a finished skill step left work for [`commit_step`]: edits to
+/// commit, or commits a branch other than the default hasn't pushed. A
+/// checkout Git can't read has nothing to commit.
+pub fn step_commit_pending(repo: &Path) -> bool {
+    let unpushed = || -> OpsResult<bool> {
+        if !off_default_branch(repo)? {
+            return Ok(false);
+        }
+        Ok(match crate::git::rev_parse(repo, "@{upstream}") {
+            Ok(upstream) => upstream != crate::git::rev_parse(repo, "HEAD")?,
+            Err(_) => true,
+        })
+    };
+    !is_clean(repo).unwrap_or(true) || unpushed().unwrap_or(false)
+}
+
+fn off_default_branch(repo: &Path) -> OpsResult<bool> {
+    let default_branch = crate::git::get_default_branch(repo)?;
+    Ok(current_branch(repo)?.is_some_and(|branch| branch != default_branch))
+}
+
+fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {
+    match written.filter(|message| !message.title.trim().is_empty()) {
+        Some(message) => format!("lf {step}: {}", message.text()),
+        None => format!("lf {step}: checkpoint"),
+    }
+}
+
+/// A hung provider must not hold the Graph or the skill run that asked.
+const COMMIT_MESSAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// Where an agent named on the command line stands against the
+/// `commit-message` skill's own preference.
+#[derive(Debug, Clone, Copy)]
+enum MessageAgent<'a> {
+    /// `lf commit -a`: the person chose the agent for this message.
+    Chosen(Option<&'a str>),
+    /// A step commit: the run's agent writes the message only when
+    /// `commit-message` resolves none of its own.
+    Fallback(Option<&'a str>),
+}
+
+fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<CommitMessage> {
+    let skill = load_skill("commit-message", repo)
+        .map_err(|err| OpsError::Message(format!("commit-message skill not found: {err}")))?;
+    let template = skill
         .content
+        .clone()
         .ok_or_else(|| OpsError::Message("commit-message skill has no content".to_string()))?;
 
     let diff = git_stdout(repo, &["diff", "--cached"])?;
@@ -188,42 +271,64 @@ fn generate_commit_message(repo: &Path, agent_override: Option<&str>) -> OpsResu
          No markdown fences. No explanation."
     );
 
+    // The skill's own `agent`, `default_agent` and `agents` preferences apply,
+    // so a cheap model can be chosen for `commit-message` alone.
     let config = load_config_or_default(Some(repo));
-    let agent = match agent_override {
-        Some(agent) => agent,
-        None => config.agent()?,
-    }
-    .to_string();
-
-    let launch = AgentConfig {
-        chrome: config.chrome,
-        codex_service_tier: config.codex.service_tier,
-        claude_model: config.claude.model.clone(),
-        task_prompt: prompt,
-        agent: Some(agent),
-        cwd: Some(repo.to_path_buf()),
-        skip_permissions: true,
-        ..Default::default()
+    let config = crate::config::settings::resolve(&config, Some(&skill))
+        .map(|resolved| resolved.config)
+        .unwrap_or(config);
+    let configured = || -> OpsResult<Vec<String>> {
+        Ok(match config.agent_order() {
+            order if order.is_empty() => vec![config.agent()?.to_string()],
+            order => order,
+        })
+    };
+    let agents = match agent {
+        MessageAgent::Chosen(Some(agent)) => vec![agent.to_string()],
+        MessageAgent::Chosen(None) | MessageAgent::Fallback(None) => configured()?,
+        MessageAgent::Fallback(Some(agent)) => {
+            configured().unwrap_or_else(|_| vec![agent.to_string()])
+        }
     };
     let process = ProcessConfig {
         auto: true,
         stream: false,
+        timeout: Some(COMMIT_MESSAGE_TIMEOUT),
         ..Default::default()
     };
-
-    let result = run_agent(&launch, &process)
-        .map_err(|err| OpsError::Message(format!("commit message generation failed: {err}")))?;
-    if result.exit_code != 0 {
-        return Err(OpsError::Message(format!(
-            "commit message generation failed (exit {}): {}",
-            result.exit_code,
-            result.stderr.trim()
-        )));
+    let mut failure = String::new();
+    for agent in agents {
+        let launch = AgentConfig {
+            chrome: config.chrome,
+            codex_service_tier: config.codex.service_tier,
+            claude_model: config.claude.model.clone(),
+            task_prompt: prompt.clone(),
+            agent: Some(agent.clone()),
+            cwd: Some(repo.to_path_buf()),
+            skip_permissions: true,
+            ..Default::default()
+        };
+        match run_agent(&launch, &process) {
+            Ok(result) if result.exit_code == 0 => {
+                let combined = format!("{}\n{}", result.stdout, result.stderr);
+                if let Some(message) = parse_commit_message(&combined) {
+                    return Ok(message);
+                }
+                failure = format!("{agent}: no commit message in the reply");
+            }
+            Ok(result) => {
+                failure = format!(
+                    "{agent}: exit {}: {}",
+                    result.exit_code,
+                    result.stderr.trim()
+                );
+            }
+            Err(error) => failure = format!("{agent}: {error}"),
+        }
     }
-
-    let combined = format!("{}\n{}", result.stdout, result.stderr);
-    parse_commit_message(&combined)
-        .ok_or_else(|| OpsError::Message("failed to parse commit message from agent".to_string()))
+    Err(OpsError::Message(format!(
+        "commit message generation failed ({failure})"
+    )))
 }
 
 fn parse_commit_message(raw: &str) -> Option<CommitMessage> {
@@ -380,72 +485,31 @@ pub(crate) fn verify_remote_branch_head(
     Ok(())
 }
 
-/// Traced version of commit_workflow for parity testing.
-/// Returns JSON trace instead of executing operations.
-pub fn commit_workflow_traced(options: &CommitOptions) -> String {
-    let mut tracer = Tracer::new(
-        "commit",
-        json!({
-            "add": options.add,
-            "push": options.push,
-            "create_draft_pr": options.create_draft_pr,
-            "has_message": options.message.is_some()
-        }),
-    );
+#[cfg(test)]
+mod tests {
+    use super::{step_commit_message, CommitMessage};
 
-    // Check if repo is dirty
-    tracer.trace_result("git:status", MockResponses::git_status());
-    let is_dirty = MockResponses::git_status() == "dirty";
-
-    if !is_dirty {
-        return tracer.to_json();
+    #[test]
+    fn step_commits_name_the_skill_before_what_changed() {
+        let written = CommitMessage {
+            title: "Count retries per Task".into(),
+            body: "The board read attempts from the wrong row.".into(),
+        };
+        assert_eq!(
+            step_commit_message("implement", Some(&written)),
+            "lf implement: Count retries per Task\n\nThe board read attempts from the wrong row."
+        );
+        let untitled = CommitMessage {
+            title: " ".into(),
+            body: "orphan body".into(),
+        };
+        assert_eq!(
+            step_commit_message("implement", Some(&untitled)),
+            "lf implement: checkpoint"
+        );
+        assert_eq!(
+            step_commit_message("reflect", None),
+            "lf reflect: checkpoint"
+        );
     }
-
-    // Stage changes
-    if options.add {
-        tracer.trace("git:add_all");
-    }
-
-    // Check if anything staged
-    tracer.trace_result("git:diff_cached", MockResponses::git_diff_cached());
-    let has_staged = MockResponses::git_diff_cached() == "has_changes";
-
-    if !has_staged {
-        return tracer.to_json();
-    }
-
-    // Resolve commit message: explicit or generated.
-    let message = if let Some(message) = options
-        .message
-        .as_deref()
-        .map(str::trim)
-        .filter(|message| !message.is_empty())
-    {
-        message.to_string()
-    } else {
-        tracer.trace("commit:generate_message");
-        format_commit_message(&options.task, &options.sources, Some("generated title"))
-    };
-
-    // Commit
-    tracer.trace_args("git:commit", json!({"message": message}));
-
-    // Push
-    if options.push {
-        let has_upstream = MockResponses::git_has_upstream();
-        tracer.trace_result("git:has_upstream", &has_upstream.to_string());
-
-        if has_upstream {
-            tracer.trace("git:push");
-
-            let pr_exists = MockResponses::gh_pr_exists();
-            tracer.trace_result("gh:pr_exists", &pr_exists.to_string());
-
-            if !pr_exists {
-                tracer.trace("gh:pr_create_draft");
-            }
-        }
-    }
-
-    tracer.to_json()
 }

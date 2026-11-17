@@ -130,7 +130,13 @@ pub(crate) fn run_sync_in(
         && !on_main
         && matches!(plan.strategy, crate::ops::SyncStrategy::MergeTarget)
         && crate::git::intervention_state(repo_root)?.is_none()
-        && checkpoint_uncommitted_work(repo_root, &plan.base_ref, progress)?
+        && {
+            progress.status("Committing uncommitted edits before merging...");
+            checkpoint_uncommitted_work(
+                repo_root,
+                &format!("Checkpoint edits before syncing onto {}", plan.base_ref),
+            )?
+        }
     {
         plan = plan_sync(repo_root, Some(target), fork_base.clone())?;
     }
@@ -199,7 +205,8 @@ pub(crate) fn run_sync_in(
 }
 
 /// Checkpoint ordinary edits while retaining telemetry's staged and working contents.
-fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress) -> Result<bool> {
+/// Returns whether there was anything to commit.
+pub fn checkpoint_uncommitted_work(repo: &Path, message: &str) -> Result<bool> {
     // A literal `.lf/tmp` prefix makes Git reject the pathspec when ignored.
     // Use the same rooted glob when staging and refreshing the real index.
     const EXCLUDE_TELEMETRY: &str = ":(exclude,top,glob)[.]lf/tmp/**";
@@ -219,12 +226,7 @@ fn checkpoint_uncommitted_work(repo: &Path, base: &str, progress: &impl Progress
     if run(&["diff", "--cached", "--name-only"])?.is_empty() {
         return Ok(false);
     }
-    progress.status("Committing uncommitted edits before merging...");
-    crate::git::commit(
-        repo,
-        &format!("Checkpoint edits before syncing onto {base}"),
-        &inherit_index,
-    )?;
+    crate::git::commit(repo, message, &inherit_index)?;
     // Refresh only committed paths; the merge's existing preservation wrapper
     // carries the remaining telemetry through the merge with its index intact.
     crate::git::git_stdout(

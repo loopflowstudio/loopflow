@@ -1,168 +1,108 @@
 ---
-docs: scripts/testing.md
 requires: intended change and an implementation plan
-produces: working implementation, focused check, and an updated plan
+produces: one working slice of the plan, a focused check, and an updated plan
 action_style: procedural
+docs: scripts/testing.md
 ---
-Turn the design doc into working code.
+Turn the next slice of the plan into working code.
 
-## Orientation
-
-Before starting, orient yourself in this branch:
-
-- Read `scratch/` — design docs and notes for the current work live here
-  (`scratch/<branch>.md` is this PR's design; `scratch/questions.md` holds open
-  questions and assumptions).
-- Read wave/PM context only when the seed names the exact wave, task, project,
-  or a concrete coordination question; never infer it or repair access as a
-  prerequisite.
-- Read the repo's agent doc (`AGENTS.md`) for conventions.
-
-Write design artifacts, notes, and open questions under `scratch/`. Don't
-re-derive what these already record.
-
-## Goal
-
+Your job is two things: choose a slice worth building, then write it well.
 Working code with rough edges beats perfect code that took too long.
 
-Produce a working change, resolve reversible ambiguity, and verify it. Preserve the intended outcome across internal slices; a first draft does not satisfy unfinished acceptance.
+Read the plan, `scratch/plan.md`, and the agent guide; a small change may have
+its plan in the conversation. Read the affected user docs too, including edits
+made since the last pass: they describe the experience to build, so keep their
+corrections.
 
-## Keep authored context within budget
+## Choose the slice
 
-Run `lf context` to read memory and scratch size targets, their configuration
-sources, and current usage. Read complete sources before curating them.
-Bring over-budget scratch under both token and byte limits as part of this step.
-Curate `.lf/wave/` only when the selected Loopflow Graph calls for it; otherwise
-record proposed memory changes in scratch.
-Merge duplicates, summarize long evidence, remove obsolete notes inherited from a
-stacked parent, and keep historical detail in git rather than ambient context.
-Preserve live decisions, attribution, unresolved work, and contrary evidence;
-keep a precise git reference when older detail still matters. Preserve uncommitted
-evidence before removing it. Edit existing notes instead of accumulating reports.
-Re-run the query after writing. Do not raise limits to conceal overflow. If the
-live decisions alone cannot fit, record the concrete conflict and remaining overage.
+**Build end to end, thinly.** Take the next piece of the plan that runs
+through every layer it touches, from what a person does to what gets stored.
+The test: when this slice is done, can you run it and see whether the pieces
+fit?
 
-## Workflow
+**Pick the slice that teaches the most.** Build first what could prove the
+plan wrong: the join between two parts, the data shape everything depends on,
+the step nobody has tried.
 
-Use the supplied design and repository conventions. A small change may have its
-plan in the conversation; do not require a document template or a prior skill.
+**Let the slice change the plan.** If the pieces don't fit, say so in the plan
+and stop building on the part that broke.
 
-1. **Understand the design**
-   Recover the intended outcome, accepted constraints, approach, and acceptance checks.
-   Read the affected user documentation, including saved edits since the
-   previous pass. It describes the experience to build; preserve corrections
-   rather than regenerating it from an older plan. Reconcile consequential
-   conflicts with accepted direction in the conversation or working design.
-   Read the current plan wherever it lives. Reconstruct the affected concepts,
-   owners, persistence, and call paths before choosing where behavior belongs.
-   Read or add the plan's **Delete — do not maintain** list: concrete files/symbols
-   and their exclusive tests/fixtures slated for removal, with required behavior,
-   data, and tests to preserve. Keep it current across passes.
-   Remove what this change replaces in the same diff; leave no parallel path.
-   Add newly discovered predecessors to the delete list as you find them,
-   preserving required behavior and data on the surviving path.
+A small plan is one slice. Work can be divided between Tasks either way, by
+layer or end to end; inside a Task, every slice goes end to end.
 
-2. **Implement**
-   - Make the deepest planned deletions first: remove obsolete concepts,
-     authorities, and paths, then build data structures on what remains.
-   - Never repair, refactor, or extend a deletion target or its exclusive
-     tests/fixtures. When one fails, carry out the planned removal instead.
-     Preserve coverage of required behavior on the surviving path.
-   - Move real consumers end to end and include any required data migration in
-     the deletion cut. Temporary compile/test breakage within the cut is no
-     reason to repair the predecessor; finish the cut before checking the result.
-     New capabilities need no invented predecessor or deletion quota.
-   - Keep one unreleased schema migration per Task and edit it in place. When
-     the schema changes again, rewrite that migration to the final shape; never
-     stack a second one that alters or drops what the first created. Test the
-     upgrade from the last released schema to the finished migration, not the
-     steps between.
-   - Functions one at a time, following the signatures
-   - Match existing patterns in the codebase
-   - Reshape the existing owner instead of adding a parallel representation
-   - Follow the design's delivery boundary. An indivisible architectural change
-     proceeds in coherent internal slices but ships as one PR. Keep the complete
-     target and update the remaining work as implementation teaches us more.
-     Do not stage the landing with flags, v2s, or setups nothing uses yet.
+## Build it well
 
-3. **Sanity check**
-   - Reread the affected user docs before finishing to pick up edits made during
-     implementation. Verify their examples against the behavior built; keep
-     missing behavior explicit rather than weakening the docs to match it.
-     Maintain those files in place and preserve edits made since the last read.
-   - This repository's focused commands are in the included
-     `scripts/testing.md`.
-   - Build the changed code and run the focused test for the behavior changed:
-     the narrowest filter that names it, never a whole package or workspace
-     suite. Skip builds for prose-only edits. Reuse a still-applicable passing
-     result; do not repeat a command without a change or failure that warrants it.
-   - One build at a time: never run two compilers, test runners or linters
-     against the same build directory concurrently, in the background or in
-     parallel tool calls.
-   - Gate starts CI for the suites and selects a few high-risk tests, including
-     the design's automated acceptance checks. Do not run suites early because
-     they appear in Done when.
-   - If a check cannot run headless here, use a headless equivalent or leave it
-     to gate/CI rather than stopping implementation. Ask the person for a
-     judgment you need when one is in the conversation; headless, leave it for
-     demo/review instead of blocking the Graph. An actual build or test failure
-     still needs a fix.
-   - Update remaining work in place. Keep one command/result line with any
-     deferred owner; no pass ledger or repeated caveats.
+**Own the code you're adding to.** Before writing something, search the whole
+codebase for the job, not the location: logging, fetching a file, retrying a
+call. The copies are usually far apart, written by another area with the same
+need. Then decide. Unify when the job has nuance that each copy gets slightly
+wrong, or when it is a large part of the system. Leave a copy alone when the
+code is simple and sharing it would tie two areas together for nothing. The
+test: can you say where else this job is done, and why you joined it or
+didn't?
 
-## Rules
+**Reshape what exists.** A new type means a new real-world concept. If the
+codebase uses `@dataclass`, use `@dataclass`. No flags, v2 types, adapters,
+fallbacks, dual writes or setup nothing uses yet, unless the plan calls for
+one and says when it is deleted.
 
-**Match existing patterns.** Find similar code nearby and match its style. If the codebase uses `@dataclass`, use `@dataclass`. If it uses type hints, use type hints.
+**Move real consumers end to end,** with any data migration in the same
+slice.
 
-**Stay in scope.** Implement exactly what the design describes. Scope creep goes in `scratch/questions.md`, not the code.
+**Write for the load it will carry.** Take data size and concurrency from
+what the repository says it serves, not from the fixture. Read the plan of
+every query you add or change, bound what a hot path reads, keep writes
+short, and time it at realistic size.
 
-**One concept, one authority.** A new type must represent a new real-world
-concept. Legacy/New enums, v2 types, adapters, fallbacks, dual writes,
-compatibility shims, and parallel stores are blocking by default. Use one only
-when the reviewed design explicitly calls for it and names its deletion point.
+**Write the tests.** New behavior gets a test in the same slice, and so does
+behavior you changed. Assert on the intended behavior and user experience,
+not internal code flow or mechanics.
 
-**Test behavior.** Add tests for user-visible behavior. Don't test implementation details. Assert on results, not mock calls.
+**Finish the slice by deleting.** Once the new path works, remove what it
+replaced, with its tests and docs. Don't repair or extend code the plan
+deletes; when its test fails, delete the test and cover the behavior on the
+surviving path. A finished slice leaves one way to do its job.
 
-## Task context
+**Stay in scope.** Unifying with code that already does this job is part of
+the slice. New behavior is not: other ideas go in `scratch/questions.md`.
 
-When a Task is supplied, use its directive, accepted design and included Steers.
-Stay in its supplied worktree and preserve the active writer, selected Graph,
-and review boundaries. Do not select backlog work, create a second Task or
-launch a competing implementation. A failed planning read is a named gap;
-continue independent work from the supplied evidence without repairing auth.
-Publication, landing and navigation belong to the caller's explicit steps.
+**Commit each coherent change** as you finish it, with a message that says
+what changed and why. Committing and pushing are always safe here: history
+keeps everything, and nothing needs the branch to stay clean. Whatever you
+leave is committed for you when the step ends.
 
-When a Wave is supplied, notice signals that could help it steer.
-Name the outcome, candidate measure, decision value and cheapest credible
-producer. Add a useful instrument when it fits the coherent change;
-otherwise leave the proposal for Wave sponsorship.
-Metric proposals are discoveries, not a completion quota.
+## Check
 
-## Wave context
+Test the behavior you changed, with the narrowest test that names it, never a
+whole package. That is your share. The usual mistake is running too many
+tests, not too few. Gate and CI come after you and run the suites, including
+the ones named in "Done when", so a full run here only makes everything wait.
+Maximize the throughput of the whole software factory, not the certainty of
+this step.
 
-If `<lf:wave>` is present, check `.lf/wave/<wave>/GOAL.md` and `MEMORY.md` in docs:
+One build at a time. Skip builds for prose-only edits, and don't rerun a
+passing command without a change. A check that can't run here goes to gate; a
+real failure still gets fixed.
 
-- Follow the wave's intent and principles during implementation
-- Respect decisions and constraints recorded in `MEMORY.md`
-- Edit GOAL.md and MEMORY.md only when the selected Loopflow Graph calls for
-  maintaining them. Association alone leaves `.lf/wave/` read-only.
-- Note drift from wave constraints in `scratch/questions.md`
+Run the slice the way a person would and reread the docs against what you
+built. Where behavior is missing, say so rather than weakening the docs.
 
-## When the design is wrong
+## When the plan is wrong
 
-Keep named, dated decisions, draft/accepted status and remaining work in the
-plan. Record one check-result line. Omit session instructions and ambient Machine
-facts; the plan must not direct its next reader. Keep transcripts separate and
-historical skill names unprefixed.
+Unclear: make the simplest reversible choice and record it in
+`scratch/questions.md`. Contradicted, by a counterexample that breaks the
+slice, the data model or the deletion path: stop the work that depends on it
+and revise the plan. Never note a contradiction and keep building on it.
 
-If the design doc is unclear, make the simplest reversible choice and record it
-in `scratch/questions.md`.
+Mark the plan's remaining work in place: what this slice built, what it
+taught, what is next. If you had to discover an undocumented convention, add
+it to the agent guide so the next run doesn't rediscover it.
 
-If implementation reveals a counterexample that invalidates the slice,
-authority model, deletion path, or full-design trajectory, stop dependent work
-and revise the design or return to review. Never note an architectural
-contradiction and keep building on it.
+This is one step of someone's work. Stay in this checkout and build the Task
+you were given; don't pick up backlog, create a second Task or start a
+competing implementation. Publishing and landing belong to the caller.
 
-## Adaptation
+## In this repository
 
-If you had to discover a convention that wasn't documented — error handling pattern, test structure, naming style, import conventions — add it to the repo's style guide (AGENTS.md) so the next session doesn't have to rediscover it.
+The focused commands are in the included `scripts/testing.md`.

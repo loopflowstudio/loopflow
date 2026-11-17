@@ -2238,8 +2238,8 @@ fn the_research_graph_stops_at_its_findings_then_reaches_end() {
         String::from_utf8_lossy(&ended.stderr)
     );
     assert_eq!(position(), serde_json::json!({"kind": "at", "step": "end"}));
-    // Running the Graph left a file uncommitted; ending kept it.
-    assert!(checkout.join(".gitignore").exists());
+    // Running the Graph left its prompt files; ending kept them.
+    assert!(checkout.join(".lf/prompts").exists());
 }
 
 #[test]

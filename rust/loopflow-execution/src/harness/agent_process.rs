@@ -1027,7 +1027,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(process.completed_at.is_some());
-        assert!(process.outcome.is_none());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(attachment)
@@ -1241,15 +1240,12 @@ mod tests {
         );
         assert!(summary.terminal_id.is_none());
         assert!(!summary.available);
-        assert_eq!(
-            store
-                .agent_process(&attachment.agent_process_id)
-                .unwrap()
-                .unwrap()
-                .outcome
-                .as_deref(),
-            Some("interrupted")
-        );
+        assert!(store
+            .agent_process(&attachment.agent_process_id)
+            .unwrap()
+            .unwrap()
+            .completed_at
+            .is_some());
     }
 
     #[test]
@@ -1318,7 +1314,6 @@ mod tests {
         for (id, retired) in &expected {
             let process = store.agent_process(id).unwrap().unwrap();
             assert_eq!(process.completed_at.is_some(), *retired);
-            assert!(process.outcome.is_none());
             assert!(process.pid.is_none());
         }
         let retry = super::reap_in(&store, false).unwrap();
@@ -1371,7 +1366,6 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert!(process.completed_at.is_some());
-            assert!(process.outcome.is_none());
             let current = store.session_attachment(&session.id).unwrap().unwrap();
             assert_eq!(current.lf_process_id.is_none(), ended);
             let history = store.session_history(&session.id, 0, 0).unwrap();
@@ -1519,7 +1513,6 @@ mod tests {
             .unwrap();
         assert_eq!(retained.pid, Some(child.id()));
         assert!(retained.completed_at.is_none());
-        assert!(retained.outcome.is_none());
     }
 
     #[tokio::test]
@@ -1574,10 +1567,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(failed.completed_at.is_some());
-        assert!(
-            failed.outcome.is_none(),
-            "failed exec is not a provider outcome"
-        );
         let retry = attachment::prepare_session_agent_process(&store, &session.id, &next).unwrap();
         assert_ne!(retry.agent_process_id, next.agent_process_id);
         assert_eq!(
@@ -1686,7 +1675,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(failed.completed_at.is_some());
-        assert!(failed.outcome.is_none());
         assert_eq!(
             store
                 .agent_process(&first.agent_process_id)

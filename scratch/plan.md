@@ -12,7 +12,8 @@ After a kill, a reboot or a server restart, every open Task on this Machine
 either runs again or says what stopped it and which one command continues it.
 
 - A Task conversation that ended without the person quitting comes back on its
-  own. It restarts from its saved thread, in a held terminal, within seconds of
+  own. It restarts from its saved thread (or, when a crash took the provider's
+  transcript, a fresh thread seeded with its original request), in a held terminal, within seconds of
   the server noticing. An open Desktop pane reconnects to it.
 - A Task conversation the person quit (exit 0 or 130, or an lf command they
   ran to stop it) stays quit.
@@ -600,6 +601,18 @@ Must survive:
    Taught: the fixture's "finished turn" reset left `last_started_at`, so the
    restart waited a full backoff minute and only passed by a second; it now
    clears both, as `steers.rs` does.
+
+## Concept review after slice 6
+
+`scratch/concept-review.html` (HEAD `4040a941`). Nothing to change before
+gate. Every product concept pairs with one code owner. Recorded, not built:
+- the fresh thread is told only in the starting pane; status and Desktop read
+  `running (started again …, attempt 1)` (`questions.md`, slice 6);
+- `thread_lost` judges from the resuming process's `CLAUDE_CONFIG_DIR`/`CODEX_HOME`
+  (the server's, for the pass). A thread that ran under another home reads as
+  gone and the pane says "is gone" while the file exists elsewhere. Claude run
+  by that server could not resume it either, so the fresh start is right; only
+  the wording overclaims.
 
 ## Remaining
 

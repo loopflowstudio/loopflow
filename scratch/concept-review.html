@@ -1,6 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>LOO-959 concept review, after the crash</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-959 concept review, after slice 6</title>
 <style>
 :root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mute:#666;--yes:#1f7a3a;--no:#b3261e;--prop:#2457c5;--line:#ddd}
 @media(prefers-color-scheme:dark){:root{--fg:#e8e8e3;--bg:#151515;--mute:#9a9a9a;--yes:#6fcf8a;--no:#ff8a80;--prop:#8fb0ff;--line:#333}}
@@ -10,50 +9,51 @@ table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-bottom:1px 
 code{font-size:.9em}pre{background:rgba(127,127,127,.12);padding:.7rem;overflow:auto}.mute{color:var(--mute)}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 </style></head><body>
-<h1>Do the concepts line up? LOO-959 after the crash</h1>
-<p class="mute">Area: recovery of a Task's conversation and its run after a kill, a reboot or a server restart, reviewed against base <code>2593c489</code> with slices 1–5 and the post-crash qa fixes in it (HEAD <code>5354b604</code>). Taken because the last qa was a real Machine crash, which is the case this Task exists for.</p>
+<h1>Do the concepts line up? LOO-959 after slice 6</h1>
+<p><b>Area:</b> recovery of a Task's conversation and its run after a kill, a reboot or a server restart, with all six slices in it (HEAD <code>4040a941</code>, against LOO-953's branch). Taken whole because slice 6 changed what "comes back" means: a conversation can now come back without its provider thread.</p>
 
 <h2>Pairings</h2>
 <table>
-<tr><th>What a person knows</th><th>In the code</th><th></th><th>Where it's wrong</th></tr>
-<tr><td>The Task's conversation</td><td>primary Session (<code>task_primary_sessions</code>); status field <code>conversation</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>It died / I quit it</td><td><code>ended.by: died | person</code> from launcher exit (0/130 = person)</td><td class="yes">yes</td><td>SIGTERM window still unmeasured on real Claude (a person's Machine).</td></tr>
-<tr><td>It's starting again, attempt k, next at</td><td><code>start {attempts, last_started_at, next_at, gave_up, failure}</code>; one rule <code>next_start_at</code> for pass and line</td><td class="yes">yes</td><td></td></tr>
-<tr><td>I started it myself, so the count starts over</td><td><code>record_persons_start</code>: count 0, <code>last_started_at</code> = now</td><td class="yes">yes</td><td>Small: <code>starts_since_turn</code> counts only the pass's starts while <code>last_started_at</code> also holds a person's. One idea ("starts since it last worked"), two rules. Recorded.</td></tr>
-<tr><td><b>It comes back from its saved thread</b></td><td><code>continuing()</code> → <code>lf session resume</code> → <code>adopt_native</code>, which errors when the transcript is missing</td><td class="no">no</td><td><b>"Saved thread" is a provider thread id, not a thread.</b> After the crash 11 had no transcript. The pass burns 5 starts, then offers <code>lf resume --task X</code>, which fails the same way.</td></tr>
-<tr><td>The run died at a step and is carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, <code>died_run</code></td><td class="yes">yes</td><td>Noticed on the 60 s read only (50–65 s in qa). Acceptable.</td></tr>
-<tr><td>After a reboot things come back in order</td><td><code>Registry::open</code> settles adoption's ends, then the pass, one start at a time</td><td class="yes">yes</td><td>The same reap-before-settle order can in principle happen at runtime; never seen. Recorded.</td></tr>
-<tr><td>"Starts again when the server runs"</td><td><code>conversation_line(server_runs)</code></td><td class="yes">yes</td><td></td></tr>
+<tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
+<tr><td>The Task's conversation</td><td>primary Session; <code>conversation</code> in <code>lf task status --json</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>It died / I quit it</td><td><code>ended.by</code> from launcher exit (0/130 = person)</td><td class="yes">yes</td><td>SIGTERM-at-shutdown exit code on real Claude still unmeasured (a person's Machine).</td></tr>
+<tr><td>It's starting again, attempt k, next at</td><td><code>start {attempts, last_started_at, next_at, gave_up, failure}</code>; one rule <code>next_start_at</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>I started it myself, so the count starts over</td><td><code>record_start</code> in <code>lf session resume</code>, unless <code>LF_RECOVERING_SESSION</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>It comes back, even when the crash took its transcript</td><td><code>human_session::open</code> → <code>lost_thread</code> → <code>new_thread</code>, one rule for the pass and <code>lf resume</code></td><td class="yes">yes</td><td>Fixed by slice 6. qa: first attempt, both starters.</td></tr>
+<tr><td>It came back <em>without its memory</em></td><td>a pane diagnostic before the provider draws; nothing on the Session</td><td class="no">no</td><td>The one fact a person would want and can't read later. Status says <code>running (started again 23:29, attempt 1)</code>, same as a resume that kept everything.</td></tr>
+<tr><td>The run died at a step and is carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, <code>died_run</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>After a reboot things come back in order</td><td><code>Registry::open</code> settles, then the pass, one start at a time</td><td class="yes">yes</td><td></td></tr>
 </table>
 
-<h2>The biggest mismatch: the line's one command doesn't work</h2>
+<h2>The biggest mismatch: a fresh thread looks like a resume</h2>
 <div class="cols">
-<div><h3>Before (built)</h3>
-<pre>crash → transcript gone
-pass: resume → "cannot resume claude
-  conversation X: its transcript is missing"
-  … ×5, backoff 1→16 min
-status: died · started 5 times;
-  `lf resume --task X` opens it
-lf resume --task X → same error</pre>
-<p>Eleven Tasks, each needing a person who then hits an error.</p></div>
-<div class="prop"><h3>After (proposed, slice 6)</h3>
-<pre>crash → transcript gone
-pass: thread_lost? → new_thread(same Session,
-  seeded with lf's log) → continuing()
-  request recover:&lt;s&gt;:&lt;agent&gt;:fresh
-status: running (fresh thread; the old
-  one's transcript was gone)
-lf resume --task X → same rule, opens fresh</pre>
-<p>One rule in the start path both starters share. <code>adopt_native</code>'s <code>ensure!</code> becomes the branch, not the error.</p></div>
+<div><h3>Built</h3>
+<pre>crash → transcript gone → kill
+pane:   The claude transcript of this
+        conversation is gone; continuing
+        on a fresh thread.   (scrolls away)
+status: running (started again 23:29,
+        attempt 1)
+Desktop: same line</pre>
+<p class="mute">Someone attaching later meets an agent that forgot the conversation and has no line saying why.</p></div>
+<div class="prop"><h3>Possible later (not proposed now)</h3>
+<pre>status: running on a fresh thread since
+        23:29 (the old transcript was gone)</pre>
+<p class="mute">Needs one nullable Session fact (the lost thread it replaced) on the wire: DTO fixture plus 13 Swift inline fixtures. Already recorded in <code>questions.md</code>.</p></div>
 </div>
-<p>Counterexample checked: a transcript that is only in an account's home, not the native one, is found by <code>conversation_home</code> and copied, as today; only "no home holds it" starts fresh. A fresh thread that dies again is an ordinary death on the same count.</p>
-<p>Chosen for review: <b>1b</b>. Passed over: 1a keeps 3a and changes the give-up line to <code>lf session new</code>. Honest, but every Task the crash hit still waits for a person.</p>
+<p><b>Recommendation: ship as built.</b> The outcome this Task promises (every open Task runs again or names one command) now holds for the crash case; the fresh thread carries the original request and skill, so the agent's first reply already shows where it starts. The missing line is wording, not recovery, and it costs a wire change this Task doesn't need.</p>
+
+<h2>Counterexample kept</h2>
+<p><code>thread_lost</code> reads the home from the resuming process's <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code>, which for the pass is the server's. A thread that ran under another home reads as gone. The fresh start is still right (Claude started by that server couldn't resume it either), but the pane's "is gone" is false: the file exists elsewhere. Before slice 6 this case failed five times and gave up.</p>
+
+<h2>Plan changes</h2>
+<ul><li>Outcome line now says a lost transcript comes back on a fresh thread seeded with its original request (it said "from its saved thread").</li>
+<li>"Concept review after slice 6" records the two items above. Nothing to build before gate.</li></ul>
 
 <h2>Questions</h2>
 <ol>
-<li>A conversation whose provider transcript is gone: (a) leave it, and make the give-up line offer <code>lf session new</code> · <b>(b) start it on a fresh thread of the same Session, for the pass and for <code>lf resume</code> (chosen, slice 6)</b> · (c) fresh only for the pass; <code>lf resume</code> keeps erroring.</li>
-<li>The fresh start's status line: (a) text only, while no turn has finished (chosen) · (b) a <code>start.fresh_thread</code> wire field Desktop shows.</li>
-<li>The runtime reap-before-settle race: (a) leave recorded (chosen) · (b) make "a reaped attachment is not a move" in <code>attachment_lost</code> now.</li>
+<li>A conversation that came back on a fresh thread: (a) pane notice only, as built (chosen) · (b) a Session fact and a status/Desktop line, in a follow-up Task · (c) in this Task before gate.</li>
+<li>A thread found under a different provider home: (a) fresh start, wording as is (chosen) · (b) say "not found in this server's claude home" instead of "gone" · (c) look in the person's home too and copy it, as account homes once did.</li>
+<li>SIGTERM at shutdown on real Claude (acceptance 5): (a) a person measures it during the real reboot (chosen) · (b) build <code>holder_stopping</code> now, before the measurement.</li>
 </ol>
 </body></html>

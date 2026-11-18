@@ -185,7 +185,6 @@ fn record(
         availability: handed_back(&turn).then_some(SessionAvailability::Available),
         program_status: None,
         agent_process_id: None,
-        task_primary: false,
         task_ids: task.into_iter().collect(),
         id: id.into(),
         workspace: None,

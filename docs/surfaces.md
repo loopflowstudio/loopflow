@@ -103,8 +103,8 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
 
 Task lifecycle, conversation membership and availability agree across the page,
-sidebar, board and pickers. Dragging a sidebar Task changes the shared order used
-by ordinary repository and Wave lists. See the [Desktop guide](../swift/README.md)
+sidebar, board and pickers. Dragging a sidebar Task changes its rank, the order
+ordinary repository and Wave lists, `lf task list` and Linear share. See the [Desktop guide](../swift/README.md)
 for status, ownership and ordering details.
 
 ```bash

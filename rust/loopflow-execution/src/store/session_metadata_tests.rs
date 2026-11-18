@@ -32,7 +32,7 @@ fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
             .unwrap();
             if let Some(primary) = primary {
                 conn.execute(
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)",
+                    "UPDATE agent_sessions SET primary_scope='task',task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id=?2",
                     params![task.as_str(), primary],
                 )
                 .unwrap();
@@ -44,7 +44,10 @@ fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
             .unwrap();
     assert_eq!(rows.len(), 2);
     for row in rows {
-        assert_eq!(row.task_primary, row.id.as_str() == "primary");
+        assert_eq!(
+            row.primary_scope.as_deref() == Some("task"),
+            row.id.as_str() == "primary"
+        );
     }
 }
 

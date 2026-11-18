@@ -399,7 +399,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     });
     assert!(conn
         .query_row(
-            "SELECT planning_completed FROM tasks WHERE id=?1",
+            "SELECT planning_state IS 'completed' FROM tasks WHERE id=?1",
             [fixture.task.id.as_str()],
             |r| r.get::<_, bool>(0)
         )

@@ -455,8 +455,8 @@ impl SqliteStore {
     }
 
     /// A Graph run's record of itself as it starts: the graph it launched
-    /// with, the Task it started for, the OS process it runs as and the held
-    /// terminal it runs in.
+    /// with, the Task it belongs to ([`super::task_work::starting_task_in`]),
+    /// the OS process it runs as and the held terminal it runs in.
     #[allow(clippy::too_many_arguments)]
     pub fn record_graph(
         &self,
@@ -469,6 +469,8 @@ impl SqliteStore {
         held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
+        let task =
+            super::task_work::starting_task_in(&conn, task, cwd, start.caller_session.as_ref())?;
         conn.execute(
             "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at,repo,cwd,held_terminal_id,caller_session_id)
              VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
@@ -476,7 +478,7 @@ impl SqliteStore {
                 graph_process,
                 compiled.name,
                 serde_json::to_string(compiled)?,
-                task.map(TaskId::as_str),
+                task.as_ref().map(TaskId::as_str),
                 start.started_at,
                 start.pid,
                 start.os_started_at,
@@ -688,25 +690,11 @@ impl SqliteStore {
                 })
                 .collect(),
         };
-        // A Graph started in a checkout is that Task's, as the launch binds it.
-        let task = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            conn.query_row(
-                "SELECT task_id FROM task_checkouts
-                 WHERE ?1=rtrim(worktree,'/') OR ?1 LIKE rtrim(worktree,'/')||'/%'
-                 ORDER BY length(worktree) DESC LIMIT 1",
-                [cwd],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()
-            .unwrap()
-            .map(|task| TaskId::parse(&task).unwrap())
-        };
         process(&graph_process, None, graph_outcome);
         self.record_graph(
             &graph_process,
             &compiled,
-            task.as_ref(),
+            None,
             &start,
             Some(cwd),
             Some(cwd),

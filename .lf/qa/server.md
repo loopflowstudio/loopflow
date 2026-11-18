@@ -117,3 +117,32 @@ CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
 conversations' providers by their disposable checkout cwd and stop them with
 their descendants; they are children of the private home's `lf holder run`, so
 stopping the foreground server alone leaves them running.
+
+# Comparing a branch with the installed lf
+
+The live store is for `sqlite3` only (above). When it lacks only the branch's
+migration (`comm -3` of `ls rust/loopflow-storage/src/migrations` against
+`select version from schema_migrations`), snapshot it with
+`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" "VACUUM INTO '<copy>'"`
+(`.backup` restarts on every write and may never finish), then feed the copy
+`PRAGMA foreign_keys=OFF; BEGIN; <migration>; COMMIT;` with `.timer on`: the
+runner turns foreign keys off too, and with them on a table rebuild fails.
+Count before and after, then `pragma foreign_key_check` and `integrity_check`.
+
+For what people see, build the earlier state in a private home with the
+installed `lf` (`whence -p lf`), then run the branch on that home and
+alternate the two. Unset `LF_*`, close stdin, set `LF_BIN` to the branch
+binary for branch commands only, and put stand-in `claude` and `codex`
+scripts first on `PATH`. `lf task create '<words>' --worktree <path> --json`
+adopts a worktree; inside it `lf -b graph qa` records a run,
+`lf -b default hello` a finished headless Session (the stand-in fails the
+turn; the row stays) and `lf session resume --prepare --json` the Task's
+primary. A live taskless conversation is `lf -a claude : 'hello'` under a PTY
+driver in a plain worktree, with a stand-in that `exec sleep 300`.
+`lf task show <id>` piped prints JSON: `execution.work.sessions[].id` and
+`execution.work.graph_processes[].id` are a Task's membership. A Working-board
+drag is `lf desktop dashboard move working-tasks/task:<id> --destination
+task:<id>`, run from the repository. To move a repository with its checkouts,
+keep the worktrees inside it, `mv` it, `git worktree repair`, then run
+`lf task list` from the new path. Once every writer has exited, `sqlite3
+?mode=ro` cannot open a home's store (no `-shm`); open it read-write.

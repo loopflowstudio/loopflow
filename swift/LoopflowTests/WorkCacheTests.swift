@@ -948,7 +948,6 @@ private actor Source {
             record["primary_scope"] = wave == nil ? "repository" : "wave"
             record["wave_id"] = waveId ?? NSNull()
             record["task_ids"] = []
-            record["task_primary"] = false
             record["workspace"] = ["machine_id": "home-a", "worktree": "/src/loopflow." + (wave ?? "repo"), "task_id": NSNull()]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")
@@ -965,7 +964,7 @@ private actor Source {
             var record = (page["entries"] as! [[String: Any]])[0]
             record["id"] = "conversation-" + id
             record["task_ids"] = [id]
-            record["task_primary"] = true
+            record["primary_scope"] = "task"
             record["workspace"] = ["machine_id": location.machineId, "worktree": location.worktree, "task_id": id]
             record["state"] = "closed"
             record["action"] = sessionActionFixture(state: "closed")

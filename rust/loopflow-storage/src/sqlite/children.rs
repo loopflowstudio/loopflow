@@ -36,26 +36,44 @@ const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
 /// Record the checkout this Machine has for a Task, or that it has none.
+/// Open Sessions in an adopted checkout that name no Task become the Task's,
+/// as if they had started there: a Session records its Task once, and nothing
+/// matches paths later.
 fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    match &task.worktree {
-        Some(worktree) => conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
-             VALUES(?1,?2,?3,?4,?5) ON CONFLICT(task_id) DO UPDATE SET
-             worktree=excluded.worktree,branch=excluded.branch,
-             base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
-            params![
-                task.id.as_str(),
-                worktree.display().to_string(),
-                task.branch,
-                task.base_commit,
-                task.parent_pr_id.as_ref().map(TaskPrId::as_str)
-            ],
-        )?,
-        None => conn.execute(
+    let Some(root) = task
+        .worktree
+        .as_ref()
+        .map(|path| path.display().to_string())
+    else {
+        conn.execute(
             "DELETE FROM task_checkouts WHERE task_id=?1",
             [task.id.as_str()],
-        )?,
+        )?;
+        return Ok(());
     };
+    conn.execute(
+        "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
+         VALUES(?1,?2,?3,?4,?5) ON CONFLICT(task_id) DO UPDATE SET
+         worktree=excluded.worktree,branch=excluded.branch,
+         base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
+        params![
+            task.id.as_str(),
+            root,
+            task.branch,
+            task.base_commit,
+            task.parent_pr_id.as_ref().map(TaskPrId::as_str)
+        ],
+    )?;
+    conn.execute(
+        &format!(
+            "UPDATE agent_sessions SET task_id=?1,work_source=coalesce(work_source,'checkout'),
+                wave_id=(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1)
+             WHERE id IN (SELECT id FROM agent_sessions INDEXED BY open_sessions WHERE completed_at IS NULL)
+             AND task_id IS NULL AND wave_id IS NULL AND primary_scope IS NULL AND {}",
+            super::task_work::within("cwd", "?2")
+        ),
+        params![task.id.as_str(), root],
+    )?;
     Ok(())
 }
 
@@ -364,7 +382,7 @@ impl SqliteStore {
             tx.execute(
                 "UPDATE agent_sessions SET primary_scope=NULL,
                  wave_id=CASE WHEN task_id IS NULL THEN NULL ELSE wave_id END
-                 WHERE id=?1 AND primary_scope IS NOT NULL",
+                 WHERE id=?1 AND primary_scope IN ('repository','wave')",
                 [session.id.as_str()],
             )?;
             // Re-read the capture under the transaction: promotion changes only
@@ -559,7 +577,7 @@ impl SqliteStore {
             ));
         }
         let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_completed,completion_request IS NOT NULL FROM tasks WHERE id=?1",
+            "SELECT planning_state IS 'completed',completion_request IS NOT NULL FROM tasks WHERE id=?1",
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -1443,7 +1461,7 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
     let state: Option<String> = conn.query_row(
-        "SELECT COALESCE(planning_state,CASE WHEN planning_completed=1 THEN 'completed' END) FROM tasks WHERE id=?1",
+        "SELECT planning_state FROM tasks WHERE id=?1",
         [task.id.as_str()],
         |row| row.get(0),
     )?;
@@ -1807,7 +1825,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
         ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
     LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
@@ -2540,7 +2558,7 @@ pub(super) fn request_completion_in(
     note: Option<&str>,
 ) -> StoreResult<Option<i64>> {
     let (completed, pending): (Option<i64>, Option<i64>) = conn.query_row(
-        "SELECT CASE WHEN planning_completed=1 THEN 1 END,completion_request FROM tasks WHERE id=?1",
+        "SELECT CASE WHEN planning_state='completed' THEN 1 END,completion_request FROM tasks WHERE id=?1",
         [task.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;

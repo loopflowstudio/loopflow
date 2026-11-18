@@ -115,7 +115,10 @@ pub async fn associate(
     let home = store.local_machine().await?.id;
     let mut resolver = WorkspaceResolver::new(home.clone(), checkouts);
     for session in sessions {
-        if session.primary_scope.is_some() {
+        if matches!(
+            session.primary_scope.as_deref(),
+            Some("repository" | "wave")
+        ) {
             let cwd = Path::new(&session.cwd);
             session.workspace = Some(SessionWorkspace {
                 machine_id: home.clone(),

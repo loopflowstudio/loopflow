@@ -9,21 +9,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::json;
 
 use crate::work::task::Task;
-use crate::StoreResult;
+use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
 
 pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResult<()> {
     let project = task.project_id.as_ref();
-    let mut query = conn.prepare(
-        "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
-         AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id",
-    )?;
-    let previous = query
-        .query_map(
-            params![task.repository_id.as_str(), project.map(ProjectId::as_str)],
-            |row| row.get::<_, String>(0),
-        )?
-        .collect::<Result<Vec<_>, _>>()?;
+    let previous = siblings_in(conn, task)?;
     let mut desired = previous.clone();
     desired.retain(|id| id != task.id.as_str());
     desired.insert((rank as usize).min(desired.len()), task.id.to_string());
@@ -44,16 +35,81 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
     Ok(())
 }
 
+/// `task` takes `target`'s place among `target`'s Project's Tasks, or among
+/// the repository's standalone Tasks, moving into that Project first.
+pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {
+    if task.repository_id != target.repository_id {
+        return Err(StoreError::InvalidData(format!(
+            "{} and {} are in different repositories; nothing changed.",
+            task.identifier, target.identifier
+        )));
+    }
+    let moved;
+    let task = if task.project_id == target.project_id {
+        task
+    } else {
+        super::task_content::move_task_in(
+            conn,
+            &task.id,
+            task.project_id.as_ref(),
+            target.project_id.as_ref(),
+        )?;
+        moved = super::children::task_on(conn, &task.id)?.ok_or(StoreError::NotFound)?;
+        &moved
+    };
+    let position = siblings_in(conn, task)?
+        .iter()
+        .position(|id| id == target.id.as_str())
+        .ok_or(StoreError::NotFound)?;
+    reorder_in(conn, task, position as u32)?;
+    siblings_in(conn, task)
+}
+
+/// The Tasks `task` is ranked among, in rank order. Ties break by id, as
+/// `TaskOrder::key` does on every board, so a Move lands where it was dropped.
+fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
+    let mut query = conn.prepare(
+        "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
+         AND planning_deleted_at IS NULL ORDER BY planning_rank,id",
+    )?;
+    let rows = query.query_map(
+        params![
+            task.repository_id.as_str(),
+            task.project_id.as_ref().map(ProjectId::as_str)
+        ],
+        |row| row.get::<_, String>(0),
+    )?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
+}
+
+/// The tracker's order of a Project's Tasks: their observed items by rank.
+/// `None` when the Project has no tracker Project.
 pub(super) fn observed_order(
     conn: &Connection,
     project: &ProjectId,
 ) -> StoreResult<Option<Vec<String>>> {
-    let body: Option<String> = conn.query_row(
-        "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
-         JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana') WHERE p.id=?1",
-        [project.as_str()], |row| row.get(0)).optional()?.flatten();
-    body.map(|body| serde_json::from_str(&body).map_err(Into::into))
-        .transpose()
+    let bound: Option<(String, String, String)> = conn
+        .query_row(
+            "SELECT o.repo,o.tracker,o.id FROM projects p JOIN waves w ON w.id=p.wave_id
+             JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana')
+             WHERE p.id=?1",
+            [project.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((repo, tracker, external)) = bound else {
+        return Ok(None);
+    };
+    let mut query = conn.prepare(
+        "SELECT t.id FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
+         WHERE i.repo=?1 AND i.tracker=?2 AND i.project_id=?3
+         AND t.project_id=?4 AND t.planning_deleted_at IS NULL
+         ORDER BY i.rank,i.id",
+    )?;
+    let rows = query.query_map(params![repo, tracker, external, project.as_str()], |row| {
+        row.get::<_, String>(0)
+    })?;
+    Ok(Some(rows.collect::<Result<_, _>>()?))
 }
 
 /// Keep newly observed members next to their next known neighbour; retain local
@@ -74,24 +130,15 @@ pub fn include_members(desired: &[String], observed: &[String]) -> Vec<String> {
 
 pub(crate) fn observe_in(
     conn: &Connection,
-    repo: &str,
-    external: &str,
     project: &ProjectId,
     observed: Vec<String>,
 ) -> StoreResult<bool> {
     if let Some(previous) = observed_order(conn, project)? {
         // List omission proves neither deletion nor a completed membership move.
-        for id in previous.iter().filter(|id| !observed.contains(id)) {
-            let retained: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tasks WHERE id=?1 AND project_id=?2 AND planning_deleted_at IS NULL)", params![id,project.as_str()], |row| row.get(0))?;
-            if retained {
-                return Ok(false);
-            }
+        if previous.iter().any(|id| !observed.contains(id)) {
+            return Ok(false);
         }
     }
-    conn.execute(
-        "UPDATE tracker_projects SET task_order_json=?4 WHERE repo=?1 AND tracker=?2 AND id=?3",
-        params![repo, "linear", external, serde_json::to_string(&observed)?],
-    )?;
     // The tracker's complete list answers an attempted order the way the
     // drain's look would; the newest unconfirmed order is local intent.
     for action in unconfirmed_orders(conn, project)? {
@@ -138,7 +185,7 @@ fn unconfirmed_orders(
 fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
-         ORDER BY planning_rank,created_at,id",
+         ORDER BY planning_rank,id",
     )?;
     let rows = query.query_map([project.as_str()], |row| row.get(0))?;
     rows.collect::<Result<_, _>>().map_err(Into::into)

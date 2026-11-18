@@ -353,9 +353,9 @@ fn task_conversation_starts_at_launch_not_creation() {
         };
         let stored: (Option<String>, Option<String>) = db
             .query_row(
-                "SELECT p.session_id,c.worktree FROM tasks
+                "SELECT p.id,c.worktree FROM tasks
                  LEFT JOIN task_checkouts c ON c.task_id=tasks.id
-                 LEFT JOIN task_primary_sessions p ON p.task_id=tasks.id WHERE tasks.id=?1",
+                 LEFT JOIN agent_sessions p ON p.task_id=tasks.id AND p.primary_scope='task' WHERE tasks.id=?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -382,7 +382,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         let session = ensured["id"].as_str().unwrap().to_owned();
         let primary: String = db
             .query_row(
-                "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+                "SELECT id FROM agent_sessions WHERE task_id=?1 AND primary_scope='task'",
                 [id],
                 |row| row.get(0),
             )
@@ -1365,9 +1365,8 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     let sole = converse(&sole_path);
     let chosen = primary(&["inf-123"]);
     assert_eq!(chosen["id"], sole.as_str());
-    // It stays an ordinary member of its Task.
-    assert_eq!(chosen["primary_scope"], Value::Null);
-    assert_eq!(chosen["task_primary"], true);
+    // Its row is marked for its Task, and it stays a member of that Task.
+    assert_eq!(chosen["primary_scope"], "task");
     assert_eq!(members("Inf-123"), std::slice::from_ref(&sole));
     for args in [
         vec!["resume", "--task", "inf-123", "--prepare", "--json"],
@@ -1407,7 +1406,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|session| session["task_primary"] == true)
+        .filter(|session| session["primary_scope"] == "task")
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(marked, std::slice::from_ref(&later));
@@ -2878,7 +2877,7 @@ fn promotion_background_run_does_not_claim_primary() {
     let primary: Option<String> = fixture
         .db()
         .query_row(
-            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+            "SELECT id FROM agent_sessions WHERE task_id=?1 AND primary_scope='task'",
             [task],
             |row| row.get(0),
         )

@@ -822,7 +822,7 @@ public struct RegistryQuery: Sendable {
             .desktopDashboardMove(directory: repoPath, board: "query:" + id, member: member.selector, destination: target.selector)))
     }
 
-    /// Move a Working Tasks member into `target`'s place in the repository's one Task order.
+    /// Move a Working Tasks member into `target`'s rank among its Project's Tasks.
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await write(
             .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))

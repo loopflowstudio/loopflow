@@ -229,7 +229,6 @@ fn summary_fixture() -> crate::session::SessionSummary {
         unviewed: false,
         held: false,
         task_terminal: false,
-        task_primary: false,
         task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
@@ -1633,13 +1632,18 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
+            "UPDATE agent_sessions SET primary_scope='task' WHERE id='task-primary' AND task_id=?1",
             [task.as_str()],
         )
         .unwrap();
         db.execute(
             "UPDATE agent_sessions SET cwd=?1 WHERE id IN ('bare','repository-in-task')",
             [repo.path().to_str().unwrap()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='bare'",
+            rusqlite::params![task.as_str(), wave],
         )
         .unwrap();
         Self {

@@ -411,8 +411,6 @@ pub struct SessionRecord {
     pub program_status: Option<loopflow_model::program_status::Records>,
     /// The provider's current AgentProcess; absent when Loopflow never launched one.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
-    /// Its Task names it as the Task's primary conversation.
-    pub task_primary: bool,
     pub task_ids: Vec<loopflow_model::durable::TaskId>,
     pub id: loopflow_model::id::LfSessionId,
     pub workspace: Option<SessionWorkspace>,
@@ -720,7 +718,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         availability: session_availability(session),
         program_status: session.program_status.clone(),
         agent_process_id: session.agent_process_id.clone(),
-        task_primary: session.task_primary,
         task_ids: session.task_ids.clone(),
         id: session.id.clone(),
         workspace: None,
@@ -1445,7 +1442,6 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         availability: session_availability(&metadata),
         program_status: metadata.program_status.clone(),
         agent_process_id: metadata.agent_process_id.clone(),
-        task_primary: metadata.task_primary,
         task_ids: store.sqlite.session_task_ids(&session.id)?,
         id: session.id.clone(),
         workspace: None,

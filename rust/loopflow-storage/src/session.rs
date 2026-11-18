@@ -286,13 +286,13 @@ pub enum SessionPrimary {
     Repository,
 }
 
-/// Inventory selection; SQL filters metadata, then the list resolves checkout membership.
+/// Inventory selection, filtered in SQL before pagination.
 #[derive(Debug, Clone)]
 pub struct SessionFilter {
     pub orphan: bool,
     pub repo: Option<String>,
     pub task: Option<String>,
-    /// Attribution or resolved checkout membership, selected before pagination.
+    /// The Session's Wave, or its Task's.
     pub wave: Option<WaveId>,
     pub primary: Option<SessionPrimary>,
     pub search: Option<String>,
@@ -347,8 +347,6 @@ pub struct SessionSummary {
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
-    /// Its Task names it as the Task's primary conversation.
-    pub task_primary: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,

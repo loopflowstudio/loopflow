@@ -401,8 +401,8 @@ pub(super) fn save_in(
 /// The steers that apply to Session `?1`, as CTE `applicable`.
 fn scopes() -> String {
     // Membership is derived here; receipts alone retain delivery state.
-    // Reuse Task inventory's association rule, including explicit binds and
-    // checkout membership. UNION terminates even in malformed cyclic ancestry.
+    // Reuse Task inventory's association rule: the Session's recorded Task.
+    // UNION terminates even in malformed cyclic ancestry.
     format!("WITH RECURSIVE member_tasks(id) AS MATERIALIZED (
         SELECT tw.id FROM agent_sessions s JOIN tasks tw ON tw.id IN ({}) WHERE s.id=?1
         ), member_waves(id) AS (

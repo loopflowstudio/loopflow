@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, lf-row readers converted)
+## Status (2026-11-18, lf-row readers converted; next: journal stop)
 
 LOO-936 merged as #1965 (`fb14b674c9`) and #1964 with it; synced at
 `ac93e4c0e7`, resolved against the LOO-936 branch history (main's tree
@@ -51,10 +51,9 @@ OS-scan measurement: `questions.md`.
   tests what remains: a released-shape runner end on `processes` ends its
   Graph run, and a released launcher's endpoint update shows in
   `lf session list`.
-- **`transport::held_in()` reads `LF_HELD_TERMINAL` alone.** The holder sets
-  it beside `LF_TRANSPORT_HELD` on every start (`registry.rs`), and
-  `Handoff::take` removes only the latter, so the `current()` fallback is
-  never the answer.
+- **`transport::held_in()` reads `LF_HELD_TERMINAL` alone** (built in the
+  2026-11-18 realign). The holder sets it beside `LF_TRANSPORT_HELD` on every
+  start (`registry.rs`), and `Handoff::take` removes only the latter.
 - **With the journal stop:** `record_process_within`'s `transport::current()`
   argument, `lf_evidence` and the journal's receipt tests go with receipts;
   `attach_in` stops landing the attaching lf's row once the rebuild drops
@@ -80,7 +79,7 @@ the bridge and slice-4 deletion targets (`lf ps`/`top`, history, doctor,
   `graph_processes_unended`. **Deviation:** the plan's `transport::current()`
   is only the direct child of the holder, so work typed into a Desktop shell
   never had it. The holder now also passes `LF_HELD_TERMINAL` (inherited,
-  stripped from detached starts); `transport::held_in()` reads either.
+  stripped from detached starts), which `transport::held_in()` reads.
   Retirement: work is excused when its Session's or Graph run's held
   terminal is one of the Task's shell or conversation terminals.
   `terminal_retention` reads Graph runs held in the terminal.
@@ -209,29 +208,6 @@ timed out twice under load and passes alone (holder `exit.json`, no store);
 `work_open_tests` time out when 90 terminal fixtures run at once. Gate also
 runs `binary(two_people)`, `binary(transport_tests)` and `test(performance_tests::)`
 for the trigger changes.
-
-**Concept review after the Session lifetime cut (2026-11-17): next implement direction.**
-
-A Process row is two things: an lf row (written by the journal) and an agent
-row (written by the attachment writers). The agent row left first (built
-above), because lf rows were read through the agent's attachment.
-
-- **Then the lf-row readers, then the journal stop.** In one change before
-  the journal stop: `task_open_process_pairs` and `task_state_sql`'s
-  `open_processes` arm become the Task's live Sessions (`agent_started_at`
-  set, `agent_ended_at` NULL) and unended Graph runs; retirement by
-  terminal (Graph runs gain `held_terminal_id` from `transport::current()`,
-  which the journal passes to `record_process_within` today; `unsettled_work`'s
-  ancestry walk, `held_terminal_processes` and `launcher_lf_process_id`
-  reads go); `process_starter` from the ship event's `caller_session_id`;
-  `run_task_graph`'s parent check compares the carrier id with the parent
-  id the journal already inherits from the env, not a store row. The
-  journal-stop change (foreign-key rebuild, liveness pass, new → old lf-row
-  bridge) follows with the tests already named. A carrier waiting between
-  retries has no live Graph run; it is still "moving" by `run_pid`, so the
-  Task cannot retire then, as today.
-
-No open product choice.
 
 **Carrier slices as built.**
 
@@ -578,20 +554,6 @@ canonical ids). DTO fields that carry Process data: `processes[]` in
 (`swift/Loopflow/Models/LfProcess.swift`); `GraphStepProcess` and
 `GraphProcessSummary` fields are read from Process columns today.
 
-**Gap found in review (2026-11-17): Task retirement's ancestry walk.**
-`unsettled_work` (`loopflow-execution/src/ops/task/retirement.rs:308`) lets a
-Task retire while open work runs only if that work descends, by
-`parent_lf_process_id`, from a Desktop shell's launcher
-(`desktop_shells.launcher_lf_process_id`, read by `desktop::shells::hosts`) or
-from an lf started inside a held terminal (`held_terminal_processes`). With no
-Process rows there is no parent chain. Replacement: membership by terminal.
-Open work is the Task's live Sessions and Graph runs. Each belongs to a shell
-when its own `terminal_id` / `held_terminal_id` is one of the Task's
-`desktop_shells.terminal_id`. Then `launcher_lf_process_id` and
-`held_terminal_processes` are D, and the walk goes. Lands with the Session
-slice; test: a Task with a Desktop shell running an agent retires and closes
-the shell, and a Task whose Graph run is outside any shell does not.
-
 ## Target records
 
 Process ids stay as opaque UUIDs (`LF_PROCESS_ID`, Graph run id, step id,
@@ -673,9 +635,7 @@ agents. After `lf install`, every new command runs the new binary (agents
 resolve `lf` from PATH; steps via `resolve_lf_binary`); only processes already
 running keep the old code, and they read mostly their own Session.
 
-What breaks without a bridge: an old Graph runner's next step runs the new lf,
-writes no `processes` row, and `child_process_after` never finds it; an old
-Task-run loop never sees its new Graph child; an old launcher's endpoint,
+What breaks without a bridge: an old launcher's endpoint,
 exit and re-token land only in `processes`, so new readers show its Session
 stale. A new lf taking over an old-held Session repoints
 `agent_sessions.agent_process_id` to an id with no `processes` row, so the old
@@ -686,11 +646,10 @@ holder's fence fails closed (correct).
   current Session's columns (only while `agent_sessions.agent_process_id`
   matches and the token is the one being replaced) and `lf` rows that an owner
   points at into that owner's result columns.
-- new → old (agent rows only; Graph runs and steps need none, see the
-  concept review after the lf-row readers): triggers on owner inserts/updates write the matching
-  `processes` row (Graph run with `parent_lf_process_id` = the carrier that
-  spawned it, step with parent = Graph run, agent with attachment), so an old
-  runner's `child_process_after` and `graph_child_after` find new children.
+- new → old, agent rows only (`process_agent_from_session_*`,
+  `process_terminal_from_session`), which old holders' fences read. Graph
+  runs and steps need none: a released runner stops at its next step's
+  schema check (concept review after the lf-row readers).
 - Loops: SQLite's `recursive_triggers` is off, and each trigger writes only
   when the value differs.
 - The migration backfills every new column from `processes` for all rows

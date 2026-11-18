@@ -217,14 +217,12 @@ pub fn current() -> Option<&'static TerminalId> {
     HANDOFF.get().map(|handoff| &handoff.terminal)
 }
 
-/// The held terminal this process's work runs in: the one it took up, or
-/// the one its program started in. Work started there holds it open.
+/// The held terminal this process's work runs in. The holder sets it on
+/// every start and descendants inherit it. Work started there holds it open.
 pub fn held_in() -> Option<TerminalId> {
-    current().cloned().or_else(|| {
-        std::env::var(WITHIN_ENV)
-            .ok()
-            .and_then(|id| TerminalId::parse(&id).ok())
-    })
+    std::env::var(WITHIN_ENV)
+        .ok()
+        .and_then(|id| TerminalId::parse(&id).ok())
 }
 
 /// Whether this process runs the launch or handed it to its owner.

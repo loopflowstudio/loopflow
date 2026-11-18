@@ -13,3 +13,9 @@ Made without anyone to ask; each is reversible.
   `graph_process_steps_*` measured and every traced Graph statement audited.
 - **`pin` still reruns the inputs.** Comparing `store_revisions` would need
   `store_revision_agent_sessions_update` to fire on every identity write.
+- **The single-Session read drops ended agents too** (concept review). Dead
+  for an ended agent comes from the row in `read_summary` for every read, and
+  `SessionProcessIdentity.completed_at` goes. The kickoff plan narrowed only
+  the all-read.
+- **The deadline statement shares its guard with `available_sql`** rather than
+  repeating three of its clauses.

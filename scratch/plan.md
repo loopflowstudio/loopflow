@@ -4,13 +4,17 @@
 
 `session_projection_inputs_in` (`rust/loopflow-storage/src/sqlite/sessions.rs`)
 reads only Sessions whose agent has not ended, plus the unended Graph runs.
+Its three lists then mean one thing each: the agents the OS must be asked
+about, the Graph runs the OS must be asked about, and the times an answer
+changes with no write.
 On this Machine's store that is 37 Sessions and 6 runs instead of 20,732
 activity rows and 803 open Sessions twice over. Nobody sees a different
 Session list; `lf server run` stops spending its busy time here.
 
 Done when the all-Sessions inputs read costs tens of microseconds on a store
 this size, the three statements appear in a query-plan test that fails on a
-scan, and every Session summary reads the same as before.
+scan, and every Session summary reads the same as before, but for the one
+reading named under Identities.
 
 ## What the store showed (2026-11-18, `~/.lf/loopflow.db`, read-only, SQLite 3.51)
 
@@ -58,6 +62,14 @@ WHERE <s.id=?3 | s.agent_process_id IS NOT NULL>
   AND act.observed_at > ?2 - ?1 ORDER BY 1
 ```
 
+The guard that makes an activity row count (`act.session_id=s.id`, open
+Session, the Session's current agent, agent not ended) is the same one
+`available_sql` opens with. It is written once, as a function of the Session
+alias beside `available_sql`, and both statements use it: the rule and the
+time it next changes its answer cannot drift apart. The other three copies of
+the join (`TURN_LIVE`, `summary_query`, `session_reports_status`) each lack one
+of its clauses on purpose and stay.
+
 17 µs for all (7 rows), 2 µs for one. The meaning holds: `available_sql`
 reads quiet time only from an activity row of the Session's current agent, on
 an open Session whose agent has not ended, and `read_summary` reports
@@ -70,19 +82,30 @@ all-read (not the single one) and it is rewritten on every activity reading,
 every few seconds per streaming agent, under the Machine's one write lock.
 The join needs no migration.
 
-**Identities** for the all-read take the same index: add `agent_process_id IS
-NOT NULL AND agent_ended_at IS NULL` to the predicate. 37 rows, 29 µs.
-An ended agent is Dead from its own row (`RecordedProcess::evidence_by`
-returns Dead on `ended` before any OS lookup), so the 735 ended agents were
-read only to say what the row already says. `SessionProjection::evidence`
-defaults to Unknown for an agent missing from the map, and
-`agent_process_evidence` is on the `SessionSummary` wire, so the summary
-query selects `a.agent_ended_at IS NOT NULL` and `read_summary` reports Dead
-for it before consulting the map. Holders of ended agents are never read
-(`terminal_id` checks the holder only when the agent is Live).
+**Identities** are the agents that have not ended, in both reads: add
+`agent_ended_at IS NULL` to the statement, and `agent_process_id IS NOT NULL`
+to the all-read's predicate so it takes the same index. 37 rows, 29 µs.
 
-One reading changes, made for review: a completed Session with an ended agent
-reads Dead in an all-Sessions summary where it read Unknown (it was outside
+An ended agent is Dead because its row says so, and no OS answer can change
+that. Today that fact travels out of SQL as
+`SessionProcessIdentity.completed_at` (which holds `agent_ended_at`), through
+`RecordedProcess { ended }`, into the evidence map and back into
+`read_summary`, for 735 of the 772 identities. After: the summary query
+selects `a.agent_ended_at IS NOT NULL` and `read_summary` reports Dead for it
+before consulting the map, for the all-read and the single read alike.
+`SessionProcessIdentity.completed_at` is deleted and `Reading::acquire` passes
+`ended: false`. The evidence map then holds only what the OS was asked.
+`SessionProjection::evidence` still defaults to Unknown for an unended agent
+missing from the map. Holders of ended agents are never read (`terminal_id`
+checks the holder only when the agent is Live).
+
+Chosen for review, over the kickoff plan's narrower change: the single-Session
+read stops returning ended agents too. Passed over: narrowing only the
+all-read, which leaves two ways to learn that an ended agent is Dead (the row
+in one read, `RecordedProcess.ended` in the other).
+
+One reading changes: a completed Session with an ended agent reads Dead in an
+all-Sessions summary where it read Unknown (it was outside
 `completed_at IS NULL`). The single-Session read already said Dead, so the two
 now agree. Passed over: keeping Unknown there with a `completed_at` test in
 `read_summary`.
@@ -91,7 +114,9 @@ now agree. Passed over: keeping Unknown there with a `completed_at` test in
 `WHERE g.ended_at IS NULL`, through `graph_processes_unended`. 6 rows, 3 µs.
 This is a superset of "unended runs whose step captured an open Session's
 input"; an extra run costs one OS observation and `graph_result` is looked up
-by run id, so no summary changes. The single-Session statement stays.
+by run id, so no summary changes. The single-Session statement stays: one
+Session's read should not ask the OS about every running Graph. The field's
+doc comment says which runs each read carries.
 
 After: about 50 µs for the all-read, both runs of it under 0.1 ms.
 
@@ -116,6 +141,10 @@ nothing left worth that. The PR says so.
 - Adding the table to `GROWING` puts every other traced path's
   `session_activity` statements under the same check. A scan it finds
   elsewhere is fixed here when it is a one-line predicate, otherwise filed.
+- A deadline test beside `quiet_deadline_repages_sessions_and_task_selections_without_a_write`:
+  two Sessions with fresh activity, one whose agent has ended. The all-read
+  carries one deadline, the live Session's; a single read of the ended one
+  carries none; a single read of the live one carries its own.
 - `identity_acquisition_is_batched_and_indexes_out_completed_history`
   (`rust/loopflow-execution/src/store/session_projection.rs`) keeps its count
   of 6 SELECTs: three statements, twice.
@@ -148,15 +177,16 @@ the before and after plans and times from this file.
 
 ## Exclusions
 
-No migration, no new index, no change to `store_revisions` triggers, to
-`available_sql`, or to the 120 s quiet rule. The summary read itself
+No migration, no new index, no change to `store_revisions` triggers, to what
+`available_sql` answers, or to the 120 s quiet rule. The summary read itself
 (`summary_query`) is not re-planned here.
 
 ## What goes
 
 - The `observed_at + ?1 > ?2` statement.
 - The all-read's list subquery over every open Session for Graph runs.
-- Evidence and holder map entries for ended agents.
+- Evidence and holder map entries for ended agents, in both reads.
+- `SessionProcessIdentity.completed_at`.
 
 What survives: the deadlines a subscription wakes on, `pin` returning `None`
 when an identity changed between observation and projection
@@ -167,10 +197,12 @@ ended agent in every summary.
 
 1. **The failing plan test, then deadlines.** Add `session_activity` to
    `GROWING` and `MEASURED`, write the test, watch it fail on the scan, replace
-   the deadline statement. Shows whether adding the table flags statements in
+   the deadline statement using the guard shared with `available_sql`. Shows whether adding the table flags statements in
    other traced paths, which is the one thing that could widen this change.
-2. **Identities through the unended-agent index**, with Dead read from the row
-   in `read_summary`. Run `session_projection::` and the Session CLI tests that
+2. **Identities are the unended agents**, in both reads, with Dead read from
+   the row in `read_summary` and `SessionProcessIdentity.completed_at` gone.
+   `a_session_reads_its_agent_lifetime_from_its_own_row` covers Unknown, Live
+   and Dead through the single read. Run `session_projection::` and the Session CLI tests that
    assert `agent_process_evidence`
    (`grep -rn agent_process_evidence rust/loopflow/tests`).
 3. **Graph runs as every unended run.**
@@ -182,3 +214,18 @@ ended agent in every summary.
 `sample` of `lf server run` under the same load no longer shows
 `session_projection_inputs_in` near the top; headless, the timing script's
 all-read total drops from about 6,200 µs to about 50 µs.
+
+## Left for later, larger than this change
+
+`scratch/concept-review.html` shows these against the product concepts.
+
+- The 120 s quiet rule is written three times: `available_sql`, the deadline
+  statement, and a literal `120` in `store_revision_session_activity_update`.
+  The first two share `AVAILABILITY_QUIET_SECONDS`; the trigger is in a merged
+  migration and changing the rule means a new one.
+- `pin` reads the inputs twice because `store_revisions` cannot vouch for
+  them (see the currency check above).
+- No wakeup comes from a narrower deadline list by accident: a view that
+  relied on an ended agent's activity row to re-read would now wait for a
+  write or a process death. None is known; `process_death_invalidates_session_pages_and_task_selections_without_a_write`
+  and the quiet-deadline test cover the two real wake sources.

@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-979 concept review: what a Session read asks the Machine</title>
+<style>
+  :root {
+    --paper: #f6f7f4; --ink: #1b2421; --quiet: #5c6b66; --rule: #cfd6d1;
+    --panel: #ffffff; --yes: #1f6f55; --no: #a8321f; --new: #2c4fa3; --new-bg: #e9eefb;
+    --no-bg: #fbece8; --yes-bg: #e6f2ec;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper: #131917; --ink: #e4e9e6; --quiet: #94a39d; --rule: #2f3a36;
+      --panel: #1a2220; --yes: #6fc7a5; --no: #f08a76; --new: #9db4f2; --new-bg: #1c2540;
+      --no-bg: #36201b; --yes-bg: #173027;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--paper); color: var(--ink);
+    font: 16px/1.55 "Avenir Next", "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 64rem; margin: 0 auto; padding: 3rem 1.5rem 5rem; }
+  h1 { font: 600 2.1rem/1.15 "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin: 0 0 1rem; max-width: 22em; }
+  h2 { font: 600 1.35rem/1.25 "Iowan Old Style", "Palatino Linotype", Georgia, serif; margin: 3.2rem 0 .8rem; }
+  p { max-width: 44em; margin: .6rem 0; }
+  .lede { color: var(--quiet); }
+  code, pre { font: .86em/1.5 "SF Mono", Menlo, Consolas, monospace; }
+  pre { background: var(--panel); border: 1px solid var(--rule); padding: .9rem 1rem; overflow-x: auto; margin: .6rem 0; border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; margin: 1rem 0; }
+  th, td { text-align: left; vertical-align: top; padding: .7rem .8rem; border-top: 1px solid var(--rule); }
+  th { font-weight: 600; color: var(--quiet); border-top: 0; font-size: .9rem; }
+  .mark { display: inline-block; font-weight: 600; padding: .05rem .5rem; border-radius: 3px; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yes-bg); }
+  .no { color: var(--no); background: var(--no-bg); }
+  .proposed { color: var(--new); background: var(--new-bg); padding: .05rem .4rem; border-radius: 3px; font-weight: 600; }
+  .legend { color: var(--quiet); font-size: .9rem; }
+  .flow { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
+  .flow > div { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 1rem 1.1rem; }
+  .flow .after { border-color: var(--new); }
+  .flow h3 { margin: 0 0 .6rem; font-size: 1rem; }
+  .flow ol { margin: 0; padding-left: 1.2rem; }
+  .flow li { margin: .35rem 0; }
+  .num { font-variant-numeric: tabular-nums; text-align: right; white-space: nowrap; }
+  ol.q > li { margin: 1rem 0; max-width: 44em; }
+  ol.q ol { list-style: lower-alpha; margin-top: .3rem; }
+  @media (max-width: 720px) { .flow { grid-template-columns: 1fr; } table { font-size: .92rem; } }
+</style>
+</head>
+<body>
+<main>
+
+<h1>A Session read asks the Machine three things. The code should hold exactly those three.</h1>
+<p class="lede">LOO-979, reviewed before anything is built. The area taken: how a Session
+comes to read as running, dead or available, and how a list of Sessions learns
+that this changed. The Task names one slow statement; that statement is one
+third of the read that answers these questions, so the review covers the
+whole read.</p>
+<p class="legend"><span class="proposed">blue</span> marks what the plan
+proposes; everything else exists on <code>origin/main</code> today.</p>
+
+<h2>One interaction, walked</h2>
+<p>Someone has the Session list open. An agent stops calling tools and says
+nothing for 120 seconds; its Session becomes available without anything being
+written. Another agent's process is killed; its Session stops reading as
+running. A third finished yesterday and reads Dead forever.</p>
+<p>To draw that list, a read collects what SQL cannot know
+(<code>SessionProjectionInputs</code>), asks the OS, checks nothing moved
+(<code>pin</code>), then projects. Today the collecting step reads 20,732
+activity rows and 772 Sessions to end up asking the OS about 37 processes and
+registering one wakeup.</p>
+
+<table>
+<thead><tr><th>Statement</th><th>Rows today</th><th>Time today</th><th>Rows after</th><th>Time after</th></tr></thead>
+<tbody>
+<tr><td>Deadlines</td><td class="num">20,732 scanned, 13 kept</td><td class="num">2,443 µs</td><td class="num"><span class="proposed">7</span></td><td class="num"><span class="proposed">17 µs</span></td></tr>
+<tr><td>Identities</td><td class="num">772</td><td class="num">1,630 µs</td><td class="num"><span class="proposed">37</span></td><td class="num"><span class="proposed">29 µs</span></td></tr>
+<tr><td>Graph runs</td><td class="num">803 Sessions probed, 6 kept</td><td class="num">2,093 µs</td><td class="num"><span class="proposed">6</span></td><td class="num"><span class="proposed">3 µs</span></td></tr>
+</tbody>
+</table>
+<p class="legend">Measured 2026-11-18 on this Machine's store, read-only, mean
+of 300 warm runs. The read runs twice per projection.</p>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+<thead><tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong</th></tr></thead>
+<tbody>
+<tr>
+  <td>A Session's agent is running, dead, or not known.</td>
+  <td><code>ProcessIdentityEvidence</code> on <code>SessionSummary</code>; <code>SessionProjection.evidence</code>, a map filled from <code>identities</code>.</td>
+  <td><span class="mark no">no</span></td>
+  <td>One answer, two origins, carried as one. "Dead because the row says the agent ended" needs no OS, yet 735 of 772 identities are read out, wrapped in <code>RecordedProcess { ended: true }</code> and mapped back in. The field that carries it is called <code>completed_at</code> and holds <code>agent_ended_at</code>.</td>
+</tr>
+<tr>
+  <td>A quiet Session becomes available after two minutes.</td>
+  <td><code>available_sql</code>; <code>deadlines</code>; the <code>observe::deadline</code> fact; the revision trigger on <code>session_activity</code>.</td>
+  <td><span class="mark no">no</span></td>
+  <td>The rule and the time it next changes its answer are separate SQL with different ideas of which rows count. The deadline statement counts every activity row ever written. The trigger writes the 120 a third time, as a literal.</td>
+</tr>
+<tr>
+  <td>A Session's Graph is running, finished or failed.</td>
+  <td><code>graph_runs</code>, <code>graph_results</code>, <code>GraphProcessSummaryState</code>.</td>
+  <td><span class="mark yes">yes</span></td>
+  <td>The concept is right. The all-Sessions statement finds 6 runs by probing every open Session.</td>
+</tr>
+<tr>
+  <td>The list is correct at the moment it is drawn.</td>
+  <td><code>pin</code> and <code>is_current</code>: rerun the inputs, compare, restart on a difference.</td>
+  <td><span class="mark yes">yes</span></td>
+  <td>Nobody sees it and nobody should. It costs a second read because <code>store_revisions</code> cannot vouch for identity writes.</td>
+</tr>
+<tr>
+  <td>Asking about one Session and asking about all give the same answer.</td>
+  <td><code>session_summary</code> and <code>session_summaries</code>, one predicate each.</td>
+  <td><span class="mark no">no</span></td>
+  <td>A completed Session with an ended agent reads Dead alone and Unknown in the list. The single read also pays for every Session's deadlines.</td>
+</tr>
+</tbody>
+</table>
+
+<h2>The biggest mismatch: an ended agent is asked about anyway</h2>
+<p>The inputs exist to hold what SQL cannot answer. An ended agent is
+something SQL has already answered. Carrying it through the observation step
+is what makes the read proportional to history instead of to what is running,
+and it is why the kickoff plan needed a special case in <code>read_summary</code>
+for the list while the single read kept the old route.</p>
+
+<div class="flow">
+  <div>
+    <h3>Today, and in the kickoff plan's single read</h3>
+    <ol>
+      <li>SQL returns every started agent with <code>completed_at</code> (really <code>agent_ended_at</code>).</li>
+      <li><code>Reading::acquire</code> builds <code>RecordedProcess { ended }</code>.</li>
+      <li><code>evidence_by</code> returns Dead before looking at the OS.</li>
+      <li>The map carries Dead back to <code>read_summary</code>.</li>
+    </ol>
+  </div>
+  <div class="after">
+    <h3><span class="proposed">Proposed, for every read</span></h3>
+    <ol>
+      <li>SQL returns agents that have not ended. Those are the ones to observe.</li>
+      <li><code>Reading::acquire</code> asks the OS about each.</li>
+      <li><code>read_summary</code> reads <code>agent_ended_at IS NOT NULL</code> from the row: Dead. Otherwise the map; missing means Unknown.</li>
+      <li><code>SessionProcessIdentity.completed_at</code> is deleted.</li>
+    </ol>
+  </div>
+</div>
+
+<p>The same idea settles the other two lists. Deadlines come only from the
+activity row that <code>available_sql</code> would read: an open Session, its
+current agent, not ended. That guard is written once and used by both, so a
+change to who can be available moves the wakeup with it.</p>
+<pre><span class="proposed">proposed</span>
+SELECT DISTINCT act.observed_at + ?1 FROM agent_sessions s
+JOIN session_activity act ON &lt;the guard available_sql opens with&gt;
+WHERE &lt;s.id=?3 | s.agent_process_id IS NOT NULL&gt;
+  AND act.observed_at &gt; ?2 - ?1 ORDER BY 1</pre>
+<p>Graph runs for the list are every unended run. For one Session they stay
+that Session's run, so a single read never asks the OS about every Graph on
+the Machine.</p>
+
+<h2>Tested against three paths</h2>
+<table>
+<thead><tr><th>Path</th><th>What must survive</th><th>Holds?</th></tr></thead>
+<tbody>
+<tr><td>Normal: an agent goes quiet.</td><td>The list re-reads at <code>observed_at + 120</code> with no write.</td><td><span class="mark yes">yes</span> The row is its current agent's, so it is in the join.</td></tr>
+<tr><td>Failure: the process is killed with no exit recorded.</td><td>Dead from the OS; views holding the process fact re-read.</td><td><span class="mark yes">yes</span> The agent is unended, so it is still observed.</td></tr>
+<tr><td>Recovery: the Session is resumed with a new agent between observing and projecting.</td><td><code>pin</code> returns nothing and the read starts over.</td><td><span class="mark yes">yes</span> The new agent appears in the rerun; the lists differ.</td></tr>
+<tr><td>Counterexample: a view that only ever woke because an ended agent's activity row produced a deadline.</td><td>Nothing should depend on it.</td><td>None found. Those wakeups stop; the plan names the two tests that cover the real sources.</td></tr>
+</tbody>
+</table>
+
+<h2>What the plan now says</h2>
+<p>Changed by this review: identities are the unended agents in both reads and
+<code>completed_at</code> leaves <code>SessionProcessIdentity</code>; the
+deadline statement shares its guard with <code>available_sql</code>; a test
+shows an ended agent's fresh activity registers no deadline. Kept from the
+kickoff plan: no index on <code>observed_at</code>, every unended Graph run for
+the list, <code>pin</code> unchanged, <code>session_activity</code> joins the
+plan-checked tables, and deadlines first as the slice that shows whether the
+plan check widens the change.</p>
+
+<h2>Larger than this change</h2>
+<p>The 120-second rule lives in <code>available_sql</code>, the deadline
+statement and a literal in <code>store_revision_session_activity_update</code>.
+Making it one thing takes a migration that rebuilds the trigger. The second
+read in <code>pin</code> goes away only if every identity write advances the
+<code>sessions</code> revision, which is also a trigger change. Neither is
+needed at 50 µs a read.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>A completed Session whose agent ended reads Dead in the list, where it read Unknown.
+    <ol><li>Dead everywhere, as chosen.</li><li>Keep Unknown for completed Sessions in the list.</li></ol>
+  </li>
+  <li>The single-Session read stops returning ended agents and the field goes.
+    <ol><li>As chosen: one route to Dead.</li><li>Narrow only the list, as the kickoff plan had it.</li></ol>
+  </li>
+  <li>The quiet rule written three times.
+    <ol><li>Leave it; file nothing.</li><li>File a Task to make the trigger and the rule one source.</li></ol>
+  </li>
+  <li><code>graph_processes</code> under the query-plan check.
+    <ol><li>Leave it out, as chosen.</li><li>File a Task to measure its indexes and audit Graph statements.</li></ol>
+  </li>
+</ol>
+
+</main>
+</body>
+</html>

@@ -161,10 +161,13 @@ cache, so a stale value could reach a display, never a launched agent.
    matter parse run once per change under `.lf/skills`, `.claude`, `.agents`,
    `.codex`. `load_skill` on top stays per call unless the sample shows it.
 
+4. **The global file's settings alone** (`config::placement::global_settings_at`,
+   `Derived::GlobalSettings`): Machine names and aliases, asked by ownership,
+   placement and Machine reads. Added after qa's sample.
+
 Machine placement (`store/placement.rs:49`) resolves layers holding only
-`machine`, a few leaves each. It is not derived unless the sample after the
-catalog slice still shows `validate_value` under `resolved_placement`; then it
-is a fourth variant keyed by `(home, scope chain)`.
+`machine`, a few leaves each. It is not derived: qa's sample put
+`resolved_placement` under 10 samples.
 
 File warnings (`reader::warn`, stderr) are printed when a value is computed, so
 the server says each once per file change per checkout, not once per read.
@@ -234,12 +237,9 @@ A reading's first resolve is now once per Task checkout, where the deleted
 `waves.rs` memo resolved once per distinct configuration within a reading.
 After a server start that is one cold resolve per worktree, then none.
 
-Left, none of it code this plan commits to:
-
-- The live `sample` under load (Demo above), by a person.
-- A `sample` of a locally run server reading a seeded store (qa or demo), to
-  see what of `validate_value`, `collect` and `outside()` is left, and whether
-  placement (`store/placement.rs`) needs a fourth variant. Not run.
+Left, not code: the live `sample` under load (Demo above), by a person. The
+`sample` of a locally run server over a seeded store is under "What qa
+changed".
 
 Checks run by this step, all passing:
 

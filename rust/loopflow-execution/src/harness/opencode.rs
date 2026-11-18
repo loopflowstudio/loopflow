@@ -26,7 +26,11 @@ use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug, Default)]
 struct State {
+    /// Input lf sent whose turn OpenCode has not named yet.
+    sent: Option<AgentSessionId>,
     turn: Option<Turn>,
+    /// The last turn this driver named.
+    named: Option<String>,
     /// Writes what the current process's turn establishes.
     writer: Option<FactWriter>,
     /// lf stopped the current turn's process.
@@ -51,6 +55,40 @@ impl State {
                 let _ = events.send(event);
             }
         }
+    }
+
+    /// Start the turn the sent input began. OpenCode names a turn by the user
+    /// message it stored for the input, which is how its transcript is read;
+    /// a run whose message cannot be found gets a name of lf's own.
+    fn begin(&mut self, events: &mpsc::UnboundedSender<ConversationEvent>) -> Option<&mut Turn> {
+        if let Some(thread) = self.sent.take() {
+            let home = super::Harness::transcript_home(&OpenCode);
+            let id = crate::transcript::opencode::last_request(
+                &crate::transcript::opencode::store(&home),
+                thread.as_str(),
+            )
+            .filter(|id| self.named.as_ref() != Some(id))
+            .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+            self.named = Some(id.clone());
+            let turn = ProviderTurn {
+                thread: thread.clone(),
+                turn: id.clone(),
+            };
+            self.turn = Some(Turn::new(turn.clone()));
+            self.publish(
+                vec![
+                    ProviderFact::SessionObserved(thread).into(),
+                    ProviderFact::TurnAnswered {
+                        turn,
+                        request: id.clone(),
+                    }
+                    .into(),
+                    ConversationEvent::TurnStarted { turn_id: id }.into(),
+                ],
+                events,
+            );
+        }
+        self.turn.as_mut()
     }
 }
 
@@ -146,13 +184,14 @@ impl Driver {
                     continue;
                 };
                 let mut state = state.lock().expect("OpenCode state lock poisoned");
-                if let Some(turn) = state.turn.as_mut() {
+                if let Some(turn) = state.begin(&events) {
                     let decoded = turn.event(&value);
                     state.publish(decoded, &events);
                 }
             }
             let exited = child.wait().await.is_ok_and(|status| status.success());
             let mut state = state.lock().expect("OpenCode state lock poisoned");
+            state.begin(&events);
             let Some(mut turn) = state.turn.take() else {
                 return;
             };
@@ -219,14 +258,11 @@ impl StreamDriver for Driver {
         let Some(message) = build_turn_content(content, &self.config, self.first_turn) else {
             return Ok(());
         };
-        if self
-            .state
-            .lock()
-            .expect("OpenCode state lock poisoned")
-            .turn
-            .is_some()
         {
-            return Err(HarnessError::TurnAlreadyInProgress.into());
+            let state = self.state.lock().expect("OpenCode state lock poisoned");
+            if state.sent.is_some() || state.turn.is_some() {
+                return Err(HarnessError::TurnAlreadyInProgress.into());
+            }
         }
         let thread = self
             .thread
@@ -262,11 +298,6 @@ impl StreamDriver for Driver {
         let mut stdin = child.stdin.take().expect("OpenCode stdin was piped");
         let stdout = child.stdout.take().expect("OpenCode stdout was piped");
 
-        let id = uuid::Uuid::new_v4().to_string();
-        let turn = ProviderTurn {
-            thread: thread.clone(),
-            turn: id.clone(),
-        };
         {
             let Recording {
                 store,
@@ -281,19 +312,7 @@ impl StreamDriver for Driver {
                 Some(attachment),
                 Default::default(),
             ));
-            state.turn = Some(Turn::new(turn.clone()));
-            state.publish(
-                vec![
-                    ProviderFact::SessionObserved(thread).into(),
-                    ProviderFact::TurnAnswered {
-                        turn,
-                        request: id.clone(),
-                    }
-                    .into(),
-                    ConversationEvent::TurnStarted { turn_id: id }.into(),
-                ],
-                &self.events,
-            );
+            state.sent = Some(thread);
         }
         self.reader = Some(self.spawn_reader(child, stdout, diagnostics));
 
@@ -326,7 +345,7 @@ impl StreamDriver for Driver {
         // the next input continues the conversation by its `--session`.
         {
             let mut state = self.state.lock().expect("OpenCode state lock poisoned");
-            if state.turn.is_none() {
+            if state.sent.is_none() && state.turn.is_none() {
                 return Ok(());
             }
             state.interrupted = true;

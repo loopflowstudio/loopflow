@@ -874,6 +874,30 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
 }
 
 #[test]
+fn context_explanation_reports_the_tracker_sync_time() {
+    use loopflow_execution::ops::context::ContextExplanation;
+
+    let json = include_str!("../../../tests/fixtures/dto/context_explanation.json");
+    let mut wire: serde_json::Value = serde_json::from_str(json).unwrap();
+    let report: ContextExplanation = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(report.tracker_synced_at, Some(1_791_499_900));
+    assert!(report
+        .render()
+        .lines()
+        .any(|line| line == "Tracker synced: 1791499900"));
+    assert_eq!(serde_json::to_value(report).unwrap(), wire);
+
+    wire["tracker_synced_at"] = serde_json::Value::Null;
+    let report: ContextExplanation = serde_json::from_value(wire.clone()).unwrap();
+    assert!(report
+        .render()
+        .lines()
+        .any(|line| line == "Tracker synced: unknown"));
+    wire.as_object_mut().unwrap().remove("tracker_synced_at");
+    assert!(serde_json::from_value::<ContextExplanation>(wire).is_err());
+}
+
+#[test]
 fn task_run_explanations_preserve_actions_and_missing_evidence() {
     use loopflow_execution::ops::task::{TaskRunAction, TaskRunExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");

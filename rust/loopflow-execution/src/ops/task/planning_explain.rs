@@ -322,7 +322,7 @@ async fn read_creation(
     };
     report.resolution.checkout = ContextFact::Unbound;
     report.resolution.execution_machine = ContextFact::Unbound;
-    report.resolution.planning_observed_at = None;
+    report.resolution.tracker_synced_at = None;
     let input = match super::resolve_task_create_input(title, notes) {
         Ok(input) => input,
         Err(error) => {

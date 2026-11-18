@@ -243,10 +243,14 @@ struct DTOFixtureTests {
         let report = try JSONDecoder().decode(ContextExplanation.self, from: data)
         #expect(report.checkout == .unbound)
         #expect(report.executionMachine == .unavailable(reason: "No local execution location; peer execution has not been observed"))
-        #expect(report.planningObservedAt == nil)
+        #expect(report.trackerSyncedAt == 1_791_499_900)
         #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(report)) == report)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        wire.removeValue(forKey: "task")
+        wire["tracker_synced_at"] = NSNull()
+        let unsynced = try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
+        #expect(unsynced.trackerSyncedAt == nil)
+        #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(unsynced)) == unsynced)
+        wire.removeValue(forKey: "tracker_synced_at")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
         }

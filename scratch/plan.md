@@ -215,18 +215,9 @@ both read first).
 
 ### The explanation's sync time is `tracker_synced_at` (made for review)
 
-`lf --explain task …` prints `Planning observed: <time>` and its JSON carries
-`planning_observed_at`; `ops/context.rs` fills both from
-`task.tracker_synced_at`. One fact, one name: Rust field and JSON key
-`tracker_synced_at`, printed `Tracker synced:`, Swift
-`ContextExplanation.trackerSyncedAt` (still `decode(Int64?.self, forKey:)`).
-Nothing stored carries the key. The two fetches that kept the old verb follow
-`fetch_issue`: `ops::linear::acquire_task` → `fetch_task`,
-`ops::task::acquire_from_planning` → `fetch_from_tracker`. Passed over:
-dropping the field from the explanation (`lf task show` has it; the
-explanation is where someone asks why a Task looks stale), and renaming
-`accept_linear_*_in` (the store accepting an event is a verb, about 60 call
-sites; follow-up in `scratch/questions.md`).
+Task explanations read `tracker_synced_at` directly from the Task and print
+`Tracker synced:`. Swift decodes the required nullable key as `trackerSyncedAt`.
+The tracker lookup functions are `fetch_task` and `fetch_from_tracker`.
 
 `planning_write`, `planning_order`, `planning_reads`, `planning_sync` stay:
 they are the plan writer and sync.
@@ -253,22 +244,14 @@ they are the plan writer and sync.
    migration references, SQL columns and mirror tests. The glossary defines
    destination.
 
-6. **Explanation sync time and fetch verbs (next).** `ContextExplanation`
-   in `rust/loopflow-execution/src/ops/context.rs` (field, the printed line,
-   line 325 of `ops/task/planning_explain.rs`),
-   `swift/Loopflow/Models/ContextExplanation.swift`,
-   `swift/LoopflowTests/DTOFixtureTests.swift:246`, the key in
-   `tests/fixtures/dto/{context_explanation,session_resume_explanations,task_checkout_explanations,task_planning_explanations,task_run_explanations}.json`,
-   regenerated `server_schema.json`; `acquire_task` and
-   `acquire_from_planning` with their 13 references. Check:
-   `git grep -nE 'planning_observed_at|planningObservedAt|Planning observed|acquire_task|acquire_from_planning'`
-   is empty, the Rust DTO fixtures and all-target clippy pass, and
-   `scripts/test_desktop.sh --filter DTOFixtureTests` passes.
+6. **Explanation sync time and fetch verbs (implemented).** Rust, Swift and
+   the shared explanations use the Task's sync timestamp. A Task that has
+   never synced reports null in JSON and unknown in the CLI. Gate is next.
 
 ## What goes
 
 `lf repo plan` and `RepoPlanCommand`; `lf wave edit-plan`, `update-plan`, `WavePlanTarget`; `repo.plan` in docs and help; the "Older code still says…" paragraph;
-`TrackerObservation`, `TaskAcquisition`, `PeerPlanningStatus`, `PeerProjectionConflict`; DTO keys `linear_id`, `acquisition`, `acquisition_error`, `pm_snapshot_synced_at`, `pm_writeback`, `planning_observed_at`,
+`TrackerObservation`, `TaskAcquisition`, `PeerPlanningStatus`, `PeerProjectionConflict`; DTO keys `linear_id`, `acquisition`, `acquisition_error`, `pm_snapshot_synced_at`, `pm_writeback`,
 `chapter_unavailable`, `chapters`; every runtime reference to the old table
 names. Released migrations, release notes and released-schema fixtures under
 `tests/fixtures/` keep old names (shipped records).
@@ -283,6 +266,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - Slice 3: 52 Rust DTO fixtures, the stream timestamp test, four documented-command checks and all-target clippy passed. Changed Swift sources parsed. A server restart replayed the creation receipt. Installed and candidate CLIs each replayed the other’s creation in an isolated Git repo; Task show and Work agreed on the unbound ID and sync state.
 - Slice 4: 23 focused event, historical upgrade, schema and documented-command tests passed, plus the issue-fetch and end-to-end Task comment tests. All-target clippy passed. Candidate `lf help wave sync` names the tracker. The architecture HTML matches its source.
 - Slice 5: all-target clippy, 52 Rust DTO fixtures, the server-restart replay test and four documented-command checks passed. A standalone Swift decoder read independent fetch and publication errors and rejected a missing fetch_error. In an isolated Git repository, both CLI versions replayed each other’s Task creation. The candidate reported fetch_error for its ref and printed “tracker writeback: current” after checkout.
+- Slice 6: 53 Rust DTO fixtures, 57 Swift fixture tests and all-target clippy passed. The regenerated server schema matched byte for byte. The candidate explained a new Task in an isolated repository with a bound Task, a null sync time and a printed unknown.
 - full suites — CI at gate
 - Desktop: `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests'` passed after QA renamed `trackerAnswer` → `repoTrackerAnswer`
 

@@ -958,14 +958,14 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
 }
 
 /// Take a Task this Machine has not saved from the repository's planning.
-pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
+pub(crate) async fn fetch_from_tracker(main: &Path, issue: &str) -> OpsResult<Task> {
     match crate::config::load_config(Some(main))
         .map_err(task_error)?
         .unwrap_or_default()
         .planning_transport()
     {
         crate::config::TrackerConfig::Linear { .. } => {
-            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+            super::linear::fetch_task(main, issue, super::linear::LinearRefresh::Auto).await
         }
         crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
             "Task {issue:?} not found in selected Git planning"
@@ -996,7 +996,7 @@ fn prepare_task(
         let acquired = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => acquire_from_planning(&main, issue).await?,
+            None => fetch_from_tracker(&main, issue).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -3291,7 +3291,7 @@ pub async fn resolve_saved_task(
                 .planning_transport()
             {
                 crate::config::TrackerConfig::Linear { .. } => {
-                    super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
+                    super::linear::fetch_task(repo, issue, super::linear::LinearRefresh::Force)
                         .await?
                 }
                 crate::config::TrackerConfig::Git { .. } => {

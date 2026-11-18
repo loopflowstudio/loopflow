@@ -9,5 +9,5 @@
   "task": { "state": "bound", "value": "task_44444444444444444444444444444444", "source": "explicit" },
   "session": { "state": "unbound" },
   "process": { "state": "unbound" },
-  "planning_observed_at": null
+  "tracker_synced_at": 1791499900
 }

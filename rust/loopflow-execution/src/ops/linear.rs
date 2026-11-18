@@ -838,7 +838,7 @@ pub(crate) async fn inspect_task_planning_async(
     })
 }
 
-pub(crate) async fn acquire_task(
+pub(crate) async fn fetch_task(
     repo: &Path,
     issue: &str,
     refresh: LinearRefresh,

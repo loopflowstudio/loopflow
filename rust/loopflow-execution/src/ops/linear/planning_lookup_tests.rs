@@ -86,7 +86,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
                 record.item.branch_name.as_deref(),
                 Some("dev/fix-1-existing")
             );
-            let resolved = crate::ops::linear::acquire_task(&repo, "issue-1", LinearRefresh::Never)
+            let resolved = crate::ops::linear::fetch_task(&repo, "issue-1", LinearRefresh::Never)
                 .await
                 .unwrap();
             assert_eq!(resolved.due_date.as_deref(), Some("2026-10-15"));
@@ -186,7 +186,7 @@ async fn refresh_returns_saved_task_fields_without_replacing_pending_edits() {
     .await;
     LINEAR_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let task = super::acquire_task(&repo, "FIX-1", LinearRefresh::Auto)
+            let task = super::fetch_task(&repo, "FIX-1", LinearRefresh::Auto)
                 .await
                 .unwrap();
             let saved = fixture
@@ -203,19 +203,19 @@ async fn refresh_returns_saved_task_fields_without_replacing_pending_edits() {
                 )
                 .unwrap();
             let pending = fixture.store.sqlite.pending_task_changes(&task.id).unwrap();
-            let acquired = super::acquire_task(&repo, "issue-1", LinearRefresh::Never)
+            let fetched = super::fetch_task(&repo, "issue-1", LinearRefresh::Never)
                 .await
                 .unwrap();
-            assert_eq!(acquired, saved);
-            assert_eq!(acquired.assignee.as_deref(), Some("pending-assignee"));
-            assert_eq!(acquired.title, "Saved during disconnection");
+            assert_eq!(fetched, saved);
+            assert_eq!(fetched.assignee.as_deref(), Some("pending-assignee"));
+            assert_eq!(fetched.title, "Saved during disconnection");
             assert_eq!(
                 fixture.store.sqlite.pending_task_changes(&task.id).unwrap(),
                 pending
             );
-            assert_eq!(acquired.worktree, task.worktree);
-            assert_eq!(acquired.branch, task.branch);
-            assert_eq!(acquired.parent_pr_id, task.parent_pr_id);
+            assert_eq!(fetched.worktree, task.worktree);
+            assert_eq!(fetched.branch, task.branch);
+            assert_eq!(fetched.parent_pr_id, task.parent_pr_id);
             assert!(fixture.store.task_prs(&task.id).await.unwrap().is_empty());
             assert!(!fixture.store.task_owned(&task.id).await.unwrap());
         })
@@ -287,7 +287,7 @@ async fn projectless_task_adopts_repository_ownership() {
                 .unwrap();
             assert!(record.project.is_none());
             assert!(record.item.project_id.is_none());
-            let task = crate::ops::linear::acquire_task(&repo, "FIX-1", LinearRefresh::Never)
+            let task = crate::ops::linear::fetch_task(&repo, "FIX-1", LinearRefresh::Never)
                 .await
                 .unwrap();
             assert!(task.project_id.is_none());
@@ -1437,7 +1437,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
     .await;
     LINEAR_TEST_CONTEXT
         .scope(fixture.context(&url), async {
-            let task = super::acquire_task(&repo, "FIX-1", LinearRefresh::Auto)
+            let task = super::fetch_task(&repo, "FIX-1", LinearRefresh::Auto)
                 .await
                 .unwrap();
             let before = fixture
@@ -1463,7 +1463,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
             )
             .unwrap();
             assert_eq!(
-                super::acquire_task(&repo, "issue-1", LinearRefresh::Never)
+                super::fetch_task(&repo, "issue-1", LinearRefresh::Never)
                     .await
                     .unwrap(),
                 task
@@ -1482,7 +1482,7 @@ async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
                     [],
                 )
                 .unwrap();
-                assert!(super::acquire_task(&repo, "FIX-1", LinearRefresh::Never)
+                assert!(super::fetch_task(&repo, "FIX-1", LinearRefresh::Never)
                     .await
                     .is_err());
                 let rejected = inspect_task_planning_async(&repo, "FIX-1", LinearRefresh::Never)

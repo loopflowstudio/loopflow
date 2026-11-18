@@ -610,7 +610,7 @@ pub async fn arriving_task(
         crate::ops::planning_sync::find_task(store, &main.to_string_lossy(), identifier).await?;
     let acquired = match found {
         Some(task) => task,
-        None => crate::ops::task::acquire_from_planning(main, identifier).await?,
+        None => crate::ops::task::fetch_from_tracker(main, identifier).await?,
     };
     anyhow::ensure!(
         acquired.id == *task,

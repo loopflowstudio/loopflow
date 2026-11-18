@@ -42,7 +42,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "start",
@@ -111,7 +111,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "resume",
@@ -180,7 +180,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "take_over",
@@ -251,7 +251,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": null,
     "state": null,
@@ -304,7 +304,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "new_thread",

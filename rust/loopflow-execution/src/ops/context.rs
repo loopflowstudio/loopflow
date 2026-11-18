@@ -51,7 +51,8 @@ pub struct ContextExplanation {
     pub task: ContextFact,
     pub session: ContextFact,
     pub process: ContextFact,
-    pub planning_observed_at: Option<i64>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
 }
 
 impl ContextExplanation {
@@ -67,7 +68,7 @@ impl ContextExplanation {
             task: ContextFact::Unbound,
             session: ContextFact::Unbound,
             process: ContextFact::Unbound,
-            planning_observed_at: None,
+            tracker_synced_at: None,
         }
     }
 
@@ -106,8 +107,8 @@ impl ContextExplanation {
             lines.push(format!("{label}: {}", fact.render()));
         }
         lines.push(format!(
-            "Planning observed: {}",
-            self.planning_observed_at
+            "Tracker synced: {}",
+            self.tracker_synced_at
                 .map(|at| at.to_string())
                 .unwrap_or_else(|| "unknown".into())
         ));
@@ -258,7 +259,7 @@ async fn read_context(
         };
         if let Some(task) = selected.task {
             report.task = ContextFact::bound(&task.id, provenance);
-            report.planning_observed_at = task.tracker_synced_at;
+            report.tracker_synced_at = task.tracker_synced_at;
             if let Some(checkout) = store.task_checkout(&task.id).await? {
                 report.checkout =
                     ContextFact::bound(checkout.worktree.display(), "recorded_checkout");

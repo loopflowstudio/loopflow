@@ -36,31 +36,15 @@ ol.q>li{margin:10px 0}ol.q ol{list-style:lower-alpha}
 <tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>lf repo tracker</code>, <code>TrackerConfig</code>, <code>tracker:</code> read spelling, <code>tracker_*</code> tables with mirrors</td><td><span class="tag yes">yes</span></td><td></td></tr>
 <tr><td><b>destination</b>: one Git ref the plan is exchanged with</td><td><code>GitDestination</code>, <code>GitDestinationConflict</code>, <code>git_tracker.rs</code> in three crates, wire <code>fetch_error</code>, Swift <code>GitDestinationsView</code>; glossary row</td><td><span class="tag yes">yes</span></td><td>Last pass's biggest mismatch. Gone: "peer" now means only another Machine. One leftover a person never sees: the lock directory <code>locks/planning-peers</code>, shared with the released lf like <code>chapter-locks</code>.</td></tr>
 <tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code>, <code>TrackerActionStatus</code>, <code>lf repo tracker answer</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code>, <code>LinearIssueState</code>, <code>fetch_issue</code></td><td><span class="tag part">partly</span></td><td>Types, tables, modules and the wire say event. Two fetches kept the old verb: <code>ops::linear::acquire_task</code> and <code>ops::task::acquire_from_planning</code>, beside <code>fetch_issue</code> and <code>fetch_repository</code> which the plan renamed for the same reason.</td></tr>
-<tr><td><b>when a Task last synced</b></td><td>Task JSON <code>tracker_synced_at</code>, <code>tracker_state.synced_at</code>, <code>tracker_writeback</code>; explain JSON <code>planning_observed_at</code>; explain text <code>Planning observed: …</code></td><td><span class="tag no">no</span></td><td><b>One fact under two names on the wire.</b> <code>ops/context.rs:261</code> copies <code>task.tracker_synced_at</code> into <code>planning_observed_at</code>. The plan's own wire rule (<code>observed_at</code> → <code>synced_at</code>) missed this DTO.</td></tr>
+<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>fetch_issue</code>, <code>fetch_task</code>, <code>fetch_from_tracker</code></td><td><span class="tag yes">yes</span></td><td>Slice 6 renamed the two Task fetches.</td></tr>
+<tr><td><b>when a Task last synced</b></td><td>Task and explanation JSON share <code>tracker_synced_at</code>.</td><td><span class="tag yes">yes</span></td><td>The explanation reads the timestamp from the Task.</td></tr>
 <tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type holding an Asana gid is named for Linear. Larger than this work, below.</td></tr>
 <tr><td><b>sync</b> (verb)</td><td><code>lf wave sync</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
 <tr><td><b>provider</b>: claude, codex</td><td>every <code>provider</code> key in the server schema is the agent's; kept: columns <code>provider</code> / <code>planning_provider_revision</code>, config tag <code>planning.provider</code></td><td><span class="tag part">partly</span></td><td>Deliberate and written down. LOO-784 flips the config writer.</td></tr>
 </table>
 
-<h2>Biggest mismatch: the sync time has a second name where people ask "why"</h2>
-<div class="big">Walk it. A Task looks stale. Someone runs <code>lf task show --json</code>, then <code>lf --explain</code> on the same command to see what it resolved.</div>
-<div class="pair">
-<div class="box"><h3>existing</h3>
-<pre>$ lf task show LOO-1 --json
-  "tracker_synced_at": 1794962032,
-  "tracker_state": {"state":"available","synced_at":1794962032}
-
-$ lf --explain task …
-  Task: LOO-1 (…)
-  Planning observed: 1794962032
-
-$ lf --explain --json task …
-  "planning_observed_at": 1794962032
-
-Swift  ContextExplanation.planningObservedAt</pre>
-<p>Same number, same source. "Observed" is the word the glossary retires for incoming changes, and it is printed.</p></div>
-<div class="box proposed"><h3>proposed</h3>
+<h2>Task explanation after slice 6</h2>
+<div class="box">
 <pre>$ lf --explain task …
   Task: LOO-1 (…)
   Tracker synced: 1794962032
@@ -74,7 +58,6 @@ Rust   ContextExplanation.tracker_synced_at
 ops::linear::fetch_task
 ops::task::fetch_from_tracker</pre>
 <p>One name from the Task row to the explanation. The two fetch functions follow <code>fetch_issue</code>.</p></div>
-</div>
 <p><b>Failure and recovery.</b> A Task never synced, or a Wave with no Task selected: the value is <code>null</code> and the line prints <code>unknown</code>, as today. A later sync fills it. <b>What must survive:</b> the key stays required and nullable on the wire (Swift <code>decode(Int64?.self, forKey:)</code>); nothing stored carries this key, so no released reader is affected. <b>Counterexample checked:</b> if the explanation's time could differ from the Task's (a separate read of the tracker), a second name would be right. It can't: there is one assignment, from the Task row.</p>
 <p><b>Size.</b> One Rust field and its printed line, one Swift property and its test, the key in five DTO fixtures, two function names with 13 references. No schema file change beyond regeneration, no SQL.</p>
 
@@ -98,8 +81,6 @@ ops::task::fetch_from_tracker</pre>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>The explanation's sync time: <ol><li><code>tracker_synced_at</code> / <code>Tracker synced:</code>, as written into the plan (slice 6);</li><li>drop the field from the explanation, since <code>lf task show</code> has it;</li><li>leave <code>planning_observed_at</code>.</li></ol></li>
-<li><code>acquire_task</code> / <code>acquire_from_planning</code>: <ol><li><code>fetch_task</code> / <code>fetch_from_tracker</code>, as written into the plan;</li><li>leave with the other internal names for the follow-up.</li></ol></li>
 <li>"action" in <code>--explain</code> output: <ol><li>leave it, the glossary's action is the tracker's;</li><li>file a Task to rename the explain key;</li><li>add a line to the glossary's action row, as it has for Desktop.</li></ol></li>
 <li><code>accept_*</code> function names: <ol><li>leave them, "accept an event" is the verb;</li><li>file the follow-up rename.</li></ol></li>
 <li><code>LinearIssueId</code> for every tracker's record ID: <ol><li>file a Task for a neutral type;</li><li>leave it.</li></ol></li>

@@ -119,7 +119,16 @@ fn local(
                 .as_deref()
                 .or(cli.task.as_deref())
                 .context("No Task selected")?;
-            let held = loopflow_execution::engine::task::hold(directory, issue, reason.as_deref())?;
+            // A Task another Machine runs is held there.
+            let super::write::WriteResult::TaskHold(held) = super::write::Write::TaskHold {
+                directory: directory.to_path_buf(),
+                issue: issue.to_owned(),
+                reason: reason.clone(),
+            }
+            .run()?
+            else {
+                unreachable!("task.hold answers with a hold")
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&held)?)?;
             } else {
@@ -178,12 +187,19 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
     match command {
         TaskCommand::Create { .. } => super::task_create::create(repo, command, io, false, None),
         TaskCommand::Claim { issue, json } | TaskCommand::Unassign { issue, json } => {
-            use loopflow_execution::ops::task_ownership::{render, OwnershipChange};
-            let requested = match command {
-                TaskCommand::Claim { .. } => OwnershipChange::Claim,
-                _ => OwnershipChange::Unassign,
+            use super::write::{Write, WriteResult};
+            use loopflow_execution::ops::task_ownership::render;
+            let (directory, issue) = (repo.to_path_buf(), issue.clone());
+            let write = match command {
+                TaskCommand::Claim { .. } => Write::TaskClaim { directory, issue },
+                _ => Write::TaskUnassign { directory, issue },
             };
-            let ownership = loopflow_execution::engine::task::ownership(repo, issue, requested)?;
+            // A Task whose ownership another Machine writes is changed there.
+            let (WriteResult::TaskClaim(ownership) | WriteResult::TaskUnassign(ownership)) =
+                write.run()?
+            else {
+                unreachable!("an ownership write answers with ownership")
+            };
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             } else {
@@ -269,7 +285,12 @@ fn task(repo: &Path, command: &TaskCommand, io: &mut CommandIo<'_>) -> Result<()
             json,
             ..
         } => {
-            let ownership = loopflow_execution::ops::session_move::move_task(issue, machine, None)?;
+            let ownership = loopflow_execution::ops::session_move::move_task(
+                issue,
+                machine,
+                None,
+                super::write::run_task,
+            )?;
             if *json {
                 writeln!(io.output, "{}", serde_json::to_string(&ownership)?)?;
             }

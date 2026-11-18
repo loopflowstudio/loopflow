@@ -468,8 +468,9 @@ struct ServerProtocolTests {
             let name = url.deletingPathExtension().lastPathComponent
             let object = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any])
             let type = try #require(object["type"] as? String)
-            // Mobile setup is exposed to Desktop by the CLI; Swift has no encoder for it.
-            if ["mobile_status_request", "configure_remote"].contains(name) { continue }
+            // Mobile setup is exposed to Desktop by the CLI, and only another
+            // Machine's lf sends a `sender`; Swift has no encoder for either.
+            if ["mobile_status_request", "configure_remote", "machine_request"].contains(name) { continue }
             if client[type] == Set(object.keys).subtracting(["type"]) {
                 let encodedHere = tests.contains("\"\(name)\"")
                 #expect(encodedHere, "No test here encodes the client fixture \(name)")

@@ -48,3 +48,10 @@ Git refuses ("not found in the Git tracker"), Asana isn't fetched yet, and
 Linear needs the team in the shared `.lf/config.yaml` (local config is
 ignored there), an `origin`, then a Linear login. `lf task run <id> --explain`
 reaches none of that; it says "is not registered".
+
+`--explain` previews (`lf --explain task create|update|move …`) need no
+registry and change nothing; `lf task delete --explain` has no planning
+preview and prints context only. A bad `origin` URL does not make
+`fetch_repository` return an error (the failure is stored on the destination),
+so the post-creation `tracker fetch after creation failed` warning is not
+reachable that way.

@@ -77,8 +77,21 @@ cargo test -p loopflow --test integration git_checkout_miss_does_not_fall_back  
 cargo test -p loopflow --test integration task_move_hands_nothing_off_when_mini_cannot_receive_it   1 passed</pre>
 <p>Not reached: a real Linear fetch (no Linear login in the isolated home; Machine's real team not touched). The 21 planning lookup tests from compress cover the fetch against a stand-in.</p>
 
+<h2>Fourth pass: explanation sentences (slice 7, 4bb79e91c2)</h2>
+<p>Fresh private Machine (<code>/tmp/lf-qa-955d</code>): new Git repository, no remote, branch <code>lf</code> for every command.</p>
+<table><tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>First visit, no registry</td><td><code>lf task create --title … --explain</code> before anything else</td><td class="ok">Every fact “unavailable: Local registry is absent”; closes with “Nothing was saved, fetched or synchronized.”</td></tr>
+<tr><td>Preview a create</td><td><code>lf --explain task create --title z</code>, and <code>--explain --json</code></td><td class="ok">“Unavailable: Tracker freshness, queued tracker actions and concurrent saves are not read or reserved”; same string in JSON <code>unavailable</code>.</td></tr>
+<tr><td>Preview an update</td><td><code>lf task update 819409 --notes 'new body' --explain</code>, then <code>task show</code></td><td class="ok">Same sentences; Task still revision 1 with the old description.</td></tr>
+<tr><td>Unknown Task</td><td><code>lf task update 999999 --notes x --explain</code> (text and JSON)</td><td class="ok">“Task "999999" is not registered; nothing was fetched from the tracker”.</td></tr>
+<tr><td>Unknown Wave</td><td><code>task create --wave nosuchwave --explain</code>; <code>task move 819409 --wave nosuchwave --explain</code></td><td class="ok">Create: “…pass --wave &lt;known-name&gt;; the Wave was not registered and nothing was fetched from the tracker”. Move names the Wave only.</td></tr>
+<tr><td>Fetch fails after creation</td><td><code>git remote add origin /nonexistent.git</code>, <code>task create</code>, read <code>logs/lf.log</code></td><td>Create says “Saved locally; planning synchronization pending.” and <code>lf repo tracker</code> shows “Git fetch failed”. The new <code>tracker fetch after creation failed</code> line did not appear: a failed Git fetch is stored on the destination and <code>fetch_repository</code> returns Ok, so only a store error reaches it.</td></tr>
+</table>
+<p>Nothing to fix in this pass.</p>
+
 <h2>Not reached</h2>
 <ul><li>Desktop live window: headless view tests only; <code>GitDestinationsView</code> showing <code>fetchError</code> was read in source, not seen on screen.</li>
+<li>The <code>tracker fetch after creation failed</code> warning: needs a store failure during the fetch, which no real path produced.</li>
 <li>Live Linear/Asana exchange: no stand-in in a shipped binary, and the Machine's real store wasn't touched.</li></ul>
 
 <h2>Still wrong, worst first</h2>
@@ -86,6 +99,9 @@ cargo test -p loopflow --test integration task_move_hands_nothing_off_when_mini_
 <li>Git fetch and publication errors are replaced by a fixed string and never logged, so “Git fetch failed” can't be diagnosed from <code>lf.log</code> (pre-existing).</li>
 <li>Two checkouts of one repository on one Machine can't share a Git plan (“belongs to another repository”; pre-existing).</li>
 <li><code>lf task status</code> prints <code>Tracker state:</code> before the Task's title line (pre-existing order, now more visible).</li>
+<li>After an unknown Wave, the create preview reads “is not registered… ; the Wave was not registered”: the second clause repeats the first.</li>
+<li><code>lf task delete --explain</code> prints only the context lines, with no intended action, effect or closing sentence (no planning preview for delete; pre-existing).</li>
+<li>The <code>Effect:</code> text still says “pending planning mutations” for what are queued tracker actions; the plan kept the label, not this wording.</li>
 <li>Outside this change: <code>lf config set</code> prints <code>saved; DomainAction</code>; a rejected tracker value says <code>invalid graph: planning: …</code>.</li>
 </ol>
 </body></html>

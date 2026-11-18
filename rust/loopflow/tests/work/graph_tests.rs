@@ -442,6 +442,18 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
     let events = runtime
         .block_on(child.store.task_events_after(&child.task.id, 0))
         .unwrap();
+    // Stacking retargets the child's open PR; a stand-in `gh` records the edit.
+    let bin = TempDir::new().unwrap();
+    let gh_calls = bin.path().join("gh-calls");
+    write_executable(
+        &bin.path().join("gh"),
+        &format!("#!/bin/sh\necho \"$*\" >> '{}'\n", gh_calls.display()),
+    );
+    let path = format!(
+        "{}:{}",
+        bin.path().display(),
+        std::env::var("PATH").unwrap()
+    );
     for _ in 0..2 {
         let output = lf_command(
             repo.path(),
@@ -454,7 +466,7 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
                 "INF-124",
                 "--json",
             ],
-            None,
+            Some(&path),
         )
         .output()
         .unwrap();
@@ -488,6 +500,10 @@ fn task_checkout_selects_parent_without_rewriting_work_or_publication() {
             events
         );
     }
+    assert_eq!(
+        fs::read_to_string(&gh_calls).unwrap(),
+        "pr edit 41 --base parent-task\n".repeat(2)
+    );
     let selected = runtime
         .block_on(child.store.active_task_pr(&child.task.id))
         .unwrap();

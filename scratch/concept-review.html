@@ -1,88 +1,116 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<title>LOO-955 concept review: one tracker vocabulary</title>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-955 concept review: one tracker vocabulary, as built</title>
 <style>
-:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dcd8cf;--yes:#2f7d4a;--no:#b4432f;--new:#2a5db0;--code:#f0ede6}
-@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#e9e6df;--mute:#9a958b;--line:#34322e;--yes:#6cc28a;--no:#e7806b;--new:#7fa8ec;--code:#22211e}}
-body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,-apple-system,system-ui,sans-serif;max-width:60rem;margin:3rem auto;padding:0 1.5rem}
-h1{font-size:1.6rem;margin-bottom:.2rem}h2{margin-top:2.6rem;font-size:1.2rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
-code,pre{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
-code{padding:0 .25em}pre{padding:.8rem 1rem;overflow:auto}
-table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
-.new{border-left:3px solid var(--new);padding-left:.8rem}.old{border-left:3px solid var(--mute);padding-left:.8rem;color:var(--mute)}
-.pair{display:grid;grid-template-columns:1fr 1fr;gap:1rem}@media(max-width:700px){.pair{grid-template-columns:1fr}}
-.tag{font-size:12px;font-weight:600;color:var(--new)}.tag.was{color:var(--mute)}
-p.lede{color:var(--mute);margin-top:0}
-ol li{margin:.5rem 0}
-</style></head><body>
-
-<h1>One tracker vocabulary: do the words line up?</h1>
-<p class="lede">LOO-955, reviewed before implementation. Area taken: the whole planning surface people touch, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store and the docs. I took the whole surface because the Task renames a vocabulary, and a vocabulary is only right if it holds everywhere at once.</p>
+:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1c1b19;--mute:#6a665e;--line:#dcd8cf;--card:#fff;--yes:#1f7a45;--no:#b3261e;--part:#9a6200;--prop:#2456c4;--code:#f1eee7}
+@media(prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ebe8e1;--mute:#a09b90;--line:#35332e;--card:#1e1d1b;--yes:#6fcf97;--no:#ff8a80;--part:#f0b455;--prop:#8fb0ff;--code:#262522}}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+main{max-width:1040px;margin:0 auto;padding:40px 24px 80px}
+h1{font-size:28px;margin:0 0 8px}h2{font-size:20px;margin:44px 0 10px}h3{font-size:16px;margin:0 0 8px}
+p{margin:10px 0}.mute{color:var(--mute)}
+code,pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:1px 5px}pre{padding:12px 14px;overflow:auto;margin:8px 0}
+table{border-collapse:collapse;width:100%;margin:12px 0;background:var(--card)}
+th,td{border:1px solid var(--line);padding:9px 11px;text-align:left;vertical-align:top;font-size:14.5px}
+th{font-weight:600}
+.tag{display:inline-block;font-weight:700;font-size:13px;padding:1px 8px;border-radius:10px;border:1.5px solid}
+.yes{color:var(--yes)}.no{color:var(--no)}.part{color:var(--part)}.prop{color:var(--prop)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:760px){.pair{grid-template-columns:1fr}}
+.box{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.box.proposed{border:2px dashed var(--prop)}
+.big{border-left:4px solid var(--no);padding:4px 0 4px 16px;margin:14px 0}
+ol.q>li{margin:10px 0}ol.q ol{list-style:lower-alpha}
+</style>
+<main>
+<h1>One tracker vocabulary, as built: do the words line up?</h1>
+<p class="mute">LOO-955, reviewed after implementation (12 commits, 208 files against <code>fb14b674</code>). Area taken: the whole planning surface a person touches, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store, Desktop and the docs. A vocabulary is right only if it holds everywhere at once, so the review reads the area as a newcomer would, not the last commit.</p>
 
 <h2>Product concepts against code concepts</h2>
-<p>Legend: <span class="yes">yes</span> means the plan as written lines them up. <span class="no">no</span> means a mismatch the plan left. <span class="tag">proposed</span> marks this review's change.</p>
+<p class="mute"><span class="tag yes">yes</span> lines up as built. <span class="tag part">partly</span> lines up where people look, not underneath. <span class="tag no">no</span> a mismatch still in the tree. <span class="tag prop">proposed</span> marks what this review adds to the plan.</p>
 <table>
-<tr><th>What a person knows</th><th>Code behind it (after the plan)</th><th></th><th>What is wrong</th></tr>
-<tr><td><b>the plan</b>: Waves, Projects, Tasks</td><td><code>lf plan</code>, <code>lf wave plan</code>, <code>planning_write</code>…</td><td class="yes">yes</td><td></td></tr>
-<tr><td><b>a Wave's current Project</b></td><td><code>lf wave edit-plan</code>, <code>lf wave update-plan --plan</code>, <code>WavePlanTarget</code>; glossary row "a Wave's plan is its Project"; AGENTS.md "current plan"</td><td class="no">no</td><td><b>One name for two ideas.</b> "plan" names both the whole shared structure and one Wave's current Project. The Task brief says the second use goes, but the plan never mentions these commands, and the glossary it calls the single definition still says it.</td></tr>
-<tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>TrackerConfig</code>, <code>lf repo tracker</code>, <code>tracker_*</code> tables</td><td class="yes">yes</td><td></td></tr>
-<tr><td><b>choosing the tracker</b> in config</td><td>reads <code>planning</code>, <code>plan</code>, <code>repo.plan</code>, <code>linear.team</code>, and now <code>tracker</code>; dotted keys undefined for the new shape</td><td class="no">no</td><td><b>One idea under five spellings, and the canonical one is wrong.</b> <code>repo.plan: {provider: linear}</code> was documented in v0.16.0 and uses both retired meanings at once. The plan adds <code>tracker</code> without saying what happens to it, or what <code>lf config set repo.tracker.linear.team</code> writes.</td></tr>
-<tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code></td><td class="yes">yes</td><td><code>task_events</code> / <code>project_events</code> also say event, but for local history. The <code>tracker_</code> prefix keeps them apart; no change.</td></tr>
-<tr><td><b>what the tracker last said</b> about a Task</td><td><code>TrackerState</code> (was <code>TaskAcquisition</code>) and <code>LinearIssueEvidence</code></td><td class="no">no</td><td><b>One fact at two grains under two names.</b> <code>TaskAcquisition</code> is derived from the evidence row (same state and seen-at fields). Renaming one and keeping "evidence" for the other leaves the old split in place.</td></tr>
-<tr><td><b>sync</b> (verb)</td><td><code>planning_sync</code>, <code>lf wave sync</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td><b>provider</b>: claude, codex</td><td>agent code; kept columns <code>planning_provider_revision</code>; config tag <code>planning.provider</code></td><td class="no">no</td><td>The plan keeps these on purpose (each costs a hot-table rebuild, and the released lf reads the config tag). Its own Done-when grep still forbids them, so implement would fail the check or rename them anyway. The carve-out has to be written down.</td></tr>
-<tr><td><b>Project</b> (was Chapter)</td><td>DTO <code>ProjectUnavailable</code>, <code>WaveRemoval.projects</code></td><td class="yes">yes</td><td>The Done-when grep also catches <code>.lf/wave/*/GOAL.md</code> and <code>MEMORY.md</code>, which people wrote. Those stay as written and are listed for their authors.</td></tr>
+<tr><th style="width:21%">What a person knows</th><th style="width:33%">Code behind it, as built</th><th style="width:8%"></th><th>What is wrong</th></tr>
+<tr><td><b>the plan</b>: Waves, Projects, Tasks</td><td><code>lf wave plan</code>, <code>planning_write</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>a Wave's current Project</b></td><td><code>lf wave edit-project</code>, <code>update-project --file</code>, <code>WaveProjectTarget</code>; glossary and AGENTS.md say Project</td><td><span class="tag yes">yes</span></td><td>The first review's biggest mismatch. Gone: no <code>edit-plan</code>, <code>update-plan</code> or "chapter" outside shipped records and the shared <code>chapter-locks</code> directory.</td></tr>
+<tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>lf repo tracker</code>, <code>TrackerConfig</code>, <code>tracker:</code> read spelling, <code>tracker_*</code> tables with mirrors</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code>, <code>TrackerActionStatus</code>, <code>lf repo tracker answer</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code>, <code>LinearIssueState</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>Git as a tracker</b>: the refs the plan is exchanged with ("Git destinations" in <code>lf repo tracker</code>)</td><td>tables <code>git_tracker_*</code>, column <code>fetch_error</code>; Rust <code>PeerPlanningStatus</code>, <code>PeerProjectionConflict</code>, <code>peer_records.rs</code>, <code>planning_peers.rs</code>, <code>peer_status()</code>, <code>acquire_repository()</code>; wire <code>acquisition_error</code>; Swift <code>PeerPlanning.swift</code>, <code>PeerPlanningView</code></td><td><span class="tag no">no</span></td><td><b>One idea under three names.</b> The table says Git tracker, the code says planning peer, the CLI says destination. The store reads a column named <code>fetch_error</code> into a field named <code>acquisition_error</code>, a word the glossary retires. "Peer" appears nowhere a person reads.</td></tr>
+<tr><td><b>when a Task last synced, and whether its change is still going out</b></td><td>Task JSON carries <code>tracker_id</code> and <code>tracker_state.synced_at</code> beside <code>pm_snapshot_synced_at</code> and <code>pm_writeback</code>; <code>lf task status</code> prints <code>PM writeback: current</code></td><td><span class="tag no">no</span></td><td><b>Old and new prefix on one record.</b> A reader of <code>lf task show --json</code> sees <code>tracker_</code> and <code>pm_</code> side by side and has to guess they are the same system. The column stays (hot-table rebuild); the JSON key and the printed line don't have to.</td></tr>
+<tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code>, <code>LINEAR_SOFT_STALE_SECS</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type that holds an Asana gid is still named for Linear. Larger than this work, below.</td></tr>
+<tr><td><b>sync</b> (verb)</td><td><code>lf wave sync</code>, <code>planning_sync</code>, <code>tracker_state {state, synced_at}</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>provider</b>: claude, codex</td><td>agent code; kept: columns <code>provider</code> / <code>planning_provider_revision</code>, config tag <code>planning.provider</code></td><td><span class="tag part">partly</span></td><td>Deliberate and written down: the columns cost a rebuild each and the released lf reads the tag. LOO-784 flips the config writer.</td></tr>
 </table>
 
-<h2>Biggest mismatch: "plan" still names a Wave's Project</h2>
-<p>Walk it. Someone reads the glossary, learns "the plan is the shared Waves, Projects and Tasks", then runs:</p>
+<h2>Biggest mismatch: Git is a tracker in the tables and a "peer" in the code</h2>
+<div class="big">Walk it. Someone on a Git tracker runs <code>lf repo tracker</code>, sees a destination with a fetch failure, and opens the code to find out why.</div>
 <div class="pair">
-<div class="old"><div class="tag was">existing, and kept by the plan</div>
-<pre>$ lf wave plan product        # Projects and Tasks: the plan ✓
-$ lf wave edit-plan product --name "2026-10"
-                              # edits… the Project
-$ lf wave update-plan --wave product --plan p.json
-                              # replaces the Project's KRs</pre>
-<p>Within two commands "plan" means two different things. The error text for <code>update-plan</code> says "Project", and <code>docs/dev/reference.md:84</code> says "one selected plan per Wave".</p></div>
-<div class="new"><div class="tag">proposed</div>
-<pre>$ lf wave plan product        # unchanged
-$ lf wave edit-project product --name "2026-10"
-$ lf wave update-project --wave product --file p.json</pre>
-<p>"plan" is the whole structure and "Project" is the thing you edit. <code>bind</code>, <code>connect</code> and <code>reteam</code> stay under <code>lf wave plan</code> because they bind the Wave's plan to the tracker. The glossary row and AGENTS.md change to match. No alias.</p></div>
-</div>
-<p>Passed over: an <code>lf wave project edit|update|bind</code> group. It would pull <code>bind</code> out of the plan group and move three commands to fix two.</p>
+<div class="box"><h3>existing</h3>
+<pre>$ lf repo tracker
+Tracker: git. …
+  origin  refs/lf/plan/main  fetch failed: …
 
-<h2>Config: one canonical key, and dotted keys that follow it</h2>
+store      git_tracker_destinations.fetch_error
+record     PeerPlanningStatus.acquisition_error
+module     sqlite/planning_peers.rs, peer_records.rs
+call       planning_sync::peer_status(), acquire_repository()
+wire       "acquisition_error": "…"
+Desktop    PeerPlanningView, PeerPlanning.swift</pre>
+<p>Four words for one fact between the table and the screen: fetch, acquisition, peer, destination. The Task's own outcome line retires "acquisition".</p></div>
+<div class="box proposed"><h3>proposed</h3>
+<pre>store      git_tracker_destinations.fetch_error
+record     GitDestination.fetch_error
+           GitDestinationConflict
+module     sqlite/git_tracker.rs, store/git_tracker.rs,
+           git_tracker.rs (was peer_records.rs)
+call       planning_sync::git_destinations(), fetch_repository()
+wire       "fetch_error": "…"
+Desktop    GitDestinationsView, GitDestination.swift</pre>
+<p>Two words, each meaning one thing: the <b>Git tracker</b> is the mechanism, a <b>destination</b> is one ref it exchanges with. The glossary gains a "destination" row.</p></div>
+</div>
+<p><b>Failure and recovery.</b> A fetch fails: <code>fetch_error</code> is set and shown; the next sync clears it. Nothing about the behavior changes, only that the name in the error path is the name in the table. <b>What must survive:</b> a released lf still writes <code>planning_destinations.acquisition_error</code>; the mirror triggers already translate it, so the rename touches no SQL. <b>Counterexample checked:</b> the plan's Modules section named the Swift files <code>TrackerSync*</code>, but <code>TrackerSync.swift</code> already exists and holds actions. Git destinations are a different thing on screen and keep their own type.</p>
+
+<h2>Task JSON: one prefix</h2>
 <div class="pair">
-<div class="old"><div class="tag was">plan as written</div>
-<pre>reads: planning · plan · repo.plan · linear.team · tracker
-docs:  repo.plan: {provider: linear, team}
-set:   repo.tracker.linear.team → ?</pre></div>
-<div class="new"><div class="tag">proposed</div>
-<pre>canonical: repo.tracker   shorthand: tracker
-  tracker: {linear: {team: X}}   # or git, {asana: …}, {git: {shared: team}}
-read-only folds (LOO-784 marker): planning, plan, repo.plan, linear.team
-writes: planning: {provider: linear, team: X}   # released shape
-lf config set repo.tracker.asana.team Y  → replaces the block
-lf config get repo.tracker               → canonical shape</pre></div>
-</div>
-<p>Failure path: a repository on Linear sets an Asana team. With merge semantics both tags survive and the fold has to pick one silently. Replacing the block makes "one repository, one tracker" true in the file. Recovery: setting the Linear team again restores it.</p>
+<div class="box"><h3>existing</h3>
+<pre>"tracker_id": "…",
+"tracker_state": {"state":"available","synced_at":…},
+"pm_snapshot_synced_at": …,
+"pm_writeback": "current"
 
-<h2>What did not move</h2>
+  PM writeback: current</pre></div>
+<div class="box proposed"><h3>proposed</h3>
+<pre>"tracker_id": "…",
+"tracker_state": {"state":"available","synced_at":…},
+"tracker_synced_at": …,
+"tracker_writeback": "current"
+
+  tracker writeback: current</pre></div>
+</div>
+<p>Struct fields and JSON keys rename on Task and Project; the SQL column names stay. Swift decodes neither key. Passed over: a serde rename alone, which leaves the Rust field and the wire disagreeing.</p>
+
+<h2>Larger than this work</h2>
 <ul>
-<li>Staged table renames with mirror triggers. The probe is sound. Its risk only touches the table section, and it stays slice 1.</li>
-<li><code>lf repo tracker</code> over <code>lf repo sync</code>.</li>
-<li>The wire: <code>tracker_id</code> and <code>tracker_state {state, synced_at}</code>, with LOO-942 folded in.</li>
-<li>The scope rule that leaves <code>observe::</code>, metric observations and Swift <code>*Observation</code> services alone.</li>
+<li><b>Two sync times on one Task.</b> <code>tracker_state.synced_at</code> comes from the issue's last state; <code>pm_snapshot_synced_at</code> comes from the Task row. If they always agree, one of them is a field that could be nothing. Settling it means reading every writer of both; not done here.</li>
+<li><b><code>LinearIssueId</code> holds Asana gids</b>, and <code>LinearWritebackState</code> describes any tracker. A neutral <code>TrackerRecordId</code> touches every planning signature; it is its own Task.</li>
+<li><b>Git has no actions.</b> The glossary says so ("Git exchanges the journal instead"), which means "action" and "lost" on <code>lf repo tracker</code> describe two of three trackers, and Git conflicts are a third thing. One model for "a change of mine that has not landed" across all three would be a design, not a rename.</li>
+<li><b>Columns</b> <code>provider</code>, <code>planning_provider_revision</code>, <code>observed_at</code>, <code>pm_snapshot_synced_at</code> on hot tables: each is a staged rebuild. LOO-960 could carry them with the contract migration.</li>
+</ul>
+
+<h2>What held</h2>
+<ul>
+<li>Mirror triggers: installed and candidate lf exchanged Task edits both ways through old and new table names.</li>
+<li><code>tracker:</code> folds to the released <code>planning:</code> layout; a different tracker name replaces the block.</li>
+<li><code>lf help wave</code>, <code>lf help repo tracker</code> read in the glossary's words on the candidate build.</li>
 </ul>
 
 <h2>Questions</h2>
-<ol>
-<li>Wave Project commands: (a) <code>edit-project</code> / <code>update-project</code>, as written into the plan; (b) one <code>lf wave project …</code> group; (c) leave them as "plan".</li>
-<li>Config dotted keys: (a) a different tracker name replaces the block, as written; (b) a mismatched tag is an error.</li>
-<li><code>LinearIssueEvidence</code>: (a) <code>LinearIssueState</code>, as written; (b) keep "evidence".</li>
-<li>Authored Wave files that say "chapter" (<code>.lf/wave/infrastructure/GOAL.md:38,49</code> and others): (a) leave them as written, as planned; (b) their authors reword them in this PR.</li>
+<ol class="q">
+<li>Git tracker names: <ol><li><code>GitDestination</code> / <code>git_tracker</code> modules / wire <code>fetch_error</code>, as written into the plan;</li><li>keep "peer" in code and only rename the wire key;</li><li>leave it for a later Task.</li></ol></li>
+<li>Task JSON <code>pm_</code> keys: <ol><li><code>tracker_synced_at</code> and <code>tracker_writeback</code>, as written into the plan;</li><li>drop <code>pm_snapshot_synced_at</code> from JSON in favor of <code>tracker_state.synced_at</code>;</li><li>leave both until the columns move.</li></ol></li>
+<li>"destination" in the glossary: <ol><li>add the row, as written;</li><li>keep it an unglossed CLI word.</li></ol></li>
+<li><code>LinearIssueId</code> for every tracker's record ID: <ol><li>file a Task for a neutral type;</li><li>leave it.</li></ol></li>
 </ol>
-</body></html>
+</main>
+</html>

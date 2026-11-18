@@ -181,13 +181,40 @@ Kept: `planning_user` (the person's key in the plan), `linear_team_checks`
 `tasks`/`projects`) are out: column renames on the two hottest tables cost a
 rebuild each and are noted in `scratch/questions.md`.
 
-### Modules
+### Git tracker: destination, not peer (made for review)
 
-`planning_git.rs` → `tracker/git.rs` beside `ops/tracker.rs` (becomes
-`tracker/mod.rs`); `store/planning_peers.rs`, `sqlite/planning_peers.rs`,
-`peer_records.rs` → `git_tracker*`; Swift `PeerPlanning.swift` /
-`PeerPlanningView.swift` → `TrackerSync*`. `planning_write`, `planning_order`,
-`planning_reads`, `planning_sync` stay: they are the plan writer and sync.
+The tables say `git_tracker_*` and `fetch_error`; Rust, the wire and Swift still
+say peer and acquisition. One name each: the Git tracker is the mechanism, a
+destination is one ref it exchanges with.
+
+| Old | New |
+|---|---|
+| `PeerPlanningStatus` | `GitDestination` |
+| `PeerProjectionConflict` | `GitDestinationConflict` |
+| field and wire key `acquisition_error` | `fetch_error` |
+| `loopflow-storage/src/peer_records.rs` | `git_tracker.rs` |
+| `sqlite/planning_peers.rs`, `store/planning_peers.rs` | `sqlite/git_tracker.rs`, `store/git_tracker.rs` |
+| `planning_sync::peer_status`, `acquire_repository` | `git_destinations`, `fetch_repository` |
+| Swift `PeerPlanning.swift`, `PeerPlanningView.swift` and their types | `GitDestination.swift`, `GitDestinationsView.swift` |
+
+`planning_git.rs` keeps its name (Git transport for the plan). Swift
+`TrackerSync*` already holds actions and is not reused. The mirror triggers
+already map the released `acquisition_error` column, so no SQL changes.
+`docs/dev/planning.md` § Words gains: "destination | one Git ref the plan is
+exchanged with, listed by `lf repo tracker`". Passed over: keeping "peer" in
+code with only the wire key renamed.
+
+### Task and Project JSON: no `pm_` keys (made for review)
+
+Struct fields and JSON keys `pm_snapshot_synced_at` → `tracker_synced_at`,
+`pm_writeback` → `tracker_writeback` (`LinearWritebackState` keeps its name);
+`lf task status` prints `tracker writeback:`. SQL column names stay. Passed
+over: a serde rename alone (field and wire would disagree), and dropping
+`pm_snapshot_synced_at` for `tracker_state.synced_at` (needs every writer of
+both read first).
+
+`planning_write`, `planning_order`, `planning_reads`, `planning_sync` stay:
+they are the plan writer and sync.
 
 ## Slices
 
@@ -203,10 +230,20 @@ rebuild each and are noted in `scratch/questions.md`.
 3. **Wire + Project vocabulary (implemented).** Task status and Work share `tracker_state {state, synced_at}`. Tasks and Projects expose `tracker_id`; metric issues use `project_unavailable`, and Wave removal counts `projects`. Rust, Swift, CLI text, the server schema and shared fixtures match. Stored creation receipts keep the binding readable by released writers.
 4. **Events and tracker prose (implemented).** Linear and Asana produce `TrackerEvent`. Task steering keeps a per-Task cursor, and planning reads the latest `LinearIssueState`. CLI help, Desktop comment conflicts and planning docs name the tracker. LOO-960 owns the contract migration 30 days after merge.
 
+5. **Git destination and Task JSON names (next).** The two decisions above:
+   rename types, modules, calls, the `fetch_error` wire key with its Swift
+   mirror, `tests/fixtures/dto/*` and `server_schema.json`; rename the two
+   `pm_` Task/Project fields and the printed line; add the glossary row. Done
+   when `git grep -nE 'PeerPlanning|PeerProjection|peer_records|planning_peers|peer_status|acquisition_error|acquisitionError|pm_writeback|pm_snapshot_synced_at|PM writeback' -- rust swift docs tests/fixtures/dto`
+   finds only migrations, released-schema fixtures, SQL column names and the
+   mirror tests in `sqlite/revisions.rs`. Check: `cargo clippy --all-targets -- -D warnings`,
+   `cargo test -p loopflow --test integration dto_fixtures::`, and
+   `lf repo tracker --json` in a Git-tracker repo shows `fetch_error`.
+
 ## What goes
 
 `lf repo plan` and `RepoPlanCommand`; `lf wave edit-plan`, `update-plan`, `WavePlanTarget`; `repo.plan` in docs and help; the "Older code still says…" paragraph;
-`TrackerObservation`, `TaskAcquisition`; DTO keys `linear_id`, `acquisition`,
+`TrackerObservation`, `TaskAcquisition`, `PeerPlanningStatus`, `PeerProjectionConflict`; DTO keys `linear_id`, `acquisition`, `acquisition_error`, `pm_snapshot_synced_at`, `pm_writeback`,
 `chapter_unavailable`, `chapters`; every runtime reference to the old table
 names. Released migrations, release notes and released-schema fixtures under
 `tests/fixtures/` keep old names (shipped records).

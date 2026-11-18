@@ -184,6 +184,11 @@ This reverses the headless choice above ("The write another Machine sends is a n
   `--subscribe` … in this PR") covers them. Built in `e10a00c4cc`: they go
   to that Machine's server, and the human output is drawn from its
   `task.status` body.
+- QA (2026-11-17, `e8c4f29428`): with the running Machine unreachable,
+  `lf task status <issue>` now fails ("machine \"mini\": unreachable: …")
+  where it used to print this Machine's copy. Kept: reads go where the Task
+  runs, and the error names the check. Open: whether an offline read should
+  fall back to the local copy, labelled as such.
 
 ## Sync onto main #1960 (2026-11-17)
 

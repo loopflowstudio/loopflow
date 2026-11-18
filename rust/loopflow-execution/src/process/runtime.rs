@@ -358,12 +358,15 @@ impl LfProcessRuntime {
             resume_thread,
             || close_session_agent_process(store, session),
         )?;
-        store.record_session_agent(session, &next, &provider, model.as_deref())?;
+        let recorded = store.record_session_agent(session, &next, &provider, model.as_deref());
+        // The old attachment is gone either way; a failed write must not
+        // leave the runtime holding it.
         runtime.owner = Some(crate::harness::Recording {
             store: store.clone(),
             session: session.clone(),
             attachment: next,
         });
+        recorded?;
         if let Err(error) = runtime.fail_and_begin_attempt(provider, model) {
             runtime.recorder.warn_telemetry(error);
         }

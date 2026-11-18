@@ -54,10 +54,9 @@ including output printed while the server was away, without redrawing.
 Selection, copy, Find and scrolling remain available.
 If recovery fails, the last screen remains visible and is marked stale.
 
-If another viewer has control, recovery leaves that viewer in control. The
-read-only pane offers **Move here** to request control explicitly. **Retry**
-repairs the connection after automatic retries are exhausted. It does not take
-control, restart the provider or repeat a command. Uncertain keystrokes and
+Other views of the same conversation stay attached and keep typing while one
+recovers. **Retry** repairs the connection after automatic retries are
+exhausted. It does not restart the provider or repeat a command. Uncertain keystrokes and
 unacknowledged commands are never replayed automatically.
 
 An unavailable connection does not mean the Session has ended. Agents run in a

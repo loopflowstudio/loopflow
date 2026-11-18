@@ -7,7 +7,7 @@ pub use loopflow_model::durable::{
     person_text, Author, CapacityDefault, DefaultScope, DurableDataError, Machine, MachineDefault,
     MachineId, MachineRef, MachineSetting, OwnershipEntryId, OwnershipKind, ProjectId,
     RepositoryId, RepositoryIdentity, TaskId, TaskOwner, TaskOwnership, TaskOwnershipEntry,
-    ToolResponseId, ToolResponseReceipt, ToolResponseWrite, WorkRef, WorkStatus,
+    WorkRef, WorkStatus,
 };
 
 /// A fresh, Machine-local observation, never replicated as planning or a start claim.

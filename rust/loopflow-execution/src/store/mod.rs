@@ -329,17 +329,6 @@ impl Store {
         .await
     }
 
-    pub async fn deleted_task_issues(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<std::collections::HashSet<String>> {
-        let wave_id = wave_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.deleted_task_issues(&wave_id)
-        })
-        .await
-    }
-
     pub async fn list_waves(&self, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
         let Some(repo) = repo else {
             return run_sqlite(&self.sqlite, move |store| store.list_waves(None)).await;

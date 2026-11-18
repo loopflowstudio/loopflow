@@ -335,6 +335,10 @@ jobs:
           # expression is 3.48+); the runner's system Python links an older one.
           UV_PYTHON_PREFERENCE: only-managed
         run: uv run python scripts/check_migrations.py
+      - name: Verify the generated schema page
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+        run: uv run python scripts/schema_page.py --check
 
   python-test:
     needs: [merge-proof, scratch-clear]

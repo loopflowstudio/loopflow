@@ -47,12 +47,6 @@ prefixed_uuid_id!(
     DurableDataError,
     DurableDataError::InvalidId
 );
-prefixed_uuid_id!(
-    ToolResponseId,
-    "response_",
-    DurableDataError,
-    DurableDataError::InvalidId
-);
 
 impl TaskId {
     /// Linear UUIDs are also the creation UUID used by locally authored Tasks.
@@ -187,8 +181,7 @@ pub struct TaskOwnershipEntry {
     pub machine_id: Option<MachineId>,
     /// The Machine's label when written, or as best known on this Machine.
     pub machine_label: Option<String>,
-    /// Absent from entries released lf wrote, which name no writer (Task 538340
-    /// drops `written_here`, after which every entry names one).
+    /// Absent from entries lf before `task_machine_local` wrote, which name no writer.
     pub writer_machine_id: Option<MachineId>,
     pub at: i64,
 }
@@ -328,22 +321,6 @@ impl std::fmt::Display for Author {
             Self::Imported(selector) => write!(f, "imported {selector}"),
         }
     }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ToolResponseWrite {
-    pub request_id: String,
-    pub choice: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ToolResponseReceipt {
-    pub id: ToolResponseId,
-    pub work: WorkRef,
-    pub request_id: String,
-    pub choice: String,
-    #[serde(with = "time::serde::rfc3339")]
-    pub responded_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]

@@ -1746,8 +1746,8 @@ mod tests {
             .unwrap();
             conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
             conn.execute(
-                "INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at,branch)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1,?3)",
+                "INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
+                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1)",
                 params![TaskId::new().as_str(), project.as_str(), format!("OLD-{n}")],
             )
             .unwrap();

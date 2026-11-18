@@ -6,7 +6,7 @@ use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
-use super::super::wire::{frame, parse_position, Decoder, Incoming, Own, Request, Tag};
+use super::super::wire::{frame, parse_position, Decoder, Incoming, Request, Tag};
 use super::{connect, Registry, Start};
 use crate::journal::TestLedgerGuard;
 use crate::terminal_holder::{serve, Place};
@@ -64,13 +64,9 @@ impl View {
         let attach = Incoming {
             id: 1,
             request: Request::Attach {
-                control: true,
-                replace: true,
-                own: Some(Own::Take),
                 rows: 24,
                 cols: 80,
                 name: None,
-                moved: None,
                 from,
             },
         };
@@ -149,8 +145,8 @@ fn an_interrupted_paste_ends_before_the_next_view_types() {
     let ledger = TestLedgerGuard::new();
     let place = holder();
     let mut registry = Registry::open(BUILD).unwrap();
-    for interruption in ["disconnect", "replace", "restart"] {
-        let end = ledger.home().join(interruption);
+    for interruption in ["disconnect", "another view", "restart"] {
+        let end = ledger.home().join(interruption.replace(' ', "-"));
         let script = r#"stty raw -echo
 printf 'ready\r\n'
 dd bs=1 count=9 of=/dev/null 2>/dev/null
@@ -158,38 +154,44 @@ printf 'prefix\r\n'
 dd bs=1 count=6 of="$PASTE_END" 2>/dev/null
 read line
 printf 'reply:%s\r\n' "$line""#;
-        let mut start = shell(None, interruption, script);
+        let mut start = shell(None, &interruption.replace(' ', "-"), script);
         start
             .env
             .push(("PASTE_END".into(), end.display().to_string()));
         let terminal = registry.start(start).unwrap();
-        let mut first = View::attach(&terminal);
-        first.wait_for("ready");
-        first.type_in(b"\x1b[200~abc");
-        first.wait_for("prefix");
+        let mut first = Some(View::attach(&terminal));
+        let pasting = first.as_mut().unwrap();
+        pasting.wait_for("ready");
+        pasting.type_in(b"\x1b[200~abc");
+        pasting.wait_for("prefix");
         let wait_for_end = || {
             wait_until("child to receive the paste end", || {
                 end.metadata().is_ok_and(|metadata| metadata.len() == 6)
             });
             assert_eq!(std::fs::read(&end).unwrap(), b"\x1b[201~", "{interruption}");
         };
-        let mut next = if interruption == "replace" {
-            let next = View::attach(&terminal);
+        let mut next = if interruption == "another view" {
+            // The first view stays; the second one's keys end its paste.
+            let mut next = View::attach(&terminal);
+            next.wait_for("prefix");
+            next.type_in(b"next\n");
             wait_for_end();
             next
         } else {
             if interruption == "restart" {
                 registry.close();
             }
-            drop(first);
+            first = None;
             wait_for_end();
             if interruption == "restart" {
                 registry = Registry::open(BUILD).unwrap();
             }
-            View::attach(&terminal)
+            let mut next = View::attach(&terminal);
+            next.type_in(b"next\n");
+            next
         };
-        next.type_in(b"next\n");
         next.wait_for("reply:next");
+        drop(first);
         wait_until("paste child exit receipt", || {
             crate::terminal_holder::recorded_exit(&place, terminal.as_str())
                 .unwrap()

@@ -228,7 +228,7 @@ frames, which it writes and does not count. The server keeps no spool.
 A view that reconnects attaches with `from`, the position its screen shows:
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":false,"own":"request","rows":40,"cols":120,"name":null,"moved":null,"from":48213}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":null,"from":48213}
 ```
 
 The server answers a new viewer identity, reads the PTY bytes from `from`
@@ -239,8 +239,8 @@ sends the current state again (size, owner, theme, directory, title and
 program status, a child exit) and a `live` event. A `from` the ring no
 longer holds, or past what the PTY printed, gets a snapshot and `position`
 instead, then `live`. Until it has caught up the view receives no reports or
-events, and its terminal's answers do not count as the controller's: the
-retained screen answers the agent's live queries meanwhile.
+events, and the server drops its terminal's answers: the retained screen
+answers the agent's live queries meanwhile.
 
 The replayed bytes contain queries the agent asked long ago, and the view's
 terminal answers them again. The relay discards everything it reads from
@@ -248,7 +248,7 @@ its terminal until the stream is live, then writes a status report query
 (`CSI 5 n`) and keeps discarding until the terminal's answer to it: answers
 come in order, so every late one has arrived by then (one second at most if
 a terminal never answers). Anything the relay itself prints into the screen
-(a reconnect notice, an input hint, an ownership change) makes its next
+(a reconnect notice, an input hint) makes its next
 reconnect a fresh attach that repaints instead. The replayed stretch is the
 raw PTY output, including a native client's exit text that live views see
 replaced.
@@ -290,22 +290,20 @@ agents quit.
 ## Using a view
 
 Ctrl+] detaches a view. Ctrl+C reaches the running program. A Task step's live
-controls (`/status`, `/interrupt`, `/detach`, messages) are shown to each
-controlling view as it attaches; headless output never sees them. Closing a
-terminal leaves the agent, its provider requests and capture settlement with
-the holder and server; `lf session list` shows its Session as `detached` and
-`lf resume` reattaches it. Attaching takes control: the previous view's input
-token is revoked and that terminal says where the conversation went.
-`lf resume SESSION --json` prints the Session record after a successful
-return, including detaching or moving to another view. Terminal traffic does
-not wait for store reads; the final record is read after relaying ends.
-When stdout is no terminal it holds only that record, and the terminal's
-output goes to stderr.
-`lf resume SESSION --prepare --json` returns the one command Desktop runs,
-without opening a socket or starting a provider. Desktop decides from the
-record's actions whether showing a pane reattaches: a held Session offers
-reveal, attaching read-only if another viewer holds input. **Move here** takes
-input explicitly; an ended Session waits for an explicit open.
+controls (`/status`, `/interrupt`, `/detach`, messages) are shown to each view
+as it attaches; headless output never sees them. Closing a terminal leaves the
+agent, its provider requests and capture settlement with the holder and
+server; `lf session list` shows its Session as `detached` and `lf resume`
+reattaches it. A held terminal takes any number of views and every attached
+view types: `lf resume` here adds one more view and leaves the others open, and
+a draft typed in one shows in all of them. `lf resume SESSION --json` prints
+the Session record after a successful return, including detaching. Terminal
+traffic does not wait for store reads; the final record is read after relaying
+ends. When stdout is no terminal it holds only that record, and the terminal's
+output goes to stderr. `lf resume SESSION --prepare --json` returns the one
+command Desktop runs, without opening a socket or starting a provider. Desktop
+decides from the record's actions whether showing a pane reattaches: a held
+Session offers reveal; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching
@@ -318,14 +316,14 @@ Leaving a relay restores keyboard and drawing modes at the current cursor
 position. Returning to the shell must not home the cursor or overwrite the
 command's output.
 
-During initial attachment, cooked input waits until the server grants control.
-Input then goes straight to the holder's PTY; only bytes not yet written are
+During initial attachment, cooked input waits until the server acknowledges
+the view. Input then goes straight to the holder's PTY; only bytes not yet written are
 queued, and no store read or write delays forwarding. Returning does not
 resubmit input. Unsent input is lost when the conversation is quit and
 resumed.
 
-An interrupted bracketed paste ends when its controlling view leaves or loses
-control. This releases the native parser's accumulated draft without submitting
+An unfinished bracketed paste ends when its view leaves, and before another
+view's keystrokes reach the agent. This releases the native parser's accumulated draft without submitting
 it. A reconnect tracks paste delimiters even while dropping queued input and
 restores paste framing before forwarding any remaining content. Ctrl+] inside
 a paste is content; outside a paste it detaches the view. No paste timeout or
@@ -344,11 +342,11 @@ delivery unknown and starts nothing. Heartbeat intervals and timeouts use
 monotonic uptime, so laptop sleep does not expire a local connection.
 Completed-Task cleanup counts wall time.
 
-For commands using pipes, the controlling view forwards stdin EOF after all
-accepted input. Disconnecting the view alone leaves stdin open. Terminal
+For commands using pipes, the view forwards stdin EOF after all accepted
+input. Disconnecting the view alone leaves stdin open. Terminal
 views keep the PTY open; the running program interprets terminal EOF keys.
 Keystrokes a view sent before it closed reach the program in order, even when
-the view quits in the same instant, as long as it still held control.
+the view quits in the same instant.
 
 ### Desktop status
 
@@ -361,22 +359,18 @@ the first retained screen uses the new pane's dimensions and cursor position.
 The relay stays alive when its server connection drops. Its native status row
 then shows **Reconnecting…** and pauses input while local selection, copy,
 Find and scrolling remain available. Disconnected typing and uncertain writes
-are never replayed. If another view took control, recovery observes it
-without replacing input or geometry. Choose **Move here** in the read-only
-pane's connection row to edit the same running Session; input stays paused
-until the server acknowledges, and a lost reply never repeats that takeover.
-Eight attempts with capped backoff lead to **Session unavailable** and a native
+are never replayed. Eight attempts with capped backoff lead to **Session unavailable** and a native
 **Retry connection** action. A final Close frame ends recovery and disables input;
 its reason explains replacement, completion or retirement. Bare EOF remains unknown. Closing the
 surface cancels recovery. Ordinary explicit Open remains separate.
 
 The native surface listens on a private Unix socket and passes its path through
 `LF_SERVER_STATUS` to its relay. Newline-delimited JSON readings carry
-generation, state, input capability, native readiness and optional
-explanation. The same stream carries `{"kind":"retry"}` or
-`{"kind":"move","generation":N}`. A move is consumed once before its
-replacing attachment; stale generations and lost actions are never replayed.
-Closing the surface removes its private directory and cancels recovery. A
+generation, state (`connecting`, `reconnecting`, `connected`, `unavailable`,
+`ended`), native readiness and optional explanation; Desktop takes input while
+the state is `connected`. The one action on the same stream is
+`{"kind":"retry"}`, honored only while `unavailable`; lost actions are never
+replayed. Closing the surface removes its private directory and cancels recovery. A
 broken status stream pauses Desktop input immediately; the relay records the
 gap, keeps the terminal running, and reconnects the status stream with its
 current reading. Status I/O, including connect, is nonblocking. This is
@@ -387,8 +381,8 @@ interaction.
 
 The server keeps a libghostty-vt terminal per held terminal (the Ghostty
 revision pinned in `rust/loopflow-terminal/ghostty-vt.json`, 8 MiB of scrollback) and
-answers the program's cursor, device and mode queries while no view's
-terminal is there to. A new view is repainted through Ghostty's VT formatter:
+answers the program's cursor, device and mode queries while no view is
+attached to answer them. A new view is repainted through Ghostty's VT formatter:
 the newest scrollback rows (up to 2,000, under 768 KiB) above its own
 history, then the active screen with colors and styles, OSC 8 hyperlinks,
 cursor position, Kitty keyboard stack, charsets, modes (alternate screen,
@@ -455,50 +449,49 @@ at most 64 KiB; a payload over 4 MiB is a protocol error.
 | `0x06` aside | server → view | lf's reports and events; not PTY bytes |
 | `0x07` close | server → view | final JSON `{reason: replaced\|finished\|retired}`; not PTY bytes |
 | `0x11` request | view → server | JSON with `id` and `kind` |
-| `0x12` input | view → server | keystrokes from the connection holding input control |
+| `0x12` input | view → server | keystrokes from any attached connection |
 
 ```json
-{"id":1,"kind":"attach","control":true,"replace":true,"own":"take","rows":40,"cols":120,"name":"/dev/ttys004","moved":null,"from":null}
-{"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","token":"…","terminal":true,"owner":"…"}
+{"id":1,"kind":"attach","rows":40,"cols":120,"name":"/dev/ttys004","from":null}
+{"answers":1,"seq":0,"kind":"attached","viewer":"…","nonce":"…","terminal":true,"owner":"…"}
+{"id":2,"kind":"focus","focused":true}
 ```
 
 Before attachment, a destination may send a `snapshot` of retained history.
-It grants no input or retention claim; the live snapshot replaces it on
-attachment. The attached stream opens with the snapshot, a `resize` event, a
-`theme` event when one is known, an `owner` event, and live output.
+It grants no retention claim; the live snapshot replaces it on attachment. The
+attached stream opens with the snapshot, a `resize` event, a `theme` event when
+one is known, an `owner` event, and live output.
 
 Events travel in `aside` frames as ``ESC _ lf1;<nonce>;<json> ESC \``, with
 the view's own nonce, so a program printing the same bytes passes through as
 output. Each carries a gapless `seq` per view, and every
 reply carries the `seq` of the last event queued when it was computed. Kinds:
 `resize {rows,cols}`, `theme {theme}`, `program_status {status}`,
-`owner {viewer,name,held}`, `control {held,notice}` (input control left this
-connection), `child_exited {code}`, `detached`, `hint {text}`,
-`return {detach}` and `live`. A terminal view that receives `control` with
-`held: false` restores its terminal, prints the notice and leaves. Desktop keeps
-its view attached read-only and offers Move here, the only action that replaces
-another view's control. When a heartbeat's `controlled` reply says nobody holds
-input, a read-only Desktop view asks for it without replacing; Busy keeps it
-read-only.
+`owner {viewer,name,held}`, `child_exited {code}`, `detached`, `hint {text}`,
+`return {detach}` and `live`.
 
-Input control and geometry release when a connection ends; a reconnecting view
-asks for them again. Another view's input or geometry claim survives, and
-closing a stale socket later cannot revoke a replacement connection's claims.
+Every attached view types; its `input` frames go to the PTY as they arrive.
+Size and colors follow one view, named by `owner` (`held` says whether the
+recipient is it): the view that most recently attached, typed or gained focus.
+When it leaves, the remaining view used most recently takes over. A view may
+report its size (`resize`) and colors (`theme`) at any time; only the sizing
+view's are applied and broadcast, and a view that has not reported colors
+supplies no color override. Focus is DEC mode 1004: every terminal relay turns
+focus reporting on in its own terminal (a Desktop pane runs the same relay in a
+Ghostty surface) and sends `focus {focused}`. A host that reports no focus
+still gets the attach-and-type rule. The agent hears `CSI I`/`CSI O` only if it
+enabled mode 1004 itself.
 
-Geometry ownership arbitrates only size and colors. `own: "take"` replaces the
-geometry owner, who receives `owner` with `held: false` and stays attached;
-`own: "request"` queues until the owner leaves. A view may report its size and
-colors before it owns them; only the selected owner's reports are broadcast as
-effective appearance, and its known size and colors follow ownership. A view
-that has not reported colors supplies no color override. Who may type is
-separate: the `token` of a controlling attach, `busy` when control is held and
-`replace` is false, and a `control` event to the connection that lost it.
+Only the sizing view's terminal answers the agent's queries. The server drops
+the other views' answers (cursor position, device attributes, OSC color
+replies, mode reports) so the agent hears one answer.
 
 A view sends `{"id":N,"kind":"controlled"}` every ten seconds on its attached
-connection, independent of input and output; after thirty seconds without one
-the server releases that connection's retention and input claim. Silent
-network loss needs no EOF. The view also detects thirty seconds without an
-answer or output, even when its writes still succeed, and reconnects. Neither
+connection, independent of input and output, and gets `controlled {viewed,
+ready}` back; after thirty seconds without one the server drops that view and
+its retention claim. Silent network loss needs no EOF. The view also detects
+thirty seconds without an answer or output, even when its writes still
+succeed, and reconnects. Neither
 starts a provider or replays input. Queued replies are read before checking
 the deadline so a responsive, quiet provider stays attached after waking.
 
@@ -575,7 +568,7 @@ different execution. An unavailable destination never opens a local successor
 prompt.
 
 Keep a Task Session view open to retain its worktree. Hidden or unfocused
-views count, passive ones too; input control is separate. Closing the last
+views count. Closing the last
 view starts a completed Task's cleanup grace; requested work delays cleanup
 without restarting that clock. A shell does not retain the worktree.
 Loopflow cleans up its Desktop shells; Rex shells remain yours to manage in
@@ -642,17 +635,14 @@ Desktop keeps views open for visible Tasks and a bounded recent set of
 unfinished conversations, so those hold their checkouts; leaving the set,
 Close and window close detach them.
 
-Desktop's automatic opening uses a non-replacing input claim: working Tasks use
-Start, which permits first-thread creation; other Work uses reveal, which
-requires existing history. Their prepared commands keep that distinction
-through launch. If another view wins before attachment, the server returns
-Busy; Desktop attaches read-only and keeps that view's input. Only Take back uses
-ordinary resume to take control; Try again on a consumed first launch uses it on a Session no client
-holds. The live relay announces native input readiness to Desktop after the
-server acknowledges the native client; saved screen bytes never provide that
-announcement. A successful automatic attach records its Desktop terminal
-association after the handshake, keeping current provider status without
-claiming another view's input during preparation.
+Desktop opens a conversation the way `lf resume` does: it attaches one more
+view beside any already open, resumes an ended provider from history, and
+takes over a Session whose provider runs outside a held terminal, in a native
+client lf cannot share. Try again on a consumed first launch gives its request
+another attempt. The live relay announces native input readiness to Desktop after
+the server acknowledges the native client; saved screen bytes never provide
+that announcement. A successful automatic attach records its Desktop terminal
+association after the handshake.
 
 Terminal parsing and repainting live in
 [`loopflow-terminal`](../../../loopflow-terminal/README.md). The application

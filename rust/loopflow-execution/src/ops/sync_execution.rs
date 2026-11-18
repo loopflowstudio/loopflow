@@ -4,9 +4,8 @@ use crate::git::{current_branch, get_default_branch};
 use crate::graph::load_skill;
 use crate::ops::telemetry::record_ops_metric;
 use crate::ops::{
-    abort_sync_after_authorization, abort_sync_for_resolution, continue_sync_after_authorization,
-    continue_sync_for_resolution, plan_sync, recover_sync, sync_class_name, sync_strategy_name,
-    sync_with_plan, OpsError, Progress, SyncOptions,
+    abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
+    sync_class_name, sync_strategy_name, sync_with_plan, OpsError, Progress, SyncOptions,
 };
 use crate::prompt::process::{prepare_process_prompt, ContextSourceOverrides, ProcessPromptInput};
 use crate::prompt::Surface;
@@ -40,33 +39,13 @@ pub(crate) fn run_sync_in(
         ));
     }
     if continue_sync {
-        if adopt {
-            continue_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            continue_sync_for_resolution(repo_root, false)?;
-        }
+        continue_sync_for_resolution(repo_root, adopt)?;
         return Ok(Sync::Finished {
             message: "Sync complete; branch remains local.".into(),
         });
     }
     if abort {
-        if adopt {
-            abort_sync_after_authorization(repo_root, true, || {
-                crate::ops::task::record_task_pr_repair(
-                    repo_root,
-                    loopflow_storage::work::task::TaskPrRepairKind::ManualGitRepair,
-                )
-                .map(|_| ())
-            })?;
-        } else {
-            abort_sync_for_resolution(repo_root, false)?;
-        }
+        abort_sync_for_resolution(repo_root, adopt)?;
         return Ok(Sync::Finished {
             message: "Sync aborted.".into(),
         });
@@ -145,7 +124,6 @@ pub(crate) fn run_sync_in(
         push: !manual && !on_main,
         fork_base,
     };
-    let avoidable = is_avoidable_sync_class(&plan.class);
     let (verification, agent_launched) = if manual {
         (sync_with_plan(repo_root, &options, &plan, progress)?, false)
     } else {
@@ -163,7 +141,6 @@ pub(crate) fn run_sync_in(
                         &onto,
                         &detail,
                         recovery,
-                        avoidable,
                         progress,
                         &recovery_config,
                     )
@@ -245,7 +222,6 @@ fn resolve_sync_conflict(
     onto: &str,
     detail: &str,
     recovery: Option<Box<crate::ops::SyncRecovery>>,
-    avoidable: bool,
     progress: &impl Progress,
     config: &Config,
 ) -> Result<crate::ops::SyncVerification> {
@@ -254,24 +230,11 @@ fn resolve_sync_conflict(
     let context = format!(
         "<lf:sync-conflict>\nSync onto: {onto}\n{detail}\nContinue the existing owned sequencer; do not start another sync or push.\n</lf:sync-conflict>"
     );
-    if avoidable {
-        crate::ops::task::record_task_pr_repair(
-            repo_root,
-            loopflow_storage::work::task::TaskPrRepairKind::AvoidableRebaseAgent,
-        )?;
-    }
     progress.status("Launching sync agent to resolve conflicts...");
     Ok(recover_sync(*recovery, || {
         process_skill_agent(repo_root, "sync-conflicts", Some(&context), config)
             .map_err(|error| OpsError::Message(error.to_string()))
     })?)
-}
-
-fn is_avoidable_sync_class(class: &crate::ops::SyncClass) -> bool {
-    matches!(
-        class,
-        crate::ops::SyncClass::StaleEmpty | crate::ops::SyncClass::ScratchOnly
-    )
 }
 
 /// Run a PR-mutating op; on a sync conflict, launch the sync agent to
@@ -294,7 +257,6 @@ pub(crate) fn with_sync_retry<T>(
                 &onto,
                 &detail,
                 recovery,
-                false,
                 progress,
                 &load_config_or_default(Some(repo_root)),
             )?;
@@ -394,18 +356,4 @@ fn process_skill_agent(
         ));
     }
     Ok(())
-}
-
-#[cfg(test)]
-mod sync_performance_tests {
-    use super::is_avoidable_sync_class;
-    use crate::ops::SyncClass;
-
-    #[test]
-    fn disposable_sync_classes_make_an_agent_launch_a_repair_incident() {
-        assert!(is_avoidable_sync_class(&SyncClass::StaleEmpty));
-        assert!(is_avoidable_sync_class(&SyncClass::ScratchOnly));
-        assert!(!is_avoidable_sync_class(&SyncClass::CleanAuthored));
-        assert!(!is_avoidable_sync_class(&SyncClass::Protected));
-    }
 }

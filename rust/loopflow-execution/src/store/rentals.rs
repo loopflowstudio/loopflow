@@ -3,7 +3,6 @@ use crate::store::{StoreError, StoreResult};
 use loopflow_model::durable::MachineId;
 use loopflow_storage::rental::{OnDemand, Ownership, Pool, Rental, Usd};
 use loopflow_storage::sqlite::SqliteStore;
-use time::OffsetDateTime;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
@@ -45,19 +44,14 @@ fn edit(
 }
 
 pub fn pools(store: &SqliteStore) -> StoreResult<Vec<Pool>> {
-    let saved = store.capacity_created_at()?;
-    config(store)?
+    Ok(config(store)?
         .pools
         .into_iter()
-        .map(|(name, declaration)| {
-            let created = *saved.get(&("pool".into(), name.clone())).unwrap_or(&0);
-            Ok(Pool {
-                name,
-                off: declaration.off,
-                created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid)?,
-            })
+        .map(|(name, declaration)| Pool {
+            name,
+            off: declaration.off,
         })
-        .collect()
+        .collect())
 }
 pub fn pool(store: &SqliteStore, name: &str) -> StoreResult<Option<Pool>> {
     Ok(pools(store)?.into_iter().find(|pool| pool.name == name))
@@ -73,7 +67,6 @@ pub fn add_pool(store: &SqliteStore, name: &str) -> StoreResult<Pool> {
                 .map_err(invalid)?,
         ),
     )?;
-    store.register_pool(name)?;
     pool(store, name)?.ok_or(StoreError::NotFound)
 }
 pub fn set_pool_off(store: &SqliteStore, name: &str, off: bool) -> StoreResult<()> {
@@ -89,7 +82,7 @@ pub fn remove_pool(store: &SqliteStore, name: &str) -> StoreResult<()> {
     if !edit(&file, &["pools", name], None)? {
         return Err(StoreError::NotFound);
     }
-    store.remove_pool_record(name)
+    store.clear_pool_machines(name)
 }
 pub fn set_machine_ownership(
     store: &SqliteStore,
@@ -106,23 +99,18 @@ pub fn set_machine_ownership(
 }
 
 pub fn ondemands(store: &SqliteStore) -> StoreResult<Vec<OnDemand>> {
-    let saved = store.capacity_created_at()?;
-    config(store)?
+    Ok(config(store)?
         .ondemands
         .into_iter()
-        .map(|(name, declaration)| {
-            let created = *saved.get(&("ondemand".into(), name.clone())).unwrap_or(&0);
-            Ok(OnDemand {
-                name,
-                provider: declaration.provider,
-                hardware: declaration.hardware,
-                max_machines: declaration.max_machines,
-                max_usd_per_hour: declaration.max_usd_per_hour,
-                hours: declaration.hours,
-                created_at: OffsetDateTime::from_unix_timestamp(created).map_err(invalid)?,
-            })
+        .map(|(name, declaration)| OnDemand {
+            name,
+            provider: declaration.provider,
+            hardware: declaration.hardware,
+            max_machines: declaration.max_machines,
+            max_usd_per_hour: declaration.max_usd_per_hour,
+            hours: declaration.hours,
         })
-        .collect()
+        .collect())
 }
 pub fn ondemand(store: &SqliteStore, name: &str) -> StoreResult<Option<OnDemand>> {
     Ok(ondemands(store)?
@@ -144,7 +132,7 @@ pub fn add_ondemand(store: &SqliteStore, ondemand: &OnDemand) -> StoreResult<()>
         &["ondemands", &ondemand.name],
         Some(serde_yaml_ng::to_value(declaration).map_err(invalid)?),
     )?;
-    store.register_ondemand(ondemand)
+    Ok(())
 }
 pub fn set_ondemand_max(store: &SqliteStore, name: &str, max: u32) -> StoreResult<()> {
     let file = lock(store)?;
@@ -169,7 +157,7 @@ pub fn remove_ondemand(store: &SqliteStore, name: &str) -> StoreResult<()> {
     if !edit(&file, &["ondemands", name], None)? {
         return Err(StoreError::NotFound);
     }
-    store.remove_ondemand_record(name)
+    Ok(())
 }
 pub fn admit_rental(
     store: &SqliteStore,

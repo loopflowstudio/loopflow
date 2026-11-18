@@ -667,8 +667,6 @@ fn project_accepted_planning(
          AND ((observed.id IS NOT NULL AND observed.wave_id=p.wave_id)
               OR (i.project_id_observed=1 AND i.claimed_project_id IS NULL))
          AND (target.id IS NULL OR target.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
-         AND NOT EXISTS(SELECT 1 FROM task_deletions d
-             WHERE d.issue_id=i.id AND EXISTS(SELECT 1 FROM waves dw WHERE dw.id=d.wave_id AND dw.repo=?1))
          AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
              AND c.removed=1)"
     ))?;

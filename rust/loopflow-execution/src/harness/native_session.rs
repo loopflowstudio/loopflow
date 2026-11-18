@@ -141,20 +141,6 @@ pub fn launch_session(
     })
 }
 
-pub(crate) fn resume_session(
-    artifact_key: &String,
-    provider_session: &crate::session_record::ProviderSessionRef,
-    kind: LaunchKind,
-) -> Result<()> {
-    resume_session_with_env(
-        artifact_key,
-        Some(provider_session),
-        &BTreeMap::new(),
-        None,
-        kind,
-    )
-}
-
 /// Continue a recorded conversation with the lifetime selected by delegation.
 pub fn resume_session_with_env(
     artifact_key: &String,
@@ -796,7 +782,7 @@ fn native_return(
         );
     let command = format!("lf resume {session}");
     crate::transport::native_client(
-        format!("Left {name}. Continue with: {command}  (Ctrl+] steps away without stopping)"),
+        format!("Left {name}. Continue with: {command}"),
         format!("Detached from {name}; it keeps running. Return with: {command}"),
     )
 }

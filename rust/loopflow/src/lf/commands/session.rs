@@ -11,7 +11,6 @@ use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
     ConversationLaunch, Opening, SessionRecord, SessionState,
 };
-use loopflow_execution::session::SessionOpenIntent;
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
 
@@ -727,12 +726,8 @@ async fn list(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
-            for action in session.actions {
-                println!(
-                    "  {} — {}",
-                    action.label,
-                    action.unavailable_reason.as_deref().unwrap_or(&action.help)
-                );
+            if let Some(action) = session.action {
+                println!("  {} — {}", action.label, action.help);
             }
         }
         for session in copied {
@@ -860,13 +855,8 @@ async fn select(
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected = loopflow_execution::ops::human_session::select_connection(
-        store,
-        directory,
-        target,
-        SessionOpenIntent::Resume,
-    )
-    .await?;
+    let selected =
+        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
     if selected.started {
         loopflow_execution::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
@@ -888,22 +878,6 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let intent = connection.intent();
-    if intent != SessionOpenIntent::Resume {
-        anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
-        let selected = loopflow_execution::ops::human_session::select_connection(
-            store, directory, target, intent,
-        )
-        .await?;
-        return loopflow_execution::ops::human_session::open_without_replacing(
-            store,
-            &selected.id,
-            intent,
-            !connection.prepare,
-            json,
-        )
-        .await;
-    }
     let id = select(store, directory, target).await?;
     loopflow_execution::ops::human_session::open(
         store,
@@ -1011,13 +985,8 @@ async fn restarted(
     request_id: Option<&str>,
     agent: Option<&str>,
 ) -> anyhow::Result<Opening> {
-    let selected = loopflow_execution::ops::human_session::select_connection(
-        store,
-        directory,
-        target,
-        SessionOpenIntent::Resume,
-    )
-    .await?;
+    let selected =
+        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
     let request_id = request_id
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());

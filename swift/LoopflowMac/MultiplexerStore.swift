@@ -271,8 +271,7 @@ public final class MultiplexerStore {
         return _record(.browserTab(tabs[index], index: index))
     }
 
-    public func paneLayout(work: WorkWorkspaceKey, revision: Int64,
-                           files: WorkBrowserTab?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
+    public func paneLayout(files: WorkBrowserTab?, drafts: [WorkFileDraft]) -> WorkPaneLayout {
         func place(_ value: WorkspaceIdentity?) -> WorkViewPlan.Location? {
             value.map { WorkViewPlan.Location(machineID: $0.machineId, cwd: $0.worktree) }
         }
@@ -303,12 +302,12 @@ public final class MultiplexerStore {
                 return .pane(id: pane.id, content: intent)
             }
         }
-        return WorkPaneLayout(work: work, revision: revision, tree: tree(layout), focused: focusedPaneId,
+        return WorkPaneLayout(tree: tree(layout), focused: focusedPaneId,
                               zoomed: zoomedPaneId, hidden: collapsedPaneIds.sorted(), drafts: drafts)
     }
 
     /// Restore portable identity with fresh native occurrences. No command is replayed.
-    public func restore(_ saved: WorkPaneLayout) {
+    public func restore(_ saved: WorkPaneLayout, taskId: String) {
         func location(_ value: WorkViewPlan.Location?) -> WorkspaceIdentity? {
             value.map { WorkspaceIdentity(machineId: $0.machineID, worktree: $0.cwd) }
         }
@@ -335,7 +334,7 @@ public final class MultiplexerStore {
                         case .url(let id, let url): URL(string: url).flatMap { BrowserTab.page($0, id: id) }
                         }
                     }
-                    content = .browser(taskId: saved.work.id, tabs: restored,
+                    content = .browser(taskId: taskId, tabs: restored,
                         selected: restored.contains { $0.id == selected } ? selected : restored.first?.id,
                         location: location(place))
                 }

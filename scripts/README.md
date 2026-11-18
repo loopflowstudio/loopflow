@@ -11,6 +11,7 @@ LF_HOME="$(mktemp -d)" local-bin/lf wave list --json   # run a disposable experi
 uv run pytest python/tests/test_gate_bounded.py        # one Python behavior
 uv run python scripts/resource_envelope.py             # attribute local disk pressure
 uv run python scripts/check_architecture.py            # architecture owners and vocabulary
+uv run python scripts/due_removals.py                  # leaving store members and their drop dates
 uv run python scripts/test.py --list                   # affected-suite plan
 uv run python scripts/test.py --reuse-passing          # affected suites once per exact tree
 uv run python scripts/desktop_performance.py run --cli target/debug/lf --output /tmp/desktop-check --samples 1  # needs lf-world built beside lf
@@ -36,6 +37,44 @@ with its caller. See [build commands](testing.md#builds).
 ## Scheduled disk cleanup
 
 Reclaim disposable coding output with [opt-in hourly cleanup](disk-cleanup.md).
+
+## Store size and leaving members
+
+```bash
+$ uv run python scripts/model_size.py
+tables                         74
+columns                        645
+storage pub fns (non-test)     1029
+SQL call sites outside storage 35 in 8 files
+
+$ uv run python scripts/due_removals.py
+LOO-836  agent_sessions.work_source  drop after 2026-12-17  unstarted
+
+uv run python scripts/due_removals.py --start      # run each due, unstarted removal Task
+uv run python scripts/schema_page.py               # rewrite rust/loopflow-storage/SCHEMA.md
+uv run python scripts/schema_page.py --check       # what CI runs
+```
+
+`model_size.py` counts what a change adds to or removes from the model; paste
+its before and after into the PR. `due_removals.py` reads the `-- leaving:`
+marks in migrations ([migration rules](../rust/loopflow-storage/src/MIGRATIONS.md#leaving-marks))
+and prints every marked Task with the date its members may drop. A Task is due
+once its marking migration has been on `origin/main` for `STAGING_DAYS`.
+
+`--start` runs `lf task run <ID> -a claude` for each due Task whose
+`lf task status --json` is `unstarted`. It never restarts a started, done or
+abandoned Task, so running it again is safe. Without `--start` it only prints.
+
+Schedule it weekly on the Machine that runs your Tasks:
+
+```bash
+uv run python scripts/due_removals.py install      # weekly LaunchAgent, Monday 09:00
+uv run python scripts/due_removals.py uninstall
+```
+
+It is a LaunchAgent, not cron, so `lf task run` can reach the Keychain
+([scheduling](../docs/work.md#run-a-pass-or-keep-a-conversation)). Its output goes to
+`~/Library/Logs/loopflow-due-removals.log`. lf itself schedules nothing.
 
 ## Changed-aware runner
 

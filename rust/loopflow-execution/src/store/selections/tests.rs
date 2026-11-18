@@ -1066,7 +1066,7 @@ fn nested_query_failure_retains_prior_members_but_confirmed_departure_prunes() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1 WHERE issue_identifier='FIX-2'",
+            "UPDATE tasks SET planning_state='completed' WHERE issue_identifier='FIX-2'",
             [],
         )
         .unwrap();

@@ -54,3 +54,21 @@ WHERE inside.id=agent_sessions.id;
 UPDATE tasks SET ship_lf_process_id=NULL WHERE ship_lf_process_id IS NOT NULL;
 
 -- leaving: relocated_task_processes LOO-877
+
+-- A Task is completed when its state says so. Released lf still reads the old
+-- boolean (and the retirement triggers fire on it), so it follows the state
+-- until the contract drops both.
+UPDATE tasks SET planning_state='completed'
+WHERE planning_completed=1 AND planning_state IS NULL;
+CREATE TRIGGER tasks_completed_follows_state_insert AFTER INSERT ON tasks
+WHEN NEW.planning_completed IS NOT (NEW.planning_state IS 'completed')
+BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WHERE id=NEW.id; END;
+CREATE TRIGGER tasks_completed_follows_state_update AFTER UPDATE OF planning_state,planning_completed ON tasks
+WHEN NEW.planning_completed IS NOT (NEW.planning_state IS 'completed')
+BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WHERE id=NEW.id; END;
+
+-- The provider's revision for the last accepted observation is the
+-- observation's own: `tracker_items.revision`, `tracker_projects.revision`.
+-- leaving: tasks.planning_completed LOO-877
+-- leaving: tasks.planning_provider_revision LOO-877
+-- leaving: projects.planning_provider_revision LOO-877

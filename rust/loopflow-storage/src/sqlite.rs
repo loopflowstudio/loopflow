@@ -343,7 +343,7 @@ pub fn read_task_branches(path: &Path) -> StoreResult<Vec<(String, bool)>> {
 pub fn read_task_worktree_ownership(path: &Path) -> StoreResult<Vec<TaskWorktreeOwnership>> {
     let conn = open_unmigrated(path)?;
     let query = format!(
-        "SELECT t.id,c.worktree,t.abandoned_at IS NULL AND t.planning_completed IS 1,({open}) \
+        "SELECT t.id,c.worktree,t.abandoned_at IS NULL AND t.planning_state IS 'completed',({open}) \
          FROM task_checkouts c JOIN tasks t ON t.id=c.task_id",
         open = durable::task_open_sql("t"),
     );

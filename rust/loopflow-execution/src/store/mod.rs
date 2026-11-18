@@ -674,9 +674,9 @@ mod tests {
         rusqlite::Connection::open(path)
             .unwrap()
             .execute_batch(
-                "CREATE TABLE tasks (id TEXT PRIMARY KEY, abandoned_at INTEGER, planning_completed INTEGER);
+                "CREATE TABLE tasks (id TEXT PRIMARY KEY, abandoned_at INTEGER, planning_state TEXT);
                  CREATE TABLE task_checkouts (task_id TEXT PRIMARY KEY, worktree TEXT NOT NULL, branch TEXT NOT NULL);
-                 INSERT INTO tasks VALUES ('running', NULL, NULL), ('done', NULL, 1),
+                 INSERT INTO tasks VALUES ('running', NULL, NULL), ('done', NULL, 'completed'),
                      ('abandoned', 1, NULL), ('unplaced', NULL, NULL);
                  INSERT INTO task_checkouts VALUES ('running', '/repo.running', 'running'),
                      ('done', '/repo.done', 'done'), ('abandoned', '/repo.abandoned', 'abandoned');",

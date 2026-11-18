@@ -62,7 +62,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<(TerminalId, bool)>> {
         let due = |viewed: &str| {
             format!(
-                "(tw.abandoned_at IS NOT NULL OR (tw.planning_completed=1
+                "(tw.abandoned_at IS NOT NULL OR (tw.planning_state='completed'
                  AND (CASE WHEN tw.planning_completed_at IS NULL THEN tw.updated_at
                      ELSE unixepoch(tw.planning_completed_at) END)+?3<=?2
                  AND {viewed}+?3<=?2
@@ -177,7 +177,7 @@ impl SqliteStore {
                WHERE a.abandoned_at IS NOT NULL
                AND NOT EXISTS(SELECT 1 FROM task_retirements WHERE task_id=a.id)
              UNION SELECT tw.id FROM hosted h CROSS JOIN tasks tw ON tw.id IN ({members})
-               WHERE tw.planning_completed=1 OR tw.abandoned_at IS NOT NULL
+               WHERE tw.planning_state='completed' OR tw.abandoned_at IS NOT NULL
              ORDER BY 1",
             members = super::task_work::session_tasks("h")
         ))?;
@@ -219,7 +219,7 @@ impl SqliteStore {
         tx.execute("INSERT INTO task_retirements(task_id,completion,checkout,branch,due_at,phase)
             SELECT t.id,CASE WHEN t.abandoned_at IS NOT NULL THEN 'abandoned:'||t.abandoned_at ELSE t.planning_completed_at END,
                 c.worktree,c.branch,?2+?3,'waiting' FROM tasks t JOIN task_checkouts c ON c.task_id=t.id
-            WHERE t.id=?1 AND (t.abandoned_at IS NOT NULL OR (t.planning_completed=1 AND t.planning_completed_at IS NOT NULL))
+            WHERE t.id=?1 AND (t.abandoned_at IS NOT NULL OR (t.planning_state='completed' AND t.planning_completed_at IS NOT NULL))
             ON CONFLICT(task_id) DO NOTHING", params![task.as_str(),now,grace])?;
         match hold {
             Some(ViewerHold::Viewed(_)) => hold_retirement(&tx, task, Some(VIEWED))?,
@@ -354,7 +354,7 @@ mod tests {
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();
         let repo = crate::test_fixture::repository(&store, "/repo");
         let task = TaskId::new();
-        store.conn.lock().unwrap().execute_batch(&format!("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at) VALUES('{task}','{repo}','SHELL-1',1,1,'completion-1');
+        store.conn.lock().unwrap().execute_batch(&format!("INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_state,planning_completed_at) VALUES('{task}','{repo}','SHELL-1',1,'completed','completion-1');
             INSERT INTO task_checkouts(task_id,worktree,branch) VALUES('{task}','/repo.task','task');", task=task.as_str(), repo=repo.as_str())).unwrap();
         (home, store, task)
     }
@@ -462,7 +462,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_completed=0,abandoned_at=1 WHERE id=?1",
+                "UPDATE tasks SET planning_state='started',abandoned_at=1 WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
@@ -590,8 +590,8 @@ mod tests {
             let other = TaskId::new();
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_completed,planning_completed_at)
-                 VALUES(?1,?2,?3,1,1,'completion-1')",
+                "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,planning_state,planning_completed_at)
+                 VALUES(?1,?2,?3,1,'completed','completion-1')",
                 params![other.as_str(), repo.as_str(), format!("OTHER-{n}")],
             ).unwrap();
             conn.execute(
@@ -741,7 +741,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE tasks SET planning_completed=0 WHERE id=?1",
+                "UPDATE tasks SET planning_state='started' WHERE id=?1",
                 [task.as_str()],
             )
             .unwrap();
@@ -750,7 +750,7 @@ mod tests {
             .reconcile_task_retirement(&task, 200, None)
             .unwrap()
             .is_none());
-        store.conn.lock().unwrap().execute("UPDATE tasks SET planning_completed=1,planning_completed_at='completion-2' WHERE id=?1", [task.as_str()]).unwrap();
+        store.conn.lock().unwrap().execute("UPDATE tasks SET planning_state='completed',planning_completed_at='completion-2' WHERE id=?1", [task.as_str()]).unwrap();
         let next = store
             .reconcile_task_retirement(&task, 300, None)
             .unwrap()

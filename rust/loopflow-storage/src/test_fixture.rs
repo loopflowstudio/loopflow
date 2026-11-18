@@ -510,8 +510,8 @@ pub fn retirement() -> (
         let conn = store.conn.lock().unwrap();
         conn.execute(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at,
-                 planning_completed,planning_completed_at)
-             VALUES(?1,?2,'PLAN-1',1,1,'done')",
+                 planning_state,planning_completed_at)
+             VALUES(?1,?2,'PLAN-1',1,'completed','done')",
             rusqlite::params![task.as_str(), repo.as_str()],
         )
         .unwrap();

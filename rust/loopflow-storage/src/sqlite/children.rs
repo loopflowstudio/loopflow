@@ -585,7 +585,7 @@ impl SqliteStore {
             ));
         }
         let (completed, pending): (bool, bool) = tx.query_row(
-            "SELECT planning_completed,completion_request IS NOT NULL FROM tasks WHERE id=?1",
+            "SELECT planning_state IS 'completed',completion_request IS NOT NULL FROM tasks WHERE id=?1",
             [id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )?;
@@ -1469,7 +1469,7 @@ pub(super) fn require_task_not_deleted(conn: &Connection, task: &Task) -> StoreR
 pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_planning_identity(conn, task)?;
     let state: Option<String> = conn.query_row(
-        "SELECT COALESCE(planning_state,CASE WHEN planning_completed=1 THEN 'completed' END) FROM tasks WHERE id=?1",
+        "SELECT planning_state FROM tasks WHERE id=?1",
         [task.id.as_str()],
         |row| row.get(0),
     )?;
@@ -1833,7 +1833,7 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
         ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
-    t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
+    t.planning_rank,t.planning_assignee,t.planning_due_date,t.planning_state,t.planning_completed_at,t.repository_id
     FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
     LEFT JOIN task_checkouts c ON c.task_id=t.id";
 pub(super) const TASK_PR_COLUMNS: &str = "SELECT
@@ -2566,7 +2566,7 @@ pub(super) fn request_completion_in(
     note: Option<&str>,
 ) -> StoreResult<Option<i64>> {
     let (completed, pending): (Option<i64>, Option<i64>) = conn.query_row(
-        "SELECT CASE WHEN planning_completed=1 THEN 1 END,completion_request FROM tasks WHERE id=?1",
+        "SELECT CASE WHEN planning_state='completed' THEN 1 END,completion_request FROM tasks WHERE id=?1",
         [task.as_str()],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;

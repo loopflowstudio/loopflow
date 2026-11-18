@@ -346,7 +346,7 @@ pub(super) fn map_machine_by_id(
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
-         WHEN {t}.planning_completed=1 THEN 'done' \
+         WHEN {t}.planning_state='completed' THEN 'done' \
          WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
              FROM task_ship_events e WHERE e.task_id={t}.id \
              AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
@@ -368,7 +368,7 @@ pub(crate) fn task_state_sql(t: &str) -> String {
 
 /// SQL: Task row `t` is neither done nor abandoned.
 pub(crate) fn task_open_sql(t: &str) -> String {
-    format!("({t}.abandoned_at IS NULL AND {t}.planning_completed IS NOT 1)")
+    format!("({t}.abandoned_at IS NULL AND {t}.planning_state IS NOT 'completed')")
 }
 
 pub(crate) fn task_state_in(conn: &Connection, task: &TaskId) -> StoreResult<TaskState> {
@@ -732,7 +732,7 @@ mod durable_store_tests {
         }
         // A done Task is still a valid assignment target.
         conn.execute(
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             [bound_task.as_str()],
         )
         .unwrap();

@@ -451,7 +451,7 @@ fn put_item(
                 "INSERT INTO task_events(task_id,kind_json,created_at)
                  SELECT t.id,json_object('kind','completed','summary','Completion observed in Linear'),?3
                  FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
-                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_completed=0",
+                 WHERE t.external_issue_id=?1 AND w.repo=?2 AND t.planning_state IS NOT 'completed'",
                 params![item.id,repo,observed_at])?;
         }
         conn.execute(
@@ -614,7 +614,10 @@ fn project_accepted_planning(
             &crate::work::edit::WorkEdit::for_target(id.as_str(), &edits),
             crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
-        tx.execute("UPDATE projects SET pm_snapshot_synced_at=?2,planning_provider_revision=?3 WHERE id=?1",params![id.as_str(),observed_at,revision])?;
+        tx.execute(
+            "UPDATE projects SET pm_snapshot_synced_at=?2 WHERE id=?1",
+            params![id.as_str(), observed_at],
+        )?;
     }
     let mut query = tx.prepare(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
@@ -732,8 +735,8 @@ fn project_accepted_planning(
             crate::sqlite::planning_write::WriteOrigin::Tracker,
         )?;
         tx.execute(
-            "UPDATE tasks SET planning_provider_revision=?2,pm_snapshot_synced_at=?3 WHERE id=?1",
-            params![id.as_str(), revision, observed_at],
+            "UPDATE tasks SET pm_snapshot_synced_at=?2 WHERE id=?1",
+            params![id.as_str(), observed_at],
         )?;
     }
     Ok(())

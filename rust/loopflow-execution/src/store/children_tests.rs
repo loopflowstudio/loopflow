@@ -337,7 +337,7 @@ fn local_labels_extend_only_for_collisions_including_completed_tasks() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE tasks SET planning_completed=1,issue_identifier='ENG-9' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed',issue_identifier='ENG-9' WHERE id=?1",
             [second.as_str()],
         )
         .unwrap();
@@ -878,7 +878,7 @@ fn local_planning_migration_preserves_released_links() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT planning_state,planning_completed FROM tasks WHERE id=?1",
+            "SELECT planning_state,planning_state IS 'completed' FROM tasks WHERE id=?1",
             [imported.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )

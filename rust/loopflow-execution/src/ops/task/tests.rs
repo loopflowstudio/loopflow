@@ -66,14 +66,17 @@ fn task_wait_condition_releases_terminal_tasks() {
     assert!(!read(TaskWaitUntil::Terminal).1);
     pr.publication = None;
     runtime.block_on(store.update_task_pr(&pr)).unwrap();
-    for field in ["planning_completed", "abandoned_at"] {
+    for (terminal, open) in [
+        ("planning_state='completed'", "planning_state='started'"),
+        ("abandoned_at=1", "abandoned_at=NULL"),
+    ] {
         store
             .sqlite
             .conn
             .lock()
             .unwrap()
             .execute(
-                &format!("UPDATE tasks SET {field}=1 WHERE id=?1"),
+                &format!("UPDATE tasks SET {terminal} WHERE id=?1"),
                 [fixture.task.id.as_str()],
             )
             .unwrap();
@@ -88,14 +91,7 @@ fn task_wait_condition_releases_terminal_tasks() {
             .lock()
             .unwrap()
             .execute(
-                &format!(
-                    "UPDATE tasks SET {field}={} WHERE id=?1",
-                    if field == "planning_completed" {
-                        "0"
-                    } else {
-                        "NULL"
-                    }
-                ),
+                &format!("UPDATE tasks SET {open} WHERE id=?1"),
                 [fixture.task.id.as_str()],
             )
             .unwrap();
@@ -1803,7 +1799,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
     // This is a reader proof, not a provider-deletion fixture.
     connection
         .execute(
-            "UPDATE tasks SET planning_completed=1,planning_state='completed' WHERE id=?1",
+            "UPDATE tasks SET planning_state='completed' WHERE id=?1",
             [fixture.task.id.as_str()],
         )
         .unwrap();
@@ -1853,7 +1849,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
     assert_eq!(
         connection
             .query_row(
-                "SELECT planning_completed FROM tasks WHERE id=?1",
+                "SELECT planning_state IS 'completed' FROM tasks WHERE id=?1",
                 [fixture.task.id.as_str()],
                 |row| row.get::<_, i64>(0)
             )

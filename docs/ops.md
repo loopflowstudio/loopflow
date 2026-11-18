@@ -299,7 +299,8 @@ lf sync LOO-12                         # from LOO-13's worktree, once it already
 ```
 $ lf sync LOO-12
 Stacked LOO-13 on LOO-12; PR #1972 now targets jack/loo-12-retry-budget
-Merging origin/jack/loo-12-retry-budget into jack/loo-13-backoff
+Merging origin/jack/loo-12-retry-budget...
+Synced onto origin/jack/loo-12-retry-budget.
 ```
 
 `lf sync` names its target by Task identifier or by branch. When the target is

@@ -274,6 +274,30 @@ impl SqliteStore {
         Ok(())
     }
 
+    // ---- Other Machines' plan refs ----
+
+    /// The commit of each other Machine's plan ref this store last took in.
+    pub fn plan_ref_tips(&self, repo: &str) -> StoreResult<HashMap<String, String>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query =
+            conn.prepare_cached("SELECT machine_id,tip FROM plan_refs WHERE repo=?1")?;
+        let tips = query
+            .query_map([repo], |row| Ok((row.get(0)?, row.get(1)?)))?
+            .collect::<Result<_, _>>()?;
+        Ok(tips)
+    }
+
+    /// Every record of `machine`'s plan ref at `tip` has been taken in.
+    pub fn record_plan_ref(&self, repo: &str, machine: &str, tip: &str) -> StoreResult<()> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(
+            "INSERT INTO plan_refs(repo,machine_id,tip) VALUES(?1,?2,?3)
+             ON CONFLICT(repo,machine_id) DO UPDATE SET tip=excluded.tip",
+            params![repo, machine, tip],
+        )?;
+        Ok(())
+    }
+
     // ---- Records out and in ----
 
     /// The records of `repo` changed after `since`, in change order, each

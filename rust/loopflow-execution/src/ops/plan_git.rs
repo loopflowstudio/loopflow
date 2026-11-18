@@ -1,0 +1,738 @@
+//! Git carries a plan without Linear or Asana. Each Machine pushes its whole
+//! plan to a ref of its own on the repository's remote
+//! (`refs/loopflow/plan/<machine id>`, one stamped record per file) and reads
+//! the others' from `refs/loopflow/plan-seen/*`. It decides nothing: arriving
+//! records go through the one import, where the newest stamp wins.
+use std::collections::HashMap;
+use std::io::Write;
+use std::path::Path;
+use std::process::{Command, Stdio};
+
+use anyhow::{anyhow, bail, Context, Result};
+
+use loopflow_model::durable::RepositoryId;
+use loopflow_storage::sqlite::plan_carriers::Carrier;
+use loopflow_storage::sqlite::SqliteStore;
+use loopflow_storage::work::edit::{StampedRecord, StampedValue};
+use loopflow_storage::StoreError;
+
+/// This Machine's ref, here and on the remote.
+const OWN: &str = "refs/loopflow/plan/";
+/// The remote's refs as last fetched, this Machine's own among them.
+const SEEN: &str = "refs/loopflow/plan-seen/";
+/// The repository id every clone of the remote converges on.
+const REPOSITORY: &str = "repository";
+/// Records read from the store at a time while a commit is built.
+const PAGE: usize = 1 << 20;
+
+/// The remote a repository's plan travels by: `origin`, else its only other
+/// one in name order. `None` for a repository with no remote.
+pub fn remote(repo: &Path) -> Option<String> {
+    let remotes = crate::git::git_stdout(repo, &["remote"]).ok()?;
+    let mut remotes: Vec<&str> = remotes.lines().filter(|name| !name.is_empty()).collect();
+    remotes.sort_unstable();
+    remotes
+        .iter()
+        .find(|name| **name == "origin")
+        .or(remotes.first())
+        .map(|name| (*name).to_owned())
+}
+
+/// One Git exchange for `repo`, when it has no Linear or Asana.
+pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
+    if crate::ops::tracker::connected(repo) {
+        return Ok(());
+    }
+    let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
+}
+
+/// One Git exchange for every repository this Machine plans without Linear
+/// or Asana. The Machine server runs this on its timer.
+pub fn exchange_all(store: &SqliteStore) -> Result<()> {
+    for path in store.repository_paths()? {
+        let repo = path.to_string_lossy();
+        if !path.is_dir() || crate::ops::tracker::connected(&repo) {
+            continue;
+        }
+        if let Err(error) = exchange(store, &repo) {
+            tracing::debug!(%repo, error = %format!("{error:#}"), "Git plan exchange failed");
+        }
+    }
+    Ok(())
+}
+
+/// Fetch every Machine's plan ref, take in what changed in the others', then
+/// commit the records changed here onto this Machine's ref and push it. The
+/// outcome is recorded for `lf repo tracker`. A repository with no remote
+/// does nothing.
+pub fn exchange(store: &SqliteStore, repo: &str) -> Result<()> {
+    let path = Path::new(repo);
+    let Some(remote) = remote(path) else {
+        return Ok(());
+    };
+    // A clone that has saved nothing still reads the plan its remote carries.
+    let repository = crate::repository::location::ensure_repository(store, repo)?;
+    // One Git exchange per repository at a time; the next reads what this one wrote.
+    let _turn = super::plan_hub::lock(store, "plan-git", &repository)?;
+    let sent_seq = store.select_carrier(repo, Carrier::Git, &remote)?.sent_seq;
+    let result = exchange_with(store, repo, &remote, repository, sent_seq);
+    let error = result.as_ref().err().map(|error| format!("{error:#}"));
+    store.record_carrier_exchange(repo, Carrier::Git, error.as_deref())?;
+    result
+}
+
+fn exchange_with(
+    store: &SqliteStore,
+    repo: &str,
+    remote: &str,
+    mut repository: RepositoryId,
+    sent_seq: i64,
+) -> Result<()> {
+    let path = Path::new(repo);
+    git(
+        path,
+        &[
+            "fetch",
+            "--quiet",
+            "--no-tags",
+            "--prune",
+            "--no-write-fetch-head",
+            "--no-recurse-submodules",
+            remote,
+            &format!("+{OWN}*:{SEEN}*"),
+        ],
+        None,
+    )?;
+    let me = crate::store::machines::local_machine(store)?.id;
+    let seen = seen_refs(path)?;
+    let mine = seen.get(me.as_str());
+
+    // A ref that cannot be read does not stop the others or this Machine's push.
+    let mut failed = None;
+    let taken = store.plan_ref_tips(repo)?;
+    let names = super::plan_hub::machine_names(store)?;
+    let mut lowest = repository.clone();
+    for (machine, tip) in &seen {
+        if machine == me.as_str() || taken.get(machine) == Some(tip) {
+            continue;
+        }
+        let read = (|| {
+            let base = taken
+                .get(machine)
+                .filter(|base| commit_exists(path, base))
+                .or(mine);
+            let (records, theirs) = changed_records(path, base.map(String::as_str), tip)?;
+            apply(store, repo, &records, &names)?;
+            store.record_plan_ref(repo, machine, tip)?;
+            Ok::<_, anyhow::Error>(theirs)
+        })();
+        match read {
+            Ok(Some(theirs)) if theirs.as_str() < lowest.as_str() => lowest = theirs,
+            Ok(_) => {}
+            Err(error) => {
+                failed.get_or_insert(error.context(format!("read the plan ref of {machine}")));
+            }
+        }
+    }
+    // Clones of one remote converge on the lowest id any of them was given.
+    if lowest != repository {
+        match crate::repository::location::bind_repository(store, repo, &lowest) {
+            Ok(()) => repository = lowest,
+            Err(error) => {
+                tracing::warn!(%repo, %error, "this clone keeps its own repository id")
+            }
+        }
+    }
+    publish(
+        store,
+        path,
+        remote,
+        me.as_str(),
+        &repository,
+        mine,
+        sent_seq,
+    )?;
+    failed.map_or(Ok(()), Err)
+}
+
+/// Each fetched plan ref's Machine and commit.
+fn seen_refs(repo: &Path) -> Result<HashMap<String, String>> {
+    let listed = git(
+        repo,
+        &["for-each-ref", "--format=%(refname) %(objectname)", SEEN],
+        None,
+    )?;
+    Ok(String::from_utf8_lossy(&listed)
+        .lines()
+        .filter_map(|line| line.strip_prefix(SEEN)?.split_once(' '))
+        .map(|(machine, tip)| (machine.to_owned(), tip.to_owned()))
+        .collect())
+}
+
+fn commit_exists(repo: &Path, commit: &str) -> bool {
+    git(
+        repo,
+        &["cat-file", "-e", &format!("{commit}^{{commit}}")],
+        None,
+    )
+    .is_ok()
+}
+
+/// The records whose files differ between `base` (nothing, when `None`) and
+/// `tip`, and the repository id `tip` names when that changed too.
+fn changed_records(
+    repo: &Path,
+    base: Option<&str>,
+    tip: &str,
+) -> Result<(Vec<StampedRecord>, Option<RepositoryId>)> {
+    let empty;
+    let base = match base {
+        Some(base) => base,
+        None => {
+            let hashed = git(repo, &["hash-object", "-t", "tree", "--stdin"], Some(b""))?;
+            empty = String::from_utf8_lossy(&hashed).trim().to_owned();
+            &empty
+        }
+    };
+    let diff = git(
+        repo,
+        &[
+            "diff-tree",
+            "-r",
+            "-z",
+            "--raw",
+            "--no-abbrev",
+            "--no-renames",
+            "--diff-filter=AM",
+            base,
+            tip,
+        ],
+        None,
+    )?;
+    // `:<mode> <mode> <old> <new> <status>\0<path>\0`, repeated.
+    let mut parts = diff.split(|byte| *byte == 0);
+    let mut files = Vec::new();
+    while let (Some(change), Some(file)) = (parts.next(), parts.next()) {
+        let change = String::from_utf8_lossy(change);
+        let Some(blob) = change.split(' ').nth(3) else {
+            continue;
+        };
+        files.push((blob.to_owned(), String::from_utf8_lossy(file).into_owned()));
+    }
+    let wanted = files
+        .iter()
+        .map(|(blob, _)| format!("{blob}\n"))
+        .collect::<String>();
+    let blobs = git(repo, &["cat-file", "--batch"], Some(wanted.as_bytes()))?;
+    let mut rest = blobs.as_slice();
+    let (mut records, mut repository) = (Vec::new(), None);
+    for (_, file) in &files {
+        let content = next_blob(&mut rest).context("read a plan ref's files")?;
+        if file == REPOSITORY {
+            repository = RepositoryId::parse(String::from_utf8_lossy(content).trim()).ok();
+        } else if let Some(record) = parse_record(file, content) {
+            records.push(record);
+        }
+    }
+    Ok((records, repository))
+}
+
+/// One `<object> <type> <size>\n<content>\n` of `git cat-file --batch`.
+fn next_blob<'a>(rest: &mut &'a [u8]) -> Result<&'a [u8]> {
+    let end = rest
+        .iter()
+        .position(|byte| *byte == b'\n')
+        .ok_or_else(|| anyhow!("Git answered fewer objects than asked for"))?;
+    let header = String::from_utf8_lossy(&rest[..end]).into_owned();
+    let size: usize = header
+        .rsplit(' ')
+        .next()
+        .and_then(|size| size.parse().ok())
+        .ok_or_else(|| anyhow!("Git could not read an object: {header}"))?;
+    let content = rest
+        .get(end + 1..end + 1 + size)
+        .ok_or_else(|| anyhow!("Git cut an object short"))?;
+    *rest = rest.get(end + 2 + size..).unwrap_or_default();
+    Ok(content)
+}
+
+/// A plan ref file as a record. A file that does not parse is skipped, and so
+/// is each field this build does not know; both are logged.
+fn parse_record(file: &str, content: &[u8]) -> Option<StampedRecord> {
+    #[derive(serde::Deserialize)]
+    struct File {
+        table: String,
+        id: String,
+        fields: Vec<serde_json::Value>,
+    }
+    let parsed: File = match serde_json::from_slice(content) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            tracing::warn!(%file, %error, "skipped a plan ref file that does not parse");
+            return None;
+        }
+    };
+    let fields = parsed
+        .fields
+        .into_iter()
+        .filter_map(
+            |field| match serde_json::from_value::<StampedValue>(field) {
+                Ok(field) => Some(field),
+                Err(error) => {
+                    tracing::warn!(%file, %error, "skipped a plan ref field this build does not know");
+                    None
+                }
+            },
+        )
+        .collect();
+    Some(StampedRecord {
+        table: parsed.table,
+        id: parsed.id,
+        fields,
+    })
+}
+
+/// Take in a ref's records together; when one of them cannot be written, one
+/// at a time, parents first, so the rest still arrive.
+fn apply(
+    store: &SqliteStore,
+    repo: &str,
+    records: &[StampedRecord],
+    names: &loopflow_storage::sqlite::plan_carriers::MachineNames,
+) -> Result<()> {
+    match store.apply_plan_records(repo, records, None, names) {
+        Err(StoreError::InvalidData(_) | StoreError::NotFound) => {}
+        applied => return Ok(applied?),
+    }
+    for table in ["waves", "projects", "tasks", "task_comments"] {
+        for record in records.iter().filter(|record| record.table == table) {
+            if let Err(error) =
+                store.apply_plan_records(repo, std::slice::from_ref(record), None, names)
+            {
+                tracing::warn!(id = %record.id, %error, "skipped a plan ref record that cannot be written");
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Where a record's file lives in a plan ref; `None` for an id that cannot
+/// name a file.
+fn record_path(record: &StampedRecord) -> Option<String> {
+    let id = &record.id;
+    if id.is_empty()
+        || !id
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+    {
+        return None;
+    }
+    // Ids are `<kind>_<hex>`: spread a directory by the first hex byte.
+    let unique = id.rsplit('_').next().unwrap_or(id);
+    let shard = unique.get(..2).unwrap_or("00");
+    Some(match record.table.as_str() {
+        "waves" => format!("waves/{id}.json"),
+        "projects" => format!("projects/{id}.json"),
+        "tasks" => format!("tasks/{shard}/{id}.json"),
+        "task_comments" => format!("comments/{shard}/{id}.json"),
+        _ => return None,
+    })
+}
+
+/// Commit every record changed here since `sent_seq` onto this Machine's ref
+/// as the remote holds it (`mine`), and push. A remote without this Machine's
+/// ref is given the whole plan. Nothing is forced: a push the remote refuses
+/// is the error.
+fn publish(
+    store: &SqliteStore,
+    repo: &Path,
+    remote: &str,
+    me: &str,
+    repository: &RepositoryId,
+    mine: Option<&String>,
+    sent_seq: i64,
+) -> Result<()> {
+    let key = repo.to_string_lossy();
+    let mut since = if mine.is_some() { sent_seq } else { 0 };
+    let mut files = Vec::new();
+    loop {
+        let page = store.plan_records_since(&key, since, PAGE)?;
+        for record in &page.records {
+            let Some(path) = record_path(record) else {
+                tracing::warn!(id = %record.id, "a record whose id cannot name a file stays out of the plan ref");
+                continue;
+            };
+            file(&mut files, &path, &serde_json::to_vec(record)?);
+        }
+        since = page.seq;
+        if !page.more {
+            break;
+        }
+    }
+    let named = mine.is_some_and(|mine| {
+        git(
+            repo,
+            &["cat-file", "-p", &format!("{mine}:{REPOSITORY}")],
+            None,
+        )
+        .is_ok_and(|held| String::from_utf8_lossy(&held).trim() == repository.as_str())
+    });
+    if files.is_empty() && (named || mine.is_none()) {
+        store.plan_sent(&key, Carrier::Git, since)?;
+        return Ok(());
+    }
+    let own = format!("{OWN}{me}");
+    let mut stream = format!(
+        "commit {own}\ncommitter {me} <loopflow@localhost> {} +0000\ndata 4\nplan\n",
+        time::OffsetDateTime::now_utc().unix_timestamp()
+    )
+    .into_bytes();
+    if let Some(mine) = mine {
+        stream.extend_from_slice(format!("from {mine}\n").as_bytes());
+    }
+    file(&mut stream, REPOSITORY, repository.as_str().as_bytes());
+    stream.extend_from_slice(&files);
+    // A commit left by a push that failed is replaced, never built on.
+    git(repo, &["fast-import", "--quiet", "--force"], Some(&stream))?;
+    let tree = |commit: &str| git(repo, &["rev-parse", &format!("{commit}^{{tree}}")], None);
+    if mine.is_none_or(|mine| tree(mine).ok() != tree(&own).ok()) {
+        git(
+            repo,
+            &[
+                "push",
+                "--quiet",
+                "--no-verify",
+                remote,
+                &format!("{own}:{own}"),
+            ],
+            None,
+        )?;
+        git(repo, &["update-ref", &format!("{SEEN}{me}"), &own], None)?;
+    }
+    store.plan_sent(&key, Carrier::Git, since)?;
+    Ok(())
+}
+
+/// One file of a `git fast-import` commit.
+fn file(stream: &mut Vec<u8>, path: &str, content: &[u8]) {
+    stream
+        .extend_from_slice(format!("M 100644 inline {path}\ndata {}\n", content.len()).as_bytes());
+    stream.extend_from_slice(content);
+    stream.push(b'\n');
+}
+
+/// Run Git in `repo` with no terminal to ask on, giving it `input`. A failure
+/// is Git's own reason.
+fn git(repo: &Path, args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    let mut child = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(args)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .stdin(if input.is_some() {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("start git")?;
+    let stdin = child.stdin.take();
+    let output = std::thread::scope(|scope| {
+        if let (Some(mut stdin), Some(input)) = (stdin, input) {
+            // Git may answer before it has read everything it is given.
+            scope.spawn(move || {
+                let _ = stdin.write_all(input);
+            });
+        }
+        child.wait_with_output()
+    })?;
+    if output.status.success() {
+        return Ok(output.stdout);
+    }
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let reason = stderr
+        .lines()
+        .find(|line| line.starts_with("fatal:") || line.starts_with("error:"))
+        .or_else(|| stderr.lines().rfind(|line| !line.trim().is_empty()));
+    match reason {
+        Some(reason) => bail!("{}", reason.trim()),
+        None => bail!("git {} failed with {}", args[0], output.status),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{exchange, remote};
+    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    use loopflow_storage::sqlite::SqliteStore;
+    use loopflow_storage::work::task::{NewTask, TaskUpdate};
+    use loopflow_test_support::TestRepo;
+    use std::path::{Path, PathBuf};
+
+    fn git(dir: &Path, args: &[&str]) -> String {
+        let output = std::process::Command::new("git")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    /// A Machine: its own store and its own clone of `origin`.
+    struct Machine {
+        store: SqliteStore,
+        repo: String,
+    }
+
+    impl Machine {
+        fn new(root: &Path, name: &str, origin: &Path) -> Self {
+            let clone = root.join(name).join("clone");
+            std::fs::create_dir_all(clone.parent().unwrap()).unwrap();
+            git(
+                root,
+                &[
+                    "clone",
+                    "-q",
+                    origin.to_str().unwrap(),
+                    clone.to_str().unwrap(),
+                ],
+            );
+            Self::at(root, name, clone)
+        }
+
+        fn at(root: &Path, name: &str, clone: PathBuf) -> Self {
+            let store = crate::store::opening::open_ephemeral(&root.join(name).join("loopflow.db"))
+                .unwrap();
+            Self {
+                store,
+                repo: clone.canonicalize().unwrap().to_str().unwrap().to_owned(),
+            }
+        }
+
+        fn task(&self, title: &str) -> loopflow_model::durable::TaskId {
+            let project =
+                crate::work::wave::bootstrap::ensure_wave_project(&self.store, &self.repo, "plan")
+                    .unwrap();
+            self.store
+                .create_task(&NewTask {
+                    repository_id: crate::repository::location::ensure_repository(
+                        &self.store,
+                        &self.repo,
+                    )
+                    .unwrap(),
+                    id: loopflow_model::durable::TaskId::new(),
+                    project_id: Some(project.id),
+                    title: title.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id
+        }
+
+        fn retitle(&self, task: &loopflow_model::durable::TaskId, title: &str) {
+            let revision = self.store.task(task).unwrap().unwrap().revision;
+            self.store
+                .edit_task(
+                    task,
+                    revision,
+                    &TaskUpdate {
+                        title: Some(title.into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+
+        fn title(&self, task: &loopflow_model::durable::TaskId) -> Option<String> {
+            self.store.task(task).unwrap().map(|task| task.title)
+        }
+
+        fn exchange(&self) {
+            exchange(&self.store, &self.repo).unwrap();
+        }
+
+        fn unsent(&self) -> usize {
+            self.store
+                .plan_unsent(&self.repo, Carrier::Git, 0)
+                .unwrap()
+                .count
+        }
+
+        fn repository(&self) -> String {
+            self.store
+                .repository_id(&self.repo)
+                .unwrap()
+                .unwrap()
+                .to_string()
+        }
+    }
+
+    fn machines() -> (tempfile::TempDir, TestRepo, Machine, Machine) {
+        let root = tempfile::tempdir().unwrap();
+        let origin = TestRepo::new();
+        let laptop = Machine::new(root.path(), "laptop", origin.bare_path());
+        let mini = Machine::new(root.path(), "mini", origin.bare_path());
+        (root, origin, laptop, mini)
+    }
+
+    #[test]
+    fn a_task_made_on_one_clone_is_on_another_and_the_later_title_wins_on_both() {
+        let (_root, origin, laptop, mini) = machines();
+        let task = laptop.task("x");
+        assert!(laptop.unsent() > 0);
+        laptop.exchange();
+        assert_eq!(laptop.unsent(), 0);
+        // The plan stays out of what a person sees of the repository.
+        assert!(!git(origin.bare_path(), &["branch", "-a"]).contains("loopflow"));
+        assert!(!git(Path::new(&laptop.repo), &["branch", "-a"]).contains("loopflow"));
+
+        // mini was never told about the laptop: the remote is what they share.
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("x"));
+        // Every clone of the remote ends on one repository id.
+        laptop.exchange();
+        assert_eq!(laptop.repository(), mini.repository());
+        assert_eq!(laptop.title(&task).as_deref(), Some("x"));
+
+        mini.retitle(&task, "one");
+        laptop.retitle(&task, "two");
+        mini.exchange();
+        laptop.exchange();
+        mini.exchange();
+        assert_eq!(laptop.title(&task).as_deref(), Some("two"));
+        assert_eq!(mini.title(&task).as_deref(), Some("two"));
+
+        // Once both hold the same plan an exchange commits nothing more.
+        laptop.exchange();
+        let refs = || git(origin.bare_path(), &["for-each-ref", "refs/loopflow/plan"]);
+        let settled = refs();
+        assert_eq!(settled.lines().count(), 2, "{settled}");
+        mini.exchange();
+        laptop.exchange();
+        assert_eq!(refs(), settled);
+        assert_eq!((laptop.unsent(), mini.unsent()), (0, 0));
+    }
+
+    #[test]
+    fn an_unreachable_remote_keeps_the_change_unsent_with_gits_reason() {
+        let (_root, origin, laptop, mini) = machines();
+        laptop.task("first");
+        laptop.exchange();
+        let away = origin.bare_path().with_extension("away");
+        std::fs::rename(origin.bare_path(), &away).unwrap();
+        let task = laptop.task("made offline");
+        let error = exchange(&laptop.store, &laptop.repo).unwrap_err();
+        assert!(format!("{error:#}").starts_with("fatal:"), "{error:#}");
+        let held = laptop
+            .store
+            .plan_carrier(&laptop.repo, Carrier::Git)
+            .unwrap()
+            .unwrap();
+        assert_eq!(held.peer, "origin");
+        assert!(held.failing_since.is_some());
+        assert_eq!(held.error.as_deref(), Some(format!("{error:#}").as_str()));
+        assert_eq!(laptop.unsent(), 1);
+
+        std::fs::rename(&away, origin.bare_path()).unwrap();
+        laptop.exchange();
+        let held = laptop
+            .store
+            .plan_carrier(&laptop.repo, Carrier::Git)
+            .unwrap()
+            .unwrap();
+        assert_eq!((held.error, held.failing_since), (None, None));
+        assert_eq!(laptop.unsent(), 0);
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("made offline"));
+    }
+
+    #[test]
+    fn a_file_or_field_this_build_cannot_read_is_skipped_and_the_rest_arrives() {
+        let (root, origin, laptop, mini) = machines();
+        let task = laptop.task("readable");
+        laptop.exchange();
+        // Another Machine's ref: the laptop's records, one with a field from a
+        // later build, beside a file that is not a record.
+        let me = git(
+            origin.bare_path(),
+            &["for-each-ref", "--format=%(refname)", "refs/loopflow/plan"],
+        );
+        let scratch = root.path().join("scratch");
+        git(
+            root.path(),
+            &[
+                "clone",
+                "-q",
+                origin.bare_path().to_str().unwrap(),
+                scratch.to_str().unwrap(),
+            ],
+        );
+        git(&scratch, &["fetch", "-q", "origin", me.trim()]);
+        git(&scratch, &["checkout", "-q", "FETCH_HEAD"]);
+        let file = scratch
+            .join("tasks")
+            .join(&task.as_str()["task_".len()..][..2])
+            .join(format!("{task}.json"));
+        let mut record: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        for field in record["fields"].as_array_mut().unwrap() {
+            if field["field"] == "task_title" {
+                field["value"] = "from a later build".into();
+                field["at"] = serde_json::json!(field["at"].as_i64().unwrap() + 1);
+            }
+        }
+        record["fields"].as_array_mut().unwrap().push(
+            serde_json::json!({"field":"task_mood","value":"sunny","at":1,"machine":"home_later"}),
+        );
+        std::fs::write(&file, serde_json::to_vec(&record).unwrap()).unwrap();
+        std::fs::write(scratch.join("waves/notes.json"), "not a record").unwrap();
+        git(&scratch, &["add", "-A"]);
+        git(
+            &scratch,
+            &[
+                "-c",
+                "user.name=later",
+                "-c",
+                "user.email=later@localhost",
+                "commit",
+                "-qm",
+                "plan",
+            ],
+        );
+        git(
+            &scratch,
+            &["push", "-q", "origin", "HEAD:refs/loopflow/plan/home_later"],
+        );
+
+        mini.exchange();
+        assert_eq!(mini.title(&task).as_deref(), Some("from a later build"));
+    }
+
+    #[test]
+    fn a_repository_with_no_remote_writes_no_ref() {
+        let root = tempfile::tempdir().unwrap();
+        let clone = root.path().join("alone");
+        std::fs::create_dir_all(&clone).unwrap();
+        git(&clone, &["init", "-q"]);
+        let alone = Machine::at(root.path(), "store", clone);
+        alone.task("here");
+        assert_eq!(remote(Path::new(&alone.repo)), None);
+        alone.exchange();
+        assert_eq!(git(Path::new(&alone.repo), &["for-each-ref"]), "");
+        assert!(alone
+            .store
+            .plan_carrier(&alone.repo, Carrier::Git)
+            .unwrap()
+            .is_none());
+    }
+}

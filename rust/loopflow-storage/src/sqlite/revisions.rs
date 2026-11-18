@@ -154,6 +154,8 @@ mod tests {
         "planning_peer_routes",
         // A field's stamp decides which value is kept; views read the value.
         "plan_stamps",
+        // Which commit of another Machine's plan ref was read; views read the plan.
+        "plan_refs",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",

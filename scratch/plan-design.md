@@ -158,6 +158,17 @@ carry sources there and are not all re-checked):
   existing Project asks about neither. The research missed Asana Teams: they
   hold Projects, never tasks, and are not behind the paid tier (from general
   knowledge, not re-checked).
+- **A Task with no Wave is an issue with no Project.** Jack Heart: "sounds
+  good." Created in Loopflow: Linear puts it in the repository's default
+  Team with no Project; Asana gives it no Project, so it sits in the person's
+  My Tasks and the shadow repository project goes. Assigned to you from
+  outside: it goes to the repository when exactly one of your repositories
+  could own it (Linear: one repository names that Team as its default; Asana:
+  one repository uses that workspace), and otherwise shows under
+  `lf task list --available` until `lf task claim` from the repository you
+  want. Jack Heart: "how about if it is in the team that is the default team
+  for a repo, it goes into that repo...though i guess that becomes a problem
+  if two repos have the same team".
 - Four things on `main` disturb a shared workspace and block "your slice":
   the repository marker written into a Linear Team's description; refusing
   Projects with several Teams or not exactly one Initiative; ingesting every

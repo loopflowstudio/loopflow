@@ -72,6 +72,16 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 CREATE TRIGGER store_revision_plan_carriers_delete AFTER DELETE ON plan_carriers
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
+-- `plan_refs`: the last commit of each other Machine's plan ref
+-- (`refs/loopflow/plan/<machine id>`) this store has taken in, so the next
+-- fetch reads only the files that changed. Kept per store, not per clone.
+CREATE TABLE plan_refs (
+    repo TEXT NOT NULL,
+    machine_id TEXT NOT NULL,
+    tip TEXT NOT NULL,
+    PRIMARY KEY(repo,machine_id)
+) WITHOUT ROWID;
+
 -- The Git planning ref, its peer journal and destinations are gone; released
 -- lf still writes them until the staging window passes.
 -- leaving: git_tracker_changes LOO-938

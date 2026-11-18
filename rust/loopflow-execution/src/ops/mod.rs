@@ -13,6 +13,7 @@ pub mod land;
 pub mod linear;
 pub mod metrics;
 pub mod people;
+pub mod plan_git;
 pub mod plan_hub;
 pub mod planning_sync;
 mod pr;

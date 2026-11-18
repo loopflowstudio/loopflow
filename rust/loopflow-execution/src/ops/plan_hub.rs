@@ -69,12 +69,12 @@ pub async fn sync(store: &crate::store::Store, repo: &str, send_only: bool) -> R
 }
 
 /// After a command on this Machine's server answers: one exchange for its
-/// repository, on a thread of its own. Commands arriving while one runs, or
-/// within [`QUIET`] of the last, share it.
+/// repository by each carrier it has, on a thread of its own. Commands
+/// arriving while one runs, or within [`QUIET`] of the last, share it.
 pub fn after_command(directory: std::path::PathBuf) {
     std::thread::spawn(move || {
         if let Err(error) = exchange_after_command(&directory) {
-            tracing::debug!(error = %format!("{error:#}"), "hub exchange after a command failed");
+            tracing::debug!(error = %format!("{error:#}"), "plan exchange after a command failed");
         }
     });
 }
@@ -91,13 +91,6 @@ struct Turn {
 static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
 
 fn exchange_after_command(directory: &Path) -> Result<()> {
-    // Most Machines have no hub: answer that before any Git or SQLite.
-    if crate::config::placement::global_settings_at(&crate::store::lf_home_dir())?
-        .hub
-        .is_none()
-    {
-        return Ok(());
-    }
     let repo = crate::repository::discover(directory)?.to_string();
     if crate::ops::tracker::connected(&repo) {
         return Ok(());
@@ -107,11 +100,12 @@ fn exchange_after_command(directory: &Path) -> Result<()> {
         return Ok(());
     }
     let store = crate::store::open_sqlite(&path)?;
-    let Some(hub) = hub(&store)? else {
+    let hub = hub(&store)?;
+    if hub.is_none() && super::plan_git::remote(Path::new(&repo)).is_none() {
         return Ok(());
-    };
+    }
     {
-        let mut turns = TURNS.lock().expect("hub turns are never poisoned");
+        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
         let turn = turns.entry(repo.clone()).or_default();
         if turn.running {
             turn.again = true;
@@ -123,8 +117,13 @@ fn exchange_after_command(directory: &Path) -> Result<()> {
         turn.running = true;
     }
     loop {
-        let result = exchange(&store, &repo, &hub, false);
-        let mut turns = TURNS.lock().expect("hub turns are never poisoned");
+        // The hub first: it answers in less time than a fetch, and what it
+        // gives goes out by Git in the same turn.
+        let by_hub = hub
+            .as_ref()
+            .map_or(Ok(()), |hub| exchange(&store, &repo, hub, false));
+        let result = super::plan_git::exchange(&store, &repo).and(by_hub);
+        let mut turns = TURNS.lock().expect("plan turns are never poisoned");
         let turn = turns.entry(repo.clone()).or_default();
         if std::mem::take(&mut turn.again) && result.is_ok() {
             continue;
@@ -144,7 +143,7 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
         return Ok(());
     };
     // One exchange per repository at a time; the next one reads what this one wrote.
-    let _turn = lock(store, &repository)?;
+    let _turn = lock(store, "plan-hub", &repository)?;
     let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
     if send_only && held.seen_seq.is_some() && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
     {
@@ -182,10 +181,16 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
     result
 }
 
-fn lock(store: &SqliteStore, repository: &RepositoryId) -> Result<std::fs::File> {
+/// One exchange per carrier and repository at a time, across processes.
+pub(super) fn lock(
+    store: &SqliteStore,
+    carrier: &str,
+    repository: &RepositoryId,
+) -> Result<std::fs::File> {
     let path = store
         .home_dir()?
-        .join("locks/plan-hub")
+        .join("locks")
+        .join(carrier)
         .join(format!("{repository}.lock"));
     std::fs::create_dir_all(path.parent().expect("a lock path has a parent"))?;
     let file = std::fs::OpenOptions::new()
@@ -294,7 +299,7 @@ pub fn changes_here(
 
 /// The person's names for their Machines, for the steers an arriving
 /// ownership entry writes.
-fn machine_names(
+pub(super) fn machine_names(
     store: &SqliteStore,
 ) -> Result<loopflow_storage::sqlite::plan_carriers::MachineNames> {
     let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;

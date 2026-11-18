@@ -190,9 +190,7 @@ and leaves Git unsent until the server or `lf task sync`. *Made for review:*
   `docs/dev/reference.md` ("Shared plan" row), `docs/dev/data.md`,
   `rust/loopflow/src/server/README.md`. Implement reads them as the spec for
   wording: `Plan: Git origin, 1 unsent.`, `Hub mini.`, records listed by
-  identifier, Git's own reason on the error line. Still naming the old test
-  (`…shows_the_change_sent_last…`): `rust/loopflow/tests/README.md`,
-  `scripts/testing.md`; rename with the test. Code links in the reference
+  identifier, Git's own reason on the error line. Code links in the reference
   row (`HubPlan`) follow the types.
 
   Assumed by the docs, to undo there if the build decides otherwise:
@@ -293,9 +291,7 @@ etude checkout and `lf` version are unknown.
 - "The change sent last wins" for the hub: gone from code and docs. The
   phrase stays where it describes Linear/Asana (`planning/rules.rs`,
   `docs/dev/reference.md` "Linear events", `docs/dev/delivery.md`), which
-  this Task leaves alone. The old test name is still in
-  `rust/loopflow/tests/README.md` and `scripts/testing.md` if slice 1 did
-  not rename it there; check when slice 2 extends that test.
+  this Task leaves alone.
 - Already deleted on this branch and staying deleted: the journal, field
   causality, destinations, `PlanningSync`, `lf repo tracker key` / `journal`,
   the `two-people` World. The Git carrier is new code in a new module; nothing

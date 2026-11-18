@@ -13,11 +13,12 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 15] = [
+const GROWING: [&str; 16] = [
     "agent_sessions",
     "git_tracker_changes",
     "git_tracker_routes",
     "processes",
+    "session_activity",
     "session_events",
     "steer_delivered",
     "steers",
@@ -50,12 +51,14 @@ const GROWING: [&str; 15] = [
 /// reference on November 16's store. `session_capture_turn` is estimated from
 /// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
 /// inputs with an ended turn, rarely two per Session thread.
+/// `session_activity` counts November 18's 20,732 readings, one per Session
+/// of 22,643, on a store where 37 agents had not ended.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
          'git_tracker_changes','git_tracker_routes','repository_plans','steers',
          'task_retirements','task_checkouts','task_ship_events',
-         'task_ownership','task_update_readings');
+         'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_attached','117 1'),
@@ -98,6 +101,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('projects','sqlite_autoindex_projects_2','63 2'),
          ('repository_plans','repository_selected_plan','53 1'),
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
+         ('session_activity','sqlite_autoindex_session_activity_1','20732 1'),
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
          ('session_events','session_capture_provider_thread','21078 1'),

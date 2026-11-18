@@ -55,20 +55,22 @@ pub fn retain() {
     }
 }
 
-/// Names the Session the recovery pass is starting, in the environment of the
-/// `lf session resume` it runs. Any other start of a Session is a person's.
-pub const RECOVERING_ENV: &str = "LF_RECOVERING_SESSION";
+/// How the recovery pass names each start it makes:
+/// `recover:<session>:<ended agent>:<attempt>`. The held terminal's
+/// `lf session resume` carries it as `--request-id`.
+pub const RECOVER_REQUEST: &str = "recover:";
 
 /// A person started `session` at `at` (`lf resume`, Desktop, the phone),
-/// unless this process is the pass's own start of it: the pass's count of
+/// unless `request` is the pass's own start of it: the pass's count of
 /// starts after a death begins again, an earlier start's failure is
 /// forgotten, and the pass holds off while the person's start comes up.
 pub fn record_start(
     store: &SqliteStore,
     session: &LfSessionId,
+    request: Option<&str>,
     at: i64,
 ) -> crate::store::StoreResult<()> {
-    if std::env::var(RECOVERING_ENV).is_ok_and(|recovering| *session == recovering) {
+    if request.is_some_and(|request| request.starts_with(RECOVER_REQUEST)) {
         return Ok(());
     }
     store.record_persons_start(session, at)

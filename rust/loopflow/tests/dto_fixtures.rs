@@ -351,23 +351,23 @@ fn task_detail_says_each_fact_once() {
         .unwrap();
     let next = time::OffsetDateTime::parse(
         conversation
-            .start
+            .outlook
             .as_ref()
             .unwrap()
-            .next_at
+            .at
             .as_deref()
             .unwrap(),
         &time::format_description::well_known::Rfc3339,
     )
     .unwrap()
     .unix_timestamp();
-    let line = conversation.conversation_line("LOO-2", next, true);
+    let line = conversation.conversation_line("LOO-2", next);
     assert!(
         line.starts_with("died ") && line.ends_with("(exit 137) · starting again"),
         "{line}"
     );
     assert!(conversation
-        .conversation_line("LOO-2", next - 1, true)
+        .conversation_line("LOO-2", next - 1)
         .contains("· starts again "));
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),

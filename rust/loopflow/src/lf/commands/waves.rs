@@ -1288,9 +1288,7 @@ pub fn task_conversation_line(
     let Some(facts) = task_conversation(&std::sync::Arc::new(store), task)? else {
         return Ok(None);
     };
-    let server_runs = crate::server::socket_path()
-        .is_ok_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok());
-    Ok(Some(facts.conversation_line(identifier, now, server_runs)))
+    Ok(Some(facts.conversation_line(identifier, now)))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than

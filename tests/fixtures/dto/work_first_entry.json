@@ -56,7 +56,8 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   },
   "reopened": {
     "action": {
@@ -106,7 +107,8 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   },
   "roadmap": {
     "generated_at": "2026-10-11T22:28:09.267041Z",
@@ -325,7 +327,8 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "start": null
+      "start": null,
+      "outlook": null
     },
     {
       "action": {
@@ -380,7 +383,8 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "start": null
+      "start": null,
+      "outlook": null
     },
     {
       "action": {
@@ -429,7 +433,8 @@
       "turn": null,
       "raw": false,
       "ended": null,
-      "start": null
+      "start": null,
+      "outlook": null
     }
   ],
   "task_primary": {
@@ -485,6 +490,7 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   }
 }

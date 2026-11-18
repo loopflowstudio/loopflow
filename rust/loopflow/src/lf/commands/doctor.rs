@@ -117,24 +117,17 @@ const PTYS: &str = "ptys";
 /// PTYs in use against the Machine's limit. Each Task conversation's held
 /// terminal takes one, as does every terminal tab; they run out first.
 fn check_ptys() -> Check {
-    match pty_usage() {
+    match loopflow_execution::transport::pty_usage() {
         Some(usage) => pty_check(usage),
         None => Check::warn(PTYS, "cannot read this Machine's PTY limit"),
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PtyUsage {
-    in_use: u64,
-    max: u64,
-    /// The setting that holds `max`.
-    limit: &'static str,
-}
-
 /// Fewer PTYs left than this warns: a reboot starts every Task conversation again.
 const PTY_HEADROOM: u64 = 32;
 
-fn pty_check(usage: PtyUsage) -> Check {
+fn pty_check(usage: loopflow_execution::transport::PtyUsage) -> Check {
+    use loopflow_execution::transport::PtyUsage;
     let PtyUsage { in_use, max, limit } = usage;
     let left = max.saturating_sub(in_use);
     let detail = format!(
@@ -148,44 +141,6 @@ fn pty_check(usage: PtyUsage) -> Check {
     } else {
         Check::ok(PTYS, detail)
     }
-}
-
-#[cfg(target_os = "macos")]
-fn pty_usage() -> Option<PtyUsage> {
-    let output = std::process::Command::new("/usr/sbin/sysctl")
-        .args(["-n", "kern.tty.ptmx_max"])
-        .output()
-        .ok()?;
-    let max = String::from_utf8_lossy(&output.stdout)
-        .trim()
-        .parse()
-        .ok()?;
-    // devfs lists a `ttysNNN` node for each PTY while it is allocated.
-    let in_use = std::fs::read_dir("/dev")
-        .ok()?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry.file_name().to_str().is_some_and(|name| {
-                name.strip_prefix("ttys")
-                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
-            })
-        })
-        .count() as u64;
-    Some(PtyUsage {
-        in_use,
-        max,
-        limit: "kern.tty.ptmx_max",
-    })
-}
-
-#[cfg(not(target_os = "macos"))]
-fn pty_usage() -> Option<PtyUsage> {
-    let read = |path: &str| std::fs::read_to_string(path).ok()?.trim().parse().ok();
-    Some(PtyUsage {
-        in_use: read("/proc/sys/kernel/pty/nr")?,
-        max: read("/proc/sys/kernel/pty/max")?,
-        limit: "kernel.pty.max",
-    })
 }
 
 const STRAYS: &str = "strays";
@@ -655,8 +610,9 @@ fn print_checks(store: &StoreReport, checks: &[Check]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{check_contention, inspect_store, pty_check, strays, PtyUsage, Status};
+    use super::{check_contention, inspect_store, pty_check, strays, Status};
     use loopflow_execution::process::OsProcess;
+    use loopflow_execution::transport::PtyUsage;
 
     const STRAY_CHILD: &str = "LOOPFLOW_DOCTOR_STRAY_CHILD";
 

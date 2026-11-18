@@ -136,12 +136,15 @@ impl Watcher {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
-            let mut start = super::service::continuing(conversation.session.clone(), request, 0, 0)
-                .map_err(|error| anyhow::anyhow!("{}", error.message))?;
-            start.env.push((
-                loopflow_execution::ops::recovery::RECOVERING_ENV.into(),
-                conversation.session.to_string(),
-            ));
+            let mut start =
+                super::service::continuing(conversation.session.clone(), request.clone(), 0, 0)
+                    .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            // The resume reads who started it from its request, not from an
+            // environment the agent's own shells would inherit.
+            let target = start.argv.len() - 2;
+            start
+                .argv
+                .splice(target..target, ["--request-id".to_string(), request]);
             terminals.start(start)?;
             pace(store, conversation);
             Ok(())
@@ -224,7 +227,10 @@ fn recover_conversations(
             None => conversation.starts_since_turn + 1,
         };
         let generation = agent.as_ref().map_or("new", |agent| agent.as_str());
-        let request = format!("recover:{session}:{generation}:{attempt}");
+        let request = format!(
+            "{}{session}:{generation}:{attempt}",
+            loopflow_execution::ops::recovery::RECOVER_REQUEST
+        );
         match start(&conversation, request) {
             Ok(()) => {
                 store.record_start_failure(session, None)?;
@@ -547,22 +553,26 @@ mod tests {
             )
             .unwrap();
         }
-        // `lf resume` by a person; the pass's own resume names its Session.
-        let _env = loopflow_test_support::env_lock().lock().unwrap();
-        std::env::set_var(
-            loopflow_execution::ops::recovery::RECOVERING_ENV,
-            fixture.session.as_str(),
-        );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
-            .unwrap();
-        std::env::remove_var(loopflow_execution::ops::recovery::RECOVERING_ENV);
+        // `lf resume` by a person; the pass's own resume carries its request.
+        let record = |request: Option<&str>| {
+            loopflow_execution::ops::recovery::record_start(
+                &fixture.store,
+                &fixture.session,
+                request,
+                NOW,
+            )
+            .unwrap()
+        };
+        record(Some(&format!(
+            "recover:{}:{}:4",
+            fixture.session, fixture.agent
+        )));
         assert_eq!(
             fixture.attempts().0,
             4,
             "the pass's start is not a person's"
         );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
-            .unwrap();
+        record(None);
         assert_eq!(fixture.failure(), None);
         // While the person's start comes up, the pass does not race it.
         assert!(fixture.pass(NOW + 1, false).is_empty());

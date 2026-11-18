@@ -324,6 +324,7 @@
     "turn": null,
     "raw": false,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   }
 }

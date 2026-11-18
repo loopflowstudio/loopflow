@@ -35,10 +35,13 @@
       },
       "start": {
         "attempts": 1,
-        "last_started_at": "2026-11-17T12:01:02Z",
-        "next_at": "2026-11-17T12:02:02Z",
-        "gave_up": false,
-        "failure": null
+        "last_started_at": "2026-11-17T12:01:02Z"
+      },
+      "outlook": {
+        "kind": "coming_back",
+        "at": "2026-11-17T12:02:02Z",
+        "reason": null,
+        "command": null
       }
     },
     {
@@ -51,7 +54,8 @@
       "cwd": "/src/loopflow.loo-2",
       "agent_process_id": null,
       "ended": null,
-      "start": null
+      "start": null,
+      "outlook": null
     }
   ],
   "conversation": "session_5e55105e000040008000000000000002",

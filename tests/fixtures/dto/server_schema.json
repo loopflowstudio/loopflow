@@ -9908,6 +9908,66 @@
       ],
       "type": "string"
     },
+    "SessionOutlook": {
+      "description": "Whether a conversation that is down comes back, and what brings it back.\nEvery client prints this; none works it out from `ended` and `start`.",
+      "properties": {
+        "at": {
+          "description": "RFC 3339: when the server starts it next; a time already past is a\nstart under way. `null` when the server will not start it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "command": {
+          "description": "The command that opens it; `null` while the server brings it back.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/SessionOutlookKind"
+        },
+        "reason": {
+          "description": "Ready to print. Why it could not start; for one coming back, that its\nlast start failed and why; for one waiting, why the server leaves it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "at",
+        "reason",
+        "command"
+      ],
+      "type": "object"
+    },
+    "SessionOutlookKind": {
+      "oneOf": [
+        {
+          "const": "coming_back",
+          "description": "It died and the server here starts it again, at `at`.",
+          "type": "string"
+        },
+        {
+          "const": "waiting_for_you",
+          "description": "It died and only its command brings it back: it is not a Task's\nconversation, or the server here does not or no longer starts it.",
+          "type": "string"
+        },
+        {
+          "const": "quit",
+          "description": "The person quit it. It stays quit.",
+          "type": "string"
+        },
+        {
+          "const": "could_not_start",
+          "description": "No agent has run yet: its start failed, for `reason`. The server\ntries again at `at`, or left it to `command`.",
+          "type": "string"
+        }
+      ]
+    },
     "SessionPage": {
       "properties": {
         "entries": {
@@ -10039,6 +10099,17 @@
           },
           "type": "array"
         },
+        "outlook": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionOutlook"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What happens next to a conversation that is down, as this Machine\nreads it; `null` while it runs, and when nothing says why it is down."
+        },
         "preview": {
           "anyOf": [
             {
@@ -10085,7 +10156,7 @@
               "type": "null"
             }
           ],
-          "description": "The server's starts of a Task's conversation since it last finished a\nturn: after it died, or a first start that failed; `null` when nothing\nwas or will be started."
+          "description": "The server's starts of a Task's conversation since it last finished a\nturn; `null` when it made none, and once the person quit."
         },
         "state": {
           "$ref": "#/$defs/SessionState"
@@ -10200,7 +10271,8 @@
         "turn",
         "raw",
         "ended",
-        "start"
+        "start",
+        "outlook"
       ],
       "type": "object"
     },
@@ -10218,7 +10290,7 @@
       "type": "object"
     },
     "SessionStarts": {
-      "description": "What the server's recovery pass did and will do for a Task conversation.",
+      "description": "What the server's recovery pass did for a Task conversation.",
       "properties": {
         "attempts": {
           "description": "Starts since it last finished a turn.",
@@ -10226,26 +10298,8 @@
           "minimum": 0,
           "type": "integer"
         },
-        "failure": {
-          "description": "Why the last start failed; `null` once one succeeded.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "gave_up": {
-          "description": "The pass made its last start; `lf resume --task <ID>` continues it.",
-          "type": "boolean"
-        },
         "last_started_at": {
-          "description": "RFC 3339: the pass's last start; `null` before its first.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "next_at": {
-          "description": "RFC 3339: when the next start is due, while it is down and the pass\nhas starts left; `null` otherwise.",
+          "description": "RFC 3339: the pass's last start.",
           "type": [
             "string",
             "null"
@@ -10254,10 +10308,7 @@
       },
       "required": [
         "attempts",
-        "last_started_at",
-        "next_at",
-        "gave_up",
-        "failure"
+        "last_started_at"
       ],
       "type": "object"
     },
@@ -16254,6 +16305,7 @@
               "resume",
               "task_00000000000000000000000000000001:task-design:review_kickoff:0"
             ],
+            "outlook": null,
             "preview": null,
             "primary_scope": null,
             "program_status": null,

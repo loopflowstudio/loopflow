@@ -350,18 +350,35 @@ lf task status LOO-12
 # Run died 5 times at implement; `lf task run LOO-12` starts it again
 ```
 
-Only a running server starts anything. With none, the line says so:
-`died 12:01 (exit 137) · starts again when the server runs`.
+The line promises a start only when this Machine will make one. With no
+server running, or with the Task checked out or claimed on another Machine,
+it says so and gives the command instead:
+
+```bash
+lf task status LOO-12
+# Conversation: died 12:01 (exit 137) · no server runs here to start it; `lf resume --task LOO-12` opens it
+```
 
 A crash can take the provider's transcript with it, as when the provider was
 killed before saving its first turn. Then the conversation starts again on a
 fresh thread with its original request, whether the server starts it or you
 do with `lf resume`, and the old thread stays in `lf session history`.
 
-A start that cannot happen says why instead of retrying silently, for
-example `last start failed: claude is not installed on this Machine's PATH`.
+A start that cannot happen says why instead of retrying silently. A work
+session that has never run reads as that, not as a death:
+
+```bash
+lf task status LOO-12
+# Conversation: could not start: claude is not installed on this Machine's PATH · tries again 12:02
+# Conversation: died 12:01 (exit 137) · starts again 12:02 · last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)
+```
+
 `lf machine doctor` reports how many PTYs are left: each work session's
 holder takes one, and the Machine runs out of them first.
+
+`lf session list --json` and `lf task status --json` carry the same answer as
+the Session's `outlook`: `coming_back`, `waiting_for_you`, `quit` or
+`could_not_start`, with when, why and the command. Desktop prints it too.
 
 | After a kill or reboot… | |
 |---|---|

@@ -1305,6 +1305,19 @@ fn next_task_conversation_agent(
     }
 }
 
+/// The `lf holder run` that `pid`, a provider in a held terminal, runs under.
+fn holder_of(mut pid: i64) -> i64 {
+    loop {
+        let line =
+            succeed(Command::new("/bin/ps").args(["-o", "ppid=,command=", "-p", &pid.to_string()]));
+        let (parent, command) = line.trim().split_once(' ').unwrap();
+        if command.contains("holder run") {
+            return pid;
+        }
+        pid = parent.parse().unwrap();
+    }
+}
+
 #[test]
 fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     let repo = TestRepo::new();
@@ -1374,10 +1387,11 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     fs::create_dir_all(transcript.parent().unwrap()).unwrap();
     fs::write(&transcript, "{}\n").unwrap();
 
-    // Killed: it comes back on its thread, counted once, and the death is
-    // not a quit.
+    // Killed: it comes back on its thread, counted once. Coming back is what
+    // says the death was not read as a quit.
     succeed(Command::new("/bin/kill").args(["-9", &pid.to_string()]));
-    let (second, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&first));
+    let (second, provider, attempts) =
+        next_task_conversation_agent(&db, home.path(), id, Some(&first));
     assert_eq!(attempts, 1);
     assert_eq!(launches(2)[1..], [format!("--resume {thread}")]);
     let status = || -> serde_json::Value {
@@ -1402,16 +1416,11 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         "{conversation}"
     );
     assert_eq!(conversation["start"]["attempts"], 1, "{conversation}");
-    let exit: Option<i64> = rusqlite::Connection::open(&db)
-        .unwrap()
-        .query_row(
-            "SELECT l.exit_code FROM processes p JOIN processes l ON l.id=p.parent_lf_process_id
-             WHERE p.id=?1",
-            [&first],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert!(!matches!(exit, Some(0 | 130)), "{exit:?}");
+    assert_eq!(
+        conversation["outlook"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
 
     // A finished turn resets the count; then the server stops, the holder
     // dies with it, and the next server starts the conversation once. The
@@ -1425,14 +1434,7 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         )
         .unwrap();
     drop(running.take());
-    let holder: i64 = rusqlite::Connection::open(&db)
-        .unwrap()
-        .query_row(
-            r#"SELECT pid FROM processes WHERE command='["lf","holder","run"]' AND completed_at IS NULL"#,
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
+    let holder = holder_of(provider);
     succeed(Command::new("/bin/kill").args(["-9", &holder.to_string()]));
     running = Some(server());
     let (third, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&second));
@@ -1476,6 +1478,12 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     assert_eq!(conversation["ended"]["exit_code"], 0, "{conversation}");
     assert_eq!(
         conversation["start"],
+        serde_json::Value::Null,
+        "{conversation}"
+    );
+    assert_eq!(conversation["outlook"]["kind"], "quit", "{conversation}");
+    assert_eq!(
+        conversation["outlook"]["at"],
         serde_json::Value::Null,
         "{conversation}"
     );
@@ -1536,6 +1544,18 @@ fn a_task_conversation_whose_agent_is_not_installed_says_why_it_did_not_start() 
     };
     assert_eq!(failure, "claude is not installed on this Machine's PATH");
     assert_eq!(open_task_conversations(&db, id), 0);
+    // It never ran, so it reads as that, never as a death.
+    let status = succeed(
+        claude_launch(home.path(), "exit 0")
+            .current_dir(repo.path())
+            .args(["task", "status", id]),
+    );
+    assert!(
+        status.contains(
+            "Conversation: could not start: claude is not installed on this Machine's PATH"
+        ),
+        "{status}"
+    );
 }
 
 #[test]

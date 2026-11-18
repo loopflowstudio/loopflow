@@ -64,9 +64,10 @@ first reading after start is the restart and reboot case. Each reading:
    provider across server restarts. `lf task run`, `lf ship` and
    `lf task checkout` only prepare the Session; this pass starts it. That
    first start counts only if it fails, so the first death after it comes
-   back at once; its terminal holds later passes off. The pass's start runs
-   with `LF_RECOVERING_SESSION=<session>`; any other `lf session resume` of it
-   is a person's, and sets the count to zero and clears `start_failure`.
+   back at once; its terminal holds later passes off. The pass's
+   `lf session resume` carries that request as `--request-id`; a resume with
+   any other request, or none, is a person's, and sets the count to zero and
+   clears `start_failure`.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
    checkpoint. A carrier that exits on its own writes an outcome on its
@@ -87,8 +88,14 @@ start that fails records its reason on the Session
 (`agent_sessions.start_failure`, for example `claude is not installed on this
 Machine's PATH`), cleared by the next start that succeeds, and retries on the
 same backoff. A Session's `ended {at, by, exit_code}` and `start {attempts,
-last_started_at, next_at, gave_up, failure}` carry these facts to
-`lf session list`, `lf task status` and Desktop. Only a Task's work session is
+last_started_at}` carry these facts, and its `outlook {kind, at, reason,
+command}` says once what happens next: `coming_back`, `waiting_for_you`,
+`quit` or `could_not_start`. The Session read folds it
+(`ops::human_session::session_ending`) from the backoff, the give-up, whether
+the Task is checked out and claimed here and whether a server runs;
+`lf session list`, `lf task status` and Desktop print it and derive nothing.
+A holder that gets no PTY answers `no PTY left: N in use (<limit>)`, read the
+way `lf machine doctor`'s `ptys` check reads it. Only a Task's work session is
 started; a Wave's or repository's work session, a chat and a batch are
 reported, never started.
 

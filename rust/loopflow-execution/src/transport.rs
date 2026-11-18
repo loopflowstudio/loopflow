@@ -499,6 +499,68 @@ pub fn nonblocking(fd: RawFd) -> io::Result<()> {
     Ok(())
 }
 
+/// PTYs allocated on this Machine against its limit. Every held terminal
+/// takes one, as does every terminal tab; they run out before anything else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PtyUsage {
+    pub in_use: u64,
+    pub max: u64,
+    /// The setting that holds `max`.
+    pub limit: &'static str,
+}
+
+#[cfg(target_os = "macos")]
+pub fn pty_usage() -> Option<PtyUsage> {
+    let output = std::process::Command::new("/usr/sbin/sysctl")
+        .args(["-n", "kern.tty.ptmx_max"])
+        .output()
+        .ok()?;
+    let max = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse()
+        .ok()?;
+    // devfs lists a `ttysNNN` node for each PTY while it is allocated.
+    let in_use = std::fs::read_dir("/dev")
+        .ok()?
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_name().to_str().is_some_and(|name| {
+                name.strip_prefix("ttys")
+                    .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+            })
+        })
+        .count() as u64;
+    Some(PtyUsage {
+        in_use,
+        max,
+        limit: "kern.tty.ptmx_max",
+    })
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn pty_usage() -> Option<PtyUsage> {
+    let read = |path: &str| std::fs::read_to_string(path).ok()?.trim().parse().ok();
+    Some(PtyUsage {
+        in_use: read("/proc/sys/kernel/pty/nr")?,
+        max: read("/proc/sys/kernel/pty/max")?,
+        limit: "kernel.pty.max",
+    })
+}
+
+/// Why a held terminal got no PTY, as its conversation's start failure
+/// reads: the Machine has none left, or the OS error beside what is in use.
+pub(crate) fn pty_failure(error: &io::Error, usage: Option<PtyUsage>) -> String {
+    match usage {
+        Some(PtyUsage { in_use, max, limit }) if in_use >= max => {
+            format!("no PTY left: {in_use} in use ({limit})")
+        }
+        Some(PtyUsage { in_use, max, limit }) => {
+            format!("cannot open a PTY: {error} ({in_use} of {max} in use, {limit})")
+        }
+        None => format!("cannot open a PTY: {error}"),
+    }
+}
+
 pub(crate) fn terminal_pair() -> io::Result<(File, File)> {
     let mut master = -1;
     let mut slave = -1;
@@ -2529,6 +2591,29 @@ mod tests {
         RelayOutput, Sizing, Viewer, CONTROL_ENV, HELD_ENV, LIMIT, PARENT_ENV,
     };
     use loopflow_model::id::TerminalId;
+
+    /// A start that gets no PTY names the shortage, not the OS error alone.
+    #[test]
+    fn a_pty_failure_says_when_the_machine_has_none_left() {
+        let error = std::io::Error::from_raw_os_error(libc::EAGAIN);
+        let usage = |in_use| {
+            Some(super::PtyUsage {
+                in_use,
+                max: 511,
+                limit: "kern.tty.ptmx_max",
+            })
+        };
+        assert_eq!(
+            super::pty_failure(&error, usage(511)),
+            "no PTY left: 511 in use (kern.tty.ptmx_max)"
+        );
+        let other = super::pty_failure(&error, usage(144));
+        assert!(other.starts_with("cannot open a PTY: "), "{other}");
+        assert!(
+            other.ends_with("(144 of 511 in use, kern.tty.ptmx_max)"),
+            "{other}"
+        );
+    }
 
     #[test]
     fn a_catching_up_views_terminal_answers_never_reach_the_agent() {

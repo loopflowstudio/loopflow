@@ -68,7 +68,7 @@ prepares the conversation and the pass starts it. `kill -9` the provider (find
 it by `pgrep -f 'w/bin/claude --name <task>'`) and poll `lf task status <task> |
 grep Conversation` once a second: `died … · starting again`, then `running
 (started again …, attempt n)`. A second kill with no finished turn waits the
-backoff; `start.next_at` in `--json` says when, and the start lands on that
+backoff; `outlook.at` in `--json` says when, and the start lands on that
 second. The world stand-in finishes no turns, so the count never resets: five
 kills give up with "started 5 times". Type `quit` through `lf resume --task` in
 a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL

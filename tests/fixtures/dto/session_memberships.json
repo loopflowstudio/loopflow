@@ -56,7 +56,8 @@
     "preview": null,
     "transition": null,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   },
   {
     "id": "run_00000000000000000000000000000002",
@@ -125,7 +126,13 @@
       "by": "person",
       "exit_code": 0
     },
-    "start": null
+    "start": null,
+    "outlook": {
+      "kind": "quit",
+      "at": null,
+      "reason": null,
+      "command": "lf resume run_00000000000000000000000000000002"
+    }
   },
   {
     "id": "run_00000000000000000000000000000003",
@@ -176,7 +183,8 @@
     "preview": null,
     "transition": null,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   },
   {
     "id": "run_00000000000000000000000000000004",
@@ -234,10 +242,13 @@
     },
     "start": {
       "attempts": 1,
-      "last_started_at": "2026-11-17T12:01:02Z",
-      "next_at": "2026-11-17T12:02:02Z",
-      "gave_up": false,
-      "failure": "claude is not installed on this Machine's PATH"
+      "last_started_at": "2026-11-17T12:01:02Z"
+    },
+    "outlook": {
+      "kind": "coming_back",
+      "at": "2026-11-17T12:02:02Z",
+      "reason": "last start failed: claude is not installed on this Machine's PATH",
+      "command": null
     }
   },
   {
@@ -304,7 +315,16 @@
       "by": "died",
       "exit_code": null
     },
-    "start": null
+    "start": {
+      "attempts": 5,
+      "last_started_at": "2026-11-17T12:31:00Z"
+    },
+    "outlook": {
+      "kind": "waiting_for_you",
+      "at": null,
+      "reason": "started 5 times",
+      "command": "lf resume --task LOO-1"
+    }
   },
   {
     "id": "run_00000000000000000000000000000007",
@@ -361,7 +381,16 @@
     "preview": null,
     "transition": null,
     "ended": null,
-    "start": null
+    "start": {
+      "attempts": 1,
+      "last_started_at": "2026-11-17T12:01:02Z"
+    },
+    "outlook": {
+      "kind": "could_not_start",
+      "at": "2026-11-17T12:02:02Z",
+      "reason": "no PTY left: 511 in use (kern.tty.ptmx_max)",
+      "command": null
+    }
   },
   {
     "id": "task_00000000000000000000000000000001:feature:demo:0",
@@ -425,6 +454,7 @@
     "preview": null,
     "transition": null,
     "ended": null,
-    "start": null
+    "start": null,
+    "outlook": null
   }
 ]

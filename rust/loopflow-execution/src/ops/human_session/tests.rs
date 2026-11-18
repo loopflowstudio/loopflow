@@ -233,6 +233,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         held: false,
         task_terminal: false,
         task_primary: false,
+        in_task_checkout: false,
         task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),
@@ -266,76 +267,133 @@ fn summary_fixture() -> crate::session::SessionSummary {
     }
 }
 
-/// A Task conversation that died says how and when the server starts it
-/// again; one the person quit has no starts; after the last start it is the
-/// person's; once it runs again its attempts stay visible until a turn ends.
+/// A Session's outlook, with this Machine's pass willing to start it.
+fn outlook(summary: &crate::session::SessionSummary) -> Option<super::SessionOutlook> {
+    super::summary_surface(summary, || None).outlook
+}
+
+/// A Task conversation that is down says once whether it comes back, when,
+/// and which command opens it otherwise.
 #[test]
-fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
+fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
+    use super::SessionOutlookKind::{ComingBack, CouldNotStart, Quit, WaitingForYou};
     use super::{SessionEndedBy, SessionState};
+    let died = |at| {
+        Some(crate::session::AgentEnd {
+            at,
+            exit_code: Some(137),
+        })
+    };
     let mut summary = summary_fixture();
     summary.task_primary = true;
+    summary.in_task_checkout = true;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
-    summary.agent_end = Some(crate::session::AgentEnd {
-        at: 1_000,
-        exit_code: Some(137),
-    });
+    summary.agent_end = died(1_000);
 
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.state, SessionState::Closed);
     let ended = row.ended.unwrap();
     assert_eq!(
         (ended.by, ended.exit_code),
         (SessionEndedBy::Died, Some(137))
     );
-    let start = row.start.unwrap();
-    assert_eq!(start.attempts, 0);
+    assert_eq!(row.start, None, "the pass has started nothing yet");
+    let next = row.outlook.unwrap();
     assert_eq!(
-        start.next_at,
-        Some(ended.at),
+        (next.kind, next.at, next.reason, next.command),
+        (ComingBack, Some(ended.at), None, None),
         "the first start is immediate"
     );
-    assert!(!start.gave_up);
 
     summary.starts_since_turn = 2;
     summary.last_started_at = Some(2_000);
-    let start = super::summary_surface(&summary).start.unwrap();
     assert_eq!(
-        start.next_at,
+        outlook(&summary).unwrap().at,
         crate::transcript::rfc3339(2_000),
         "a start counted after the death is under way"
     );
 
-    summary.agent_end = Some(crate::session::AgentEnd {
-        at: 2_500,
-        exit_code: Some(137),
-    });
-    let start = super::summary_surface(&summary).start.unwrap();
+    summary.agent_end = died(2_500);
+    summary.start_failure = Some("no PTY left: 511 in use (kern.tty.ptmx_max)".into());
+    let next = outlook(&summary).unwrap();
     assert_eq!(
-        start.next_at,
-        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
+        (next.kind, next.at),
+        (
+            ComingBack,
+            crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2))
+        ),
         "a death after that start waits its backoff"
     );
+    assert_eq!(
+        next.reason.as_deref(),
+        Some("last start failed: no PTY left: 511 in use (kern.tty.ptmx_max)")
+    );
+
+    // This Machine's pass leaves it: nothing promises a start.
+    let left = super::summary_surface(&summary, || Some("no server runs here to start it".into()))
+        .outlook
+        .unwrap();
+    assert_eq!((left.kind, left.at), (WaitingForYou, None));
+    assert_eq!(left.command.as_deref(), Some("lf resume --task INF-123"));
+    summary.start_failure = None;
+    summary.in_task_checkout = false;
+    let elsewhere = outlook(&summary).unwrap();
+    assert_eq!(
+        (elsewhere.kind, elsewhere.reason.as_deref()),
+        (WaitingForYou, Some("its Task is not checked out here"))
+    );
+    summary.in_task_checkout = true;
 
     summary.starts_since_turn = loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
-    let start = super::summary_surface(&summary).start.unwrap();
-    assert!(start.gave_up);
-    assert_eq!(start.next_at, None);
+    let row = super::summary_surface(&summary, || None);
+    assert_eq!(row.start.unwrap().attempts, 5);
+    let gave_up = row.outlook.unwrap();
+    assert_eq!(
+        (gave_up.kind, gave_up.at, gave_up.reason.as_deref()),
+        (WaitingForYou, None, Some("started 5 times"))
+    );
+    assert_eq!(gave_up.command.as_deref(), Some("lf resume --task INF-123"));
 
     summary.agent_end = Some(crate::session::AgentEnd {
         at: 3_000,
         exit_code: Some(0),
     });
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.ended.unwrap().by, SessionEndedBy::Person);
     assert_eq!(row.start, None, "a quit conversation stays quit");
+    let quit = row.outlook.unwrap();
+    assert_eq!((quit.kind, quit.at), (Quit, None));
+    assert_eq!(quit.command.as_deref(), Some("lf resume --task INF-123"));
 
+    // Running again: the starts stay visible until a turn ends.
     summary.agent_end = None;
     summary.starts_since_turn = 1;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Live;
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
+    assert_eq!((row.ended, row.outlook), (None, None));
+    assert_eq!(row.start.unwrap().attempts, 1);
+
+    // No agent ever ran: its first start failed. It never reads as a death,
+    // and with no agent its state is unknown, not closed.
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Unknown;
+    summary.last_started_at = Some(5_000);
+    summary.start_failure = Some("claude is not installed on this Machine's PATH".into());
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.ended, None);
-    let start = row.start.unwrap();
-    assert_eq!((start.attempts, start.next_at), (1, None));
+    let failed = row.outlook.unwrap();
+    assert_eq!(
+        (failed.kind, failed.reason.as_deref(), failed.command),
+        (
+            CouldNotStart,
+            Some("claude is not installed on this Machine's PATH"),
+            None
+        )
+    );
+    assert_eq!(
+        failed.at,
+        crate::transcript::rfc3339(5_000 + crate::ops::pr_landing::repair_backoff(1))
+    );
+    summary.start_failure = None;
 
     summary.task_primary = false;
     summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
@@ -343,9 +401,15 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
         at: 4_000,
         exit_code: None,
     });
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.ended.unwrap().by, SessionEndedBy::Died);
-    assert_eq!(row.start, None, "only a Task's conversation comes back");
+    assert_eq!(row.start, None);
+    let other = row.outlook.unwrap();
+    assert_eq!(
+        (other.kind, other.command),
+        (WaitingForYou, Some(format!("lf resume {}", summary.id))),
+        "only a Task's conversation comes back"
+    );
 }
 
 /// A summary whose projected state is `state`: a running one has an agent
@@ -375,7 +439,7 @@ fn session_metadata_keeps_unknown_position_visible() {
     let mut summary = summary_fixture();
     let task = summary.task_id.clone().unwrap();
     let wave = summary.wave_id.clone().unwrap();
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
     assert_eq!(row.wave_id, Some(wave));
@@ -391,14 +455,14 @@ fn session_metadata_keeps_unknown_position_visible() {
     ));
     summary.graph_step_latest = true;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, || None).graph_membership,
         super::SessionGraphMembership::Step {
             occurrence: super::SessionGraphOccurrence::Current,
             ..
         }
     ));
     summary.graph.as_mut().unwrap().state = crate::session::GraphProcessSummaryState::Stopped;
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert!(matches!(
         row.graph_membership,
         super::SessionGraphMembership::Step {
@@ -413,15 +477,15 @@ fn session_metadata_keeps_unknown_position_visible() {
     );
     summary.graph_lf_process_id = None;
     assert!(matches!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, || None).graph_membership,
         super::SessionGraphMembership::Unknown { .. }
     ));
     summary.independent = true;
     assert_eq!(
-        super::summary_surface(&summary).graph_membership,
+        super::summary_surface(&summary, || None).graph_membership,
         super::SessionGraphMembership::Independent
     );
-    let row = super::summary_surface(&summary);
+    let row = super::summary_surface(&summary, || None);
     assert_eq!(row.state, super::SessionState::Unknown);
     assert_eq!(row.availability, None);
     summary.completed_at = Some(1);
@@ -504,6 +568,23 @@ fn session_action_fixtures_match_the_shared_boundary() {
             session
         );
     }
+}
+
+/// The shared fixture carries one conversation per outlook, and the key is
+/// required: a client that drops it would work the outlook out for itself.
+#[test]
+fn outlook_fixtures_cover_every_kind_and_are_required() {
+    use super::SessionOutlookKind::{ComingBack, CouldNotStart, Quit, WaitingForYou};
+    let json = include_str!("../../../../../tests/fixtures/dto/session_memberships.json");
+    let sessions: Vec<super::SessionRecord> = serde_json::from_str(json).unwrap();
+    let kinds: Vec<_> = sessions
+        .iter()
+        .filter_map(|session| Some(session.outlook.as_ref()?.kind))
+        .collect();
+    assert_eq!(kinds, [Quit, ComingBack, WaitingForYou, CouldNotStart]);
+    let mut without: Vec<serde_json::Value> = serde_json::from_str(json).unwrap();
+    without[0].as_object_mut().unwrap().remove("outlook");
+    assert!(serde_json::from_value::<super::SessionRecord>(without.remove(0)).is_err());
 }
 
 #[test]

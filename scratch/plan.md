@@ -23,7 +23,7 @@ People notice:
   Graph process, not a ship process plus its runs.
 - Auto-Ship turned on mid-run takes effect at the run's next interactive step,
   because the run reads it at each step rather than at launch.
-- `lf ship --stop` / `lf task hold`: the run carries on to its next interactive
+- `lf task hold`: the run carries on to its next interactive
   step or landing and stops there. Nothing is killed. (Made for review; see
   Decisions.)
 - A Task whose run fails the same way three times stops and stays stopped;
@@ -43,8 +43,8 @@ main once #1972 merges). Function names below are as they stand at
 ## Source of truth: one Auto-Ship mark on `task_graphs`
 
 Auto-Ship is a three-way fact: never set, on, or stopped. It is one mark, not
-a pair, in three new nullable columns on `task_graphs` (migration `auto_ship`,
-additive):
+a pair, in three new nullable columns on `task_graphs` (migration
+`task_graph_auto_ship`, additive):
 
 | column | meaning |
 |---|---|
@@ -76,7 +76,7 @@ columns.
 |---|---|
 | `lf ship` | `on`, unconditionally — the only thing that lifts a stop |
 | `lf -b task run` | `on`, unless `stopped` |
-| `lf ship --stop`, `lf task hold`, `task.hold`, Desktop Stop Auto-Ship | `stopped`, with the stopper |
+| `lf task hold`, `task.hold`, Desktop Stop Auto-Ship | `stopped`, with the stopper |
 | anything else (a route with no interactive step ahead, reaching `end`, failure, refusal, unassign) | nothing |
 
 The route write (`Approval::Route`, "its run reached the end") goes, and the
@@ -178,7 +178,7 @@ states.
 
 ### Schema staging (released v0.16.0 has `task_ship_events` and `tasks.shipped_at`)
 
-- `auto_ship.sql` (expand): add the three `task_graphs` columns and
+- `task_graph_auto_ship.sql` (expand): add the three `task_graphs` columns and
   `task_summaries.auto_ship`; backfill from each Task's latest `approved` or
   `stopped` event (`withdrawn` counts as `stopped`), resolving the starter from
   the event's process/person; add the columns to the `task_graphs` planning
@@ -208,7 +208,7 @@ land → verify):
    `auto_ship.by` = the person, state `shipping`, one Graph process.
 2. `lf task wait T` → the run stood in at `human-review`, the land step merged
    the fake PR, verify ran headless, state `done`.
-3. Second Task: `lf ship`, then `lf ship --stop` while implement runs → the run
+3. Second Task: `lf ship`, then `lf task hold` while implement runs → the run
    reaches `human-review` and blocks there (state `active`), `auto_ship` =
    `stopped` by the person, no merge. `lf -b task run T` → stops before `land`
    with "not approved to merge"; Auto-Ship stays stopped. `lf ship T` → lands.
@@ -285,16 +285,16 @@ Left for gate:
 
 ## Decisions made for review
 
-- **Stop doesn't kill.** `--stop` sets `stopped` and the run stops at its next
+- **Stop doesn't kill.** `lf task hold` sets `stopped` and the run stops at its next
   interactive step or landing. Passed over: killing the run (today's
   behavior), which needs a carrier identity ship had and `lf task run` handles
   through `lf task interrupt`.
 - **Hand-merged PRs go through the Graph.** `ship_settle_merge` goes; the land
   step sees the merge. Passed over: a PR watcher in the runner. Graphs with
   no land step (`build`, `pursue`, `deep-clean`, `queue`) relied on
-  `ship_settle_merge` to complete a hand-merged Task; slice 1 checks that the
-  Task's PR observation completes it, and if not, keeps one merge check
-  between steps in the runner instead.
+  `ship_settle_merge` to complete a hand-merged Task; their run now finishes
+  its steps into `end` and completion settles. No merge check between steps
+  was added.
 - **Failures don't touch Auto-Ship.** Passed over: `ship_halt`'s withdrawal,
   which made a Task silently stop shipping.
 - **Clear `tasks.shipped_at` in the migration** so released lf stops
@@ -317,5 +317,4 @@ Auto-Ship line in `task_operate.md`, `repo_operate.md`, `wave_operate.md`,
 `launch-plan.md`. Slice 4's doc list is down to `docs/dev/*`, `server/README.md`
 and the iOS README.
 
-`lf ship --stop` doesn't exist on main; the docs use `lf task hold` as the one
-stop. The plan's `--stop` mentions mean `lf task hold`.
+`lf ship --stop` doesn't exist on main; `lf task hold` is the one stop.

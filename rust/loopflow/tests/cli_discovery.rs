@@ -602,12 +602,11 @@ fn open_is_one_root_command_and_keeps_pr_open_explicit() {
         "open",
         "--session",
         "session-exact",
-        "--diff",
         "--json",
     ])
     .unwrap();
     assert!(
-        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.diff && args.selection.json)
+        matches!(&composed.command, Some(Commands::Open(args)) if args.selection.session.as_deref() == Some("session-exact") && args.selection.json)
     );
     assert!(Cli::command()
         .find_subcommand("desktop")
@@ -936,6 +935,7 @@ fn installation_configuration_and_app_commands_have_distinct_owners() {
             "list",
             "ondemand",
             "pool",
+            "prune",
             "public",
             "remove",
             "rename",
@@ -1592,9 +1592,10 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     assert_eq!(plan.name.as_deref(), Some("Later"));
     assert!(plan.pinned);
     assert_eq!(plan.contents.len(), 1);
-    let layout = invoke(&["desktop", "layout", "repository"]);
-    assert!(layout.status.success());
-    assert_eq!(String::from_utf8_lossy(&layout.stdout).trim(), "null");
+    // Desktop keeps each Work's panes; the command reads only Dashboards.
+    assert!(!invoke(&["desktop", "layout", "repository"])
+        .status
+        .success());
     assert_eq!(counts(), before_reads);
     let stale = invoke(&[
         "desktop",
@@ -1697,62 +1698,14 @@ fn desktop_query_plan_reads_backlog_without_execution_or_desktop() {
     let read: loopflow_execution::work::selection::Dashboard =
         serde_json::from_slice(&read.stdout).unwrap();
     assert_eq!((read.slots, read.revision), (None, arranged.revision + 1));
-    let mut layout: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_str(include_str!("../../../tests/fixtures/dto/pane_layout.json")).unwrap();
-    layout.revision = 0;
-    // The fixture's conversation is not recorded here; the session pane shows the start state.
-    if let loopflow_execution::work::selection::PaneTree::Split { first, .. } = &mut layout.tree {
-        **first = loopflow_execution::work::selection::PaneTree::Pane {
-            id: "pane-0".into(),
-            content: loopflow_execution::work::selection::PaneIntent::Session {
-                session_id: None,
-                location: None,
-            },
-        };
-    }
-    layout.focused = None;
-    layout.zoomed = None;
-    layout.hidden.clear();
-    let input = serde_json::to_string(&layout).unwrap();
-    let saved = invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save",
-        ],
-        &input,
-    );
-    assert!(
-        saved.status.success(),
-        "{}",
-        String::from_utf8_lossy(&saved.stderr)
-    );
-    let saved: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&saved.stdout).unwrap();
-    assert_eq!(saved.drafts, layout.drafts);
-    assert_eq!(saved.revision, 1);
-    assert!(!invoke_input(
-        &[
-            "desktop",
-            "layout",
-            "task:task_22222222222222222222222222222222",
-            "--save"
-        ],
-        &input
-    )
-    .status
-    .success());
-    let before_read = counts();
-    let reopened = invoke(&[
+    // Desktop keeps each Work's panes; only Dashboards have a stored layout.
+    assert!(!invoke(&[
         "desktop",
         "layout",
         "task:task_22222222222222222222222222222222",
-    ]);
-    let reopened: loopflow_execution::work::selection::WorkPaneLayout =
-        serde_json::from_slice(&reopened.stdout).unwrap();
-    assert_eq!(reopened, saved);
-    assert_eq!(counts(), before_read);
+    ])
+    .status
+    .success());
     assert_eq!((counts().0, counts().1), (before.0, before.1));
     assert_eq!(
         conn.query_row("SELECT count(*) FROM dashboards", [], |row| row

@@ -18,7 +18,7 @@ public enum ProjectStatus: String, Decodable, Sendable, Hashable {
 }
 
 public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let sync: PlanningSyncStatus
+    public let sync: TrackerSync
     public let current: Bool
     public let id: String
     public let linearId: String?
@@ -65,7 +65,7 @@ public struct TaskAcquisition: Decodable, Sendable, Hashable {
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
     public let acquisition: TaskAcquisition
-    public let sync: PlanningSyncStatus
+    public let sync: TrackerSync
     public let id: String
     public let repositoryId: String
     public let repo: String
@@ -247,11 +247,18 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     }
 
     // What a Task's Session slot does follows its state alone, never its owner:
-    // unstarted offers Start, working opens with Start, finished reveals history.
+    // unstarted offers Start, working opens by itself, finished opens when asked.
 
     /// Not yet started and still open: it has no checkout, so no conversation to
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
+
+    /// Where a Task that never ran its Graph stands, as the server reads it:
+    /// starting that Graph, or why its setup stopped.
+    public var setupPosition: String? {
+        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
+        return execution.reason
+    }
 
     /// Completion dates may be unknown even when the lifecycle is settled.
     public var historyLabel: String {
@@ -260,11 +267,10 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
 
     public var isCompleted: Bool { lifecycle.isTerminal }
 
-    /// Working Tasks start their conversation when opened, owned or not: opening
-    /// claims nothing. Unstarted and finished Tasks only show history.
-    public var conversationIntent: SessionOpenIntent {
-        lifecycle.isWorking ? .start : .reveal
-    }
+    /// Working Tasks open their conversation without being asked, owned or not:
+    /// opening claims nothing. Unstarted and finished Tasks open one only when a
+    /// person asks, or when Desktop already shows its Session.
+    public var opensConversationAutomatically: Bool { lifecycle.isWorking }
 }
 
 /// What a shipped Task is doing, derived in Rust; nothing here waits on a person.

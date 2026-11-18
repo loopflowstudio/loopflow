@@ -510,7 +510,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}`, `{provider: notion, team: "<page-url-or-id>"}` or `{provider: git, shared: team}` |
+| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}` or `{provider: git, shared: team}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |
@@ -1192,13 +1192,13 @@ name does not reuse its preferences.
 ### What stays in the database?
 
 Files hold declared preferences, including preferred machines,
-pool availability, rental templates and admission limits. The database holds live state and observations: provider-reported usage, machine identity, Sessions, execution history and Desktop’s current saved
-Task arrangements. A saved Desktop arrangement is current state, not a default.
+pool availability, rental templates and admission limits. The database holds live
+state and observations: provider-reported usage, machine identity, Sessions and
+execution history. Desktop keeps its pane arrangements on each Mac, outside the
+database.
 
-`task_layout` holds the default layout for `lf workspace`, including Wave-scoped
-preferences ([workspaces](workspaces.md#set-a-waves-default)). External hosts own the
-workspaces launched from it or from Desktop layouts; LF keeps no external-host
-workspace registry. Ordinary `lf open` does not apply these layouts.
+External hosts own the workspaces lf opens; LF keeps no external-host workspace
+registry.
 
 Credentials stay with their secret/provider owner. The database is not an
 additional preference override layer.

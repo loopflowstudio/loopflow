@@ -9,47 +9,61 @@ use crate::lf::SessionCommand;
 use crate::lf::SessionConnectionArgs;
 use crate::lf::SessionListArgs;
 use loopflow_execution::ops::human_session::{
-    SessionEnd, SessionEndedBy, SessionRecord, SessionStarts, SessionState,
+    ConversationLaunch, Opening, SessionEnd, SessionEndedBy, SessionRecord, SessionStarts,
+    SessionState,
 };
-use loopflow_execution::session::SessionOpenIntent;
 use loopflow_execution::session_record::SessionTitleSource;
 use loopflow_execution::store::{open_store, storage_config_from_env, Store};
 
-pub fn run(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
-    if let SessionCommand::Card { id, .. } = command {
-        return super::screens::print(super::read::Read::SessionCard { id: id.clone() });
-    }
-    if let SessionCommand::List(args) = command {
-        return list_sessions(args);
-    }
-    if let SessionCommand::Usage(args) = command {
-        return super::history::usage(args);
-    }
-    if let SessionCommand::Retention { json } = command {
-        return super::history_transcript::retention(*json);
-    }
+/// Run a `lf session` command. Opening a conversation whose input starts fresh
+/// returns its launch, which the caller runs in this process.
+pub fn run(
+    command: &SessionCommand,
+    cli: &crate::lf::Cli,
+) -> anyhow::Result<Option<ConversationLaunch>> {
     match command {
-        SessionCommand::History { cmd: Some(cmd), .. } => return super::history::run(cmd),
+        SessionCommand::Resume {
+            id,
+            connection,
+            fork,
+            request_id,
+        } => tokio::runtime::Runtime::new()?.block_on(resume(
+            cli,
+            connection,
+            connection.target(cli, id.as_deref())?,
+            *fork,
+            request_id.as_deref(),
+        )),
+        SessionCommand::New {
+            id,
+            connection,
+            request_id,
+        } => tokio::runtime::Runtime::new()?.block_on(new_thread(
+            cli,
+            connection,
+            connection.target(cli, id.as_deref())?,
+            request_id.as_deref(),
+        )),
+        _ => run_command(command, cli).map(|()| None),
+    }
+}
+
+fn run_command(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Result<()> {
+    match command {
+        SessionCommand::Card { id, .. } => {
+            super::screens::print(super::read::Read::SessionCard { id: id.clone() })
+        }
+        SessionCommand::List(args) => list_sessions(args),
+        SessionCommand::Usage(args) => super::history::usage(args),
+        SessionCommand::Retention { json } => super::history_transcript::retention(*json),
+        SessionCommand::History { cmd: Some(cmd), .. } => super::history::run(cmd),
         SessionCommand::History {
             id: None,
             feed,
             cmd: None,
             ..
-        } => return super::activity::run(feed),
-        _ => {}
-    }
-    let runtime = tokio::runtime::Runtime::new()?;
-    if matches!(
-        command,
-        SessionCommand::Resume { .. } | SessionCommand::New { .. }
-    ) {
-        let cwd = loopflow_execution::repo::working_directory()?;
-        let argv = std::env::args().collect::<Vec<_>>();
-        loopflow_execution::journal::with_runtime(&cwd, &argv, || {
-            runtime.block_on(run_async(command, cli))
-        })
-    } else {
-        runtime.block_on(run_async(command, cli))
+        } => super::activity::run(feed),
+        _ => tokio::runtime::Runtime::new()?.block_on(run_async(command, cli)),
     }
 }
 
@@ -193,12 +207,33 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             else {
                 bail!("Session {id} was not found");
             };
+            // Turns change once, when they end, so they are a list beside
+            // the observation feed, not entries in it.
+            let turns = store.sqlite.session_turns(&session.id)?;
             let events = store
                 .sqlite
                 .session_history(&session.id, *after, feed.limit)?;
             if feed.json {
-                println!("{}", serde_json::to_string(&events)?);
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({"turns": turns, "events": events}))?
+                );
             } else {
+                for turn in turns {
+                    let usage = turn.usage.as_ref().map(|usage| &usage.usage);
+                    println!(
+                        "turn {} {} {} input={} output={}",
+                        turn.thread,
+                        turn.turn,
+                        turn.status.as_deref().unwrap_or("running"),
+                        usage
+                            .and_then(|usage| usage.total_input_tokens)
+                            .map_or("-".into(), |tokens| tokens.to_string()),
+                        usage
+                            .and_then(|usage| usage.output_tokens)
+                            .map_or("-".into(), |tokens| tokens.to_string()),
+                    );
+                }
                 for event in events {
                     println!(
                         "{} {} {} {}",
@@ -243,31 +278,8 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             }
             Ok(())
         }
-        SessionCommand::Resume {
-            id,
-            connection,
-            fork,
-        } => {
-            resume(
-                cli,
-                connection,
-                connection.target(cli, id.as_deref())?,
-                *fork,
-            )
-            .await
-        }
-        SessionCommand::New {
-            id,
-            connection,
-            request_id,
-        } => {
-            new_thread(
-                cli,
-                connection,
-                connection.target(cli, id.as_deref())?,
-                request_id.as_deref(),
-            )
-            .await
+        SessionCommand::Resume { .. } | SessionCommand::New { .. } => {
+            unreachable!("`run` opens conversations itself")
         }
         SessionCommand::Rename { .. } => unreachable!("rename uses shared mutation dispatch"),
         SessionCommand::Send {
@@ -570,6 +582,7 @@ pub(crate) fn subscribe_list(
         headless: filter.headless,
     };
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         args,
         move |store, args| {
             let filter = loopflow_execution::session::SessionFilter {
@@ -793,12 +806,8 @@ async fn list(
                 line.push_str(&format!("  {}", turn.describe(now)));
             }
             println!("{line}");
-            for action in session.actions {
-                println!(
-                    "  {} — {}",
-                    action.label,
-                    action.unavailable_reason.as_deref().unwrap_or(&action.help)
-                );
+            if let Some(action) = session.action {
+                println!("  {} — {}", action.label, action.help);
             }
         }
         for session in copied {
@@ -856,7 +865,8 @@ async fn resume(
     connection: &SessionConnectionArgs,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     fork: bool,
-) -> anyhow::Result<()> {
+    request_id: Option<&str>,
+) -> anyhow::Result<Option<ConversationLaunch>> {
     // Prepared connections have already returned through shared mutation dispatch.
     let message = &connection.message;
     anyhow::ensure!(
@@ -875,7 +885,6 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         loopflow_execution::ops::recovery::record_start(
@@ -896,20 +905,33 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            crate::lf::commands::run::resume(&id, message, cli, named_work)
-        });
+            let kind = loopflow_execution::transport::LaunchInput {
+                batch: true,
+                interactive: false,
+                has_prompt: true,
+            }
+            .kind();
+            crate::lf::commands::run::resume(&id, message, cli, kind)
+        })
+        .map(|()| None);
     }
-    let session = reopen(
+    let opening = reopen(
         &store,
         &cwd,
         target,
         connection,
+        cli.agent.as_deref(),
+        request_id,
         fork,
         connection.json || cli.json,
-        named_work,
     )
     .await?;
-    print_opened(connection.json || cli.json, &session)
+    match opening {
+        Opening::Done(session) => {
+            print_opened(connection.json || cli.json, &session).map(|()| None)
+        }
+        Opening::Launch(launch) => Ok(Some(launch)),
+    }
 }
 
 /// The conversation `lf resume` run from `directory` selects.
@@ -918,13 +940,8 @@ async fn select(
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
 ) -> anyhow::Result<String> {
-    let selected = loopflow_execution::ops::human_session::select_connection(
-        store,
-        directory,
-        target,
-        SessionOpenIntent::Resume,
-    )
-    .await?;
+    let selected =
+        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
     if selected.started {
         loopflow_execution::journal::request::diagnostic(format_args!(
             "Nothing to resume here; starting a new conversation."
@@ -935,32 +952,17 @@ async fn select(
 
 /// `lf session resume` without a message: the selected conversation, opened
 /// here, and its provider started unless `--prepare` was requested.
+#[allow(clippy::too_many_arguments)]
 async fn reopen(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     connection: &SessionConnectionArgs,
+    agent: Option<&str>,
+    request_id: Option<&str>,
     fork: bool,
     json: bool,
-    named_work: bool,
-) -> anyhow::Result<SessionRecord> {
-    let intent = connection.intent();
-    if intent != SessionOpenIntent::Resume {
-        anyhow::ensure!(!fork, "non-replacing opening cannot fork a conversation");
-        let selected = loopflow_execution::ops::human_session::select_connection(
-            store, directory, target, intent,
-        )
-        .await?;
-        return loopflow_execution::ops::human_session::open_without_replacing(
-            store,
-            &selected.id,
-            intent,
-            !connection.prepare,
-            json,
-            named_work,
-        )
-        .await;
-    }
+) -> anyhow::Result<Opening> {
     let id = select(store, directory, target).await?;
     loopflow_execution::ops::recovery::record_start(
         &store.sqlite,
@@ -971,10 +973,11 @@ async fn reopen(
         store,
         directory,
         &id,
+        agent,
+        request_id,
         fork,
         !connection.prepare,
         json,
-        named_work,
     )
     .await
 }
@@ -993,19 +996,21 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 id,
                 connection,
                 fork,
+                ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let named_work = connection.work_flag(cli).is_some();
-                let mut record = reopen(
-                    &store, directory, target, connection, *fork, false, named_work,
+                reopen(
+                    &store,
+                    directory,
+                    target,
+                    connection,
+                    cli.agent.as_deref(),
+                    None,
+                    *fork,
+                    false,
                 )
-                .await?;
-                // The opening terminal resumes this Session by id, managed
-                // when the prepare named its Work.
-                if let Some(flag) = connection.work_flag(cli) {
-                    record.open_argv.extend(flag.map(str::to_string));
-                }
-                Ok(record)
+                .await?
+                .prepared()
             }
             SessionCommand::New {
                 id,
@@ -1022,7 +1027,8 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     request_id.as_deref(),
                     cli.agent.as_deref(),
                 )
-                .await
+                .await?
+                .prepared()
             }
             _ => bail!("only `--prepare` opens a Session without starting its provider"),
         }
@@ -1036,13 +1042,13 @@ async fn new_thread(
     connection: &SessionConnectionArgs,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
     request_id: Option<&str>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<ConversationLaunch>> {
     anyhow::ensure!(
         connection.message.is_none(),
         "`lf session new` starts an interactive thread; continue it with `lf -b resume --message`"
     );
     let store = open_shared_store().await?;
-    let record = restarted(
+    let opening = restarted(
         &store,
         &std::env::current_dir()?,
         target,
@@ -1052,7 +1058,10 @@ async fn new_thread(
         cli.agent.as_deref(),
     )
     .await?;
-    print_opened(connection.json || cli.json, &record)
+    match opening {
+        Opening::Done(record) => print_opened(connection.json || cli.json, &record).map(|()| None),
+        Opening::Launch(launch) => Ok(Some(launch)),
+    }
 }
 
 /// The conversation `lf session new` run from `directory` selects, on a fresh
@@ -1065,18 +1074,13 @@ async fn restarted(
     json: bool,
     request_id: Option<&str>,
     agent: Option<&str>,
-) -> anyhow::Result<SessionRecord> {
-    let selected = loopflow_execution::ops::human_session::select_connection(
-        store,
-        directory,
-        target,
-        SessionOpenIntent::Resume,
-    )
-    .await?;
+) -> anyhow::Result<Opening> {
+    let selected =
+        loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
     let request_id = request_id
         .map(str::to_owned)
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-    let next = loopflow_execution::ops::human_session::new_thread(
+    let (next, launch) = loopflow_execution::ops::human_session::new_thread(
         store,
         &selected.id,
         agent,
@@ -1085,17 +1089,33 @@ async fn restarted(
         &request_id,
     )
     .await?;
+    if let Some(launch) = launch {
+        return Ok(Opening::Launch(launch));
+    }
     if let Some(result) = store
         .sqlite
         .creation_receipt(&request_id)?
         .and_then(|r| r.result)
     {
-        return Ok(serde_json::from_value(result)?);
+        return Ok(Opening::Done(serde_json::from_value(result)?));
     }
-    loopflow_execution::ops::human_session::surface(store, &next).await
+    loopflow_execution::ops::human_session::surface(store, &next)
+        .await
+        .map(Opening::Done)
 }
 
 /// Finish a successful Session connection after its thin relay has returned.
+/// Whether opening a conversation answers with its Session record once the
+/// conversation returns, including one launched in this process.
+pub fn returns_record(command: &SessionCommand, cli: &crate::lf::Cli) -> bool {
+    match command {
+        SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } => {
+            connection.json || cli.json
+        }
+        _ => false,
+    }
+}
+
 pub fn print_returned(id: &str) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;

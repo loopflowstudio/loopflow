@@ -27,6 +27,9 @@ const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const PROCESS_RECEIPT_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
+/// The tracing target of a Start's timings: the server's creation steps and the
+/// conversation's setup steps. `logs/lf.log` keeps it at INFO for the report.
+pub const START_TIMING_TARGET: &str = "loopflow::start_timing";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 /// The id a spawner minted for this process and already recorded on the run
 /// it owns (a Graph run or step). Taken once at start; children never see it.
@@ -142,10 +145,16 @@ static READ: AtomicBool = AtomicBool::new(false);
 /// Set by a Graph on the step it starts, and only on that child.
 pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
 static GRAPH_STEP: AtomicBool = AtomicBool::new(false);
+static WORKER_STEP: AtomicBool = AtomicBool::new(false);
 /// Whether a Graph started this process as its step. Clears the mark, so the
 /// step's own children are not steps.
 pub fn take_graph_step() -> bool {
-    let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
+    let value = std::env::var_os(GRAPH_STEP_ENV);
+    let step = value.is_some();
+    WORKER_STEP.fetch_or(
+        value.is_some_and(|value| value == "worker"),
+        Ordering::Relaxed,
+    );
     std::env::remove_var(GRAPH_STEP_ENV);
     GRAPH_STEP.fetch_or(step, Ordering::Relaxed) || step
 }
@@ -153,6 +162,11 @@ pub fn take_graph_step() -> bool {
 /// Whether a Graph started this process as its step, once taken.
 pub(crate) fn graph_step() -> bool {
     GRAPH_STEP.load(Ordering::Relaxed)
+}
+
+/// Whether Task delivery started this Graph step as a headless worker.
+pub(crate) fn worker_step() -> bool {
+    WORKER_STEP.load(Ordering::Relaxed)
 }
 
 /// A command that changes no Work records no Process. Admission still
@@ -516,15 +530,6 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
         elapsed_ms = started.elapsed().as_millis(),
         "admitted Process"
     );
-}
-
-/// Complete this Process before it execs into another program. The image that
-/// replaces it keeps the PID but is not this command; its exit is recorded by
-/// whoever waits on it.
-pub fn finish_before_exec() {
-    if let Some(context) = current_context() {
-        finish_runtime(&context.cwd, &Ok::<(), anyhow::Error>(()));
-    }
 }
 
 const EXEC_PROCESS_ENV: &str = "LF_EXEC_PROCESS";

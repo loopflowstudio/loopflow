@@ -4,17 +4,16 @@
 //! A run and a ship outlive the request that starts them. From a terminal the
 //! `lf` process is their carrier; a served request has none, so [`run`] and
 //! [`ship`] start the same command detached ([`super::launch`]) and return the
-//! result it reports, the value its CLI spelling prints with `--json`. A Task
-//! whose Work lives on another Machine runs the operation's `lf … --json`
-//! spelling there over SSH; nothing falls back to local execution.
+//! result it reports, the value its CLI spelling prints with `--json`. Each
+//! runs here: the caller sends a Task another Machine runs to that Machine,
+//! whose server starts it with the `environment` the sender carried.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use super::{launch, Error, ErrorCode, Result};
-use crate::machine::task::RemoteTaskOperation;
 use crate::ops::task::{TaskControlResult, TaskSnapshot, TaskWaitUntil};
 use crate::ops::task_ownership::OwnershipChange;
 use crate::read_stream::{Subscription, Transport};
@@ -154,37 +153,25 @@ pub fn run(
     graph: Option<&str>,
     agent: Option<&str>,
     approve: bool,
+    environment: &[(String, String)],
 ) -> Result<TaskRun> {
-    let spell = |task: &str| spell_run(task, from, graph, agent, approve);
-    if let Some(run) = remote(
+    launch::start_with(
         directory,
-        issue,
-        spell,
-        RemoteTaskOperation::Run { agent, approve },
-    )? {
-        return Ok(run);
-    }
-    launch::start(directory, &spell(issue))
+        &spell_run(issue, from, graph, agent, approve),
+        environment,
+    )
 }
 
 /// `task.ship`: approve Auto-Ship and start shipping detached, as `lf --task
 /// <issue> ship` does: every remaining step headless, an interactive step
 /// standing in for the person, until the PR lands.
-pub fn ship(directory: &Path, issue: &str) -> Result<TaskShip> {
-    let spell = |task: &str| spell_task(task, "ship");
-    if let Some(shipping) = remote(directory, issue, spell, RemoteTaskOperation::Ship)? {
-        return Ok(shipping);
-    }
-    launch::start(directory, &spell(issue))
+pub fn ship(directory: &Path, issue: &str, environment: &[(String, String)]) -> Result<TaskShip> {
+    launch::start_with(directory, &spell_ship(issue), environment)
 }
 
 /// `task.hold`: withdraw the Task's Auto-Ship approval, as `lf --task <issue>
 /// ship --stop` does, until the next `task.ship`.
-pub fn hold(directory: &Path, issue: &str, reason: Option<&str>) -> Result<Hold> {
-    let spell = |task: &str| spell_task(task, "hold");
-    if let Some(held) = remote(directory, issue, spell, RemoteTaskOperation::Hold)? {
-        return Ok(held);
-    }
+pub fn hold(issue: &str, reason: Option<&str>) -> Result<Hold> {
     let stopped = crate::ops::task::ship::ship_stop(issue, reason).map_err(written)?;
     Ok(Hold {
         issue: issue.to_owned(),
@@ -248,18 +235,9 @@ pub fn interrupt(issue: &str) -> Result<TaskControlResult> {
     crate::ops::task::task_interrupt(issue).map_err(written)
 }
 
-/// `task.claim` / `task.unassign`, on the Machine that writes the Task's ownership.
+/// `task.claim` / `task.unassign`, here: the caller sends a Task whose
+/// ownership another Machine writes to that Machine.
 pub fn ownership(directory: &Path, issue: &str, change: OwnershipChange) -> Result<TaskOwnership> {
-    let verb = match change {
-        OwnershipChange::Claim => "claim",
-        _ => "unassign",
-    };
-    let spell = |task: &str| spell_task(task, verb);
-    let writer = crate::machine::task::remote_ownership_writer(issue)
-        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
-    if let Some(ownership) = remote_on(writer, directory, spell, RemoteTaskOperation::Ownership)? {
-        return Ok(ownership);
-    }
     let repo = crate::ops::task::task_repository(directory, Some(issue)).map_err(written)?;
     crate::ops::task_ownership::change(&repo, issue, change).map_err(written)
 }
@@ -291,6 +269,7 @@ pub fn subscribe_wait(
     transport: Transport,
 ) -> anyhow::Result<Option<Subscription>> {
     crate::read_stream::start(
+        crate::read_stream::Watch::State,
         (issue, until),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::read_stream::require_store(store)?;
@@ -301,38 +280,6 @@ pub fn subscribe_wait(
         },
         transport,
     )
-}
-
-/// The value `lf <spell(task)>` prints on the Machine that owns the Task
-/// `issue` names, when that is not this one.
-fn remote<T: DeserializeOwned>(
-    directory: &Path,
-    issue: &str,
-    spell: impl FnOnce(&str) -> Vec<String>,
-    operation: RemoteTaskOperation<'_>,
-) -> Result<Option<T>> {
-    let route = crate::machine::task::remote_task(issue)
-        .map_err(|error| Error::refused(&error, ErrorCode::Unavailable))?;
-    remote_on(route, directory, spell, operation)
-}
-
-/// What the command `spell` names prints on `route`'s Machine; `None` when
-/// it runs here.
-fn remote_on<T: DeserializeOwned>(
-    route: Option<crate::durable::TaskExecutionRoute>,
-    directory: &Path,
-    spell: impl FnOnce(&str) -> Vec<String>,
-    operation: RemoteTaskOperation<'_>,
-) -> Result<Option<T>> {
-    let Some(route) = route else {
-        return Ok(None);
-    };
-    let args = spell(route.task_id.as_str());
-    let printed = crate::machine::task::run_remote(route, directory, &args, operation)
-        .map_err(|error| Error::outcome_unknown(&error))?;
-    serde_json::from_value(printed)
-        .map(Some)
-        .map_err(|error| Error::outcome_unknown(&error.into()))
 }
 
 fn written(error: impl Into<anyhow::Error>) -> Error {
@@ -367,14 +314,10 @@ pub fn spell_run(
     args
 }
 
-pub fn spell_task(issue: &str, verb: &str) -> Vec<String> {
-    if verb == "ship" {
-        ["--task", issue, "ship", "--json"]
-    } else {
-        ["task", verb, issue, "--json"]
-    }
-    .map(str::to_owned)
-    .to_vec()
+pub fn spell_ship(issue: &str) -> Vec<String> {
+    ["--task", issue, "ship", "--json"]
+        .map(str::to_owned)
+        .to_vec()
 }
 
 #[cfg(test)]

@@ -9,20 +9,10 @@
     }
   },
   "primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -46,7 +36,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -70,20 +59,10 @@
     "start": null
   },
   "reopened": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -107,7 +86,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -157,8 +135,7 @@
               "slug": "task-pr-tests",
               "status": "started",
               "sync": {
-                "changes": [],
-                "connected": false
+                "actions": []
               }
             }
           ],
@@ -279,8 +256,7 @@
             "rank": 0,
             "state": null,
             "sync": {
-              "changes": [],
-              "connected": false
+              "actions": []
             },
             "repo_id": "repo_00000000000040008000000000000001",
             "repo": "/private/tmp/.tmpRKKNhK",
@@ -302,20 +278,10 @@
   },
   "sessions": [
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -339,7 +305,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [],
       "task_primary": false,
@@ -363,20 +328,10 @@
       "start": null
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK",
@@ -400,7 +355,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [
         "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
@@ -429,20 +383,10 @@
       "start": null
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
@@ -465,7 +409,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "closed",
       "task_ids": [],
       "task_primary": false,
@@ -490,20 +433,10 @@
     }
   ],
   "task_primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK",
@@ -527,7 +460,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [
       "task_ab8d3359dc7053bda4afd24ff7e7a7d7"

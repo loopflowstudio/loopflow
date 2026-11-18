@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use crate::linear_records::{LinearBindingError, LinearProjectId};
+use crate::planning::{LinearBindingError, LinearProjectId};
 use crate::work::task::{TaskEventKind, TaskId};
 pub use loopflow_model::durable::ProjectId;
 use loopflow_model::id::WaveId;

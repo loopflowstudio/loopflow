@@ -126,8 +126,7 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
         .sqlite
         .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
         .map_err(lifecycle_error)?;
-    let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    super::project::import_binding(store, wave, &acquisition)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
     let id = store
         .sqlite
         .ensure_project(wave.id(), wave.slug())
@@ -523,7 +522,11 @@ pub fn remove(
             .sqlite
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
-        runtime.block_on(super::planning_sync::sync_after_save(&store, &repo_key));
+        runtime.block_on(super::planning_sync::sync_after_save(
+            &store,
+            &repo_key,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
+        ));
     }
 
     operation.planning_done = true;

@@ -128,6 +128,7 @@ pub fn subscribe_ps(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         {
             let mut reader = ActivityReader::default();

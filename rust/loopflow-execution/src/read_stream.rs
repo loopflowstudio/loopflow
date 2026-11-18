@@ -68,7 +68,8 @@ pub fn select_output(paths: Option<Vec<String>>) {
     SELECTED.with(|selected| *selected.borrow_mut() = paths);
 }
 
-fn selected() -> Option<Vec<String>> {
+/// This invocation's `--select`, which a subscription on another Machine sends.
+pub fn selected() -> Option<Vec<String>> {
     SELECTED.with(|selected| selected.borrow().clone())
 }
 
@@ -107,9 +108,26 @@ pub fn require_store(store: Option<SharedStore>) -> Result<SharedStore> {
     store.ok_or_else(|| anyhow::anyhow!("no Loopflow store exists on this Machine"))
 }
 
-/// Whether a commit that moved revisions from `old` to `new` can change a result.
-fn changed(old: StoreRevisions, new: StoreRevisions) -> bool {
-    StoreRevisions { usage: 0, ..old } != StoreRevisions { usage: 0, ..new }
+/// What a read names beside the store's state. History moves with every
+/// turn, so a commit to `history.db` reads again only the subscriptions that
+/// name `history.*`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Watch {
+    /// State in `loopflow.db` only.
+    State,
+    /// State, Session history and turns.
+    History,
+}
+
+/// Whether a commit that moved revisions from `old` to `new` can change a
+/// result of a read that watches `watch`.
+fn changed(watch: Watch, old: StoreRevisions, new: StoreRevisions) -> bool {
+    match watch {
+        Watch::History => old != new,
+        Watch::State => {
+            StoreRevisions { history: 0, ..old } != StoreRevisions { history: 0, ..new }
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -139,7 +157,7 @@ fn lock<A>(shared: &Shared<A>) -> MutexGuard<'_, Mailbox<A>> {
 /// Print `read(store, args)` as frames, keeping the invocation's `--select`,
 /// until stdin closes or the parent exits.
 /// `store` is `None` until a Loopflow store exists on this Machine.
-pub fn run<A, T, F, Fut>(args: A, read: F) -> Result<()>
+pub fn run<A, T, F, Fut>(watch: Watch, args: A, read: F) -> Result<()>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
@@ -152,7 +170,7 @@ where
     let shared = mailbox();
     let input = shared.clone();
     std::thread::spawn(move || read_requests(&input));
-    let mut reader = Reader::new(shared.clone(), parent, args, read, selected())?;
+    let mut reader = Reader::new(shared.clone(), parent, watch, args, read, selected())?;
     let mut stdout = std::io::stdout().lock();
     loop {
         let step = reader.step()?;
@@ -200,7 +218,12 @@ impl std::fmt::Debug for Transport {
 
 /// Serve `read` over `transport`. Stdio runs until the subscription ends; a pulled
 /// subscription returns its handle at once.
-pub fn start<A, T, F, Fut>(args: A, read: F, transport: Transport) -> Result<Option<Subscription>>
+pub fn start<A, T, F, Fut>(
+    watch: Watch,
+    args: A,
+    read: F,
+    transport: Transport,
+) -> Result<Option<Subscription>>
 where
     A: DeserializeOwned + Clone + Send + 'static,
     T: Serialize,
@@ -208,12 +231,12 @@ where
     Fut: std::future::Future<Output = Result<T>>,
 {
     match transport {
-        Transport::Stdio => run(args, read).map(|()| None),
+        Transport::Stdio => run(watch, args, read).map(|()| None),
         Transport::Pull {
             wake,
             select,
             events,
-        } => start_pull(args, read, wake, select, events).map(Some),
+        } => start_pull(watch, args, read, wake, select, events).map(Some),
     }
 }
 
@@ -302,6 +325,7 @@ impl<A: DeserializeOwned + Send> Inbox for (Mutex<Mailbox<A>>, Condvar) {
 /// Serve `read` as `run` does, read on the puller's thread. A thread of this
 /// process only waits for the next reason to read and calls `wake`.
 fn start_pull<A, T, F, Fut>(
+    watch: Watch,
     args: A,
     read: F,
     wake: Box<dyn Fn() + Send + Sync>,
@@ -316,7 +340,7 @@ where
 {
     let shared = mailbox();
     let inbox: Arc<dyn Inbox> = shared.clone();
-    let mut reader = Reader::new(shared.clone(), None, args, read, select)?;
+    let mut reader = Reader::new(shared.clone(), None, watch, args, read, select)?;
     reader.observer = events.then(crate::read_stream::events::Observer::default);
     lock(&shared).pull_at = Some(Instant::now());
     let waker = shared.clone();
@@ -442,6 +466,7 @@ struct Reader<A, F> {
     shared: Shared<A>,
     database: PathBuf,
     read: F,
+    watch: Watch,
     args: A,
     runtime: Runtime,
     observations: Arc<Cache>,
@@ -473,6 +498,7 @@ where
     fn new(
         shared: Shared<A>,
         parent: Option<u32>,
+        watch: Watch,
         args: A,
         read: F,
         select: Option<Vec<String>>,
@@ -484,6 +510,7 @@ where
             shared,
             database,
             read,
+            watch,
             args,
             select,
             observer: None,
@@ -549,7 +576,7 @@ where
                 None => true,
                 Some(read_on) => {
                     let changed = match (self.read_at, revisions) {
-                        (Some(old), Some(new)) => changed(old, new),
+                        (Some(old), Some(new)) => changed(self.watch, old, new),
                         (None, None) => false,
                         _ => true,
                     };
@@ -813,7 +840,7 @@ mod tests {
     use std::sync::{mpsc, Arc};
     use std::time::{Duration, Instant};
 
-    use super::{changed, identity, retry_due, start_pull, Subscription};
+    use super::{changed, identity, retry_due, start_pull, Subscription, Watch};
     use loopflow_storage::sqlite::StoreRevisions;
 
     fn next_frame(subscription: &Subscription, wakes: &mpsc::Receiver<()>) -> serde_json::Value {
@@ -839,6 +866,7 @@ mod tests {
             let (sender, wakes) = mpsc::channel();
             let directory = repo.path().to_owned();
             let subscription = start_pull(
+                Watch::State,
                 (),
                 move |_, ()| {
                     let directory = directory.clone();
@@ -900,6 +928,7 @@ mod tests {
         let counted = reads.clone();
         let directory = checkout.clone();
         let subscription = start_pull(
+            Watch::State,
             (),
             move |_, ()| {
                 counted.fetch_add(1, Ordering::Relaxed);
@@ -1011,6 +1040,7 @@ mod tests {
         let directory = repo.path().to_owned();
         let personal = home.path().to_owned();
         let subscription = start_pull(
+            Watch::State,
             (),
             move |_, ()| {
                 let (directory, personal) = (directory.clone(), personal.clone());
@@ -1048,16 +1078,51 @@ mod tests {
     }
 
     #[test]
-    fn usage_alone_is_not_a_change() {
+    fn a_turn_reaches_a_subscription_that_watches_turns() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let store =
+            crate::store::opening::open_ephemeral(&home.path().join("loopflow.db")).unwrap();
+        store.test_session(
+            "conversation",
+            &loopflow_storage::session_record::new_artifact_key(),
+        );
+        let (sender, wakes) = mpsc::channel();
+        let subscription = start_pull(
+            Watch::History,
+            (),
+            |store, ()| async move {
+                let store = super::require_store(store)?;
+                Ok(store.sqlite.session_turns("conversation")?.len())
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        assert_eq!(next_frame(&subscription, &wakes)["body"], 0);
+        store.record_turn_start("conversation", &"thread".into(), "turn", 1);
+        assert_eq!(next_frame(&subscription, &wakes)["body"], 1);
+    }
+
+    #[test]
+    fn history_and_turns_reach_only_the_reads_that_watch_them() {
         let old = StoreRevisions {
             planning: 1,
             sessions: 1,
             graphs: 1,
             processes: 1,
-            usage: 1,
+            history: 1,
         };
-        assert!(!changed(old, StoreRevisions { usage: 9, ..old }));
+        let turn = StoreRevisions { history: 9, ..old };
+        assert!(!changed(Watch::State, old, turn));
+        assert!(changed(Watch::History, old, turn));
         assert!(changed(
+            Watch::State,
             old,
             StoreRevisions {
                 processes: 2,

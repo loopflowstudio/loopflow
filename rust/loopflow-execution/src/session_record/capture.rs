@@ -305,7 +305,6 @@ impl SessionRecorder {
                 title,
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: manifest.created_at.unix_timestamp(),
             },

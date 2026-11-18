@@ -19,11 +19,11 @@ existing terminal attachment. It links no embedded Loopflow library. Desktop's U
 On macOS the signed selected app bundles `com.loopflow.server.plist` and
 registers it with SMAppService. Explicit development Machines use separately
 named launchd jobs. Linux uses a user systemd service. Closing Desktop does not
-stop the service. Managed Sessions and Desktop shells run in a holder the service starts with
-`setsid` and controls ([Held terminals](../transport/README.md#held-terminals));
+stop the service. Work sessions and Desktop shells run in a holder the service starts with
+`setsid` and controls ([Held terminals](../../../loopflow-execution/src/transport/README.md#held-terminals));
 stopping or replacing the service leaves holders and their agents running.
 This service holds no PTY itself and hosts no Graphs: those run as
-[plain detached processes](../transport/README.md#headless-work). Logout/reboot do not
+[plain detached processes](../../../loopflow-execution/src/transport/README.md#headless-work). Logout/reboot do not
 preserve live processes; the [recovery pass](#recovery-pass) starts them again.
 Disabled Background Items remain disabled. Upgrade
 retires the previous
@@ -92,7 +92,7 @@ last_started_at, next_at, gave_up, failure}` carry these facts to
 started; a Wave's or repository's work session, a chat and a batch are
 reported, never started.
 
-## Local protocol, revision 7
+## Local protocol, revision 8
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -109,6 +109,35 @@ bytes. It admits another untagged node of the approved owner through
 same Mac connects; create it only on a Mac with one account. Setup saves the endpoint, owner and enabled choice in
 Machine-local `mobile.yaml`, using the shared atomic file writer. It does not
 add service state to `config.yaml` or the preferences catalogue.
+
+Another Machine reaches this server over SSH: `lf server connect` checks
+`LF_EXPECTED_MACHINE_ID`, starts the server when none is running
+(`installation::server::ensure`), and copies bytes between its stdin and stdout
+and the socket until either side closes. It reads none of them, so every
+message works over SSH as on the socket, and it records nothing; the server
+records each request. An SSH login is the same OS user the socket trusts. An
+`lf` older than this entry exits 2 with a usage error, which the sender
+reports as the destination's version and its update command; an older server
+answers `incompatible` itself. The client side is `Connection::open_on`.
+
+Another Machine says so in `hello` (`client.kind` is `machine`), and every
+operation it sends then runs here and is never sent on. Its requests and
+subscriptions carry `sender`, what the receiving server cannot know; a
+Machine's null `sender` is `invalid`, and a client on this Machine sends null:
+
+```text
+→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
+← {"type":"welcome",…}
+→ {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
+← {"type":"response","id":"…","result":{…}}
+```
+
+The server runs the operation in its own checkout of `repository` (the
+operation's `directory` is the sender's), and starts any launch (`task.run`,
+`task.ship`) with `selection` and `secrets`: the values `forward.env` names,
+which nothing prints (`Debug` shows names). Files `forward.files` names are
+delivered over SSH first. The sender waits 120 s for an answer; past that the
+request fails, naming the Machine and `ssh <route> lf server status`.
 
 `machine/wire.rs` owns the envelope, endpoint and native request types;
 `server/wire.rs` instantiates the envelope with the CLI read/write operations.
@@ -150,8 +179,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":7,"min_revision":7,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":7,"server_revision":7,"min_revision":7,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":8,"server_revision":8,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -175,7 +204,7 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 7; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 8; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -314,7 +343,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `task.move`, `.claim`, `.unassign`, `.save`, `.complete`, `.reopen`, `.abandon` | `lf task <verb>` | write |
 | `session.list` | `lf session list` | read |
 | `session.card` | `lf session card <id>` | read |
-| `session.start` | a managed launch: `lf task run`, `lf resume --task`, Wave session commands, Desktop panes | server |
+| `session.start` | start a held terminal, for example for `lf resume --task`, a Desktop pane or a Desktop Task shell | server |
 | `session.attach` | Desktop panes' relay and other clients that speak only the server protocol; CLI views of a held terminal enter `held.sock` directly | server |
 | `session.usage` | `lf session usage` (`lf usage`) | read |
 | `session.history` | `lf session history` (`lf history`) | read |
@@ -355,7 +384,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `skill.run` | `lf skill <name>` (`lf -b`, detached) | write; `engine::skill::run` (the Process carrying the run) |
 | `skill.list` | `lf list [<path>…]` | read; `lf::commands::list::list_children` |
 | `desktop.portfolio`, `.portfolio.set` | `lf desktop portfolio` (`lf portfolio`) | read, write |
-| `desktop.layout`, `.layout.save` | `lf desktop layout <work> [--save]` | read, write |
+| `desktop.layout` | `lf desktop layout query:<id>` | read (Dashboard slots) |
 | `desktop.view.list`, `.view.get` | `lf desktop view list`, `lf desktop view show` | read |
 | `desktop.dashboard.*` | `lf desktop dashboard query`, `pin`, `unpin`, `rename`, `hide`, `show`, `move`, `resize`, `slots` | write |
 | `desktop.<verb>` | `lf desktop enter`, `send`, `send-key`, `capture`, `zoom`, `focus`, `close`, `reopen`, `move`, `resize`, `browse`, … | CLI only, executed by the app |
@@ -372,8 +401,8 @@ Machine, Repository, Work, PR, Checkout, Skill, Account), plus `config` for
 settings, `desktop` for the app and `plan` for every Wave's plan at once;
 nothing gets a namespace of its own for a client.
 
-`desktop.*` is Desktop's own arrangement state: saved pane layouts and
-Dashboards. The portfolio is the Machine's repository set: Desktop's sidebar,
+`desktop.*` is Desktop's shared arrangement state: Dashboards. Pane layouts
+stay in Desktop's per-Mac cache. The portfolio is the Machine's repository set: Desktop's sidebar,
 the phone's `view.select` Task list and its creation destinations all read it.
 
 - `config.*` is `engine::config`, which `lf config` calls too: `config.catalog`
@@ -448,13 +477,14 @@ the phone's `view.select` Task list and its creation destinations all read it.
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
   standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
-  files a Task or adopts the named Session; `run` requests its Graph launch.
+  files a Task or adopts the named Session; `run` admits its conversation,
+  which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
-  `task.claim`, `task.unassign`, `session.resume`) runs its `lf … --json`
-  spelling there over SSH and returns what that prints, which is the
-  destination's value; it never falls back to local execution. Requests create no Process rows; diagnostics the shared
+  `task.claim`, `task.unassign`, `session.resume`) goes to that Machine's
+  server over SSH and returns its answer; it never falls back to
+  local execution. Requests create no Process rows; diagnostics the shared
   functions print go to the request's log. A refusal the shared code names
   (an empty name is `invalid`, a stale Dashboard revision `conflict`, a missing
   record `not_found`) answers that code; any other failure is
@@ -577,8 +607,8 @@ nonce, so unfinished terminal escapes cannot swallow the reason.
 | `retired` | Task cleanup or shell Close ended this terminal. | Stop automatic attachment; deliberately resume when needed. |
 
 Attachment finds existing execution. It never launches a provider or replays
-keystrokes. A replacement terminal requires fresh input and geometry claims;
-request them without replacement so another viewer keeps control. Desktop's
+keystrokes. A replacement terminal needs a fresh attach; every attached view
+of it types, beside any already there. Desktop's
 decoded relay shows the reason, disables input and stops recovery; it does not
 automatically follow a replacement.
 
@@ -591,20 +621,23 @@ reported, never started by an attachment attempt.
 
 ## Turn and tool boundaries
 
-A launch is managed when a Task, Wave or repository command starts it: `lf
-task run` and its Graph's steps, `--task`, `--wave`, a Task, Wave or
-repository conversation, `lf resume [ID] --task` or `--wave`, a Session bound
-with `lf session bind`. Every other launch is bare, including
-`lf <skill>` or `lf graph` typed, or run by an agent, inside a Task's
-checkout; that run still counts toward the Task. The launch's Work source
-decides (`WorkSource::is_managed`; `lf task run` names its Task to each agent
-step), and reopening a recorded conversation also reads the Session row
-(`SqliteStore::is_bare`). The launch carries the answer as
-`AgentConfig::holder`: `Server` for managed work, `Caller` for every bare
-launch, which reports no boundary, held in a Desktop pane or not. Every launch
-[reads its own steers from the store](#every-launch-reads-its-own-steers).
+`Launch::kind` carries whether a launch is bare or managed and its mode.
+[Work sessions, workers, chats and batches are defined here](../../../../docs/glossary.md#loopflows-words).
+`transport::LaunchInput::kind` selects chats or batches for skill and Graph
+commands launched in the caller's terminal or pipe. `lf -b resume <ID> --message TEXT`
+is a batch. A Graph's correction turn in a Task run remains a worker.
+Interactive Task, Wave, repository and bound conversations are work sessions,
+as are conversations opened in a held terminal through Desktop or a framed
+`lf --machine` view. Workers run headless Task Graph steps, the `ci-fix` run
+landing starts, and Discord answers for a Wave. The checkout, `--task` and
+`LF_AS` only decide Task membership: accounting and Task steers always travel
+together. Resume retains a Session's bare or managed lifetime, reading its
+binding and primary scope once before delegation; attribution alone leaves it
+bare. Every launch [reads its own steers from the store](#every-launch-reads-its-own-steers).
+Chats and batches report no boundaries. Work sessions and workers
+report turn boundaries to the Machine server.
 
-For a managed launch, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
+For a work session or worker, Claude and Codex hooks run `lf __context-block --moment <moment>` at session start,
 compaction, each prompt and each turn end. That process first makes one
 `session.boundary` request on `machine.sock`, for the server to record. The
 OpenCode plugin and the Pi extension send the same request from inside the
@@ -672,9 +705,8 @@ be lost. `lf session steers <session>` shows each steer `delivered` or
 line in `logs/lf.log`; the tool goes on and the next boundary asks again.
 
 The launch carries its capability as `LF_PROVIDER_CONTEXT` when the server
-records its boundaries and as `LF_BARE_STEER` when no one does; a bare
-launch's tool and prompt hooks run only `--moment steer`, which reports
-nothing. Nothing wakes a bare launch: a conversation idle at its prompt reads a
+records its boundaries and as `LF_BARE_STEER` when no one does. For chats and
+batches, tool and prompt hooks run only `--moment steer`, which reports nothing. Nothing wakes a chat or batch: a chat idle at its prompt reads a
 steer when its person next types.
 
 Every tool hook first compares files and starts `lf` only when a steer may be
@@ -683,14 +715,14 @@ waiting. Saving a steer touches one marker under `steers/` inside the write:
 Wave's or repository's. A launch names its Session's marker and its Task's
 (`LF_STEER_SESSION`, `LF_STEER_TASK`); its hook exits while `LF_STEER_SEEN`,
 touched at each check, is newer than all three. So a comment on one Task
-starts `lf` only in that Task's conversations. A held launch's prompt hook
-always runs, which reaches a Session bound to a Task after launch; a bare
-launch's prompt hook is gated like its tool hook.
+starts `lf` only in that Task's conversations. A managed launch's prompt hook
+always runs, which reaches a Session bound to a Task after launch. For chats
+and batches, prompt hooks are gated like tool hooks.
 
 ### Waking an idle conversation
 
 The server keeps no list of conversations (`wake.rs`); it reads them from the
-store. A managed Session is idle when its last recorded native turn yielded
+store. A work session is idle when its last recorded native turn yielded
 (`session_activity`) and its AgentProcess is live, and reachable through its
 Codex app-server (`processes.endpoint`) or the Claude inbox key its first
 managed boundary saved (`processes.inbox`); `sessions/<pid>.json` beside that
@@ -714,7 +746,7 @@ that lapses for the next boundary:
 
 A server that restarts reads the same conversations again. An unreachable
 Claude inbox leaves its news unclaimed. After a failed send the steers arrive
-again. Bare Sessions are never woken. No
+again. Chats and batches are never woken. No
 process or clock runs per Session: the watcher's only clock is the change
 signal's 60 s fallback for a missed checkpoint or a Machine's sleep.
 
@@ -727,14 +759,13 @@ Still nothing, and the launch fails before the agent starts:
 Loopflow server is not running, and Task and Wave work needs it (…); run `lf install server`, then `lf server status`
 ```
 
-A bare launch, here or through `lf --machine`, runs without a server. At a
-terminal or headless (`-b`, a Graph step, a run an agent starts), it prints
-the context block from checkout files at session start and compaction. Those
+A chat or batch, here or through `lf --machine`, runs without a server.
+It prints the context block from checkout files at session start and compaction. Those
 two callbacks make no request and log no gap, and the run reports no turn
 boundary; whoever started it reads its output. Its steer check reads the
 store directly. On Pi the extension still guards bash tools, which ends a
-tool's process group with its provider. A bare conversation held in a
-Desktop pane has the same hooks.
+tool's process group with its provider. A chat in a Desktop shell has the
+same hooks.
 
 The hook resolves the server at its fixed path on every call; no address is
 put in the agent's environment. Connecting, `hello` and the answer share a
@@ -770,7 +801,7 @@ When context needs rendering, the plugin sends `start` or `compact`, then runs
 from checkout files and asks no one; it reuses that block for every model
 request until the next one.
 
-For steers, held or bare, the plugin makes the hook's file comparison in
+For steers on every launch, the plugin makes the hook's file comparison in
 process and starts `lf __context-block --moment steer` only when a marker is
 newer than its last check.
 
@@ -799,9 +830,9 @@ one `recording gap` line to its log (`logs/pi-extension.log` for Pi,
 conversation. The next boundary connects as every boundary does, sends the
 open gap, and logs one line when it is answered. A
 server restart, an upgrade and a stopped server all look like this; the
-conversation needs no relaunch. A bare headless run opens no connection: Pi
+conversation needs no relaunch. A batch opens no connection: Pi
 keeps its context block, steers and bash guard, OpenCode its context block and
-steers, and so does a bare conversation. A launch with no context delivery file has no
+steers, and so does a chat. A launch with no context delivery file has no
 `delivery` to send and opens none either.
 
 A store the server cannot write, or a callback whose conversation the Session
@@ -907,14 +938,14 @@ operation returns in `response.result`.
 | --- | --- |
 | `plan.board` | `tasks` evidence with each Task's `id`, `identifier`, `title`, `section`, `state`, `pr.url` and nullable `waiting_on` actor/reason; `generated_at` |
 | `task.detail` | Task, PR, checks, Graph processes, comments and current Session |
-| `session.card` | Session, liveness, control holder and last line |
+| `session.card` | Session, liveness, occupied terminal and last line |
 
 Use `section` to place a Task in Backlog, Working, Autonomous, Done or
 Abandoned; `state` describes its progress within that grouping. To populate a
 board row's detail, request `task.detail`; for its Session, request `session.card`.
 A card observes the Session: reading it does not resume a provider, attach a
-terminal or claim input control. Its `liveness` is `live`, `dead` or `unknown`;
-`control_holder` is the recorded occupied terminal ID, never an input token.
+terminal or add a view. Its `liveness` is `live`, `dead` or `unknown`;
+`control_holder` is the recorded occupied terminal ID.
 `last_line` is the final nonempty line of the current provider preview, or null
 when there is none; the Session's preview retains its source and observation time.
 
@@ -1152,11 +1183,26 @@ without age-based pruning; an old ID never becomes a new creation because time
 passed or its resource was removed.
 
 Task creation returns `{task, graph, session_id, milestone}` with or without
-`run`. Milestones distinguish filing, admission and confirmed start. If a launch
-was requested but its registration cannot be confirmed, the result is
-`outcome_unknown` with the Task and `run_requested` milestone. Only a launch
-correlated to this creation can settle that outcome; another current Graph is
-insufficient. Recovery never launches again across that uncertainty.
+`run`, plus the primary Session's record (with `open_argv`) and the Task's `row`
+in the Work projection's shape, read after commit, so a client selects the Task
+and opens the conversation without another read. An admitted Task's row is
+already started (Working when claimed). A repeat reads them again; the receipt
+does not store them.
+
+| Milestone | Means | Repeat |
+| --- | --- | --- |
+| `filed` | Task recorded, no `run` | complete |
+| `admitted` | Task, claim, Graph and primary Session recorded in one transaction; the conversation sets the Task up | complete |
+| `run_requested` | `-b` launch requested, unconfirmed | inspect |
+| `started` | `-b` launch recorded | complete |
+
+`admitted` involves no network and no Git beyond resolving the repository and
+the Graph file. Tracker sync and the assignee check run after the answer under
+the request's trace; their failures are Task events. Setup is the Task's, not
+the receipt's: a conversation opening on a Task that took up its Graph and never
+ran it makes the checkout and starts the Graph, and the receipt only answers
+repeats. The held conversation carries `--request-id`, so its setup steps are
+timed under the creation's request.
 
 `session.new` records its stop and new-thread admission against the same request.
 A completed retry returns the current record for the same Session without
@@ -1197,10 +1243,8 @@ Terminal continuation addresses the held terminal, separately from Work
 reads. A view resumes from its PTY byte position, served from the holder's
 2 MiB ring; a server restart does not invalidate the position, and one older
 than the ring falls back to a fresh screen. Uncertain input is never
-replayed. Recovery takes only free claims or those held by the viewer's
-own stale connection; a newer viewer keeps input and geometry. Replacing that
-stale socket cannot let its later close revoke the replacement's claims.
-A stalled bridge cannot block another viewer or Work control traffic.
+replayed. A recovering view attaches beside the others; every view types, and
+the one used most recently sizes the terminal. A stalled bridge cannot block another viewer or Work control traffic.
 
 If the Session has moved to another terminal, attaching to the old one
 returns `not_found` with `terminal_id` and `current_terminal_id`. Attaching by
@@ -1212,8 +1256,8 @@ Desktop reconnects to the same held terminal with bounded backoff. See
 [connection loss](../../../../docs/server.md#keep-editing-through-a-connection-loss)
 for connection status and recovery controls outside terminal bytes.
 
-The Loopflow Session, provider conversation, serving AgentProcess and viewer's
-control claims are distinct. `SessionRecord.transition` reports the latest
+The Loopflow Session, provider conversation, serving AgentProcess and the
+views attached to its terminal are distinct. `SessionRecord.transition` reports the latest
 observed provider change, or null when none is known; `session.history` keeps
 the changes. Reserving a process is not a successful transition.
 

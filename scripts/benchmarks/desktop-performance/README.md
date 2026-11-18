@@ -107,11 +107,17 @@ Missing timestamps leave attribution unavailable. These are busy-turn counts,
 not a scroll frame-drop measurement.
 
 Server creation traces contain `task_creation` and timed `creation_step` spans:
-repository resolution, lock, store open, receipt check, Task filing, primary
-Session preparation, Graph launch and receipt admission. They retain the creation
-request ID and elapsed time, with no request text, title or provider output. New
-Task creation uses the interaction observation ID as its creation request ID, so
-the live journey and server stages can be joined directly.
+repository resolution, lock, store open, receipt check, admission, held
+conversation start and the answer's reads. The conversation logs
+`conversation_setup` spans (`step=checkout|graph`); what follows them in a
+sample is the provider starting. Both keep the creation request ID and elapsed
+time in `<Machine>/logs/lf.log` under the `loopflow::start_timing` tracing
+target, with no request text, title or provider output.
+New Task creation uses the interaction observation ID as its creation request
+ID, so `timings.py` nests the server and setup steps under their Start → typing
+sample (`machine_steps` in `--json`, medians under the sample in text). A remote
+Machine's steps stay in that Machine's log. Start records the Machine kind
+(`local` or `remote`) and the report splits Start → typing by it.
 
 Each record carries the selected repository (Desktop path or phone repository ID)
 so Loopflow, Manabot and Kata stay separate. Session counts describe the cached

@@ -302,7 +302,7 @@ async fn projectless_task_adopts_repository_ownership() {
             let mut foreign = record.item;
             foreign.team_id = Some("foreign-team".into());
             foreign.name = "Foreign update".into();
-            assert!(crate::ops::planning_delivery::ingest_task(
+            assert!(crate::ops::tracker::ingest_task(
                 &fixture.store,
                 &repo,
                 &foreign,
@@ -529,12 +529,6 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
                     .state,
                 crate::store::PlanningState::Available
             );
-            assert!(fixture
-                .store
-                .deleted_task_issues(wave.id())
-                .await
-                .unwrap()
-                .is_empty());
         })
         .await;
 }

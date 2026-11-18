@@ -75,7 +75,7 @@ fn prepare(
     Ok((
         OwnershipFacts {
             person: claimant(Path::new(repo), scope.placement.person_id.clone())?,
-            planning_connected: crate::ops::planning_client::connected(repo),
+            planning_connected: crate::ops::tracker::connected(repo),
             declared_machines: machine_names(store)?,
             local_label: local_label(),
             owning_machine: machine,
@@ -190,7 +190,7 @@ pub(crate) fn promote_task(
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
     destination: Option<&Path>,
-    receipt: Option<&loopflow_storage::sqlite::creation::CreationIdentity>,
+    receipt: Option<&loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> StoreResult<Task> {
     let caller = if session.is_some() {
         super::sessions::session_caller()?
@@ -256,7 +256,7 @@ pub(crate) fn held_planning(
         .map(|(task, (_, repo))| {
             let value = *connected
                 .entry(repo)
-                .or_insert_with(|| crate::ops::planning_client::connected(repo));
+                .or_insert_with(|| crate::ops::tracker::connected(repo));
             (task.clone(), value)
         })
         .collect();
@@ -324,7 +324,7 @@ pub fn task_detail_facts(
 pub(crate) fn apply_linear_observation(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &loopflow_storage::linear_records::LinearIssueObservation,
+    observation: &loopflow_storage::planning::TrackerObservation,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
 ) -> StoreResult<loopflow_storage::work::task::LinearObservationOutcome> {

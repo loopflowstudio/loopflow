@@ -646,86 +646,106 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn only_owner_identity_reaches_shared_operations_on_one_connection() {
-        let tickets = Arc::new(Tickets::default());
-        for (permitted, path, origin) in [
-            (false, "/v1/machine", false),
-            (false, "/v1/ticket", false),
-            (true, "/v1/pair", false),
-            (true, "/v1/machine?token=old", false),
-            (true, "/v1/machine", true),
-        ] {
-            assert!(connect(&tickets, permitted, path, origin).await.is_err());
-        }
-        // A client speaking only a newer revision is refused by name.
-        let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
-        client.send(text(&hello(REVISION + 1))).await.unwrap();
-        let refusal = receive(&mut client).await.unwrap();
-        assert!(
-            matches!(refusal, ServerMessage::Error { id: None, .. }),
-            "{refusal:?}"
+    /// Runs `body` with this test's own `LF_HOME`: the welcome reads the
+    /// Machine's store, which other tests swap under the env lock.
+    fn in_empty_home(body: impl std::future::Future<Output = ()>) {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
+            "LF_HOME",
+            home.path().to_str().unwrap(),
         );
-        assert!(receive(&mut client).await.is_none(), "refusal closes");
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(body);
+    }
 
-        let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
-        client.send(text(&hello(REVISION))).await.unwrap();
-        let ServerMessage::Welcome(welcome) = receive(&mut client).await.unwrap() else {
-            panic!("expected welcome");
-        };
-        assert_eq!(welcome.revision, REVISION.min(REVISION));
-        assert!(welcome.min_revision <= MIN_REVISION);
-        assert_eq!(welcome.instance, "test-instance");
-        // Mobile setup stays on the Machine's private socket; the remote
-        // carrier answers it as an ordinary error and keeps the connection.
-        for (id, operation) in [
-            ("status", ServerOperation::MobileStatus),
-            (
-                "configure",
-                ServerOperation::MobileConfigure {
-                    configuration: None,
-                },
-            ),
-        ] {
-            let operation = Operation::Server(operation);
+    #[test]
+    fn only_owner_identity_reaches_shared_operations_on_one_connection() {
+        in_empty_home(async {
+            let tickets = Arc::new(Tickets::default());
+            for (permitted, path, origin) in [
+                (false, "/v1/machine", false),
+                (false, "/v1/ticket", false),
+                (true, "/v1/pair", false),
+                (true, "/v1/machine?token=old", false),
+                (true, "/v1/machine", true),
+            ] {
+                assert!(connect(&tickets, permitted, path, origin).await.is_err());
+            }
+            // A client speaking only a newer revision is refused by name.
+            let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
+            client.send(text(&hello(REVISION + 1))).await.unwrap();
+            let refusal = receive(&mut client).await.unwrap();
+            assert!(
+                matches!(refusal, ServerMessage::Error { id: None, .. }),
+                "{refusal:?}"
+            );
+            assert!(receive(&mut client).await.is_none(), "refusal closes");
+
+            let mut client = connect(&tickets, true, "/v1/machine", false).await.unwrap();
+            client.send(text(&hello(REVISION))).await.unwrap();
+            let ServerMessage::Welcome(welcome) = receive(&mut client).await.unwrap() else {
+                panic!("expected welcome");
+            };
+            assert_eq!(welcome.revision, REVISION.min(REVISION));
+            assert!(welcome.min_revision <= MIN_REVISION);
+            assert_eq!(welcome.instance, "test-instance");
+            // Mobile setup stays on the Machine's private socket; the remote
+            // carrier answers it as an ordinary error and keeps the connection.
+            for (id, operation) in [
+                ("status", ServerOperation::MobileStatus),
+                (
+                    "configure",
+                    ServerOperation::MobileConfigure {
+                        configuration: None,
+                    },
+                ),
+            ] {
+                let operation = Operation::Server(operation);
+                client
+                    .send(text(&ClientMessage::Request {
+                        select: None,
+                        id: id.into(),
+                        operation,
+                        sender: None,
+                        request_id: None,
+                    }))
+                    .await
+                    .unwrap();
+                let answer = receive(&mut client).await.unwrap();
+                assert!(
+                    matches!(&answer, ServerMessage::Error { id: Some(of), .. } if of == id),
+                    "{answer:?}"
+                );
+            }
+            // A Session without a held terminal is refused without starting a provider.
             client
                 .send(text(&ClientMessage::Request {
                     select: None,
-                    id: id.into(),
-                    operation,
+                    id: "terminal".into(),
+                    operation: Operation::Server(ServerOperation::SessionAttach {
+                        session: loopflow_model::id::LfSessionId::from("session_missing"),
+                        terminal_id: None,
+                    }),
+                    sender: None,
                     request_id: None,
                 }))
                 .await
                 .unwrap();
-            let answer = receive(&mut client).await.unwrap();
-            assert!(
-                matches!(&answer, ServerMessage::Error { id: Some(of), .. } if of == id),
-                "{answer:?}"
-            );
-        }
-        // A Session without a held terminal is refused without starting a provider.
-        client
-            .send(text(&ClientMessage::Request {
-                select: None,
-                id: "terminal".into(),
-                operation: Operation::Server(ServerOperation::SessionAttach {
-                    session: loopflow_model::id::LfSessionId::from("session_missing"),
-                    terminal_id: None,
-                }),
-                request_id: None,
-            }))
-            .await
-            .unwrap();
-        assert!(matches!(
-            receive(&mut client).await.unwrap(),
-            ServerMessage::Error { id: Some(id), .. } if id == "terminal"
-        ));
-        // Binary frames belong to a bridged terminal, never to the control connection.
-        client
-            .send(Message::Binary(b"\x11\x00\x00\x00\x00".to_vec().into()))
-            .await
-            .unwrap();
-        assert!(receive(&mut client).await.is_none(), "connection ends");
+            assert!(matches!(
+                receive(&mut client).await.unwrap(),
+                ServerMessage::Error { id: Some(id), .. } if id == "terminal"
+            ));
+            // Binary frames belong to a bridged terminal, never to the control connection.
+            client
+                .send(Message::Binary(b"\x11\x00\x00\x00\x00".to_vec().into()))
+                .await
+                .unwrap();
+            assert!(receive(&mut client).await.is_none(), "connection ends");
+        });
     }
 
     #[tokio::test]
@@ -790,69 +810,59 @@ mod tests {
 
     #[test]
     fn ticket_endpoint_bridges_one_terminal_and_any_foreign_attempt_spends_it() {
-        let _env = loopflow_test_support::env_lock().lock().unwrap();
-        let home = tempfile::tempdir().unwrap();
-        let _home = loopflow_execution::config::environment::EnvVarGuard::set(
-            "LF_HOME",
-            home.path().to_str().unwrap(),
-        );
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async {
-                let tickets = Arc::new(Tickets::default());
-                let phone = Admission::Remote {
-                    node: "phone".into(),
-                    user: 1,
-                };
-                let held = loopflow_model::id::TerminalId::new();
-                let listener = tokio::net::UnixListener::bind(
-                    loopflow_execution::transport::registry::entrance().unwrap(),
-                )
-                .unwrap();
-                let entrance = tokio::spawn(async move {
-                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-                    let (mut stream, _) = listener.accept().await.unwrap();
-                    while stream.read_u8().await.unwrap() != b'\n' {}
-                    let answer = format!(
-                        "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
-                        loopflow_execution::transport::registry::REVISION
-                    );
-                    stream.write_all(answer.as_bytes()).await.unwrap();
-                    stream
-                });
-                let attach = |ticket: String| text(&ClientMessage::Attach { ticket });
-                let ticket = tickets.issue(phone.clone(), Purpose::Terminal(held.clone()));
-                let mut terminal = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
-                terminal.send(attach(ticket.clone())).await.unwrap();
-                assert!(matches!(
-                    receive(&mut terminal).await.unwrap(),
-                    ServerMessage::Bridged { terminal_id } if terminal_id == held
-                ));
-                let _held = entrance.await.unwrap();
-                // Replay, another node and a local ticket are refused and spent.
-                let laptop = Admission::Remote {
-                    node: "laptop".into(),
-                    user: 1,
-                };
-                let foreign = tickets.issue(laptop.clone(), Purpose::Terminal(held.clone()));
-                let local = tickets.issue(Admission::Local, Purpose::Terminal(held.clone()));
-                for presented in [ticket, foreign.clone(), local.clone()] {
-                    let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
-                    refused.send(attach(presented)).await.unwrap();
-                    assert!(matches!(
-                        receive(&mut refused).await.unwrap(),
-                        ServerMessage::Error {
-                            id: None,
-                            code: ErrorCode::NotFound,
-                            ..
-                        }
-                    ));
-                    assert!(receive(&mut refused).await.is_none());
-                }
-                assert!(tickets.redeem(&foreign, &laptop).is_none());
-                assert!(tickets.redeem(&local, &Admission::Local).is_none());
+        in_empty_home(async {
+            let tickets = Arc::new(Tickets::default());
+            let phone = Admission::Remote {
+                node: "phone".into(),
+                user: 1,
+            };
+            let held = loopflow_model::id::TerminalId::new();
+            let listener = tokio::net::UnixListener::bind(
+                loopflow_execution::transport::registry::entrance().unwrap(),
+            )
+            .unwrap();
+            let entrance = tokio::spawn(async move {
+                use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                let (mut stream, _) = listener.accept().await.unwrap();
+                while stream.read_u8().await.unwrap() != b'\n' {}
+                let answer = format!(
+                    "{{\"answer\":\"hosted\",\"revision\":{}}}\n",
+                    loopflow_execution::transport::registry::REVISION
+                );
+                stream.write_all(answer.as_bytes()).await.unwrap();
+                stream
             });
+            let attach = |ticket: String| text(&ClientMessage::Attach { ticket });
+            let ticket = tickets.issue(phone.clone(), Purpose::Terminal(held.clone()));
+            let mut terminal = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+            terminal.send(attach(ticket.clone())).await.unwrap();
+            assert!(matches!(
+                receive(&mut terminal).await.unwrap(),
+                ServerMessage::Bridged { terminal_id } if terminal_id == held
+            ));
+            let _held = entrance.await.unwrap();
+            // Replay, another node and a local ticket are refused and spent.
+            let laptop = Admission::Remote {
+                node: "laptop".into(),
+                user: 1,
+            };
+            let foreign = tickets.issue(laptop.clone(), Purpose::Terminal(held.clone()));
+            let local = tickets.issue(Admission::Local, Purpose::Terminal(held.clone()));
+            for presented in [ticket, foreign.clone(), local.clone()] {
+                let mut refused = connect(&tickets, true, "/v1/ticket", false).await.unwrap();
+                refused.send(attach(presented)).await.unwrap();
+                assert!(matches!(
+                    receive(&mut refused).await.unwrap(),
+                    ServerMessage::Error {
+                        id: None,
+                        code: ErrorCode::NotFound,
+                        ..
+                    }
+                ));
+                assert!(receive(&mut refused).await.is_none());
+            }
+            assert!(tickets.redeem(&foreign, &laptop).is_none());
+            assert!(tickets.redeem(&local, &Admission::Local).is_none());
+        });
     }
 }

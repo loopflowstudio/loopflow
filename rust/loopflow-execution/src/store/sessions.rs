@@ -219,7 +219,7 @@ pub fn ensure_primary_session(
 
 /// Name the repository holding the Session's cwd. This runs Git, so callers
 /// do it before taking the write lock every other writer waits on.
-fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
+pub(crate) fn discover_session_repo(session: &mut LfSession) -> StoreResult<()> {
     if session.repo.is_none() && session.cwd.is_dir() {
         session.repo = crate::repository::containing(&session.cwd)
             .map_err(|error| super::StoreError::InvalidData(error.to_string()))?
@@ -351,6 +351,7 @@ pub fn project_history_input(
         &saved.session,
         saved.artifact_key.as_deref(),
         &saved.events,
+        &saved.turns,
         saved.names,
     )
     .map_err(|error| super::StoreError::InvalidData(error.to_string()))
@@ -383,7 +384,6 @@ mod tests {
             title: "Conversation".into(),
             title_source: TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         }

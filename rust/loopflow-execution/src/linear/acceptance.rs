@@ -12,8 +12,8 @@ pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
     initiative: String,
-    projects: Vec<crate::linear::LinearProject>,
-    issues: Vec<crate::linear::LinearIssue>,
+    projects: Vec<loopflow_storage::planning::TrackerProject>,
+    issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
     acquisition: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
@@ -27,7 +27,7 @@ pub(crate) async fn reconcile_linear_project_teams(
     store: &Store,
     wave: &WaveId,
     initiative: &str,
-    project: crate::linear::LinearProject,
+    project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
     acquisition: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
@@ -42,8 +42,8 @@ pub(crate) async fn reconcile_linear_project_teams(
 pub(crate) async fn accept_linear_issue(
     store: &Store,
     repo: &str,
-    issue: crate::linear::LinearIssue,
-    project: Option<crate::linear::LinearProject>,
+    issue: loopflow_storage::planning::TrackerItem,
+    project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
     acquisition: Option<Arc<PlanningLocks>>,
@@ -62,6 +62,7 @@ pub(crate) async fn accept_linear_issue(
             confirmed_wave
                 .as_ref()
                 .map(|(wave, initiative)| (wave, initiative.as_str())),
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
     })
     .await
@@ -70,7 +71,7 @@ pub(crate) async fn accept_linear_issue(
 #[cfg(test)]
 mod tests {
     use crate::test_linear_input::SeedLinearSqlite;
-    use rusqlite::{params, Connection};
+    use rusqlite::Connection;
 
     use crate::store::PlanningState;
     use loopflow_model::id::WaveId;
@@ -106,7 +107,13 @@ mod tests {
         issue.project_id = Some("unknown-project".into());
         issue.revision = Some("2026-10-17T01:00:00Z".into());
         loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
-            &store, "/repo", &issue, None, 43, None,
+            &store,
+            "/repo",
+            &issue,
+            None,
+            43,
+            None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(
@@ -142,7 +149,13 @@ mod tests {
         issue.project_id = None;
         issue.revision = Some("2026-10-17T02:00:00Z".into());
         loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
-            &store, "/repo", &issue, None, 44, None,
+            &store,
+            "/repo",
+            &issue,
+            None,
+            44,
+            None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let detached = store.task(&original.id).unwrap().unwrap();
@@ -160,7 +173,6 @@ mod tests {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
         use loopflow_storage::work::project::ProjectId;
         use loopflow_storage::work::task::TaskId;
-        use std::sync::{Arc, Mutex};
 
         let cases = [
             ("", PlanningState::Available),
@@ -174,7 +186,6 @@ mod tests {
             ("UPDATE pm_items SET body=json_remove(body,'$.project_id') WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_projects SET body=json_set(body,'$.team_ids',json('[\"foreign\"]')) WHERE id='project'", PlanningState::Invalid),
             ("INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
-            ("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT id,'issue','TEAM-1',55 FROM waves", PlanningState::Removed),
             ("DELETE FROM pm_items WHERE id='issue'", PlanningState::Unavailable),
             ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
@@ -213,10 +224,8 @@ mod tests {
                 .collect::<Result<_, _>>()
                 .unwrap();
             upgrade_from_migration(&conn, "planning_peers");
-            let store = SqliteStore {
-                token_key: crate::store::token_key::encryption_key,
-                conn: Arc::new(Mutex::new(conn)),
-            };
+            let store =
+                SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
             let saved = store.task(&task).unwrap().unwrap();
             assert_eq!(saved.title, "Saved Task");
             assert_eq!(saved.description, "Saved brief");
@@ -343,8 +352,6 @@ mod tests {
                 [serde_json::to_string(&project.initiative_ids).unwrap()],
             )
             .unwrap();
-            conn.execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,?2,?3,50)",
-                params![wave.id(),item.id,item.identifier]).unwrap();
         }
         validate().unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
@@ -510,6 +517,7 @@ mod tests {
             Some(&project),
             43,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
@@ -525,6 +533,7 @@ mod tests {
             Some(&project),
             44,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap_err()
         .to_string();
@@ -543,6 +552,7 @@ mod tests {
             Some(&project),
             45,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(state(), PlanningState::Available);

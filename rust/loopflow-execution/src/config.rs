@@ -123,9 +123,6 @@ pub fn participant_email(repo: &Path) -> Option<String> {
     (!email.is_empty()).then(|| email.to_lowercase())
 }
 
-/// Agents Loopflow can drive; listing order grants no preference.
-const KNOWN_AGENTS: [&str; 4] = ["codex", "claude", "opencode", "pi"];
-
 /// Claude model families a launch can name with `claude:<family>` and a
 /// scoped Claude limit can name in its `rate_limit_type` suffix.
 pub const CLAUDE_MODEL_FAMILIES: [&str; 4] = ["fable", "opus", "sonnet", "haiku"];
@@ -171,14 +168,17 @@ pub(crate) fn resume_choice(provider: &str, model: Option<&str>, selected: Optio
 /// Select automatically only when exactly one supported harness is installed.
 pub fn default_agent() -> Option<&'static str> {
     #[cfg(test)]
-    let is_installed = |agent: &str| agent == KNOWN_AGENTS[0];
+    let is_installed = |agent: &str| agent == crate::harness::HarnessKind::Codex.as_str();
     #[cfg(not(test))]
     let is_installed = check_cli_available;
     installed_agent(is_installed)
 }
 
 fn installed_agent(is_installed: impl Fn(&str) -> bool) -> Option<&'static str> {
-    let mut installed = KNOWN_AGENTS.into_iter().filter(|agent| is_installed(agent));
+    let mut installed = crate::harness::HarnessKind::ALL
+        .into_iter()
+        .map(crate::harness::HarnessKind::as_str)
+        .filter(|agent| is_installed(agent));
     let only = installed.next()?;
     installed.next().is_none().then_some(only)
 }
@@ -326,10 +326,6 @@ pub enum PlanningConfig {
     Asana {
         team: String,
     },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion {
-        team: String,
-    },
 }
 
 /// Which ref on the planning remote carries this repository's plan.
@@ -379,8 +375,6 @@ enum RawPlanningConfig {
     /// The Asana team's gid or URL. Tasks live in the team project named
     /// after the repository; Wave Projects are Asana projects in the team.
     Asana { team: String },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion { team: String },
 }
 
 impl TryFrom<RawPlanningConfig> for PlanningConfig {
@@ -395,7 +389,6 @@ impl TryFrom<RawPlanningConfig> for PlanningConfig {
             } => (remote, shared, personal),
             RawPlanningConfig::Linear { team } => return Ok(Self::Linear { team }),
             RawPlanningConfig::Asana { team } => return Ok(Self::Asana { team }),
-            RawPlanningConfig::Notion { team } => return Ok(Self::Notion { team }),
         };
         let plan = match (shared, personal) {
             (Some(name), true) => {
@@ -427,7 +420,6 @@ impl From<PlanningConfig> for RawPlanningConfig {
             }
             PlanningConfig::Linear { team } => Self::Linear { team },
             PlanningConfig::Asana { team } => Self::Asana { team },
-            PlanningConfig::Notion { team } => Self::Notion { team },
         }
     }
 }
@@ -443,7 +435,6 @@ impl PlanningConfig {
             Self::Git { .. } => None,
             Self::Linear { .. } => Some("Linear"),
             Self::Asana { .. } => Some("Asana"),
-            Self::Notion { .. } => Some("Notion"),
         }
     }
 }
@@ -518,6 +509,32 @@ impl Config {
             .collect()
     }
 
+    /// Resolve launch choices before provider effects, including configured models.
+    pub fn resolve_agents(&self) -> Result<(Agent, Vec<Agent>), LoadError> {
+        let first = Agent::parse(self.agent()?)?;
+        let mut fallback: Vec<Agent> = self
+            .fallback_agents()
+            .iter()
+            .map(|agent| Agent::parse(agent).map(|agent| agent.with_configured_model(self)))
+            .collect::<Result<_, _>>()?;
+        if fallback.is_empty() && first.model.is_none() {
+            fallback.extend(
+                first
+                    .harness
+                    .harness()
+                    .model_rungs()
+                    .iter()
+                    .map(|model| Agent {
+                        harness: first.harness,
+                        model: Some((*model).to_owned()),
+                    }),
+            );
+        }
+        let first = first.with_configured_model(self);
+        fallback.retain(|agent| agent != &first);
+        Ok((first, fallback))
+    }
+
     /// The agents a headless step may move to when a usage limit refuses its
     /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
     pub fn fallback_agents(&self) -> Vec<String> {
@@ -533,13 +550,51 @@ pub(crate) fn agent_list(value: &str) -> impl Iterator<Item = &str> {
         .filter(|agent| !agent.is_empty())
 }
 
-/// Parse agent string like 'claude:opus' into (harness, model).
-pub fn parse_agent(agent: &str) -> (String, Option<String>) {
-    if let Some((harness, model)) = agent.split_once(':') {
-        return (harness.to_string(), Some(model.to_string()));
+/// A selected harness and its provider model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Agent {
+    pub harness: crate::harness::HarnessKind,
+    pub model: Option<String>,
+}
+
+impl Agent {
+    pub fn parse(value: &str) -> Result<Self, LoadError> {
+        let (name, model) = parse_agent(value);
+        let harness = crate::harness::HarnessKind::parse(&name)
+            .ok_or_else(|| LoadError::InvalidAgent(value.to_owned()))?;
+        Ok(Self { harness, model })
     }
 
-    (agent.to_string(), None)
+    pub fn with_configured_model(mut self, config: &Config) -> Self {
+        if self.harness == crate::harness::HarnessKind::Claude && self.model.is_none() {
+            self.model = config.claude.model.clone();
+        }
+        self
+    }
+}
+
+impl std::fmt::Display for Agent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.harness.as_str())?;
+        if let Some(model) = &self.model {
+            write!(f, ":{model}")?;
+        }
+        Ok(())
+    }
+}
+
+/// Parse agent string like 'claude:opus' into (harness, model). An empty
+/// model (`claude:`) leaves the choice to the provider.
+pub fn parse_agent(agent: &str) -> (String, Option<String>) {
+    match agent.split_once(':') {
+        Some((harness, model)) => (
+            harness.to_string(),
+            Some(model.trim())
+                .filter(|model| !model.is_empty())
+                .map(str::to_string),
+        ),
+        None => (agent.to_string(), None),
+    }
 }
 
 /// Load YAML file, returning None if not present or empty.
@@ -928,6 +983,36 @@ mod tests {
         assert_eq!(installed_agent(|_| false), None);
     }
 
+    #[test]
+    fn resolved_choices_keep_configured_models_and_fallback_order() {
+        let mut config = Config {
+            agent: Some("claude".into()),
+            ..Config::default()
+        };
+        config.claude.model = Some("sonnet".into());
+        let (agent, fallback) = config.resolve_agents().unwrap();
+        assert_eq!(agent.to_string(), "claude:sonnet");
+        assert_eq!(
+            fallback.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["claude:opus", "claude:haiku"]
+        );
+        config.agent = Some("claude:fable".into());
+        assert!(config.resolve_agents().unwrap().1.is_empty());
+        config.agent = None;
+        config.default_agent = Some("codex".into());
+        config.agents = vec!["codex".into(), "claude".into(), "pi:fixture/model".into()];
+        let (_, fallback) = config.resolve_agents().unwrap();
+        assert_eq!(
+            fallback.iter().map(ToString::to_string).collect::<Vec<_>>(),
+            ["claude:sonnet", "pi:fixture/model"]
+        );
+        config.agent = Some("unknown:model".into());
+        assert!(matches!(
+            config.resolve_agents(),
+            Err(LoadError::InvalidAgent(_))
+        ));
+    }
+
     // ==========================================================================
     // parse_agent tests
     // ==========================================================================
@@ -951,6 +1036,12 @@ mod tests {
         for harness in ["claude", "codex", "opencode", "pi"] {
             assert_eq!(parse_agent(harness), (harness.to_string(), None));
         }
+    }
+
+    #[test]
+    fn an_empty_model_defers_to_the_provider() {
+        assert_eq!(parse_agent("claude:"), ("claude".to_string(), None));
+        assert_eq!(Agent::parse("codex: ").unwrap().to_string(), "codex");
     }
 
     #[test]

@@ -224,7 +224,8 @@ pub struct DesktopSessionInspection {
     pub reading: String,
     pub reason: Option<String>,
     pub observed_at: Option<String>,
-    pub actions: Option<Vec<SessionAction>>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub action: Option<SessionAction>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -481,7 +482,7 @@ pub(crate) fn result_schema(path: &[String]) -> Option<schemars::Schema> {
         ["desktop", "query" | "pin" | "unpin"] => {
             Some(schema::<loopflow_storage::work::selection::Dashboard>())
         }
-        ["desktop", "layout"] => Some(schema::<DesktopLayoutRecord<'_>>()),
+        ["desktop", "layout"] => Some(schema::<loopflow_storage::work::selection::Dashboard>()),
         ["desktop", "hide" | "show" | "move" | "resize"] => Some(schema::<DesktopTileOutput<'_>>()),
         ["open"] => Some(schema::<super::open::OpenReport>()),
         ["desktop", "ls"] => Some(schema::<DesktopWindowInspection>()),
@@ -521,7 +522,6 @@ pub struct DesktopOpening {
 pub enum DesktopOpeningStatus {
     Opening,
     Usable,
-    Elsewhere,
     Failed,
 }
 
@@ -531,15 +531,6 @@ pub enum DesktopOpeningStatus {
 enum DesktopViewResult<'a> {
     Plan(&'a loopflow_storage::work::selection::ViewPlan),
     Opening(&'a DesktopOpening),
-}
-
-/// `layout` reads and writes a Work's pane intent or a Dashboard's slot layout.
-#[derive(Debug, Serialize, schemars::JsonSchema)]
-#[serde(untagged)]
-pub(crate) enum DesktopLayoutRecord<'a> {
-    Work(&'a Option<loopflow_storage::work::selection::WorkPaneLayout>),
-    /// Its `slots`; null is the default layout.
-    Dashboard(&'a loopflow_storage::work::selection::Dashboard),
 }
 
 fn open_url(mut url: reqwest::Url, json: bool) -> Result<()> {
@@ -730,6 +721,7 @@ pub(crate) fn subscribe_plans(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let result = store
@@ -756,6 +748,7 @@ pub(crate) fn subscribe_view_plan(
         loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let result = store
@@ -815,6 +808,7 @@ pub(crate) fn subscribe_all_view_plans(
         expression: Option<String>,
     }
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         Arguments { expression },
         |store, args| async move {
             let store = loopflow_execution::read_stream::require_store(store)?;
@@ -857,30 +851,17 @@ fn view_plan(
 ) -> Result<()> {
     if !passive && expression.is_none() {
         require_supported()?;
-        // Default Work displays its arrangement, like `lf workspace`.
-        return super::open::run_workspace(
-            cli,
-            &super::open::WorkspaceArgs {
-                selection: super::open::OpenSelection {
-                    url: None,
-                    host: super::open::OpenHost::Desktop,
-                    session: None,
-                    diff: false,
-                    link: false,
-                    format: None,
-                    json,
-                    server: None,
-                },
-                available: false,
-                no_focus: false,
-                follow: None,
-                seen: Vec::new(),
-                local_workspace: false,
-                arrive_task: Vec::new(),
-                into: None,
-                remote: Vec::new(),
-            },
-        );
+        // Default Work displays its arrangement, like `lf open --workspace`.
+        let args = super::open::OpenArgs::overview(super::open::OpenSelection {
+            url: None,
+            host: super::open::OpenHost::Desktop,
+            session: None,
+            link: false,
+            format: None,
+            json,
+            server: None,
+        });
+        return super::open::run_workspace(cli, &args);
     }
     // Explicit Work context selects the same default model without preparing a checkout.
     let plan = if expression.is_none() && (cli.task.is_some() || cli.wave.is_some()) {
@@ -964,31 +945,32 @@ fn work_key(
     })
 }
 
-/// `lf desktop layout <work>`: the saved pane intent of a Work, or a
-/// Dashboard's slot layout, in `selected` or the repository containing `directory`.
+/// `lf desktop layout query:<id>`: a Dashboard's slot layout (its `slots`; null
+/// is the default), in `selected` or the repository containing `directory`.
+/// Desktop keeps each Work's pane layout itself.
 pub fn saved_layout(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,
     work: &str,
 ) -> Result<serde_json::Value> {
     use loopflow_storage::work::selection::DashboardId;
+    let Some(id) = work.strip_prefix("query:") else {
+        bail!(
+            "`lf desktop layout` reads a Dashboard (query:<id>); Desktop keeps each Work's panes"
+        );
+    };
     let reader = loopflow_execution::store::read_existing_registry()?
         .ok_or(loopflow_execution::store::StoreError::NotFound)
         .context("Work registry is unavailable")?;
     let repository = repository_in(selected, directory, &reader.sqlite)?;
-    Ok(match work.strip_prefix("query:") {
-        Some(id) => serde_json::to_value(DesktopLayoutRecord::Dashboard(
-            &selections::read_dashboard(&reader.sqlite, &repository, &DashboardId(id.into()))?
-                .ok_or(loopflow_execution::store::StoreError::NotFound)?
-                .saved,
-        ))?,
-        None => serde_json::to_value(DesktopLayoutRecord::Work(
-            &reader.sqlite.pane_layout(&work_key(&repository, work)?)?,
-        ))?,
-    })
+    Ok(serde_json::to_value(
+        &selections::read_dashboard(&reader.sqlite, &repository, &DashboardId(id.into()))?
+            .ok_or(loopflow_execution::store::StoreError::NotFound)?
+            .saved,
+    )?)
 }
 
-/// `lf desktop dashboard <verb>` and `lf desktop layout --save`: save the
+/// `lf desktop dashboard <verb>`: save the
 /// arrangement in `selected` or the repository containing `directory`,
 /// reading a layout or slots from `input`, and return what the command
 /// prints. Renaming a Task is a Work change; the rest are arrangement and
@@ -1056,9 +1038,6 @@ pub fn save_arrangement(
         }
         DesktopCommand::Dashboard { cmd } => Ok(serde_json::to_value(save_dashboard(
             selected, directory, cmd, input,
-        )?)?),
-        DesktopCommand::Layout { work, save: true } => Ok(serde_json::to_value(save_layout(
-            selected, directory, work, input,
         )?)?),
         _ => bail!("not a saved arrangement"),
     }
@@ -1147,31 +1126,6 @@ pub(crate) fn save_dashboard(
         ),
         _ => bail!("not a Dashboard edit"),
     }?)
-}
-
-pub(crate) fn save_layout(
-    selected: Option<&loopflow_model::durable::RepositoryId>,
-    directory: &std::path::Path,
-    work: &str,
-    input: &mut dyn std::io::Read,
-) -> Result<loopflow_storage::work::selection::WorkPaneLayout> {
-    use loopflow_storage::work::selection::WorkPaneLayout;
-    if work.starts_with("query:") {
-        bail!("a Dashboard's slots are saved with `lf desktop dashboard slots {work} --revision <revision>`");
-    }
-    let reader = loopflow_execution::store::read_existing_registry()?
-        .ok_or(loopflow_execution::store::StoreError::NotFound)
-        .context("Work registry is unavailable")?;
-    let repository = repository_in(selected, directory, &reader.sqlite)?;
-    drop(reader);
-    let store = loopflow_execution::store::open_sqlite(
-        &loopflow_execution::store::database_path_from_env()?,
-    )?;
-    let layout: WorkPaneLayout = serde_json::from_reader(&mut *input)?;
-    if layout.work != work_key(&repository, work)? {
-        bail!("layout belongs to different Work");
-    }
-    store.save_pane_layout(&layout).map_err(Into::into)
 }
 
 pub fn run(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result<()> {
@@ -1352,9 +1306,7 @@ fn dispatch(cli: &crate::lf::Cli, command: &crate::lf::DesktopCommand) -> Result
         DesktopCommand::Shell { .. } => {
             unreachable!("shell runtime dispatch precedes Desktop control")
         }
-        DesktopCommand::Layout {
-            work, save: false, ..
-        } => {
+        DesktopCommand::Layout { work } => {
             let record = saved_layout(cli.repository.as_ref(), &std::env::current_dir()?, work)?;
             println!("{record}");
             return Ok(());
@@ -3322,13 +3274,8 @@ impl DesktopInspection {
                     "    Observed: {}",
                     session.observed_at.as_deref().unwrap_or("unavailable")
                 ));
-                for action in session.actions.iter().flatten() {
-                    lines.push(format!(
-                        "    {}: {} · {}",
-                        action.label,
-                        action.unavailable_reason.as_deref().unwrap_or("available"),
-                        action.help
-                    ));
+                if let Some(action) = &session.action {
+                    lines.push(format!("    {}: {}", action.label, action.help));
                 }
             }
             if !window.view_parts.is_empty() {
@@ -3558,9 +3505,7 @@ pub(super) fn is_saved_mutation(command: &crate::lf::DesktopCommand) -> bool {
     use crate::lf::DesktopCommand;
     matches!(
         command,
-        DesktopCommand::Dashboard { .. }
-            | DesktopCommand::Portfolio { .. }
-            | DesktopCommand::Layout { save: true, .. }
+        DesktopCommand::Dashboard { .. } | DesktopCommand::Portfolio { .. }
     )
 }
 
@@ -3611,7 +3556,6 @@ mod tests {
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
             DesktopOpeningStatus::Failed,
-            DesktopOpeningStatus::Elsewhere,
         ] {
             let mut reading: DesktopInspection = serde_json::from_str(include_str!(
                 "../../../../../tests/fixtures/dto/desktop_inspection.json"

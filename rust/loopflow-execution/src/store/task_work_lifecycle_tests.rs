@@ -359,7 +359,8 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         }
         // Binding includes earlier Processes in the inventory without assigning
         // their earlier performed work or usage to this Task.
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
+        store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
         conn.execute(
             "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
             params![mechanical, sibling],
@@ -408,15 +409,18 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
             params![unfinished, TraceId::new()],
         )
         .unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','open',?1,1,'{}')", [&unfinished]).unwrap();
+        store.execute_history(
+"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','open',?1,1,'{}')", [&unfinished]).unwrap();
     }
+    // Task state reads only `loopflow.db`: a Process history alone names is
+    // not one of its open Processes.
     let open = store.task_open_processes(&task).unwrap();
-    assert_eq!(open.len(), 3);
-    assert!(open
+    assert_eq!(open.len(), 2);
+    assert!(!open
         .iter()
         .any(|process| process.id() == unfinished.as_str()));
-    // With every Process unfinished, each membership path agrees: checkout,
-    // Session event and attachment.
+    // With every Process unfinished, each membership path in state agrees:
+    // checkout, Session event and attachment.
     store
         .conn
         .lock()
@@ -436,7 +440,12 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         .unwrap()
         .processes);
     assert_eq!(all.len(), 5);
-    assert_eq!(ids(store.task_open_processes(&task).unwrap()), all);
+    let in_state: Vec<_> = all
+        .iter()
+        .filter(|id| ![unfinished.as_str(), bound_process.as_str()].contains(&id.as_str()))
+        .cloned()
+        .collect();
+    assert_eq!(ids(store.task_open_processes(&task).unwrap()), in_state);
     store.conn.lock().unwrap().execute_batch(
         "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
          DROP TABLE finished;",
@@ -444,7 +453,8 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     .unwrap();
     {
         let conn = store.conn.lock().unwrap();
-        conn.execute("DELETE FROM session_events WHERE receipt_key='open'", [])
+        store
+            .execute_history("DELETE FROM session_history WHERE receipt_key='open'", [])
             .unwrap();
         conn.execute("DELETE FROM processes WHERE id=?1", [&unfinished])
             .unwrap();
@@ -574,10 +584,8 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     // A Session that later names a taskless Graph does not make it the
     // Task's: the Graph's Task is what its launch recorded.
     let taskless = store.test_graph("taskless", "/elsewhere", &[], None);
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload) VALUES('history','started','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
-    }
+    store.execute_history(
+        "INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','taskless-graph',?1,3,'{}')", [&taskless]).unwrap();
     assert_eq!(graph_ids(&task), enclosing);
     let (_, entry) = store.graph_process(taskless.as_str()).unwrap().unwrap();
     assert_eq!(entry.summary.task_id, None);

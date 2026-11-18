@@ -264,6 +264,7 @@ plan, code and memory and keeps open findings with the work.
 - One migration per Task: `uv run python scripts/new_migration.py <name>` creates `migrations/<name>.sql` or prints the branch's existing one.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
+- When code stops using a table or column, mark it in that Task's migration (`-- leaving: <table>[.<column>] <Task ID>`); the drop date counts from that merge, and `scripts/due_removals.py` lists what is due. `rust/loopflow-storage/SCHEMA.md` maps every table to its concept and shows what is leaving.
 - Test the merged frontier against the finished migration, not the steps between.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
@@ -320,7 +321,7 @@ them.
   Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
   `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
-- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
+- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/work/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
 - After moving fixtures between crates, run one application launch/resume test and
   one moved fixture. Compilation misses runtime script paths and child initializer
@@ -339,7 +340,13 @@ them.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only in execution's `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
-- A headless fixture that expects turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, a steer check that reads the store (`LF_BARE_STEER`), no turn hooks, no server. A managed interactive launch, held by the server, keeps every hook; a bare one has the same hooks as `-b`, at a terminal or held in a Desktop pane.
+- A fixture expecting turn hooks or `LF_PROVIDER_CONTEXT` launches a Task Graph
+  worker or resumes a work session, with a `MachineServer` for its home.
+  Direct `lf <skill>` and `lf graph <name>` launches are chats or batches, including with
+  `--task` or `LF_AS`: context hooks, `LF_BARE_STEER` reads the store, no turn
+  reports or required server. The [four launch names](docs/glossary.md#loopflows-words)
+  are work session, worker, chat and batch. The launch matrix covers all four
+  harnesses in each cell.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

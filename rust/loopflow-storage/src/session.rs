@@ -13,6 +13,57 @@ pub struct SessionTurnOrigin {
     pub captured_event: Option<i64>,
     pub task_id: Option<String>,
     pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub provider: Option<String>,
+    /// The Graph and step the input was dispatched for.
+    pub graph: Option<String>,
+    pub step: Option<String>,
+}
+
+/// One provider turn as `history.turns` keeps it: inserted when it starts,
+/// completed in place when it ends. Its grouping is what it was dispatched
+/// for; a bind made while it ran does not move it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Turn {
+    pub id: i64,
+    pub session_id: LfSessionId,
+    pub thread: AgentSessionId,
+    pub turn: String,
+    pub captured_event: Option<i64>,
+    pub lf_process_id: Option<String>,
+    pub agent_process_id: Option<String>,
+    pub task_id: Option<String>,
+    pub wave_id: Option<String>,
+    pub project_id: Option<String>,
+    pub repository: Option<String>,
+    pub skill: Option<String>,
+    pub graph: Option<String>,
+    pub step: Option<String>,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    /// How the provider says it ended: `completed`, `failed`, `interrupted`.
+    pub status: Option<String>,
+    pub duration_ms: Option<i64>,
+    /// The provider's error or errors, as it reported them.
+    pub error: Option<serde_json::Value>,
+    pub provider: Option<String>,
+    pub usage: Option<RecordedUsage>,
+    pub context: Option<TurnContext>,
+}
+
+/// One turn's tokens, resolved from its provider's reading before they are
+/// kept: a sum over turns needs no counter logic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RecordedUsage {
+    pub observed_at: i64,
+    /// The provider marked the reading as its last for the turn.
+    #[serde(rename = "final")]
+    pub final_reading: bool,
+    /// Counted from the first report seen, not from the turn's start.
+    pub partial: bool,
+    pub usage: loopflow_model::chat::types::TurnUsage,
 }
 
 /// Immutable native evidence. Missing start, attribution or usage stays missing.
@@ -36,13 +87,9 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SessionEventKind {
+    /// An input, kept in the store as Session state.
     Captured,
-    Started,
-    Usage,
-    Completed,
-    /// Final provider output for an exact native turn; completion is separate.
-    Output,
-    /// Evidence without an exact native turn; cannot settle a Graph.
+    /// Session history; provider turns are in `history.turns`.
     Observed,
 }
 
@@ -61,10 +108,6 @@ impl SessionEventKind {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Captured => "captured",
-            Self::Started => "started",
-            Self::Usage => "usage",
-            Self::Completed => "completed",
-            Self::Output => "output",
             Self::Observed => "observed",
         }
     }
@@ -100,7 +143,6 @@ pub struct LfSession {
     pub title_source: TitleSource,
     /// Retained request context from historical conversations.
     pub request: Option<String>,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub created_at: i64,
 }
@@ -236,50 +278,6 @@ pub enum WorkSource {
     Bound,
 }
 
-impl WorkSource {
-    /// A launch is managed when a Task or Wave command named its Work (a
-    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
-    /// `lf` in a Task's checkout, or a child run a Session's agent started,
-    /// only counts toward the Task. What each kind gets is in
-    /// `server/README.md` ("Turn and tool boundaries").
-    pub fn is_managed(self) -> bool {
-        matches!(self, Self::Declared | Self::Bound)
-    }
-}
-
-/// Who holds a launch's provider process. It decides the launch's hooks,
-/// whether it needs the Machine server and whether it takes steers, and is
-/// decided once, where the launch is configured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Holder {
-    /// A bare launch: the terminal it runs in, or the caller waiting on a
-    /// headless run. It behaves as the harness alone would, with no server:
-    /// two context hooks, and a steer check that reads the store itself.
-    #[default]
-    Caller,
-    /// Task, Wave or repository work: every hook and steers, beside a
-    /// Machine server that must be up before the agent starts.
-    Server,
-}
-
-impl Holder {
-    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
-    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
-    pub fn of(work: bool) -> Self {
-        if work {
-            Self::Server
-        } else {
-            Self::Caller
-        }
-    }
-
-    /// Whether the provider reports its turn boundaries to the Machine server.
-    pub fn reports_turns(self) -> bool {
-        self != Self::Caller
-    }
-}
-
-/// Which scopes' current primary conversations to list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SessionPrimary {
     All,
@@ -368,7 +366,6 @@ pub struct SessionSummary {
     pub has_provider_history: bool,
     pub title: String,
     pub title_source: TitleSource,
-    pub ready_summary: Option<String>,
     pub completed_at: Option<i64>,
     pub interactive: bool,
     pub task_id: Option<TaskId>,

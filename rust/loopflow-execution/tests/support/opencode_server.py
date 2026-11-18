@@ -4,6 +4,7 @@
 import json
 import os
 import queue
+import sqlite3
 import subprocess
 import sys
 import threading
@@ -14,6 +15,7 @@ from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
+SERVER_CONFIG = HOME / "native-opencode-config.json"
 LOCATIONS = HOME / "native-locations.json"
 EVENTS = queue.Queue()
 REPLIES = {}
@@ -22,6 +24,34 @@ LOCK = threading.Lock()
 
 def _save(sessions):
     SESSIONS.write_text(json.dumps(sessions))
+    _store(sessions)
+
+
+def _store(sessions):
+    """OpenCode's own store, where lf reads a conversation's answers."""
+    data = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    home = Path(data) / "opencode"
+    home.mkdir(parents=True, exist_ok=True)
+    now = int(time.time() * 1000)
+    with sqlite3.connect(home / "opencode.db") as store:
+        store.executescript(
+            "CREATE TABLE IF NOT EXISTS session_v2(id TEXT PRIMARY KEY, directory TEXT, time_updated INTEGER);"
+            "CREATE TABLE IF NOT EXISTS session_message(id TEXT PRIMARY KEY, session_id TEXT,"
+            " type TEXT, seq INTEGER, time_created INTEGER, time_updated INTEGER, data TEXT);"
+        )
+        for session, messages in sessions.items():
+            store.execute(
+                "INSERT OR REPLACE INTO session_v2 VALUES(?, ?, ?)",
+                (session, locations.get(session), now),
+            )
+            store.execute("DELETE FROM session_message WHERE session_id=?", (session,))
+            for seq, message in enumerate(messages):
+                data = {k: v for k, v in message.items() if k not in ("id", "type")}
+                created = message.get("time", {}).get("created", now)
+                store.execute(
+                    "INSERT INTO session_message VALUES(?, ?, ?, ?, ?, ?, ?)",
+                    (message["id"], session, message["type"], seq, created, now, json.dumps(data)),
+                )
 
 
 def _event(kind, **properties):
@@ -36,20 +66,20 @@ def _record_launch():
         Path(evidence + ".caller").write_text(os.environ["LF_AGENT_CALLER"])
         Path(evidence + ".args").write_text("\n".join(sys.argv[1:]))
     config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
-    if "serve" not in sys.argv:
-        (HOME / "received.json").write_text(
-            json.dumps(
-                {
-                    "args": sys.argv[1:],
-                    "cwd": os.getcwd(),
-                    "participant": os.environ.get("LF_USER_NAME"),
-                    "opencode": json.dumps(config),
-                    "model": json.loads((HOME / "native-model.json").read_text())
-                    if (HOME / "native-model.json").exists()
-                    else None,
-                }
-            )
+    (HOME / "received.json").write_text(
+        json.dumps(
+            {
+                "args": sys.argv[1:],
+                "cwd": os.getcwd(),
+                "participant": os.environ.get("LF_USER_NAME"),
+                "opencode": json.dumps(config),
+                "server": json.loads(SERVER_CONFIG.read_text()),
+                "model": json.loads((HOME / "native-model.json").read_text())
+                if (HOME / "native-model.json").exists()
+                else None,
+            }
         )
+    )
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
     with (HOME / "declarations").open("a") as output:
@@ -317,6 +347,7 @@ if "serve" not in sys.argv:
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
+SERVER_CONFIG.write_text(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
 locations = json.loads(LOCATIONS.read_text()) if LOCATIONS.exists() else {}
 server = ThreadingHTTPServer(("127.0.0.1", 0), Server)

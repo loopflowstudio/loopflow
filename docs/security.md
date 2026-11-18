@@ -121,9 +121,10 @@ Do not name a broad Doppler credential when a scoped service token is sufficient
 ## Keep client access separate from Machine logins
 
 The local Loopflow server accepts the same OS user through a private Unix socket.
-It exposes existing Work operations and bridges views of held terminals; the
-server still grants input control. A connection or reconnect does not give a viewer the
-right to replace another viewer's claim.
+It exposes existing Work operations and bridges views of held terminals. Any
+connection the server admits to a held terminal can type into it: access is
+granted per person and Machine, not per view, and there are no input claims to
+take or hold.
 
 Do not expose this socket through a network proxy: the proxy's local identity
 cannot authenticate a remote client. Authenticated phone access is separate

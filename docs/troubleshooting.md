@@ -13,7 +13,7 @@ lf resume                       # return to this scope’s conversation
 
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
-| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
+| Conversations, interactive and headless | `~/.lf/loopflow.db`, `~/.lf/history.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
 | A Task's work session and run | Started again by the server unless you quit or stopped them | `lf task status <ID>` |
 | A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
@@ -80,8 +80,9 @@ The surviving conversation keeps its draft and pending requests, and the selecte
 pane regains focus when input is ready. Switching Tasks is unnecessary.
 
 While **Opening… Input paused** or **Reconnecting…** appears, the screen may be
-readable before typing is available. If another view has control, choose
-**Take back** only when you want to move input here; Refresh does not take it.
+readable before typing is available. Other views of the conversation never
+block typing here: every view types. A provider running in a client lf cannot
+share is taken over when the pane opens; that client ends.
 If the provider has ended, use the offered resume action to continue its history.
 Refresh never repeats a submitted message or restarts the Task's Graph.
 
@@ -106,8 +107,6 @@ open; its screen and local reading actions remain available. If automatic retrie
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
 running and restores its status automatically when that channel returns.
-A read-only pane's **Move here** requests control explicitly; a lost connection
-alone never takes it from another viewer.
 
 If the diagnosis reports disabled background access, enable Loopflow in macOS
 System Settings, or enable its user service on Linux. Retry and status do not
@@ -203,9 +202,24 @@ lf server receipt REQUEST_ID --json  # read the recorded creation; starts nothin
 lf task status TASK_ID --json        # inspect any Task the receipt identifies
 ```
 
-A `run_requested` receipt means launch is unconfirmed. Inspect the Task's Graphs
-and processes before starting anything; a lost answer does not establish a failed
-launch. See [creation recovery](server.md#recover-a-submitted-creation).
+An `admitted` or `started` receipt is complete: the Task exists, and an
+`admitted` Task's conversation sets it up. Open it with
+`lf resume --task TASK_ID`; while the Task's Graph has never run, opening runs
+setup again. A `run_requested` receipt means a `-b` launch is unconfirmed. Inspect the Task's Graphs and processes before starting
+anything; a lost answer does not establish a failed launch. See
+[creation recovery](server.md#recover-a-submitted-creation).
+
+## Setup failed in a new Task's conversation
+
+The conversation prints the step and its error, for example a `git worktree add`
+failure, and the Task's position reads `Setup stopped: checkout failed: …` in
+`lf task status` and Desktop. Fix the cause and reopen it:
+
+```bash
+lf resume --task TASK_ID   # runs setup again
+```
+
+The agent starts once the checkout exists, even if the Graph step failed.
 
 ## A launch reports `outcome_unknown`
 
@@ -332,13 +346,15 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
+lf machine prune                   # only lf's records: expired history, then vacuum
+ls -la ~/.lf/loopflow.db ~/.lf/history.db   # state stays small
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
 holds and nothing wrote for 4 hours. It removes nothing under `~/.lf`: the
-database, its pre-migration clones (lf's own, see
+databases, its pre-migration clones (lf's own, see
 `rust/loopflow-storage/src/MIGRATIONS.md`), captures, logs and account homes stay.
 Anything a process holds open is never removed; when `lsof` fails, neither is
 anything else that check protects.
@@ -348,6 +364,12 @@ what it kept and why, and worktrees still holding unpushed work; it deletes
 nothing itself. Edit `scripts/disk-cleanup.sh` or
 `.lf/skills/disk-cleanup.md` to change the policy. Provider transcripts follow
 each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
+
+`history.db` grows with use. The Machine server keeps 90 days of Session
+history, pruning every hour; turns are kept. `lf doctor` reports the file's
+size and oldest rows, and warns when history is past retention. Deleting it
+while nothing runs loses only past history and usage: Tasks, conversations,
+Graph routing and `lf resume` read `loopflow.db`.
 
 ## Stale worktrees and branches
 

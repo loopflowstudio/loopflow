@@ -342,24 +342,28 @@ pub fn worktree_dir(repo: &Path, id: &WorktreeName) -> PathBuf {
 
 fn dir_for_component(repo: &Path, component: &str) -> PathBuf {
     let repo_root = main_repo_root(repo).unwrap_or_else(|_| repo.to_path_buf());
-    if let Some(path) = inferred_worktree_dir(&repo_root, component) {
+    let worktrees = list_porcelain(&repo_root).unwrap_or_default();
+    placement_dir(&repo_root, &worktrees, component)
+}
+
+fn placement_dir(main: &Path, worktrees: &[(PathBuf, Option<String>)], component: &str) -> PathBuf {
+    if let Some(path) = inferred_worktree_dir(main, worktrees, component) {
         return path;
     }
-    let repo_name = repo_root
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("repo");
-    repo_root
-        .parent()
-        .unwrap_or(repo_root.as_path())
+    let repo_name = main.file_name().and_then(|n| n.to_str()).unwrap_or("repo");
+    main.parent()
+        .unwrap_or(main)
         .join(format!("{repo_name}.{component}"))
 }
 
-fn inferred_worktree_dir(repo: &Path, component: &str) -> Option<PathBuf> {
-    let worktrees = list_porcelain(repo).ok()?;
+fn inferred_worktree_dir(
+    repo: &Path,
+    worktrees: &[(PathBuf, Option<String>)],
+    component: &str,
+) -> Option<PathBuf> {
     let mut directory = None;
     let mut examples = 0;
-    for (path, branch) in &worktrees {
+    for (path, branch) in worktrees {
         if path == repo || !path.is_dir() {
             continue;
         }
@@ -494,8 +498,117 @@ pub(crate) fn list_porcelain(repo: &Path) -> Result<Vec<(PathBuf, Option<String>
     if let Some(path) = current_path.take() {
         items.push((path, current_branch.take()));
     }
+    // Git lists the main checkout first. The ready checkout belongs to no
+    // Task, so no listing, placement or cleanup sees it.
+    if let Some((main, _)) = items.first().cloned() {
+        let ready = placement_dir(&main, &items, READY);
+        items.retain(|(path, branch)| branch.is_some() || *path != ready);
+    }
 
     Ok(items)
+}
+
+// ---- Ready checkout ----
+
+const READY: &str = "ready";
+
+/// The repository's ready checkout: a detached worktree beside its Task
+/// checkouts at `origin/<default>` as of the last fetch, which a new Task's
+/// branch takes instead of `git worktree add`.
+pub fn ready_checkout(repo: &Path) -> PathBuf {
+    dir_for_component(repo, READY)
+}
+
+/// Move the ready checkout to `destination` on a new `branch` at `base`, and
+/// start making the next; the cost is the diff since it was made. False when
+/// there is none to take, or it is still being made, leaving `destination`
+/// absent.
+pub(crate) fn take_ready_checkout(
+    main: &Path,
+    destination: &Path,
+    branch: &str,
+    base: &str,
+) -> bool {
+    let ready = ready_checkout(main);
+    if !ready.join(".git").is_file() {
+        return false;
+    }
+    // A single --force replaces a stale registration at the destination; Git
+    // still refuses a checkout locked while `worktree add` makes it.
+    let moved = Command::new("git")
+        .arg("-C")
+        .arg(main)
+        .args(["worktree", "move", "--force"])
+        .arg(&ready)
+        .arg(destination)
+        .output();
+    if !moved.as_ref().is_ok_and(|output| output.status.success()) {
+        tracing::warn!(ready = %ready.display(), output = ?moved, "ready checkout was not taken");
+        return false;
+    }
+    let switched = Command::new("git")
+        .arg("-C")
+        .arg(destination)
+        .args(["switch", "--quiet", "--no-track", "-c", branch, base])
+        .output();
+    if switched
+        .as_ref()
+        .is_ok_and(|output| output.status.success())
+    {
+        prepare_ready_checkout(main);
+        return true;
+    }
+    tracing::warn!(%branch, output = ?switched, "ready checkout did not switch to the Task's branch");
+    let _ = Command::new("git")
+        .arg("-C")
+        .arg(main)
+        .args(["worktree", "remove", "--force"])
+        .arg(destination)
+        .output();
+    false
+}
+
+/// Start making the ready checkout unless one exists, in its own session so it
+/// outlives this process, from `origin/<default>` as the last fetch left it.
+/// `--force` replaces the registration a hand-deleted one leaves behind.
+pub fn prepare_ready_checkout(main: &Path) {
+    let ready = ready_checkout(main);
+    if ready.symlink_metadata().is_ok() {
+        return;
+    }
+    let base = match crate::git::integration_base(main) {
+        Ok(base) => base,
+        Err(error) => {
+            tracing::warn!(%error, "no base for the ready checkout");
+            return;
+        }
+    };
+    let mut command = Command::new("/bin/sh");
+    command
+        .args([
+            "-c",
+            r#"git -C "$1" worktree add --quiet --force --detach "$2" "$3" >/dev/null 2>&1 &"#,
+            "sh",
+        ])
+        .arg(main)
+        .arg(&ready)
+        .arg(&base)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // SAFETY: setsid is async-signal-safe and runs between fork and exec.
+    unsafe {
+        std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+            if libc::setsid() < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    // The shell exits once Git is started; Git is nobody's child here.
+    if let Err(error) = command.status() {
+        tracing::warn!(%error, "ready checkout was not started");
+    }
 }
 
 /// Parse GitHub owner/repo from the origin remote URL.

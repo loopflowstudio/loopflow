@@ -5,7 +5,7 @@ use loopflow_storage::migration_runner::migration_section_sql;
 use loopflow_storage::planning_exchange::PlanningMutation;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 fn local_repository(store: &SqliteStore) -> RepositoryId {
     let repo = store.home_dir().unwrap();
@@ -643,7 +643,15 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         )
         .unwrap();
     assert_eq!(edited.title, "A mapping does not transfer authority");
-    store.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'different-provider-uuid','TEAM-9',1)", [&mapped.wave_id]).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+            [mapped.id.as_str()],
+        )
+        .unwrap();
     assert!(store.task_deleted(&mapped).unwrap());
     assert!(store.list_tasks(None).unwrap().is_empty());
     let retained = store.task(&mapped.id).unwrap().unwrap();
@@ -718,9 +726,8 @@ fn local_planning_prefix_collision_is_explicit() {
 }
 
 #[test]
-fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
+fn local_planning_migration_preserves_released_links() {
     use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
-    use std::sync::{Arc, Mutex};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "local_planning");
@@ -840,10 +847,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
             |row| row.get(0),
         )
         .unwrap();
-    let store = SqliteStore {
-        token_key: crate::store::token_key::encryption_key,
-        conn: Arc::new(Mutex::new(conn)),
-    };
+    let store = SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(
             &store.conn.lock().unwrap(),
@@ -898,9 +902,79 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     let project = store.project(&project).unwrap().unwrap();
     assert_eq!(project.linear_id.unwrap().as_str(), "linear-project");
     assert_eq!(project.description, "Retain KRs");
-    assert_eq!(
-            store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),
-            Some(("orphan-issue".into(), "LOO-2".into()))
-        );
     assert!(store.task_by_issue("LOO-2").unwrap().is_none());
+}
+
+#[test]
+fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
+    use loopflow_storage::sqlite::creation::{
+        CreationIdentity, RecoveryDisposition, TaskAdmission, TaskCreationRecord,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+    let repository_id = local_repository(&store);
+    let admit = |request: &str, graph: &str| {
+        let creation = NewTask {
+            repository_id: repository_id.clone(),
+            due_date: None,
+            id: TaskId::new(),
+            project_id: None,
+            title: "Start in the conversation".into(),
+            description: "Start in the conversation".into(),
+        };
+        let mut session = loopflow_storage::test_fixture::unpublished_conversation(
+            Some(creation.id.clone()),
+            None,
+            1,
+        );
+        session.interactive = true;
+        let record = TaskCreationRecord {
+            identity: CreationIdentity {
+                request_id: request.into(),
+                kind: "task.create",
+                fingerprint: "f".into(),
+                run: true,
+            },
+            admission: Some(TaskAdmission {
+                graph: Some(graph.into()),
+                session: session.clone(),
+                caller: None,
+            }),
+        };
+        let result = crate::store::ownership::promote_task(
+            &store,
+            &creation.id,
+            Some(&creation),
+            None,
+            None,
+            None,
+            Some(&record),
+        );
+        (creation.id, session, result)
+    };
+
+    // A write failing inside admission leaves nothing: no Task without its
+    // Graph or conversation, and no receipt to answer a repeat with.
+    let (failed, _, result) = admit("broken", "not json");
+    assert!(result.is_err());
+    assert!(store.task(&failed).unwrap().is_none());
+    assert!(store.creation_receipt("broken").unwrap().is_none());
+
+    let (task, session, result) = admit("req", r#"{"name":"code","steps":[]}"#);
+    result.unwrap();
+    // One reading holds all of it.
+    assert_eq!(
+        store.task_graph_row(&task).unwrap().unwrap().step,
+        loopflow_storage::sqlite::task_work::START
+    );
+    assert!(store.task_claimed_here(&task).unwrap());
+    assert_eq!(store.task_primary(&task).unwrap().unwrap().id, session.id);
+    let admitted = store.creation_receipt("req").unwrap().unwrap();
+    assert_eq!(admitted.milestone, "admitted");
+    assert_eq!(admitted.disposition, RecoveryDisposition::Complete);
+    let result = admitted.result.unwrap();
+    assert_eq!(result["milestone"], "admitted");
+    assert_eq!(result["graph"], "code");
+    assert_eq!(result["session_id"], session.id.as_str());
 }

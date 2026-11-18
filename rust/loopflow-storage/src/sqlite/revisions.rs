@@ -37,8 +37,9 @@ pub struct StoreRevisions {
     pub sessions: i64,
     pub graphs: i64,
     pub processes: i64,
-    /// Token counts. Moves every few seconds while agents work.
-    pub usage: i64,
+    /// Session history and turns in `history.db`. Moves at every turn's
+    /// start and end; only a read that names `history.*` waits on it.
+    pub history: i64,
 }
 
 /// Every domain's revision, by name, as clients see them: a write's answer
@@ -68,7 +69,7 @@ impl Revisions {
             sessions: domain("sessions"),
             graphs: domain("graphs"),
             processes: domain("processes"),
-            usage: domain("usage"),
+            history: domain("history"),
         }
     }
 }
@@ -107,9 +108,14 @@ impl SqliteStore {
     pub fn revision_map(&self) -> StoreResult<Revisions> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare("SELECT domain,revision FROM store_revisions")?;
-        let revisions = query
+        let mut revisions: BTreeMap<String, i64> = query
             .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
             .collect::<rusqlite::Result<_>>()?;
+        let history =
+            conn.query_row("SELECT revision FROM history.history_revision", [], |row| {
+                row.get(0)
+            })?;
+        revisions.insert("history".to_owned(), history);
         Ok(Revisions(revisions))
     }
 }
@@ -130,11 +136,9 @@ mod tests {
         "command_answers",
         "creation_receipts",
         "access_profiles",
-        "pm_project_name_cutover",
         "planning_user",
         "planning_peer_changes",
         "planning_peer_observed",
-        "project_binding_imports",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",
@@ -143,9 +147,7 @@ mod tests {
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",
-        // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
-        "ondemands",
-        "pools",
+        // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.
         "pool_machines",
         "provider_account_limits",
         "provider_account_switches",
@@ -157,18 +159,23 @@ mod tests {
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
         // A busy Session's pending move; its Stop hook reads it, no view does.
         "session_moves",
-        "session_steers",
         "steer_adapters",
-        "steer_batches",
         "steer_delivered",
-        "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
         // A Task's last reading is compared by the next reader; its news is the steers.
         "task_update_readings",
-        "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",
+        // Leaving (LOO-954): nothing reads or writes these.
+        "ondemands",
+        "pm_project_name_cutover",
+        "pools",
+        "project_binding_imports",
+        "session_steers",
+        "steer_batches",
+        "steer_deliveries",
+        "tool_responses",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {
@@ -180,15 +187,6 @@ mod tests {
     fn session(store: &SqliteStore, id: &str) {
         let conn = store.conn.lock().unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,?1,'human',1,0,'/repo')", [id]).unwrap();
-    }
-
-    fn event(store: &SqliteStore, session: &str, kind: &str, receipt: &str, payload: &str) {
-        let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,?2,?3,1,?4)", params![session, kind, receipt, payload]).unwrap();
-    }
-
-    fn evidence(kind: &str) -> String {
-        format!(r#"{{"evidence":{{"schema_version":1,"type":"{kind}"}}}}"#)
     }
 
     #[test]
@@ -358,7 +356,8 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO task_state_deliveries(id,task_id,target,attempted,error) VALUES(?1,?2,'started',1,'rate limited')",
+            "INSERT INTO tracker_actions(id,task_id,kind,value_json,phase,tracker,error)
+             VALUES(?1,?2,'state','{}','sent','linear','rate limited')",
             params![delivery, task.as_str()],
         )
         .unwrap();
@@ -401,7 +400,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='rate limited' WHERE id=?1",
+                "UPDATE tracker_actions SET error='rate limited' WHERE id=?1",
                 &delivery
             ),
             0,
@@ -410,7 +409,7 @@ mod tests {
         assert_eq!(
             planning_moved(
                 &conn,
-                "UPDATE task_state_deliveries SET error='denied' WHERE id=?1",
+                "UPDATE tracker_actions SET error='denied' WHERE id=?1",
                 &delivery
             ),
             1,
@@ -445,6 +444,7 @@ mod tests {
             "tasks",
             "task_changes",
             "task_state_deliveries",
+            "tracker_actions",
         ] {
             let trigger: String = conn
                 .query_row(
@@ -511,45 +511,35 @@ mod tests {
     }
 
     #[test]
-    fn usage_moves_only_its_own_revision_and_every_fact_moves_sessions() {
+    fn history_and_turns_move_only_the_history_revision() {
         let (_dir, store) = store();
         session(&store, "conversation");
         let before = store.revisions().unwrap();
-        event(&store, "conversation", "usage", "turn", "{}");
+        store.record_turn_start("conversation", &"thread".into(), "turn", 1);
+        store.record_turn_completion(
+            "conversation",
+            &"thread".into(),
+            "turn",
+            2,
+            &serde_json::json!({"status": "completed"}),
+        );
+        store.append_history(
+            "observation",
+            &[crate::history::Row::observed(
+                "conversation",
+                "store-gap:1:2".into(),
+                None,
+                1,
+                "{}".into(),
+            )],
+        );
+        let after = store.revisions().unwrap();
         assert_eq!(
-            store.revisions().unwrap(),
+            after,
             StoreRevisions {
-                usage: before.usage + 1,
+                history: before.history + 3,
                 ..before
             }
         );
-        // Facts share the `observed` kind and receipt keys; unreadable evidence counts.
-        for (kind, receipt, payload) in [
-            ("observed", "input:manifest.json", "{}".to_owned()),
-            ("observed", "input:terminal.json", "{}".to_owned()),
-            ("observed", "attachment:0:exit", "{}".to_owned()),
-            ("started", "turn", "{}".to_owned()),
-            ("completed", "turn", "{}".to_owned()),
-            (
-                "observed",
-                "input:events.jsonl:20",
-                evidence("provider_session_observed"),
-            ),
-            (
-                "observed",
-                "input:events.jsonl:21",
-                evidence("provider_attempt_finished"),
-            ),
-            ("observed", "input:events.jsonl:22", "{".to_owned()),
-            ("observed", "input:silence:23", "{}".to_owned()),
-        ] {
-            let sessions = store.revisions().unwrap().sessions;
-            event(&store, "conversation", kind, receipt, &payload);
-            assert_eq!(
-                store.revisions().unwrap().sessions,
-                sessions + 1,
-                "{kind} {receipt}"
-            );
-        }
     }
 }

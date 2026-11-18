@@ -107,6 +107,13 @@ answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
 
+lf keeps its own records of what happened apart from the store of current
+work, in `~/.lf/history.db`: one row per provider turn (time, status, model,
+tokens, final message, and the Task, Wave, skill and Graph step it ran for),
+kept, and 90 days of Session history (retries, failures, provider changes).
+The Machine server prunes history past 90 days every hour; `lf machine prune`
+does the same at once.
+
 Replay a captured request as new work, with the same prompt, model and permissions, using current native authentication; the original record is left alone:
 
 ```bash
@@ -136,7 +143,7 @@ transcript (`lf session history show <ID> --transcript`).
 
 When a process died without lf seeing it exit, the Machine server notices on its
 next pass, marks the run ended with an unknown result and releases the Session.
-Nothing needs pruning.
+`lf machine prune` drops history past its retention and compacts the files.
 
 ## How big the codebase is
 
@@ -175,6 +182,7 @@ them and stops nothing; end one with `kill <pid>` once you know what it is.
 | `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
 | `lf ps` | Live Sessions and Graph runs, OS-confirmed |
+| `lf machine prune` | Expire old history and compact the files |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
 | `lf machine doctor [--plan]` | Installation, storage and stray processes |
 

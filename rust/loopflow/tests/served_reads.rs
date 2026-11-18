@@ -288,7 +288,11 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         };
         let first = if served_first { adopt() } else { cli() };
         let second = if served_first { cli() } else { adopt() };
-        assert_eq!(without_revision(first.clone()), without_revision(second));
+        // The answer's row stamps when it was read.
+        assert_eq!(
+            without_clock(without_revision(first.clone())),
+            without_clock(without_revision(second))
+        );
         let first = &first["task"];
         assert_eq!(first["title"], "Keep the conversation");
         assert!(first["project_id"].is_null());
@@ -430,7 +434,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     assert_eq!(receive().unwrap()["type"], "welcome");
 
     write(
-        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "request_id": null}),
+        serde_json::json!({"type": "request", "id": "catalog", "operation": {"kind": "config.catalog"}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let answer = receive().unwrap();
@@ -441,7 +445,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null}),
+        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null, "sender": null}),
         true,
     );
     let mut subscribed = false;
@@ -472,7 +476,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
-        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "request_id": null}),
+        serde_json::json!({"type": "request", "id": "newer", "operation": {"kind": "task.teleport"}, "select": null, "sender": null, "request_id": null}),
         false,
     );
     let refused = loop {
@@ -491,7 +495,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "request_id": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let after = loop {
@@ -523,7 +527,7 @@ fn observed_git_changes_reach_subscriptions_and_requests_on_the_same_connection(
         directory: repo.path().to_owned(),
         issue: "INF-123".into(),
     };
-    let id = connection.subscribe(pane()).unwrap();
+    let id = connection.subscribe(pane(), None).unwrap();
     let frame = connection.reading(&id).unwrap().unwrap();
     assert!(frame["unavailable"].is_null(), "{frame}");
     assert_eq!(
@@ -626,7 +630,6 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             title: "Recorded conversation".into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -920,6 +923,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::ViewSelect { .. }
         | Read::SessionList { .. }
         | Read::TaskGet { .. }
+        | Read::TaskStatus { .. }
         | Read::TaskDetail { .. }
         | Read::PlanBoard { .. }
         | Read::SessionCard { .. }
@@ -964,6 +968,10 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(true),
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
                 Read::TaskDetail {
                     directory: repo.path().to_owned(),
                     issue: "INF-123".into(),
@@ -1012,10 +1020,6 @@ fn server_operations_match_their_lf_commands() {
                             repository: repo.path().to_owned(),
                         },
                     key: "agent".into(),
-                },
-                Read::DesktopLayout {
-                    directory: repo.path().to_owned(),
-                    work: "repository".into(),
                 },
                 Read::RepoPeople {
                     directory: repo.path().to_owned(),
@@ -1146,6 +1150,10 @@ fn server_operations_match_their_lf_commands() {
                     directory: work_folder,
                 },
                 task_pane(),
+                Read::TaskStatus {
+                    directory: repo.path().to_owned(),
+                    issue: "INF-123".into(),
+                },
             ],
         ),
     };
@@ -1183,7 +1191,7 @@ fn server_operations_match_their_lf_commands() {
         let words: Vec<&str> = argv.iter().map(String::as_str).collect();
         unchanged(&words, &mut || {
             let mut connection = loopflow_execution::machine::client::Connection::open().unwrap();
-            let id = connection.subscribe(served.clone()).unwrap();
+            let id = connection.subscribe(served.clone(), None).unwrap();
             frame = connection.reading(&id).unwrap().expect("a reading");
         });
         let mut served = frame;
@@ -1226,7 +1234,6 @@ fn server_operations_match_their_lf_commands() {
             .unwrap(),
         )
     };
-    let repository_id = repository["id"].as_str().unwrap().to_owned();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
         Read::DesktopLayout {
@@ -1238,25 +1245,6 @@ fn server_operations_match_their_lf_commands() {
     };
     let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
     let dashboard = || without_revision(layout("query:served"));
-    let pane = |revision: i64| Write::DesktopLayoutSave {
-        directory: directory.clone(),
-        work: "repository".into(),
-        layout: serde_json::json!({
-            "work": {"repository": repository_id, "kind": "repository", "id": repository_id},
-            "revision": revision,
-            "tree": {"kind": "pane", "id": "session",
-                     "content": {"kind": "session", "session_id": null, "location": null}},
-            "focused": null,
-            "zoomed": null,
-            "hidden": [],
-            "drafts": []
-        })
-        .to_string(),
-    };
-    let pane_revision = || {
-        let saved = layout("repository");
-        saved["revision"].as_i64().unwrap_or(0)
-    };
     // A new Write fails to compile here until it is compared too.
     let (writes, arrangement) = match (Write::TaskReopen {
         directory: directory.clone(),
@@ -1298,6 +1286,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::WavePlanBind { .. }
         | Write::WavePlanConnect { .. }
         | Write::WavePlanReteam { .. }
+        // Syncing and answering exchange with the tracker; their spellings
+        // are below and planning_sync_tests answers a lost line through them.
+        | Write::TaskSync { .. }
+        | Write::PlanAnswer { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
@@ -1334,8 +1326,7 @@ fn server_operations_match_their_lf_commands() {
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
         | Write::ConfigUnset { .. }
-        | Write::ConfigTheme { .. }
-        | Write::DesktopLayoutSave { .. } => (
+        | Write::ConfigTheme { .. } => (
             [
                 Write::TaskUpdate {
                     directory: directory.clone(),
@@ -1367,7 +1358,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -1375,7 +1365,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     request_id: "new-thread-parity".into(),
@@ -1462,7 +1451,6 @@ fn server_operations_match_their_lf_commands() {
                     expression: "state:backlog".into(),
                     revision: Some(revision("query:served")),
                 }),
-                Box::new(|| pane(pane_revision())),
             ],
         ),
     };
@@ -1604,6 +1592,7 @@ fn server_operations_match_their_lf_commands() {
     let stop = Write::TaskHold {
         directory: directory.clone(),
         issue: "INF-123".into(),
+        reason: None,
     };
     let stopped = || {
         Read::TaskGet {
@@ -1775,7 +1764,6 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
-                        intent: loopflow_execution::session::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -2082,8 +2070,47 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             path(directory),
             words(&["task", "unassign", issue, "--json"]),
         ),
-        Write::TaskHold { directory, issue } => {
-            (path(directory), words(&["task", "hold", issue, "--json"]))
+        Write::TaskHold {
+            directory,
+            issue,
+            reason,
+        } => {
+            let mut spelled = words(&["task", "hold", issue, "--json"]);
+            if let Some(reason) = reason {
+                spelled.extend(words(&["--reason", reason]));
+            }
+            (path(directory), spelled)
+        }
+        Write::TaskSync {
+            directory,
+            issue,
+            answer,
+        } => {
+            let mut args = words(&["task", "sync", issue]);
+            match answer {
+                Some(loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs) => {
+                    args.push("--keep-theirs".into())
+                }
+                Some(loopflow_execution::store::planning_sync::LostAnswer::UseMine) => {
+                    args.push("--use-mine".into())
+                }
+                None => {}
+            }
+            (path(directory), args)
+        }
+        Write::PlanAnswer {
+            directory,
+            action,
+            answer,
+        } => {
+            let flag = match answer {
+                loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs => "--keep-theirs",
+                loopflow_execution::store::planning_sync::LostAnswer::UseMine => "--use-mine",
+            };
+            (
+                path(directory),
+                words(&["repo", "plan", "answer", action, flag, "--json"]),
+            )
         }
         Write::TaskRun {
             directory,
@@ -2230,7 +2257,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             task,
             wave,
             agent,
-            intent,
         } => {
             let mut spelled = Vec::new();
             if id.is_none() && task.is_none() && wave.is_none() {
@@ -2240,7 +2266,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["session", "resume"]));
-            spelled.extend(intent.flag().map(str::to_owned));
             spelled.extend(id.clone());
             if let Some(task) = task {
                 spelled.extend(words(&["--task", task]));
@@ -2787,12 +2812,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 destination,
             ]),
         ),
-        Write::DesktopLayoutSave {
-            directory, work, ..
-        } => (
-            path(directory),
-            words(&["desktop", "layout", work, "--save"]),
-        ),
         Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")
         }
@@ -2921,7 +2940,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"request_id":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     // Deliberately do not read the answer. Admission is observed in the receipt.
@@ -2959,7 +2978,15 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .request(Operation::Write(change.clone()))
         .unwrap()
         .result;
-    assert_eq!(first, second);
+    // A repeat returns the same receipt; the reads beside it are taken again.
+    let receipt = |mut answer: serde_json::Value| {
+        let fields = answer.as_object_mut().unwrap();
+        for read in ["session", "row"] {
+            fields.remove(read).unwrap();
+        }
+        answer
+    };
+    assert_eq!(receipt(first.clone()), receipt(second));
     std::thread::scope(|scope| {
         let concurrent: Vec<_> = (0..4)
             .map(|_| {
@@ -2974,7 +3001,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
             })
             .collect();
         for retry in concurrent {
-            assert_eq!(retry.join().unwrap(), first);
+            assert_eq!(receipt(retry.join().unwrap()), receipt(first.clone()));
         }
     });
     let found = connection
@@ -2983,7 +3010,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         }))
         .unwrap()
         .result;
-    assert_eq!(found["result"], first);
+    assert_eq!(found["result"], receipt(first.clone()));
     assert_eq!(found["disposition"], "complete");
     assert_eq!(found["explanation"], "Task created");
     let mut changed = change.clone();
@@ -3086,7 +3113,7 @@ fn served_task_create_survives_a_dropped_connection_and_server_restart() {
         .result;
     assert_eq!(removed["disposition"], "inspect");
     assert_eq!(removed["explanation"], "The created Task was removed");
-    assert_eq!(removed["result"], first);
+    assert_eq!(removed["result"], receipt(first.clone()));
     assert!(connection.request(Operation::Write(changed)).is_err());
     assert_eq!(
         conn.query_row(
@@ -3149,7 +3176,7 @@ fn served_session_new_recovers_its_input_after_a_lost_reply_and_restart() {
     writeln!(
         socket,
         "{}",
-        serde_json::json!({"type":"request","id":"first","select":null,"request_id":null,"operation":change})
+        serde_json::json!({"type":"request","id":"first","select":null,"sender":null,"request_id":null,"operation":change})
     )
     .unwrap();
     let deadline = std::time::Instant::now() + Duration::from_secs(15);

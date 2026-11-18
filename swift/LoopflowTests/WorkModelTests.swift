@@ -178,7 +178,7 @@ struct WorkModelTests {
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
             "id": "old-plan", "linear_id": NSNull(), "slug": "old", "name": "Previous",
             "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
-            "sync": ["connected": false, "changes": []]
+            "sync": ["actions": []]
         ]]]
         let reply = try JSONSerialization.data(withJSONObject: historical)
         await deferred.release(try #require(String(data: reply, encoding: .utf8)))
@@ -572,7 +572,7 @@ struct WorkModelStreamTests {
             .appendingPathComponent("tests/fixtures/dto/peer_planning_status.json")
         let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
         func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
-            let body = #"{"transport":"git","destinations":\#(statuses)}"#
+            let body = #"{"tracker":"git","destinations":\#(statuses)}"#
             return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
                                      scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
                                      body: body)
@@ -1267,7 +1267,7 @@ struct TaskPlanningReadabilityTests {
     private let key = WorkWorkspaceKey(repository: "repo", kind: .task, id: "task-opaque")
 
     private func plan(title: String = "Readable local Task") -> WorkViewPlan {
-        let content = WorkViewPlan.Content(paneRevision: nil, face: nil, work: key, title: title,
+        let content = WorkViewPlan.Content(work: key, title: title,
             states: [.working], identifier: "LOO-905", primarySession: nil, location: nil, argv: nil, unavailable: [])
         return fixtureViewPlan(owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [content])
     }
@@ -1299,7 +1299,7 @@ struct TaskPlanningReadabilityTests {
         let model = WorkModel(query: fixture.query, repoPath: "/src/loopflow")
         let record = try #require(fixture.roadmap.tasks.items.first { $0.id == "issue-now" })
         let work = WorkWorkspaceKey(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id)
-        let member = WorkViewPlan.Content(paneRevision: nil, face: nil, work: work, title: "Fresh list name",
+        let member = WorkViewPlan.Content(work: work, title: "Fresh list name",
             states: [.working], identifier: record.task.identifier, primarySession: nil, location: nil, argv: nil, unavailable: [])
         let list = fixtureViewPlan(owner: key, members: [member])
         func planning(_ failed: Bool) {
@@ -1423,7 +1423,7 @@ struct TaskPlanningReadabilityTests {
                 waves: .available(fixture.waves), workActivity: .available(fixture.workActivity), repos: [], fixed: true)
         }
         let record = try #require(model.task(id: "issue-now")?.task)
-        let member = WorkViewPlan.Content(paneRevision: nil, face: nil,
+        let member = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: record.task.name, states: shipping ? [.autonomous] : [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])
@@ -1543,7 +1543,7 @@ struct TaskPlanningReadabilityTests {
         try await eventually { !model.showsSavedPlanning }
         #expect(model.taskListReading.isLoading)
         #expect(model.sidebarTaskIDs.isEmpty, "planning is not a second list")
-        let content = WorkViewPlan.Content(paneRevision: nil, face: nil,
+        let content = WorkViewPlan.Content(
             work: .init(repository: "repo", kind: .task, id: record.runtime?.workId ?? record.id),
             title: "Fresh local name", states: [.working], identifier: record.task.identifier,
             primarySession: nil, location: nil, argv: nil, unavailable: [])

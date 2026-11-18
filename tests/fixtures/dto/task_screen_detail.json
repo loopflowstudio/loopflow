@@ -10,8 +10,7 @@
     "completed_at": null,
     "due_date": null,
     "sync": {
-      "connected": false,
-      "changes": []
+      "actions": []
     },
     "linear_id": null,
     "acquisition": {
@@ -293,7 +292,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "unknown",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -306,20 +304,10 @@
     ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "independent"
     },

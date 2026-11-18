@@ -257,3 +257,15 @@ Slice 5 (implement):
 - `new_thread` now treats a live conversation whose transcript is not yet
   saved as lost (original request) instead of failing "retry after claude
   saves its first turn".
+
+## Sync onto main (2026-11-17)
+
+- Under plain `cargo test` (one process), `ops::human_session::tests::resume_refuses_a_run_and_leaves_its_provider_running`
+  calls `journal::with_process`, which sets the process-wide `PROCESS_STARTED_AT`; every later
+  `journal::with_runtime` test in that process then skips admission, so
+  `resuming_an_ended_conversation_launches_its_provider_as_the_session` fails with
+  "Native launch has no admitted invocation". Both tests come from main; nextest (one process per
+  test) passes both. Not fixed in the sync.
+- The merged `open` checks for a lost transcript beside main's `NewThread` intent (`lost_thread`);
+  main's `resuming_an_ended_conversation…` fixture now writes the thread's Claude transcript so it
+  resumes instead of starting fresh.

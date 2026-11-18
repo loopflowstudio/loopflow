@@ -80,10 +80,34 @@ rerunning the command without it is a new submission.
 
 The JSON creation result contains `task`, `graph`, `session_id` and `milestone`,
 including without `--run`. Scripts read the identifier at `.task.identifier`.
-For `--run`, an interrupted launch can return `outcome_unknown` with the created
-Task and `run_requested` milestone. Inspect `lf task status <ID>` before starting
-anything: recovery never launches a second Graph when the first launch is
-unconfirmed. A receipt for a removed Task does not recreate it.
+Without `--run` the milestone is `filed`. With `--run` the answer arrives once
+the Task, its claim, its Graph and its conversation are recorded, before any
+checkout or network call: the milestone is `admitted`. The conversation then
+does the rest, one line per step:
+
+```
+Checkout ready  0.2 s
+Graph code started
+```
+
+Repeating the request ID during setup returns the same Task and Session and
+starts no second Graph. If a setup step fails, the conversation shows the error
+and the Task's position reads `Setup stopped: checkout failed` (or `graph`) in
+`lf task status` and Desktop; `lf resume --task <ID>` reopens it and runs setup
+again. Tracker
+sync and the assignee check run after the answer; a failure there is a Task
+event, not a creation failure.
+
+A new Task's branch starts from `origin/<default>` as of the last background
+fetch, not a fetch at creation; its first `lf sync` catches up. To make the
+checkout instant, Loopflow keeps one prepared checkout per repository at
+`<repo>.ready` beside your Task worktrees and replaces it after each Task takes
+it. `lf wt prune` leaves it alone. Deleting it is safe: the next Task makes its
+checkout the slower way and a new one is prepared.
+
+A receipt for a removed Task does not recreate it. An earlier release may have
+left a `run_requested` receipt: its launch is unconfirmed, so inspect
+`lf task status <ID>` before starting anything.
 
 Desktop saves and recovers these submissions automatically, including after it
 quits. Showing the resulting Task clears its saved submission; promotion from a
@@ -228,21 +252,21 @@ planning:
 ```
 
 Ref names are not access control; pick a remote whose readers should see the
-plan. When two people edit the same field, the later edit wins and the other
-value stays in `lf repo plan journal`, ready to copy back.
+plan. When two people edit the same field, the later edit wins; the other
+value shows as lost on its Task and in `lf repo plan` until you answer it.
 
-### Linear, Asana or Notion
+### Linear or Asana
 
 ```bash
-lf account connect linear                  # or asana, or notion
+lf account connect linear                  # or asana
 lf wave plan connect --all --team-key LOO       # Linear: one Team per repository; Tasks become LOO-12
 ```
 
 ```yaml
-# .lf/config.yaml, for Asana or Notion
+# .lf/config.yaml, for Asana
 planning:
-  provider: asana                  # or notion
-  team: "<team-gid-or-url>"        # Asana team, or the Notion page holding the databases
+  provider: asana
+  team: "<team-gid-or-url>"        # the Asana team holding this repository's project
 ```
 
 Each Task is one item in the tracker, and the tracker is where coworkers work:
@@ -256,13 +280,47 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 
 | You, in Loopflow… | Coworkers see… |
 |---|---|
-| create, update, steer, complete | the same change |
+| create, edit, steer, complete, reorder or delete | the same change |
 | start work on the Task | it moves to in progress |
 | open, land or abandon its PR | a link to the PR and its state |
 
-In Linear, a Wave is an Initiative and its planning is a Linear Project. Offline,
-commands save locally and deliver on the next connected command;
-`lf task sync LOO-12` retries one Task.
+Linear and Asana behave the same way. In Linear, a Wave is an Initiative and
+its planning is a Linear Project; in Asana, a Wave's planning is a team
+project.
+
+Every change saves on this machine first and joins one queue of deliveries to
+the tracker, sent in the order you made them. Each `lf` command sends a short
+batch from the queue, so a long backlog drains over several commands without
+using up the tracker's request allowance. Offline, commands still save and the
+queue waits:
+
+```text
+$ lf repo plan
+Tracker: linear. 3 open · 1 lost.
+  LOO-412            title · queued · Offline
+  LOO-412            comment · queued · Offline
+  LOO-398            complete · sent, waiting for linear to confirm
+  LOO-377  9f2c41d0  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
+Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.
+```
+
+When a send failed, the line ends with why: offline, signed out, or the
+tracker's own error.
+
+A change waiting to confirm was sent, but its answer never arrived.
+Loopflow reads the tracker before sending anything else for that Task, at most
+once every ten minutes, so the change lands once. `lf task sync LOO-398` looks
+now.
+
+When a coworker changed the same field in the tracker before your edit
+arrived, the tracker's value wins and your edit is lost, not open: nothing is
+left to send. The line shows both values, on the Task or Project, until you
+answer it. `lf repo plan answer 9f2c41d0 --keep-theirs` closes it;
+`--use-mine` saves yours again and sends it; so does editing that field.
+Desktop's Keep and Use mine buttons on the line do the same, and
+`lf task sync LOO-377 --keep-theirs` answers every line a Task lost. It also closes on its own when a
+coworker changes that field again in the tracker. On Git, a value the journal
+lost shows the same way, as `git`.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -464,14 +522,19 @@ and keeps the Session, checkout, PR and graph.
 position; retry it alone if it fails. `lf task reopen` keeps the same PR.
 `lf task abandon` cancels it, closes its PRs and deletes its branches.
 
-**Sync.** `lf task sync LOO-12` looks for its tracker creation now and re-sends
-it with its saved ID when absent; between syncs, every `lf` command looks for an
-uncertain creation once per window. `--retry-updates` retries saved field
-changes after reading the tracker again. `lf wave sync` refreshes from Linear
-first; a Wave with no Initiative skips the refresh and still succeeds.
+**Sync.** `lf task sync LOO-12` exchanges that Task with its tracker now. On
+Linear or Asana it looks for every change sent without an answer and resends
+what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
+every `lf` command sends one short batch. It prints what is still open (a
+change queued or sent) and what was lost to the tracker's value, until you
+answer it with `--keep-theirs` or `--use-mine`. `lf repo plan` lists the same
+lines for the whole repository, and `lf repo plan answer <id>` answers one.
+`lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
+the refresh and still succeeds.
 
 ```bash
-lf task sync LOO-403 --retry-updates
+lf task sync LOO-403
+# LOO-403: title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
 ```
 
 Linear can change an issue or a Project without moving its `updatedAt` (it

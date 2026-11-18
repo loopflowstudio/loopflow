@@ -348,7 +348,6 @@ mod tests {
     use time::OffsetDateTime;
 
     use super::{resolve_work_binding, resolve_work_selection, WorkSelection};
-    use crate::linear::LinearProject;
     use crate::linear::{LinearIssueId, LinearProjectId};
     use crate::store::SharedStore;
     use crate::store::StorageConfig;
@@ -356,6 +355,7 @@ mod tests {
     use crate::work::wave::Wave;
     use loopflow_model::durable::{ProjectId, TaskId, WorkRef};
     use loopflow_model::id::WaveId;
+    use loopflow_storage::planning::TrackerProject;
     use loopflow_storage::work::project::Project;
     use loopflow_storage::work::project::ProjectKR;
     use loopflow_storage::work::task::{LinearWritebackState, Observation, Task, TaskPr, TaskPrId};
@@ -1009,8 +1009,8 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.linear_id.as_ref().unwrap().as_str(), task.identifier],
+                "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+                [task.id.as_str()],
             )
             .unwrap();
 
@@ -1079,10 +1079,12 @@ mod tests {
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
                 || {
-                    crate::harness::native_session::resume_session(
+                    crate::harness::native_session::resume_session_with_env(
                         &capture.artifact_key(),
-                        &history,
-                        false,
+                        Some(&history),
+                        &Default::default(),
+                        None,
+                        crate::harness::LaunchKind::Batch,
                     )
                 },
             );
@@ -1154,7 +1156,6 @@ mod tests {
                 title: "Investigation".into(),
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: 1,
             }
@@ -1325,7 +1326,7 @@ mod tests {
             .await
             .unwrap();
         let snapshot = Inventory {
-            projects: vec![LinearProject {
+            projects: vec![TrackerProject {
                 description: None,
                 revision: None,
                 id: "project-api".to_string(),

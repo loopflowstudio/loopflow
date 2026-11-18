@@ -31,12 +31,14 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Fact | Owner |
 | --- | --- |
 | Authored goals, memory, Skills, Graphs and code | Repository files and Git |
-| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear, Asana or Notion provider |
+| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear or Asana tracker |
 | Commits, PR heads, checks and merge | Git and GitHub |
-| Actual lf command process, causal parent and observed command outcome | `processes` |
+| Actual lf command process, causal parent and observed command outcome | `processes` while it runs or a current record names it; history and turns name it for 30 days after it finished |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |
-| Agent conversation, title, feedback and native identity | `agent_sessions` |
-| Native starts, outcomes, retries, provider transitions and usage | LfSession history, correlated to native turn and driving Process |
+| Agent conversation, title, feedback, native identity, when it was opened and its latest provider transition | `agent_sessions` |
+| A Session's captured inputs, and how each one's newest ended turn went: which turn, when, its status and error | `session_events` (`captured` only) |
+| Retries, turns that did not complete, provider transitions and recording gaps | `history.session_history`, correlated to native turn and driving Process |
+| One provider turn: start, end, status, model, usage, final message and what it ran for | `history.turns` |
 | Submitted creation identity and outcome | `creation_receipts`, shared by CLI and server; retained independently of the created resource |
 | Desktop submissions awaiting reconciliation | Versioned immutable request payloads in the device's Work cache; outcomes come from server receipts |
 | A Graph's identity, state and step results | Its Graph process and child step processes in `processes` |
@@ -69,12 +71,56 @@ LfProcess can die while it continues. History retains the original Process and
 AgentProcess when a later attachment recovers a missed native completion. Missing command outcome, usage or process
 evidence stays unknown.
 
-The provider's own transcript holds the conversation; Loopflow keeps no copy
-of the stream. SQLite history keeps only Session facts: provider attempts,
-accounts and sessions, how each turn ended, and silences longer than ten
-minutes. Usage is the provider's native `usage` row, one per turn, updated as
-receipts arrive; each turn's `completed` receipt carries its prompt context.
-`session_activity` holds the latest CPU sample for Running/Stalled.
+The provider's own transcript holds the conversation. Graph routing, headless
+runs and ci-fix read a turn's final answer from that transcript; one that is
+gone or lacks the turn is an error naming the file, never an empty answer.
+The turn's row in history keeps a copy of its final message for people:
+`lf session history show --final` and the Task view read it only when the
+transcript is gone. History keeps what a turn's row does not say: each
+capture's settlement, retried attempts, turns that did not complete, errors,
+provider transitions, silences longer than ten minutes and recording gaps. An ordinary completed turn adds
+no attempt or turn-end row beyond its turn. `session_activity` holds the latest CPU
+sample for Running/Stalled.
+
+### State and history
+
+```bash
+ls -la ~/.lf/loopflow.db ~/.lf/history.db
+sqlite3 -readonly ~/.lf/history.db "SELECT skill, sum(output_tokens), sum(ended_at-started_at)
+  FROM turns GROUP BY 1 ORDER BY 2 DESC LIMIT 10"
+lf machine prune    # what the Machine server runs every hour
+```
+
+Two SQLite files, each with its own write lock, WAL and revision row.
+`loopflow.db` holds what the product reads to act now: Tasks, Sessions and
+their captured inputs, Processes, Graphs. When a turn ends, its input's
+captured row records which turn answered it, when it ended, its status and
+any error: Graph routing, the Session list and a failed step read only that.
+`history.db` holds what a person reads later: Session history
+(`history.session_history`, observations appended by `seq`) and one row per
+provider turn (`history.turns`), inserted when the turn starts and completed
+in place when it ends, with its Task, Wave, skill, Graph step and model as
+columns, so a report by any of them is one query. Deleting `history.db`
+loses history and usage, never what a running Graph or Session list sees.
+
+Every store connection attaches `history.db` read-only as `history`, so a
+join across files is one query. History writes open the file as the main
+database with `loopflow.db` attached read-only for the attachment-token
+fence, so `BEGIN IMMEDIATE` locks only that file and never waits on, or
+holds up, a state writer. A history write that fails is a recording gap in
+`logs/lf.log`; the turn, tool or command carries on.
+
+The Machine server runs `lf machine prune` at start and then every hour:
+Session history older than 90 days goes, and a finished command that only
+history or turns name is forgotten 30 days after it finished. Turns are
+kept. History an earlier lf wrote into `session_events` (observations, and
+turns as three rows) moves into `history.db` on the same pass, including
+rows a released `lf` still writes after `lf install`; what an ordinary
+turn's row already says (its first attempt and completed turn) and copies of a provider's last message are not moved.
+`lf install` backs up and migrates `loopflow.db` only.
+
+A history or turn row wakes only the subscriptions that read it: Session
+History (`lf history --subscribe`) and the Task view.
 
 A Graph is one lf process and the step processes it starts, and its ID is the
 Graph process's. The Graph process keeps the cursor in memory and appends GraphProcess: the
@@ -172,6 +218,9 @@ One Machine runs hundreds of agents over about 10,000 Tasks, and every one of
 them shares one SQLite write lock. A query that is fast on a fresh store can be
 a full scan on that one, so plan statements against a `.backup` copy of a real
 store, never the live file.
+
+Only state shares that lock: history writes take `history.db`'s own (see
+[State and history](#state-and-history)).
 
 Every statement on a path that runs per hook, per server request, per Desktop
 read, per Work projection or per Graph step plans as `SEARCH` or reads a fixed

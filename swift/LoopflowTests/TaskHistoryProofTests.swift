@@ -47,11 +47,10 @@ struct TaskHistoryProofTests {
             renameFixtureRecord("design", title: "review-design", work: work)
         )) as? [String: Any])
         design["state"] = "unknown"
-        design["actions"] = sessionActionFixture(state: "unknown")
+        design["action"] = sessionActionFixture(state: "unknown")
         design["terminal_ids"] = [shells[0]]
         design["open_argv"] = ["must-not-launch"]
         design["provider"] = "claude"
-        design["ready_summary"] = "Design revised; ready for your review."
         var notes = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(
             renameFixtureRecord("notes", title: "notes", work: work)
         )) as? [String: Any])

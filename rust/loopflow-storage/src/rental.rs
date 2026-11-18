@@ -452,8 +452,6 @@ pub struct Pool {
     pub name: String,
     /// Takes no new work; what it holds stays.
     pub off: bool,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -464,8 +462,6 @@ pub struct OnDemand {
     pub max_machines: u32,
     pub max_usd_per_hour: Usd,
     pub hours: f64,
-    #[serde(with = "time::serde::rfc3339")]
-    pub created_at: OffsetDateTime,
 }
 
 impl OnDemand {

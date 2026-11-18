@@ -286,9 +286,9 @@ Cross-provider replay fixtures must install stand-ins for both the recorded and
 override providers, with a fixture/system-only PATH. A developer's installed
 provider must neither satisfy a missing fixture nor receive a test launch.
 
-## Linear acquisition fixtures
+## Work and tracker fixtures
 
-Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+Work and tracker acquisition fixtures live under `rust/loopflow/tests/work/` and compile
 inside the library, where fetched response types stay private. Focused Cargo tests
 build the current CLI and take its path from Cargo’s artifact output:
 
@@ -390,8 +390,7 @@ conversations, while native authentication stays authoritative. Retired managed
 homes supply transcripts only. Account switching and saved-back credentials are
 outside launch behavior. Use isolated homes and synthetic provider endpoints;
 ordinary retry, usage, binding and review behavior belong in
-`session_lifecycle_tests`, and legacy Linear Project adoption belongs in
-`ops::linear::adoption_tests`.
+`session_lifecycle_tests`.
 
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
@@ -763,8 +762,9 @@ Never use the installed store to prove an unmerged migration.
 `session_launch_contract::native_auth_owns_launches_with_a_populated_catalog`
 checks native launch/resume with unusable saved accounts, transcript-only adoption,
 sandboxed Tasks and remote preparation. Credential markers stay private to the
-fixture. `agent::tests::native_retry_policy_matrix` checks bare/Task ×
-interactive/headless refusal handling: only headless Graph steps follow
+fixture. `agent::tests::native_retry_policy_matrix` checks Task-attributed and
+taskless headless refusal handling, with pinned agents and fallback orders.
+Only headless Graph steps follow
 configured model/harness fallbacks and wait out a usage limit, explicit pins
 stop, a revoked login skips its provider's models, and quota snapshots or
 successful answers mentioning limits do not trigger fallback. Fixtures use isolated homes,
@@ -814,7 +814,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::tracker_events::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
@@ -828,7 +828,7 @@ not exercised by macOS-only checks.
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
 refuses unqualified CLI requests so a fixture cannot reach your own server. Run
-them one at a time: together they can miss a follower's arrival deadline.
+them one at a time: together they can miss a host's reply deadline.
 On macOS, run Rex fixtures directly: `scripts/test_network.py` blocks Rex's
 `/usr/bin/login` launcher before the terminal command executes. These fixtures
 use private homes, an isolated server and stand-in providers.

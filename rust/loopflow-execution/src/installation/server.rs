@@ -31,11 +31,13 @@ pub fn ensure() -> Result<crate::machine::client::Status> {
         if status.ready {
             return Ok(status);
         }
-        anyhow::ensure!(
-            Instant::now() < deadline,
-            "Loopflow server unavailable: {}",
-            status.error.as_deref().unwrap_or("not ready")
-        );
+        if Instant::now() >= deadline {
+            // A socket that never listened has no reason beyond the wait.
+            match status.error.filter(|_| status.listening) {
+                Some(error) => anyhow::bail!("Loopflow server did not start within 10s: {error}"),
+                None => anyhow::bail!("Loopflow server did not start within 10s"),
+            }
+        }
         std::thread::sleep(Duration::from_millis(100));
     }
 }

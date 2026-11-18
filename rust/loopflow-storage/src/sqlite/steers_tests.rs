@@ -449,10 +449,21 @@ fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
             .unwrap();
         store.session_steers("session", 0, 32).unwrap().pending
     };
-    assert_eq!(pending("/work/task/rust/src/"), 1);
-    assert_eq!(pending("/work/task"), 1);
-    assert_eq!(pending("/work/task-other"), 0);
-    assert_eq!(pending("/work"), 0);
+    for source in ["declared", "checkout", "inherited", "bound"] {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "UPDATE agent_sessions SET work_source=?1 WHERE id='session'",
+                [source],
+            )
+            .unwrap();
+        assert_eq!(pending("/work/task/rust/src/"), 1, "{source}");
+        assert_eq!(pending("/work/task"), 1, "{source}");
+        assert_eq!(pending("/work/task-other"), 0, "{source}");
+        assert_eq!(pending("/work"), 0, "{source}");
+    }
 }
 
 #[test]
@@ -583,7 +594,7 @@ fn selections(store: &SqliteStore) -> Vec<(Option<String>, String, String)> {
         .unwrap()
         .prepare(
             "SELECT json_extract(payload,'$.transition.from_provider_session'),json_extract(payload,'$.transition.to_provider_session'),
-             json_extract(payload,'$.source') FROM session_events
+             json_extract(payload,'$.source') FROM history.session_history
              WHERE json_extract(payload,'$.type')='provider_transition' ORDER BY seq",
         )
         .unwrap()

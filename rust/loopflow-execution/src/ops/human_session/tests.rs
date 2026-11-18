@@ -68,12 +68,12 @@ impl LiveSessionFixture {
         RunningAgent(
             crate::harness::agent_process::spawn_native(
                 command,
-                &(
-                    self.store.sqlite.clone(),
-                    session.id.to_string(),
+                &crate::harness::Recording {
+                    store: self.store.sqlite.clone(),
+                    session: session.id.to_string(),
                     attachment,
-                ),
-                crate::session::Holder::Caller,
+                },
+                crate::harness::LaunchKind::Batch,
             )
             .unwrap(),
         )
@@ -129,11 +129,11 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
             let mut provider = crate::harness::agent_process::spawn(
                 command,
                 None,
-                &(store.sqlite.clone(), session.id.to_string(), first.clone()),
-                crate::session::Holder::Caller,
+                &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
+                crate::harness::LaunchKind::Batch,
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, false).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -217,11 +217,10 @@ fn session_metadata_wire_preserves_unknown_observation_and_occurrence() {
     );
 }
 
-/// A retained interactive Session of Task `task` in Wave `wave`, at an earlier Graph step.
-fn retained_summary(
-    task: &TaskId,
-    wave: &loopflow_model::id::WaveId,
-) -> crate::session::SessionSummary {
+/// An interactive Session's summary with recorded history and unknown process evidence.
+fn summary_fixture() -> crate::session::SessionSummary {
+    let task = TaskId::new();
+    let wave = loopflow_model::id::WaveId::new();
     crate::session::SessionSummary {
         transition: None,
         preview: None,
@@ -246,7 +245,6 @@ fn retained_summary(
         artifact_key: Some(crate::session_record::new_artifact_key()),
         title: "Retained conversation".into(),
         title_source: crate::session::TitleSource::Human,
-        ready_summary: None,
         completed_at: None,
         interactive: true,
         task_id: Some(task.clone()),
@@ -280,9 +278,7 @@ fn retained_summary(
 #[test]
 fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
     use super::{SessionEndedBy, SessionState};
-    let task = TaskId::new();
-    let wave = loopflow_model::id::WaveId::new();
-    let mut summary = retained_summary(&task, &wave);
+    let mut summary = summary_fixture();
     summary.task_primary = true;
     summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
@@ -358,11 +354,33 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
     assert_eq!(row.start, None, "only a Task's conversation comes back");
 }
 
+/// A summary whose projected state is `state`: a running one has an agent
+/// process, a detached one is held and unviewed.
+fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
+    use crate::journal::ProcessIdentityEvidence::*;
+    let mut summary = summary_fixture();
+    summary.interactive = interactive;
+    summary.agent_process_evidence = match state {
+        super::SessionState::Unknown => Unknown,
+        super::SessionState::Active | super::SessionState::Detached => Live,
+        super::SessionState::Closed => Dead,
+    };
+    summary.agent_process_id = matches!(
+        state,
+        super::SessionState::Active | super::SessionState::Detached
+    )
+    .then(loopflow_model::id::AgentProcessId::new);
+    summary.held = state == super::SessionState::Detached;
+    summary.unviewed = summary.held;
+    assert_eq!(super::session_state(&summary), state);
+    summary
+}
+
 #[test]
 fn session_metadata_keeps_unknown_position_visible() {
-    let task = TaskId::new();
-    let wave = loopflow_model::id::WaveId::new();
-    let mut summary = retained_summary(&task, &wave);
+    let mut summary = summary_fixture();
+    let task = summary.task_id.clone().unwrap();
+    let wave = summary.wave_id.clone().unwrap();
     let row = super::summary_surface(&summary);
     assert_eq!(row.id, summary.id);
     assert_eq!(row.work, Some(loopflow_model::durable::WorkRef::Task(task)));
@@ -409,12 +427,9 @@ fn session_metadata_keeps_unknown_position_visible() {
         super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
-    summary.ready_summary = Some("Exact retained feedback".into());
     let row = super::summary_surface(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
-    assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
-    summary.ready_summary = None;
     summary.completed_at = Some(1);
     assert_eq!(
         super::session_state(&summary),
@@ -445,7 +460,6 @@ use crate::store::SharedStore;
 
 use super::human_session_argv;
 use crate::session::LfSession;
-use crate::session::SessionOpenIntent;
 pub use crate::test_support::human_session::SessionHome;
 
 use loopflow_storage::work::task::TaskId;
@@ -455,7 +469,7 @@ fn session_action_fixtures_match_the_shared_boundary() {
     #[derive(serde::Deserialize)]
     struct Case {
         state: super::SessionState,
-        actions: Vec<super::SessionAction>,
+        action: Option<super::SessionAction>,
     }
     let cases: Vec<Case> = serde_json::from_str(include_str!(
         "../../../../../tests/fixtures/dto/session_actions.json"
@@ -463,14 +477,8 @@ fn session_action_fixtures_match_the_shared_boundary() {
     .unwrap();
     for case in cases {
         assert_eq!(
-            super::session_actions(
-                case.state,
-                true,
-                true,
-                case.state == super::SessionState::Active,
-                false
-            ),
-            case.actions
+            super::session_action(&summary_in(case.state, true)),
+            case.action
         );
     }
     let report = include_str!("../../../../../tests/fixtures/dto/session_move_report.json");
@@ -489,14 +497,8 @@ fn session_action_fixtures_match_the_shared_boundary() {
     ] {
         let session: super::SessionRecord = serde_json::from_str(fixture).unwrap();
         assert_eq!(
-            session.actions,
-            super::session_actions(
-                session.state,
-                session.interactive,
-                true,
-                session.state == super::SessionState::Active,
-                false
-            )
+            session.action,
+            super::session_action(&summary_in(session.state, session.interactive))
         );
         assert_eq!(session.work_path.as_deref(), Some("product / LOO-291"));
         let mut untitled = serde_json::to_value(&session).unwrap();
@@ -519,14 +521,8 @@ fn graph_membership_fixtures_cover_every_projection_and_are_required() {
     let mut kinds = Vec::new();
     for session in &sessions {
         assert_eq!(
-            session.actions,
-            super::session_actions(
-                session.state,
-                session.interactive,
-                true,
-                session.state == super::SessionState::Active,
-                false
-            )
+            session.action,
+            super::session_action(&summary_in(session.state, session.interactive))
         );
         kinds.push(match &session.graph_membership {
             super::SessionGraphMembership::Step { occurrence, .. } => match occurrence {
@@ -669,7 +665,6 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         title: "Conversation".into(),
         title_source: crate::session::TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: 1,
     };
@@ -834,128 +829,229 @@ fn session_page_preserves_the_continuation_and_required_entries() {
 }
 
 #[test]
-fn only_a_consumed_first_launch_offers_try_again() {
-    use super::{SessionActionKind::*, SessionState::*};
-    let kinds = |state, history, occupied, consumed| -> Vec<_> {
-        super::session_actions(state, true, history, occupied, consumed)
-            .into_iter()
-            .map(|action| (action.kind, action.label))
-            .collect()
+fn opening_reads_as_what_resume_does_there() {
+    use super::SessionResumeIntent::*;
+    let _lock = crate::journal::test_env_lock();
+    let _home = SessionHome::new();
+    let mut summary = summary_fixture();
+    summary.captured = None;
+    let label = |intent, summary: &crate::session::SessionSummary| {
+        super::opening(intent, summary).map(|action| action.label)
     };
+    assert_eq!(label(Resume, &summary).as_deref(), Some("Open here"));
+    assert_eq!(label(TakeOver, &summary).as_deref(), Some("Take over"));
     assert_eq!(
-        kinds(Closed, false, false, true),
-        [
-            (MoveHere, "Try again".to_string()),
-            (Reveal, "Show conversation".to_string())
-        ]
+        label(Start, &summary).as_deref(),
+        Some("Start conversation")
     );
-    assert_eq!(kinds(Closed, true, false, true)[0].0, Open);
-    assert_eq!(kinds(Closed, false, false, false)[0].0, Open);
-    let held = kinds(Active, false, true, true);
-    assert_eq!(held[0].0, Open);
-    assert_eq!(held[1], (MoveHere, "Take back".to_string()));
-    assert!(super::session_actions(Closed, false, false, false, true).is_empty());
+    assert_eq!(label(View, &summary).as_deref(), Some("Open here"));
+    assert_eq!(label(NewThread, &summary), None);
+    summary.unviewed = true;
+    assert_eq!(label(View, &summary).as_deref(), Some("Reconnect"));
+    // A captured launch whose marker the launcher consumed.
+    summary.captured = Some(1);
+    assert_eq!(label(Start, &summary).as_deref(), Some("Try again"));
+    let dir = super::local_capture_dir(summary.artifact_key.as_deref().unwrap()).unwrap();
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("prepared"), "").unwrap();
+    assert_eq!(
+        label(Start, &summary).as_deref(),
+        Some("Start conversation")
+    );
+    summary.interactive = false;
+    assert_eq!(label(Resume, &summary), None);
 }
 
 #[test]
-fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
+fn one_decision_reads_a_sessions_holder_process_and_history() {
+    use super::SessionResumeIntent::*;
+    use super::SessionState::*;
+    let intent = |state| super::resume_intent(&summary_in(state, true));
+    assert_eq!(intent(Detached), View);
+    assert_eq!(intent(Active), TakeOver);
+    assert_eq!(intent(Closed), Resume);
+    assert_eq!(intent(Unknown), Resume);
+    let mut admitted = summary_in(Unknown, true);
+    admitted.agent_process_id = Some(loopflow_model::id::AgentProcessId::new());
+    assert_eq!(
+        super::resume_intent(&admitted),
+        TakeOver,
+        "an admitted holder nothing says ended"
+    );
+    let mut fresh = summary_in(Closed, true);
+    fresh.has_provider_history = false;
+    assert_eq!(super::resume_intent(&fresh), Start);
+}
+
+#[test]
+fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let store = home.store().await;
         let repo = loopflow_test_support::TestRepo::new();
+        let _claude = crate::config::settings::select_invocation(
+            serde_yaml_ng::from_str("agent: claude").unwrap(),
+        );
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let first = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Start,
-            false,
-            false,
-            false,
-        )
-        .await
-        .unwrap();
-        assert!(first.open_argv.ends_with(&["--start-if-free".into()]));
-        assert!(first.actions.iter().any(|action| {
-            action.kind == super::SessionActionKind::Open && action.unavailable_reason.is_none()
-        }));
-
         let session = store.session(&record.id).await.unwrap().unwrap();
         let session = super::append_input(&store, session).await.unwrap();
-        let (dir, _) = crate::session_record::resolve_manifest(
-            &crate::store::lf_home_dir(),
+        let observation = crate::session_record::provider_session_observation(
+            &session,
             session.input_key().unwrap(),
-        )
-        .unwrap();
-        // The launcher consumes this marker before starting the provider. A
-        // crash at that boundary must not replay the captured request on load.
-        std::fs::remove_file(dir.join("prepared")).unwrap();
-        let error = super::open_without_replacing(
+            &"claude-thread".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&session, &observation)
+            .unwrap();
+        // A launcher still running that has not recorded its provider's pid.
+        let launcher = crate::id::LfProcessId::new();
+        rusqlite::Connection::open(home.home.path().join("loopflow.db"))
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,?2)",
+                rusqlite::params![&launcher, loopflow_storage::rows::now_unix()],
+            )
+            .unwrap();
+        let holder =
+            attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)
+                .unwrap();
+        let summary = super::current_summary(&store, &session.id).unwrap();
+        assert_eq!(
+            summary.agent_process_evidence,
+            crate::journal::ProcessIdentityEvidence::Unknown
+        );
+        assert_eq!(
+            listed_session(&store, &session.id).action.unwrap().label,
+            "Take over"
+        );
+
+        let opened = super::open(
             &store,
-            &record.id,
-            SessionOpenIntent::Start,
+            repo.path(),
+            &session.id,
+            None,
+            None,
+            false,
             true,
             false,
-            false,
         )
-        .await
-        .unwrap_err();
-        assert!(error.to_string().contains("retry it explicitly"));
-        let retry = |record: &super::SessionRecord| {
-            let action = record
-                .actions
-                .iter()
-                .find(|action| action.kind == super::SessionActionKind::MoveHere)
-                .unwrap()
-                .clone();
-            assert!(!record
-                .actions
-                .iter()
-                .any(|action| action.kind == super::SessionActionKind::Open));
-            action
-        };
-        let listed = listed_session(&store, &record.id);
-        assert_eq!(retry(&listed).label, "Try again");
-        assert!(retry(&listed).unavailable_reason.is_none());
-        let refused = super::open_without_replacing(
-            &store,
-            &record.id,
-            SessionOpenIntent::Start,
-            false,
-            false,
-            false,
-        )
-        .await
-        .unwrap();
-        assert_eq!(retry(&refused), retry(&listed));
-        // The click prepares the launch that `open_waiting` gives a new attempt.
-        let prepared = super::open(
-            &store,
-            std::path::Path::new("/"),
-            &record.id,
-            false,
-            false,
-            false,
-            false,
-        )
-        .await
-        .unwrap();
-        assert!(!prepared.open_argv.contains(&"--start-if-free".into()));
-        let after = store.session(&record.id).await.unwrap().unwrap();
-        assert_eq!(after.captured, session.captured);
-        assert_eq!(after.artifact_key, session.artifact_key);
-        assert!(store
-            .sqlite
-            .session_attachment(&record.id)
-            .unwrap()
-            .is_none());
+        .await;
+        let message = opened.unwrap_err().to_string();
+        assert!(
+            message.contains("resume was not started"),
+            "opening resumed beside a holder it could not stop: {message}"
+        );
+        assert_eq!(
+            store.sqlite.session_attachment(&session.id).unwrap(),
+            Some(holder)
+        );
     });
 }
 
 #[test]
-fn reveal_requires_history_and_never_publishes_a_first_turn() {
+fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
+    use std::os::unix::fs::PermissionsExt;
+    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ambient = crate::test_ambient::EnvGuard::new();
+    let home = ledger.home();
+    let bin = tempfile::tempdir().unwrap();
+    let received = bin.path().join("received");
+    let claude = bin.path().join("claude");
+    std::fs::write(
+        &claude,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s ' \"$@\" > '{}'\n",
+            received.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The thread's transcript is still here, so it resumes rather than starting fresh.
+    let _claude_home = crate::test_ambient::EnvGuard::clear(&["CLAUDE_CONFIG_DIR"]);
+    let claude_home = tempfile::tempdir().unwrap();
+    let project = claude_home.path().join("projects").join("-home");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("claude-thread.jsonl"), "{}\n").unwrap();
+    std::env::set_var("CLAUDE_CONFIG_DIR", claude_home.path());
+    // The launch records the CLI it would hand children; never the Machine's.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    std::env::set_var(
+        "PATH",
+        std::env::join_paths(
+            std::iter::once(bin.path().to_path_buf()).chain(std::env::split_paths(&path)),
+        )
+        .unwrap(),
+    );
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let opened = crate::journal::with_runtime(home, &["lf".into(), "resume".into()], || {
+        runtime.block_on(async {
+            let store = std::sync::Arc::new(
+                crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(
+                    home.join("loopflow.db"),
+                ))
+                .await
+                .unwrap(),
+            );
+            // A bare conversation: no Task, Wave or repository holds it.
+            let capture = crate::session_record::SessionRecorder::begin_at(
+                home,
+                crate::session_record::SessionCaptureSpec {
+                    harness: "claude".into(),
+                    model: None,
+                    surface: "tui".into(),
+                    cwd: home.into(),
+                    repo: None,
+                    worktree: None,
+                    skill: None,
+                    subjects: vec![],
+                    graph: crate::session_record::SessionGraphMembership::Independent,
+                    work: None,
+                },
+            )
+            .unwrap();
+            let session = store
+                .sqlite
+                .session_for_artifact(&capture.artifact_key())
+                .unwrap()
+                .unwrap();
+            let observation = crate::session_record::provider_session_observation(
+                &session,
+                session.input_key().unwrap(),
+                &"claude-thread".into(),
+                None,
+            );
+            store
+                .sqlite
+                .retain_session_observation(&session, &observation)
+                .unwrap();
+            assert_eq!(
+                super::invocation_intent(
+                    &session,
+                    &super::current_summary(&store, &session.id).unwrap(),
+                    false,
+                    false,
+                ),
+                super::SessionResumeIntent::Resume
+            );
+            super::open(&store, home, &session.id, None, None, false, true, false)
+                .await
+                .map(|_| ())
+        })
+    });
+    std::env::set_var("PATH", path);
+    opened.unwrap();
+    let argv = std::fs::read_to_string(&received).unwrap();
+    assert!(argv.contains("claude-thread"), "{argv}");
+}
+
+#[test]
+fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
     let _lock = crate::journal::test_env_lock();
     let home = SessionHome::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
@@ -965,27 +1061,24 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             .await
             .unwrap();
         let before = store.session(&record.id).await.unwrap().unwrap();
-        let prepared = super::open_without_replacing(
+        let first = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
+            None,
+            None,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
-        assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
-        let action = prepared
-            .actions
-            .iter()
-            .find(|action| action.kind == super::SessionActionKind::Reveal)
-            .unwrap();
-        assert!(action
-            .unavailable_reason
-            .as_ref()
-            .unwrap()
-            .contains("No saved provider history"));
+        assert_eq!(
+            first.open_argv,
+            super::human_session_argv(&record.id).unwrap()
+        );
         for refreshed in [
             super::surface(&store, &before).await.unwrap(),
             listed_session(&store, &record.id),
@@ -996,32 +1089,56 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
                 .find(|row| row.id == record.id)
                 .unwrap(),
         ] {
-            assert_eq!(refreshed.actions, prepared.actions);
-            let start = refreshed
-                .actions
-                .iter()
-                .find(|action| action.kind == super::SessionActionKind::Open)
-                .unwrap();
-            assert_eq!(start.label, "Start conversation");
-            assert!(start.unavailable_reason.is_none());
+            assert_eq!(refreshed.action, first.action);
+            assert_eq!(refreshed.action.unwrap().label, "Start conversation");
         }
-        let error = super::open_without_replacing(
+        let unchanged = store.session(&record.id).await.unwrap().unwrap();
+        assert_eq!(unchanged.captured, before.captured);
+        assert_eq!(unchanged.input_published, before.input_published);
+
+        let session = super::append_input(&store, unchanged).await.unwrap();
+        let (dir, _) = crate::session_record::resolve_manifest(
+            &crate::store::lf_home_dir(),
+            session.input_key().unwrap(),
+        )
+        .unwrap();
+        // The launcher consumes this marker before starting the provider; the
+        // next opening gives the request another attempt.
+        std::fs::remove_file(dir.join("prepared")).unwrap();
+        let listed = listed_session(&store, &record.id);
+        assert_eq!(listed.action.as_ref().unwrap().label, "Try again");
+        // `--explain` reads its Action and the opening from one decision.
+        let explained = super::explain_resume(
             &store,
+            std::path::Path::new("/"),
+            super::SessionTarget::Session(&record.id),
+            false,
+            false,
+        )
+        .await;
+        assert_eq!(
+            explained.action.unwrap().intent,
+            super::SessionResumeIntent::Start
+        );
+        assert_eq!(explained.opening, listed.action);
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
-            true,
+            None,
+            None,
+            false,
             false,
             false,
         )
         .await
-        .unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("start this conversation explicitly"));
+        .unwrap()
+        .prepared()
+        .unwrap();
+        assert_eq!(prepared.action, listed.action);
         let after = store.session(&record.id).await.unwrap().unwrap();
-        assert_eq!(after.artifact_key, before.artifact_key);
-        assert_eq!(after.captured, before.captured);
-        assert_eq!(after.input_published, before.input_published);
+        assert_eq!(after.captured, session.captured);
+        assert_eq!(after.artifact_key, session.artifact_key);
         assert!(store
             .sqlite
             .session_attachment(&record.id)
@@ -1040,20 +1157,21 @@ fn recovery_refresh_follows_current_holder_and_history() {
         let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-        let prepared = super::open_without_replacing(
+        let prepared = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
+            None,
+            None,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
-        assert!(!prepared
-            .actions
-            .iter()
-            .any(|a| a.kind == super::SessionActionKind::MoveHere));
+        assert_eq!(prepared.action.unwrap().label, "Start conversation");
 
         // A launcher that may still be running; an ended one would make its
         // unidentified agent dead instead of unknown.
@@ -1065,71 +1183,52 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let holder =
+        let run =
             attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher, true)
                 .unwrap();
         store
             .sqlite
             .record_agent_process_launch(
                 &record.id,
-                &holder,
+                &run,
                 &std::process::Command::new("fixture-provider"),
                 true,
             )
             .unwrap();
-        // An admitted holder with unknown OS evidence cannot be replaced by a reveal.
+        // An admitted run with unknown OS evidence: opening takes it over,
+        // and preparing leaves it attached.
         let refreshed = listed_session(&store, &record.id);
-        let takeover = refreshed
-            .actions
-            .iter()
-            .find(|a| a.kind == super::SessionActionKind::MoveHere)
-            .unwrap();
-        assert_eq!(takeover.label, "Take back");
-        let reveal = super::open_without_replacing(
+        assert_eq!(refreshed.action.as_ref().unwrap().label, "Take over");
+        let prepared = super::open(
             &store,
+            std::path::Path::new("/"),
             &record.id,
-            SessionOpenIntent::Reveal,
+            None,
+            None,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
-        assert_eq!(reveal.actions, refreshed.actions);
+        assert_eq!(prepared.action, refreshed.action);
         assert_eq!(
             store.sqlite.session_attachment(&record.id).unwrap(),
-            Some(holder.clone())
+            Some(run.clone())
         );
 
         store
             .sqlite
-            .record_session_agent_session(&record.id, &holder, &"saved-thread".into())
+            .record_session_agent_session(&record.id, &run, &"saved-thread".into())
             .unwrap();
         store
             .sqlite
-            .record_agent_process_exit(&record.id, &holder, true)
+            .record_agent_process_exit(&record.id, &run, true)
             .unwrap();
         let refreshed = listed_session(&store, &record.id);
-        assert!(!refreshed
-            .actions
-            .iter()
-            .any(|a| a.kind == super::SessionActionKind::MoveHere));
-        assert!(refreshed
-            .actions
-            .iter()
-            .find(|a| a.kind == super::SessionActionKind::Reveal)
-            .unwrap()
-            .unavailable_reason
-            .is_some());
-        assert_eq!(
-            refreshed
-                .actions
-                .iter()
-                .find(|a| a.kind == super::SessionActionKind::Open)
-                .unwrap()
-                .label,
-            "Start conversation"
-        );
+        assert_eq!(refreshed.action.unwrap().label, "Start conversation");
     });
 }
 
@@ -1139,89 +1238,63 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
     let home = SessionHome::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let store = home.store().await;
-        for source in ["provider-session:imported", "events.jsonl:1"] {
-            let repo = loopflow_test_support::TestRepo::new();
-            let (record, _) = super::primary::ensure(&store, repo.path(), None)
-                .await
-                .unwrap();
-            let session = store.session(&record.id).await.unwrap().unwrap();
-            let session = super::append_input(&store, session).await.unwrap();
-            let mut observation = crate::session_record::provider_session_observation(
-                &session,
-                session.input_key().unwrap(),
-                &"imported-history".into(),
-                None,
-            );
-            observation.source = source.into();
-            observation.payload["source"] = source.into();
-            if source.starts_with("events") {
-                observation.payload["evidence"] = serde_json::json!({
-                    "schema_version": 1, "seq": 1, "observed_at": "2026-11-04T00:00:00Z",
-                    "type": "provider_session_observed", "attempt_key": "imported",
-                    "provider_session_id": "imported-history"
-                });
-            }
-            store
-                .sqlite
-                .retain_session_observation(&session, &observation)
-                .unwrap();
-            let prepared = super::open_without_replacing(
-                &store,
-                &record.id,
-                SessionOpenIntent::Reveal,
-                false,
-                false,
-                false,
-            )
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
             .unwrap();
-            let refreshed = listed_session(&store, &record.id);
-            assert_eq!(prepared.actions, refreshed.actions);
-            assert_eq!(
-                refreshed
-                    .actions
-                    .iter()
-                    .find(|a| a.kind == super::SessionActionKind::Open)
-                    .unwrap()
-                    .label,
-                "Open here"
-            );
-            assert!(refreshed
-                .actions
-                .iter()
-                .find(|a| a.kind == super::SessionActionKind::Reveal)
-                .unwrap()
-                .unavailable_reason
-                .is_none());
-            assert!(store
-                .sqlite
-                .session_attachment(&record.id)
-                .unwrap()
-                .is_none());
-            // A new captured input cannot borrow the older input's resume reference.
-            let next = super::append_input(&store, session).await.unwrap();
-            let prepared = super::open_without_replacing(
-                &store,
-                &next.id,
-                SessionOpenIntent::Reveal,
-                false,
-                false,
-                false,
-            )
-            .await
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        let session = super::append_input(&store, session).await.unwrap();
+        let observation = crate::session_record::provider_session_observation(
+            &session,
+            session.input_key().unwrap(),
+            &"imported-history".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&session, &observation)
             .unwrap();
-            let refreshed = listed_session(&store, &next.id);
-            assert_eq!(prepared.actions, refreshed.actions);
-            assert_eq!(
-                refreshed
-                    .actions
-                    .iter()
-                    .find(|a| a.kind == super::SessionActionKind::Open)
-                    .unwrap()
-                    .label,
-                "Start conversation"
-            );
-        }
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &record.id,
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap()
+        .prepared()
+        .unwrap();
+        let refreshed = listed_session(&store, &record.id);
+        assert_eq!(prepared.action, refreshed.action);
+        assert_eq!(refreshed.action.unwrap().label, "Open here");
+        assert!(store
+            .sqlite
+            .session_attachment(&record.id)
+            .unwrap()
+            .is_none());
+        // A new captured input cannot borrow the older input's resume reference.
+        let next = super::append_input(&store, session).await.unwrap();
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &next.id,
+            None,
+            None,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap()
+        .prepared()
+        .unwrap();
+        let refreshed = listed_session(&store, &next.id);
+        assert_eq!(prepared.action, refreshed.action);
+        assert_eq!(refreshed.action.unwrap().label, "Start conversation");
     });
 }
 
@@ -1274,7 +1347,7 @@ fn a_session_switched_to_another_provider_resumes_on_it() {
         let config =
             crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None, false)
                 .unwrap();
-        assert_eq!(config.agent().unwrap(), "codex");
+        assert_eq!(config.agent.to_string(), "codex");
         assert_eq!(config.resume_token, Some("codex-thread".into()));
     });
 }
@@ -1378,7 +1451,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
@@ -1501,7 +1575,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Publication succeeded but the result was not recorded before exit.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
@@ -1528,10 +1603,12 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
             .unwrap();
         let first = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let retry = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(first.captured, retry.captured);
         assert_eq!(first.request, retry.request);
         assert!(store
@@ -1543,7 +1620,7 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
 }
 
 /// A held Task conversation nobody views is the Task's, and any terminal
-/// attaches to it: there is no other terminal's input to take back.
+/// attaches to it as one more view.
 #[allow(clippy::await_holding_lock)]
 #[tokio::test]
 async fn a_held_task_conversation_without_a_view_offers_attach() {
@@ -1584,31 +1661,9 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
     let row = rows.iter().find(|row| row.id == session.id).unwrap();
     assert_eq!(row.state, super::SessionState::Detached);
     assert_eq!(row.work_path.as_deref(), Some(created.identifier.as_str()));
-    let offered: Vec<_> = row
-        .actions
-        .iter()
-        .map(|action| (action.label.as_str(), action.unavailable_reason.as_deref()))
-        .collect();
-    assert_eq!(offered, [("Reconnect", None), ("Show conversation", None)]);
-    assert!(row.actions[0]
-        .help
-        .ends_with(&format!("lf resume {}", session.id)));
-    // Desktop reopens and refreshes a pane with reveal; it needs the action
-    // that carries whether revealing can attach.
-    let prepared = super::open_without_replacing(
-        &logins.store,
-        &session.id,
-        SessionOpenIntent::Reveal,
-        false,
-        false,
-        false,
-    )
-    .await
-    .unwrap();
-    assert!(prepared
-        .actions
-        .iter()
-        .any(|action| action.kind == super::SessionActionKind::Reveal));
+    let action = row.action.as_ref().unwrap();
+    assert_eq!(action.label, "Reconnect");
+    assert!(action.help.ends_with(&format!("lf resume {}", session.id)));
 }
 
 struct ListFilters {

@@ -133,7 +133,7 @@ struct WorkSurfaceView: View {
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
                     }
-                    PlanningSyncView(sync: task.task.sync)
+                    TrackerSyncView(sync: task.task.sync, repo: task.task.repo)
                     TaskWorkflowHeader(model: model, task: task, work: model.taskWork[task.id])
                         .id(task.id)
                 }
@@ -163,7 +163,7 @@ struct WorkSurfaceView: View {
                                         repository: model.repoPath, liveSessions: model.liveSessionCount,
                                         owner: model.navigation.performanceOwner) { onOpenSession(session) }
                     } label: {
-                        Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
+                        Label("Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
                     .accessibilityIdentifier("task-available-\(session.id)")

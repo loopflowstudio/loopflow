@@ -76,10 +76,13 @@ lf --machine build-home --wave product wave-operate
 its Machine identity, resolves its own files and store, and returns the result.
 Planning intent, including Task ownership, has one owner of record: the planning
 provider, or Loopflow's journal when the plan is local. Execution facts stay with
-the Machine that produced them, and inventories remain local. SSH command
-routing needs no resident API server. Desktop uses a separate local client API
-server; LOO-718 adds authenticated remote client access. Neither moves execution
-ownership into a central service.
+the Machine that produced them, and inventories remain local. Work sent to
+another Machine runs in that Machine's server: a Task or Session write for a
+Task mini runs travels over SSH to `lf server connect` there, a pipe to mini's
+server that starts it when none is running. Commands run on a Machine itself
+need no server, and `ssh mini lf …` by hand is the way in when its server
+cannot run. LOO-718 adds authenticated remote client access. Neither moves
+execution ownership into a central service.
 
 The Machine and ownership types live in
 [`durable.rs`](../../rust/loopflow-execution/src/durable.rs). SSH routing is exposed by
@@ -156,9 +159,36 @@ inside one IMMEDIATE transaction:
 
 | Task is | Writer |
 |---|---|
-| Yours, on another of your Machines | That Machine, over `lf --machine` |
+| Yours, on another of your Machines | That Machine, as a typed operation over SSH |
 | Unowned | Your Wave Machine |
 | Someone else's | Your own Wave Machine; your later claim wins |
+
+A write for a Task another Machine runs travels as the operation itself, not
+as a command line. Running, shipping, holding, claiming or unassigning the Task,
+and opening or resuming its Session, reach the writer the same way:
+
+```bash
+lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+ssh mini lf server status               # while it runs, the laptop is a connected client
+```
+
+The sender runs `lf server connect` on the writer over SSH, a pipe to the
+writer's server that checks its Machine identity and starts the server when
+none is running. The write goes as itself, with a `sender` naming the
+repository and the sender's profile, participant name and agent override; a
+run or ship also carries the values `forward.env` names, and the files
+`forward.files` names are delivered first. `lf task status <issue>
+--subscribe` for a Task mini runs subscribes to mini's server the same way.
+The writer's server runs it in its own checkout and answers; an operation that
+arrives this way is never forwarded again. An older `lf` there fails naming
+its version and `ssh mini 'lf install'`; one that dies, or SSH that cannot
+reach mini, fails with what the destination printed.
+
+A writer with an older `lf` fails the call and names its version and the
+update command, for example ``mini runs lf 0.15.2, which cannot take this
+operation; update it with `ssh -- 'mini' 'lf install'` ``. A writer with a newer
+protocol asks you to update this Machine with `lf install`. Nothing falls back
+to running the write locally.
 
 Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim
@@ -466,8 +496,7 @@ shell / automation / Loopflow.app
 ```
 
 [What runs on a Machine](index.md#what-runs-on-a-machine) is the process
-model: a launch runs here, held by the Machine server's holder, or detached
-under a Graph process. Wave operations are finite attributed conversations.
+model and its four launch kinds. Wave operations are finite attributed conversations.
 Each Task Graph runs through the common Graph runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
@@ -539,8 +568,10 @@ Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
 main-Machine opens never initialize or advance its schema.
 
-`LF_HOME` explicitly selects a private, disposable Home. Its database is
-always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable
+`LF_HOME` explicitly selects a private, disposable Home. Its store is
+always `$LF_HOME/loopflow.db`, with history and turns in `$LF_HOME/history.db`;
+no other
+variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
 migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into

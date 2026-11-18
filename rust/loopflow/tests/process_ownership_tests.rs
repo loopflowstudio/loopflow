@@ -166,6 +166,8 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .await
         .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
+    let history =
+        rusqlite::Connection::open(loopflow_storage::history::history_path(&database)).unwrap();
     let parent = LfProcessId::new();
     let raw = serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ literal"]).unwrap();
     connection
@@ -295,8 +297,8 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
         VALUES('caller-session','Historical','human',1,1,'/missing',?1,?2)",
         rusqlite::params![task.as_str(),wave]).unwrap();
-    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
-        VALUES('caller-session','thread','turn','started','',?1,?2,?3,1,'unreadable history')",
+    history.execute("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+        VALUES('caller-session','thread','turn',?1,?2,?3,1)",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
         vec!["history", "list", "--all", "--task", "PROOF-1", "--json"],
@@ -356,8 +358,8 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .unwrap();
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,wave_id)
         VALUES('other-session','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
-    connection.execute("INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,lf_process_id,wave_id,observed_at,payload)
-        VALUES('other-session','thread','turn','started','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
+    history.execute("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,wave_id,started_at)
+        VALUES('other-session','thread','turn',?1,?2,1)", rusqlite::params![ids[0],other_wave]).unwrap();
     for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
         let result = command(
             home.path(),
@@ -739,7 +741,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
             title: "AgentProcess ownership".into(),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -749,7 +750,7 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
 }
 
 #[tokio::test]
-async fn historical_feedback_is_not_live_availability() {
+async fn historical_sessions_are_not_live_availability() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -768,12 +769,6 @@ async fn historical_feedback_is_not_live_availability() {
     )
     .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();
-    connection
-        .execute(
-            r#"INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES('waiting','observed','legacy_review_feedback',1,'{"type":"legacy_review_feedback","summary":"Review the API"}')"#,
-            [],
-        )
-        .unwrap();
     connection
         .execute(
             "UPDATE agent_sessions SET completed_at=2 WHERE id='legacy_finished'",

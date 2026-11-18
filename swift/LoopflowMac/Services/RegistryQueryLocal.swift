@@ -16,7 +16,7 @@ enum RegistryQueryLocal {
             let answer = try await CreationSubmissions.shared.submit(change, requestID: requestID)
             do {
                 switch change {
-                case .taskCreate: _ = try RegistryQuery.decode(TaskCreateReceipt.self, from: answer)
+                case .taskCreate: _ = try RegistryQuery.decode(TaskCreated.self, from: answer)
                 case .sessionNew: _ = try RegistryQuery.decode(SessionRecord.self, from: answer)
                 default: break
                 }

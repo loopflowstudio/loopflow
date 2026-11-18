@@ -134,11 +134,16 @@ impl SqliteStore {
                 NativeBoundary::Select { source } | NativeBoundary::Activate { source } => source,
                 _ => "observed",
             };
-            super::provider_transitions::observe_in(&tx, &adapter.session, thread, source)?;
+            let mut history = Vec::from_iter(super::provider_transitions::observe_in(
+                &tx,
+                &adapter.session,
+                thread,
+                source,
+            )?);
             if let Some((session, input, reference)) =
                 resume.filter(|(_, _, reference)| reference.agent_session.as_str() != thread)
             {
-                super::sessions::retain_history_in(
+                history.extend(super::sessions::retain_history_in(
                     &tx,
                     &session,
                     &[crate::session_record::provider_session_observation(
@@ -147,13 +152,15 @@ impl SqliteStore {
                         &thread.into(),
                         reference.account_id,
                     )],
-                )?;
+                )?);
             }
             tx.execute(
                 "UPDATE steer_adapters SET activated_at=COALESCE(activated_at,unixepoch()) WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )?;
             tx.commit()?;
+            drop(conn);
+            self.append_history("provider transition", &history);
         }
         write()
     }
@@ -242,12 +249,12 @@ impl SqliteStore {
         let mut statement = conn.prepare(
             "SELECT s.id,p.id,a.capability,s.provider_thread,s.cwd,
                 CASE WHEN p.agent_provider='codex' THEN p.endpoint END,p.inbox,
-                s.work_source,p.pid,p.os_started_at
+                p.pid,p.os_started_at
              FROM processes p INDEXED BY processes_unfinished
              JOIN agent_sessions s ON s.agent_process_id=p.id
              JOIN steer_adapters a ON a.agent_process_id=p.id
              JOIN session_activity act ON act.session_id=s.id AND act.agent_process_id=p.id
-             WHERE act.yielded=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
+             WHERE act.yielded=1 AND s.interactive=1 AND p.completed_at IS NULL AND s.provider_thread IS NOT NULL
                AND (p.agent_provider='codex' AND p.endpoint IS NOT NULL OR p.inbox IS NOT NULL)
                AND (?1 IS NULL OR s.id=?1)",
         )?;
@@ -256,20 +263,9 @@ impl SqliteStore {
                 Some(endpoint) => IdleReach::Codex(endpoint.into()),
                 None => IdleReach::Claude(row.get::<_, String>(6)?.into()),
             };
-            let source: Option<crate::session::WorkSource> = row
-                .get::<_, Option<String>>(7)?
-                .map(|source| serde_json::from_value(serde_json::Value::String(source)))
-                .transpose()
-                .map_err(|error| {
-                    rusqlite::Error::FromSqlConversionFailure(
-                        7,
-                        rusqlite::types::Type::Text,
-                        Box::new(error),
-                    )
-                })?;
             let identity = row
-                .get::<_, Option<u32>>(8)?
-                .zip(row.get::<_, Option<i64>>(9)?);
+                .get::<_, Option<u32>>(7)?
+                .zip(row.get::<_, Option<i64>>(8)?);
             let conversation = IdleConversation {
                 adapter: SteerAdapter {
                     session: row.get(0)?,
@@ -280,16 +276,12 @@ impl SqliteStore {
                 cwd: row.get::<_, String>(4)?.into(),
                 reach,
             };
-            Ok(source
-                .filter(|source| source.is_managed())
-                .map(|_| IdleCandidate {
-                    conversation,
-                    identity,
-                }))
+            Ok(IdleCandidate {
+                conversation,
+                identity,
+            })
         })?;
-        Ok(rows
-            .filter_map(Result::transpose)
-            .collect::<Result<_, _>>()?)
+        Ok(rows.collect::<Result<_, _>>()?)
     }
 
     /// A woken conversation is in a turn until its next Stop says otherwise.

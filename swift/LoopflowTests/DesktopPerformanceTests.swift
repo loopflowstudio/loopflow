@@ -714,7 +714,7 @@ struct DesktopPerformanceTests {
                 try journal.write(["event": "reopen_request", "round": round,
                                    "selected_session": model.navigation.selectedSessionId as Any? ?? NSNull(),
                                    "state": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.state),
-                                   "actions": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.actions)])
+                                   "action": String(describing: store.sessions.first { $0.id == fixture.sessionId }?.record.action)])
             }, ready: {
                 let terminal = registry.surfaces.view(for: identity)
                 let hasHistory = terminal.surface.map {
@@ -996,8 +996,8 @@ struct DesktopPerformanceTests {
              "workspace": ["machine_id": fixtureMachineId, "worktree": checkout,
                            "task_id": "perf-task-\(index)", "unavailable": NSNull()],
              "title": String(format: "Conversation %03d", index), "detail": "Benchmark fixture",
-             "cwd": checkout, "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(), "work_path": NSNull(),
-             "actions": sessionActionFixture(state: "active"),
+             "cwd": checkout, "wave_id": "wave-1", "state": "active", "work_path": NSNull(),
+             "action": sessionActionFixture(state: "active"),
              "blocked": false, "title_source": "generated", "ended": NSNull(), "start": NSNull(), "task_primary": false, "graph_membership": ["kind": "independent"], "task_ids": ["perf-task-\(index)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "terminal_ids": [], "open_argv": ["must-not-launch"]] as [String: Any]
         })
         let historyTemplate = try #require(JSONSerialization.jsonObject(with: Data(contentsOf:

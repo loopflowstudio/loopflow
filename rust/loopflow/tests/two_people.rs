@@ -364,3 +364,13 @@ fn two_people_share_one_repository() {
         );
     }
 }
+
+#[test]
+fn a_peer_syncs_a_task_it_has_never_fetched() {
+    use Person::{Lee, Maya};
+    let pair = Pair::build();
+    let task = pair.create_task(Maya, "Unfetched");
+    let synced = pair.ok(Lee, &["task", "sync", &task]);
+    assert_eq!(synced.trim(), format!("{task}: synchronized"));
+    assert!(pair.ok(Lee, &["task", "list"]).contains("Unfetched"));
+}

@@ -74,6 +74,25 @@ open their brief beside **Start**, which runs the Task's Workflow; opening alone
 starts nothing. Waves follow Tasks in the same scrolling sidebar, with counts
 from the planning inventory.
 
+**⌘N** opens New Task. Type what you want and click **Start**: the sheet closes
+in the click and the Task's workspace shows your words in its conversation, with
+the Task already in Working. Setup prints under them as it finishes, then the
+agent's prompt takes typing:
+
+```
+Fix the flaky reconnect test
+Checkout ready  0.2 s
+Graph code started
+```
+
+The checkout branches from the default branch as of Loopflow's last background
+fetch; the Task's first sync catches up. A setup step that fails prints its error
+in the pane, and the agent still starts once the checkout exists. Reopening the
+conversation continues setup from the step that stopped; it never starts a
+second Graph. If the Machine refuses before filing, your words stay with the
+error and **Try again**; once it has answered, the Task exists, so a failure to
+open its conversation shows in the Task's pane with Retry, never a second Start.
+
 Click a row to select its retained workspace. The title-bar **Repo › Wave › Task**
 path follows hierarchy: click a name to go there, or the **›** after it to list and
 search what it contains; Back and **⌘[ / ⌘]** follow visits. **⌘K** searches Work
@@ -118,10 +137,8 @@ Filtering or opening a Task leaves the order intact. Saved Dashboard arrangement
 search results and Done's completion-date ordering keep their own order.
 
 Each Work keeps one pane layout and document store. The browser offers Files,
-Changes, Task & workflow, Graph processes and web pages. A Task with no saved
-layout inherits its Wave's semantic default; later Wave edits leave saved Task
-layouts alone. Rex reads those defaults for new windows and owns its active
-native layout independently.
+Changes, Task & workflow, Graph processes and web pages. Rex, Herdr and cmux
+open only a Task's conversation and never read Desktop's layouts.
 
 Repository and Wave
 entry shows their conversation, opened on load or on selection.
@@ -140,8 +157,7 @@ links wait for resolution before delivery. Unknown repositories need an initial 
 Every conversation a window can select opens on load, before any selection and
 with no saved recent visits: the repository's, each Wave's and every claimed
 working Task's (idle, active or moving). Selecting any of them shows opening, the
-live conversation, a passive view of a conversation another client controls, or a
-failure with **Retry**; never a **No session** or **Open** gate. Load opens the
+live conversation, or a failure with **Retry**; never a **No session** or **Open** gate. Load opens the
 selected Work first, then visible tiles, then the repository and Waves, then
 recent working Tasks, two preparations at a time; initial rendering does not wait.
 A prepared conversation starts its provider at once, before any pane shows it;
@@ -170,21 +186,30 @@ opens whether or not anyone owns it. An unstarted Task has no checkout and no
 conversation: its Session slot offers **Start**, which runs its Workflow. Opening never launches a Graph, claims or starts a Task, runs the
 repository or Wave operator, or replays consumed input: with no request, the first
 turn of any primary reads its scope and reports where it stands. A failed
-automatic Start shows its error with **Retry**. A launch that ended with no saved
-history stays closed until **Try again** repeats it; Retry and refresh never do.
-If another client holds input, the pane offers **Take back** and leaves that client
-in control until clicked or until it closes. Close and eviction discard late opening results.
+automatic opening shows its error with **Retry**. A finished Task opens by itself
+only when it already has a conversation; otherwise **Open conversation** starts one.
+Every opening is `lf resume`: a held terminal gains a view, an ended Session resumes
+from its history, and a provider running in a native client lf can't share is taken
+over, ending that client. A pane's button carries Rust's label for which it will do
+(**Reconnect**, **Open here**, **Take over**, **Try again**, **Start conversation**).
+A held terminal takes any number of views and every view types, so a draft typed
+in one shows in the others. The view that most recently attached, typed or gained
+focus sets the terminal's size; when it leaves, the next most recent live view does.
+Close and eviction discard late opening results.
 
 Finite CLI requests time out after 30 seconds. Canceling preparation ends only
 that request; running Sessions continue. If a change times out, refresh to learn
 its result before retrying.
 
-Session panes receive their relay's status and send Retry/Move actions over one
+Session panes receive their relay's status and send Retry over one
 private Unix connection. Quiet streams schedule no reads, including in retained
 hidden panes. Status loss pauses input while the relay continues; a fresh status
 connection supplies the current reading without replaying actions. Closing a pane
-stops observation and removes its private socket directory. Native readiness and
-attachment permission share that reading; a saved screen cannot enable input.
+stops observation and removes its private socket directory. Input waits for a
+connected reading with native readiness; a saved screen cannot enable input.
+The terminal view tells Ghostty when it gains or loses focus (first responder in
+the key window); the relay turns Ghostty's focus reports into the holder's
+`focus` requests, so the pane being looked at sets the size.
 
 Pane headers name the known provider, conversation and directory; arbitrary terminal
 titles remain context under **Shell**, without guessing which program is running.
@@ -317,11 +342,9 @@ menus use the same actions for the clicked Task. Command-T adds a shell tab. The
 **Codex**, and **OpenCode**, continuing the same Session with its history.
 **Refresh session** reconnects the pane to that conversation, including after a
 failed launch or stale connection. It keeps the provider's history and running
-process; a conversation open elsewhere still offers **Take back**. The control
+process, and takes over a conversation a native client holds. The control
 stays visible when the Session is the only pane. The same action is available
-through `lf desktop do refresh-session -p session`. **Take back** transfers input
-from another terminal; `lf desktop do take-back-session -p session` uses the same
-action.
+through `lf desktop do refresh-session -p session`.
 **Reset session** starts a fresh provider thread in the same Session, seeded with
 its saved conversation. Reset and provider switching first read that history,
 then replace the current provider process. If the
@@ -424,10 +447,8 @@ long lines retain the native editor's known responsiveness limitation.
 
 Select a repository, then a Task to open its conversation. Its workspace retains
 conversations, shells, file drafts and layout across visits. Use **+** for supporting
-panes; expand **Overview** for Task details. Active clients elsewhere require
-explicit **Take back**. The pane retains its last available screen and shows
-Rust's command beside the action. Passive reveal leaves the other client in control.
-With no saved screen, the pane explains where the conversation is controlled.
+panes; expand **Overview** for Task details. Opening a conversation a native
+client holds takes it over here; that client ends.
 
 Exiting a disposable CLI conversation retires it from navigation while keeping
 its provider history. Ctrl-C interruption is recorded; interrupted Graph reviews,
@@ -614,8 +635,8 @@ Sessions and Task human GraphSteps.
 Runs resumed interactively also appear, including those originally launched
 headlessly. Closing their client preserves the Session and its history.
 
-**Take back** transfers input to this pane; the previous terminal reports the move.
-Opening the pane leaves the other client in control.
+Opening the pane takes input from a native client, which ends; a held terminal
+only gains this view.
 
 Discuss review feedback in the ongoing conversation. Closing a pane only hides
 the view and releases its Desktop hold. Shared lifecycle protections determine
@@ -652,7 +673,7 @@ directory does not move it into another workspace.
 Manually launched agents in these shells register against their actual terminal.
 Selecting their Session focuses the existing shell; selection leaves both the
 conversation and shell running.
-External clients require explicit **Take back**. Terminals and their command titles survive Work list and detail
+Terminals and their command titles survive Work list and detail
 navigation. Switching repositories focuses that repository’s window without replacing
 the origin’s panes or drafts. Native surfaces belong to
 that window and are never mounted twice.
@@ -980,7 +1001,7 @@ supplies `graph_processes`, using the same execution details as CLI inspection.
 ### Inspect retained workspaces
 
 ```sh
-lf open loopflow://loopflow/task/LOO-427 --diff --json
+lf open loopflow://loopflow/task/LOO-427 --explain --json
 lf desktop state --json
 lf task run LOO-427 --explain --json
 ```
@@ -1015,13 +1036,11 @@ window. After explicit `config repo --bind`, the next open reuses the existing
 scene, including one still registering. Retained local IDs come from `lf`, not
 path matching. Drafts, native views and pending links stay in place; old pane
 targets become stale, so inspect again before control. Restoration accepts a
-retained ID but refuses a location that no longer owns it. `--diff` reveals the existing Changes browser beside the conversation,
-retaining file selection and drafts. Launch acceptance returns `opening`; it does
+retained ID but refuses a location that no longer owns it. Launch acceptance returns `opening`; it does
 not prove a usable native endpoint. Inspection retains the latest request's outcome:
-`usable` for a Session request requires the Session's native-surface callback and a loaded Changes reading
-when requested, with both original panes still visible. Closing, hiding, replacing or
-zooming away a requested pane fails the pending request, as do connection, surface and
-comparison errors. Navigation cancels an unfinished opening; late results cannot settle a newer
+`usable` for a Session request requires the Session's native-surface callback, with its
+pane still visible. Closing, hiding, replacing or zooming away that pane fails the pending
+request, as do connection and surface errors. Navigation cancels an unfinished opening; late results cannot settle a newer
 request, even for the same URL. This is endpoint readiness, not provider-turn completion
 or proof of compositor rendering. A plain Task link waits for its Task page to mount;
 it does not require a Session or checkout. An unavailable workspace reports failure.
@@ -1031,16 +1050,15 @@ including lookup/validation failures before any window registers. A plain reposi
 becomes usable when its validated workspace receiver registers, even while planning
 loads. Registered Task links report their page/Session outcome on the window instead.
 Each receipt has a revision so a repeated request cannot consume its previous
-result. Session panes report attachment separately from native surface existence;
-`elsewhere` means another client retains input. Failed panes can reconnect in
+result. Session panes report attachment separately from native surface existence.
+Failed panes can reconnect in
 place, while a pending attachment stays with its current viewer.
 These are transient receipts, not opening history or Work identity. Remote Task links
 retain the local repository window and re-observe the named execution Machine before
-opening its Session and optional Changes pane. A remote link without `--session`
-shows the Task without creating or connecting a Session. An explicit Changes
-request without a Session still uses that Task's primary Session. Missing, changed or unavailable recorded locations
+opening its Session. A remote link without `--session` shows the Task without
+creating or connecting a Session. Missing, changed or unavailable recorded locations
 never prepare another checkout. The CLI transports native Session argv over SSH,
-keeping the owner's data directory and explicit takeover behavior. Local panes and
+keeping the owner's data directory and takeover behavior. Local panes and
 drafts remain retained; no remote planning tree or execution record is imported.
 
 Every Desktop gesture is a `DesktopAction` in `LoopflowMac/DesktopActions.swift`:
@@ -1119,7 +1137,7 @@ concurrent request traces in `logs/lf.log`, and no request Process rows or globa
 context changes. Native cancellation releases the client's wait; a lost reply
 remains unknown without replay.
 
-Terminal recovery must preserve the exact owner, draft and newer control claims.
+Terminal recovery must preserve the exact owner and draft.
 Opening shows **Opening… Input paused** through attachment and native readiness;
 **Reconnecting…** follows a previously acknowledged connection.
 Connection feedback overlays the terminal, so clearing it does not resize the
@@ -1127,13 +1145,12 @@ provider or move its cursor. Both mount layout and pre-mount sizing keep the sam
 viewport while status changes.
 Refresh waits for its previous viewer to retire before preparing a replacement.
 `WarmPaneMountTests` checks this headless with paused input and overlapping
-Refresh requests. Take back replaces read-only and ended attachments; the transport
-fixture `desktop_crash_reopen` checks control loss, read-only Refresh, explicit
-takeover and input returning when the other viewer closes, against a surviving
-provider. `GhosttyTerminalMountTests` checks mounted
+Refresh requests. Opening again replaces an ended attachment; the transport fixture `desktop_crash_reopen` checks that the draft survives
+a Desktop crash and new input submits once, against a surviving provider.
+`GhosttyTerminalMountTests` checks mounted
 focus separately.
 Check native status, paused input, local copy/Find/scroll, Retry after exhaustion,
-one-shot **Move here**, and cancellation on pane closure. An orderly terminal close
+typing from two views at once, and cancellation on pane closure. An orderly terminal close
 ends recovery and shows its replacement or retirement reason; bare EOF keeps the
 reason unknown. Installed-helper replacement must preserve the Session and Graph
 identities and prove continued input and Graph progress; a socket restart alone is insufficient.
@@ -1303,10 +1320,12 @@ restore it from Hidden. Rust resolves membership and the first visible occurrenc
 reuse each Task's retained Session, tools and drafts. Focus never changes which
 occurrence wins or replaces its primary Session face.
 
-Task pane layouts, selected shell/file tabs and file drafts save through lfdb.
-A delayed restore keeps newer tabs and edits. Conflicts leave local content intact
-and show an error; **Reload saved intent** reconciles retained content before another
-save. File drafts compare their saved base with disk before editing. Restored shell
+Each Mac saves its own pane layouts, selected shell/file tabs and file drafts, one
+file per Work under `$LF_HOME/desktop-cache/pane-layouts/<machine>/<kind>/`; two
+Macs driving one Machine keep separate layouts. Restoring into open Work keeps its
+newer tabs and edits, and a pane naming a Session the current reading lacks opens
+empty. A failed save leaves local content intact and shows an error; **Reload saved
+intent** reconciles retained content before another save. File drafts compare their saved base with disk before editing. Restored shell
 intent retains its identity without initial commands: opening it attaches to the
 same owner and never replays startup or creates replacement execution.
 

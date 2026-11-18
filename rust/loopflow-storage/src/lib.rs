@@ -10,8 +10,8 @@ pub mod error;
 pub mod execution;
 pub mod graph;
 pub mod graph_process;
+pub mod history;
 pub mod instrumentation;
-pub mod linear_records;
 pub mod machine_records;
 pub mod metric;
 #[cfg(test)]
@@ -21,6 +21,7 @@ pub mod migration_runner;
 pub mod migration_schema;
 pub mod peer_records;
 pub mod people;
+pub mod planning;
 pub mod planning_destination;
 pub mod planning_exchange;
 pub mod planning_sync;

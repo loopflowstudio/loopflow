@@ -94,29 +94,6 @@ pub(super) async fn resolve_managed_task(repo: &Path) -> OpsResult<ManagedTask> 
     }
 }
 
-pub fn record_task_pr_repair(
-    repo: &Path,
-    kind: loopflow_storage::work::task::TaskPrRepairKind,
-) -> OpsResult<bool> {
-    block_on_task(async move {
-        let ManagedTask::Managed { store, task } = resolve_managed_task(repo).await? else {
-            return Ok(false);
-        };
-        let Some(pr) = store
-            .active_task_pr(&task.id)
-            .await
-            .map_err(|error| task_error(format!("failed to read active PR: {error}")))?
-        else {
-            return Ok(false);
-        };
-        let occurred_at = time::OffsetDateTime::now_utc();
-        store
-            .record_task_pr_repair_incident(&pr.id, kind, occurred_at)
-            .await
-            .map_err(|error| task_error(format!("failed to record Task PR repair: {error}")))
-    })
-}
-
 pub(super) fn task_pr_for_publication(task: &Task) -> TaskPr {
     TaskPr {
         id: TaskPrId::new(),
@@ -626,15 +603,31 @@ pub(super) fn resolve_upstream_base(
     repo: &Path,
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
-    let base = if default_branch == get_default_branch(repo)? {
+    let base = upstream_base(repo, default_branch)?;
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    resolve_base(repo, default_branch, base)
+}
+
+/// The same base as the last fetch left it.
+pub(super) fn local_upstream_base(
+    repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(String, String)> {
+    resolve_base(repo, default_branch, upstream_base(repo, default_branch)?)
+}
+
+fn upstream_base(repo: &Path, default_branch: &str) -> OpsResult<String> {
+    Ok(if default_branch == get_default_branch(repo)? {
         crate::git::integration_base(repo)?
     } else if has_remote(repo)? {
         format!("origin/{default_branch}")
     } else {
         default_branch.to_string()
-    };
-    crate::git::fetch_tracking_ref(repo, &base)
-        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    })
+}
+
+fn resolve_base(repo: &Path, default_branch: &str, base: String) -> OpsResult<(String, String)> {
     let base_ref = if base == default_branch {
         format!("refs/heads/{default_branch}")
     } else {

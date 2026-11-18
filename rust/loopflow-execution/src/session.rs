@@ -15,7 +15,6 @@ pub fn conversation(
         &crate::config::PersonalSettings::read(Some(cwd), wave.as_deref()),
         Some(&skill),
     )?;
-    let (provider, model) = crate::config::parse_agent(&agent);
     Ok(LfSession {
         captured: None,
         id: uuid::Uuid::new_v4().simple().to_string().into(),
@@ -24,8 +23,8 @@ pub fn conversation(
         input_published: false,
         cwd: cwd.to_path_buf(),
         skill: Some(skill.name),
-        provider: Some(provider),
-        model,
+        provider: Some(agent.harness.as_str().to_owned()),
+        model: agent.model,
         node: None,
         iterations: None,
         task_id: None,
@@ -38,32 +37,9 @@ pub fn conversation(
         title,
         title_source: TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: loopflow_storage::rows::now_unix(),
     })
-}
-
-/// Whether opening may take control, start a thread, or only reveal history.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionOpenIntent {
-    Resume,
-    Start,
-    Reveal,
-}
-
-impl SessionOpenIntent {
-    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
-    pub fn flag(self) -> Option<&'static str> {
-        match self {
-            Self::Resume => None,
-            Self::Start => Some("--start-if-free"),
-            Self::Reveal => Some("--reveal-existing"),
-        }
-    }
 }
 
 #[cfg(test)]

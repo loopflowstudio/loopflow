@@ -97,11 +97,11 @@ fn wave_detail_preserves_graph_and_machine() {
     else {
         panic!("missing Projects")
     };
-    assert_eq!(projects[0].sync.changes[1].field, "task_order");
+    assert_eq!(projects[0].sync.actions[1].change, "order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
-    assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
+    assert_eq!(tasks[0].task.sync.actions[0].change, "create");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
@@ -281,29 +281,29 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn session_history_retains_receipts_and_unknown_lf_process() {
+fn session_history_lists_turns_beside_observations() {
     let input = include_str!("../../../tests/fixtures/dto/session_history.json");
+    let history: serde_json::Value = serde_json::from_str(input).unwrap();
+    let turns: Vec<loopflow_execution::session::Turn> =
+        serde_json::from_value(history["turns"].clone()).unwrap();
     let events: Vec<loopflow_execution::session::SessionEvent> =
-        serde_json::from_str(input).unwrap();
+        serde_json::from_value(history["events"].clone()).unwrap();
+    assert_eq!(turns[0].thread.as_str(), "thread_fixture");
+    assert_eq!(turns[0].status.as_deref(), Some("completed"));
+    assert!(turns[0].lf_process_id.is_none());
     assert_eq!(
-        events[1].kind,
-        loopflow_execution::session::SessionEventKind::Completed
+        turns[0].usage.as_ref().unwrap().usage.total_input_tokens,
+        Some(20)
     );
     assert_eq!(
-        events[0].agent_session.as_ref().unwrap().as_str(),
-        "thread_fixture"
-    );
-    assert!(events[1].lf_process_id.is_none());
-    assert_eq!(events[0].payload["total"]["inputTokens"], 40);
-    assert_eq!(
-        events[2].kind,
+        events[0].kind,
         loopflow_execution::session::SessionEventKind::Observed
     );
-    assert!(events[2].provider_turn.is_none());
-    assert!(events[2].agent_session.is_none());
+    assert!(events[0].provider_turn.is_none());
     assert_eq!(
-        serde_json::to_value(events).unwrap(),
-        serde_json::from_str::<serde_json::Value>(input).unwrap()
+        serde_json::to_value(&turns).unwrap(),
+        history["turns"],
+        "a turn round-trips"
     );
 }
 
@@ -660,7 +660,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "peer_planning" => {
                 read::<Vec<loopflow_execution::store::PeerPlanningStatus>>(&body["destinations"]);
-                assert_eq!(body["transport"], "git");
+                assert_eq!(body["tracker"], "git");
             }
             other => panic!("unknown subscription {other}"),
         }
@@ -738,27 +738,41 @@ fn composed_lifecycle_preserves_completion_before_graph_arrival() {
 }
 
 #[test]
-fn planning_sync_preserves_delivery_and_losing_values() {
+fn tracker_sync_preserves_sent_actions_and_losing_values() {
+    use loopflow_execution::store::planning_sync::{ActionOwnerKind, TrackerKind};
+    use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
     let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/planning_sync.json"
+        "../../../tests/fixtures/dto/tracker_sync.json"
     ))
     .unwrap();
-    let sync: loopflow_execution::store::planning_sync::PlanningSyncStatus =
+    let sync: loopflow_execution::store::planning_sync::TrackerSync =
         serde_json::from_value(value.clone()).unwrap();
-    assert!(sync.connected);
+    assert_eq!(sync.actions[1].phase, ActionPhase::Sent);
+    assert_eq!(sync.actions[2].change, "title");
+    assert_eq!(sync.actions[2].local_value, "Local title");
     assert_eq!(
-        sync.changes[1].state,
-        loopflow_execution::store::planning_sync::PlanningSyncState::Uncertain
-    );
-    assert_eq!(sync.changes[2].field, "task_title");
-    assert_eq!(sync.changes[3].field, "task_assignee");
-    assert_eq!(sync.changes[2].local_value, "Local title");
-    assert_eq!(
-        sync.changes[2].linear_value,
+        sync.actions[2].tracker_value,
         Some(serde_json::json!("Linear title"))
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
-    assert!(sync.lines()[3].contains("provider: null"));
+    assert_eq!(
+        sync.lines()[2],
+        r#"title · conflicted · lost: "Local title" · linear: "Linear title""#
+    );
+    assert!(sync.lines()[3].contains("linear: null"));
+    assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
+    assert_eq!(sync.actions[5].seq, None);
+    assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
+    assert_eq!(
+        sync.lines()[5],
+        r#"title · conflicted · lost: "Mine" · git: "Peer title""#
+    );
+    let mut unknown = value;
+    unknown["actions"][0]["tracker"] = serde_json::json!("notion");
+    assert!(
+        serde_json::from_value::<loopflow_execution::store::planning_sync::TrackerSync>(unknown)
+            .is_err()
+    );
 }
 
 #[test]
@@ -859,8 +873,7 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
         vec![
             DesktopOpeningStatus::Opening,
             DesktopOpeningStatus::Usable,
-            DesktopOpeningStatus::Failed,
-            DesktopOpeningStatus::Elsewhere
+            DesktopOpeningStatus::Failed
         ]
     );
     assert!(readings[0].reason.is_none());
@@ -944,7 +957,7 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert!(reports[1].action.as_ref().unwrap().prepare_only);
     assert_eq!(
         reports[2].action.as_ref().unwrap().intent,
-        SessionResumeIntent::TakeOver
+        SessionResumeIntent::View
     );
     assert!(!reports[2].action.as_ref().unwrap().fork);
     assert!(!reports[2].unavailable.is_empty());
@@ -953,9 +966,9 @@ fn session_resume_explanations_preserve_intent_and_unavailable_evidence() {
     assert_eq!(new_thread.agent.as_deref(), Some("codex"));
     assert!(reports[3].action.is_none());
     assert!(reports[3].state.is_none());
-    assert!(reports[3].actions.is_empty());
+    assert!(reports[3].opening.is_none());
     assert_eq!(serde_json::to_value(&reports).unwrap(), wire);
-    for field in ["resolution", "actions", "impediments", "unavailable"] {
+    for field in ["resolution", "opening", "impediments", "unavailable"] {
         let mut missing = wire[0].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(serde_json::from_value::<SessionResumeExplanation>(missing).is_err());
@@ -1359,17 +1372,32 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 }
 
 #[test]
-fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
+fn task_create_answers_with_the_conversation_record_and_row() {
+    use loopflow::lf::commands::task_create::TaskCreated;
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipts: Vec<loopflow_execution::engine::creation::TaskCreateReceipt> =
-        serde_json::from_str(json).unwrap();
-    assert_eq!(receipts[0].graph.as_deref(), Some("code"));
-    assert!(receipts[0].session_id.is_some());
-    // The run failed after the Task was filed.
-    assert_eq!(receipts[1].graph, None);
-    assert_eq!(receipts[1].session_id, None);
+    let answers: Vec<TaskCreated> = serde_json::from_str(json).unwrap();
+    let admitted = &answers[0];
+    assert_eq!(admitted.receipt.milestone, "admitted");
+    assert_eq!(admitted.receipt.graph.as_deref(), Some("code"));
+    let session = admitted.session.as_ref().unwrap();
+    assert_eq!(Some(&session.id), admitted.receipt.session_id.as_ref());
+    assert!(!session.open_argv.is_empty());
+    // The row a client selects before planning lists the Task.
+    assert_eq!(answers[0].row.task.id, admitted.receipt.task.id.as_str());
     assert_eq!(
-        serde_json::to_value(&receipts).unwrap(),
+        answers[0].row.section,
+        loopflow_execution::durable::TaskSection::Working
+    );
+    // A headless `-b` run has no conversation.
+    assert_eq!(answers[1].receipt.session_id, None);
+    assert!(answers[1].session.is_none());
+    for key in ["session", "row"] {
+        let mut absent: serde_json::Value = serde_json::from_str(json).unwrap();
+        absent[1].as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<Vec<TaskCreated>>(absent).is_err());
+    }
+    assert_eq!(
+        serde_json::to_value(&answers).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }
@@ -1385,25 +1413,6 @@ fn wave_graph_reports_its_default_with_or_without_a_wave() {
         serde_json::to_value(&graphs).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
-}
-
-#[test]
-fn session_open_intents_distinguish_explicit_resume_from_passive_reveal() {
-    use loopflow_execution::session::SessionOpenIntent;
-    let wire: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/session_open_intents.json"
-    ))
-    .unwrap();
-    let intents: Vec<SessionOpenIntent> = serde_json::from_value(wire.clone()).unwrap();
-    assert_eq!(
-        intents,
-        vec![
-            SessionOpenIntent::Resume,
-            SessionOpenIntent::Start,
-            SessionOpenIntent::Reveal
-        ]
-    );
-    assert_eq!(serde_json::to_value(intents).unwrap(), wire);
 }
 
 #[test]
@@ -1431,7 +1440,6 @@ fn opening_receipts_distinguish_focus_from_attachment() {
             OpenStatus::Opening,
             OpenStatus::Usable,
             OpenStatus::Focused,
-            OpenStatus::Elsewhere,
             OpenStatus::Failed
         ]
     );

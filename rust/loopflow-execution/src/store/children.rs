@@ -22,7 +22,7 @@ impl Store {
         session: Option<crate::session::LfSession>,
         destination: Option<std::path::PathBuf>,
         acquisition: Option<Arc<super::PlanningLocks>>,
-        receipt: Option<super::sqlite::creation::CreationIdentity>,
+        receipt: Option<super::sqlite::creation::TaskCreationRecord>,
     ) -> StoreResult<Task> {
         let task_id = task_id.clone();
         run_planning_write(&self.sqlite, acquisition, move |store| {
@@ -172,19 +172,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
     }
 
-    pub(crate) async fn record_task_pr_repair_incident(
-        &self,
-        pr_id: &TaskPrId,
-        kind: loopflow_storage::work::task::TaskPrRepairKind,
-        occurred_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let pr_id = pr_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
-        })
-        .await
-    }
-
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_prs(&task_id)).await
@@ -292,7 +279,7 @@ impl Store {
     pub(crate) async fn apply_linear_observation(
         &self,
         task_id: &TaskId,
-        observation: loopflow_storage::linear_records::LinearIssueObservation,
+        observation: loopflow_storage::planning::TrackerObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
     ) -> StoreResult<LinearObservationOutcome> {

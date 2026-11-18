@@ -40,7 +40,7 @@ kernel locks                 live local exclusion authority
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Planning | `waves`, `projects`, `project_changes`, `project_events`, `tasks`, `task_creation_intents`, `task_changes`, `task_comments`, `task_comment_deliveries`, `task_state_deliveries`, `task_issue_identities`, `task_deletions`, `task_events` | Stored plans and definitions, optional provider links, stable Work identity, creation receipts, comments and deletion recovery |
+| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional provider links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
@@ -50,8 +50,8 @@ kernel locks                 live local exclusion authority
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Repository relocation | `relocated_task_processes` | Retains Task membership for Processes whose cwd names a repository directory before it moved on this Machine; separate from moves between Machines |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
-| Work adjuncts | `tool_responses`, `task_ownership`, `people` | Tool answers, the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by planning-provider identity |
-| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order, the repository's Task order, and portable pane layouts |
+| Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by planning-provider identity |
+| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order and the repository's Task order; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | Linear acquisition | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |

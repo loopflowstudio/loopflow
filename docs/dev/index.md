@@ -7,10 +7,9 @@ title: Architecture
 
 Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
-and the step processes it starts. An agent runs in one of three places: in the
-command that launched it, in a terminal the Machine server's holder keeps, or
-under a detached Graph process. [What runs on a Machine](#what-runs-on-a-machine)
-is the whole process model.
+and the step processes it starts. [What runs on a Machine](#what-runs-on-a-machine)
+shows where chats, batches, work sessions and workers run and which processes
+keep them alive.
 
 This guide specifies the accepted model. The reference owns
 [cutover status](reference-cutover.md#cutover-status), the remaining work
@@ -29,8 +28,8 @@ lf implement
 
 That command discovers `implement`, assembles its context, chooses a provider,
 records its Process, reserves an LfSession, captures the input, then launches the
-provider. It needs no Wave, Task, or server process. The conversation persists
-after that command exits; a later command can connect to the same LfSession.
+provider. It needs no Wave, Task, or server process. The LfSession and its
+history survive the command, so a later command can reopen the conversation.
 
 ```text
 request
@@ -162,45 +161,37 @@ still has agents, and a Graph process for each running Graph. Every other `lf`
 is a command that ends.
 
 ```text
-your terminal            lf <skill> ──────────────────────────► agent        here
+your terminal            lf <skill> ──────────────────────────► agent        chat
+script or pipe           lf -b <skill> ───────────────────────► agent        batch
 
 your terminal ─ view ─┐
-Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   held
+Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   work session or Desktop shell
 phone         ─ view ─┘         │
                                 └─ store, hooks, steers, Work reads and writes
 
-lf task run / lf ship / landing ─► Graph process ─► step lf ─► agent          detached
+lf task run / lf ship ──────────► Graph process ─► step lf ─► agent          worker
         │                                │
         └─ one startup line, then gone   └─ logs/graph-<id>.log
 ```
 
-A launch runs in exactly one of three places, chosen once in
-`transport::delegate`:
+Transport selects one of the [four launch kinds](../glossary.md#loopflows-words)
+before delegation. Managed launches report turns to the Machine server and
+require it at startup.
 
-| | Here | Held | Detached |
+| Launch | Reports turns | Where the agent runs | Examples |
 | --- | --- | --- | --- |
-| What | `lf <skill>`, `lf graph …`, any bare `-b` or piped run, every headless Graph step | Task, Wave and repository conversations; Desktop shells; a bare Session a Desktop pane or framed `lf --machine` view opens | Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command |
-| Parent of the agent | The launching `lf`, in its caller's terminal or pipe | The holder, on a PTY | A step `lf` under the Graph process |
-| Ends with | Its caller | Its agent quitting, or its Task closing | Its Graph |
-| Seen through | The terminal it runs in | Any number of views, all live | Its log, `lf task status`, the Session's history |
-| Needs the server | No | Yes; it fails rather than fall back | To start, no |
+| Chat | No | In the caller's terminal, which owns its lifetime | `lf <skill>` at a terminal, including `lf research --task LOO-12` |
+| Batch | No | Headless under the caller, returning output to it | `lf -b <skill>` |
+| Work session | Yes | On a PTY in a holder, independent of its viewers | Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed `lf --machine` view |
+| Worker | Yes | Headless, with its lifetime set by the step or caller | Headless steps of `lf task run` or `lf ship`, landing's `ci-fix`, or a Discord Wave answer |
 
-Work decides between Here and the other two, except that a Desktop pane or
-framed `lf --machine` view holds a bare Session too: a command that names a
-Task or Wave, or reopens a Session bound to one, is Work, and a plain `lf`
-typed in a Task's checkout is not. A terminal decides between Held and Detached: Work
-someone views is held, Work nobody views is detached. Nothing wraps a headless
-run in a terminal, and nothing hosts a conversation in a process of its own.
+The checkout, `--task` and `LF_AS` supply Task attribution. Usage counts toward
+that Task, and hooks on every launch read the Session's steers from the store,
+including steers for that Task. Chats and batches use the launch's context;
+work sessions and workers also report boundaries so the server can refresh it.
 
-Detached is a place a launch runs. `lf session list` also prints `detached`
-as a Session state, meaning a held conversation no view is showing; the two
-are unrelated, and user docs keep the word for the Session state only.
-
-Hooks follow Work, not the place. A bare agent gets two, which print the
-context block at start and after compaction from files in the checkout. An
-agent launched for a Task or Wave (a held conversation, or a Graph step, which
-`lf task run` starts with `--task`) also reports turn and tool boundaries to
-the server and takes steers from it, so its launch starts the server first.
+Desktop Task shells use held terminals too. `lf session list` shows
+`detached` when a running conversation has no view.
 
 | Process | One per | Holds | Restarts |
 | --- | --- | --- | --- |
@@ -228,8 +219,8 @@ Conversations started by a build from before held terminals run under an
 starts one now, and nothing sweeps them. `lf resume` of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
 waits for it to exit and resumes the thread from provider history where any
-resume of it would run: held for Work or a Desktop pane, in the terminal for a
-bare `lf resume`. One it cannot verify, or that does not exit, keeps running
+resume of it would run: in a held terminal for a work session, in the caller's
+terminal for a chat. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.
 
 The [transport README](../../rust/loopflow-execution/src/transport/README.md) owns the

@@ -7,7 +7,8 @@ writes a private Machine whose `bin/claude` stand-in echoes each line; its
 printed environment holds `LF_HOME`, the provider homes and `PATH`. Under an
 isolated `HOME`, give that home a Git `user.email` first or the build fails at
 claiming. Copy `lf` and `lf-world` out of `target/` before a long walkthrough so
-a rebuild can't change the binary under its owners. `lf task checkout <task>`
+a rebuild can't change the binary under its owners; to refresh the copy, `rm` it
+before `cp`: overwriting it in place gets the next exec killed (exit 137). `lf task checkout <task>`
 warms the Task's conversation detached; `lf session list --json` maps it to its
 Session. Bare `lf task retire` runs one pass over every pending Task. Attach the
 Task's Session in a PTY with `lf session resume <session>`, type a line without

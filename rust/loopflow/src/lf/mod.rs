@@ -151,6 +151,15 @@ pub struct Cli {
     /// The conversation `lf -b resume ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
+
+    /// The prepared capture a conversation's fresh launch publishes.
+    #[arg(skip)]
+    pub prepared_capture: Option<String>,
+
+    /// The Session launch lock a conversation's fresh launch holds until its
+    /// provider is recorded.
+    #[arg(skip)]
+    pub launch_lock: Option<loopflow_execution::ops::human_session::LaunchLock>,
 }
 
 impl Cli {
@@ -415,6 +424,8 @@ impl Cli {
             wt: self.wt.clone(),
             cwd: self.cwd.clone(),
             resume: self.resume.clone(),
+            prepared_capture: self.prepared_capture.clone(),
+            launch_lock: self.launch_lock.clone(),
         }
     }
 
@@ -486,10 +497,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open one conversation here, in a sibling tab, or focus its existing view
+    /// Open one conversation here, in a sibling tab, or a repository/Wave overview
     Open(commands::open::OpenArgs),
-    /// Open configured Task layouts or a repository/Wave overview
-    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -744,13 +753,11 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete pane record from stdin
+    /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {
-        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
+        /// query:ID
+        #[arg(value_name = "QUERY")]
         work: String,
-        /// Replace the pane record from JSON on stdin instead of reading it
-        #[arg(long)]
-        save: bool,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -975,9 +982,7 @@ impl DesktopCommand {
     pub fn is_read(&self) -> bool {
         matches!(
             self,
-            Self::View { .. }
-                | Self::Portfolio { cmd: None, .. }
-                | Self::Layout { save: false, .. }
+            Self::View { .. } | Self::Portfolio { cmd: None, .. } | Self::Layout { .. }
         )
     }
 }
@@ -1148,7 +1153,6 @@ impl Commands {
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
             | Self::Open(_)
-            | Self::Workspace(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -1167,7 +1171,6 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
-            | Self::View { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
             | Self::Context { .. }
@@ -1177,7 +1180,6 @@ impl TaskCommand {
             | Self::Wait { .. } => false,
             Self::Retire { .. } => true,
             Self::Report { .. } => true,
-            Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
             | Self::Run { .. }
@@ -1320,6 +1322,7 @@ impl RepoCommand {
         match self {
             Self::Plan { cmd, .. } => match cmd {
                 Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoPlanCommand::Answer { .. }) => true,
                 Some(RepoPlanCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
@@ -1387,6 +1390,9 @@ pub enum ServerCommand {
     },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
+    /// Pipe stdin and stdout to this Machine's server, starting it first if
+    /// needed; another Machine runs it over SSH to reach the server.
+    Connect,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.
@@ -1430,7 +1436,8 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
-            Self::Connect { .. }
+            Self::Prune { .. }
+            | Self::Connect { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -1593,12 +1600,6 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
-    /// Reveal existing history without replacing another terminal or starting a turn
-    #[arg(long, hide = true, conflicts_with = "message")]
-    pub reveal_existing: bool,
-    /// Start or continue without replacing another terminal's input
-    #[arg(long, hide = true, conflicts_with_all = ["message", "reveal_existing"])]
-    pub start_if_free: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -1614,27 +1615,6 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
-        use loopflow_execution::session::SessionOpenIntent;
-        if self.reveal_existing {
-            SessionOpenIntent::Reveal
-        } else if self.start_if_free {
-            SessionOpenIntent::Start
-        } else {
-            SessionOpenIntent::Resume
-        }
-    }
-
-    /// The Task or Wave this command names, as the flag and value that name
-    /// it. Naming one makes the resume managed, as `--task` or `--wave` does
-    /// for a launch, also beside a Session id.
-    pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
-        let task = self.task.as_deref().or(cli.task.as_deref());
-        let wave = self.wave.as_deref().or(cli.wave.as_deref());
-        task.map(|task| ["--task", task])
-            .or_else(|| wave.map(|wave| ["--wave", wave]))
-    }
-
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,
@@ -1803,7 +1783,7 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Opens the conversation in this terminal. With none for this scope, it starts one and says so. A conversation running in an lf terminal gains one more view here, and every view types. An ended or crashed one continues its provider thread from history. One running in a client lf can't share is taken over: that client ends, unsent text there is lost, and resume says so. If attachment fails, resume reports the failure, leaves that work intact and resends no input.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID; beside
@@ -1814,6 +1794,9 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// Time a new Task's setup steps under the creation request that started it
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness
@@ -2156,12 +2139,19 @@ pub enum TaskCommand {
         selection: crate::lf::Selection,
     },
 
-    /// Synchronize a Task with its tracker; the change sent last wins
+    /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
+    #[command(after_help = "A lost line is a value the tracker kept over yours. \
+--keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
+`lf repo plan answer <id>` answers one.")]
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
-        /// Retry uncertain saved field/state updates after observing current Linear values
+        /// Keep the tracker's value for each lost line
         #[arg(long)]
-        retry_updates: bool,
+        keep_theirs: bool,
+        /// Save each lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
     },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
@@ -2291,7 +2281,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// Unassign the Task: nobody owns it and its tracker shows no assignee; nothing
     /// moves it until someone claims or runs it. History stays intact
     Unassign {
         issue: String,
@@ -2331,13 +2321,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         subscribe: bool,
         #[command(flatten)]
         selection: crate::lf::Selection,
-    },
-    /// Browse the Task brief, workflow and recorded runs without starting work
-    View {
-        issue: Option<String>,
-        /// Print once, including when stdout is a terminal
-        #[arg(long)]
-        once: bool,
     },
     /// Show this Task's patch
     Diff {
@@ -2414,7 +2397,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    /// Cancel the Task in its tracker and locally, close its PRs and delete its branches
     Abandon {
         /// Issue ID or branch; defaults to the Task in this checkout
         issue: Option<String>,
@@ -2423,14 +2406,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Preview open issues outside current chapters; apply safe cancellations explicitly
-    Sweep {
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+    /// Cancel unfinished placed work, clean up delivery, then trash the tracker item
     Delete { issue: String },
     /// Update a Task's title or notes, before or after placement
     Update {
@@ -2516,10 +2492,9 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -2551,10 +2526,9 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -2844,6 +2818,20 @@ pub enum RepoPlanCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Answer a lost line: keep the tracker's value, or save yours again and send it
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
+    Answer {
+        /// The line's id, as `lf repo plan` prints it
+        id: String,
+        /// Keep the tracker's value; the line closes
+        #[arg(long)]
+        keep_theirs: bool,
+        /// Save the lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 /// Manage the installed artifacts and exported skills.
@@ -3011,6 +2999,17 @@ pub enum MachineCommand {
         #[arg(long = "plan")]
         planning: bool,
         /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply store retention: close dead Processes, forget finished ones,
+    /// expire Session history past 90 days and reclaim the space
+    #[command(
+        after_help = "The Machine server runs this every hour. Turns are kept; history an earlier \
+                      lf wrote into loopflow.db moves to history.db."
+    )]
+    Prune {
+        /// Emit the retention report as JSON
         #[arg(long)]
         json: bool,
     },
@@ -3382,7 +3381,7 @@ mod tests {
             let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
             assert!(error.to_string().contains(login), "{error}");
         }
-        for service in ["github", "linear", "asana", "notion", "doppler", "opencode"] {
+        for service in ["github", "linear", "asana", "doppler", "opencode"] {
             assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
             assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
         }
@@ -3392,19 +3391,21 @@ mod tests {
     }
 
     #[test]
-    fn conversation_modes_and_workspace_options_have_separate_commands() {
+    fn workspace_options_belong_to_open_and_exclude_one_conversation_modes() {
         for flags in [
             ["--here", "--tab"],
             ["--here", "--focus"],
             ["--tab", "--focus"],
+            ["--workspace", "--here"],
+            ["--workspace", "--tab"],
+            ["--available", "--focus"],
+            ["--available", "--workspace"],
         ] {
             assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
         }
-        for option in ["--available", "--no-focus"] {
-            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
-            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        for option in ["--workspace", "--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_ok());
         }
-        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
     }
 
     #[test]
@@ -4195,7 +4196,6 @@ mod tests {
                 connection.target(&cli, id.as_deref()).unwrap(),
                 loopflow_execution::ops::human_session::SessionTarget::Session("session-id")
             ));
-            assert!(connection.work_flag(&cli).is_some());
         }
         assert!(Cli::try_parse_from([
             "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",

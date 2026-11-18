@@ -125,7 +125,10 @@ struct RegistryQueryTests {
         #expect(move.argv == ["task", "move", "FIX-1", "--no-wave", "--json"])
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
-        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
+        #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#))
+        let keep = ServedWrite.planAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
+        #expect(try object(keep) == object(#"{"kind":"plan.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
+        #expect(keep.argv == ["repo", "plan", "answer", "a1", "--keep-theirs", "--json"])
         #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
@@ -139,14 +142,14 @@ struct RegistryQueryTests {
         #expect(try object(portfolio) == object(#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#))
         #expect(portfolio.argv == ["desktop", "portfolio", "remove", "/r", "--json"])
         #expect(portfolio.cwd == "/")
-        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil, intent: .resume)
+        let primary = ServedWrite.sessionResume(directory: "/r", id: nil, task: nil, wave: nil, agent: nil)
         #expect(try object(primary) == object(
-            #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#))
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#))
         #expect(primary.argv == ["--repo", "/r", "session", "resume", "--prepare", "--json"])
-        let start = ServedWrite.sessionResume(directory: "/r", id: nil, task: "FIX-1", wave: nil, agent: nil, intent: .start)
-        #expect(try object(start) == object(
-            #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null,"intent":"start"}"#))
-        #expect(start.argv == ["session", "resume", "--start-if-free", "--task", "FIX-1", "--prepare", "--json"])
+        let task = ServedWrite.sessionResume(directory: "/r", id: nil, task: "FIX-1", wave: nil, agent: nil)
+        #expect(try object(task) == object(
+            #"{"kind":"session.resume","directory":"/r","id":null,"task":"FIX-1","wave":null,"agent":null}"#))
+        #expect(task.argv == ["session", "resume", "--task", "FIX-1", "--prepare", "--json"])
         let restart = ServedWrite.sessionNew(directory: "/r", requestID: "fixture-thread", id: "session_1", agent: "codex")
         #expect(try object(restart) == object(
             #"{"kind":"session.new","directory":"/r","request_id":"fixture-thread","id":"session_1","agent":"codex"}"#))
@@ -344,7 +347,7 @@ struct RegistryQueryTests {
       {
         "id": "project-1",
         "linear_id": null,
-        "sync": {"connected": false, "changes": []},
+        "sync": {"actions": []},
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
@@ -374,7 +377,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"actions": []},
           "assignee": null
         },
         "reference": {
@@ -601,8 +604,8 @@ struct RegistryQueryTests {
             switch args {
             case ["session", "list", "--json", "--page", "--limit", "100"]:
                 return #"{"entries":\#(sessionsJSON),"next":null}"#
-            case ["session", "resume", "--start-if-free", session.id, "--prepare", "--json"],
-                 ["session", "resume", "--start-if-free", "--task", "INF-123", "--prepare", "--json"]:
+            case ["session", "resume", session.id, "--prepare", "--json"],
+                 ["session", "resume", "--task", "INF-123", "--prepare", "--json"]:
                 return sessionJSON
             default:
                 throw RegistryQueryError("unexpected argv: \(args)")

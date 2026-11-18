@@ -13,14 +13,18 @@
 //! - `turn/interrupt {threadId, turnId}` -> `{}`; the turn then ends with
 //!   `turn/completed` status "interrupted" (probed live).
 
+use crate::harness::LaunchKind;
+use crate::harness::Recording;
 use crate::process::attachment;
+use crate::transcript::json_lines;
 use loopflow_model::id::AgentSessionId;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use futures_util::StreamExt;
 use serde_json::{json, Value};
@@ -35,7 +39,7 @@ use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
 use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::FactWriter;
-use crate::harness::{ApprovalPolicy, Harness, HarnessError, SendCurrentOutcome};
+use crate::harness::{ApprovalPolicy, Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
@@ -252,7 +256,7 @@ impl CodexStream {
     }
 }
 
-pub struct CodexHarness {
+pub struct Driver {
     events: mpsc::UnboundedSender<ConversationEvent>,
     approval: ApprovalPolicy,
     child: Option<Child>,
@@ -278,24 +282,29 @@ pub struct CodexHarness {
     /// Request id of the in-flight `thread/start` call; the reader mines the
     /// matching response for the vendor thread id. 0 = none pending.
     thread_start_request_id: Arc<AtomicI64>,
-    launch: Option<AgentConfig>,
+    launch: AgentConfig,
     should_seed_prompt: bool,
     /// Retain the group from spawn through failed startup, before `child` is
     /// installed. The harness alone mutates it; the lifeline covers lf death.
     child_group: Option<u32>,
     agent_directory: Option<tempfile::TempDir>,
     native_start: Option<(std::path::PathBuf, Value)>,
-    session_attachment: Option<super::agent_process::AttachmentOwner>,
+    owner: Recording,
+    kind: LaunchKind,
 }
 
-impl std::fmt::Debug for CodexHarness {
+impl std::fmt::Debug for Driver {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CodexHarness").finish()
+        f.debug_struct("Driver").finish()
     }
 }
 
-impl CodexHarness {
-    pub fn new(events: mpsc::UnboundedSender<ConversationEvent>, approval: ApprovalPolicy) -> Self {
+impl Driver {
+    pub fn new(
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: ApprovalPolicy,
+    ) -> Self {
         Self {
             events,
             approval,
@@ -310,16 +319,17 @@ impl CodexHarness {
             turn_in_progress: Arc::new(AtomicBool::new(false)),
             shutdown_requested: Arc::new(AtomicBool::new(false)),
             agent_session: Arc::new(Mutex::new(None)),
-            resume_agent_session: None,
+            resume_agent_session: launch.start.thread(),
             current_turn_id: Arc::new(Mutex::new(None)),
             initialize_request_id: Arc::new(AtomicI64::new(0)),
             thread_start_request_id: Arc::new(AtomicI64::new(0)),
-            launch: None,
+            launch: launch.config.clone(),
             should_seed_prompt: true,
             child_group: None,
             agent_directory: None,
             native_start: None,
-            session_attachment: None,
+            owner: launch.recording.clone(),
+            kind: launch.kind,
         }
     }
 
@@ -426,7 +436,7 @@ impl CodexHarness {
 }
 
 #[async_trait]
-impl Harness for CodexHarness {
+impl StreamDriver for Driver {
     fn pid(&self) -> Option<u32> {
         self.child.as_ref().and_then(Child::id)
     }
@@ -435,12 +445,15 @@ impl Harness for CodexHarness {
         self.child_group.filter(|pid| *pid > 1)
     }
 
-    async fn start(&mut self, config: &AgentConfig) -> Result<()> {
+    async fn start(&mut self) -> Result<()> {
+        let config = self.launch.clone();
+        let config = &config;
+        let recording = self.owner.clone();
+        let recording = &recording;
         if self.outbound_tx.is_some() {
             return Ok(());
         }
         self.shutdown_requested.store(false, Ordering::Relaxed);
-        self.launch = Some(config.clone());
         self.should_seed_prompt = true;
         if let Some(thread) = self.resume_agent_session.as_ref() {
             crate::transcript::adopt_native(Provider::Codex, thread)?;
@@ -454,7 +467,7 @@ impl Harness for CodexHarness {
             .lock()
             .expect("codex turn id lock poisoned") = None;
 
-        let start_result = self.start_inner(config).await;
+        let start_result = self.start_inner(config, recording).await;
         if let Err(err) = start_result {
             let _ = self.stop().await;
             return Err(err);
@@ -466,11 +479,7 @@ impl Harness for CodexHarness {
         let text = content.trim();
         let invocation = self
             .should_seed_prompt
-            .then(|| {
-                self.launch
-                    .as_ref()
-                    .and_then(|launch| launch.skill_invocation.as_ref())
-            })
+            .then(|| self.launch.skill_invocation.as_ref())
             .flatten();
         if text.is_empty() && invocation.is_none() {
             return Ok(());
@@ -480,15 +489,14 @@ impl Harness for CodexHarness {
         }
         let turn_text = if self.should_seed_prompt {
             self.should_seed_prompt = false;
-            if let Some(launch) = &self.launch {
+            {
+                let launch = &self.launch;
                 let mut parts = Vec::new();
                 if !launch.task_prompt.trim().is_empty() {
                     parts.push(launch.task_prompt.trim().to_string());
                 }
                 parts.push(text.to_string());
                 parts.join("\n\n")
-            } else {
-                text.to_string()
             }
         } else {
             text.to_string()
@@ -586,12 +594,10 @@ impl Harness for CodexHarness {
     async fn stop(&mut self) -> Result<()> {
         self.shutdown_requested.store(true, Ordering::Relaxed);
 
-        if self.session_attachment.is_some()
-            && (self.agent_session().is_some() || self.native_start.is_some())
-        {
+        if self.agent_session().is_some() || self.native_start.is_some() {
             // The invocation closes its AgentProcess under the attachment lock
             // during settlement, without holding SQLite across provider I/O.
-            // Harness teardown only drops this connection after takeover.
+            // Driver teardown only drops this connection after takeover.
             self.child.take();
             self.child_group = None;
             if let Some(directory) = self.agent_directory.take() {
@@ -603,13 +609,18 @@ impl Harness for CodexHarness {
 
         let _ = self.interrupt().await;
 
-        let mut terminate = || {
+        let terminate = || {
             if let Some(pid) = self.child_group.take() {
                 kill_process_group(pid);
             }
             Ok(())
         };
-        if let Some((store, session, expected)) = &self.session_attachment {
+        let Recording {
+            store,
+            session,
+            attachment: expected,
+        } = &self.owner;
+        {
             if store
                 .with_session_attachment(session, expected, terminate)
                 .is_err()
@@ -621,8 +632,6 @@ impl Harness for CodexHarness {
                 self.shutdown_tasks().await;
                 return Ok(());
             }
-        } else {
-            terminate()?;
         }
         if let Some(child) = self.child.as_mut() {
             let _ = child.wait().await;
@@ -643,13 +652,9 @@ impl Harness for CodexHarness {
             .expect("codex provider session id lock poisoned")
             .clone()
     }
-
-    fn set_agent_session(&mut self, agent_session: Option<AgentSessionId>) {
-        self.resume_agent_session = agent_session;
-    }
 }
 
-impl CodexHarness {
+impl Driver {
     /// lf's configuration for this AgentProcess's conversations, as dotted Codex
     /// config keys: shell policy and hooks, plus configured writable roots for
     /// the native client. Both extend what the server would otherwise inherit.
@@ -702,15 +707,18 @@ impl CodexHarness {
                         .find(|layer| layer["name"]["type"] == "sessionFlags")
                 })
                 .and_then(|layer| layer["config"].get("hooks"));
-            config["hooks"] = super::context::codex_hooks(context, session_hooks, launch.holder)?;
+            config["hooks"] = super::context::codex_hooks(context, session_hooks, self.kind)?;
         }
         Ok(config)
     }
 
-    async fn start_inner(&mut self, launch: &AgentConfig) -> Result<()> {
-        let owner = super::agent_process::open_owner(launch.session_attachment.as_ref())?;
-        self.session_attachment = Some(owner.clone());
-        let (store, session, _) = &owner;
+    async fn start_inner(&mut self, launch: &AgentConfig, recording: &Recording) -> Result<()> {
+        let owner = recording.clone();
+        let Recording {
+            store,
+            session,
+            attachment: _,
+        } = &owner;
         let connection = attachment::session_connection(store, session)?;
         let saved_thread = store.session_thread(session)?;
         if let Some(thread) = &saved_thread {
@@ -816,7 +824,7 @@ impl CodexHarness {
                 command,
                 Some(&lifeline),
                 &owner,
-                launch.holder,
+                self.kind,
             )?)
         } else {
             None
@@ -883,9 +891,9 @@ impl CodexHarness {
         let authority = owner.clone();
         let writer_events = self.events.clone();
         let stream = Arc::new(tokio::sync::Mutex::new(CodexStream::new(FactWriter::new(
-            owner.0.clone(),
-            owner.1.clone(),
-            Some(owner.2.clone()),
+            owner.store.clone(),
+            owner.session.clone(),
+            Some(owner.attachment.clone()),
             Default::default(),
         ))));
         let writer_stream = stream.clone();
@@ -912,7 +920,11 @@ impl CodexHarness {
                     break;
                 }
                 let message = Message::Text(payload.to_string().into());
-                let (store, session, expected) = authority.clone();
+                let Recording {
+                    store,
+                    session,
+                    attachment: expected,
+                } = authority.clone();
                 let dispatched = tokio::task::spawn_blocking(move || {
                     let outcome = store.with_session_dispatch(&session, &expected, || {
                         super::dispatch::send_fenced(&mut writer, message)
@@ -960,7 +972,11 @@ impl CodexHarness {
                 let Ok(value) = serde_json::from_str::<Value>(&line) else {
                     continue;
                 };
-                let (store, session, _) = &reader_owner;
+                let Recording {
+                    store,
+                    session,
+                    attachment: _,
+                } = &reader_owner;
                 let decoded = {
                     let thread = super::dispatch::off_reactor(|| store.session_thread(session));
                     let (decoded, written) = stream
@@ -1152,7 +1168,11 @@ impl CodexHarness {
         self.send_notification("initialized").await?;
 
         if self.approval == ApprovalPolicy::NativeClient {
-            let (store, session, attachment) = &owner;
+            let Recording {
+                store,
+                session,
+                attachment,
+            } = &owner;
             store.record_agent_endpoint(session, attachment, &endpoint.to_string_lossy())?;
             self.native_start = Some((endpoint, Value::Object(thread_params)));
             return Ok(());
@@ -1174,7 +1194,11 @@ impl CodexHarness {
         // returning None rather than failing startup.
         match tokio::time::timeout(Duration::from_secs(10), thread_id_rx).await {
             Ok(Ok(thread_id)) => {
-                let (store, session, attachment) = &owner;
+                let Recording {
+                    store,
+                    session,
+                    attachment,
+                } = &owner;
                 if let Some(context) = &launch.conversation_context {
                     store.with_session_attachment(session, attachment, || {
                         let mut context = context.clone();
@@ -1228,13 +1252,13 @@ mod tests {
         let request = "Find the bug.\n\n<lf:clipboard>\nPasted evidence.\n</lf:clipboard>";
         let (mut harness, mut outbound, _, _, _events) = steerable_harness();
         harness.turn_in_progress.store(false, Ordering::Relaxed);
-        harness.launch = Some(AgentConfig {
+        harness.launch = AgentConfig {
             skill_invocation: Some(SkillInvocation {
                 skill,
                 arguments: "exact \"two words\" 雪".into(),
             }),
-            ..AgentConfig::default()
-        });
+            ..crate::agent::AgentConfig::default()
+        };
 
         harness.send_input(request).await.unwrap();
         let OutboundRpc::Request { method, params, .. } = outbound.recv().await.unwrap() else {
@@ -1278,7 +1302,18 @@ mod tests {
             .spawn()
             .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
+        // Stopping signals the group only under the admitted attachment, so
+        // its ledger outlives the driver.
+        let home = tempfile::tempdir().unwrap();
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(home.path()),
+            ),
+            tx,
+            ApprovalPolicy::AutoApprove,
+        );
         // Startup can fail before installing the child handle in the harness.
         harness.child_group = child.id();
         assert_eq!(harness.process_group_id(), child.id());
@@ -1316,18 +1351,34 @@ mod tests {
             attachment::claim_session_attachment(&store, "saved", Some(&old), &process, true)
                 .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
-        let mut harness = CodexHarness::new(tx, ApprovalPolicy::AutoApprove);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            ),
+            tx,
+            ApprovalPolicy::AutoApprove,
+        );
         let config = AgentConfig {
-            session_attachment: Some(("saved".into(), attachment.clone())),
             // Even a mistakenly reached spawn cannot launch a real provider.
             cwd: Some(ledger.home().join("absent")),
-            ..Default::default()
+            ..crate::agent::AgentConfig::default()
         };
         let runtime = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
             .unwrap();
-        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        let error = runtime
+            .block_on(harness.start_inner(
+                &config,
+                &Recording {
+                    store: store.clone(),
+                    session: "saved".into(),
+                    attachment: attachment.clone(),
+                },
+            ))
+            .unwrap_err();
         assert!(error
             .to_string()
             .contains("Saved conversation thread differs"));
@@ -1338,11 +1389,16 @@ mod tests {
             attachment::claim_session_attachment(&store, "saved", Some(&released), &process, true)
                 .unwrap();
         harness.resume_agent_session = Some("saved-thread".into());
-        let config = AgentConfig {
-            session_attachment: Some(("saved".into(), retry)),
-            ..config
-        };
-        let error = runtime.block_on(harness.start_inner(&config)).unwrap_err();
+        let error = runtime
+            .block_on(harness.start_inner(
+                &config,
+                &Recording {
+                    store: store.clone(),
+                    session: "saved".into(),
+                    attachment: retry,
+                },
+            ))
+            .unwrap_err();
         assert!(
             error.to_string().contains("failed to spawn codex"),
             "{error}"
@@ -1352,17 +1408,17 @@ mod tests {
             Some("saved-thread".into())
         );
         assert!(store
-            .session_history("saved", 0, 100)
+            .session_turns("saved")
             .unwrap()
             .iter()
-            .all(|event| event.kind != crate::session::SessionEventKind::Completed));
+            .all(|turn| turn.ended_at.is_none()));
     }
 
     #[test]
     fn start_and_resume_add_instructions_without_replacing_native_base() {
         let config = AgentConfig {
             system_prompt: "Fixed additions.".into(),
-            ..Default::default()
+            ..crate::agent::AgentConfig::default()
         };
         let saved_session = AgentSessionId::from("saved-native-thread");
         for session in [None, Some(&saved_session)] {
@@ -1377,7 +1433,7 @@ mod tests {
     fn pinned_codex_session_uses_thread_resume() {
         let launch = AgentConfig {
             cwd: Some("/tmp/project".into()),
-            ..AgentConfig::default()
+            ..crate::agent::AgentConfig::default()
         };
         let (method, params) = build_thread_request(&launch, Some(&"thread_abc".into()), true);
 
@@ -1394,7 +1450,8 @@ mod tests {
 
     #[test]
     fn new_codex_session_uses_thread_start() {
-        let (method, params) = build_thread_request(&AgentConfig::default(), None, true);
+        let (method, params) =
+            build_thread_request(&crate::agent::AgentConfig::default(), None, true);
         assert_eq!(method, "thread/start");
         assert!(!params.contains_key("threadId"));
     }
@@ -1402,14 +1459,22 @@ mod tests {
     /// A steer-ready harness plus the channels a test needs to answer it:
     /// the outbound RPC stream and the pending-waiter map.
     fn steerable_harness() -> (
-        CodexHarness,
+        Driver,
         mpsc::Receiver<OutboundRpc>,
         PendingRequests,
         RetiredRequests,
         mpsc::UnboundedReceiver<ConversationEvent>,
     ) {
         let (events, event_rx) = mpsc::unbounded_channel();
-        let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            ),
+            events,
+            ApprovalPolicy::AutoApprove,
+        );
         *harness.agent_session.lock().expect("thread id lock") = Some("thread_1".into());
         *harness.current_turn_id.lock().expect("turn id lock") = Some("turn_1".to_string());
         harness.turn_in_progress.store(true, Ordering::Relaxed);
@@ -1596,7 +1661,15 @@ mod tests {
     #[tokio::test]
     async fn current_send_names_the_exact_codex_turn() {
         let (events, _event_rx) = mpsc::unbounded_channel();
-        let mut harness = CodexHarness::new(events, ApprovalPolicy::AutoApprove);
+        let mut harness = Driver::new(
+            &crate::harness::launch_for_test(
+                crate::harness::HarnessKind::Codex,
+                &crate::agent::AgentConfig::default(),
+                &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
+            ),
+            events,
+            ApprovalPolicy::AutoApprove,
+        );
         *harness.agent_session.lock().expect("thread id lock") = Some("thread_1".into());
         *harness.current_turn_id.lock().expect("turn id lock") = Some("turn_1".to_string());
         harness.turn_in_progress.store(true, Ordering::Relaxed);
@@ -1629,4 +1702,242 @@ mod tests {
             }
         );
     }
+}
+
+fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
+    let mut times = BTreeMap::<String, i64>::new();
+    for row in json_lines(path) {
+        let Some(id) = row["session_id"].as_str().filter(|id| wanted.contains(id)) else {
+            continue;
+        };
+        let Some(at) = row["ts"]
+            .as_i64()
+            .filter(|at| *at >= 0)
+            .and_then(|at| at.checked_mul(1000))
+        else {
+            continue;
+        };
+        times
+            .entry(id.to_string())
+            .and_modify(|saved| *saved = (*saved).max(at))
+            .or_insert(at);
+    }
+    times
+}
+
+#[derive(Debug)]
+pub struct Codex;
+
+impl super::Harness for Codex {
+    fn validate_agent_process_close(
+        &self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+        session: &str,
+        process: &loopflow_model::id::AgentProcessId,
+    ) -> crate::store::StoreResult<()> {
+        // The server may host conversations outside this AgentProcess.
+        let endpoint = store.agent_endpoint(process)?.ok_or_else(|| {
+            crate::store::StoreError::InvalidAuthority(
+                "Codex AgentProcess connection is unavailable".into(),
+            )
+        })?;
+        let thread = store.session_thread(session)?;
+        super::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
+            .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
+    }
+    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
+        codex_input_times(&home.join("history.jsonl"), wanted)
+    }
+
+    fn sign_in_advice(&self) -> &'static str {
+        "run `codex login`"
+    }
+    fn provider_env(&self) -> &'static [&'static str] {
+        &["CODEX_ACCESS_TOKEN", "OPENAI_API_KEY"]
+    }
+    fn provider(&self) -> Option<crate::provider_auth::Provider> {
+        Some(crate::provider_auth::Provider::Codex)
+    }
+    fn recognizes_driver(&self, command: &str) -> bool {
+        super::command_program(command, "codex")
+            && command.split_whitespace().any(|arg| arg == "app-server")
+            && command.split_whitespace().any(|arg| arg == "--listen")
+    }
+    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
+        crate::transcript::codex::read
+    }
+    fn transcript_id<'a>(&self, name: &'a str) -> Option<&'a str> {
+        let rest = name.strip_suffix(".jsonl")?.strip_prefix("rollout-")?;
+        let at = rest.len().checked_sub(36)?;
+        rest.is_char_boundary(at)
+            .then(|| &rest[at..])
+            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+    }
+    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
+        (home.join("sessions"), 3)
+    }
+    fn terminal_error(&self, code: &str) -> bool {
+        matches!(code, "codex_disconnected" | "codex_dispatch_rejected")
+    }
+    fn kind(&self) -> super::HarnessKind {
+        super::HarnessKind::Codex
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Reported,
+                managed: super::ThreadName::Reported,
+            },
+            initial_prompt_on_resume: true,
+            supports_execution_boundary: true,
+            classifies_failures: true,
+            native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint:
+                "Install it with `npm install -g @openai/codex`, then sign in with `codex login`.",
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events, approval))
+    }
+    fn title_args(&self, _name: &str) -> Vec<String> {
+        vec!["-c".into(), "tui.terminal_title=[]".into()]
+    }
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let (mut args, input) = launch.terminal_input()?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        if !launch.kind.is_managed() {
+            args.extend(crate::agent::codex_terminal_options(
+                launch.config,
+                launch.kind,
+            )?);
+            if let super::Start::Resume { thread } = launch.start {
+                args.extend(["resume".into(), "--".into(), thread.to_string()]);
+            } else {
+                args.push("--".into());
+            }
+            args.extend(input.filter(|input| !input.is_empty()));
+            if let Some(context) = &launch.config.conversation_context {
+                let delivery = context.configure_hooks(&mut client.process)?;
+                if client.thread.is_none() {
+                    client.reported_thread =
+                        Some(crate::context_block::reported_thread_path(&delivery))
+                            .filter(|path| std::fs::write(path, "").is_ok());
+                }
+            }
+        } else {
+            let mut config = launch.config.clone();
+            config.task_prompt = input.unwrap_or_default();
+            if matches!(launch.start, super::Start::New) {
+                config.skill_invocation = None;
+            }
+            let opened = std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()?
+                            .block_on(open_native(&super::Launch {
+                                config: &config,
+                                ..*launch
+                            }))
+                    })
+                    .join()
+                    .map_err(|_| anyhow!("Codex startup worker panicked"))?
+            })?;
+            args = vec![
+                "--remote".into(),
+                format!("unix://{}", opened.endpoint.display()),
+                "resume".into(),
+                "--".into(),
+                opened.thread.to_string(),
+            ];
+            client.thread = Some(opened.thread);
+            client.remote = Some(opened.endpoint);
+        }
+        client.process.args(args);
+        Ok(client)
+    }
+}
+
+struct OpenedCodex {
+    thread: AgentSessionId,
+    endpoint: std::path::PathBuf,
+}
+
+/// Start the app-server and open the conversation with lf's configuration, so
+/// the native client only joins it. Nothing here outlives the client's start.
+async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
+    use crate::harness::{codex_connection, ApprovalPolicy};
+
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = launch.recording;
+    let saved = launch.start.thread().or(store.session_thread(session)?);
+    let (events, _events) = tokio::sync::mpsc::unbounded_channel();
+    let launch_value = super::Launch {
+        start: super::Start::from_thread(saved.as_ref()),
+        ..*launch
+    };
+    let mut harness = Driver::new(&launch_value, events, ApprovalPolicy::NativeClient);
+
+    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start()).await {
+        Ok(result) => result?,
+        Err(_) => {
+            harness.stop().await?;
+            bail!("Codex app-server did not open the conversation within 20s; the owned provider was stopped");
+        }
+    }
+    let (endpoint, params) = harness
+        .native_start()
+        .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
+    harness.stop().await?;
+    // Recover saved history before opening the UI, without replaying its input.
+    let turns = match &saved {
+        Some(thread) => tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            codex_connection::recover_history(store, session, thread, &endpoint),
+        )
+        .await
+        .context("Codex native history recovery timed out")??,
+        None => 0,
+    };
+    let title = store
+        .session(session)?
+        .map(|session| session.title)
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Loopflow".to_string());
+    let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
+    store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
+    if let Some(context) = &launch.config.conversation_context {
+        // Hooks run on the app-server, which never inherits the terminal's
+        // launch file. Bind before the client can send a turn.
+        let mut context = context.clone();
+        context.identify(store, session)?;
+        context.bind_codex_session(thread.as_str())?;
+    }
+    if turns == 0 && !launch.config.task_prompt.is_empty() {
+        // Provider history settles on the next read whether it ran, so a
+        // broken store cannot stop the turn.
+        codex_connection::start_turn(
+            store,
+            session,
+            attachment,
+            &endpoint,
+            &thread,
+            &launch.config.task_prompt,
+        )
+        .await
+        .context("Codex first turn was not sent")?;
+    }
+    Ok(OpenedCodex { thread, endpoint })
 }

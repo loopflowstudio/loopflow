@@ -187,28 +187,46 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-              "field": "state",
               "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "complete",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "local_value": "completed",
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 3,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -217,13 +235,19 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-              "linear_value": null,
+              "seq": 4,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "person",
@@ -233,10 +257,9 @@
                 "created_at": "2026-10-28T02:59:02.871386Z",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
@@ -889,28 +912,46 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-                "field": "state",
                 "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "complete",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
                 "local_value": "completed",
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -919,13 +960,19 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-                "linear_value": null,
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "person",
@@ -935,10 +982,9 @@
                   "created_at": "2026-10-28T02:59:02.871386Z",
                   "id": "2e5de426-1620-43a5-a234-6b203e56f531"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
@@ -948,28 +994,46 @@
         ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-            "field": "state",
             "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "complete",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "local_value": "completed",
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 3,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -978,13 +1042,19 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-            "linear_value": null,
+            "seq": 4,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "person",
@@ -994,10 +1064,9 @@
               "created_at": "2026-10-28T02:59:02.871386Z",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,
@@ -1202,28 +1271,46 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-              "field": "state",
               "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "complete",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "local_value": "completed",
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 3,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -1232,13 +1319,19 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-              "linear_value": null,
+              "seq": 4,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "person",
@@ -1248,10 +1341,9 @@
                 "created_at": "2026-10-28T02:59:02.871386Z",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
@@ -1858,28 +1950,46 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-                "field": "state",
                 "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "complete",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
                 "local_value": "completed",
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -1888,13 +1998,19 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-                "linear_value": null,
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "person",
@@ -1904,10 +2020,9 @@
                   "created_at": "2026-10-28T02:59:02.871386Z",
                   "id": "2e5de426-1620-43a5-a234-6b203e56f531"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
@@ -1917,28 +2032,46 @@
         ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-            "field": "state",
             "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "complete",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "local_value": "completed",
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 3,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -1947,13 +2080,19 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-            "linear_value": null,
+            "seq": 4,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "person",
@@ -1963,10 +2102,9 @@
               "created_at": "2026-10-28T02:59:02.871386Z",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,
@@ -2175,20 +2313,32 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "unstarted",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": null,
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": null,
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -2197,10 +2347,9 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
       },
@@ -2805,20 +2954,32 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "unstarted",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": null,
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": null,
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -2827,10 +2988,9 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
         },
@@ -2842,20 +3002,32 @@
         ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": null,
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": null,
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -2864,10 +3036,9 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,

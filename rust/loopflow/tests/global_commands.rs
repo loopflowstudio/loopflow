@@ -951,8 +951,6 @@ fn open_explain_reads_a_plain_repository_without_initializing_or_launching() {
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
     assert_eq!(plain["links"][0]["url"], format!("loopflow://{folder}"));
     assert!(plain["links"][0]["target"]["repo_id"].is_null());
-    let invalid = run(&["open", "--diff", "--explain", "--json"]);
-    assert!(String::from_utf8_lossy(&invalid.stderr).contains("--diff needs a Task"));
     assert!(success(run(&["open", "--explain"])).contains("Nothing was executed"));
     assert!(!home.path().join(".lf").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
@@ -987,14 +985,11 @@ fn open_explain_preserves_state_and_matches_explicit_and_inferred_work() {
         serde_json::from_str::<serde_json::Value>(&success(run(args))).unwrap()["links"][0]["url"]
             .clone()
     };
-    let explicit = url(&["--task", "INF-123", "open", "--diff", "--explain", "--json"]);
-    let inferred = url(&["open", "--diff", "--explain", "--json"]);
+    let explicit = url(&["--task", "INF-123", "open", "--explain", "--json"]);
+    let inferred = url(&["open", "--explain", "--json"]);
     assert_eq!(explicit, inferred);
     let folder = repo.path().file_name().unwrap().to_str().unwrap();
-    assert_eq!(
-        explicit,
-        format!("loopflow://{folder}/task/INF-123?diff=true")
-    );
+    assert_eq!(explicit, format!("loopflow://{folder}/task/INF-123"));
     assert!(
         !run(&["open", "--session", "missing", "--explain", "--json"])
             .status
@@ -1212,7 +1207,6 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
             title: "Connection proof".into(),
             title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -1222,9 +1216,15 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
 }
 
 fn connection_history(db: &rusqlite::Connection, session: &loopflow_execution::session::LfSession) {
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'observed',?2,1,?3)",
-        rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key.as_ref().unwrap()),
-        serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();
+    // The input resumes the native conversation its captured row names.
+    let named = db
+        .execute(
+            "UPDATE session_events SET provider_thread='native-proof',provider_account=NULL
+             WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+            rusqlite::params![session.id, session.artifact_key.as_ref().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(named, 1);
 }
 
 #[test]
@@ -1307,7 +1307,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
     ))
     .unwrap();
     assert_eq!(missing_bin["state"], explicit["state"]);
-    assert_eq!(missing_bin["actions"], explicit["actions"]);
+    assert_eq!(missing_bin["opening"], explicit["opening"]);
     assert_eq!(missing_bin["unavailable"], explicit["unavailable"]);
     let forked = read(&[
         "session",
@@ -1342,7 +1342,6 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
         .unwrap(),
     );
     assert!(text.contains("Resume saved provider history"), "{text}");
-    assert!(text.contains("unsent text there is lost"));
     assert!(text.contains("Nothing was executed"));
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1351,7 +1350,7 @@ fn session_resume_explain_shares_explicit_native_and_inferred_selection_without_
     let prepared = read(&["session", "resume", "native-proof", "--prepare", "--json"]);
     assert_eq!(prepared["id"], explicit["resolution"]["session"]["value"]);
     assert_eq!(prepared["state"], explicit["state"]);
-    assert_eq!(prepared["actions"], explicit["actions"]);
+    assert_eq!(prepared["action"], explicit["opening"]);
 }
 
 #[test]
@@ -1397,12 +1396,12 @@ fn session_resume_explain_preserves_missing_and_stale_evidence() {
     fs::write(&receipt, serde_json::json!({"schema_version":1,"pid":std::process::id(),"terminal_id":"stale","started_at":"2000-01-01T00:00:00Z"}).to_string()).unwrap();
     let stale = read(&session.id);
     assert_eq!(stale["state"], "unknown");
-    assert!(stale["actions"][0]["unavailable_reason"].is_null());
+    assert_eq!(stale["opening"]["label"], "Try again");
     fs::write(&receipt, "unreadable receipt").unwrap();
     let invalid = read(&session.id);
     // Native receipt corruption does not replace recorded Process evidence.
     assert_eq!(invalid["state"], "unknown");
-    assert_eq!(invalid["actions"], stale["actions"]);
+    assert_eq!(invalid["opening"], stale["opening"]);
     assert_eq!(fs::read_to_string(&receipt).unwrap(), "unreadable receipt");
     db.execute_batch("PRAGMA wal_checkpoint(TRUNCATE)").unwrap();
     assert_eq!(before, fs::read(db_path).unwrap());
@@ -1463,7 +1462,7 @@ fn session_resume_explain_observes_takeover_without_signaling_owned_client() {
                 report["impediments"].as_array().unwrap().is_empty(),
                 "{report}"
             );
-            assert_eq!(report["actions"][1]["kind"], "move_here");
+            assert_eq!(report["opening"]["label"], "Take over");
             assert!(child.try_wait().unwrap().is_none());
             assert_eq!(fs::read_to_string(&receipt).unwrap(), bytes);
         }
@@ -1527,7 +1526,7 @@ fn session_resume_explain_never_probes_or_claims_a_live_endpoint() {
         .unwrap(),
     ))
     .unwrap();
-    assert_eq!(report["action"]["intent"], "take_over");
+    assert_eq!(report["action"]["intent"], "view");
     assert_eq!(report["action"]["prepare_only"], false);
     assert!(report["unavailable"]
         .as_array()

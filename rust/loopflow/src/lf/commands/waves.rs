@@ -124,7 +124,7 @@ pub struct TaskSummary {
     pub project_id: Option<String>,
     pub wave_id: Option<String>,
     pub acquisition: loopflow_execution::store::TaskAcquisition,
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub id: String,
     pub linear_id: Option<String>,
     pub identifier: String,
@@ -387,7 +387,7 @@ impl RoadmapSnapshot {
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ProjectSummary {
-    pub sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub current: bool,
     pub id: String,
     pub linear_id: Option<String>,
@@ -409,7 +409,7 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
             .into_iter()
             .map(|project| -> Result<ProjectSummary> {
                 Ok(ProjectSummary {
-                    sync: store.project_planning_sync(&project.id)?,
+                    sync: store.project_tracker_sync(&project.id)?,
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
@@ -605,7 +605,7 @@ async fn read_status(
     };
     let wave = loopflow_execution::work::wave::context::resolve_in(&store, directory, wave).await?;
     if observe {
-        loopflow_execution::ops::linear_observe::sync_repository(&store, wave.repo()).await;
+        loopflow_execution::ops::tracker_events::sync_repository(&store, wave.repo()).await;
     }
     Ok(Some(wave_detail(&store, &wave).await?))
 }
@@ -638,14 +638,18 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    loopflow_execution::read_stream::run((), |store, ()| {
-        let wave = wave.clone();
-        async move {
-            let store = loopflow_execution::read_stream::require_store(store)?;
-            let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-            Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        (),
+        |store, ()| {
+            let wave = wave.clone();
+            async move {
+                let store = loopflow_execution::read_stream::require_store(store)?;
+                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
+            }
+        },
+    )
 }
 
 /// One Wave's `lf wave status` reading.
@@ -736,6 +740,7 @@ pub fn subscribe_show(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
@@ -845,7 +850,7 @@ async fn show_roadmap(
         let mut checked = std::collections::HashSet::new();
         for wave in &waves {
             if checked.insert(wave.repo()) {
-                loopflow_execution::ops::linear_observe::sync_repository(store, wave.repo()).await;
+                loopflow_execution::ops::tracker_events::sync_repository(store, wave.repo()).await;
             }
         }
     }
@@ -911,15 +916,19 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    loopflow_execution::read_stream::run(args, |store, args| {
-        let repo = repo.to_owned();
-        async move {
-            let Some(store) = store else {
-                return Ok(Vec::new());
-            };
-            open_tasks(&store, &repo, &args).await
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        args,
+        |store, args| {
+            let repo = repo.to_owned();
+            async move {
+                let Some(store) = store else {
+                    return Ok(Vec::new());
+                };
+                open_tasks(&store, &repo, &args).await
+            }
+        },
+    )
 }
 
 /// What a `lf task status --subscribe` request can select instead.
@@ -939,6 +948,162 @@ pub fn subscribe_task_status(
     watch_task(repo, issue, transport, |store, status| async move {
         task_detail(&store, status).await
     })
+}
+
+/// A connection to the server of the Machine that runs the Task `issue`
+/// names, and the `task.status` read to send it; `None` when it runs here or
+/// a move from here has not arrived, whose progress only this Machine knows.
+fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
+    use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
+    let Some(route) = loopflow_execution::machine::task::remote_ownership_writer(issue)? else {
+        return Ok(None);
+    };
+    let machine = super::write::find_machine(route.machine_id.as_str())?;
+    let sender = Sender {
+        repository: route.repository_id,
+        selection: Selection::capture(repo, None)?,
+        secrets: Secrets::default(),
+    };
+    let connection = loopflow_execution::machine::client::Connection::open_on(&machine, sender)?;
+    let read = super::read::Read::TaskStatus {
+        directory: repo.to_owned(),
+        issue: route.task_id.to_string(),
+    };
+    Ok(Some(TaskMachine {
+        name: machine.name(),
+        connection,
+        read,
+    }))
+}
+
+struct TaskMachine {
+    name: String,
+    connection: loopflow_execution::machine::client::Connection,
+    read: super::read::Read,
+}
+
+impl TaskMachine {
+    fn status(mut self) -> Result<serde_json::Value> {
+        let answer = self
+            .connection
+            .request(crate::server::wire::Operation::Read(self.read))?;
+        Ok(answer.result)
+    }
+}
+
+/// `task.status` for a Task another Machine runs, as that Machine's server
+/// reads it; `None` when it runs here.
+pub(crate) fn remote_task_detail(repo: &Path, issue: &str) -> Result<Option<serde_json::Value>> {
+    task_machine(repo, issue)?
+        .map(TaskMachine::status)
+        .transpose()
+}
+
+/// `lf task status <issue>` (`--json`, `--subscribe`) for a Task another
+/// Machine runs, from that Machine's server. `false` when it runs here.
+pub fn print_remote_task_status(
+    repo: &Path,
+    issue: &str,
+    json: bool,
+    subscribe: bool,
+) -> Result<bool> {
+    let Some(machine) = task_machine(repo, issue)? else {
+        return Ok(false);
+    };
+    if subscribe {
+        print_remote_readings(machine)?;
+    } else if json {
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&loopflow_execution::read_stream::selected_answer(
+                &machine.status()?
+            )?)?
+        );
+    } else {
+        let name = machine.name.clone();
+        print_remote_detail(&name, &serde_json::from_value(machine.status()?)?)?;
+    }
+    Ok(true)
+}
+
+fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
+    let task = &detail.task;
+    println!("{} · {}", task.title, task.identifier);
+    println!("Runs on {machine}; read from its server.");
+    println!(
+        "State: {} · {}",
+        serde_json::to_value(task.state)?
+            .as_str()
+            .expect("a Task state is a string"),
+        task.reason
+    );
+    if let Some(graph) = &task.graph {
+        match &graph.step {
+            Some(step) => println!("Graph: {} · {step}", graph.name),
+            None => println!("Graph: {}", graph.name),
+        }
+    }
+    if let Some(pr) = &task.pr {
+        println!("PR #{}: {}", pr.number, pr.url);
+    }
+    for process in &detail.graph_processes {
+        println!(
+            "Graph process {} · {}{}",
+            process.id,
+            process.name,
+            process
+                .step
+                .as_deref()
+                .map(|step| format!(" · {step}"))
+                .unwrap_or_default()
+        );
+    }
+    if let Some(next) = &task.next {
+        println!("Next: {next}");
+    }
+    Ok(())
+}
+
+/// The `--subscribe` readings of the Machine's server, one JSON line each.
+fn print_remote_readings(machine: TaskMachine) -> Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::Ordering;
+    let TaskMachine {
+        mut connection,
+        read,
+        ..
+    } = machine;
+    let id = connection.subscribe(read, loopflow_execution::read_stream::selected())?;
+    // As here, the subscription ends when stdin closes, after its first
+    // reading; closing this end of the pipe ends it on the other Machine too.
+    let printed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let closed = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let (printed, closed) = (printed.clone(), closed.clone());
+        std::thread::spawn(move || {
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            closed.store(true, Ordering::SeqCst);
+            if printed.load(Ordering::SeqCst) {
+                std::process::exit(0);
+            }
+        });
+    }
+    let mut stdout = std::io::stdout().lock();
+    while let Some(frame) = connection.reading(&id)? {
+        serde_json::to_writer(&mut stdout, &frame)?;
+        if stdout
+            .write_all(b"\n")
+            .and_then(|()| stdout.flush())
+            .is_err()
+        {
+            break;
+        }
+        printed.store(true, Ordering::SeqCst);
+        if closed.load(Ordering::SeqCst) {
+            break;
+        }
+    }
+    Ok(())
 }
 
 /// `lf task show <issue> --subscribe`: `lf task show --json` now and each time it
@@ -970,6 +1135,7 @@ where
 {
     let repo = repo.to_owned();
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::History,
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();
@@ -1000,13 +1166,18 @@ pub(crate) async fn task_pane(
     status: loopflow_execution::ops::task::TaskStatus,
 ) -> Result<DesktopTaskPane> {
     let row = match &status.task {
-        Some(task) => {
-            let shared = SharedTaskReads::read(store).await?;
-            snapshot_task_details(store, vec![task], false, &shared)?.pop()
-        }
+        Some(task) => Some(task_row(store, task).await?),
         None => None,
     };
     Ok(DesktopTaskPane { status, row })
+}
+
+/// One Task's row in the Work projection's shape, as the plan reads it.
+pub(crate) async fn task_row(store: &SharedStore, task: &Task) -> Result<RoadmapTask> {
+    let shared = SharedTaskReads::read(store).await?;
+    Ok(snapshot_task_details(store, vec![task], false, &shared)?
+        .pop()
+        .expect("one Task reads one row"))
 }
 
 /// `lf task status --json`.
@@ -1027,6 +1198,18 @@ pub fn print_task_detail(status: loopflow_execution::ops::task::TaskStatus) -> R
     })
 }
 
+/// `lf --cwd <directory> task status <issue> --json`, read from the store.
+pub(crate) fn read_task_detail(directory: &Path, issue: &str) -> Result<TaskDetail> {
+    let repo = loopflow_execution::ops::task::task_repository(directory, Some(issue))?;
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let store = loopflow_execution::store::read_existing_registry()?
+            .map(std::sync::Arc::new)
+            .ok_or_else(|| anyhow!("no Loopflow store exists on this Machine"))?;
+        let status = loopflow_execution::ops::task::read_task_status(&store, &repo, issue).await?;
+        task_detail(&store, status).await
+    })
+}
+
 /// `lf task status`'s reading of one registered Task.
 pub(crate) async fn task_detail(
     store: &SharedStore,
@@ -1035,10 +1218,7 @@ pub(crate) async fn task_detail(
     let task = status
         .task
         .ok_or_else(|| anyhow!("this Task is not registered in Loopflow"))?;
-    let shared = SharedTaskReads::read(store).await?;
-    let row = snapshot_task_details(store, vec![&task], false, &shared)?
-        .pop()
-        .expect("a registered Task has a row");
+    let row = task_row(store, &task).await?;
     let mut sessions = Vec::new();
     for session in status
         .overview
@@ -1747,7 +1927,7 @@ struct DetailReads<'a> {
     /// Agents already resolved in this reading, by the configuration that chose
     /// them. Checkouts of one repository usually share their files, and resolving
     /// validates every setting, so each distinct configuration resolves once.
-    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
+    agents: std::sync::Mutex<HashMap<String, Option<loopflow_execution::config::Agent>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs: HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphRun>,
     execution: loopflow_storage::sqlite::GraphExecutionFacts,
@@ -1765,12 +1945,10 @@ impl<'a> DetailReads<'a> {
         }
         let facts = loopflow_execution::store::ownership::task_detail_facts(&store.sqlite, tasks)?;
         let mut planning_connections = HashMap::new();
-        for receipts in facts.planning_receipts.values() {
+        for open in facts.tracker_actions.values() {
             planning_connections
-                .entry(receipts.repo.clone())
-                .or_insert_with(|| {
-                    loopflow_execution::ops::planning_client::connected(&receipts.repo)
-                });
+                .entry(open.repo.clone())
+                .or_insert_with(|| loopflow_execution::ops::tracker::connected(&open.repo));
         }
         let graphs = store
             .sqlite
@@ -1859,7 +2037,7 @@ impl<'a> DetailReads<'a> {
         checkout: &Path,
         wave: Option<&str>,
         personal: &loopflow_execution::config::PersonalSettings,
-    ) -> Option<String> {
+    ) -> Option<loopflow_execution::config::Agent> {
         let resolve = || {
             loopflow_execution::ops::task::resolve_task_agent(checkout, wave, personal, None).ok()
         };
@@ -1939,7 +2117,7 @@ async fn snapshot_task_detail(
         .get(&(task.wave_id.clone(), task.repository_id.clone()))
         .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
     let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
-    let provider = agent.map(|agent| loopflow_execution::config::parse_agent(&agent).0);
+    let provider = agent.map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
@@ -2098,14 +2276,10 @@ async fn snapshot_task_detail(
         task: task_summary(
             task,
             facts
-                .planning_receipts
+                .tracker_actions
                 .get(&task.id)
-                .map(|receipts| {
-                    receipts
-                        .clone()
-                        .status(reads.planning_connections[&receipts.repo])
-                })
-                .ok_or_else(|| anyhow!("Task {} has no planning receipts", task.id))?,
+                .map(|open| open.clone().status(reads.planning_connections[&open.repo]))
+                .ok_or_else(|| anyhow!("Task {} has no tracker actions read", task.id))?,
             acquisition,
             facts
                 .repository_paths
@@ -2415,7 +2589,7 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 
 fn task_summary(
     task: &Task,
-    sync: loopflow_storage::planning_sync::PlanningSyncStatus,
+    sync: loopflow_storage::planning_sync::TrackerSync,
     acquisition: loopflow_execution::store::TaskAcquisition,
     repo: String,
 ) -> TaskSummary {
@@ -3370,8 +3544,8 @@ mod tests {
             .task_ids(),
             [active]
         );
-        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
-            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,1)", [active]).unwrap();
+        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,(SELECT id FROM machines WHERE is_local=1),1)", [active]).unwrap();
         store
             .sqlite
             .record_program_status(
@@ -3732,7 +3906,7 @@ mod tests {
             directory.path().display().to_string(),
         );
         store.create_wave(&wave).await.unwrap();
-        let mut item = loopflow_execution::linear::LinearIssue {
+        let mut item = loopflow_storage::planning::TrackerItem {
             branch_name: None,
             revision: None,
             id: "removed".into(),
@@ -3937,7 +4111,7 @@ mod tests {
         store.create_wave(&wave).await.unwrap();
         let selected = "999bdbdd-c045-41a6-8ffc-a97c4a40b0b3";
         let predecessor = "218967b6-a760-4b7c-9a46-11d9d61a42c2";
-        let project = |id: &str, name: &str| loopflow_execution::linear::LinearProject {
+        let project = |id: &str, name: &str| loopflow_storage::planning::TrackerProject {
             description: None,
             id: id.into(),
             name: name.into(),
@@ -3950,7 +4124,7 @@ mod tests {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["team".into()],
         };
-        let item = loopflow_execution::linear::LinearIssue {
+        let item = loopflow_storage::planning::TrackerItem {
             id: "issue".into(),
             identifier: "FIX-1".into(),
             name: "Unreviewed backlog".into(),

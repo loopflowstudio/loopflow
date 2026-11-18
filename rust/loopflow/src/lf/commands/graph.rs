@@ -878,7 +878,14 @@ impl RunningGraph<'_> {
             tokio::process::Command::new(loopflow_execution::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
-        command.env(loopflow_execution::journal::GRAPH_STEP_ENV, "1");
+        command.env(
+            loopflow_execution::journal::GRAPH_STEP_ENV,
+            if self.task_run.is_some() {
+                "worker"
+            } else {
+                "bare"
+            },
+        );
         // The step runs as the id this Graph mints and records for it.
         let run = LfProcessId::default();
         command.env(loopflow_execution::journal::LF_RUN_ID_ENV, run.as_str());
@@ -982,18 +989,15 @@ impl RunningGraph<'_> {
             // A turn someone else interrupted, such as a native takeover, is held.
             Some(3 | 130) => Ok((StepExit::Held, step)),
             _ => {
-                // The step's own conversation says how its turn ended.
-                for envelope in self.turn_events(step.as_ref())?.iter().rev() {
-                    let event = &envelope["event"];
-                    if event["type"] == "turn_completed" && event["status"] == "interrupted" {
-                        return Ok((StepExit::Held, step));
-                    }
-                    if event["type"] == "error" {
-                        anyhow::bail!(
-                            "{label}: {}: {}",
-                            event["code"].as_str().unwrap_or("provider error"),
-                            event["message"].as_str().unwrap_or("provider turn failed")
-                        );
+                // The step's input says how its last turn ended.
+                if let Some((_, input)) = self.captured(step.as_ref())? {
+                    if let Some(end) = self.store.sqlite.input_turn_end(&input)? {
+                        if end.status.as_deref() == Some("interrupted") {
+                            return Ok((StepExit::Held, step));
+                        }
+                        if let Some(error) = end.error {
+                            anyhow::bail!("{label}: {error}");
+                        }
                     }
                 }
                 anyhow::bail!("{label} process exited with {status}")
@@ -1014,16 +1018,6 @@ impl RunningGraph<'_> {
             .map(|(session, input, _)| (session, input)))
     }
 
-    fn turn_events(
-        &self,
-        step: Option<&loopflow_model::id::LfProcessId>,
-    ) -> Result<Vec<serde_json::Value>> {
-        Ok(match self.captured(step)? {
-            Some((_, input)) => self.store.sqlite.input_events(&input)?,
-            None => Vec::new(),
-        })
-    }
-
     /// The Session a step's Process opened and the answer its turn returned.
     fn answer(
         &self,
@@ -1037,7 +1031,8 @@ impl RunningGraph<'_> {
                 step.as_str()
             )
         })?;
-        let answer = self.store.sqlite.input_final_answer(&input)?;
+        let answer =
+            loopflow_execution::transcript::answer::input_final_answer(&self.store.sqlite, &input)?;
         Ok((session, answer))
     }
 }
@@ -1126,7 +1121,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::Unapproved(step));
         }
-        loopflow_execution::ops::linear_observe::sync_repository(
+        loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )
@@ -1239,7 +1234,7 @@ impl SkillExecutor for &RunningGraph<'_> {
         if let Some(step) = self.stopped_landing()? {
             return Ok(SkillOutcome::Unapproved(step));
         }
-        loopflow_execution::ops::linear_observe::sync_repository(
+        loopflow_execution::ops::tracker_events::sync_repository(
             &self.store,
             &self.cwd.to_string_lossy(),
         )

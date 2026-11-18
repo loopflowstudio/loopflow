@@ -21,7 +21,6 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_GRAPH_ID")
-        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -149,7 +148,6 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_DIR",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
-            "LF_HUMAN_SESSION",
             "LF_GRAPH_ID",
         ] {
             command.env_remove(name);
@@ -290,9 +288,12 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
                 [id],
             )
             .unwrap();
-            db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
-                FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
+            db.execute(
+                "UPDATE session_events SET provider_thread='ses_resume-proof',provider_account=NULL
+                 WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+                [id, run_id],
+            )
+            .unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
         std::fs::write(
@@ -315,28 +316,6 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        if !resume {
-            let rejected = bin.join("rejecting-lf");
-            std::fs::write(
-                &rejected,
-                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
-            )
-            .unwrap();
-            std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let failed = command(home.path(), &["session", "resume", id])
-                .env("LF_BIN", &rejected)
-                .output()
-                .unwrap();
-            assert_eq!(failed.status.code(), Some(2));
-            let error = String::from_utf8_lossy(&failed.stderr);
-            // Connect becomes the launcher, preserving its error and pending input.
-            assert!(
-                error.contains("fixture launcher rejected invocation"),
-                "{error}"
-            );
-            assert!(dir.join("prepared").exists());
-            assert!(!error.contains("Local proof"), "prompt leaked: {error}");
-        }
         let evidence = home.path().join("resumed");
         let mut first = command(home.path(), &["session", "resume", id])
             .env(
@@ -494,7 +473,6 @@ fn prepare_conversation(
             title: title.into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: Some(title.into()),
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -1401,7 +1379,6 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let session = store.session(&id).unwrap().unwrap();
     assert_eq!(session.id.as_str(), id);
-    let history = store.session_history(&id, 0, 1000).unwrap();
     // Failed and exited starts are retained as their own AgentProcess records.
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     for (state, minimum) in [("spawn_failed", 1), ("exited", 1)] {
@@ -1415,22 +1392,22 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
             .unwrap();
         assert!(recorded >= minimum, "{state}: {recorded}");
     }
-    assert!(
-        history
-            .iter()
-            .filter(|event| event.kind == loopflow_execution::session::SessionEventKind::Captured)
-            .count()
-            >= 2
-    );
+    // Each start is an input of the one conversation, and one resumes the
+    // native conversation the provider published.
+    let (inputs, native): (i64, Option<String>) = db
+        .query_row(
+            "SELECT count(*),max(provider_thread) FROM session_events
+             WHERE session_id=?1 AND kind='captured'",
+            [id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert!(inputs >= 2, "{inputs}");
     let count: i64 = db
         .query_row("SELECT count(*) FROM agent_sessions", [], |row| row.get(0))
         .unwrap();
     assert_eq!(count, 1);
-    assert!(history
-        .iter()
-        .any(|event| event.payload["evidence"]["provider_session_id"]
-            .as_str()
-            .is_some_and(|id| id.starts_with("ses_"))));
+    assert!(native.is_some_and(|id| id.starts_with("ses_")));
 }
 
 #[cfg(unix)]
@@ -1563,12 +1540,19 @@ fn session_new_restarts_the_same_conversation_on_a_seeded_thread() {
         .request
         .unwrap()
         .contains("Keep the original request"));
-    // The old thread stays in the conversation's history.
-    assert!(store
-        .session_history(&id, 0, 1000)
+    // The old input stays in the conversation with the thread it resumed.
+    let thread: Option<String> = store
+        .conn
+        .lock()
         .unwrap()
-        .iter()
-        .any(|event| event.payload["input_id"] == input.as_str()));
+        .query_row(
+            "SELECT provider_thread FROM session_events
+             WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+            [id.as_str(), input.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(thread.is_some());
 }
 
 #[cfg(unix)]
@@ -1708,9 +1692,13 @@ fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
         [id, native],
     )
     .unwrap();
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
-        FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
+    // The input resumes the native conversation its captured row names.
+    db.execute(
+        "UPDATE session_events SET provider_thread=?3,provider_account=NULL
+         WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+        [id, input, native],
+    )
+    .unwrap();
 }
 
 #[cfg(unix)]
@@ -1770,7 +1758,7 @@ fn resume_admits_native_claude_and_codex_ids_and_keeps_their_identity() {
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let count: i64 = db
             .query_row(
-                "SELECT count(DISTINCT session_id) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')=?1",
+                "SELECT count(DISTINCT session_id) FROM session_events WHERE kind='captured' AND provider_thread=?1",
                 [&id],
                 |row| row.get(0),
             )

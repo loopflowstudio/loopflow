@@ -33,6 +33,7 @@ use tokio::task::JoinHandle;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::harness::HarnessKind;
 use crate::provider_auth::credential_socket::{
     AuthStartResponse, CredentialSocketClient, CredentialSocketError,
 };
@@ -54,7 +55,6 @@ const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "LINEAR_CLIENT_SECRET",
     authorize_params: &[("scope", "read,write")],
     redirect_port: 19222,
-    basic_auth: false,
     rotates_refresh_token: true,
     refresh_requires_secret: false,
 };
@@ -66,20 +66,6 @@ const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "ASANA_CLIENT_SECRET",
     authorize_params: &[("scope", "default")],
     redirect_port: 19222,
-    basic_auth: false,
-    rotates_refresh_token: false,
-    refresh_requires_secret: true,
-};
-/// The Notion integration's registered redirect is port 19223 (1c925c0c18).
-const NOTION_OAUTH: PmOAuthSpec = PmOAuthSpec {
-    provider: Provider::Notion,
-    authorize_url: "https://api.notion.com/v1/oauth/authorize",
-    token_url: "https://api.notion.com/v1/oauth/token",
-    client_id_env: "NOTION_CLIENT_ID",
-    client_secret_env: "NOTION_CLIENT_SECRET",
-    authorize_params: &[("owner", "user")],
-    redirect_port: 19223,
-    basic_auth: true,
     rotates_refresh_token: false,
     refresh_requires_secret: true,
 };
@@ -382,12 +368,10 @@ pub(crate) struct PmOAuthSpec {
     token_url: &'static str,
     client_id_env: &'static str,
     client_secret_env: &'static str,
-    /// Provider-specific authorization parameters: scope, or Notion's `owner`.
+    /// Provider-specific authorization parameters, such as scope.
     authorize_params: &'static [(&'static str, &'static str)],
     /// The loopback port registered as the application's redirect.
     redirect_port: u16,
-    /// Notion takes client credentials as HTTP Basic and a JSON body.
-    basic_auth: bool,
     /// Linear rotates refresh grants; Asana keeps one long-lived grant.
     rotates_refresh_token: bool,
     /// PKCE public clients refresh by client ID alone; Asana requires its secret.
@@ -398,7 +382,6 @@ fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
     match provider {
         Provider::Linear => Some(&LINEAR_OAUTH),
         Provider::Asana => Some(&ASANA_OAUTH),
-        Provider::Notion => Some(&NOTION_OAUTH),
         _ => None,
     }
 }
@@ -408,8 +391,7 @@ impl PmOAuthSpec {
         format!("http://localhost:{}/oauth/callback", self.redirect_port)
     }
 
-    /// A token request: form fields with the client credentials, or for Basic
-    /// authentication the same grant as JSON.
+    /// A token request: form fields with the client credentials and the grant.
     fn token_request(
         &self,
         url: &str,
@@ -418,13 +400,6 @@ impl PmOAuthSpec {
         grant: &[(&str, &str)],
     ) -> reqwest::RequestBuilder {
         let client = reqwest::Client::new().post(url);
-        if self.basic_auth {
-            let body: serde_json::Map<String, serde_json::Value> = grant
-                .iter()
-                .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
-                .collect();
-            return client.basic_auth(client_id, client_secret).json(&body);
-        }
         let mut form = vec![("client_id", client_id)];
         if let Some(secret) = client_secret {
             form.push(("client_secret", secret));
@@ -1039,11 +1014,10 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
     [
         Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
         Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
-        Arc::new(PmOAuthBroker::new(Provider::Notion)) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -2015,7 +1989,7 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear | Provider::Asana | Provider::Notion => {
+        Provider::Linear | Provider::Asana => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
@@ -2375,29 +2349,12 @@ fn summarize_command_output(output: &std::process::Output) -> String {
     format!("exit status {}", output.status)
 }
 
-fn normalize_program_name(program: &str) -> String {
-    std::path::Path::new(program)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or(program)
-        .trim()
-        .to_ascii_lowercase()
-}
-
 fn normalize_env_name(name: &str) -> String {
     name.trim().to_ascii_uppercase()
 }
 
-pub fn provider_env_allowed_for_program(program: &str, env_name: &str) -> bool {
-    match env_name {
-        "GH_TOKEN" => true,
-        "CLAUDE_CODE_OAUTH_TOKEN" => normalize_program_name(program) == "claude",
-        "CODEX_ACCESS_TOKEN" => normalize_program_name(program) == "codex",
-        "ANTHROPIC_API_KEY" => normalize_program_name(program) == "claude",
-        "OPENAI_API_KEY" => normalize_program_name(program) == "codex",
-        "OPENCODE_API_KEY" => normalize_program_name(program) == "opencode",
-        _ => false,
-    }
+pub(crate) fn provider_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
+    env_name == "GH_TOKEN" || harness.harness().provider_env().contains(&env_name)
 }
 
 const API_KEY_ENV_NAMES: &[&str] = &[
@@ -2414,21 +2371,14 @@ pub fn is_api_key_env_name(name: &str) -> bool {
     API_KEY_ENV_NAMES.iter().any(|item| *item == normalized)
 }
 
-pub fn api_key_env_allowed_for_program(program: &str, env_name: &str) -> bool {
+pub(crate) fn api_key_env_allowed(harness: HarnessKind, env_name: &str) -> bool {
     let env_name = normalize_env_name(env_name);
     if !is_api_key_env_name(&env_name) {
         return true;
     }
     // An exported API key would bill Claude and Codex per token instead of
     // their native login; only harnesses that take one see it.
-    match normalize_program_name(program).as_str() {
-        "pi" => matches!(
-            env_name.as_str(),
-            "ANTHROPIC_API_KEY" | "OPENAI_API_KEY" | "GEMINI_API_KEY" | "MOONSHOT_API_KEY"
-        ),
-        "opencode" => matches!(env_name.as_str(), "OPENCODE_API_KEY" | "MOONSHOT_API_KEY"),
-        _ => false,
-    }
+    harness.harness().api_key_env().contains(&env_name.as_str())
 }
 
 pub fn api_key_env_names() -> &'static [&'static str] {
@@ -2465,18 +2415,20 @@ pub async fn provider_env_vars(store: &crate::store::Store) -> Vec<(String, Stri
     vars
 }
 
-/// Apply stored provider credentials that are valid for this executable.
+/// Apply stored provider credentials allowed for the selected harness.
 ///
 /// Agent launch is synchronous, while the credential store is async. Keep the
 /// runtime on a short-lived worker so callers remain safe inside Tokio too.
-pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::process::Command) {
+pub(crate) fn apply_provider_env_to_command(
+    harness: HarnessKind,
+    command: &mut std::process::Command,
+) {
     for env_name in api_key_env_names() {
-        if !api_key_env_allowed_for_program(program, env_name) {
+        if !api_key_env_allowed(harness, env_name) {
             command.env_remove(env_name);
         }
     }
 
-    let program = program.to_string();
     let worker = match std::thread::Builder::new()
         .name("lf-provider-env".to_string())
         .spawn(move || {
@@ -2516,7 +2468,7 @@ pub(crate) fn apply_provider_env_to_command(program: &str, command: &mut std::pr
         }
     };
     for (name, value) in env_vars {
-        if provider_env_allowed_for_program(&program, &name) {
+        if provider_env_allowed(harness, &name) {
             command.env(name, value);
         }
     }
@@ -2536,28 +2488,25 @@ mod tests {
 
     #[test]
     fn api_key_env_filter_is_harness_specific() {
-        assert!(api_key_env_allowed_for_program(
-            "opencode",
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
             "OPENCODE_API_KEY"
         ));
-        assert!(api_key_env_allowed_for_program(
-            "/usr/local/bin/opencode",
+        assert!(api_key_env_allowed(
+            HarnessKind::OpenCode,
             "MOONSHOT_API_KEY"
         ));
-        assert!(api_key_env_allowed_for_program("pi", "ANTHROPIC_API_KEY"));
-        assert!(!api_key_env_allowed_for_program(
-            "opencode",
+        assert!(api_key_env_allowed(HarnessKind::Pi, "ANTHROPIC_API_KEY"));
+        assert!(!api_key_env_allowed(
+            HarnessKind::OpenCode,
             "ANTHROPIC_API_KEY"
         ));
         // Claude and Codex bill to their native login, never an exported key.
         for name in API_KEY_ENV_NAMES {
-            assert!(!api_key_env_allowed_for_program("claude", name), "{name}");
-            assert!(
-                !api_key_env_allowed_for_program("/opt/bin/codex", name),
-                "{name}"
-            );
+            assert!(!api_key_env_allowed(HarnessKind::Claude, name), "{name}");
+            assert!(!api_key_env_allowed(HarnessKind::Codex, name), "{name}");
         }
-        assert!(api_key_env_allowed_for_program("claude", "GH_TOKEN"));
+        assert!(api_key_env_allowed(HarnessKind::Claude, "GH_TOKEN"));
     }
 
     #[derive(Debug)]
@@ -3088,7 +3037,7 @@ mod tests {
 
     #[test]
     fn planning_brokers_registered_in_default_brokers() {
-        for provider in [Provider::Linear, Provider::Asana, Provider::Notion] {
+        for provider in [Provider::Linear, Provider::Asana] {
             assert!(
                 default_brokers(None)
                     .iter()
@@ -3259,27 +3208,6 @@ mod tests {
             Some("refresh-token")
         );
         assert!(!params.contains_key("client_secret"));
-    }
-
-    #[test]
-    fn notion_token_requests_use_basic_auth_and_json() {
-        let (request, body) = token_request_body(NOTION_OAUTH.token_request(
-            NOTION_OAUTH.token_url,
-            "notion-client",
-            Some("notion-secret"),
-            &[("grant_type", "authorization_code"), ("code", "abc")],
-        ));
-        let authorization = request.headers()["authorization"].to_str().unwrap();
-        assert!(authorization.starts_with("Basic "));
-        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            body,
-            serde_json::json!({"grant_type": "authorization_code", "code": "abc"})
-        );
-        assert_eq!(
-            NOTION_OAUTH.redirect_uri(),
-            "http://localhost:19223/oauth/callback"
-        );
     }
 
     #[test]

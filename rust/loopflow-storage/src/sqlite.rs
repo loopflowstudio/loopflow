@@ -27,14 +27,12 @@ mod github_people;
 mod graph_inventory;
 pub mod linear_acceptance;
 mod linear_observations;
-mod project_adoption;
 mod subscription_events;
+mod task_started;
 
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
-pub mod planning_changes;
-pub mod planning_export;
 pub mod planning_order;
 mod planning_peers;
 pub use planning_peers::PeerImport;
@@ -56,6 +54,7 @@ pub mod selections;
 mod session_events;
 pub mod session_recovery;
 pub mod sessions;
+mod turns;
 pub use sessions::SessionCaller;
 pub mod task_ownership;
 
@@ -69,17 +68,18 @@ mod task_retirement;
 mod transport;
 pub use task_retirement::{TaskRetirement, ViewerHold, WORKSPACE_GRACE};
 pub mod task_history;
-pub mod task_state_delivery;
+mod task_state;
 pub mod task_summaries;
 pub mod task_work;
+pub mod tracker_actions;
 pub mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
+pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
-pub use session_events::CurrentConversation;
+pub use session_events::{AnsweredTurn, CurrentConversation};
 pub use task_details::TaskDetailFacts;
 pub use task_work::TaskShipping;
 
@@ -147,6 +147,11 @@ pub struct SqliteStore {
     pub token_key: token_crypto::TokenKeySource,
     #[cfg(not(feature = "test-support"))]
     pub(crate) token_key: token_crypto::TokenKeySource,
+    /// This connection's writer of `history.db`, opened at its first write.
+    #[cfg(feature = "test-support")]
+    pub history: Arc<crate::history::HistoryFile>,
+    #[cfg(not(feature = "test-support"))]
+    pub(crate) history: Arc<crate::history::HistoryFile>,
 }
 
 fn waves_in(conn: &Connection, repo: Option<&str>) -> StoreResult<Vec<Wave>> {
@@ -176,20 +181,88 @@ impl SqliteStore {
     }
 
     /// Refresh `sqlite_stat1` for tables whose size changed enough to move a
-    /// plan. Bounded by `analysis_limit`, it holds the write lock under a
-    /// second on a store of 770 MB. The Machine server runs it at start and
-    /// about once a day; nothing else does.
+    /// plan, in the store and in `history.db`. Bounded by `analysis_limit`,
+    /// it holds the write lock under a second on a store of 770 MB. The
+    /// Machine server runs it at start and about once a day; nothing else
+    /// does. A history that cannot be measured is a gap.
     pub fn refresh_statistics(&self) -> StoreResult<()> {
+        const OPTIMIZE: &str = "PRAGMA analysis_limit=400; PRAGMA main.optimize=0x10002;";
         self.conn
             .lock()
             .expect("store mutex poisoned")
-            .execute_batch("PRAGMA analysis_limit=400; PRAGMA optimize=0x10002;")?;
+            .execute_batch(OPTIMIZE)?;
+        self.history
+            .write("statistics", |tx| Ok(tx.execute_batch(OPTIMIZE)?));
         Ok(())
     }
 
     pub fn home_dir(&self) -> StoreResult<PathBuf> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         home_dir_in(&conn)
+    }
+
+    /// A store over a fixture's own connection, with its history attached as
+    /// an opened store's is.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn from_fixture_connection(
+        conn: Connection,
+        token_key: token_crypto::TokenKeySource,
+    ) -> Self {
+        let path = conn
+            .path()
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from);
+        match &path {
+            Some(path) => crate::history::attach(&conn, path),
+            None => crate::history::attach_empty(&conn),
+        }
+        Self::with_history(conn, token_key, path.as_deref())
+    }
+
+    /// A store over `conn`, whose history lives beside `path` and is already
+    /// attached.
+    fn with_history(
+        conn: Connection,
+        token_key: token_crypto::TokenKeySource,
+        path: Option<&Path>,
+    ) -> Self {
+        Self {
+            conn: Arc::new(Mutex::new(conn)),
+            token_key,
+            history: crate::history::HistoryFile::beside(path),
+        }
+    }
+
+    /// Run `write` on this store's `history.db`, never under the store's write
+    /// lock. A failure is a recording gap for `what`, and `None`.
+    pub(crate) fn write_history<T>(
+        &self,
+        what: &str,
+        write: impl FnOnce(&rusqlite::Transaction<'_>) -> StoreResult<T>,
+    ) -> Option<T> {
+        self.history.write(what, write)
+    }
+
+    /// Run `sql` on this store's history file, with the store attached as
+    /// `store`, for fixtures that seed history and turn rows directly.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn execute_history(&self, sql: &str, params: impl rusqlite::Params) -> StoreResult<usize> {
+        self.write_history("fixture", |tx| Ok(tx.execute(sql, params)?))
+            .ok_or_else(|| StoreError::InvalidData("fixture history write failed".into()))
+    }
+
+    /// Append `rows` to Session history in one transaction, after the state
+    /// they describe has committed; a failure is a recording gap.
+    pub(crate) fn append_history(&self, what: &str, rows: &[crate::history::Row]) {
+        if rows.is_empty() {
+            return;
+        }
+        self.write_history(what, |tx| {
+            for row in rows {
+                crate::history::append_in(tx, row)?;
+            }
+            Ok(())
+        });
     }
 }
 
@@ -215,15 +288,6 @@ pub struct WorkIdentity {
     pub parent: Option<WorkRef>,
     pub subject: String,
     pub external_id: Option<String>,
-}
-
-fn deleted_task_issues_in(
-    conn: &Connection,
-    wave_id: &WaveId,
-) -> StoreResult<std::collections::HashSet<String>> {
-    let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
-    let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
-    rows.map(|row| row.map_err(StoreError::from)).collect()
 }
 
 pub fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
@@ -253,7 +317,9 @@ fn copy_test_store(path: &Path) -> StoreResult<()> {
 fn open_unmigrated(path: &Path) -> StoreResult<Connection> {
     let conn = Connection::open_with_flags(
         path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+            | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+            | rusqlite::OpenFlags::SQLITE_OPEN_URI,
     )?;
     crate::instrumentation::observe_sqlite(&conn);
     conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
@@ -578,10 +644,8 @@ impl SqliteStore {
         crate::instrumentation::observe_sqlite(&conn);
         configure_write_connection(&mut conn, path, SQLITE_WRITE_BUSY_TIMEOUT)?;
         super::migration_runner::apply_sqlite(build, &conn, observers)?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     /// Open with the application's selected frontier authority and upgrade observations.
@@ -649,11 +713,8 @@ impl SqliteStore {
         if may_apply_migrations {
             migrate_plaintext_provider_tokens(&mut conn, token_key)?;
         }
-
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     /// Open only the Process rows without schema or token writes.
@@ -679,7 +740,9 @@ impl SqliteStore {
     ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
@@ -689,10 +752,8 @@ impl SqliteStore {
         conn.prepare(
             "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
         )?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     pub fn open_read_only(
@@ -701,14 +762,14 @@ impl SqliteStore {
     ) -> StoreResult<Self> {
         let conn = Connection::open_with_flags(
             path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY
+                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
+                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
         )?;
         crate::instrumentation::observe_sqlite(&conn);
         conn.execute_batch("PRAGMA query_only = ON; PRAGMA busy_timeout = 5000;")?;
-        Ok(Self {
-            conn: Arc::new(Mutex::new(conn)),
-            token_key,
-        })
+        crate::history::attach(&conn, path);
+        Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
     pub fn work_identities(&self) -> StoreResult<Vec<WorkIdentity>> {
@@ -764,14 +825,6 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn deleted_task_issues(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<std::collections::HashSet<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        deleted_task_issues_in(&conn, wave_id)
-    }
-
     pub fn upsert_wave_prepared(
         &self,
         wave: &Wave,
@@ -825,6 +878,7 @@ impl SqliteStore {
             &tx,
             wave.repo(),
             &crate::work::edit::WorkEdit::for_target(wave.id().as_str(), &edits),
+            crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
         if !saved {
             tx.execute("UPDATE waves SET created_at=?2,retired_at=?3,superseded_by_wave_id=?4,retirement_reason=?5 WHERE id=?1",params![wave.id(),created_at,wave.retired_at().map(|at|at.unix_timestamp()),wave.superseded_by_wave_id(),wave.retirement_reason()])?;
@@ -1668,10 +1722,7 @@ mod fixture_tests {
             .unwrap();
         conn.execute_batch(&view).unwrap();
         conn.execute_batch("PRAGMA query_only = ON").unwrap();
-        let store = SqliteStore {
-            token_key: crate::test_fixture::key,
-            conn: std::sync::Arc::new(std::sync::Mutex::new(conn)),
-        };
+        let store = SqliteStore::with_history(conn, crate::test_fixture::key, None);
         let identities = store.work_identities().unwrap();
         assert_eq!(identities.len(), 4);
         assert_eq!(identities[3].subject, "abcdef");

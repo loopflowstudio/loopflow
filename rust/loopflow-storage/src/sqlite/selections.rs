@@ -1,5 +1,4 @@
 //! Saved selection and layout intent share one transaction and one Work snapshot.
-mod panes;
 use super::sessions::{SessionProjection, SessionProjectionInputs};
 use super::SqliteStore;
 use crate::execution::{TaskSection, TaskState};
@@ -109,7 +108,7 @@ fn work_in(
         conn,
         &super::children::ids_json(ids.iter().map(|id| id.as_str())),
     )?;
-    let published = super::project_adoption::published_in(conn, &ids)?;
+    let published = super::task_started::published_in(conn, &ids)?;
     let owners = super::task_ownership::owners_in(conn, &ids)?;
     let mut task_work = Vec::with_capacity(tasks.len());
     for task in tasks {
@@ -337,7 +336,7 @@ fn plan_in(
     queries: &BTreeMap<DashboardId, Selection>,
     work: &[SelectionWork],
 ) -> StoreResult<crate::work::selection::ViewPlan> {
-    use crate::work::selection::{PaneIntent, ViewContent, ViewLocation, ViewPlan};
+    use crate::work::selection::{ViewContent, ViewLocation, ViewPlan};
     let resolution = selection
         .resolve(repository.as_str(), work, queries)
         .map_err(StoreError::from)?;
@@ -354,17 +353,7 @@ fn plan_in(
     let mut contents = Vec::new();
     for key in selected {
         let facts = work.iter().find(|item| item.key == key);
-        let pane_layout = panes::layout_in(conn, &key)?;
-        let face = pane_layout.as_ref().and_then(|layout| {
-            layout
-                .zoomed
-                .as_ref()
-                .and_then(|id| layout.tree.pane(id))
-                .cloned()
-        });
         let mut content = ViewContent {
-            pane_revision: pane_layout.as_ref().map(|layout| layout.revision),
-            face,
             work: key.clone(),
             title: facts.map_or_else(|| key.id.clone(), |item| item.name.clone()),
             states: facts.map_or_else(BTreeSet::new, |item| item.states.clone()),
@@ -403,12 +392,6 @@ fn plan_in(
                 content
                     .unavailable
                     .push("Recorded execution location is unavailable".into());
-            }
-            if content.face.is_none() {
-                content.face = primary.map(|primary| PaneIntent::Session {
-                    session_id: Some(primary.id.into()),
-                    location: content.location.clone(),
-                });
             }
         }
         contents.push(content);

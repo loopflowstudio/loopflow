@@ -166,6 +166,10 @@ fix, to reproduce a CI failure, or for a risk no suite covers:
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(skills::catalog::) | test(prompt::) | binary(golden_prompt)'
 ```
 
+A decoder or transcript reader change names its crate, since its tests are not
+under a `harness::` module: `--rust-filter 'package(loopflow-harness) | test(harness::)'`
+runs them with execution's launch matrix and conformance suites.
+
 The runner runs architecture, Python, website and Swift suites when their
 paths changed, then Rust: inventory, `cargo fmt --check`, the filtered nextest
 run with one prepared fixture CLI, then `cargo clippy --all-targets -- -D warnings`.

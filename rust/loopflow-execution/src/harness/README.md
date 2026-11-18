@@ -46,6 +46,7 @@ Each harness file answers the rest:
 | `capabilities()` | who names the thread, initial prompt on resume, execution boundary, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
 | `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
+| `recognizes(&OsProcess)` | whether a running process is this client: Claude checks its executable path, Pi its arguments |
 
 Each harness is one unit struct (`loopflow_harness::Claude`, `Codex`,
 `OpenCode`, `Pi`) seen two ways, and those are the only harness dispatch:

@@ -7,9 +7,9 @@ $EDITOR rust/loopflow-harness/src/claude_decode.rs
 cargo test -p loopflow-harness claude_decode
 ```
 
-That builds this crate and `loopflow-model`. Storage, execution and the
-application are not compiled, and a storage or execution edit does not rebuild
-this crate.
+That builds this crate and `loopflow-model`, over `rusqlite`, `regex`, `serde`
+and a few other registry crates. Storage, execution and the application are
+not compiled, and a storage or execution edit does not rebuild this crate.
 
 Reading a saved conversation needs no store either:
 
@@ -51,6 +51,7 @@ Captured provider output is under `src/testdata/` (streams) and
 `src/transcript/testdata/` (saved conversations). A decoder or reader change
 adds the output that prompted it. Tests that push decoded facts into a store
 (`harness::conformance_tests`) and the launch matrix are execution's; they
-replay the same streams through `fact::trace`, which the `test-support` feature
-exposes. `pi_rpc.py`, a stand-in Pi process, stays with execution's launch
+replay the same streams through `fact::trace` and read the same saved
+conversations through `transcript::testdata`, both exposed by the
+`test-support` feature. `pi_rpc.py`, a stand-in Pi process, stays with execution's launch
 fixtures.

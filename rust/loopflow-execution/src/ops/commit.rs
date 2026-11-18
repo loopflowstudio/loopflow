@@ -132,7 +132,10 @@ pub fn commit_workflow(
         progress.status("Generating commit message...");
         match generate_commit_message(repo, MessageAgent::Chosen(options.agent.as_deref())) {
             Ok(message) => message.text(),
-            Err(_) => format_commit_message(&options.task, &options.sources),
+            Err(error) => {
+                progress.error(&error.to_string());
+                format_commit_message(&options.task, &options.sources)
+            }
         }
     };
 

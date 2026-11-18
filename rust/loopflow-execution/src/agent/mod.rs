@@ -1253,6 +1253,7 @@ fn _model_unavailable(text: &str) -> Option<()> {
                 "is unavailable",
                 "is currently unavailable",
                 "is not available",
+                "is not supported",
             ]
             .iter()
             .any(|phrase| text.contains(phrase))))
@@ -1857,6 +1858,7 @@ trust_level = "trusted"
             "claude_result: Fable 5 is currently unavailable. Switch to another model.",
             "claude_result: Selected model is not available.",
             "codex_error: model_not_found",
+            "codex_error: The 'gpt-6.2-sol' model is not supported when using Codex with a ChatGPT account.",
         ] {
             assert_eq!(
                 _classify_agent_failure(&failed_result(message)),

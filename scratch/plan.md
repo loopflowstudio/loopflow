@@ -35,8 +35,9 @@ apostrophe (`You’ve`, U+2019) and the text classifier matched `you've` with
 
 Codex also states the cause in a field. `codex app-server
 generate-json-schema` (codex-cli 0.170.0): `TurnError.codexErrorInfo` is an
-enum with `usageLimitExceeded`, `modelNotFound` and `unauthorized`. Both are
-read: the fold is what the logs prove, the field is what the schema promises.
+enum with `usageLimitExceeded`, `modelNotFound` and `unauthorized`. Only
+`usageLimitExceeded` is read from the field, beside the text fold; a live
+refusal carries it. An unavailable model and a revoked login classify by text.
 
 ## What exists
 
@@ -75,6 +76,18 @@ when a provider refuses it; only a Graph step also waits for capacity.
   asked Codex's close check for an endpoint and failed with `Codex
   AgentProcess connection is unavailable`. Claude to Codex had worked only
   because the default close check asks nothing.
+- **Who answered.** A capture row keeps the agent an input was first sent
+  to and cannot change. `input_answered_turn` takes the Session's provider
+  when the answering thread is the Session's current thread, so a Graph reads
+  a moved step's answer from the transcript of the agent that wrote it.
+  Without it, the second step of `lf -b research` failed with "the transcript
+  … is gone: ~/.codex has no file for it".
+- **Codex's unsupported model.** `The '<model>' model is not supported when
+  using Codex with a ChatGPT account.` is a model-unavailable refusal
+  (`_model_unavailable` matches `is not supported`), so a retired or mistyped
+  Codex model in `agents` moves on.
+- **`lf commit` says why it has no message** before committing as
+  `lf commit`.
 - **Recording.** `record_agent_limit_recovery` inserts only for a Graph
   step's Process. A command's move is the stderr line and nothing in the
   store.
@@ -130,13 +143,19 @@ retry four times on the same agent.
 
 No building. Lint and gate run the checks below that implement did not.
 
-Unobserved against the provider, each noted in `scratch/questions.md`:
+Observed against the provider on 2026-11-18, while the account's Codex was
+refused until 3:36 PM (`scratch/qa.html`): `codexErrorInfo` is
+`usageLimitExceeded`; `lf -b`, `lf commit`, `lf pr open`, `lf sync`, a batch
+Graph and a Task Graph step all moved `codex:gpt-6.2-sol →
+codex:gpt-6.2-astra → claude:haiku` and finished.
 
-- Whether a live Codex usage refusal sets `codexErrorInfo`. No trace of one
-  exists; the checked-in traces have `null` for a stream disconnect.
-- A move inside Codex (`codex:a → codex:b`) resumes the refused thread with
-  `LIMIT_FAILOVER_PROMPT`. No Codex refusal classified before this change, so
-  that path has never run against the provider.
+Still unobserved: a second Codex model answering on the resumed thread (the
+limit is account-wide, so it was refused too), and a move after Codex has
+already replied in the step.
+
+Open product choices are in `scratch/questions.md`: a foreground batch Graph
+waits, `lf commit` still commits without a message, a headless turn to an
+existing conversation does not move.
 
 ## Demo
 
@@ -159,3 +178,5 @@ out of quota: `lf pr open` prints the move lines, then the PR URL.
 - `cargo test -p loopflow-execution --lib -- agent::tests harness::codex_decode ops::task_execution ops::human_session::conversation_log` — passed; implement.
 - `cargo clippy --all-targets -- -D warnings` — not run; lint.
 - `test(store::) | test(session_record::capture_tests::) | test(process::runtime::tests::)` — not run; gate. The retry path now writes the Session's provider.
+- `cargo test -p loopflow-execution --lib -- store::state_without_history transcript::answer session_record::capture_tests ops::commit` — passed; qa.
+- `cargo test -p loopflow-execution --lib -- agent::tests::model_unavailable` — passed; qa.

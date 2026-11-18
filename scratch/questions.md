@@ -8,21 +8,21 @@
   timeout or an unparseable reply matters, that belongs in the shared loop
   for every caller, not in a second loop.
 
-- **`codexErrorInfo` on a live usage refusal is unobserved.** The 0.170.0
-  schema lists `usageLimitExceeded`, but no captured trace of a real refusal
-  exists. The apostrophe fold is what the logs prove; the structured read is
-  added beside it. A trace captured the next time Codex refuses would settle
-  whether the text match can go.
+- **`codexErrorInfo` on a live usage refusal is `usageLimitExceeded`.**
+  Observed 2026-11-18 against the account's Codex (codex-cli 0.170.0, refused
+  until 3:36 PM): every move classified from the field, and stderr read
+  `provider_rate_limited: You’ve hit your usage limit. …`. The text match is
+  now the second reader; whether it can go was not decided.
 
 - **`lf replay` runs the recorded agent and nothing else.** The bare-harness
   model expansion lives only in `Config::resolve_agents`; replay builds its
   launch by hand, so it never moves. Same as today.
 
-- **A Codex-to-Codex move resumes a thread whose first turn was refused.** It
-  sends `LIMIT_FAILOVER_PROMPT` to that thread. No Codex refusal has ever
-  classified, so this path has never run against the provider; whether the
-  thread still holds the task is unknown. If it does not, a move within a
-  provider with no reply yet should also restart from the original prompt.
+- **A Codex-to-Codex move resumes the refused thread.** Ran live 2026-11-18:
+  `codex:gpt-6.2-sol → codex:gpt-6.2-astra` resumed (`resumed=true` in
+  `lf.log`) and the second model was refused too, since the limit is
+  account-wide. Whether the resumed thread still holds the task when the
+  second model answers is still unobserved.
 
 - **A turn refused before any reply restarts from the original prompt on the
   next provider**, instead of importing the transcript. Chosen because a PR
@@ -35,7 +35,31 @@
   Whether Session lists should show the first agent or the current one was
   not asked; they now show the current one.
 
-- **Stderr prefix on a Codex refusal read from `codexErrorInfo`** is
-  `provider_rate_limited: You’ve hit…`, where the docs' example shows
-  `codex_error: You’ve hit…` (what the text match yields). Which one people
-  see depends on the unobserved field.
+- **An input answered after a move names its provider through the Session.**
+  The capture row keeps the first agent and cannot change, so
+  `input_answered_turn` takes the Session's provider when the answering thread
+  is the Session's current thread. Found by `lf -b research`: its second step
+  failed with "the transcript … is gone: ~/.codex has no file for it". Left
+  open: a Session that moved inside one input and later switched provider again
+  reads that old input's answer from history's copy only. A `turn_provider`
+  column beside `turn_thread` would close it; passed over as a schema change.
+
+- **A batch Graph's steps wait.** `lf -b research '<question>'` is a Graph, so
+  with the whole order refused it waits 5, 15, 30, 60 minutes at the terminal
+  where `lf -b skill -- unbreak` stops at once. Before this change a Codex-led
+  one failed at once, because the refusal never classified. The docs now say
+  so; whether a Graph run in the foreground should wait was not decided.
+
+- **`lf commit` with its order spent still commits as `lf commit`.** It now
+  prints why the message failed; before, it printed nothing. Whether it should
+  stop instead was not decided.
+
+- **A headless turn sent to an existing conversation does not move.**
+  `lf -b session resume <id> --message …` on a refused Codex conversation stops
+  with "No fallback remains … If `agents` is missing or has only one entry",
+  though `agents` has four. `-a claude:haiku` moves it by hand. Left as is: a
+  conversation keeps its provider; the advice does not fit this case.
+
+- **`-a claude` with every Claude model refused** ends "add another agent to
+  `agents`", which the pin ignores. A launch cannot tell a pin from an
+  unconfigured default, where that advice is right.

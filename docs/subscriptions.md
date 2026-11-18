@@ -60,7 +60,7 @@ model fallthrough and explicit pins.
 | Launch | After a classified refusal |
 | --- | --- |
 | Graph step, with or without a Task | Follow configured model/harness fallbacks |
-| Other headless work (`lf -b`, commit and PR text, sync conflicts) | Follow the same fallbacks; never wait |
+| Other headless work (`lf -b <skill>`, commit and PR text, sync conflicts) | Follow the same fallbacks; never wait |
 | Pi or OpenCode | Stop with the provider error; neither reports why it refused |
 | Interactive, with or without a Task | Keep the provider, thread and refusal visible; wait for an explicit retry or move |
 | Explicit agent | Keep the harness; bare Claude retains model fallthrough |

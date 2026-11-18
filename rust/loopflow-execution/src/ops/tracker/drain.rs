@@ -113,8 +113,8 @@ pub(crate) async fn drain_repository(
 }
 
 /// The repository's unconfirmed actions for `tracker`, after recording its
-/// tracker and queueing a
-/// creation for each owner made before the tracker was connected. An action
+/// tracker and queueing a creation for each owner made before the tracker was
+/// connected. An action
 /// queued for another tracker retires here, before any tracker is built, so a
 /// switched repository that is offline or signed out does not keep it.
 fn queued(store: &Store, repo: &str, tracker: TrackerKind) -> OpsResult<Vec<TrackerAction>> {

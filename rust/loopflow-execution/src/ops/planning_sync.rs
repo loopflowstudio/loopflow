@@ -67,11 +67,6 @@ pub async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> 
     exchange_repository(store, repo, Exchange::Publish { wait: true }).await
 }
 
-/// One connection tick publishes only when Git's outbox holds something.
-async fn tick_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, Exchange::Tick).await
-}
-
 #[derive(Debug, Clone, Copy)]
 enum Exchange {
     Acquire,
@@ -616,7 +611,7 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync(EXCHANGE_TICK, || tick_repository(&store, &repo)) => {},
+                        _ = exchange_every_tick(&store, &repo) => {},
                     }
                 };
                 #[cfg(any(test, feature = "test-support"))]
@@ -641,15 +636,12 @@ const EXCHANGE_TICK: Duration = Duration::from_secs(5);
 
 // The delay follows each attempt, so a slow exchange cannot make missed ticks
 // burst when it returns.
-async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
-    delay: Duration,
-    mut attempt: impl FnMut() -> F,
-) {
+async fn exchange_every_tick(store: &Store, repo: &str) {
     loop {
-        if let Err(error) = attempt().await {
+        if let Err(error) = exchange_repository(store, repo, Exchange::Tick).await {
             tracing::debug!(%error, "Git planning exchange pending");
         }
-        tokio::time::sleep(delay).await;
+        tokio::time::sleep(EXCHANGE_TICK).await;
     }
 }
 

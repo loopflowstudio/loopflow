@@ -3153,8 +3153,8 @@ mod tests {
         )
         .unwrap();
         let git = change(&wave("/git"));
-        let linear = change(&wave("/linear"));
-        let orphan = change(&loopflow_model::id::WaveId::new().to_string());
+        change(&wave("/linear"));
+        change(&loopflow_model::id::WaveId::new().to_string()); // orphaned
         let held = change(&loopflow_model::id::WaveId::new().to_string());
         conn.execute(
             "INSERT INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,'/git','plan')",
@@ -3176,7 +3176,6 @@ mod tests {
         expected.sort();
         assert_eq!(kept("planning_peer_changes"), expected);
         assert_eq!(kept("planning_peer_observed"), expected);
-        assert!(![linear, orphan].iter().any(|id| expected.contains(id)));
         let trackers: Vec<(String, Option<String>)> = conn
             .prepare("SELECT repo,planning_tracker FROM repository_plans ORDER BY repo")
             .unwrap()

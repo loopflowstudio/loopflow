@@ -916,7 +916,7 @@ impl Read {
             | Self::WavePlan { directory, .. }
             | Self::TaskList { directory, .. }
             | Self::PlanList { directory, .. }
-            | Self::RepoPlan { directory }
+            | Self::RepoTracker { directory }
             | Self::WorkResolve { directory, .. }
             | Self::WaveGraph { directory, .. }
             | Self::RepoTokens { directory, .. }

@@ -66,7 +66,7 @@ fn without_a_tracker_the_plan_is_on_this_machine() {
         assert_eq!(
             status["plan"],
             serde_json::json!({
-                "hub": null, "is_hub": false, "unreachable_since": null, "error": null, "open": []
+                "hub": null, "unreachable_since": null, "error": null, "open": []
             }),
             "{config:?}"
         );

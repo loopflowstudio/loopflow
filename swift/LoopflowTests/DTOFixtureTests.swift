@@ -1014,8 +1014,8 @@ struct DTOFixtureTests {
         #expect(plan.line.hasSuffix(". 1 open."))
         let linear = #"{"tracker":"linear","plan":null,"actions":[]}"#
         #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(linear.utf8)).line == "Tracker: linear.")
-        let hub = #"{"tracker":null,"plan":{"hub":null,"is_hub":true,"unreachable_since":null,"error":null,"open":[]}}"#
-        #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(hub.utf8)).line == "Plan: this Machine (hub).")
+        let here = #"{"tracker":null,"plan":{"hub":null,"unreachable_since":null,"error":null,"open":[]}}"#
+        #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(here.utf8)).line == "Plan: this Machine.")
         for key in ["tracker", "plan"] {
             var object = body
             object.removeValue(forKey: key)

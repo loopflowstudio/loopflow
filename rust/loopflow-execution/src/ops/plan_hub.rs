@@ -20,6 +20,39 @@ use loopflow_storage::work::edit::WorkEdit;
 /// ticketed connection.
 const BUDGET: usize = crate::machine::wire::MAX_MESSAGE / 2;
 
+/// An owner's open values as one line: its first send, then `title`,
+/// `title, description`, or `14 values` for a record the hub has yet to see,
+/// and `sent` only when every value's answer is outstanding.
+pub fn open_by_owner(sends: &[HubSend]) -> Vec<(&HubSend, String, &'static str)> {
+    let mut owners: Vec<(&HubSend, Vec<&HubSend>)> = Vec::new();
+    for send in sends {
+        match owners
+            .iter_mut()
+            .find(|(first, _)| first.edit.target == send.edit.target)
+        {
+            Some((_, values)) => values.push(send),
+            None => owners.push((send, vec![send])),
+        }
+    }
+    owners
+        .into_iter()
+        .map(|(first, values)| {
+            let fields = if values.len() > 3 {
+                format!("{} values", values.len())
+            } else {
+                let names: Vec<_> = values.iter().map(|send| send.field()).collect();
+                names.join(", ")
+            };
+            let phase = if values.iter().all(|send| send.sent_at.is_some()) {
+                "sent"
+            } else {
+                "queued"
+            };
+            (first, fields, phase)
+        })
+        .collect()
+}
+
 /// The Machine that holds this Machine's plan; `None` when it is here, on a
 /// Machine with no hub or that is its own hub.
 pub fn hub(store: &SqliteStore) -> Result<Option<Machine>> {
@@ -35,31 +68,23 @@ pub fn hub(store: &SqliteStore) -> Result<Option<Machine>> {
         .ok_or_else(|| anyhow!("hub {id} is not an added Machine; run `lf machine add` for it, or `lf machine hub --clear`"))
 }
 
-/// Whether this Machine is the hub its own setting names, where other
-/// Machines keep their plan.
-pub fn is_hub(store: &SqliteStore) -> Result<bool> {
-    let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;
-    Ok(config.hub.is_some_and(|id| {
-        crate::store::machines::local_machine(store).is_ok_and(|local| local.id == id)
-    }))
-}
-
 /// `lf machine hub <machine>` and `--clear` (`None`). Clearing keeps every
 /// plan here and drops what was waiting for the hub; changing the hub reads
-/// the new one's whole plan first.
+/// the new one's whole plan first. Returns how many values a cleared hub
+/// never took.
 pub fn set_hub(
     store: &SqliteStore,
     hub: Option<&loopflow_model::durable::MachineId>,
-) -> Result<()> {
+) -> Result<usize> {
     crate::config::placement::write_global(
         &store.home_dir()?,
         &["hub"],
         hub.map(|id| id.as_str().into()),
     )?;
-    if hub.is_none() {
-        store.forget_hub_plans()?;
-    }
-    Ok(())
+    Ok(match hub {
+        Some(_) => 0,
+        None => store.forget_hub_plans()?,
+    })
 }
 
 // ---- Another Machine's side ----
@@ -336,6 +361,6 @@ fn checkout(store: &SqliteStore, repository: &RepositoryId) -> Result<String> {
         .repository_path(repository)
         .context("read the repository's checkout")?
         .ok_or_else(|| {
-            anyhow!("the hub has no checkout of repository {repository}; clone it there and run `lf config repo --bind {repository}` in it")
+            anyhow!("the hub has no checkout of repository {repository}; clone it there and run `lf config repo --bind {repository}` in it, or when the hub already holds this plan, run `lf config repo --bind <id>` here with the id `lf config repo` prints in the hub's checkout")
         })
 }

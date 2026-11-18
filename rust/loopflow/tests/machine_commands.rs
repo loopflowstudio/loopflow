@@ -1497,6 +1497,13 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
         "Plan: hub mini. Nothing open."
     );
 
+    // A Wave made here is on mini when the command returns.
+    ok(&["wave", "create", "billing"]);
+    assert_eq!(
+        ok(&["repo", "tracker"]).trim(),
+        "Plan: hub mini. Nothing open."
+    );
+
     // mini changes the title, then stops answering; the laptop changes it too.
     let revision = plan.remote.task(&task).unwrap().unwrap().revision;
     plan.remote
@@ -1517,8 +1524,21 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
         "{offline}"
     );
     assert!(offline.contains(" 1 open."), "{offline}");
-    assert!(offline.contains("title · queued · "), "{offline}");
-    assert!(offline.contains("Operation timed out"), "{offline}");
+    assert!(offline.contains("  title · queued\n"), "{offline}");
+    // A Task made offline is one line, and the reason is said once.
+    ok(&["task", "create", "made offline"]);
+    let offline = ok(&["repo", "tracker"]);
+    assert!(offline.contains(" 2 open."), "{offline}");
+    assert_eq!(
+        offline.matches(" values · queued\n").count(),
+        1,
+        "{offline}"
+    );
+    assert_eq!(
+        offline.matches("Operation timed out").count(),
+        1,
+        "{offline}"
+    );
 
     // mini answers again, but its answer to the send is lost after it wrote it.
     fs::remove_file(flags.join("down")).unwrap();

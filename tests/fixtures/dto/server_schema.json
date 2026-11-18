@@ -3440,10 +3440,10 @@
       "type": "object"
     },
     "HubOpen": {
-      "description": "One value on its way to the hub: `3e1c9a07  title · queued`.",
+      "description": "One record's values on their way to the hub: `3e1c9a07  title · queued`.",
       "properties": {
         "field": {
-          "description": "The field without its record prefix: `title`, `name`.",
+          "description": "The open fields without their record prefix: `title`, `title, notes`, or `14 values` for a record the hub has yet to see.",
           "type": "string"
         },
         "owner": {
@@ -3451,7 +3451,7 @@
           "type": "string"
         },
         "phase": {
-          "description": "`queued`, or `sent` while its answer is outstanding.",
+          "description": "`queued`, or `sent` while every answer is outstanding.",
           "type": "string"
         }
       },
@@ -5503,12 +5503,8 @@
             "null"
           ]
         },
-        "is_hub": {
-          "description": "Whether this Machine is the hub other Machines keep their plan on.",
-          "type": "boolean"
-        },
         "open": {
-          "description": "Values saved here the hub has yet to confirm, in send order.",
+          "description": "Each record with values the hub has yet to confirm, in send order.",
           "items": {
             "$ref": "#/$defs/HubOpen"
           },
@@ -5525,7 +5521,6 @@
       },
       "required": [
         "hub",
-        "is_hub",
         "unreachable_since",
         "error",
         "open"

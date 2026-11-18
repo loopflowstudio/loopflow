@@ -145,24 +145,23 @@ pub(crate) struct PlanHome {
     /// The hub's name when the plan is on another Machine; `null` when it is
     /// on this one.
     hub: Option<String>,
-    /// Whether this Machine is the hub other Machines keep their plan on.
-    is_hub: bool,
     /// When the hub stopped answering (Unix seconds), while it still does not.
     unreachable_since: Option<i64>,
     /// Why the last exchange with the hub failed.
     error: Option<String>,
-    /// Values saved here the hub has yet to confirm, in send order.
+    /// Each record with values the hub has yet to confirm, in send order.
     open: Vec<HubOpen>,
 }
 
-/// One value on its way to the hub: `3e1c9a07  title · queued`.
+/// One record's values on their way to the hub: `3e1c9a07  title · queued`.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct HubOpen {
     /// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
     owner: String,
-    /// The field without its record prefix: `title`, `name`.
+    /// The open fields without their record prefix: `title`, `title, notes`,
+    /// or `14 values` for a record the hub has yet to see.
     field: String,
-    /// `queued`, or `sent` while its answer is outstanding.
+    /// `queued`, or `sent` while every answer is outstanding.
     phase: String,
 }
 
@@ -229,7 +228,6 @@ fn plan_home(store: &Store, repo: &str) -> Result<PlanHome> {
     let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? else {
         return Ok(PlanHome {
             hub: None,
-            is_hub: loopflow_execution::ops::plan_hub::is_hub(&store.sqlite)?,
             unreachable_since: None,
             error: None,
             open: Vec::new(),
@@ -237,21 +235,19 @@ fn plan_home(store: &Store, repo: &str) -> Result<PlanHome> {
     };
     let plan = store.sqlite.hub_plan(repo)?;
     let failing = plan.as_ref().and_then(|plan| plan.failing_since);
-    let open = store
-        .sqlite
-        .open_hub_sends(repo)?
-        .iter()
-        .map(|send| {
+    let sends = store.sqlite.open_hub_sends(repo)?;
+    let open = loopflow_execution::ops::plan_hub::open_by_owner(&sends)
+        .into_iter()
+        .map(|(send, field, phase)| {
             Ok(HubOpen {
                 owner: hub_owner_name(store, send)?,
-                field: send.field().to_owned(),
-                phase: send.phase().to_owned(),
+                field,
+                phase: phase.to_owned(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(PlanHome {
         hub: Some(hub.name().to_owned()),
-        is_hub: false,
         unreachable_since: failing,
         error: failing.and(plan.and_then(|plan| plan.error)),
         open,
@@ -289,17 +285,11 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     print_actions(store, &actions)
 }
 
-/// `Plan: hub mini. 2 open.`, then each open value under its owner's name.
+/// `Plan: hub mini. 2 open.`, then each record with open values, then why
+/// the hub did not take them.
 fn print_plan(plan: &PlanHome) {
     let Some(hub) = &plan.hub else {
-        println!(
-            "Plan: {}.",
-            if plan.is_hub {
-                "this Machine (hub)"
-            } else {
-                "this Machine"
-            }
-        );
+        println!("Plan: this Machine.");
         return;
     };
     let place = match plan.unreachable_since {
@@ -324,11 +314,10 @@ fn print_plan(plan: &PlanHome) {
         .max()
         .unwrap_or(0);
     for open in &plan.open {
-        let mut line = format!("{} · {}", open.field, open.phase);
-        if let Some(error) = &plan.error {
-            line.push_str(&format!(" · {error}"));
-        }
-        println!("  {:width$}  {line}", open.owner);
+        println!("  {:width$}  {} · {}", open.owner, open.field, open.phase);
+    }
+    if let Some(error) = &plan.error {
+        println!("  {error}");
     }
 }
 

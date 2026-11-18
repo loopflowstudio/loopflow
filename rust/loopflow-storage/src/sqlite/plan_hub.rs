@@ -182,13 +182,14 @@ impl SqliteStore {
     }
 
     /// Keep every plan on this Machine again: nothing queues for a hub.
-    pub fn forget_hub_plans(&self) -> StoreResult<()> {
+    /// Returns how many values the hub never took.
+    pub fn forget_hub_plans(&self) -> StoreResult<usize> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("DELETE FROM hub_sends", [])?;
+        let unsent = tx.execute("DELETE FROM hub_sends", [])?;
         tx.execute("DELETE FROM hub_plans", [])?;
         tx.commit()?;
-        Ok(())
+        Ok(unsent)
     }
 
     /// What `repo` has yet to send to its hub, oldest first.

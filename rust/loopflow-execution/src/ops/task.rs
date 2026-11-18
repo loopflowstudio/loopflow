@@ -2638,13 +2638,16 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
 /// What `lf task sync` prints after a hub exchange: the Task's values still
 /// on their way to the hub.
 async fn hub_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
-    let open = store
+    let sends = store
         .sqlite
         .open_hub_sends(repo)
         .map_err(task_error)?
         .into_iter()
         .filter(|send| send.edit.target == task.id.as_str())
-        .map(|send| format!("{} · {}", send.field(), send.phase()))
+        .collect::<Vec<_>>();
+    let open = super::plan_hub::open_by_owner(&sends)
+        .into_iter()
+        .map(|(_, fields, phase)| format!("{fields} · {phase}"))
         .collect::<Vec<_>>();
     Ok(open_lines(&task.identifier, &open))
 }

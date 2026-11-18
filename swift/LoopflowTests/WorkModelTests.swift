@@ -567,8 +567,8 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         try await feed.opened(1)
         let scope = try await feed.request(1)
-        let onHub = #"{"tracker":null,"plan":{"hub":"mini","is_hub":false,"unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
-        let here = #"{"tracker":null,"plan":{"hub":null,"is_hub":false,"unreachable_since":null,"error":null,"open":[]},"actions":[]}"#
+        let onHub = #"{"tracker":null,"plan":{"hub":"mini","unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
+        let here = #"{"tracker":null,"plan":{"hub":null,"unreachable_since":null,"error":null,"open":[]},"actions":[]}"#
         func planFrame(_ sequence: Int, _ answers: Int, repo: String, body: String) throws -> WorkFrame {
             try fixture.frame("plan_home", sequence: sequence, answers: answers,
                               scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),

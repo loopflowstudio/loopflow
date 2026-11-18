@@ -77,6 +77,12 @@ pub async fn add(repo: &Path, name: &str, objective: Option<&str>) -> OpsResult<
         &[authored_path(wave.slug())],
         &format!("lf wave add: {}", wave.slug()),
     );
+    super::planning_sync::sync_after_save(
+        &store,
+        &main.to_string_lossy(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(wave.id().clone()),
+    )
+    .await;
     let mut added = WaveAdded {
         id: wave.id().clone(),
         name: wave.slug().to_string(),

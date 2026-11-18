@@ -19,3 +19,12 @@ Jack Heart, 2026-11-18:
   a new task, and we would introduce a new multi-task workflow concept for
   that" (the Task is LOO-558, "Assign Workflow stages to people and hand
   Tasks over without a service", open.)
+- "what do we think is the right answer to the 5 people no linear case. Lets
+  say that we wnat to have the best reasonable behavior without a hub, and
+  then also support saying that there is a hub (which could b a separate
+  machine or possibly just running on one person's machine)"
+- "is there a design that would naturally graduate through all the tiers of
+  possible deployment"
+- "ok. Write a new design doc and then a guiding HTML for it, and let me know
+  what major tradeoffs it makes" → `scratch/plan-design.md`,
+  `scratch/plan-design.html`. Not yet chosen.

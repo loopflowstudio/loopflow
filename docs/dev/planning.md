@@ -289,10 +289,10 @@ newer revision ("changed again in Linear"), or `answer_lost` over action ids
 of any owner (`lf repo tracker answer <id> --keep-theirs | --use-mine`, served
 as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task sync
 --keep-theirs | --use-mine` answers a Task's whole slice). Without a tracker,
-`lf repo tracker` reads `Plan: hub mini. 2 open.` with each value still on its
-way, `Plan: this Machine (hub)` on the hub, and `Plan: this Machine.` without
-one. Linear checks run at the boundaries described below. A short save attempts
-delivery after its answer. No resident, whole-store callback, scheduler or
+`lf repo tracker` reads `Plan: hub mini. 2 open.` with each record still on its
+way, and `Plan: this Machine.` on the hub or without one. Linear checks run
+at the boundaries described below. A short save attempts delivery after its
+answer. No resident, whole-store callback, scheduler or
 implicit turn/Graph replay is involved.
 
 `--machine` sends portable pushed-code requirements and a Task selector, then the

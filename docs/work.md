@@ -237,12 +237,9 @@ lf machine hub mini        # this Machine now keeps its plan on mini
 
 ```text
 $ lf task create 'hub smoke'
-Created 3e1c9a07: hub smoke
+hub smoke · 3e1c9a
 $ lf repo tracker
-Plan: hub mini. 1 open.
-  3e1c9a07  title · queued
-$ lf task sync 3e1c9a07
-3e1c9a07: nothing open
+Plan: hub mini. Nothing open.
 ```
 
 On mini, `lf task list` shows the Task. Every Task, Project, Wave, comment and
@@ -250,17 +247,19 @@ order you change travels: renaming a Wave on the laptop renames it on mini.
 Only planning travels: checkouts, Sessions, Graphs and processes stay on the
 Machine that ran them. Claims follow your Git `user.email`.
 
-Every command saves on this Machine first, so nothing waits on the hub. Each
-`lf` command sends what is open and reads what changed on the hub, and
-`lf task sync` does both now. When two Machines change the same field, the
+Every command saves on this Machine first, so nothing waits on the hub. A
+save sends what is open at once. Desktop reads what changed on the hub after
+each thing you do; in a terminal, `lf task sync` sends and reads now. When two Machines change the same field, the
 change that reaches the hub last wins, on both. Offline, commands still save,
 read what this Machine last saw, and the changes wait:
 
 ```text
 $ lf repo tracker
-Plan: hub mini, unreachable since 14:02. 2 open.
-  3e1c9a07  title · queued · ssh: mini: Operation timed out
-  wave billing  name · queued · ssh: mini: Operation timed out
+Plan: hub mini, unreachable since Nov 18 14:02. 3 open.
+  3e1c9a        title · queued
+  5b20c4        14 values · queued
+  wave billing  name · queued
+  machine "mini": unreachable: … ssh: connect to host mini port 22: Operation timed out
 ```
 
 They go when mini answers again. A hub running a different `lf` says which side
@@ -268,11 +267,14 @@ to update and how (`ssh -- 'mini' 'lf install'`).
 
 Set the hub once per Machine, not per repository; it holds the plan of every
 repository on it that has no Linear or Asana. On the hub itself, `lf repo
-tracker` reads `Plan: this Machine (hub)` and nothing queues. The hub reaches
-the repository through its own checkout: clone it there and bind it to this
-repository's plan. Until then, sends stay open and `lf repo tracker` names the
-command, `lf config repo --bind <id>`, to run in that clone. `lf machine hub --clear` keeps the plan on this Machine again;
-`lf machine list` marks the hub.
+tracker` reads `Plan: this Machine.` and nothing queues. The hub reaches
+the repository through its own checkout, and every Machine's clone carries the
+same repository id: `lf config repo` prints it on the first Machine, and
+`lf config repo --bind <id>` sets it in each other clone, the hub's included,
+before anything is saved there. Until then nothing reaches the hub and
+`lf repo tracker` names the command.
+`lf machine hub --clear` keeps the plan on this Machine again and says how many
+saved values never reached the hub; `lf machine list` marks the hub.
 
 The first time a Machine reaches its hub, it reads the hub's plan, then sends
 whatever the hub lacked, so a plan kept on two Machines before ends up as one.

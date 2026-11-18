@@ -15,11 +15,11 @@ public struct RepositoryPlan: Decodable, Sendable, Equatable {
     }
 
     /// The line `lf repo tracker` starts with: `Tracker: linear.`,
-    /// `Plan: hub mini. 1 open.`, `Plan: this Machine (hub).`
+    /// `Plan: hub mini. 1 open.`, `Plan: this Machine.`
     public var line: String {
         if let tracker { return "Tracker: \(tracker.rawValue)." }
         guard let plan else { return "Plan: this Machine." }
-        guard let hub = plan.hub else { return plan.isHub ? "Plan: this Machine (hub)." : "Plan: this Machine." }
+        guard let hub = plan.hub else { return "Plan: this Machine." }
         let place = plan.unreachableSince.map { since in
             "hub \(hub), unreachable since \(Date(timeIntervalSince1970: TimeInterval(since)).formatted(date: .omitted, time: .shortened))"
         } ?? "hub \(hub)"
@@ -31,30 +31,27 @@ public struct RepositoryPlan: Decodable, Sendable, Equatable {
 public struct PlanHome: Decodable, Sendable, Equatable {
     /// The hub's name when the plan is on another Machine; nil on this one.
     public let hub: String?
-    public let isHub: Bool
     /// Unix seconds since the hub stopped answering.
     public let unreachableSince: Int?
     public let error: String?
-    /// Values saved here the hub has yet to confirm, in send order.
+    /// Each record with values the hub has yet to confirm, in send order.
     public let open: [HubOpen]
 
     enum CodingKeys: String, CodingKey {
         case hub, error, open
-        case isHub = "is_hub"
         case unreachableSince = "unreachable_since"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         hub = try values.decode(String?.self, forKey: .hub)
-        isHub = try values.decode(Bool.self, forKey: .isHub)
         unreachableSince = try values.decode(Int?.self, forKey: .unreachableSince)
         error = try values.decode(String?.self, forKey: .error)
         open = try values.decode([HubOpen].self, forKey: .open)
     }
 }
 
-/// One value on its way to the hub: `3e1c9a07  title · queued`.
+/// One record's values on their way to the hub: `3e1c9a07  title · queued`.
 public struct HubOpen: Decodable, Sendable, Equatable, Identifiable {
     public let owner: String
     public let field: String

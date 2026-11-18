@@ -73,7 +73,7 @@ struct DesktopHeadlessTests {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
             if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
-                return #"{"tracker":null,"plan":{"hub":"mini","is_hub":false,"unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
+                return #"{"tracker":null,"plan":{"hub":"mini","unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }

@@ -323,7 +323,6 @@
         "tracker": null,
         "plan": {
           "hub": "mini",
-          "is_hub": false,
           "unreachable_since": 1763474520,
           "error": "ssh: mini: Operation timed out",
           "open": [

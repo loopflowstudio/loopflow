@@ -1,3 +1,24 @@
+# LOO-938 — One plan at every size
+
+## Direction (2026-11-18, replaces everything below)
+
+The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
+Jack Heart, on whether it replaces "the hub owns the plan": "Why woudd it
+not? it seems like it does".
+
+The hub is a connection, not the plan's home. Every Machine stamps its saves;
+the plan is the newest stamp per field; Git carries it always (one ref per
+Machine), a hub carries it live when named, a tracker carries it between
+people when the repository has one.
+
+Run b20a303b built the hub-owns design and was interrupted at `qa`; its
+uncommitted work is the commit after c64f4a3b68. What it built that stays,
+changes and comes back is in the design under "What the branch has, and what
+changes". The rest of this file describes that earlier design and is kept
+only as a record of what exists on the branch.
+
+---
+
 # LOO-938 — Keep the plan on the hub Machine's server
 
 ## Direction (2026-11-18)

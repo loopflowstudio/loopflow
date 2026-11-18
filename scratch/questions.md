@@ -103,3 +103,11 @@
   is the same computation with one more input.
 - **Not reached:** a store home that differs from `LF_HOME`, and a forwarded
   remote profile. Neither has a route from a private Machine's socket.
+
+## Human review (2026-11-18), nobody present
+
+- **Went on to gate.** Every behavior the Task names was seen working against
+  the installed `lf`; nothing promised is missing. No person reacted; the
+  six questions on `scratch/human-review.html` are unanswered.
+- **Not seen by this step:** CI's suites. The run on `433c7879ab` is green with
+  `rust-test`, `rust-lint`, `rust-build`, `python-test` and `macos` skipped.

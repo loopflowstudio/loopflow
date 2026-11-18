@@ -24,7 +24,7 @@ impl Reading {
         for identity in &inputs.identities {
             let observed = session_agent_evidence(
                 RecordedProcess {
-                    ended: identity.completed_at.is_some(),
+                    ended: false,
                     pid: identity.pid,
                     os_started_at: identity.os_started_at,
                     started_at: Some(identity.started_at),
@@ -283,6 +283,51 @@ mod tests {
     }
 
     #[test]
+    fn quiet_deadlines_come_only_from_agents_that_have_not_ended() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        for (id, observed_at) in [("ended", 450), ("live", 460)] {
+            store.test_session(id, &crate::session_record::new_artifact_key());
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &store.test_lf_process())
+                    .unwrap();
+            store
+                .record_session_activity(
+                    id,
+                    &attachment,
+                    &SessionActivity {
+                        preview: None,
+                        observed_at,
+                        open_tools: 0,
+                        pending_input: 0,
+                        yielded: false,
+                    },
+                )
+                .unwrap();
+            if id == "ended" {
+                store
+                    .record_agent_process_exit(id, &attachment, true)
+                    .unwrap();
+            }
+        }
+        let deadlines = |session| {
+            store
+                .session_projection_inputs(500, session)
+                .unwrap()
+                .deadlines
+        };
+        assert_eq!(deadlines(None), [580]);
+        assert_eq!(deadlines(Some("live")), [580]);
+        assert!(deadlines(Some("ended")).is_empty());
+        // A reading already quiet for the whole window has no deadline left.
+        assert!(store
+            .session_projection_inputs(580, None)
+            .unwrap()
+            .deadlines
+            .is_empty());
+    }
+
+    #[test]
     fn a_changed_identity_restarts_acquisition_before_projection() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("db");
@@ -337,6 +382,10 @@ mod tests {
                 .available
         );
     }
+
+    // The one plan check for the inputs read: identities, Graph runs and quiet
+    // deadlines, for every Session and for one. `session_activity` is in
+    // `GROWING`, so a deadline statement that scans it fails here.
     #[test]
     fn identity_acquisition_is_batched_and_indexes_out_completed_history() {
         use loopflow_storage::query_plans::{growing_scans, statements};

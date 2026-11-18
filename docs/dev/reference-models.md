@@ -217,7 +217,9 @@ previous excerpt before output arrives. Desktop applies a 30-second working-text
 lifetime without changing execution state; current Available results retain their
 source age. Missing or disconnected evidence uses a labeled summary.
 A recorded AgentProcess alone decides whether its Session is active: completed
-means closed; otherwise exact PID/birth evidence is live, dead or unknown. Unknown
+means closed. One whose end is recorded is dead by its own row, in every read
+and for a finished Session too; the OS is asked only about agents that have not
+ended, where exact PID/birth evidence is live, dead or unknown. Unknown
 is never Available and never ages into replacement or checkout-cleanup authority.
 Every owned launch records an AgentProcess before exec, including native terminals.
 Sessions without one remain unknown; client files are not read. A held

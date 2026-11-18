@@ -22,11 +22,11 @@ const OWN: &str = "refs/loopflow/plan/";
 const SEEN: &str = "refs/loopflow/plan-seen/";
 /// The repository id every clone of the remote converges on.
 const REPOSITORY: &str = "repository";
-/// Records read from the store at a time while a commit is built.
+/// Bytes of records read from the store at a time while a commit is built.
 const PAGE: usize = 1 << 20;
 
-/// The remote a repository's plan travels by: `origin`, else its only other
-/// one in name order. `None` for a repository with no remote.
+/// The remote a repository's plan travels by: `origin`, else the first by
+/// name. `None` for a repository with no remote.
 pub fn remote(repo: &Path) -> Option<String> {
     let remotes = crate::git::git_stdout(repo, &["remote"]).ok()?;
     let mut remotes: Vec<&str> = remotes.lines().filter(|name| !name.is_empty()).collect();

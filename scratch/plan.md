@@ -157,10 +157,8 @@ ref exists locally" for one Machine; nobody could read it.
 **Repository id.** *Made for review.* When a fetched ref's `repository` differs
 from this clone's, the clone takes the lower of the two through
 `bind_repository`, so every clone converges without a command and the hub
-finds its checkout. Check first: the docs say to bind "before anything is
-saved there". If binding does not carry rows saved under the clone's first
-id, drop this, keep `lf config repo --bind` in the docs for the hub, and leave
-the `repository` file out.
+finds its checkout. Checked in slice 2: binding keeps rows saved under the
+clone's first id, so this stands.
 
 **When they run.** The Machine server owns both. After a command it answers,
 the existing coalesced exchange (`after_command`, quiet 5 s) does the hub and
@@ -194,11 +192,9 @@ and leaves Git unsent until the server or `lf task sync`. *Made for review:*
   row (`HubPlan`) follow the types.
 
   Assumed by the docs, to undo there if the build decides otherwise:
-  - The repository id check passes, so a clone with a remote needs no
-    `lf config repo --bind`. The docs keep `--bind` only for a hub on a
-    repository with no remote.
-  - `lf task claim` / `lf task run` exchange first (slice 3) and the losing
-    claim's run stops, keeping its work.
+  `lf task claim` / `lf task run` exchange first (slice 3) and the losing
+  claim's run stops, keeping its work. (The docs' other assumption held: a
+  clone with a remote needs no `lf config repo --bind`.)
 
   Questions writing exposed:
   - A teammate who can fetch but not push sees the plan and every save of
@@ -230,8 +226,9 @@ primary key; the clock is `max(at)` on its index. Check both and the
 A change costs one small commit per Machine on the remote and one no-op diff
 read per Machine; sized for about ten Machines, not a hundred.
 Stamping happens inside the save's own transaction: no second write lock. Git
-runs outside any SQLite transaction. One exchange per repository at a time
-(the existing `locks/plan-hub` file lock, renamed for both carriers).
+runs outside any SQLite transaction. One exchange per carrier and repository
+at a time (`locks/plan-hub/<id>.lock`, `locks/plan-git/<id>.lock`); a hub and
+a Git exchange may overlap, and each import is one transaction.
 
 ## Acceptance check at gate
 
@@ -260,8 +257,8 @@ the mini until `lf repo tracker` shows both refs confirmed (the laptop's
 personal ref showed "local changes pending" and "Git acquisition failed" on
 2026-11-18; the 22 records there exist only on the laptop and will arrive on
 the mini as new records either way). Install on both. Each server writes its
-ref within a minute. Git needs no `lf config repo --bind` on the mini; the hub
-does unless the repository id check in slice 2 passes. Unverified: the mini was unreachable during both kickoffs, so its
+ref within a minute. Neither Git nor the hub needs `lf config repo --bind` on the mini, once the
+mini has fetched. Unverified: the mini was unreachable during both kickoffs, so its
 etude checkout and `lf` version are unknown.
 
 ## Exclusions
@@ -319,10 +316,12 @@ etude checkout and `lf` version are unknown.
      and a third edit between them splits the plan.
    - What a peer just gave is not owed back: an import from a carrier moves
      that carrier's `sent_seq` to the end when nothing was unsent before it.
-     Without this `lf repo tracker` reads `N unsent` after every read. The Git
-     import needs the same call (`apply_plan_records(.., Some((Carrier::Git,
-     ..)))`), and a Git arrival still counts as unsent for the hub, which is
-     how one carrier feeds the other.
+     Without this `lf repo tracker` reads `N unsent` after every read. That
+     holds for the hub only. The Git import passes no carrier
+     (`apply_plan_records(.., None, ..)`): a whole-plan ref owes every arrival
+     back in this Machine's own ref, and the same exchange publishes it. A Git
+     arrival also counts as unsent for the hub, which is how one carrier feeds
+     the other.
    - A page of records carries what each record needs ahead of it (a
      comment's Task, a Task's Project, a Project's Wave, a Wave's parent and
      selected Project), so any page applies alone. The old send split parents
@@ -369,8 +368,13 @@ etude checkout and `lf` version are unknown.
    - A second clone of one remote on the same Machine cannot take the shared
      id (`bind_repository` refuses an id that locates another path); it keeps
      its own and logs. Untested.
-   - Not built from "Acceptance check at gate": the home whose push is
-     refused retitling through the hub, read by a fourth Git-only home.
+   - Remaining, owed before gate: the last case of "Acceptance check at
+     gate", the one whole-plan refs exist for (a home whose push is refused
+     retitles through the hub; a fourth Git-only home reads that title from
+     another Machine's ref). It joins the acceptance test with slice 3.
+   - A record skipped because it could not be written (questions, slice 2)
+     is not retried: the ref's tip is recorded once read, and later diffs
+     start from it. It arrives again only when its file next changes.
    - Reads that are not asked for do not fetch: `lf repo tracker --subscribe`
      and a provider exit exchange with the hub only; `lf task sync`,
      `lf wave status --sync`, a Task lookup that misses, a served command and
@@ -408,4 +412,8 @@ etude checkout and `lf` version are unknown.
   Machine). `server_schema.json` regenerated.
 - Not compiled here: Swift (`RepositoryPlan.swift` gained `GitCarrier` and
   `CarrierStanding`; three test files follow).
-- Next: slice 3, first-wins claims.
+- Slice 2's tests ran before main (#1977, Session reads) was merged in at
+  `5796dd348b`; the merge touched no plan file. After it,
+  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
+  ran clean, 2026-11-18. The acceptance test reruns as slice 3 extends it.
+- Next: slice 3, first-wins claims, and the refused-push acceptance case.

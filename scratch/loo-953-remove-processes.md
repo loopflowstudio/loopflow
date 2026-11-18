@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, slices 4, 4b, 4c and 5 built; next: gate)
+## Status (2026-11-18, slices 4, 4b, 4c and 5 built; concept review after 4c: nothing to change; next: gate)
 
 Realign 2026-11-18: `grep -rn -e '--processes' rust docs swift` and a grep
 for `process.get`/`process.history` return nothing; 4b stands as built.
@@ -66,6 +66,12 @@ Quotes and the OS-scan measurement: `questions.md`.
   `changes()`; `store_revisions` still catches a read that writes.
 - Follow-up Task at gate: `GraphProcess*` → `GraphRun*`,
   `work.graph_processes`, `graph_process.rs` (42 files, Rust and Swift).
+  Concept review after 4c adds the journal's names for one lf run to the
+  same Task, since `Execution` is that record's name: `ProcessContext`,
+  `LfNode::Process`, `with_process`, `admit_process` ("admitted Process"),
+  `process_attribution` ("Process attributed to no wave" in `lf.log`), and
+  `ledger` for the store (`open_ledger`, `process_ledger`, "recording to
+  ledger"). Internal and log-only, so not this PR.
 
 **Slice 4c as built (2026-11-18).** Design: `git show 7b9a8e0638:scratch/loo-953-remove-processes.md`.
 

@@ -408,6 +408,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
                 session_id: id.clone().into(),
                 agent_process_id: Some(first.agent_process_id.clone()),
                 origin_lf_process_id: process,
+                trace_id: None,
             }),
             capture_key: session.artifact_key.clone(),
         };

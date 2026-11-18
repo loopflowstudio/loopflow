@@ -26,7 +26,7 @@ pub struct ConversationToStart {
     pub provider: Option<String>,
     /// When the agent's end was recorded; `None` while its row is unfinished.
     pub ended_at: Option<i64>,
-    /// The provider's exit, as its launcher recorded it. `None` when nobody saw
+    /// The provider's exit, as its launcher saw it. `None` when nobody saw
     /// the end: the holder died, or the Machine restarted.
     pub exit_code: Option<i32>,
     /// The agent's recorded OS identity.
@@ -44,19 +44,17 @@ impl SqliteStore {
     pub fn conversations_to_start(&self) -> StoreResult<Vec<ConversationToStart>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut statement = conn.prepare_cached(&format!(
-            "SELECT s.id,t.id,p.id,COALESCE(p.completed_at,l.completed_at),l.exit_code,
-                p.pid,p.os_started_at,s.starts_since_turn,s.last_started_at,s.provider
+            "SELECT s.id,t.id,s.agent_process_id,s.agent_ended_at,s.agent_exit_code,
+                s.agent_pid,s.agent_os_started_at,s.starts_since_turn,s.last_started_at,s.provider
              FROM task_primary_sessions tp
              JOIN tasks t ON t.id=tp.task_id
              JOIN task_checkouts c ON c.task_id=t.id
              JOIN agent_sessions s ON s.id=tp.session_id
-             LEFT JOIN processes p ON p.id=s.agent_process_id
-             LEFT JOIN processes l ON l.id=p.parent_lf_process_id
              WHERE {open} AND s.completed_at IS NULL AND s.interactive=1
                AND s.moved_to_machine_id IS NULL
                AND rtrim(s.cwd,'/')=rtrim(c.worktree,'/')
                AND s.starts_since_turn<?1
-               AND (l.exit_code IS NULL OR l.exit_code NOT IN (0,130))
+               AND (s.agent_exit_code IS NULL OR s.agent_exit_code NOT IN (0,130))
              ORDER BY t.updated_at DESC,t.id",
             open = super::durable::task_open_sql("t"),
         ))?;

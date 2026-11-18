@@ -171,11 +171,16 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
             fixture.assert_retained();
         }
         fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
+        // Closing waits for the conversation's agent to exit.
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        assert_eq!(fixture.intent().phase, "closing");
+        let reason = fixture.diagnostics().0.unwrap_or_default();
+        assert!(reason.contains("Session final-turn"), "{reason}");
+        let _ = worker.0.kill();
+        worker.0.wait().unwrap();
         let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
         assert!(error.to_string().contains("without confirmed job cleanup"));
         assert_eq!(fixture.intent().phase, "closing");
-        let _ = worker.0.kill();
-        worker.0.wait().unwrap();
         fixture.sql().execute("UPDATE agent_sessions SET completed_at=1 WHERE id='final-turn'", []).unwrap();
         fixture.sql().execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&agent]).unwrap();
         let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
@@ -715,9 +720,9 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     assert_eq!(request(), Some(false));
     let graph = store.test_lf_process();
     conn.execute(
-        "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-        VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,1)",
-        params![task.as_str(), graph],
+        "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,run_pid,run_os_started_at,updated_at)
+        VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,?3,?4,1)",
+        params![task.as_str(), graph, live.pid, live.started_at],
     )
     .unwrap();
     assert_eq!(request(), None);

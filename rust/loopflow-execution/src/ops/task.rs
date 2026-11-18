@@ -3110,9 +3110,7 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
         .task_graphs(&task.id)
         .map_err(task_error)?
         .pop()
-        .filter(|graph| {
-            crate::journal::lf_evidence(&store.sqlite, graph.id()) != ProcessIdentityEvidence::Dead
-        });
+        .filter(|graph| crate::journal::run_evidence(&graph.run) != ProcessIdentityEvidence::Dead);
     if let Some(graph) = graph {
         let name = graph.name.clone();
         let facts = store
@@ -3140,24 +3138,16 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
             return Ok(Some(format!("stopped Graph {name} {position}")));
         }
     }
-    let processes = store
-        .sqlite
-        .task_open_processes(&task.id)
-        .map_err(task_error)?;
-    let open = crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?;
-    Ok(open.first().map(|(process, evidence)| {
-        let command = process
-            .command()
-            .and_then(|command| serde_json::from_str::<Vec<String>>(command).ok())
-            .map(|argv| format!(" running `{}`", argv.join(" ")))
-            .unwrap_or_default();
+    let work = store.sqlite.task_open_work(&task.id).map_err(task_error)?;
+    let open = crate::ops::task_execution::unresolved_work(&store.sqlite, &work)?;
+    Ok(open.first().map(|(work, evidence)| {
         let unknown = match evidence {
             ProcessIdentityEvidence::Unknown => " (liveness unknown)",
             _ => "",
         };
         format!(
-            "interrupt recorded for Process {}{command}{unknown}; a Task run or a `--task` Session stops on it",
-            process.id()
+            "interrupt recorded for {}{unknown}; a Task run or a `--task` Session stops on it",
+            work.label()
         )
     }))
 }

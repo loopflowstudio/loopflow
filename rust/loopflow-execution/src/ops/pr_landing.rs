@@ -379,6 +379,7 @@ fn admit_ci_fix(
                     started_at: loopflow_storage::rows::now_unix(),
                     pid: Some(worker.pid),
                     os_started_at: worker.os_started_at,
+                    caller_session: None,
                 },
             )
             .map_err(repair_error)?
@@ -451,16 +452,13 @@ fn repair_error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-/// A taskless checkout's work is the Processes started in it.
+/// A taskless checkout's work is the Sessions and Graph runs started in it.
 fn checkout_execution_blockers(store: &SharedStore, worktree: &Path) -> OpsResult<Vec<String>> {
-    let processes: Vec<_> = store
+    let work = store
         .sqlite
-        .processes_since(0)
-        .map_err(repair_error)?
-        .into_iter()
-        .filter(|process| process.cwd() == worktree.to_str())
-        .collect();
-    super::task_execution::execution_blockers(&store.sqlite, &processes)
+        .checkout_open_work(worktree)
+        .map_err(repair_error)?;
+    super::task_execution::execution_blockers(&store.sqlite, &work)
 }
 
 /// Record each exited ci-fix run of this PR: the Session it opened and the

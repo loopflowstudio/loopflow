@@ -160,7 +160,9 @@ impl Driver {
             *attachment = runtime.prepare_agent_process(session, attachment)?;
             config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone().into()))?,
+                serde_json::to_string(
+                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
+                )?,
             );
         }
         let resume_id = self

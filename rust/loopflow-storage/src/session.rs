@@ -391,7 +391,7 @@ pub struct SessionSummary {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AgentEnd {
     pub at: i64,
-    /// The provider's exit, as its launcher recorded it; `None` when nobody
+    /// The provider's exit, as its launcher saw it; `None` when nobody
     /// saw it: the holder died, or the Machine restarted.
     pub exit_code: Option<i32>,
 }

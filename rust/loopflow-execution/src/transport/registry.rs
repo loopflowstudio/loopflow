@@ -27,7 +27,9 @@ use loopflow_model::program_status::Records;
 
 use super::held::Source;
 use super::hosted::{Hosted, Pass, Watchers};
-use super::{dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV};
+use super::{
+    dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV, WITHIN_ENV,
+};
 
 /// How long a connection has to name its terminal.
 const ARRIVAL: Duration = Duration::from_secs(5);
@@ -466,6 +468,7 @@ impl Registry {
             .filter(|(name, _)| {
                 ![
                     HELD_ENV,
+                    WITHIN_ENV,
                     PARENT_ENV,
                     CONTROL_ENV,
                     STREAM_ENV,
@@ -478,6 +481,7 @@ impl Registry {
             })
             .collect();
         env.push((HELD_ENV.into(), terminal.to_string()));
+        env.push((WITHIN_ENV.into(), terminal.to_string()));
         env.push((PARENT_ENV.into(), holder.pid.to_string()));
         env.push((CONTROL_ENV.into(), meta.control_key.clone()));
         // An unanswered start may have started the child. The holder's

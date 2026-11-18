@@ -252,7 +252,7 @@ mod tests {
     use super::{recover_conversations, Watcher};
     use loopflow_execution::process::attachment;
     use loopflow_model::durable::TaskId;
-    use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId};
+    use loopflow_model::id::{AgentProcessId, LfSessionId};
     use loopflow_storage::sqlite::SqliteStore;
     use loopflow_test_support::TestRepo;
     use rusqlite::params;
@@ -267,7 +267,6 @@ mod tests {
         store: SqliteStore,
         task: TaskId,
         session: LfSessionId,
-        launcher: LfProcessId,
         agent: AgentProcessId,
     }
 
@@ -334,7 +333,6 @@ mod tests {
             store,
             task,
             session,
-            launcher,
             agent: claim.agent_process_id,
         };
         let pid = std::process::id();
@@ -354,7 +352,8 @@ mod tests {
                 .lock()
                 .unwrap()
                 .execute(
-                    "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
+                    "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3
+                     WHERE agent_process_id=?1",
                     params![self.agent, pid, started_at],
                 )
                 .unwrap();
@@ -362,17 +361,16 @@ mod tests {
 
         /// The provider exited with `code`, as the holder's settlement records it.
         fn exited(&self, code: i32) {
-            let conn = self.store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE processes SET completed_at=?2 WHERE id=?1",
-                params![self.agent, NOW - 5],
-            )
-            .unwrap();
-            conn.execute(
-                "UPDATE processes SET completed_at=?2,exit_code=?3 WHERE id=?1",
-                params![self.launcher, NOW - 5, code],
-            )
-            .unwrap();
+            self.store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "UPDATE agent_sessions SET agent_ended_at=?2,agent_exit_code=?3,agent_pid=NULL,
+                         agent_os_started_at=NULL WHERE agent_process_id=?1",
+                    params![self.agent, NOW - 5, code],
+                )
+                .unwrap();
         }
 
         /// The requests one pass at `now` starts, with `held` Sessions skipped.

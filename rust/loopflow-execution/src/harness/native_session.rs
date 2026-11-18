@@ -355,7 +355,7 @@ fn validate_launch(launch: &Launch<'_>) -> Result<()> {
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     if attachment.lf_process_id.as_ref() != Some(&process)
-        || attachment.caller(session.clone().into()) != caller
+        || attachment.caller(session.clone().into(), crate::journal::current_trace_id()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
     }
@@ -437,7 +437,9 @@ pub fn admit(
     }
     environment.insert(
         crate::process::AGENT_CALLER_ENV.into(),
-        serde_json::to_string(&attachment.caller(session.id.clone()))?,
+        serde_json::to_string(
+            &attachment.caller(session.id.clone(), crate::journal::current_trace_id()),
+        )?,
     );
     crate::process::register_session_attachment_interrupt(
         &store,
@@ -1342,7 +1344,9 @@ mod tests {
             let attached = original;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attached.caller(session.id.clone()))?,
+                serde_json::to_string(
+                    &attached.caller(session.id.clone(), crate::journal::current_trace_id()),
+                )?,
             )]);
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let recording = Recording {

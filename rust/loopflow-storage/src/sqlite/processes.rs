@@ -8,8 +8,8 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
 use crate::process::{
-    AgentCaller, AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry,
-    ProcessFilter, ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
+    AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry, ProcessFilter,
+    ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
 use crate::{StoreError, StoreResult};
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
@@ -872,20 +872,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// The lf processes that started inside held terminal `terminal`.
-    pub fn held_terminal_processes(
-        &self,
-        terminal: &loopflow_model::id::TerminalId,
-    ) -> StoreResult<Vec<LfProcessId>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare("SELECT id FROM processes WHERE kind='lf' AND held_terminal_id=?1")?;
-        let ids = query
-            .query_map([terminal], |row| row.get(0))?
-            .collect::<Result<_, _>>()?;
-        Ok(ids)
-    }
-
     /// The agent row the bridge keeps for a released reader, by its id.
     /// Fixtures inspect it; this lf reads its agents from their Sessions.
     #[cfg(any(test, feature = "test-support"))]
@@ -900,57 +886,33 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// Who started `id`: the first Session in its ancestry, else `person` at
-    /// its root. A chain missing rows leaves attribution unresolved.
-    pub fn process_starter(
+    /// Who started a run: the Session whose agent started it, else `person`.
+    pub fn starter(
         &self,
-        id: &LfProcessId,
+        session: Option<&loopflow_model::id::LfSessionId>,
         person: Option<&str>,
     ) -> StoreResult<crate::process::Starter> {
         use crate::process::Starter;
+        let Some(session) = session else {
+            return Ok(Starter::Person {
+                name: person.map(str::to_owned),
+            });
+        };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut current = Some(id.clone());
-        let mut seen = std::collections::HashSet::new();
-        while let Some(id) = current.take().filter(|id| seen.insert(id.clone())) {
-            let Some((parent, session)) = conn
-                .query_row(
-                    "SELECT parent_lf_process_id,caller_session_id FROM processes WHERE id=?1",
-                    [&id],
-                    |row| {
-                        Ok((
-                            row.get::<_, Option<LfProcessId>>(0)?,
-                            row.get::<_, Option<loopflow_model::id::LfSessionId>>(1)?,
-                        ))
-                    },
-                )
-                .optional()?
-            else {
-                return Ok(Starter::Person { name: None });
-            };
-            if let Some(session) = session {
-                let name = conn
-                    .query_row(
-                        "SELECT title FROM agent_sessions WHERE id=?1",
-                        [session.as_str()],
-                        |row| row.get::<_, Option<String>>(0),
-                    )
-                    .optional()?
-                    .flatten()
-                    .filter(|title| !title.is_empty());
-                return Ok(Starter::Session {
-                    id: session,
-                    name,
-                    requester: person.map(str::to_owned),
-                });
-            }
-            if parent.is_none() {
-                return Ok(Starter::Person {
-                    name: person.map(str::to_owned),
-                });
-            }
-            current = parent;
-        }
-        Ok(Starter::Person { name: None })
+        let name = conn
+            .query_row(
+                "SELECT title FROM agent_sessions WHERE id=?1",
+                [session.as_str()],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten()
+            .filter(|title| !title.is_empty());
+        Ok(Starter::Session {
+            id: session.clone(),
+            name,
+            requester: person.map(str::to_owned),
+        })
     }
 
     /// Exact identity wins; otherwise require a unique literal UUID prefix.
@@ -1173,6 +1135,15 @@ impl SqliteStore {
             ],
         )?;
         tx.commit()?;
+        Ok(())
+    }
+
+    /// The provider's own exit code, as the launcher that became it saw it.
+    pub fn record_agent_exit_code(&self, agent: &AgentProcessId, code: i32) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET agent_exit_code=?2 WHERE agent_process_id=?1",
+            params![agent, code],
+        )?;
         Ok(())
     }
 
@@ -1592,25 +1563,6 @@ impl SqliteStore {
             .map(|departure| serde_json::from_str(&departure))
             .transpose()
             .map_err(|error| StoreError::InvalidData(error.to_string()))
-    }
-
-    /// Stale providers retain their historical caller, never the new attachment.
-    pub fn agent_parent(&self, caller: &AgentCaller) -> StoreResult<Option<(LfProcessId, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let current = attachment_in(&conn, &caller.session_id)?;
-        let parent = current
-            .as_ref()
-            .filter(|current| Some(&current.agent_process_id) == caller.agent_process_id.as_ref())
-            .and_then(|current| current.lf_process_id.as_ref())
-            .unwrap_or(&caller.origin_lf_process_id);
-        conn.query_row(
-            "SELECT trace_id FROM processes WHERE id=?1",
-            [parent],
-            |row| row.get::<_, String>(0),
-        )
-        .optional()
-        .map(|trace| trace.map(|trace| (parent.clone(), trace)))
-        .map_err(StoreError::from)
     }
 }
 
@@ -2129,6 +2081,7 @@ mod attachment_tests {
                     session_id: id.clone().into(),
                     agent_process_id: Some(first.agent_process_id.clone()),
                     origin_lf_process_id: process.clone(),
+                    trace_id: None,
                 }),
                 capture_key: session.artifact_key.clone(),
             };
@@ -2195,6 +2148,7 @@ mod attachment_tests {
                 session_id: session.id.clone(),
                 agent_process_id: Some(first.agent_process_id),
                 origin_lf_process_id: process,
+                trace_id: None,
             }),
             capture_key: other.artifact_key,
         };

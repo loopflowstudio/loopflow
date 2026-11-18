@@ -45,7 +45,8 @@ const GROWING: [&str; 16] = [
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
 /// `agent_sessions_attached` and `agent_sessions_unended_agent` count
-/// November 17's 117 attached Sessions and 17 unended agents of 22,221.
+/// November 17's 117 attached Sessions and 17 unended agents of 22,221;
+/// `agent_sessions_agent_ended` takes the rest of that store's 17,171 agents.
 /// `session_capture_provider_thread` counts the 21,078 inputs with a resume
 /// reference on November 16's store. `session_capture_turn` is estimated from
 /// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
@@ -60,6 +61,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_attached','117 1'),
          ('agent_sessions','agent_sessions_unended_agent','17 1'),
+         ('agent_sessions','agent_sessions_agent_ended','17150 1'),
          ('agent_sessions','agent_sessions_held_terminal','85 2'),
          ('agent_sessions','agent_sessions_primary_repository','9 1'),
          ('agent_sessions','agent_sessions_primary_wave','15 1'),

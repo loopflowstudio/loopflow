@@ -2,7 +2,6 @@ use crate::process::attachment;
 use crate::store::StoreError;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::session::SessionActivity;
-use rusqlite::params;
 
 use loopflow_storage::test_fixture::process as insert_process;
 
@@ -159,48 +158,60 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
 }
 
 #[test]
-fn process_starter_names_the_nearest_session_else_the_root_person() {
+fn a_graph_run_names_the_session_whose_agent_started_it_else_the_person() {
     use crate::process::Starter;
+    use loopflow_storage::graph_process::ExecutionStart;
     let dir = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&dir.path().join("store.db")).unwrap();
-    let root = insert_process(&store, 1, 1);
-    let agent = insert_process(&store, 2, 2);
-    let step = insert_process(&store, 3, 3);
-    let orphan = insert_process(&store, 4, 4);
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?2,caller_session_id='session-a' WHERE id=?1",
-            params![agent, root],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?2 WHERE id=?1",
-            params![step, agent],
-        )
-        .unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id='00000000-0000-0000-0000-0000000000ff' WHERE id=?1",
-            [&orphan],
-        )
-        .unwrap();
+    store.test_session(
+        "session-a",
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
+    let compiled = loopflow_storage::graph::CompiledGraph {
+        name: "proof".into(),
+        steps: vec![],
+    };
+    for (cwd, session) in [("/by-agent", Some("session-a")), ("/by-person", None)] {
+        let start = ExecutionStart {
+            caller_session: session.map(Into::into),
+            ..ExecutionStart::reserved(1)
+        };
+        store
+            .record_graph(
+                &LfProcessId::new(),
+                &compiled,
+                None,
+                &start,
+                None,
+                Some(cwd),
+                None,
+            )
+            .unwrap();
     }
-    let starter = |id| store.process_starter(id, Some("Jack Heart")).unwrap();
+    let starter = |cwd: &str| {
+        let graph = store
+            .graphs_at(std::path::Path::new(cwd))
+            .unwrap()
+            .remove(0);
+        store
+            .starter(graph.caller_session.as_ref(), Some("Jack Heart"))
+            .unwrap()
+    };
     assert_eq!(
-        starter(&step),
+        starter("/by-agent"),
         Starter::Session {
             id: "session-a".into(),
-            name: None,
+            name: Some(store.session("session-a").unwrap().unwrap().title)
+                .filter(|title| !title.is_empty()),
             requester: Some("Jack Heart".into()),
         }
     );
     assert_eq!(
-        starter(&root),
+        starter("/by-person"),
         Starter::Person {
             name: Some("Jack Heart".into())
         }
     );
-    assert_eq!(starter(&orphan), Starter::Person { name: None });
 }
 
 #[test]

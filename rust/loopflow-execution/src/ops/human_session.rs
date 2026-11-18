@@ -1001,7 +1001,6 @@ pub async fn open(
         }
         return surface(store, &target).await.map(Opening::Done);
     }
-    end_earlier_owner(&store.sqlite, &target.id, progress.as_ref())?;
     // One launch lock covers the decision and the launch it chooses.
     let id = target.id.clone();
     let launch_lock =
@@ -1538,63 +1537,6 @@ pub(crate) fn capture_is_prepared(run_id: &str) -> Result<bool> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
         Err(error) => Err(error).context("resolve prepared Session input"),
     }
-}
-
-/// How long an earlier build's owner has to exit once signalled.
-const STOP_TIMEOUT: Duration = Duration::from_secs(10);
-
-/// An earlier build's `lf session serve` owner runs until it records its exit
-/// or the OS shows it gone, as after a restart. Unknown evidence is not exit.
-fn owner_running(store: &SqliteStore, owner: &loopflow_model::id::LfProcessId) -> Result<bool> {
-    Ok(store
-        .lf_process(owner)?
-        .is_some_and(|process| process.completed_at.is_none())
-        && crate::journal::lf_evidence(store, owner)
-            != crate::journal::ProcessIdentityEvidence::Dead)
-}
-
-/// End the `lf session serve` owner an earlier build left running `session`,
-/// so the conversation restarts from provider history. The owner is
-/// signalled only by its verified pid and birth, and this returns once it has
-/// exited. One whose identity cannot be verified, or that outlives
-/// `STOP_TIMEOUT`, is left running and nothing starts beside it. Nothing ends
-/// these owners but a resume. The wait can take the whole timeout, so a
-/// terminal's `progress` says what it waits for.
-pub(crate) fn end_earlier_owner(
-    store: &SqliteStore,
-    session: &str,
-    progress: Option<&crate::startup::Startup>,
-) -> Result<()> {
-    let Some(owner) = store.session_owner(session)? else {
-        return Ok(());
-    };
-    if !owner_running(store, &owner)? {
-        return Ok(());
-    }
-    let still_running = |pid: Option<u32>| {
-        let pid = pid.map_or_else(|| "unknown".to_owned(), |pid| pid.to_string());
-        anyhow!(
-            "This conversation is still running under an earlier lf (pid {pid}); quit it there, then resume"
-        )
-    };
-    let Some(pid) = crate::journal::live_process_pid(store, &owner) else {
-        let recorded = store.lf_process(&owner)?.and_then(|process| process.pid);
-        return Err(still_running(recorded));
-    };
-    let ending = format!("Ending the earlier lf (pid {pid}) that runs this conversation");
-    match progress {
-        Some(progress) => progress.stage(ending),
-        None => crate::journal::request::diagnostic(format_args!("{ending}")),
-    }
-    crate::platform::kill_process(pid);
-    let deadline = std::time::Instant::now() + STOP_TIMEOUT;
-    while owner_running(store, &owner)? {
-        if std::time::Instant::now() >= deadline {
-            return Err(still_running(Some(pid)));
-        }
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Ok(())
 }
 
 /// One Session's summary, with its viewers confirmed by its held terminal.

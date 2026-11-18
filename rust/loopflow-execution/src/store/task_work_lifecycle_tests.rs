@@ -20,6 +20,7 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         started_at: 1,
         pid: Some(std::process::id()),
         os_started_at: None,
+        caller_session: None,
     };
     {
         let conn = store.conn.lock().unwrap();
@@ -159,7 +160,8 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
                 Some(loopflow_storage::sqlite::task_work::ShipStop {
                     at: loopflow_storage::rows::now_unix(),
                     by: Some(stopper.clone()),
-                    person: None
+                    person: None,
+                    session: None,
                 })
             )
             .unwrap(),
@@ -423,70 +425,15 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         Some(&task)
     );
     assert_eq!(work.processes.len(), 4);
-    // The open reading agrees with the full one about unfinished Processes.
-    let initial_open = store.task_open_processes(&task).unwrap();
-    assert_eq!(initial_open.len(), 2);
-    assert!(initial_open
-        .iter()
-        .all(|process| process.completed_at().is_none()));
-    let unfinished = LfProcessId::new();
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
-            params![unfinished, TraceId::new()],
-        )
-        .unwrap();
-        store.execute_history(
-"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','open',?1,1,'{}')", [&unfinished]).unwrap();
-    }
-    // Task state reads only `loopflow.db`: a Process history alone names is
-    // not one of its open Processes.
-    let open = store.task_open_processes(&task).unwrap();
-    assert_eq!(open.len(), 2);
-    assert!(!open
-        .iter()
-        .any(|process| process.id() == unfinished.as_str()));
-    // With every Process unfinished, each membership path in state agrees:
-    // checkout, Session event and attachment.
-    store
-        .conn
-        .lock()
+    // Open work is the Task's unended Graph runs and live agents, never a
+    // Process row: the Graph still runs, no Session's agent started.
+    let open: Vec<_> = store
+        .task_open_work(&task)
         .unwrap()
-        .execute_batch(
-            "CREATE TEMP TABLE finished AS SELECT id,completed_at FROM processes;
-         UPDATE processes SET completed_at=NULL;",
-        )
-        .unwrap();
-    let ids = |processes: Vec<loopflow_storage::process::ProcessEntry>| {
-        processes
-            .iter()
-            .map(|process| process.id().to_owned())
-            .collect::<Vec<_>>()
-    };
-    let all = ids(crate::store::task_work::task_work(&store, &task)
-        .unwrap()
-        .processes);
-    assert_eq!(all.len(), 5);
-    let in_state: Vec<_> = all
         .iter()
-        .filter(|id| ![unfinished.as_str(), bound_process.as_str()].contains(&id.as_str()))
-        .cloned()
+        .map(|work| work.label())
         .collect();
-    assert_eq!(ids(store.task_open_processes(&task).unwrap()), in_state);
-    store.conn.lock().unwrap().execute_batch(
-        "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
-         DROP TABLE finished;",
-    )
-    .unwrap();
-    {
-        let conn = store.conn.lock().unwrap();
-        store
-            .execute_history("DELETE FROM session_history WHERE receipt_key='open'", [])
-            .unwrap();
-        conn.execute("DELETE FROM processes WHERE id=?1", [&unfinished])
-            .unwrap();
-    }
+    assert_eq!(open, [format!("Graph run {independent}")]);
     assert!(work
         .processes
         .iter()

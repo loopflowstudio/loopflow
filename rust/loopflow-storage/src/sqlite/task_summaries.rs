@@ -192,7 +192,7 @@ mod tests {
             }],
         };
         store
-            .record_graph(&graph, &compiled, Some(&task), &start, None, None)
+            .record_graph(&graph, &compiled, Some(&task), &start, None, None, None)
             .unwrap();
         for pass in 0..=2 {
             store

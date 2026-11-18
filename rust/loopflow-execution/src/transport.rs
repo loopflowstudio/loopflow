@@ -43,6 +43,8 @@ use wire::{Close, CloseReason, Decoder, Event, Incoming, Outgoing, Reply, Reques
 
 /// The held terminal a direct child runs in.
 const HELD_ENV: &str = "LF_TRANSPORT_HELD";
+/// The held terminal a program runs in, inherited by everything it starts.
+pub(crate) const WITHIN_ENV: &str = "LF_HELD_TERMINAL";
 const PARENT_ENV: &str = "LF_TRANSPORT_PARENT";
 const CONTROL_ENV: &str = "LF_TRANSPORT_CONTROL";
 const LIMIT: usize = 4 * 1024 * 1024;
@@ -211,10 +213,16 @@ pub fn initialize() {
 }
 
 /// The held terminal this process runs in, when it took up a held handoff.
-/// Its start receipt names it: a terminal is no process, so the work started
-/// inside it is found through the processes that name it.
 pub fn current() -> Option<&'static TerminalId> {
     HANDOFF.get().map(|handoff| &handoff.terminal)
+}
+
+/// The held terminal this process's work runs in. The holder sets it on
+/// every start and descendants inherit it. Work started there holds it open.
+pub fn held_in() -> Option<TerminalId> {
+    std::env::var(WITHIN_ENV)
+        .ok()
+        .and_then(|id| TerminalId::parse(&id).ok())
 }
 
 /// Whether this process runs the launch or handed it to its owner.

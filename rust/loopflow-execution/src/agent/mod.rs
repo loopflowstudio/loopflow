@@ -145,6 +145,7 @@ pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_CALLER_SESSION_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_EXECUTION_ID",
     "LF_RUN_DIR",

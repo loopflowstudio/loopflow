@@ -20,7 +20,7 @@ use tracing::{debug, warn};
 
 use crate::git::worktrees::main_repo_root;
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
-use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_model::id::{LfProcessId, LfSessionId, TraceId};
 use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -32,6 +32,9 @@ pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 /// conversation's setup steps. `logs/lf.log` keeps it at INFO for the report.
 pub const START_TIMING_TARGET: &str = "loopflow::start_timing";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
+/// The Session whose agent started the work this process belongs to,
+/// inherited through the lf processes between.
+pub const LF_CALLER_SESSION_ENV: &str = "LF_CALLER_SESSION";
 /// The id a spawner minted for this process and already recorded on the run
 /// it owns (a Graph run or step). Taken once at start; children never see it.
 pub const LF_EXECUTION_ID_ENV: &str = "LF_EXECUTION_ID";
@@ -193,6 +196,9 @@ struct ProcessContext {
     lf_process_id: LfProcessId,
     parent_lf_process_id: Option<LfProcessId>,
     agent_caller: Option<AgentCaller>,
+    /// The Session whose agent started this work: the caller's, else the
+    /// one this process inherited.
+    caller_session: Option<LfSessionId>,
     /// Time this command entered the runtime, independent of OS inspection.
     started_at: i64,
     process_started_at: Option<i64>,
@@ -747,7 +753,14 @@ pub fn current_execution_start() -> Option<loopflow_storage::graph_process::Exec
         started_at: context.started_at,
         pid: Some(std::process::id()),
         os_started_at: context.process_started_at,
+        caller_session: context.caller_session,
     })
+}
+
+/// The Session whose agent started this process, directly or through the
+/// lf processes between.
+pub fn caller_session_id() -> Option<LfSessionId> {
+    current_context().and_then(|context| context.caller_session)
 }
 
 /// The repository this process records itself under: the main checkout of
@@ -987,25 +1000,9 @@ fn create_process_context(
     // A direct child of this lf process must inherit this Process, not the agent
     // edge that admitted it. Provider launches install their own fresh caller.
     std::env::remove_var(AGENT_CALLER_ENV);
-    let agent_parent = agent_caller.as_ref().and_then(|caller| {
-        match ledger
-            .clone()
-            .map_or_else(open_ledger, Ok)
-            .and_then(|store| store.agent_parent(caller))
-        {
-            Ok(parent) => parent,
-            Err(error) => {
-                warn!(%error, "agent caller could not be resolved");
-                None
-            }
-        }
-    });
-    let inherited_trace = if agent_caller.is_some() {
-        agent_parent
-            .as_ref()
-            .and_then(|(_, trace)| TraceId::parse(trace).ok())
-    } else {
-        inherits.then(|| configured_trace_id(repo_root)).flatten()
+    let inherited_trace = match agent_caller.as_ref() {
+        Some(caller) => caller.trace_id.clone(),
+        None => inherits.then(|| configured_trace_id(repo_root)).flatten(),
     };
     let (trace_id, minted_trace_id) = match inherited_trace {
         Some(trace_id) => (trace_id, false),
@@ -1019,8 +1016,8 @@ fn create_process_context(
     // that resolves to nothing. Drop it so the violation is unspellable at
     // write time; the trace id stays, so the trace still groups. A legitimate
     // parent records its own start row before it can spawn anything.
-    let parent_lf_process_id = if agent_caller.is_some() {
-        agent_parent.map(|(parent, _)| parent)
+    let parent_lf_process_id = if let Some(caller) = agent_caller.as_ref() {
+        (!minted_trace_id).then(|| caller.origin_lf_process_id.clone())
     } else {
         (!minted_trace_id)
             .then(|| {
@@ -1052,6 +1049,19 @@ fn create_process_context(
     // Process ends (see try_emit).
     std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
     std::env::set_var(LF_PROCESS_ID_ENV, lf_process_id.as_str());
+    let caller_session = agent_caller
+        .as_ref()
+        .map(|caller| caller.session_id.clone())
+        .or_else(|| {
+            inherits
+                .then(|| std::env::var(LF_CALLER_SESSION_ENV).ok())
+                .flatten()
+                .map(LfSessionId::from)
+        });
+    match &caller_session {
+        Some(session) => std::env::set_var(LF_CALLER_SESSION_ENV, session.as_str()),
+        None => std::env::remove_var(LF_CALLER_SESSION_ENV),
+    }
 
     // Write the file journal wherever we can. Fall back to ledger-only when
     // the journal can't be
@@ -1109,6 +1119,7 @@ fn create_process_context(
         lf_process_id,
         parent_lf_process_id,
         agent_caller,
+        caller_session,
         started_at: PROCESS_STARTED_AT
             .get()
             .copied()
@@ -1308,6 +1319,16 @@ pub fn current_lf_process_id() -> Option<LfProcessId> {
     current_context().map(|context| context.lf_process_id)
 }
 
+/// The lf this process runs under, as it inherited it.
+pub fn current_parent_lf_process_id() -> Option<LfProcessId> {
+    current_context().and_then(|context| context.parent_lf_process_id)
+}
+
+/// This process's trace, which the agents it launches join.
+pub fn current_trace_id() -> Option<TraceId> {
+    current_context().map(|context| context.trace_id)
+}
+
 pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
     match OsProcess::read(pid) {
         Ok(Some(process)) => process.evidence(started_at),
@@ -1326,11 +1347,13 @@ fn pid_evidence(pid: u32, os_started_at: Option<i64>) -> ProcessIdentityEvidence
 }
 
 /// Whether a Graph run or step is still running: one OS lookup against the
-/// pid it recorded. A run with no end and no pid cannot be confirmed.
+/// pid it recorded. A run with no end and no pid cannot be confirmed, unless
+/// it started before this Machine booted.
 pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> ProcessIdentityEvidence {
     match (run.ended_at, run.pid) {
         (Some(_), _) => ProcessIdentityEvidence::Dead,
         (None, Some(pid)) => pid_evidence(pid, run.os_started_at),
+        (None, None) if began_before_boot(run.started_at) => ProcessIdentityEvidence::Dead,
         (None, None) => ProcessIdentityEvidence::Unknown,
     }
 }
@@ -1373,6 +1396,8 @@ pub fn step_evidence(
     run_evidence(step)
 }
 
+/// An lf row's liveness by its receipt; the journal's receipt tests read it.
+#[cfg(test)]
 pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> ProcessIdentityEvidence {
     let Ok(Some(record)) = store.lf_process(process) else {
         return ProcessIdentityEvidence::Unknown;
@@ -1434,34 +1459,6 @@ pub(crate) fn agent_evidence(
         agent.started_at,
         agent.holder.as_ref(),
     )
-}
-
-/// Either kind's liveness: an lf row by its receipt, an agent by its own OS identity.
-pub(crate) fn process_entry_evidence(
-    store: &SqliteStore,
-    record: &crate::process::ProcessEntry,
-) -> ProcessIdentityEvidence {
-    let receipt = match record {
-        crate::process::ProcessEntry::Lf(process) => recorded_process_receipt(store, process),
-        crate::process::ProcessEntry::Agent(_) => Ok(None),
-    };
-    recorded_process_evidence(record, &receipt, process_identity_evidence)
-}
-
-/// The OS PID a recorded Process runs under now; `None` unless its recorded
-/// identity proves it live.
-pub(crate) fn live_process_pid(store: &SqliteStore, process: &LfProcessId) -> Option<u32> {
-    let record = store.lf_process(process).ok()??;
-    let receipt = recorded_process_receipt(store, &record);
-    let mut live = None;
-    lf_process_evidence(&record, &receipt, |pid, started_at| {
-        let evidence = process_identity_evidence(pid, started_at);
-        if evidence == ProcessIdentityEvidence::Live {
-            live = Some(pid);
-        }
-        evidence
-    });
-    live
 }
 
 /// The recorded Process's own receipt, read by its locator without listing others.

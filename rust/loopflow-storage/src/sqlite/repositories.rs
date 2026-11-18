@@ -393,10 +393,6 @@ mod tests {
             .unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
-        assert_eq!(
-            store.task_open_processes(&task).unwrap()[0].id(),
-            process.as_str()
-        );
         let conn = store.conn.lock().unwrap();
         let cwd: String = conn
             .query_row("SELECT cwd FROM processes WHERE id=?1", [&process], |row| {

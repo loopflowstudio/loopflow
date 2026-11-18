@@ -620,8 +620,6 @@ Left for later steps:
 - gate: the named checks under Checks, and CI's full matrix;
 - a person: acceptance check 5 against real Claude (does a SIGTERM'd provider
   exit 0?), and the real reboot with three Tasks;
-- delivery: when LOO-953's Session columns land, rewrite
-  `conversations_to_start` and `summary_query`'s `agent_end` onto them (slice 4).
 
 ## Checks
 
@@ -685,6 +683,15 @@ Left for later steps:
   "seeded with what the claude thread knew" with no thread to read; it now says
   "seeded with its original request". Clippy on execution clean.
 - A real reboot with three Tasks (a person runs it).
+- Publish, after merging LOO-953 through `fbcf0091f2`: its native exits stopped
+  writing the launcher's `processes` exit, so a quit read as died.
+  `native_exit::settle` now writes `agent_sessions.agent_exit_code`, and
+  `conversations_to_start` and `summary_query` read `agent_ended_at`/`agent_exit_code`
+  with no `processes` join; a died run is a carrier that left `run_pid` behind.
+  `context_launch_tests::a_killed_task_conversation` (failed before the fix),
+  `server::recovery::tests::`, `native_exit::`, `human_session::`, `ship::tests::`,
+  storage `sessions`/`session_recovery`/`query_plans`, `dto_fixtures::`
+  (`task_create_receipt.json` gained `ended`/`start`), clippy clean.
 
 ## Docs
 

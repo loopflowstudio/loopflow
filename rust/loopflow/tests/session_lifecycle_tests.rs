@@ -1544,7 +1544,17 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         .unwrap_or_else(|| {
             attachment::claim_session_attachment(&store, &session, None, &origin).unwrap()
         });
-    let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
+    // The launcher installs its own trace; this fixture reads the launch's.
+    let trace: String = fixture
+        .db()
+        .query_row(
+            "SELECT trace_id FROM processes WHERE id=?1",
+            [&origin],
+            |row| row.get(0),
+        )
+        .unwrap();
+    let trace = loopflow_model::id::TraceId::parse(&trace).ok();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), trace)).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
     loopflow_execution::store::sessions::bind_session(
         &store,
@@ -2646,7 +2656,8 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
                 loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                     .unwrap();
             let attachment = store.session_attachment(&id).unwrap().unwrap();
-            let caller = serde_json::to_string(&attachment.caller(id.clone().into())).unwrap();
+            let caller =
+                serde_json::to_string(&attachment.caller(id.clone().into(), None)).unwrap();
             let source = if select_session {
                 ["--session", id.as_str()]
             } else {
@@ -2851,7 +2862,8 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
             loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                 .unwrap();
         let attachment = store.session_attachment(&ids[1]).unwrap().unwrap();
-        let caller = serde_json::to_string(&attachment.caller(ids[1].clone().into())).unwrap();
+        let caller =
+            serde_json::to_string(&attachment.caller(ids[1].clone().into(), None)).unwrap();
         let caller_cwd = store.session(&ids[1]).unwrap().unwrap().cwd;
         let created = fixture.json(&[
             "task",

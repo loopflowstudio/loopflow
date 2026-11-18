@@ -56,6 +56,33 @@ writes `ended_at/exit_code/error` by `task_ship_events_process`. The
   (a SIGKILLed step reads ended, outcome `unknown`). Still untested:
   `graph_failure_cause` driving the repeated-failure stop.
 
+**Concept review after the owner slices (at `0cfa577ea4`): next implement
+direction.** Settled by the design; no product choice.
+
+- **One observed result.** "Unended and its pid is dead → `unknown`" is
+  written per reader today: `ops::project::readiness` reads readiness, then
+  queries the activation a second time (`project_activation_run`) and
+  patches the `outcome` string. Add `journal::observed_result(&Execution) ->
+  ExecutionResult` (`ExecutionResult::of`, with `Running` + `run_evidence`
+  Dead → `Unknown`) and route every owner reader through it. `readiness_in`
+  selects the activation's `Execution` once and keeps it on
+  `ProjectReadiness`; the wire `ProjectActivation` is built from it, and
+  `project_activation_run` and the patch go. Each carrier and ship arm below
+  reads through the same function.
+- **A Task carrier has no result of its own.** Its result is its Graph
+  run's. So the `TaskCarrier` arm of `finish_run` clears
+  `lf_process_id, run_pid, run_os_started_at` and writes no exit; "moving" is
+  carrier pid live by `process_identity_evidence`. The `ShipCarrier` arm is a
+  full `Execution` (ship events carry the columns). `RunOwner` stays the
+  record kind, not "has an `Execution`".
+- **`GraphProcessSummaryState::of_process`** (`sessions.rs:428`, Session
+  summary's Graph) still reads Process outcome; it goes with the Session
+  slice, replaced by `of_run(observed_result(..))`.
+
+Order for the next pass: observed result (test: the existing
+`an_activation_whose_lf_died_unended_reads_unknown` passes unchanged with
+the second query gone), then the Task carrier, then the ship carrier.
+
 Checks (2026-11-17, owner slices): `nextest -p loopflow-storage --lib`
 graph_inventory/migration_runner/project_selection → 135 pass; execution
 `readiness_tests`/`task_updates`/`wave_lifecycle`/`journal::` → pass except

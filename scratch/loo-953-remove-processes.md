@@ -16,7 +16,8 @@ os_started_at }`, so `engine::launch` waits on its child without the store;
 the owner items, carriers, the Session lifetime and the attachment cut below.
 
 Next, in order (why this order: "Concept review after the Session
-lifetime cut"): (1) the lf-row readers: `task_open_process_pairs` and
+lifetime cut"): (0) delete the handoff attach (`replace_provider`; see
+"Concept review after the attachment cut"); (1) the lf-row readers: `task_open_process_pairs` and
 `task_state_sql`'s `open_processes` arm as live Sessions + Graph runs,
 retirement by terminal (Graph runs gain `held_terminal_id`),
 `process_starter`, `run_task_graph`'s parent check (`graph.rs:83`), and the
@@ -27,6 +28,45 @@ launcher end; (2) the expand migration's foreign-key rebuild together with
 stopping the journal writer **and the owner liveness pass** (see "Concept
 review after the carrier slices"); (3) slices 4–6.
 Quotes and the OS-scan measurement: `questions.md`.
+
+**Concept review after the attachment cut (2026-11-17): next implement direction.**
+
+One agent per Session is now the model, but `attach_in` still carries the
+handoff it replaced. Every production attach passes `replace_provider=true`:
+`claim_attachment`, `claim_session_input_in` (`sessions.rs:623`),
+`replace_agent`, `prepare_agent_process`, `agent_process.rs:876`. The
+`false` callers are all `#[cfg(test)]` (`process/runtime.rs`,
+`dispatch.rs`, `fact_writer.rs`, `server/{wake,boundary}.rs`, storage and
+execution lifecycle tests, `session_steers.rs:556`). So the handoff path
+is production code shaped for tests. It goes first in the next pass,
+before the lf-row readers:
+
+- Delete `replace_provider` from `attach_in`, `attach_session` and
+  `claim_session_attachment`, along with the non-replacing `UPDATE` branch
+  and `session_activity`'s token rebinding. `SessionAttachment.provider_lf_process_id`
+  becomes the attached lf at every attach, so it is the Session's
+  `agent_launcher_lf_process_id`. Either rename it to `launcher` or drop it
+  where `lf_process_id` already answers.
+- The fence collapses. Each attach mints a new agent id, so
+  `require_current_actor_in` needs only "current `agent_process_id` and
+  attached". `finish`'s `attached_lf_process_id = agent_launcher_lf_process_id`
+  becomes `attached_lf_process_id IS NOT NULL`. `agent_parent`'s
+  `provider == origin` filter goes too. Keep `agent_launcher_lf_process_id`
+  only if `native_exit`'s launcher end still needs it after the journal
+  stop. Otherwise it goes in slice 6 with the other dead columns.
+- Tests that exercised a handoff (`attachment_lifecycle_tests` 475–552,
+  `settlement_lifecycle_tests:19`, `steer_lifecycle_tests`,
+  `session_steers.rs:556`, `opencode.rs:963`, `claude.rs:726`, the
+  `runtime.rs` resume tests) either move to a replacement or are deleted.
+  Delete the ones whose only behaviour was "a provider survives
+  handoff". `steer_adapters`/`steer_batches` keyed by `agent_process_id`
+  ("survives handoff, never replacement") then mean "this agent". The
+  `steer_batches.attachment_token` with no reader goes in slice 6.
+- The bridge's `session_agent_from_attachment` arm (the agent changes while
+  the token does not) stays. It serves a released lf's writes, not this one's.
+
+The order after that is unchanged: the lf-row readers, then the journal
+stop with the liveness pass, then slices 4–6. No open product choice.
 
 **Attachment cut as built (second cut of slice 3).**
 

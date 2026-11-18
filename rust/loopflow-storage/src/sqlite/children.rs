@@ -153,7 +153,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
 
 /// Git planning carries the Task's branch, so whoever runs it next checks out
 /// the same branch and finds the same PR. Remote trackers supply their branch
-/// when the Task is fetched from the tracker. An already-recorded branch writes nothing.
+/// when the Task is fetched. An already-recorded branch writes nothing.
 fn record_task_branch_in(
     tx: &Connection,
     task: &TaskId,

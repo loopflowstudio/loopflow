@@ -179,8 +179,7 @@ pub(crate) fn observe_in(
         )?;
     }
     let (attached, captured): (Option<String>, Option<i64>) = conn.query_row(
-        "SELECT p.attached_lf_process_id,s.current_capture FROM agent_sessions s
-         JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+        "SELECT attached_lf_process_id,current_capture FROM agent_sessions WHERE id=?1",
         [session],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?;

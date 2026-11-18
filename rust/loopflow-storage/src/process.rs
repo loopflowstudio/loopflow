@@ -290,13 +290,30 @@ pub enum Departure {
     },
 }
 
-/// The provider OS process, including its current attachment. History survives
-/// release and replacement; attachment and parent are independent identities.
+/// The OS process of the lf holding a Session's attachment, as it recorded
+/// itself when it attached. A holder that recorded none cannot be confirmed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AttachmentHolder {
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+}
+
+/// A Session's agent: the provider OS process it runs as, the lf that
+/// launched it, and the attachment holding it now with that holder's OS
+/// process. Released and replaced attachments leave the agent its launcher.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AgentProcessState {
-    pub process: AgentProcess,
+    pub id: AgentProcessId,
+    pub session_id: String,
+    pub started_at: Option<i64>,
+    pub ended_at: Option<i64>,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    pub launcher_lf_process_id: Option<LfProcessId>,
     pub attached_lf_process_id: Option<LfProcessId>,
     pub attachment_token: Option<loopflow_model::id::AttachmentToken>,
+    /// `None` when no lf holds the attachment.
+    pub holder: Option<AttachmentHolder>,
     pub provider: Option<String>,
     pub interactive: bool,
     pub spawn_reserved: bool,

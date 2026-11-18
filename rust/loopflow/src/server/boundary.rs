@@ -268,7 +268,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();

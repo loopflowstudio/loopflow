@@ -1287,6 +1287,9 @@ mod tests {
             [&replacement],
         )
         .unwrap();
+        store
+            .record_agent_process_exit("conversation", &attachment, true)
+            .unwrap();
         attachment::claim_session_attachment(
             &store,
             "conversation",

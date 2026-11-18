@@ -897,8 +897,14 @@ fn ordinary_open_reports_the_view_and_only_explicit_focus_reveals_it() {
     )
     .unwrap();
     db.execute(
-        "UPDATE processes SET terminal_id=?2 WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
-        [&primary, &format!("tmux:{}", serde_json::json!({"socket":"/fixture/other-tmux.sock","pane":"%5"}))],
+        "UPDATE agent_sessions SET attached_terminal_id=?2 WHERE id=?1",
+        [
+            &primary,
+            &format!(
+                "tmux:{}",
+                serde_json::json!({"socket":"/fixture/other-tmux.sock","pane":"%5"})
+            ),
+        ],
     )
     .unwrap();
     let url = format!("loopflow://{}/task/INF-123", folder(repo.path()));
@@ -1039,7 +1045,7 @@ fn links_tell_the_current_conversation_from_another_on_the_same_task() {
         ("cmux:current", "cmux"),
     ] {
         db.execute(
-            "UPDATE processes SET terminal_id=?2 WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
+            "UPDATE agent_sessions SET attached_terminal_id=?2 WHERE id=?1",
             rusqlite::params![primary, placement],
         ).unwrap();
         let links = json(&lf_with(home.path(), repo.path(), None,
@@ -1073,7 +1079,7 @@ fn a_task_identifier_connects_and_a_viewerless_terminal_reads_detached() {
     )
     .unwrap();
     db.execute(
-        "UPDATE processes SET terminal_id='cmux:WS-1' WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)",
+        "UPDATE agent_sessions SET attached_terminal_id='cmux:WS-1' WHERE id=?1",
         [&primary],
     )
     .unwrap();
@@ -2286,7 +2292,11 @@ fn own_session_and_same_rex_open_report_identity_without_creating_or_focusing() 
     )
     .unwrap();
     let placement = serde_json::json!({"server":"unix:///fixture/rex.sock","session":"native-session","block":"native-block"});
-    db.execute("UPDATE processes SET terminal_id=?2 WHERE id=(SELECT attached_lf_process_id FROM processes p JOIN agent_sessions s ON s.agent_process_id=p.id WHERE s.id=?1)", rusqlite::params![session, format!("rex:{placement}")]).unwrap();
+    db.execute(
+        "UPDATE agent_sessions SET attached_terminal_id=?2 WHERE id=?1",
+        rusqlite::params![session, format!("rex:{placement}")],
+    )
+    .unwrap();
     rex_peer(bin.path());
     let caller = agent_caller_env(home.path(), &session);
     for selector in [vec!["--task", "INF-123"], vec!["--session", &session]] {

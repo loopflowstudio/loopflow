@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use crate::journal::{agent_process_evidence, process_identity_evidence, ProcessIdentityEvidence};
+use crate::journal::{holder_evidence, session_agent_evidence, ProcessIdentityEvidence};
 use crate::store::StoreResult;
 use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
@@ -17,17 +17,25 @@ impl Reading {
     pub fn acquire(store: &SqliteStore, mut now: i64, session: Option<&str>) -> StoreResult<Self> {
         let inputs = store.session_projection_inputs(now, session)?;
         let mut evidence = HashMap::new();
+        let mut holders = HashMap::new();
         let mut live = Vec::new();
         for identity in &inputs.identities {
-            let observed = agent_process_evidence(
+            let observed = session_agent_evidence(
                 identity.completed_at,
                 identity.pid,
                 identity.os_started_at,
                 Some(identity.started_at),
-                process_identity_evidence,
+                identity.holder.as_ref(),
             );
             // Summary IDs canonicalize UUID case; SQL still matches saved bytes.
             evidence.insert(identity.id.to_ascii_lowercase(), observed);
+            holders.insert(
+                identity.id.to_ascii_lowercase(),
+                identity
+                    .holder
+                    .as_ref()
+                    .map_or(ProcessIdentityEvidence::Dead, holder_evidence),
+            );
             if observed == ProcessIdentityEvidence::Live {
                 live.push(identity.id.clone());
             }
@@ -53,6 +61,7 @@ impl Reading {
                 now,
                 live_agents,
                 evidence,
+                holders,
                 graph_results,
             },
         })

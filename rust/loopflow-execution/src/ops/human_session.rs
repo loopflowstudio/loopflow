@@ -1089,9 +1089,9 @@ pub async fn open(
     };
     let result = surface(store, session).await?;
     if resume {
-        // A conversation started with `lf <skill>` belongs to its terminal;
-        // this one runs a second agent on the same thread beside it.
-        if running()? && !store.sqlite.runs_in_its_terminal(&session.id)? {
+        // One Session runs one agent: the client that had it stops, even a
+        // conversation started with `lf <skill>` in another terminal.
+        if running()? {
             crate::harness::agent_process::stop_session_agent(
                 &store.sqlite,
                 &session.id,

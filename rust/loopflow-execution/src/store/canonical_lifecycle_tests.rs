@@ -243,10 +243,14 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
     )
     .unwrap();
     let store = home.path().join("loopflow.db");
-    let reader =
-        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
-            .unwrap();
-    let original_claim = reader.session_attachment(&session).unwrap().unwrap();
+    // The released schema keeps this claim on the agent's Process row.
+    let holder = loopflow_model::id::LfProcessId::parse(&PROCESS.to_ascii_lowercase()).unwrap();
+    let original_claim = crate::process::SessionAttachment {
+        agent_process_id: loopflow_model::id::AgentProcessId::parse(agent).unwrap(),
+        lf_process_id: Some(holder.clone()),
+        token: loopflow_model::id::AttachmentToken::parse(token).unwrap(),
+        provider_lf_process_id: holder,
+    };
     let fence = session_fence_file(&store, &SESSION.to_ascii_lowercase()).unwrap();
     FileExt::lock_shared(&fence).unwrap();
     apply_sqlite(&conn).unwrap();

@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, Session lifetime built)
+## Status (2026-11-17, attachment cut built)
 
 LOO-936 merged as #1965 (`fb14b674c9`) and #1964 with it; synced at
 `ac93e4c0e7`, resolved against the LOO-936 branch history (main's tree
@@ -13,23 +13,65 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them, liveness by
 `run_evidence`); `detached::start_lf` returns `Started { id, pid,
 os_started_at }`, so `engine::launch` waits on its child without the store;
-the owner items, carriers and the first Session cut below.
+the owner items, carriers, the Session lifetime and the attachment cut below.
 
 Next, in order (why this order: "Concept review after the Session
-lifetime cut"): (1) the attachment cut: `attachment_token`,
-`attached_lf_process_id`, `attached_pid`, `attached_os_started_at`,
-`endpoint`, `inbox`, `terminal_id` onto `agent_sessions`, the agent writers
-moved onto the Session, readers of the attached lf's row repointed, a
-reserved agent taking its holder's liveness, the `prepare_resume` beside
-path ended; (2) the lf-row readers: `task_open_process_pairs` and
+lifetime cut"): (1) the lf-row readers: `task_open_process_pairs` and
 `task_state_sql`'s `open_processes` arm as live Sessions + Graph runs,
 retirement by terminal (Graph runs gain `held_terminal_id`),
 `process_starter`, `run_task_graph`'s parent check (`graph.rs:83`), and the
-Rust readers the SQL scan misses (list under "Inventory");
-(3) the expand migration's foreign-key rebuild together with stopping the
-journal writer **and the owner liveness pass** (see "Concept review after
-the carrier slices"); (4) slices 4–6.
+Rust readers the SQL scan misses (list under "Inventory"), plus the lf-row
+reads the attachment cut left: `agent_parent`'s trace, `pending_inputs`'
+`attached` join (an input ends when its lf's row does), `native_exit`'s
+launcher end; (2) the expand migration's foreign-key rebuild together with
+stopping the journal writer **and the owner liveness pass** (see "Concept
+review after the carrier slices"); (3) slices 4–6.
 Quotes and the OS-scan measurement: `questions.md`.
+
+**Attachment cut as built (second cut of slice 3).**
+
+- `agent_sessions` carries the whole agent: `agent_launcher_lf_process_id`,
+  `agent_spawn_state`, `agent_command`, `agent_interactive`,
+  `agent_endpoint`, `agent_inbox`, `attachment_token`,
+  `attached_lf_process_id`, `attached_pid`, `attached_os_started_at`,
+  `attached_terminal_id` (prefixed names; the plan said `endpoint`, `inbox`,
+  `terminal_id`). Backfilled; indexes `agent_sessions_attached`,
+  `agent_sessions_unended_agent`. lf writes no agent row: `attach_in`,
+  `SessionTransfer`, settlement, launch/exit/identity, endpoint, inbox and
+  terminal write the Session. `attach_in` writes a new agent and its token
+  in one statement.
+- Bridge, both halves in SQL: old → new (`session_agent_from_process_*`,
+  `session_agent_from_attachment` when the agent changes and the token does
+  not, `session_attached_terminal_from_process`), new → old
+  (`process_agent_from_session_insert` when agent and token change together,
+  `_update`, `process_terminal_from_session`). Every copy's `WHERE` compares
+  each column it writes. The bridged insert keeps `agent_sessions`' and
+  `steer_*` foreign keys satisfied until the expand rebuild.
+- Holder liveness: `AttachmentHolder { pid, os_started_at }` (none when
+  released); `journal::holder_evidence`, `session_agent_evidence` (a
+  reservation reads Dead with a dead holder or none). The projection's
+  `holders` map hides a dead holder's terminal; `prepare_resume` refuses a
+  holder that is not Dead; `reap_in` settles reservations and orphans by
+  `holder_dead`, which also finishes a dead holder's attachment.
+  `agent_evidence` reads `agent_state` (current agent only).
+- `AgentProcessState` is flat (no `AgentProcess` inside); `agent_process(id)`
+  reads the bridged row and is test-support only.
+- One agent per Session: `prepare_resume`'s beside path, `runs_in_its_terminal`
+  and `PreviousAgentDisposition::Running` are gone; `open_session` stops a
+  bare `lf <skill>` running elsewhere (`docs/sessions.md` row updated);
+  `attach_in` refuses to replace a spawned agent with no observed exit and
+  ends a reservation it replaces.
+- **Deviation from approach 3:** `require_current_actor_in` checks
+  `agent_launcher_lf_process_id` = the caller's launcher, not
+  `attached_lf_process_id`. The launcher is a real fact the Session needs
+  anyway (`finish` completes a Session only while its launcher holds it;
+  `SessionAttachment.provider_lf_process_id`), and the two agree whenever
+  the attach replaced the provider, which every production attach does.
+- Deleted: ancestry repair (`UNRECORDED_ANCESTRY`, `UnrecordedAncestry`,
+  `unrecorded_agent_ancestry`, `release_agent_ancestry`,
+  `release_unrecorded_ancestry`, `repair_unrecorded_ancestry_in`,
+  `prune_agent_processes`, `check_lineage`'s repair hint) with its tests,
+  and `live_agent_inventory_upgrade_skips_other_processes`.
 
 **Session lifetime as built (first cut of slice 3).**
 
@@ -52,52 +94,33 @@ Quotes and the OS-scan measurement: `questions.md`.
   name) are observed by `observed_result` in `Reading::acquire`;
   `of_process` is deleted.
 
-Checks (2026-11-17, Session lifetime): storage `migration_runner::`,
-`query_plans::`, `sqlite::{sessions,processes,provider_transitions,steers,revisions}::`
-→ 185 pass; `run_owners_carry_their_process_lifecycle_after_upgrade` (Session
-backfill and bridge) → pass; execution `store::`, `process::`,
-`harness::agent_process::`, `ops::human_session::`, `capture_tests`,
-`registry_tests`, `fact_writer` → 416/417, the failure
-`process::runtime::state_tests::history_times_provider_work_from_its_first_recorded_attempt`
-also fails at `38aa184ae5` (gate); new
-`a_session_reads_its_agent_lifetime_from_its_own_row` and the extended
-`session_metadata_reads_its_graph_from_the_process_that_captured_its_input`
-(dead Graph pid → stopped) → pass; `loopflow` `server::wake::`,
-`server::boundary::` → pass; clippy → clean.
+Checks (2026-11-17, attachment cut): storage `migration_runner::`,
+`query_plans::`, `sqlite::{sessions,processes,provider_transitions,steers,
+revisions,session_events}::`, `canonical_ids`, retention/task_work/
+task_retirement/forget/durable/program_status/transport/planning_write →
+pass (238); execution `store::`, `process::`, `harness::{agent_process,
+native_session,native_exit,claude,codex,dispatch}`, `ops::human_session::`,
+`capture_tests`, `registry_tests`, `fact_writer`, `terminal_title`,
+`transport::` → 529 pass after fixture fixes, including the new
+`a_reservation_under_a_killed_holder_is_not_live_and_the_next_pass_ends_it`;
+`loopflow` `server::{wake,boundary}::`, `subscription_measurement`,
+`session_steers::`, `session_cli_tests::`, `context_launch_tests::`,
+`work_open_tests::` (`--test-threads 4`), `binary(process_ownership_tests)`,
+`binary(session_lifecycle_tests)`, `documented_commands::`,
+`graph_tests::authored_graph_records_each_skill_as_one_session` → pass;
+clippy → clean. Not this change (gate): `work_open_tests::task_location_uses_the_named_plan_outside_a_checkout`
+fails at `dfa49c4321` too ("not found"); `transport::registry::tests::an_interrupted_paste_ends_before_the_next_view_types`
+timed out twice under load and passes alone (holder `exit.json`, no store);
+`work_open_tests` time out when 90 terminal fixtures run at once. Gate also
+runs `binary(two_people)`, `binary(transport_tests)` and `test(performance_tests::)`
+for the trigger changes.
 
 **Concept review after the Session lifetime cut (2026-11-17): next implement direction.**
 
 A Process row is two things: an lf row (written by the journal) and an agent
-row (written by the attachment writers). They leave in two cuts, and the
-order is forced, not chosen:
+row (written by the attachment writers). The agent row left first (built
+above), because lf rows were read through the agent's attachment.
 
-- **The attachment cut comes first, because lf rows are read through the
-  agent's attachment.** The summary's terminal is the attached lf's
-  `processes.terminal_id` while its row is unfinished (`sessions.rs:407`);
-  `UNRECORDED_ANCESTRY` (`processes.rs:534`) and `attachment_in` treat a
-  missing lf row as released; `session_turn_origin` (`session_events.rs:559`),
-  `process_session` (`sessions.rs:841`) and provider transitions
-  (`provider_transitions.rs:182`) match on `attached_lf_process_id`. If the
-  journal stopped first, every attached agent would read released and lose
-  its terminal. So the cut puts `attachment_token`, `attached_lf_process_id`,
-  `attached_pid`, `attached_os_started_at`, `endpoint`, `inbox`,
-  `terminal_id` on `agent_sessions`, and those readers read the holder's
-  liveness from `attached_pid` through `journal::pid_evidence`, never from an
-  lf row. `require_current_actor_in`'s parent check becomes
-  `attached_lf_process_id` = the caller's launcher (approach 3).
-- **A reserved agent takes its holder's liveness.** `journal::agent_evidence`
-  already reads a reserved agent (no pid, not ended) as Dead when its
-  launcher's lf row does (`lf_evidence`, receipt-backed); nothing ends it,
-  and that read dies with the lf row. As `step_evidence` does for a reserved step, a
-  reserved agent's evidence is `pid_evidence(attached_pid, ..)`, and the
-  liveness pass ends it (`agent_ended_at`, no exit) when that reads Dead.
-  Test with the attachment cut: reserve an agent under a SIGKILLed holder →
-  `lf session list` does not show it live, and the next pass ends it.
-- **The bridge flips per column set.** After the cut lf writes no agent row;
-  `session_agent_from_process_*` then fire only for a released writer
-  (unchanged), and Session-update triggers write the agent row a released
-  reader joins. Each trigger's `WHEN` compares every column it writes, so
-  the pair cannot ping-pong.
 - **Then the lf-row readers, then the journal stop.** In one change before
   the journal stop: `task_open_process_pairs` and `task_state_sql`'s
   `open_processes` arm become the Task's live Sessions (`agent_started_at`
@@ -389,33 +412,32 @@ Paths under `rust/`.
   not the parent's build: after `lf install`, an old Graph runner's next step
   runs the new binary. This drives the bridge below.
 
-## Inventory: 79 production statements naming `processes` (2026-11-17, `ae2f761547`)
+## Inventory: 37 production statements naming `processes` (2026-11-17, attachment cut)
 
-Method: `python3 -I scratch/process_sql_scan.py rust`, test files
-(`*/tests.rs`, `loopflow-test-support`) dropped by hand: 79 statements, 33
-joined, 25 writes (base `4a0691a9a0` had 98). Composed SQL the scan misses:
-`task_state_sql`'s `open_processes` arm (`durable.rs:420`) goes through
-`task_work::task_open_process_ids`. Gone since base, onto owners:
-`completed_graph_steps`, `latest_task_graphs`, `task_of_process`,
-`task_close_candidates`, `session_projection_inputs_in`, `session_terminal`,
-`live_process`, `agent_process_identity`, `readiness_in`, `pr_repair_lifetimes`,
-`graphs_in`, `entry_in`, `process_mark`, `child_process_after`,
-`graph_child_after`, `failure_cause`. Fates: **S** → Session columns
-(attachment cut), **R** → lf-row readers change, **J** → journal-stop change,
-**D** → slice 4 deletion, **F** → fixture.
+Method: `python3 -I scratch/process_sql_scan.py rust` (55 statements, 15
+joined, 21 writes), test files and fixtures dropped by hand. Composed SQL the
+scan misses: `task_state_sql`'s `open_processes` arm (`durable.rs:420`) goes
+through `task_work::task_open_process_ids`. Gone onto owners since base
+`4a0691a9a0`: `completed_graph_steps`, `latest_task_graphs`,
+`task_of_process`, `task_close_candidates`, `session_projection_inputs_in`,
+`session_terminal`, `live_process`, `agent_process_identity`, `readiness_in`,
+`pr_repair_lifetimes`, `graphs_in`, `entry_in`, `process_mark`,
+`child_process_after`, `graph_child_after`, `failure_cause`, and the whole
+**S** set (every agent and attachment statement in `processes.rs`,
+`sessions.rs`, `session_events.rs`, `steers.rs`, `provider_transitions.rs`;
+`agent_process(id)` stays as a test-support read of the bridged row).
+Fates: **R** → lf-row readers change, **J** → journal-stop change, **D** →
+slice 4 deletion, **F** → fixture.
 
 | File (`loopflow-storage/src/`) | Function:line | Fate |
 | --- | --- | --- |
-| `sqlite.rs` | `open_existing_processes` 761, `validate_process_schema` 955, `record_hosted_process` 1549, `process_is_recorded` 1587, `record_process_in` 1601 | J (journal writer) |
+| `sqlite.rs` | `open_existing_processes`, `validate_process_schema`, `record_hosted_process`, `process_is_recorded`, `record_process_in` | J (journal writer; `attach_in` still lands the attaching lf's row) |
 | `sqlite/retention.rs` | `forget_unread_rows` 132 (LOO-936: clears `attachment_exit_seq`), `process_receipt_select` 233 ×2, `close_dead_processes` 266, `forget_processes` 291 | J → liveness pass over owners |
 | `canonical_ids.rs` | `preflight` 52, 87 | D arm |
 | `query_plans.rs` | 51 | D arm |
-| `sqlite/session_events.rs` | `record_session_activity` 439, `session_liveness` 479, `session_turn_origin` 549 | S |
-| `sqlite/steers.rs` | `with_provider_context` 69, 94; `record_native_turn` 181; `record_agent_inbox` 218; `idle_conversation_candidates` 240; `claim_session_steers` 699 | S |
-| `sqlite/sessions.rs` | `TURN_LIVE` 192, `available_sql` 287, `summary_query` 397, `pending_inputs` 1146, `require_current_actor_in` 1970 | S |
-| | `session_owner` 832, `process_session` 857 | D |
+| `sqlite/sessions.rs` | `pending_inputs` (`attached` lf join) | R |
+| | `session_owner` | D |
 | | `terminal_retention` 882 | R (Graph run's `held_terminal_id`) |
-| `sqlite/provider_transitions.rs` | `observe_in` 182 | S |
 | `sqlite/task_work.rs` | `task_open_process_pairs` 673 (and `task_state_sql` through it) | R (live Sessions + unended Graph runs) |
 | | `lf_process_ids` 122 | D (`processes[]` DTO) |
 | `sqlite/graph_inventory.rs` | `process_under_graph` 302 (`run.rs` capacity wait) | R (a step knows from `GRAPH_STEP_ENV`) |
@@ -423,11 +445,11 @@ joined, 25 writes (base `4a0691a9a0` had 98). Composed SQL the scan misses:
 | | `test_graph` 734 | F |
 | `sqlite/machine_records.rs` | 16 (rental export) | D |
 | `sqlite/repositories.rs` | `relocate_repository` 138 (`relocated_task_processes`) | D |
-| `sqlite/processes.rs` | `replace_agent` 134; `finish` 225, 237; `commit` 272, 302, 314; `attachment_in` 556; `agent_process_progress_in` 600; `attach_in` 664, 674, 691; `saved_session_connection` 1024; `record_agent_process_launch` 1099, `_exit` 1128, `_identity` 1150; `agent_endpoint` 1189; `record_agent_endpoint` 1208; `record_session_connection` 1226; `begin_agent_settlement` 1435; `record_session_terminal` 1467; `release_session_attachment` 1603; `agent_parent` 1647 | S |
+| `sqlite/processes.rs` | `agent_parent` (launcher trace) | R |
 | | `held_terminal_processes` 867, `process_starter` 900 | R |
-| | `agent_process_query` 320 ×2, 330 (`FORGETTABLE`); `process_query` 432, 505, 534; `unfinished_processes_except` 729; `process_receipt_locator` 808; `journal_trace_locator` 840; `resolve_process` 958; `unrecorded_agent_ancestry` 1364; `release_agent_ancestry` 1400 | J/D |
+| | `FORGETTABLE`; `process_query`; `unfinished_processes_except`; `process_receipt_locator`; `journal_trace_locator`; `resolve_process` | J/D |
 | | `test_lf_process` 1062 | F |
-| `loopflow/src/server/subscription_measurement.rs` | `attach` 42, 56 | F (repoint with S) |
+| `loopflow/src/server/subscription_measurement.rs` | `attach` | F |
 
 Rust readers of an lf row through `SqliteStore::lf_process` (not SQL
 literals, so not in the scan), all **R** unless marked:
@@ -435,10 +457,10 @@ literals, so not in the scan), all **R** unless marked:
 parent; both read the inherited parent id instead); `task_create.rs:141,148`
 (`--run` waits on the creation Graph's carrier row: wait on `task_graphs`
 `run_pid` / `carrier_evidence`); `task_view.rs:130` `step_log` (step command
-and outcome: the step's `Execution`); `journal::lf_evidence` (callers
-`agent_evidence` → S, `agent_process.rs:575`, `human_session.rs:1600`) and
-`live_process_pid` (`end_earlier_owner`, `human_session.rs:1628` → S, by
-`attached_pid`); `process_entry_evidence` → D with `lf ps`.
+and outcome: the step's `Execution`); `journal::lf_evidence` (remaining callers: `owner_running` in
+`human_session.rs`, `ops/task.rs:3107`, journal tests) and `live_process_pid`
+(`end_earlier_owner`, which reads the legacy `session_owner`, D);
+`native_exit`'s launcher end (J); `process_entry_evidence` → D with `lf ps`.
 
 Schema: 15 foreign keys reference `processes` (`agent_sessions` ×2,
 `ci_incidents`, `desktop_shells` ×2, `graph_process_steps`,
@@ -692,7 +714,13 @@ Dropping other dead columns (LOO-935). `lf server stop` keeps its own path.
 - `lf process show` folds into `lf graph show <run>` rather than staying.
 - No replacement Process log beyond journal traces and `lf.log`.
 - Ship result columns live on the starting ship event row, not a new table.
-- `prepare_resume` stops leaving a second agent running.
+- `prepare_resume` stops leaving a second agent running; `lf resume` of a
+  bare `lf <skill>` running in another terminal stops it there, as it does
+  for any other client (built 2026-11-17).
+- `attach_in` refuses to replace a spawned agent with no observed exit
+  instead of leaving it running unlisted; only fixtures reached that path.
+- A holder that recorded no OS process reads Unknown, so it cannot be taken
+  over; fixtures say who holds an attachment with `test_set_holder`.
 
 ## Docs written for this change (describe intended behavior)
 

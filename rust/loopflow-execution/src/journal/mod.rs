@@ -1373,27 +1373,55 @@ pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> Process
     )
 }
 
-/// A provider OS process's liveness, by its own recorded identity.
+/// Whether the lf holding a Session's attachment still runs, by the OS
+/// process it recorded when it attached.
+pub fn holder_evidence(holder: &crate::process::AttachmentHolder) -> ProcessIdentityEvidence {
+    match holder.pid {
+        Some(pid) => pid_evidence(pid, holder.os_started_at),
+        None => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// A Session agent's liveness, by its own recorded identity. Only the lf
+/// holding a reserved agent starts it, so a reservation stands or falls with
+/// its holder; with none, nothing will start it.
+pub fn session_agent_evidence(
+    completed_at: Option<i64>,
+    pid: Option<u32>,
+    os_started_at: Option<i64>,
+    started_at: Option<i64>,
+    holder: Option<&crate::process::AttachmentHolder>,
+) -> ProcessIdentityEvidence {
+    if completed_at.is_none()
+        && pid.is_none()
+        && holder.map_or(ProcessIdentityEvidence::Dead, holder_evidence)
+            == ProcessIdentityEvidence::Dead
+    {
+        return ProcessIdentityEvidence::Dead;
+    }
+    agent_process_evidence(
+        completed_at,
+        pid,
+        os_started_at,
+        started_at,
+        process_identity_evidence,
+    )
+}
+
+/// The liveness of agent `process` while it is its Session's current one.
 pub(crate) fn agent_evidence(
     store: &SqliteStore,
     process: &loopflow_model::id::AgentProcessId,
 ) -> ProcessIdentityEvidence {
-    let Ok(Some(record)) = store.agent_process(process) else {
+    let Ok(Some(agent)) = store.agent_state(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    // Only its launcher records an agent's identity, before the provider runs.
-    // A launcher that ended first never started it.
-    if record.pid.is_none() && record.completed_at.is_none() {
-        if let Some(launcher) = &record.parent_lf_process_id {
-            if lf_evidence(store, launcher) == ProcessIdentityEvidence::Dead {
-                return ProcessIdentityEvidence::Dead;
-            }
-        }
-    }
-    recorded_process_evidence(
-        &crate::process::ProcessEntry::Agent(record),
-        &Ok(None),
-        process_identity_evidence,
+    session_agent_evidence(
+        agent.ended_at,
+        agent.pid,
+        agent.os_started_at,
+        agent.started_at,
+        agent.holder.as_ref(),
     )
 }
 

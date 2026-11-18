@@ -318,10 +318,7 @@ BEGIN
 END;
 
 -- A Session records its current agent's lifetime: when it was reserved, the
--- OS process it runs as while live, and when and how it exited. lf writes the
--- agent row with its attachment until the attachment moves onto the Session;
--- these copy the agent row's lifetime there, for this lf and a released one.
--- The contract migration drops them with the table.
+-- OS process it runs as while live, and when and how it exited.
 ALTER TABLE agent_sessions ADD COLUMN agent_started_at INTEGER;
 ALTER TABLE agent_sessions ADD COLUMN agent_pid INTEGER;
 ALTER TABLE agent_sessions ADD COLUMN agent_os_started_at INTEGER;
@@ -333,31 +330,177 @@ UPDATE agent_sessions SET (agent_started_at,agent_pid,agent_os_started_at,agent_
     FROM processes WHERE id=agent_sessions.agent_process_id)
 WHERE agent_process_id IS NOT NULL;
 
+-- A Session holds its current agent's attachment and reach as well: the lf
+-- attached to it and that lf's OS process and terminal, the token fencing its
+-- writes, the lf that launched the agent, how far its spawn got and with what
+-- command, and the Codex endpoint or Claude inbox that reaches it. A dead
+-- holder reads dead from its own pid, without an lf row.
+ALTER TABLE agent_sessions ADD COLUMN agent_launcher_lf_process_id TEXT;
+ALTER TABLE agent_sessions ADD COLUMN agent_spawn_state TEXT
+    CHECK(agent_spawn_state IN ('reserved','spawn_requested','spawn_failed','exited'));
+ALTER TABLE agent_sessions ADD COLUMN agent_command TEXT;
+ALTER TABLE agent_sessions ADD COLUMN agent_interactive INTEGER CHECK(agent_interactive IN (0,1));
+ALTER TABLE agent_sessions ADD COLUMN agent_endpoint TEXT;
+ALTER TABLE agent_sessions ADD COLUMN agent_inbox TEXT;
+ALTER TABLE agent_sessions ADD COLUMN attachment_token TEXT;
+ALTER TABLE agent_sessions ADD COLUMN attached_lf_process_id TEXT;
+ALTER TABLE agent_sessions ADD COLUMN attached_pid INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN attached_os_started_at INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN attached_terminal_id TEXT;
+UPDATE agent_sessions SET (agent_launcher_lf_process_id,agent_spawn_state,agent_command,
+    agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id)=(
+    SELECT parent_lf_process_id,spawn_state,command,agent_interactive,endpoint,inbox,
+        attachment_token,attached_lf_process_id
+    FROM processes WHERE id=agent_sessions.agent_process_id)
+WHERE agent_process_id IS NOT NULL;
+UPDATE agent_sessions SET (attached_pid,attached_os_started_at,attached_terminal_id)=(
+    SELECT pid,os_started_at,terminal_id FROM processes WHERE id=agent_sessions.attached_lf_process_id)
+WHERE attached_lf_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_attached ON agent_sessions(attached_lf_process_id)
+    WHERE attached_lf_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_unended_agent ON agent_sessions(agent_process_id)
+    WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL;
+
+-- Bridge, old → new: a released lf writes the agent row and its attachment
+-- on `processes`; these copy them onto the Session. It reserves an agent's
+-- row first, then points the Session at it alone, so a Session whose agent
+-- changes while its token stays copies that row. This lf changes both in one
+-- write. Each copy writes only when a value differs. The contract migration
+-- drops both halves with the table.
 CREATE TRIGGER session_agent_from_process_insert AFTER INSERT ON processes
 WHEN NEW.kind='agent'
 BEGIN
-    UPDATE agent_sessions SET agent_started_at=NEW.started_at,
+    UPDATE agent_sessions SET agent_launcher_lf_process_id=NEW.parent_lf_process_id,
+        agent_started_at=NEW.started_at,
         agent_pid=CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END,
         agent_os_started_at=CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END,
-        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code
-    WHERE agent_process_id=NEW.id;
+        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code,
+        agent_spawn_state=NEW.spawn_state,agent_command=NEW.command,
+        agent_interactive=NEW.agent_interactive,agent_endpoint=NEW.endpoint,agent_inbox=NEW.inbox,
+        attachment_token=NEW.attachment_token,attached_lf_process_id=NEW.attached_lf_process_id,
+        attached_pid=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id THEN attached_pid
+            ELSE (SELECT pid FROM processes WHERE id=NEW.attached_lf_process_id) END,
+        attached_os_started_at=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id
+            THEN attached_os_started_at
+            ELSE (SELECT os_started_at FROM processes WHERE id=NEW.attached_lf_process_id) END,
+        attached_terminal_id=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id
+            THEN attached_terminal_id
+            ELSE (SELECT terminal_id FROM processes WHERE id=NEW.attached_lf_process_id) END
+    WHERE agent_process_id=NEW.id AND (agent_launcher_lf_process_id IS NOT NEW.parent_lf_process_id
+        OR agent_started_at IS NOT NEW.started_at
+        OR agent_pid IS NOT CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END
+        OR agent_os_started_at IS NOT CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END
+        OR agent_ended_at IS NOT NEW.completed_at OR agent_exit_code IS NOT NEW.exit_code
+        OR agent_spawn_state IS NOT NEW.spawn_state OR agent_command IS NOT NEW.command
+        OR agent_interactive IS NOT NEW.agent_interactive OR agent_endpoint IS NOT NEW.endpoint OR agent_inbox IS NOT NEW.inbox
+        OR attachment_token IS NOT NEW.attachment_token
+        OR attached_lf_process_id IS NOT NEW.attached_lf_process_id);
 END;
 CREATE TRIGGER session_agent_from_process_update
-AFTER UPDATE OF started_at,pid,os_started_at,completed_at,exit_code ON processes
+AFTER UPDATE OF parent_lf_process_id,started_at,pid,os_started_at,completed_at,exit_code,
+    spawn_state,command,agent_interactive,endpoint,inbox,attachment_token,attached_lf_process_id
+    ON processes
 WHEN NEW.kind='agent'
 BEGIN
-    UPDATE agent_sessions SET agent_started_at=NEW.started_at,
+    UPDATE agent_sessions SET agent_launcher_lf_process_id=NEW.parent_lf_process_id,
+        agent_started_at=NEW.started_at,
         agent_pid=CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END,
         agent_os_started_at=CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END,
-        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code
-    WHERE agent_process_id=NEW.id;
+        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code,
+        agent_spawn_state=NEW.spawn_state,agent_command=NEW.command,
+        agent_interactive=NEW.agent_interactive,agent_endpoint=NEW.endpoint,agent_inbox=NEW.inbox,
+        attachment_token=NEW.attachment_token,attached_lf_process_id=NEW.attached_lf_process_id,
+        attached_pid=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id THEN attached_pid
+            ELSE (SELECT pid FROM processes WHERE id=NEW.attached_lf_process_id) END,
+        attached_os_started_at=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id
+            THEN attached_os_started_at
+            ELSE (SELECT os_started_at FROM processes WHERE id=NEW.attached_lf_process_id) END,
+        attached_terminal_id=CASE WHEN attached_lf_process_id IS NEW.attached_lf_process_id
+            THEN attached_terminal_id
+            ELSE (SELECT terminal_id FROM processes WHERE id=NEW.attached_lf_process_id) END
+    WHERE agent_process_id=NEW.id AND (agent_launcher_lf_process_id IS NOT NEW.parent_lf_process_id
+        OR agent_started_at IS NOT NEW.started_at
+        OR agent_pid IS NOT CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END
+        OR agent_os_started_at IS NOT CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END
+        OR agent_ended_at IS NOT NEW.completed_at OR agent_exit_code IS NOT NEW.exit_code
+        OR agent_spawn_state IS NOT NEW.spawn_state OR agent_command IS NOT NEW.command
+        OR agent_interactive IS NOT NEW.agent_interactive OR agent_endpoint IS NOT NEW.endpoint OR agent_inbox IS NOT NEW.inbox
+        OR attachment_token IS NOT NEW.attachment_token
+        OR attached_lf_process_id IS NOT NEW.attached_lf_process_id);
 END;
 CREATE TRIGGER session_agent_from_attachment AFTER UPDATE OF agent_process_id ON agent_sessions
-WHEN NEW.agent_process_id IS NOT OLD.agent_process_id
+WHEN NEW.agent_process_id IS NOT OLD.agent_process_id AND NEW.attachment_token IS OLD.attachment_token
 BEGIN
-    UPDATE agent_sessions SET (agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code)=(
-        SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
-            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code
+    UPDATE agent_sessions SET (agent_launcher_lf_process_id,agent_started_at,agent_pid,
+        agent_os_started_at,agent_ended_at,agent_exit_code,agent_spawn_state,agent_command,
+        agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id)=(
+        SELECT parent_lf_process_id,started_at,CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,
+            spawn_state,command,agent_interactive,endpoint,inbox,attachment_token,
+            attached_lf_process_id
         FROM processes WHERE id=NEW.agent_process_id)
     WHERE id=NEW.id;
+    UPDATE agent_sessions SET (attached_pid,attached_os_started_at,attached_terminal_id)=(
+        SELECT pid,os_started_at,terminal_id FROM processes WHERE id=agent_sessions.attached_lf_process_id)
+    WHERE id=NEW.id;
+END;
+CREATE TRIGGER session_attached_terminal_from_process AFTER UPDATE OF terminal_id ON processes
+WHEN NEW.kind='lf' AND NEW.terminal_id IS NOT OLD.terminal_id
+BEGIN
+    UPDATE agent_sessions SET attached_terminal_id=NEW.terminal_id
+    WHERE attached_lf_process_id=NEW.id AND attached_terminal_id IS NOT NEW.terminal_id;
+END;
+
+-- Bridge, new → old: this lf writes the agent and its attachment on the
+-- Session alone; these write the agent row a released reader joins. A new
+-- agent and its token arrive in one write, which inserts its row. Each write
+-- happens only when a value differs, so the two halves cannot ping-pong.
+CREATE TRIGGER process_agent_from_session_insert AFTER UPDATE OF agent_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT NULL AND NEW.agent_process_id IS NOT OLD.agent_process_id
+    AND NEW.attachment_token IS NOT OLD.attachment_token
+BEGIN
+    INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+        completed_at,exit_code,pid,os_started_at,agent_session_id,agent_provider,agent_interactive,
+        spawn_state,attached_lf_process_id,attachment_token,endpoint,inbox)
+    SELECT NEW.agent_process_id,'agent',
+        COALESCE((SELECT trace_id FROM processes WHERE id=NEW.agent_launcher_lf_process_id),
+            NEW.agent_process_id),
+        NEW.agent_launcher_lf_process_id,NEW.agent_command,NEW.repo,NEW.cwd,
+        COALESCE(NEW.agent_started_at,CAST(strftime('%s','now') AS INTEGER)),NEW.agent_ended_at,
+        NEW.agent_exit_code,NEW.agent_pid,NEW.agent_os_started_at,NEW.id,NEW.provider,
+        NEW.agent_interactive,NEW.agent_spawn_state,NEW.attached_lf_process_id,NEW.attachment_token,
+        NEW.agent_endpoint,NEW.agent_inbox
+    WHERE NOT EXISTS(SELECT 1 FROM processes WHERE id=NEW.agent_process_id);
+END;
+CREATE TRIGGER process_agent_from_session_update
+AFTER UPDATE OF agent_launcher_lf_process_id,agent_started_at,agent_pid,agent_os_started_at,
+    agent_ended_at,agent_exit_code,agent_spawn_state,agent_command,agent_interactive,
+    agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT NULL AND NEW.agent_process_id IS OLD.agent_process_id
+BEGIN
+    UPDATE processes SET parent_lf_process_id=NEW.agent_launcher_lf_process_id,
+        started_at=COALESCE(NEW.agent_started_at,started_at),
+        pid=CASE WHEN NEW.agent_ended_at IS NULL THEN NEW.agent_pid ELSE pid END,
+        os_started_at=CASE WHEN NEW.agent_ended_at IS NULL THEN NEW.agent_os_started_at
+            ELSE os_started_at END,
+        completed_at=NEW.agent_ended_at,exit_code=NEW.agent_exit_code,
+        spawn_state=NEW.agent_spawn_state,command=NEW.agent_command,
+        agent_interactive=NEW.agent_interactive,endpoint=NEW.agent_endpoint,
+        inbox=NEW.agent_inbox,attachment_token=NEW.attachment_token,
+        attached_lf_process_id=NEW.attached_lf_process_id
+    WHERE id=NEW.agent_process_id AND (parent_lf_process_id IS NOT NEW.agent_launcher_lf_process_id
+        OR started_at IS NOT COALESCE(NEW.agent_started_at,started_at)
+        OR (NEW.agent_ended_at IS NULL AND (pid IS NOT NEW.agent_pid
+            OR os_started_at IS NOT NEW.agent_os_started_at))
+        OR completed_at IS NOT NEW.agent_ended_at OR exit_code IS NOT NEW.agent_exit_code
+        OR spawn_state IS NOT NEW.agent_spawn_state OR command IS NOT NEW.agent_command
+        OR agent_interactive IS NOT NEW.agent_interactive OR endpoint IS NOT NEW.agent_endpoint OR inbox IS NOT NEW.agent_inbox
+        OR attachment_token IS NOT NEW.attachment_token
+        OR attached_lf_process_id IS NOT NEW.attached_lf_process_id);
+END;
+CREATE TRIGGER process_terminal_from_session AFTER UPDATE OF attached_terminal_id ON agent_sessions
+WHEN NEW.attached_lf_process_id IS NOT NULL AND NEW.attached_terminal_id IS NOT OLD.attached_terminal_id
+BEGIN
+    UPDATE processes SET terminal_id=NEW.attached_terminal_id
+    WHERE id=NEW.attached_lf_process_id AND kind='lf' AND terminal_id IS NOT NEW.attached_terminal_id;
 END;

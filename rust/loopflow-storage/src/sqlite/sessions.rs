@@ -26,6 +26,8 @@ pub struct SessionProcessIdentity {
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     pub started_at: i64,
+    /// The OS process of the lf holding the attachment; `None` when released.
+    pub holder: Option<crate::process::AttachmentHolder>,
 }
 
 /// Explicit observed inputs for one pinned Session reading. SQL performs no OS acquisition.
@@ -34,6 +36,8 @@ pub struct SessionProjection {
     pub now: i64,
     pub live_agents: String,
     pub evidence: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
+    /// Whether the lf holding each agent's attachment runs, by agent.
+    pub holders: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
     /// Each of `graph_runs`' results as this Machine observes it.
     pub graph_results: std::collections::HashMap<String, crate::graph_process::ExecutionResult>,
 }
@@ -44,6 +48,15 @@ impl SessionProjection {
         id: Option<&loopflow_model::id::AgentProcessId>,
     ) -> crate::ProcessIdentityEvidence {
         id.and_then(|id| self.evidence.get(id.as_str()))
+            .copied()
+            .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
+    }
+
+    fn holder(
+        &self,
+        id: Option<&loopflow_model::id::AgentProcessId>,
+    ) -> crate::ProcessIdentityEvidence {
+        id.and_then(|id| self.holders.get(id.as_str()))
             .copied()
             .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
     }
@@ -80,7 +93,8 @@ pub(crate) fn session_projection_inputs_in(
         "completed_at IS NULL AND ?1 IS NULL"
     };
     let mut query = conn.prepare(&format!(
-        "SELECT agent_process_id,agent_ended_at,agent_pid,agent_os_started_at,agent_started_at
+        "SELECT agent_process_id,agent_ended_at,agent_pid,agent_os_started_at,agent_started_at,
+         attached_lf_process_id IS NOT NULL,attached_pid,attached_os_started_at
          FROM agent_sessions WHERE {predicate} AND agent_started_at IS NOT NULL ORDER BY agent_process_id"
     ))?;
     let identities = query
@@ -91,6 +105,15 @@ pub(crate) fn session_projection_inputs_in(
                 pid: row.get(2)?,
                 os_started_at: row.get(3)?,
                 started_at: row.get(4)?,
+                holder: row
+                    .get::<_, bool>(5)?
+                    .then(|| -> rusqlite::Result<_> {
+                        Ok(crate::process::AttachmentHolder {
+                            pid: row.get(6)?,
+                            os_started_at: row.get(7)?,
+                        })
+                    })
+                    .transpose()?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -190,10 +213,9 @@ pub(super) const SESSION_GRAPH: &str = session_graph!();
 /// Current provider work or a viewed terminal's working status holds Session `s`.
 /// Terminal idle cannot settle owned work; unviewed status is only history.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
-    JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
     AND s.agent_ended_at IS NULL
-    AND ((act.attachment_token IS p.attachment_token
+    AND ((act.attachment_token IS s.attachment_token
             AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
         OR (act.program_status IS NOT NULL
             AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.viewed=1)
@@ -285,7 +307,6 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 fn available_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
-            JOIN processes p ON p.id={session}.agent_process_id
             WHERE act.session_id={session}.id
             AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
             AND {session}.agent_ended_at IS NULL
@@ -293,7 +314,7 @@ fn available_sql(session: &str, now: i64) -> String {
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token=p.attachment_token
+            ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::AVAILABILITY_QUIET_SECONDS
@@ -404,17 +425,16 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         s.id IN (SELECT session_id FROM task_primary_sessions),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,CASE WHEN a.attached_lf_process_id IS NOT NULL THEN a.attached_terminal_id END,
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
-         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
+         AND act.attachment_token=a.attachment_token AND a.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         COALESCE(captured.provider_thread IS NOT NULL,0),
         EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
-        graph.pid,graph.os_started_at,graph.exit_code,graph.error
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.attached_pid,a.attached_os_started_at
         FROM page s JOIN agent_sessions a ON a.id=s.id
-        LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
@@ -486,9 +506,11 @@ fn read_summary(
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
-            terminal_id: row
-                .get::<_, Option<String>>(31)?
-                .filter(|_| live && !unviewed),
+            terminal_id: row.get::<_, Option<String>>(31)?.filter(|_| {
+                live && !unviewed
+                    && projection.holder(agent_process_id.as_ref())
+                        != crate::ProcessIdentityEvidence::Dead
+            }),
             unviewed,
             held: live && row.get(36)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
@@ -854,8 +876,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT agent_session_id FROM processes
-                     WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
+                "SELECT id FROM agent_sessions WHERE attached_lf_process_id=?1
                  UNION ALL SELECT session_id FROM session_events WHERE lf_process_id=?1
                  UNION ALL SELECT session_id FROM history.session_history WHERE lf_process_id=?1
                  UNION ALL SELECT session_id FROM history.turns WHERE lf_process_id=?1
@@ -1967,9 +1988,9 @@ pub(super) fn require_current_actor_in(
         .filter(|caller| caller.session_id == id)
     {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
-                AND p.id=?2 AND p.parent_lf_process_id=?3
-                AND p.attached_lf_process_id IS NOT NULL)",
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND agent_process_id=?2 AND agent_launcher_lf_process_id=?3
+                AND attached_lf_process_id IS NOT NULL)",
             params![id, caller.agent_process_id, caller.origin_lf_process_id],
             |row| row.get(0),
         )?;

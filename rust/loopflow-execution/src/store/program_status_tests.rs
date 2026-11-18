@@ -281,6 +281,10 @@ fn program_status_overrides_inference_before_paging_and_survives_attachment_hand
             .unwrap()
             .is_empty()
     );
+    // A Session runs one agent: the replaced one has exited.
+    store
+        .record_agent_process_exit("session", &second, true)
+        .unwrap();
     let third = attachment::claim_session_attachment(
         &store,
         "session",

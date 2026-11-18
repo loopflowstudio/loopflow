@@ -95,7 +95,17 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
         crate::test_fixture::key,
     )
     .unwrap();
-    assert!(store.session_attachment(SESSION).unwrap().is_none());
+    // The store is still at the conversion release's schema, which kept the
+    // attachment on the agent's Process row.
+    let token: Option<String> = conn
+        .query_row(
+            "SELECT p.attachment_token FROM agent_sessions s
+             LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            [SESSION.to_ascii_lowercase()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(token.is_none());
     let stale_insert = conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,'stale','human',1,0,'/repo')", [SESSION]
     ).unwrap_err();

@@ -40,7 +40,7 @@ mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
 mod processes;
-pub use processes::{PreviousAgentDisposition, SessionTransfer, UnrecordedAncestry};
+pub use processes::{PreviousAgentDisposition, SessionTransfer};
 mod program_status;
 pub mod project_content;
 pub mod project_selection;

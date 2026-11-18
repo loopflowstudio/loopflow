@@ -2001,6 +2001,10 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert!(ended["program_status"].is_null());
     assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
+    // A Session runs one agent: the killed provider's exit lands first.
+    store
+        .record_agent_process_exit(&id, attachment.as_ref().unwrap(), true)
+        .unwrap();
     attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id, true)
         .unwrap();
     let stale = observe("pane-3", 1, &records("idle"));

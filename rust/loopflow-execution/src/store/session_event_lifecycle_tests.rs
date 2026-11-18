@@ -441,6 +441,9 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
             .session_turn_origin("conversation", &original)
             .unwrap(),
     );
+    store
+        .record_agent_process_exit("conversation", &original, true)
+        .unwrap();
     let replacement = attachment::claim_session_attachment(
         &store,
         "conversation",

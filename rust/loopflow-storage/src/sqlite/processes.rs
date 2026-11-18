@@ -33,8 +33,6 @@ pub enum PreviousAgentDisposition {
     Inactive,
     /// Positive exit evidence from closing the provider.
     Closed,
-    /// A foreground invocation continues beside the new attachment.
-    Running,
 }
 
 /// An exclusive attachment fence retained through acquisition and atomic claim.
@@ -130,12 +128,7 @@ impl SessionTransfer<'_> {
         super::sessions::require_current_actor_in(&tx, session, caller)?;
         require_attachment_in(&tx, session, expected)?;
         let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        tx.execute(
-            "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                spawn_state=CASE WHEN completed_at IS NULL AND NOT ?3 THEN 'exited' ELSE spawn_state END
-             WHERE id=?1",
-            params![expected.agent_process_id, now, reserved],
-        )?;
+        end_agent_in(&tx, session, &expected.agent_process_id, now, !reserved)?;
         let next = attach_in(
             &tx,
             session,
@@ -224,7 +217,7 @@ impl SessionTransfer<'_> {
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
              AND s.completed_at IS NULL AND ?4
-             AND EXISTS(SELECT 1 FROM processes p WHERE p.id=s.agent_process_id AND p.attached_lf_process_id=p.parent_lf_process_id)
+             AND s.attached_lf_process_id=s.agent_launcher_lf_process_id
              AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
              ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
@@ -233,18 +226,10 @@ impl SessionTransfer<'_> {
             ),
             params![session, now, outcome, departure.is_none()],
         )?;
-        tx.execute(
-            "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?3,
-                endpoint=CASE WHEN ?2 THEN NULL ELSE endpoint END,
-                completed_at=CASE WHEN ?2 THEN COALESCE(completed_at,?4) ELSE completed_at END,
-                spawn_state=CASE WHEN ?2 THEN 'exited' ELSE spawn_state END WHERE id=?1",
-            params![
-                expected.agent_process_id,
-                closed,
-                AttachmentToken::new(),
-                now
-            ],
-        )?;
+        release_attachment_in(&tx, session, &AttachmentToken::new())?;
+        if closed {
+            end_agent_in(&tx, session, &expected.agent_process_id, now, true)?;
+        }
         tx.commit()?;
         drop(conn);
         self.store
@@ -262,21 +247,14 @@ impl SessionTransfer<'_> {
         if attachment_in(&tx, &self.session)?.as_ref() != self.expected.as_ref() {
             return Err(attachment_changed());
         }
-        if let Some(attachment) = self
-            .expected
-            .as_ref()
-            .filter(|_| previous != PreviousAgentDisposition::Running)
-        {
+        if let Some(attachment) = &self.expected {
             // A never-launched reservation is retired without inventing OS exit.
-            tx.execute(
-                "UPDATE processes SET completed_at=COALESCE(completed_at,?2),
-                    spawn_state=CASE WHEN ?3 THEN 'exited' ELSE spawn_state END
-                 WHERE id=?1",
-                params![
-                    attachment.agent_process_id,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    previous == PreviousAgentDisposition::Closed
-                ],
+            end_agent_in(
+                &tx,
+                &self.session,
+                &attachment.agent_process_id,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                previous == PreviousAgentDisposition::Closed,
             )?;
         }
         let result = claim(&tx)?;
@@ -299,12 +277,13 @@ impl AgentProcessSettlement<'_> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let at = time::OffsetDateTime::now_utc().unix_timestamp();
         tx.execute(
-            "UPDATE processes SET completed_at=?2,
-                spawn_state=CASE WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
-                endpoint=NULL WHERE id=?1",
-            params![self.expected.process.id, at],
+            "UPDATE agent_sessions SET agent_ended_at=?2,agent_pid=NULL,agent_os_started_at=NULL,
+                agent_spawn_state=CASE WHEN agent_spawn_state='reserved' AND agent_pid IS NULL
+                    THEN 'spawn_failed' ELSE 'exited' END,
+                agent_endpoint=NULL WHERE agent_process_id=?1",
+            params![self.expected.id, at],
         )?;
-        complete_dead_headless_run_in(&tx, self.expected.process.id.as_str(), at)?;
+        complete_dead_headless_run_in(&tx, self.expected.id.as_str(), at)?;
         tx.commit()?;
         Ok(())
     }
@@ -315,9 +294,41 @@ pub(super) const PROCESS_SELECT: &str =
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
     e.started_at,e.completed_at,e.outcome,e.exit_code,e.signal,e.error,e.pid,e.kind,e.agent_session_id,e.os_started_at FROM processes e";
 
-fn agent_process_query() -> String {
-    format!("{} WHERE e.kind='agent' AND e.completed_at IS NULL ORDER BY e.id",
-        PROCESS_SELECT.replace(" FROM processes e",",e.attached_lf_process_id,e.attachment_token,e.agent_provider,e.agent_interactive,(e.spawn_state IS 'reserved' AND e.pid IS NULL) FROM processes e"))
+/// Every Session's agent that has not ended, as `read_agent_state` reads it.
+const SESSION_AGENTS: &str = "SELECT s.agent_process_id,s.id,s.agent_started_at,s.agent_ended_at,
+    s.agent_pid,s.agent_os_started_at,
+    s.agent_launcher_lf_process_id,s.attached_lf_process_id,s.attachment_token,
+    s.attached_pid,s.attached_os_started_at,s.provider,COALESCE(s.agent_interactive,s.interactive),
+    (s.agent_spawn_state IS 'reserved' AND s.agent_pid IS NULL)
+    FROM agent_sessions s WHERE s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL
+    ORDER BY s.agent_process_id";
+
+fn read_agent_state(
+    row: &rusqlite::Row<'_>,
+) -> rusqlite::Result<crate::process::AgentProcessState> {
+    Ok(crate::process::AgentProcessState {
+        id: row.get(0)?,
+        session_id: row.get(1)?,
+        started_at: row.get(2)?,
+        ended_at: row.get(3)?,
+        pid: row.get(4)?,
+        os_started_at: row.get(5)?,
+        launcher_lf_process_id: row.get(6)?,
+        attached_lf_process_id: row.get(7)?,
+        attachment_token: row.get(8)?,
+        holder: row
+            .get::<_, Option<String>>(7)?
+            .map(|_| -> rusqlite::Result<_> {
+                Ok(crate::process::AttachmentHolder {
+                    pid: row.get(9)?,
+                    os_started_at: row.get(10)?,
+                })
+            })
+            .transpose()?,
+        provider: row.get(11)?,
+        interactive: row.get(12)?,
+        spawn_reserved: row.get(13)?,
+    })
 }
 
 /// A finished `lf` Process nothing needs any more, over alias `p`: no agent
@@ -398,6 +409,7 @@ pub(super) fn read_lf_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<LfPro
     }
 }
 
+#[cfg(any(test, feature = "test-support"))]
 fn read_agent_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<AgentProcess> {
     match read_process(row)? {
         ProcessEntry::Agent(process) => Ok(process),
@@ -528,23 +540,6 @@ fn process_query(
     (sql, values)
 }
 
-/// An ended agent reserved under a parent that had no row: `attach_in` takes
-/// its trace from the parent, so a self-rooted trace proves absence at
-/// reservation rather than later pruning.
-const UNRECORDED_ANCESTRY: &str = "a.kind='agent' AND a.completed_at IS NOT NULL
-    AND a.trace_id=a.id AND a.parent_lf_process_id IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM processes p WHERE p.id=a.parent_lf_process_id)
-    AND (a.attached_lf_process_id IS NULL
-        OR NOT EXISTS (SELECT 1 FROM processes p WHERE p.id=a.attached_lf_process_id))";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnrecordedAncestry {
-    pub agent_process_id: AgentProcessId,
-    pub parent_lf_process_id: LfProcessId,
-    pub attached_lf_process_id: Option<LfProcessId>,
-    pub session_id: Option<String>,
-}
-
 fn attachment_in(
     conn: &rusqlite::Connection,
     session: &str,
@@ -553,8 +548,8 @@ fn attachment_in(
     let session = canonical.as_str();
     let row = conn
         .query_row(
-            "SELECT p.attached_lf_process_id,p.attachment_token,p.parent_lf_process_id,p.id
-         FROM agent_sessions s LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            "SELECT attached_lf_process_id,attachment_token,agent_launcher_lf_process_id,
+             agent_process_id FROM agent_sessions WHERE id=?1",
             [session],
             |row| {
                 Ok((
@@ -597,8 +592,8 @@ fn agent_process_progress_in(
     agent: &AgentProcessId,
 ) -> StoreResult<(bool, bool)> {
     Ok(conn.query_row(
-        "SELECT completed_at IS NOT NULL,spawn_state IS 'reserved' AND pid IS NULL
-         FROM processes WHERE id=?1",
+        "SELECT agent_ended_at IS NOT NULL,agent_spawn_state IS 'reserved' AND agent_pid IS NULL
+         FROM agent_sessions WHERE agent_process_id=?1",
         [agent],
         |row| Ok((row.get(0)?, row.get(1)?)),
     )?)
@@ -632,6 +627,45 @@ pub(super) fn complete_dead_headless_run_in(
     Ok(())
 }
 
+/// End the Session's agent `agent` unless it already ended, clearing its OS
+/// process and endpoint. `exited` records an observed exit; a reservation that never
+/// spawned keeps its spawn state.
+fn end_agent_in(
+    conn: &rusqlite::Connection,
+    session: &str,
+    agent: &AgentProcessId,
+    at: i64,
+    exited: bool,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_sessions SET agent_ended_at=?3,agent_pid=NULL,agent_os_started_at=NULL,
+            agent_endpoint=NULL,agent_spawn_state=CASE WHEN ?4 THEN 'exited' ELSE agent_spawn_state END
+         WHERE id=?1 AND agent_process_id=?2 AND agent_ended_at IS NULL",
+        params![
+            loopflow_model::id::canonical_session(session),
+            agent,
+            at,
+            exited
+        ],
+    )?;
+    Ok(())
+}
+
+/// Release the Session's attachment: no lf holds it, and `token` fences out
+/// the writers of the one that did.
+fn release_attachment_in(
+    conn: &rusqlite::Connection,
+    session: &str,
+    token: &AttachmentToken,
+) -> StoreResult<()> {
+    conn.execute(
+        "UPDATE agent_sessions SET attached_lf_process_id=NULL,attachment_token=?2,
+            attached_pid=NULL,attached_os_started_at=NULL,attached_terminal_id=NULL WHERE id=?1",
+        params![loopflow_model::id::canonical_session(session), token],
+    )?;
+    Ok(())
+}
+
 pub(super) fn attach_in(
     tx: &rusqlite::Transaction<'_>,
     session: &str,
@@ -658,43 +692,69 @@ pub(super) fn attach_in(
             |value| value.provider_lf_process_id.clone(),
         ),
     };
-    if replacing {
-        if let Some(previous) = &current {
-            tx.execute(
-                "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?2 WHERE id=?1",
-                params![previous.agent_process_id, AttachmentToken::new()],
-            )?;
-        }
+    // The holder's OS process and terminal, when the attaching lf is this one.
+    let holder = start.filter(|start| &start.process.id == process);
+    let holder_pid = holder.and_then(|start| start.process.pid);
+    let holder_started = holder.and_then(|start| start.process.os_started_at);
+    let terminal = holder.and_then(|start| start.terminal.as_ref());
+    if let Some(start) = start {
         // A best-effort start receipt can lose to a held write lock; the
-        // attaching lf's row lands here instead, never a self-rooted agent.
-        if let Some(start) = start {
-            super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
+        // attaching lf's row lands here instead.
+        super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
+    }
+    if let Some(previous) = current.as_ref().filter(|_| replace_provider) {
+        // A Session runs one agent: a replaced one has ended, or never spawned.
+        let (ended, reserved) = agent_process_progress_in(tx, &previous.agent_process_id)?;
+        if !ended && !reserved {
+            return Err(no_observed_exit());
         }
-        tx.execute(
-            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
-                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state)
-             SELECT ?2,'agent',(SELECT trace_id FROM processes WHERE id=?3),
-                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,'reserved' FROM agent_sessions s WHERE s.id=?1",
-            params![session,attached.agent_process_id,process,
-                time::OffsetDateTime::now_utc().unix_timestamp()],
-        )?;
-        // A new AgentProcess on a finished headless run is working again; its
-        // exit completes the run once more. A moved conversation stays moved.
-        tx.execute(
-            "UPDATE agent_sessions SET agent_process_id=?2,
-                completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
-                    THEN NULL ELSE completed_at END WHERE id=?1",
-            params![session, attached.agent_process_id],
+        end_agent_in(
+            tx,
+            session,
+            &previous.agent_process_id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            false,
         )?;
     }
-    tx.execute(
-        "UPDATE processes SET attached_lf_process_id=?2,attachment_token=?3 WHERE id=?1",
-        params![
-            attached.agent_process_id,
-            attached.lf_process_id,
-            attached.token
-        ],
-    )?;
+    if replacing {
+        // A new agent and its token land in one write, so the bridge to a
+        // released reader's agent row sees them together. A new agent on a
+        // finished headless run is working again; its exit completes the run
+        // once more. A moved conversation stays moved.
+        tx.execute(
+            "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
+                agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
+                agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
+                agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,
+                attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
+                attached_os_started_at=?7,attached_terminal_id=?8,
+                completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
+                    THEN NULL ELSE completed_at END WHERE id=?1",
+            params![
+                session,
+                attached.agent_process_id,
+                process,
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+                attached.token,
+                holder_pid,
+                holder_started,
+                terminal,
+            ],
+        )?;
+    } else {
+        tx.execute(
+            "UPDATE agent_sessions SET attachment_token=?2,attached_lf_process_id=?3,
+                attached_pid=?4,attached_os_started_at=?5,attached_terminal_id=?6 WHERE id=?1",
+            params![
+                session,
+                attached.token,
+                process,
+                holder_pid,
+                holder_started,
+                terminal
+            ],
+        )?;
+    }
     if let Some(previous) = current.filter(|_| !replace_provider) {
         // The provider and its pending requests survive attachment handoff.
         // Only its current reading follows; stale writers retain their old fence.
@@ -871,7 +931,9 @@ impl SqliteStore {
         Ok(ids)
     }
 
-    /// Read one provider OS process by its own identity.
+    /// The agent row the bridge keeps for a released reader, by its id.
+    /// Fixtures inspect it; this lf reads its agents from their Sessions.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn agent_process(&self, id: &AgentProcessId) -> StoreResult<Option<AgentProcess>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
@@ -1021,9 +1083,9 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT p.endpoint,s.provider_thread,s.agent_ended_at,s.agent_pid,s.agent_os_started_at
-             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-             WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
+                "SELECT agent_endpoint,provider_thread,agent_ended_at,agent_pid,agent_os_started_at
+             FROM agent_sessions
+             WHERE id=?1 AND agent_endpoint IS NOT NULL AND provider_thread IS NOT NULL",
                 [session],
                 |row| {
                     Ok(SavedSessionConnection {
@@ -1066,6 +1128,26 @@ impl SqliteStore {
         id
     }
 
+    /// Record `pid` started at `os_started_at` as the OS process of the lf
+    /// holding `session`'s attachment, for fixtures whose holder is not the
+    /// test's own journal Process.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn test_set_holder(&self, session: &str, pid: u32, os_started_at: i64) {
+        self.conn
+            .lock()
+            .expect("store mutex poisoned")
+            .execute(
+                "UPDATE agent_sessions SET attached_pid=?2,attached_os_started_at=?3
+                 WHERE id=?1 AND attached_lf_process_id IS NOT NULL",
+                params![
+                    loopflow_model::id::canonical_session(session),
+                    pid,
+                    os_started_at
+                ],
+            )
+            .expect("record fixture holder");
+    }
+
     #[cfg(any(test, feature = "test-support"))]
     pub fn agent_process_identity(&self, session: &str) -> StoreResult<Option<(u32, i64)>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1096,8 +1178,10 @@ impl SqliteStore {
             .map(|arg| arg.to_string_lossy().into_owned())
             .collect::<Vec<_>>();
         let changed = tx.execute(
-            "UPDATE processes SET spawn_state='spawn_requested',command=?2,agent_interactive=?3
-            WHERE id=?1 AND completed_at IS NULL AND spawn_state='reserved' AND pid IS NULL",
+            "UPDATE agent_sessions SET agent_spawn_state='spawn_requested',agent_command=?2,
+                agent_interactive=?3
+            WHERE agent_process_id=?1 AND agent_ended_at IS NULL
+                AND agent_spawn_state='reserved' AND agent_pid IS NULL",
             params![
                 expected.agent_process_id,
                 serde_json::to_string(&argv)?,
@@ -1125,7 +1209,8 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
         tx.execute(
-            "UPDATE processes SET spawn_state=?2,completed_at=?3 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_spawn_state=?2,agent_ended_at=?3,agent_pid=NULL,
+                agent_os_started_at=NULL WHERE agent_process_id=?1",
             params![
                 expected.agent_process_id,
                 if spawned { "exited" } else { "spawn_failed" },
@@ -1147,8 +1232,9 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
         let changed = tx.execute(
-            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1
-             AND ((pid IS NULL AND os_started_at IS NULL) OR (pid=?2 AND os_started_at=?3))",
+            "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3 WHERE agent_process_id=?1
+             AND agent_ended_at IS NULL AND ((agent_pid IS NULL AND agent_os_started_at IS NULL)
+                 OR (agent_pid=?2 AND agent_os_started_at=?3))",
             params![expected.agent_process_id, pid, started_at],
         )?;
         if changed != 1 {
@@ -1186,7 +1272,7 @@ impl SqliteStore {
     pub fn agent_endpoint(&self, process: &AgentProcessId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
-            "SELECT endpoint FROM processes WHERE id=?1",
+            "SELECT agent_endpoint FROM agent_sessions WHERE agent_process_id=?1",
             [process],
             |row| row.get(0),
         )
@@ -1205,7 +1291,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
         tx.execute(
-            "UPDATE processes SET endpoint=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_endpoint=?2 WHERE agent_process_id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
         tx.commit()?;
@@ -1223,7 +1309,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         require_attachment_in(&tx, session, expected)?;
         tx.execute(
-            "UPDATE processes SET endpoint=?2 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_endpoint=?2 WHERE agent_process_id=?1",
             params![expected.agent_process_id, endpoint],
         )?;
         let transition =
@@ -1337,84 +1423,31 @@ impl SqliteStore {
         write()
     }
 
-    /// All unfinished agent rows, including detached and replaced processes.
+    /// Every Session's agent that has not ended, attached or released.
     pub fn agent_processes(&self) -> StoreResult<Vec<crate::process::AgentProcessState>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&agent_process_query())?;
+        let mut query = conn.prepare(SESSION_AGENTS)?;
         let rows = query
-            .query_map([], |row| {
-                Ok(crate::process::AgentProcessState {
-                    process: read_agent_process(row)?,
-                    attached_lf_process_id: row.get(19)?,
-                    attachment_token: row.get(20)?,
-                    provider: row.get(21)?,
-                    interactive: row.get(22)?,
-                    spawn_reserved: row.get(23)?,
-                })
-            })?
+            .query_map([], read_agent_state)?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(rows)
     }
 
-    /// Ended AgentProcesses whose parent was absent when they were reserved:
-    /// the agent's trace is rooted at itself, and no recorded LfProcess owns it.
-    pub fn unrecorded_agent_ancestry(&self) -> StoreResult<Vec<UnrecordedAncestry>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&format!(
-            "SELECT a.id,a.parent_lf_process_id,a.attached_lf_process_id,a.agent_session_id
-             FROM processes a WHERE {UNRECORDED_ANCESTRY} ORDER BY a.id"
-        ))?;
-        let rows = query
-            .query_map([], |row| {
-                Ok(UnrecordedAncestry {
-                    agent_process_id: row.get(0)?,
-                    parent_lf_process_id: row.get(1)?,
-                    attached_lf_process_id: row.get(2)?,
-                    session_id: row.get(3)?,
-                })
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(rows)
-    }
-
-    /// Release ancestry that was never recorded, logging the id it named.
-    /// Returns false when the row no longer has the signature.
-    pub fn release_agent_ancestry(
+    /// The agent `id`, ended or not, while it is its Session's current one.
+    pub fn agent_state(
         &self,
-        agent: &UnrecordedAncestry,
-        repairer: Option<&LfProcessId>,
-        start: Option<&LfProcessStart>,
-    ) -> StoreResult<bool> {
-        let _dispatch = agent
-            .session_id
-            .as_deref()
-            .map(|session| self.lock_session_attachment(session))
-            .transpose()?;
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if let Some(start) = start {
-            super::record_process_in(&tx, &start.process, start.terminal.as_ref())?;
-        }
-        let released = tx.execute(
-            &format!(
-                "UPDATE processes AS a SET parent_lf_process_id=NULL,attached_lf_process_id=NULL,
-                    attachment_token=NULL WHERE a.id=?1 AND {UNRECORDED_ANCESTRY}"
-            ),
-            [&agent.agent_process_id],
-        )?;
-        if released == 0 {
-            return Ok(false);
-        }
-        tx.commit()?;
-        tracing::info!(
-            session = agent.session_id.as_deref(),
-            agent_process = ?agent.agent_process_id,
-            unrecorded_parent = ?agent.parent_lf_process_id,
-            released_attachment = ?agent.attached_lf_process_id,
-            repairer = ?repairer,
-            "agent process ancestry released: trace rooted at agent"
-        );
-        Ok(true)
+        id: &AgentProcessId,
+    ) -> StoreResult<Option<crate::process::AgentProcessState>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                &SESSION_AGENTS
+                    .replace("s.agent_ended_at IS NULL", "s.agent_process_id=?1")
+                    .replace(" ORDER BY s.agent_process_id", ""),
+                [id],
+                read_agent_state,
+            )
+            .optional()?)
     }
 
     /// Acquire the Session fence and compare the complete saved process image.
@@ -1423,23 +1456,18 @@ impl SqliteStore {
         &self,
         expected: &crate::process::AgentProcessState,
     ) -> StoreResult<Option<AgentProcessSettlement<'_>>> {
-        let session = expected
-            .process
-            .agent_session_id
-            .as_deref()
-            .ok_or(StoreError::NotFound)?;
-        let dispatch = self.lock_session_attachment(session)?;
+        let dispatch = self.lock_session_attachment(&expected.session_id)?;
         let matches: bool = {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM processes WHERE id=?1 AND kind='agent'
-              AND pid IS ?2 AND os_started_at IS ?3 AND attached_lf_process_id IS ?4
-              AND attachment_token IS ?5 AND completed_at IS NULL
-              AND (spawn_state IS 'reserved' AND pid IS NULL)=?6)",
+                "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE agent_process_id=?1
+              AND agent_pid IS ?2 AND agent_os_started_at IS ?3 AND attached_lf_process_id IS ?4
+              AND attachment_token IS ?5 AND agent_ended_at IS NULL
+              AND (agent_spawn_state IS 'reserved' AND agent_pid IS NULL)=?6)",
                 params![
-                    expected.process.id,
-                    expected.process.pid,
-                    expected.process.os_started_at,
+                    expected.id,
+                    expected.pid,
+                    expected.os_started_at,
                     expected.attached_lf_process_id,
                     expected.attachment_token,
                     expected.spawn_reserved
@@ -1464,8 +1492,8 @@ impl SqliteStore {
         self.with_session_attachment(session, expected, || {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "UPDATE processes SET terminal_id=?2 WHERE id=?1 AND kind='lf'",
-                params![expected.lf_process_id, terminal],
+                "UPDATE agent_sessions SET attached_terminal_id=?2 WHERE id=?1",
+                params![loopflow_model::id::canonical_session(session), terminal],
             )?;
             Ok(())
         })
@@ -1517,19 +1545,6 @@ impl SqliteStore {
             Some(session) if !named_work => Ok(!self.is_bare(session)?),
             _ => Ok(named_work),
         }
-    }
-
-    /// Whether this interactive Session runs as the foreground program of the
-    /// terminal that started it (`lf <skill>`): no holder keeps it,
-    /// so nothing else may stop it, and another launch on its thread runs
-    /// beside it.
-    pub fn runs_in_its_terminal(&self, session: &str) -> StoreResult<bool> {
-        let Some(record) = self.session(session)? else {
-            return Ok(false);
-        };
-        Ok(record.interactive
-            && self.is_bare(&record)?
-            && self.session_terminal(session)?.is_none())
     }
 
     /// Hold attachment transfer across acquisition and the eventual SQL claim.
@@ -1599,10 +1614,7 @@ impl SqliteStore {
         }
         current.lf_process_id = None;
         current.token = AttachmentToken::new();
-        tx.execute(
-            "UPDATE processes SET attached_lf_process_id=NULL,attachment_token=?2 WHERE id=?1",
-            params![current.agent_process_id, current.token],
-        )?;
+        release_attachment_in(&tx, session, &current.token)?;
         tx.commit()?;
         Ok(current)
     }
@@ -2475,94 +2487,7 @@ mod attachment_tests {
         }
     }
     #[test]
-    fn live_agent_inventory_upgrade_skips_other_processes() {
-        use crate::migration_runner::{apply_before_migration, apply_pending_migrations};
-        use rusqlite::{types::Value, StatementStatus};
-
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(
-            &crate::test_fixture::observers(),
-            &crate::test_fixture::build(),
-            &conn,
-            "session_list_indexes",
-        );
-        conn.execute_batch(
-            "WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
-             INSERT INTO processes(id,trace_id,started_at,kind,completed_at)
-             SELECT printf('00000000-0000-4000-8000-%012x',i),
-                    printf('00000000-0000-4000-8000-%012x',i),1,
-                    CASE WHEN i>4000 THEN 'agent' ELSE 'lf' END,
-                    CASE WHEN i>2000 THEN 2 END FROM n;
-             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-             VALUES('inventory','Inventory','human',1,0,'/repo');
-             UPDATE processes SET completed_at=NULL,agent_session_id='inventory',
-                spawn_state='reserved',agent_provider='codex',agent_interactive=1
-                WHERE id IN ('00000000-0000-4000-8000-000000001001',
-                             '00000000-0000-4000-8000-000000001002');
-             UPDATE processes SET pid=4242,os_started_at=1,spawn_state='spawn_requested'
-                WHERE id='00000000-0000-4000-8000-000000001001';
-             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-000000001002'
-                WHERE id='inventory';",
-        )
-        .unwrap();
-        let sql = super::agent_process_query();
-        let read = || {
-            let mut query = conn.prepare(&sql).unwrap();
-            let width = query.column_count();
-            let rows = query
-                .query_map([], |row| {
-                    (0..width)
-                        .map(|i| row.get::<_, Value>(i))
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            (
-                rows,
-                query.get_status(StatementStatus::VmStep),
-                query.get_status(StatementStatus::FullscanStep),
-            )
-        };
-        let (before, before_steps, _) = read();
-        apply_pending_migrations(
-            &crate::test_fixture::observers(),
-            &crate::test_fixture::build(),
-            &conn,
-        );
-        let (after, after_steps, scans) = read();
-        assert_eq!(after, before);
-        assert_eq!(after.len(), 2); // Detached previous agent and reserved replacement.
-        assert_eq!(
-            after[0][0],
-            Value::Text("00000000-0000-4000-8000-000000001001".into())
-        );
-        assert_eq!(
-            after[1][0],
-            Value::Text("00000000-0000-4000-8000-000000001002".into())
-        );
-        assert!(
-            after_steps < before_steps / 4,
-            "VM steps: {before_steps} -> {after_steps}"
-        );
-        assert!(scans <= 2, "fullscan steps: {scans}");
-        let plans: Vec<String> = conn
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap()
-            .query_map([], |row| row.get(3))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert!(
-            plans
-                .iter()
-                .any(|line| line.contains("agent_process_unfinished")),
-            "{plans:?}"
-        );
-    }
-
-    #[test]
-    fn detached_and_replaced_agents_remain_in_the_process_inventory() {
+    fn a_released_agent_stays_in_the_inventory_and_blocks_replacement_until_it_exits() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("db")).unwrap();
         let session =
@@ -2605,15 +2530,17 @@ mod attachment_tests {
             .unwrap();
         let rows = store.agent_processes().unwrap();
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].process.parent_lf_process_id, Some(a.clone()));
+        assert_eq!(rows[0].launcher_lf_process_id, Some(a.clone()));
         assert_eq!(rows[0].attached_lf_process_id, None);
-        assert_eq!(rows[0].process.pid, Some(4242));
+        assert_eq!(rows[0].pid, Some(4242));
         assert!(matches!(
             store.record_agent_process_identity(&session.id, &first, 5555, 123),
             Err(StoreError::InvalidAuthority(_))
         ));
-        let replacement = store
-            .attach_session(
+        // A Session runs one agent: the released one still runs, so nothing
+        // replaces it until it exits.
+        assert!(matches!(
+            store.attach_session(
                 &session.id,
                 Some(&released),
                 &b,
@@ -2623,17 +2550,10 @@ mod attachment_tests {
                     agent: None,
                     capture_key: None,
                 },
-            )
-            .unwrap();
-        assert_ne!(replacement.agent_process_id, first.agent_process_id);
-        assert_eq!(store.agent_processes().unwrap().len(), 2);
-        let old = store
-            .agent_process(&first.agent_process_id)
-            .unwrap()
-            .unwrap();
-        assert_eq!(old.pid, Some(4242));
-        assert_eq!(old.parent_lf_process_id, Some(a));
-        assert!(old.completed_at.is_none());
+            ),
+            Err(StoreError::InvalidAuthority(_))
+        ));
+        assert_eq!(store.agent_processes().unwrap().len(), 1);
     }
 
     #[test]

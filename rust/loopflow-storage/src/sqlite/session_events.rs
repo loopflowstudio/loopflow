@@ -437,7 +437,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
             "INSERT INTO session_activity(session_id,attachment_token,observed_at,open_tools,pending_input,yielded,agent_process_id,preview)
-             SELECT ?1,?2,?3,?4,?5,?6,?7,?8 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1 AND p.attachment_token=?2 AND p.id=?7
+             SELECT ?1,?2,?3,?4,?5,?6,?7,?8 FROM agent_sessions s WHERE s.id=?1 AND s.attachment_token=?2 AND s.agent_process_id=?7
              ON CONFLICT(session_id) DO UPDATE SET attachment_token=excluded.attachment_token,
                 observed_at=excluded.observed_at,open_tools=excluded.open_tools,
                 pending_input=excluded.pending_input,yielded=excluded.yielded,
@@ -478,9 +478,8 @@ impl SqliteStore {
             .query_row(
                 "SELECT act.observed_at,act.cpu_sampled_at,act.cpu_quiet_since FROM session_activity act
                  JOIN agent_sessions s ON s.id=act.session_id
-                 JOIN processes p ON p.id=s.agent_process_id
-                 WHERE act.session_id=?1 AND act.attachment_token=p.attachment_token
-                 AND act.agent_process_id=p.id",
+                 WHERE act.session_id=?1 AND act.attachment_token=s.attachment_token
+                 AND act.agent_process_id=s.agent_process_id",
                 [session],
                 |row| {
                     Ok(crate::session::SessionLiveness {
@@ -551,13 +550,13 @@ impl SqliteStore {
                     COALESCE(json_extract(c.payload,'$.provider'),s.provider),g.graph,
                     (SELECT json_extract(step.value,'$.label') FROM json_each(g.compiled,'$.steps') step
                      WHERE json_extract(step.value,'$.key')=gs.node)
-             FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
+             FROM agent_sessions s
              LEFT JOIN tasks t ON t.id=s.task_id
              LEFT JOIN session_events c ON c.seq=s.current_capture
              LEFT JOIN graph_process_steps gs ON gs.lf_process_id=c.lf_process_id
              LEFT JOIN graph_processes g ON g.lf_process_id=gs.graph_lf_process_id
-             WHERE s.id=?1 AND p.attachment_token=?2 AND p.attached_lf_process_id=?3
-               AND p.id=?4",
+             WHERE s.id=?1 AND s.attachment_token=?2 AND s.attached_lf_process_id=?3
+               AND s.agent_process_id=?4",
             params![
                 session,
                 attachment.token,

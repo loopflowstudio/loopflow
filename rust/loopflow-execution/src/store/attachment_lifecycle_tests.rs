@@ -113,21 +113,10 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         Some(attachment.clone())
     );
     next.completed_at = Some(10);
-    store
-        .conn
-        .lock()
+    let birth = crate::journal::process_started_at(std::process::id())
         .unwrap()
-        .execute(
-            "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
-            params![
-                first,
-                std::process::id(),
-                crate::journal::process_started_at(std::process::id())
-                    .unwrap()
-                    .unwrap()
-            ],
-        )
         .unwrap();
+    store.test_set_holder(&session.id, std::process::id(), birth);
     // Completion does not permit taking input from a still-attached owner.
     assert!(attachment::claim_session_input(
         &store,
@@ -142,9 +131,8 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         store.session(&session.id).unwrap().unwrap().completed_at,
         Some(10)
     );
-    let mut owner = store.lf_process(&first).unwrap().unwrap();
-    owner.completed_at = Some(11);
-    store.record_process(&owner).unwrap();
+    // The holder exits: this pid no longer runs the process that started then.
+    store.test_set_holder(&session.id, std::process::id(), birth - 3600);
     let (admitted, claimed) =
         attachment::claim_session_input(&store, next.clone(), Some(&attachment), &second, || {
             panic!("reserved process needs no close")

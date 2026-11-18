@@ -42,7 +42,7 @@ resend input.
 | running with no terminal showing it (listed as `detached`) | reattaches |
 | shown in another lf terminal | takes it over; that terminal says where it went |
 | running in a provider client lf started elsewhere | reconnects to retained work; continues from history when the client can safely be replaced |
-| started with `lf <skill>` and still running in another terminal | starts a second agent on the same thread; the first keeps running |
+| started with `lf <skill>` and still running in another terminal | stops it there and continues here on the same thread |
 | ended or crashed | continues the same provider thread from its history |
 | missing for this scope | starts one and says so |
 

@@ -1063,24 +1063,16 @@ fn attached_session(
         .arg("30")
         .spawn()
         .unwrap();
-    let receipts = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
-    fs::create_dir_all(&receipts).unwrap();
-    fs::write(
-        receipts.join(format!("{first}.json")),
-        serde_json::to_vec(&crate::journal::ProcessReceipt {
-            schema_version: 1,
-            trace_id: trace.to_string(),
-            lf_process_id: first.to_string(),
-            pid: process.id(),
-            started_at: crate::journal::process_started_at(process.id())
-                .unwrap()
-                .unwrap(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
     let attachment =
         attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
+    // The `sleep` stands in for the lf holding the attachment.
+    store.test_set_holder(
+        "conversation",
+        process.id(),
+        crate::journal::process_started_at(process.id())
+            .unwrap()
+            .unwrap(),
+    );
     (store, attachment, process, second)
 }
 
@@ -1146,59 +1138,6 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         store.session_thread("conversation").unwrap(),
         Some("saved-thread".into())
     );
-}
-
-#[test]
-#[cfg(unix)]
-fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
-    use std::os::unix::process::CommandExt;
-
-    let ledger = crate::journal::TestLedgerGuard::new();
-    let (store, attachment, mut process, next) = attached_session(&ledger);
-    // `lf <skill>` in another terminal: an interactive agent, no Work named,
-    // no holder or owner, its lf still waiting.
-    let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",
-        [],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE processes SET agent_interactive=1 WHERE id=?1",
-        [&attachment.agent_process_id],
-    )
-    .unwrap();
-    let mut agent = std::process::Command::new("sleep")
-        .arg("30")
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let started = crate::journal::process_started_at(agent.id())
-        .unwrap()
-        .unwrap();
-    store
-        .record_agent_process_identity("conversation", &attachment, agent.id(), started)
-        .unwrap();
-
-    let beside =
-        crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
-    let first_running = agent.try_wait().unwrap().is_none();
-    let first_open: Option<i64> = sql
-        .query_row(
-            "SELECT completed_at FROM processes WHERE id=?1",
-            [&attachment.agent_process_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    agent.kill().unwrap();
-    agent.wait().unwrap();
-    process.kill().unwrap();
-    process.wait().unwrap();
-
-    assert!(first_running, "the first agent keeps running");
-    assert_eq!(first_open, None, "a running agent is not recorded as ended");
-    assert_ne!(beside.agent_process_id, attachment.agent_process_id);
-    assert_eq!(beside.lf_process_id, Some(next));
 }
 
 #[test]

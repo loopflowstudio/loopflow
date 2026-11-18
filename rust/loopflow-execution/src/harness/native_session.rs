@@ -1469,11 +1469,11 @@ mod tests {
                     .agent_processes()
                     .unwrap()
                     .into_iter()
-                    .find(|agent| agent.process.pid.is_some())
+                    .find(|agent| agent.pid.is_some())
                 {
                     return crate::harness::agent_process::stop_session_agent(
                         &store,
-                        agent.process.agent_session_id.as_deref().unwrap(),
+                        agent.session_id.as_str(),
                         crate::process::Departure::Terminal { to: None },
                     );
                 }

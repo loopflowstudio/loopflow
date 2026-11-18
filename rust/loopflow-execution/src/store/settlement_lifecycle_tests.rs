@@ -23,10 +23,7 @@ fn stale_orphan_observation_cannot_settle_a_transferred_agent() {
     let current = store.agent_processes().unwrap().remove(0);
     assert!(attachment::settle_agent_process(&store, &current, || {
         // Settlement holds the attachment fence, not the SQLite mutex.
-        assert_eq!(
-            store.agent_process(&current.process.id)?.as_ref(),
-            Some(&current.process)
-        );
+        assert_eq!(store.agent_state(&current.id)?.as_ref(), Some(&current));
         Ok(())
     })
     .unwrap());
@@ -65,7 +62,7 @@ fn settling_a_dead_headless_run_moves_it_to_history() {
             .agent_processes()
             .unwrap()
             .into_iter()
-            .find(|agent| agent.process.agent_session_id.as_deref() == Some(id))
+            .find(|agent| agent.session_id == id)
             .unwrap();
         assert!(attachment::settle_agent_process(&store, &agent, || Ok(())).unwrap());
         completed.push(store.session(id).unwrap().unwrap().completed_at.is_some());

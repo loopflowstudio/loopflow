@@ -413,3 +413,10 @@ Chosen (questions.md): Tasks with no Project sit after every Project.
 
 Next: gate. Every slice is built; the acceptance check above and the gate
 list in slice 1 remain.
+
+Concept review of the built change (2026-11-18, `scratch/concept-review.html`):
+nothing to change in this Task. Larger than it, recorded on the page: a Task's
+primary conversation is a table while a Repository's or Wave's is
+`agent_sessions.primary_scope` (LOO-932's to fold); a Working-board drop onto
+another Project's Task refuses rather than moving the Task; the branch's three
+homes (LOO-934).

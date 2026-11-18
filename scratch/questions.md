@@ -27,3 +27,11 @@ Implement, slice 2, 2026-11-18:
 - `HarnessKind` is no longer `#[non_exhaustive]`, against the style guide's rule for public enums that may grow. Assumed: in a private workspace crate an exhaustive match is worth more, since a fifth harness then fails to compile until it has a launcher. Keep the attribute and a wildcard arm instead?
 - `recognizes(&OsProcess)` stayed on `Launcher`. The alternative keeps it on `Harness` by passing the command, executable path and arguments in, which reads the process table for every candidate before asking. Not done.
 - The live `TurnUsage` was not renamed: the rename reaches the generated server schema.
+
+Implement, slice 3, 2026-11-18:
+
+- The comparison ran with `--cohorts 3`, not five. The one-minute load average was 33-43 on 16 CPUs from other checkouts' builds when it started, and five cohorts at one Cargo job is about three hours on an idle Machine. Assumed: three samples and their recorded load say as much as five would under that load. Rerun with five on a quiet Machine before the numbers decide the next extraction?
+- `probe.py` did not gain `rust/loopflow-harness`. Its workspace is the storage chain (model, definitions, terminal, storage, test-support), none of which depends on the crate; a member it never builds would check nothing.
+- `scripts/test.py` and `scripts/macos_inputs.py` needed no change. The runner selects Rust on any `rust/` path and runs nextest over the workspace; the Desktop inputs name wire files, none of which moved. What did need saying is the filter: the crate's tests are not under `harness::`, so gate uses `package(loopflow-harness) | test(harness::)`.
+- `harness_test` times a second edit after an untimed first test build. Without that, the baseline's sample is mostly execution's dev-dependencies compiling once, which no edit loop repeats.
+- `report.py` no longer writes `scratch/measure.html`; the committed page under `results/` is the one to open.

@@ -1,295 +1,247 @@
 # LOO-938 — One plan at every size
 
-## Direction (2026-11-18, replaces everything below)
-
 The design is `scratch/plan-design.md` (guide: `scratch/plan-design.html`).
-Jack Heart, on whether it replaces "the hub owns the plan": "Why woudd it
-not? it seems like it does".
+This file is how the branch gets there. History of the question:
+`scratch/plan-ownership-history.md`; what was said: `scratch/explore.md`.
 
-The hub is a connection, not the plan's home. Every Machine stamps its saves;
-the plan is the newest stamp per field; Git carries it always (one ref per
-Machine), a hub carries it live when named, a tracker carries it between
-people when the repository has one.
+Jack Heart, 2026-11-18, on whether the design replaces "the hub owns the
+plan": "Why woudd it not? it seems like it does". On order: "your order of
+your claimed tasks is NOT the proejct order, ut your order of hte backlog IS".
 
-Run b20a303b built the hub-owns design and was interrupted at `qa`; its
-uncommitted work is the commit after c64f4a3b68. What it built that stays,
-changes and comes back is in the design under "What the branch has, and what
-changes". The rest of this file describes that earlier design and is kept
-only as a record of what exists on the branch.
+## What people see
 
----
+- One Machine: nothing changes. `lf repo tracker` reads `Plan: this Machine.`
+- Two Machines sharing a remote: a Task made on the laptop is on the mini
+  within a minute, with no setting. `lf repo tracker` on the laptop reads
+  `Plan: Git origin, 1 unsent.` then `Plan: Git origin.`
+- With `lf machine hub mini`: the same change arrives in seconds, and the hub
+  line reads as it does on the branch. Stop the mini's server and Git still
+  carries it.
+- A teammate who clones the repository sees the plan and their Tasks appear
+  on yours. No account, no hub.
+- Two edits to one field: the one made later wins on every Machine. Nothing
+  is ever `lost` or `conflicted` between Loopflow Machines.
+- Reordering the backlog on one Machine reorders it on all of them
+  (`task_rank` is a stamped field like any other).
+- Linear and Asana repositories behave as they do on main.
 
-# LOO-938 — Keep the plan on the hub Machine's server
+## Source of truth
 
-## Direction (2026-11-18)
+Each Machine's store, plus one stamp per field. The plan a Machine shows is,
+for each field, the value with the newest stamp it has received. Three
+carriers move stamped values and none of them decides anything.
 
-Jack Heart: "the plan syncing was written in a pre-machine world"; "I think
-i decided towards ahving one plan owner machine server now"; "i would prefer
-to just turn this task into the proper design rather than continue to churn".
+### The stamp
 
-- **The hub owns the plan.** The always-on hub Machine's server holds the plan
-  for every repository without Linear or Asana; other Machines and the phone
-  read and write it through the hub. Amends LOO-861's "reads no Work of the
-  Machine it runs on" (comment posted on LOO-861, 2026-11-18).
-- **PR #1971 is closed, no interim fix.** Its head is kept at
-  `refs/backup/loo-938-pr1971` (18a15eb3ef).
+`(at, machine id)`, compared in that order. `at` is
+`max(wall clock in ms, highest at this Machine has written or seen + 1)`.
 
-History: `scratch/plan-ownership-history.md`. Concept review (2026-11-18):
-`scratch/concept-review.html`.
+*Made for review.* The design says "one more than the highest this Machine has
+written or seen". With that alone, a laptop offline since counter 4000
+retitles a Task on Tuesday at 4001 and loses to the mini's Monday retitle at
+4500, because the mini did more writes. Folding the wall clock in keeps the
+design's guarantee (an edit made after seeing yours beats yours, whatever
+either clock says) and makes unseen edits resolve by when they were made. A
+Machine with a clock an hour fast wins unseen races for that hour and no
+longer: everyone who sees its stamp moves past it.
 
-## The design in one paragraph
+A field with no stamp row reads as `(0, this Machine)`. So nothing is seeded:
+a store that predates stamps offers its whole plan at 0, and any save beats
+it. *Passed over:* stamping existing values from the Git journal's clocks (the
+design's "Moving what exists"). It reads tables this branch marks leaving, and
+after the cutover below the Machines agree on every value anyway.
 
-The hub holds the plan in the store's own words. A Machine whose plan is on a
-hub saves locally as before and queues each changed value, a `WorkEdit`
-(target + `WorkValue`), in `hub_sends`; an exchange sends a repository's open
-values in `plan.apply` and the hub writes them with the same typed writer.
-Inbound, `plan.changes` returns the `WorkEdit`s of owners changed since a
-watermark, and the Machine writes them as an import. No translation, no
-`decide`, no tracker identity binding: both ends share every id and field. On
-the hub Machine the store *is* the plan and nothing is queued. The Git
-planning ref, the peer journal, field causality, destinations and the
-per-Session exchange are deleted. `lf repo tracker` reads
-`Plan: hub mini. 3 open.`
+### Tables (all in this Task's one migration, `plan_hub.sql`, still unmerged)
 
-## Concept review changes (2026-11-18, made for review)
+- `plan_stamps(owner_id, field, at, machine_id)`, primary key
+  `(owner_id, field)`, index on `at` for the clock. New.
+- `plan_changes` stays: the local order in which owners changed. The hub
+  answers `plan.changes` from it and the Git writer finds what to write from
+  it. An arriving value bumps it like a local save.
+- `hub_plans` stays (cursor, error). `hub_sends` shrinks to `(target, field)`:
+  a send reads its value and stamp when it goes, so `edit_json` goes.
+- `git_plans(repo, pushed_seq, error, failing_since)`: how far into
+  `plan_changes` this Machine's ref holds. `plan_refs(repo, machine_id, tip)`:
+  the last commit of each other Machine's ref taken in. Both per store, not
+  per clone, so two clones of one repository on a Machine agree.
 
-The kickoff plan made the hub "a third tracker": `Tracker::Hub` beside Linear
-and Asana, local saves queued as tracker actions, inbound through
-`planning::rules::decide`. The review replaced that:
+### One way in
 
-1. **The hub is not a tracker; it is the plan's home elsewhere.** A tracker is
-   a foreign system reached through a lens: `ActionKind::of` keeps only the
-   values Linear/Asana can hold, `enqueue_local` queues only `tasks`,
-   `projects` and `task_comments`, and `Tracker::changes` answers in
-   `TrackerItem` words. Through that lens the hub would never learn any Wave
-   field, `project_wave`, ranks, `task_shipped_at`, `task_due_date`,
-   `task_branch`, `task_url` or `task_identifier`, all of which the Git
-   journal carries today (`planning_write::capture` records every
-   `WorkValue`). So the hub queues every `WorkEdit` the writer saves, and is
-   not a `Tracker` variant: its `look`, `changes`, `fetch_issue`, `removed`
-   and `issue_ownership` would all be unreachable.
-2. **One rule, the one people already have: the change sent last wins.**
-   The kickoff plan added a per-field sequence check that marks an offline
-   edit `lost` when the hub moved since its base. `decide` never does that
-   for an unsent value ("Unsent values go out even over a provider edit: the
-   change sent last wins"), and the Git journal's latest clock gives the same
-   answer in the acceptance sequence. The hub applies in arrival order;
-   setting a value twice is the same value, so every hub send is safe to
-   repeat after a lost reply, and the hub never produces `conflicted`.
-   Keep / Use mine stays Linear/Asana's. Passed over: a hub-side conflict
-   check (it would be a second conflict rule with its own table, for a
-   behaviour nobody asked for). Counterexample kept: two people editing one
-   title while one is offline lose the earlier edit silently, as with Linear
-   today.
-3. **No create/state/order/delete/link kinds for the hub.** A new Task is its
-   first `WorkEdit`s (the writer's `ensure_record` creates the row, as Git
-   imports do now); deletion is `task_deleted_at`; order is `task_rank` /
-   `project_rank`; a comment is `comment_task` + `comment_content`. So the
-   "every kind" slice disappears and slice 1 carries every field at once.
-4. **No binding.** `external_issue_id` stays a Linear/Asana column; hub rows
-   share ids by construction.
-5. **First contact pulls before it pushes.** Pushing a Machine's whole plan
-   first would overwrite mini's newer values with stale ones under "sent last
-   wins". So: `plan.changes(None)` first, imported; then queue edits only for
-   owners the hub did not return.
+`planning_write` gains the only function that takes values from elsewhere:
+stamped edits in, each written (as `WriteOrigin::Import`) only when its stamp
+is newer than the one held, stamps recorded, clock moved past the highest
+seen. The hub's import, `plan.apply` on the hub and the Git import all call
+it. A local save stamps every field it changes with the next stamp; a tracker
+observation is stamped the same way.
 
-## Findings that shaped it
+It replaces `import_hub_plan`'s skip of fields with an open send, first
+contact's "queue every owner the hub lacked", and `apply_hub_edits` writing
+arrivals as local saves. `comments_arrived` (ownership markers, direction
+steers, re-claim) stays and runs for every carrier.
 
-- **The carrier exists.** #1956 (LOO-926) sends typed requests to another
-  Machine's server with `ssh <machine> lf server connect`, protocol revision 8,
-  version-skew errors naming the fix. The hub client uses that carrier now;
-  LOO-861 swaps it for the hub's persistent outbound connection later without
-  changing the operations. **So LOO-938 does not wait for LOO-861**, which is
-  still unstarted.
-- **The writer already speaks both directions.** `planning_write::write(conn,
-  edits, origin)` takes `WorkEdit`s; `WriteOrigin::Import` writes without
-  queueing or echo (today's Git import uses it); `ensure_record` creates
-  missing Waves, Projects, Tasks and comments from their edits.
-- **"Git-planned" is the default, not a choice.** `TrackerConfig::Git` is what
-  a repository with no `tracker:` key gets (`config.rs:315`, `GitPlan::Shared`
-  default). etude has no `tracker:` key. So the new rule needs no repository
-  key: no Linear/Asana → the plan is on this Machine's hub, or local when it
-  has none (LOO-406's store-is-home, unchanged for a single Machine).
-- **etude is the only live user.** `lf repo tracker` in `~/src/etude`:
-  `shared/main` 397 records, publication confirmed; `users/9a0c1265…` 22
-  records, "local changes pending" and "Git acquisition failed". Git Tasks
-  carry no identifiers (`identifier: null`) and are addressed by UUID.
-- **mini was unreachable during kickoff** (`ssh mini`: hostname does not
-  resolve; `100.96.227.95:22` timed out). Whether mini has an etude checkout
-  and a current `lf` is unverified; slice 2's cutover checks it.
+## Carriers
 
-## Shape
+**Hub.** As built (`ops/plan_hub.rs`, protocol revision 9, never released, so
+changed in place): `plan.apply` and `plan.changes` carry
+`{target, change, at, machine}` instead of bare `WorkEdit`s. Reading first no
+longer matters. `lf machine hub --clear` drops the queue and loses nothing,
+since Git still carries those values.
 
-### Which Machine is the hub
+**Git.** `refs/loopflow/plan/<machine id>` on the repository's remote, one
+JSON file per record (`tasks/<2 hex>/<id>.json`, `waves/<id>.json`, …)
+holding the fields whose newest stamp is this Machine's, each with its `at`.
+One exchange, in any checkout of the repository:
 
-A Machine stores one hub: `lf machine hub mini` names a saved Machine
-(`lf machine add` already saves them); `lf machine hub --clear` removes it;
-`lf machine list` marks it. LOO-861 later owns this same setting as its "one
-hub address". A Machine whose own `machine_id` equals its hub's id, or with no
-hub, is authoritative for its own plan. *Made for review:* a Machine-level
-setting rather than a repository `tracker: hub` key, because who the hub is
-depends on the person's Machines, not the repository.
+1. `git fetch <remote> '+refs/loopflow/plan/*:refs/loopflow/plan-seen/*'`.
+2. For each other Machine's ref whose tip moved: `git diff-tree` from the tip
+   in `plan_refs` (the whole tree the first time, or when that commit is not
+   in this clone), read the changed files, merge by record across refs, apply
+   through the one way in.
+3. Build this Machine's commit with `git fast-import` on top of
+   `plan-seen/<me>`: rewrite the file of every owner in `plan_changes` past
+   `pushed_seq`, delete a file with no field left. Push; on success move
+   `pushed_seq`. Offline, nothing is committed and the line reads `N unsent`.
 
-### What exists (slice 1, 2026-11-18)
+Probe (git 2.50.1, `/tmp`): a first ref of 10,000 records built in about 1 s
+including generating the input; one changed record and one deletion on top
+took 0.12 s with no index and no worktree; the pushed ref does not appear in
+`git status`, `git branch -a` or a plain clone; a wildcard fetch into
+`plan-seen/*` and `diff-tree` between tips listed exactly the two paths.
 
-- `lf machine hub <machine>` / `--clear` / bare writes the `hub:` key in
-  `~/.lf/config.yaml`; `lf machine list` marks it. `ops/plan_hub.rs::hub`
-  resolves it (`None` when unset or when the hub is this Machine).
-- Migration `plan_hub.sql`: `plan_changes` (one row per owner, `seq` only
-  grows, seeded with every owner so any Machine can become a hub),
-  `hub_plans` (per repository: hub id, watermark `seq`, NULL = first contact,
-  last error), `hub_sends` (newest unsent value per (target, field)).
-  `sqlite/plan_hub.rs` owns them.
-- `planning_write::write_record` calls `plan_hub::saved` for every owner it
-  changes: bumps `plan_changes`, and when a `hub_plans` row exists, queues the
-  changed values (a created record whole).
-- Server protocol revision 9 (`PLAN_REVISION`; Swift `ServerProtocol.revision`
-  9): `plan.changes { repository, since }` → `{ edits, seq, more }`, paged
-  under half a control message; `plan.apply { repository, edits }` → `{}`,
-  written in one transaction, safe to repeat.
-- `plan_hub::exchange`: read every page first, import (skipping fields with
-  an open send), then send grouped by owner. Called from
-  `planning_sync::exchange_repository`, i.e. at every Git exchange boundary;
-  a publish-only boundary with nothing open asks the hub nothing.
-- `lf repo tracker` prints `Plan: hub mini[, unreachable since …]. N open.`
-  with each open send; a Wave rename syncs after its save.
+A repository with no remote writes no ref. *Passed over:* the design's "the
+ref exists locally" for one Machine; nobody could read it.
 
-## User-visible outcome
+**When they run.** The Machine server owns both. After a command it answers,
+the existing coalesced exchange (`after_command`, quiet 5 s) does the hub and
+the Git push. One server task fetches every repository without Linear or
+Asana that has a remote, every 60 s. `lf task sync` does both in the
+foreground. A command run with no server sends to the hub as now and leaves
+Git unsent until the server or `lf task sync`. *Made for review:* 60 s, one
+`git fetch` per repository per minute, no setting.
 
-On etude, from the laptop: `lf task create 'x'` returns at once; `lf repo
-tracker` shows `hub mini · 1 open` then `0 open` after the drain; on mini,
-`lf task list` shows the Task. A Wave renamed on the laptop is renamed on
-mini. Laptop offline: create and edit work, show open, and arrive on
-reconnect; the value sent last is the one both Machines show. Desktop loses
-the Git destinations list; its tracker line reads like a Linear
-repository's.
+**Linear / Asana.** Unchanged in this Task: `tracker_actions`, per Machine.
+
+## Surfaces that change
+
+- `lf repo tracker` text and `--json`: `plan: {git: {remote, unsent,
+  error, failing_since} | null, hub: {…as now} | null}`. DTO fixture
+  `tests/fixtures/dto/tracker_sync.json`, Rust and Swift fixture tests.
+- Desktop `RepositoryPlanView` / `RepositoryPlan.swift`: the same two lines.
+- `machine/wire.rs` `PlanApply` / `PlanChanges`, `server_schema.json`,
+  Swift `ServerProtocol`.
+- `lf task sync`: prints what is unsent by Git as well as open for the hub.
+- Docs written for hub-owns on this branch: `docs/work.md` ("Share the
+  plan"), `docs/ops.md`, `docs/config.md`, `docs/glossary.md`,
+  `docs/dev/planning.md`, `docs/dev/machines.md`. "To share a plan with
+  coworkers, use Linear or Asana" goes: they clone.
+
+## Absent and error states
+
+- No remote, no hub: `Plan: this Machine.` Nothing runs.
+- Fetch or push fails: `Plan: Git origin, unreachable since …, N unsent.` with
+  Git's reason; the hub line is independent. Saves never wait on either.
+- Push rejected because the remote's own-Machine ref moved (a second store
+  using this Machine's id): shown as the error; never forced.
+- A ref carries a field for a record whose creating fields have not arrived
+  (their author has not pushed): that ref's tip in `plan_refs` does not move,
+  so the next fetch reads it again. `logs/lf.log` names the record.
+- A file that does not parse, or a field this build does not know: that field
+  is skipped and logged; the rest of the ref applies.
+- A hub older than this build: the existing skew error naming the fix.
+- A released `lf` on another Machine keeps reading the old
+  `refs/loopflow/planning/*` and sees no new changes. `TrackerConfig::ReleasedGit`
+  stays until LOO-973.
+
+## Operational boundary
+
+10,000 Tasks, about 15 fields each: `plan_stamps` near 150,000 rows, read by
+primary key; the clock is `max(at)` on its index. Check both and the
+`plan_changes` range read with `EXPLAIN QUERY PLAN` in `query_plans.rs`.
+Stamping happens inside the save's own transaction: no second write lock. Git
+runs outside any SQLite transaction. One exchange per repository at a time
+(the existing `locks/plan-hub` file lock, renamed for both carriers).
 
 ## Acceptance check at gate
 
-Headless, two homes on one Mac with #1956's stand-in `ssh`
-(`.lf/qa/machine-moves.md`), home B's hub = home A:
+Extend `machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines`
+(stand-in `ssh`, real carrier) to three homes and a bare remote:
 
 ```bash
-B: lf task create 'hub smoke' --json          # B: lf repo tracker → "1 open"
-B: lf task sync <id>                           # → "0 open"
-A: lf task show <id> --json                    # title "hub smoke"
-A: lf task edit <id> --title one ; stop A's server
-B: lf task edit <id> --title two               # "hub … unreachable · 1 open"
-start A's server; B: lf task sync <id>         # → "0 open"
-A: lf task show <id> --json                    # title "two"
-B: lf task show <id> --json                    # title "two"
-A: rename a Wave; B: lf task sync; B shows the new name
+L: lf task create 'x'            # remote unreachable → repo tracker: "Git origin, 1 unsent"
+L: lf task sync ; M: lf task sync ; M: lf task show <id>     # title "x", no hub named
+L: lf machine hub mini ; M: lf task edit <id> --title one
+L: lf task sync ; L: lf task show <id>                       # "one"
+stop M's server ; L: lf task edit <id> --title two           # hub unreachable, 1 open
+T (third home, another identity): lf task sync ; lf task show <id>   # "two", by Git
+start M's server ; M: lf task show <id>                      # "two"
 ```
 
-Plus a Rust integration test of the same sequence with the carrier mocked at
-the `lf server connect` pipe, including a lost `plan.apply` reply that is
-sent again and applied once.
+and the case the hub-owns design needed "pull before push" for: L holds a
+stale title and has never met the hub; after first contact both show M's
+newer one.
 
 ## Cutover for etude
 
-Not code (no cross-repo migrations). Before installing: with the released
-`lf`, `lf task sync` on every Machine until `lf repo tracker` shows both refs
-confirmed, then on mini. Install. `lf machine hub mini` on the laptop; first
-contact imports `plan.changes(None)`, then queues edits for owners the hub
-lacked (the 22 personal records if mini never fetched them). The ref stays on
-origin, inert; deleting it is one hand-run
-`git push origin :refs/loopflow/planning/…`.
+By hand, not code. With the released `lf`: `lf task sync` on the laptop and
+the mini until `lf repo tracker` shows both refs confirmed (the laptop's
+personal ref showed "local changes pending" and "Git acquisition failed" on
+2026-11-18; the 22 records there exist only on the laptop and will arrive on
+the mini as new records either way). Install on both. Each server writes its
+ref within a minute. Git needs no `lf config repo --bind` on the mini; the hub
+still does. Unverified: the mini was unreachable during both kickoffs, so its
+etude checkout and `lf` version are unknown.
 
 ## Exclusions
 
-- Linear/Asana drains stay per Machine (LOO-925). Moving them to the hub is a
-  later question (`scratch/questions.md`).
-- The persistent hub connection, presence, phone pairing: LOO-861.
-- Task identifiers for hub repositories (Tasks stay UUID-addressed).
-- Several people on one hub: arrival order, no admission beyond SSH-as-owner,
-  as #1956.
+- A person's slice of a team's Linear Project, Wave membership from the link,
+  Linear manual order for the backlog, and a person's own Machines exchanging
+  through Git on a tracker repository. This needs its own Task: it needs
+  "which refs are mine" and a decision on which rule owns a field both a
+  tracker and a stamp carry.
+- Adopting a gone Machine's values. Its ref stays.
+- Who may use someone's hub beyond SSH reach.
+- The phone, presence, the hub's persistent connection: LOO-861.
+- Task identifiers for repositories without a tracker.
 
-## What slice 1 taught
+## What goes
 
-- **`hub_sends` is its own table, not `tracker_actions` rows.**
-  `tracker_actions.tracker` is `CHECK(tracker IN ('linear','asana'))`: a
-  `hub` row needs a table rebuild (with its canonical-identity triggers), and
-  a released lf's `TrackerKind::parse` fails on it. Concept review point 1
-  says the same. A confirmed send deletes its rows.
-- **The watermark row is the switch.** A `hub_plans` row makes the writer
-  queue; it is made at the first exchange, so saves before it reach the hub
-  through first contact.
-- **A clone on the hub mints its own repository identity.** The hub needs
-  `lf config repo --bind <id>` in its clone; the error names it.
-- **Sends group by owner,** so a record the hub lacks arrives with every
-  value `ensure_record` needs.
-- The open-row skip held: whole-owner imports did not fight local edits in
-  the two-home run, so the inbound shape stands.
-- Two-home run (stand-in `ssh`, `/tmp` homes): a Task made before the hub was
-  set reached mini by first contact; `lf task create` and `lf task edit`
-  sent at once; with mini down, `lf repo tracker` read `Plan: hub mini,
-  unreachable since … 1 open.` with the ssh reason, and the edit sent last
-  (`two`) won on both after mini came back; a Wave made and renamed on mini
-  appeared on the laptop after `lf task sync`; a Wave renamed on the laptop
-  reached mini at once. A swapped hub binary answered "Loopflow server uses
-  another executable".
+- `import_hub_plan`'s first-contact branch and open-send skip;
+  `apply_hub_edits`; `hub_sends.edit_json` and `HubSend.edit`;
+  `forget_hub_plans` reporting values "the hub never took".
+- "The change sent last wins" in docs, comments and test names.
+- Already deleted on this branch and staying deleted: the journal, field
+  causality, destinations, `PlanningSync`, `lf repo tracker key` / `journal`,
+  the `two-people` World. The Git carrier is new code in a new module; nothing
+  comes back from `planning_git.rs`.
+- Must survive: `lf machine hub`, the hub line, `comments_arrived`, the cold
+  move sending the plan to its target first (`session_move::ready`), every
+  Linear/Asana path.
 
-## What slice 2 built (2026-11-18)
+## Slices
 
-- Git planning is deleted: `planning_git.rs`, the Git half of
-  `ops/planning_sync.rs` and `PlanningSync` with its three starters, storage
-  `git_tracker*`, `planning_exchange.rs`, `planning_destination.rs`, the
-  writer's journal capture and the migration seed hook, `lf repo tracker key`
-  / `journal`, `session receive --planning-key`, `TrackerKind::Git`, Swift
-  `GitDestination(s)View`, their fixtures and tests, the `two-people` World and
-  `codex_connect.py --planning-peers`. `task_history.rs` (filing recovery, only
-  the Git publish called it) and the World's `person`/`teammate` went with them.
-- `plan_hub.sql` marks every `git_tracker_*`, `planning_peer_*`,
-  `planning_destinations` and `planning_user` table `-- leaving: … LOO-938`;
-  SCHEMA.md regenerated.
-- Hub call sites: the Machine server calls `plan_hub::after_command` after each
-  command it answers (coalesced per repository, quiet 5 s after the last);
-  saves send at once (`sync_after_save`); `lf task sync`, cold Task lookup,
-  provider exit (`check_directory`), `lf wave status --sync` and
-  `lf repo tracker --subscribe` read. One exchange per repository at a time
-  (file lock under `locks/plan-hub`).
-- `TrackerConfig` is Linear | Asana | `ReleasedGit`; `planning_transport()`
-  returns `None` for no tracker. LOO-973 removes `ReleasedGit`.
-- `lf repo tracker --json`: `{tracker, plan: {hub, is_hub, unreachable_since,
-  error, open: [{owner, field, phase}]}, actions}`; text prints
-  `Plan: this Machine.`, `Plan: this Machine (hub).` or the hub lines. Desktop's
-  `RepositoryPlanView` shows the same line (part `plan_home`).
-- `lf task sync` prints `<id>: nothing open` or the Task's open lines.
-- Acceptance test over the real carrier:
-  `machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines`
-  (stand-in ssh relaying to mini's `lf server connect`; offline edit; a
-  `plan.apply` answer dropped after mini wrote it, sent again, mini's change
-  watermark unchanged). Passes in 16 s.
-
-## What slice 2 taught
-
-- **The Git import did more than write values.** It parsed ownership markers
-  from arriving comments, steered the Task with a person's direction comment
-  and re-claimed open claims the arrived log no longer showed. Slice 1's hub
-  import did none of it. `import_hub_plan` and `apply_hub_edits` now do all
-  three (`comments_arrived`), with the person's Machine names.
-- **A cold move needed the plan on the target first.** A Task moving to a hub
-  that had no checkout could not be found there. `session_move::ready` now
-  sends the plan to the hub after the check has cloned it, then asks again.
-- `planning_reconnect_tests` is Linear, not Git; it stays.
-
-## What remains
-
-- etude cutover against mini, by hand at gate (below).
-- Swift view tests for `RepositoryPlanView`, run locally once; CI owns the rest.
+1. **Stamps, over the hub.** `plan_stamps`, the stamp on every save, the one
+   way in, stamped `plan.apply` / `plan.changes`, first contact deleted. Shows
+   whether the writer can take a record's fields in any order and from any
+   Machine: the acceptance sequence's hub half plus the stale-laptop case, as
+   storage tests with the clock passed in and as the two-home test. If
+   `ensure_record` cannot cope with fields arriving apart, the Git format in
+   slice 2 changes (whole records per file instead of newest fields).
+2. **Git refs.** Write, fetch, import, prune, the server's timer,
+   `lf repo tracker` and Desktop lines, three-home acceptance test, docs.
+   etude moved.
+3. **Claims are first-wins.** An ownership entry's order is its comment's
+   stamp, the same on every Machine (today `journal_order_in` orders by
+   arrival, so two Machines can read one log differently). An entry names the
+   last entry its writer had seen for the Task; a claim that names a stale one
+   loses to the claim already there, and `notify_superseded_in` stops its run
+   and keeps the work. `lf task claim` and `lf task run` on an unowned Task
+   exchange first, briefly, and go ahead if that fails.
+4. **Your order of your claimed Tasks.** A rank keyed by (person, Task),
+   stamped, shown only in that person's views, never written to `task_rank`.
+   Backlog order needs nothing: it is `task_rank`, covered by slice 1.
 
 ## Checks
 
-- `cargo nextest … -E 'test(sqlite::plan_hub::) | test(sqlite::planning_write::) | test(planning_config_tests::) | test(store::ownership_lifecycle_tests::) | test(store::children_tests::) | test(store::planning_sync_tests::) | test(migration_runner::) | test(query_plans::)'`: passed (implement).
-- `… --test integration --test global_commands -E 'test(machine_commands::) | test(planning_setup_tests::) | test(subscribe::the_plan_s_home) | test(dto_fixtures::) | test(repository_identity_binding)'`: passed after one test's expected text moved to "not found" (implement).
-- Gate: `server::schema::tests::`, `lf::tests::`, `documented_commands::`, `binary(golden_prompt)` if prompts changed, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
-
-## User docs
-
-`docs/work.md` ("Share the plan", Sync reference, `--subscribe` line),
-`docs/ops.md` (Other machines), `docs/config.md` (Tracker row),
-`docs/glossary.md` (Tracker, Hub, Linear). Hub lines are
-`<task-id>  <field> · queued · <send error>` and `wave <name>  <field> · …`;
-a hub without the repository's checkout keeps sends open with "the hub has no
-checkout". Coworker sharing without Linear/Asana is an open question in
-`scratch/questions.md`.
+- Slice 1: `cargo nextest … -E 'test(sqlite::plan_hub::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::)'`, then `--test integration -E 'test(machine_commands::)'`: implement runs.
+- Gate: `server::schema::tests::`, `dto_fixtures::`, `documented_commands::`, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
+- Swift view tests for `RepositoryPlanView`: once locally at gate; CI owns the rest.

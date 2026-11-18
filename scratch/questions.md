@@ -1,46 +1,36 @@
-# Open choices (LOO-938 kickoff, 2026-11-18, headless)
+# Open choices (LOO-938, kickoff 2, 2026-11-18, headless)
 
-- Hub setting lives on the Machine (`lf machine hub mini`), not in
-  `.lf/config.yaml`. Passed over: `tracker: { hub: <machine> }` per
-  repository. Reversible.
-- Should the hub also run the Linear/Asana `tracker_actions` drain, so only
-  one Machine talks to each tracker (and webhooks land where the drain runs)?
-  Left per Machine in this Task.
-- First contact queues `create` for every unbound local Project/Task in a hub
-  repository. Alternative: the cutover is by hand only and unbound rows stay
-  local. Chosen for the 22 personal-ref records.
-- Personal Git plans (`users/<key>`) have no hub equivalent: one plan per
-  repository on the hub.
-- mini's etude checkout and `lf` version were not verified (mini unreachable
-  during kickoff).
-- Concept review (2026-11-18): hub edits follow "the change sent last wins"
-  and never come back `lost`; the kickoff's per-field seq conflict check was
-  dropped. Reversible before release: a hub-side check could be added later.
-- Concept review: the hub is not a `Tracker` variant and carries every
-  `WorkValue` (Waves included), not the Linear action lens.
-- Docs (2026-11-18): Git sharing let a coworker who cloned the repository read
-  and write the plan with no account. The hub is SSH-as-you, so without Linear
-  or Asana the plan is one person's. Docs say "To share a plan with coworkers,
-  use Linear or Asana." Intended, or should a hub admit other people?
-- Implement (2026-11-18): `lf machine hub --clear` deletes every
-  `hub_sends` row (values saved here but never sent stay here only) and
-  every `hub_plans` row; setting another hub keeps open sends and starts
-  first contact with the new one. Reversible.
-- Implement: the `hub:` key is new in `~/.lf/config.yaml`; a released lf on
-  the same Machine rejects it as an unknown setting. Only `lf machine hub`
-  writes it, after install.
-- Implement: owners hard-deleted on the hub (Wave removal) leave their
-  `plan_changes` rows; `plan.changes` skips them and other Machines keep
-  their copies. Deletion that travels is still `task_deleted_at` only.
-- Implement slice 2 (2026-11-18): "each `lf` command reads" is built as the
-  Machine server exchanging after each command it answers, coalesced and
-  quiet for 5 s after the last. A command run without the server only sends.
-  Reversible: a periodic server-side exchange instead.
-- Implement slice 2: the `two-people` World and its binary are deleted with Git
-  sharing (no coworker sharing without Linear/Asana). Claims across two
-  people's Machines are now covered only by the ownership tests over a hub.
-- Implement slice 2: `lf session receive --planning-key` is gone, so a released
-  lf moving a Task to a branch-built Machine fails on the unknown flag until
-  both run the same release.
-- Implement slice 2: `lf repo tracker --subscribe` exchanges when it reads,
-  which is when the store changes, not on a clock.
+Made for review in `scratch/plan.md`; each is reversible before release.
+
+- A stamp's `at` folds in the wall clock (`max(now ms, highest seen + 1)`).
+  The design says a bare counter. Passed over because a Machine that writes
+  more would win unseen races against later edits.
+- Existing values are not stamped from the Git journal's clocks; an unstamped
+  field reads as `(0, this Machine)`. Two Machines that disagree on an old
+  value settle it by machine id, so etude's Machines sync with the released
+  `lf` before installing.
+- A repository with no remote writes no plan ref.
+- Git fetch every 60 s per repository, by the Machine server, no setting. A
+  command run without the server leaves Git unsent until the server or
+  `lf task sync`.
+- Tracker repositories are untouched in this Task: a person's own Machines do
+  not exchange through Git or the hub there. The design says they do. Needs
+  "which refs are mine" and one owner per field; left for the tracker Task
+  (your slice, Linear manual order), which is not filed yet.
+- Slice 4 (a person's order of their claimed Tasks) is a new value and a new
+  view rule. In this Task, or with the tracker Task?
+- First-wins claims add "the last entry I had seen" to the ownership marker.
+  Entries a released `lf` wrote have none and read as having seen everything.
+
+Still open from before:
+
+- Should one Machine run the Linear/Asana drain for all of a person's
+  Machines?
+- A hub without the repository's checkout keeps sends open; Git has no such
+  requirement. Should the hub line say so more plainly now that Git is the
+  fallback?
+- The mini's etude checkout and `lf` version are unverified (unreachable
+  during both kickoffs).
+- `lf session receive --planning-key` is gone, so a released `lf` moving a
+  Task to a branch-built Machine fails on the unknown flag until both run the
+  same release.

@@ -116,9 +116,19 @@ Linear has no field for a Task's Wave or its order in the Wave. Proposed:
 - **Wave membership comes from the link.** A Task's Wave is the Wave linked
   to its Linear Project, so everyone derives the same answer and nothing is
   stored.
-- **Order is per person.** With your slice, the Tasks you order are yours;
-  nobody else ranks them. Your order travels between your own Machines by Git
-  and the hub.
+- **There are two orders.** Jack Heart: "you shoudl be able to reorder tasks
+  for other people. if you think a task is highest priority..." and "your
+  order of your claimed tasks is NOT the proejct order, ut your order of hte
+  backlog IS".
+  - *Backlog order is the Project's order, shared.* Reordering unclaimed
+    Tasks writes Linear's own manual order, so the whole team sees it,
+    Loopflow or not. In a Git repository it is a stamped field like any other.
+    This applies to issues outside your slice too: the reorder is written
+    straight to Linear. (Linear's manual-order field in the API is unverified;
+    check it before building.)
+  - *The order of the Tasks you have claimed is yours.* It is not written to
+    the Project and nobody else's view changes. It travels between your own
+    Machines by Git and the hub.
 - **Anything later that must be shared and has no Linear field** goes in an
   attachment on the issue: Linear's attachments take key-value `metadata`
   (API only, not shown) and are keyed by URL per issue, so writing one again
@@ -126,8 +136,7 @@ Linear has no field for a Task's Wave or its order in the Wave. Proposed:
   everyone as a link.
 
 Passed over: a label group per Wave (membership only, and it fills the team's
-labels); markers in the description (people edit it); writing Linear's own
-manual order (it reorders the view for the fifty not on Loopflow); a Git ref
+labels); markers in the description (people edit it); a Git ref
 beside the tracker (two meeting points for one repository).
 
 ## What is deleted
@@ -188,8 +197,8 @@ not see new changes, so the first exchange says which Machines still run it.
    Fresh within the interval, not at once, unless there is a hub.
 7. **Two conflict rules stay in the product.** Stamps between Loopflow
    Machines; keep theirs / use mine with a tracker.
-8. **On a tracker, Loopflow-only plan data is per person**: which Wave a Task
-   is in and its order there have no field in Linear.
+8. **Reordering the backlog reorders it for everyone**, including teammates
+   not on Loopflow. Chosen. The order of claimed Tasks is per person.
 9. **Teammates do not see each other's runs.** Only what the plan holds.
 10. **Part of today's build is undone.** The branch deleted Git plan sync;
     this brings a smaller one back.

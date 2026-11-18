@@ -121,10 +121,11 @@ $ lf task claim ENG-398
 <h3>Data Linear has no field for</h3>
 <ul>
 <li><b>Which Wave a Task is in</b> comes from the link: the Wave linked to its Project. Everyone derives the same answer; nothing is stored.</li>
-<li><b>Order in the Wave</b> is per person. With your slice, the Tasks you order are yours.</li>
+<li><b>Backlog order is the Project's order, shared.</b> Reordering unclaimed Tasks writes Linear's own manual order, so the whole team sees it, on Loopflow or not: "you shoudl be able to reorder tasks for other people".</li>
+<li><b>The order of the Tasks you have claimed is yours.</b> It is not the Project's order and changes nobody else's view.</li>
 <li><b>Anything later that must be shared</b> goes in one attachment on the issue. Linear's attachments take key-value metadata (reachable by API only) and are keyed by URL, so writing one again updates it. People see it as a link.</li>
 </ul>
-<p class="mut">Passed over: a label per Wave, markers in the description, writing Linear's manual order, a Git ref beside the tracker.</p>
+<p class="mut">Passed over: a label per Wave, markers in the description, a Git ref beside the tracker.</p>
 
 <h2>What it gives up</h2>
 <div class="t"><p><b>1. A losing edit vanishes from the plan.</b> Two people change one field; the later stamp wins and nothing marks the other. It survives only in that Machine's ref history.</p></div>
@@ -134,7 +135,7 @@ $ lf task claim ENG-398
 <div class="t"><p><b>5. One ref per Machine.</b> Rented Machines add refs; a Machine that is gone keeps its ref until another adopts its values.</p></div>
 <div class="t"><p><b>6. A fetch timer returns.</b> Once per repository per Machine, not per Session. Without a hub the plan is fresh to within the interval.</p></div>
 <div class="t"><p><b>7. Two conflict rules stay in the product.</b> Stamps between Loopflow Machines; keep theirs / use mine with a tracker.</p></div>
-<div class="t"><p><b>8. On a tracker, order is per person.</b></p></div>
+<div class="t"><p><b>8. Reordering the backlog reorders it for everyone</b>, including teammates not on Loopflow. Chosen. The order of your claimed Tasks stays yours.</p></div>
 <div class="t"><p><b>9. Teammates do not see each other's runs.</b> Only what the plan holds.</p></div>
 <div class="t"><p><b>10. Part of today's build is undone.</b> The branch deleted Git plan sync; this brings back a smaller one, and the hub stops being the home.</p></div>
 

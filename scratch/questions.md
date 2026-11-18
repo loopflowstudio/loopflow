@@ -45,3 +45,9 @@ QA, 2026-11-18 (`scratch/qa.html`):
 
 - A successful Codex turn was not reached: the account was over its usage limit until 3:36 PM. Rerun `lf -b -a codex : '<prompt>'` with the branch `lf` before merge?
 - Seen on the installed build too, not changed: `lf session usage` shows `-` for Pi Sessions whose `turns` row holds tokens and cost. Its own Task?
+
+Concept review as built, 2026-11-18 (`scratch/concept-review.html`, questions renumbered):
+
+- Chosen for review: ship the crate, since merging it can be undone by moving the files back. Passed over: dropping the branch and filing `ops` with only the benchmark cases.
+- Loopflow's own tags (`<lf:skill:>`, `<lf:message>`, `<lf:suggest_actions>`) are parsed in `loopflow-harness` and written in execution, sharing no constant. Leave them, or one owner in `loopflow-model` as its own Task?
+- `Launcher` also carries the store and process-table joins. Keep the name, or split the joins out as free functions?

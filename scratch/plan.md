@@ -404,6 +404,28 @@ measurement. Nobody has decided this.
   execution from the crate below it. `title_args` is the one that is purely a
   launch argument and could sit on `Launcher`.
 
+Concept review with all four slices in (`scratch/concept-review.html`):
+nothing to change in the code. The crate line held on a normal edit, a fix
+that needs the store, and a resume from an old home. Recorded, not changed:
+
+- The crate's first line is "what each native client writes", and it also
+  reads what Loopflow writes into a conversation: `transcript::Launch::parse`
+  (`<lf:skill:NAME>`, `<lf:message>`) and `lf_tag` (`<lf:suggest_actions>`).
+  The readers need it to tell injected text from typed text. The writers are
+  execution's `prompt` and `context_block`; the tag strings are literals on
+  both sides, and no test fails if only one side changes. One sentence in
+  `rust/loopflow-harness/README.md` would say so; gate can add it. A single
+  owner in `loopflow-model` is its own Task.
+- Two public types are named `Launch`: `loopflow_execution::harness::Launch`
+  (a request to start a client) and `loopflow_harness::transcript::Launch`
+  (the first request's skill and message, parsed back).
+  `ops/human_session/conversation_log.rs` uses the second inside the crate
+  that defines the first.
+- `Launcher` holds six methods that launch nothing (`locate_transcript`,
+  `recent_transcripts`, `transcript_retention`, `conversation_owners`,
+  `recognizes`, `provider`). Its rule is "needs the store or the process
+  table"; the doc comment says so and the name does not.
+
 ## After this Task
 
 Each its own linked Task, ordered by this Task's measurement and not by this

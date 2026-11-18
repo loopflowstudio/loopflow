@@ -81,3 +81,14 @@
 - **`GlobalSettings` keeps one home and takes the profile from its key.**
 - **Not built, on the page:** installed harnesses as an observed fact; a typed
   key per derived value; `load_wave_config`'s `Option`.
+
+## Implement, second pass (2026-11-18)
+
+- **`GlobalSettings` keeps the store's home, written into `outside.home`.**
+  `store.home_dir()` is the database's directory and can differ from
+  `LF_HOME`, so dropping the field and reading the ambient home was not safe.
+- **`placement::read_at` now compares against the home it was given**, not
+  `lf_home_dir()`, when deciding whether a forwarded profile replaces the
+  global document. Same answer wherever the two homes agree.
+- **The `.git` observation sits on the local path only.** `remote::layers`
+  also calls `private_path`; a served request never has a forwarded profile.

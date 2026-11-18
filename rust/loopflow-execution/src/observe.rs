@@ -180,9 +180,8 @@ pub enum Derived {
         wave: Option<String>,
         outside: crate::config::settings::Outside,
     },
-    /// Settings the global `config.yaml` under `home` declares alone.
+    /// Settings the global `config.yaml` under `outside`'s home declares alone.
     GlobalSettings {
-        home: PathBuf,
         outside: crate::config::settings::Outside,
     },
     /// The agent of every skill a Wave's settings name.

@@ -1113,6 +1113,44 @@ mod tests {
     }
 
     #[test]
+    fn personal_settings_reach_a_task_whose_worktree_appears_after_a_reading() {
+        use crate::observe::Cache;
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        // No checked-in `.lf/config.yaml`: the personal file is the only layer.
+        let repo = loopflow_test_support::TestRepo::new();
+        std::fs::write(
+            repo.path().join(crate::config::files::PRIVATE_FILE),
+            "agent: pi\n",
+        )
+        .unwrap();
+        let checkout = home.path().join("task");
+        let agent = || {
+            let config = crate::config::load_wave_config(Some(&checkout), None).unwrap();
+            config.expect("resolved").agent().unwrap().to_owned()
+        };
+
+        let cache = Arc::new(Cache::default());
+        let (before, dependencies) = cache.capture(agent);
+        assert_eq!(before, "codex", "the only installed harness");
+
+        assert!(std::process::Command::new("git")
+            .arg("-C")
+            .arg(repo.path())
+            .args(["worktree", "add", "-b", "task"])
+            .arg(&checkout)
+            .output()
+            .unwrap()
+            .status
+            .success());
+        cache.refresh_all();
+        assert!(dependencies.changed());
+        assert_eq!(cache.capture(agent).0, "pi");
+    }
+
+    #[test]
     fn a_failing_read_waits_longer_before_each_retry() {
         let read_on = Instant::now();
         let due =

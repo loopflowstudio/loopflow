@@ -41,7 +41,7 @@ is kept with the dependencies its computation read.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Derived {
     Settings { checkout: Option<PathBuf>, wave: Option<String>, outside: Outside },
-    GlobalSettings { home: PathBuf, outside: Outside },   // added by qa
+    GlobalSettings { outside: Outside },   // added by qa; home is outside.home
     SkillAgents { checkout: PathBuf, wave: String, outside: Outside },
     SkillCatalog { repo: Option<PathBuf>, home: Option<PathBuf>,
                    claude: Option<PathBuf>, codex: Option<PathBuf> },
@@ -122,7 +122,8 @@ callers. Read per call as today; nothing in the sample points at it.
 - Wave named by ID (`files::wave_name` walks `.lf/wave` with `ignore`): resolve
   the name before `derived`; the key holds the name.
 - Main checkout of a worktree (`std::fs` in `git::worktree_root`, under
-  `files::private_path`): not fixed for a path. See "Left to build".
+  `files::private_path`): the settings computation observes the checkout's
+  `.git` first, so a worktree that appears later changes its dependencies.
 - `fs::canonicalize` on skill dirs (`catalog.rs`): symlink retargets show as
   changed `Metadata`/`File`/`Directory` answers for the lexical path.
 - `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `provider_overrides`: resolved to paths
@@ -260,7 +261,7 @@ shared values, and the bare CLI had become slower. All three are fixed:
   per reading) resolved its own layers. It reads `config::resolved` now.
 - `config::placement::global_settings_at` (Machine names and aliases, asked
   by ownership, placement and Machine reads) resolved the global file per
-  call. It is a fourth variant, `Derived::GlobalSettings { home, outside }`.
+  call. It is a fourth variant, `Derived::GlobalSettings { outside }`, with the store's home as `outside.home`.
 - Bare `lf wave status`, `lf wave show` and `lf task list` lost the deleted
   `waves.rs` memo and resolved once per Task: 168, 121 and 172 ms against the
   base's 139, 102 and 136 ms over 30 Tasks. `snapshot_task_details` now runs
@@ -270,39 +271,29 @@ After the fixes, same load: 28 samples in `resolve_with`, 17 in
 `validate_value` (base 4,261), server CPU 107% against 181%. `outside()` is 51
 samples; `resolved_placement` is under 10, so placement stays underived.
 
-## Left to build (concept review of the built change, 2026-11-18)
+## Built from the concept review (2026-11-18)
 
-The rule "a computation reads observed facts and its key, nothing else" is
-broken in three places. One implement pass, nothing beyond these:
+Nothing is left to build. The three places a computation read outside its key:
 
-1. **A checkout's `.git` is a dependency of its settings.** `file_layers`
-   (`rust/loopflow-execution/src/config.rs`) calls `files::private_path`, which
-   reads `.git` through `std::fs` (`git::worktree_root`). A reading that
-   resolves while a Task's worktree is missing or half-made looks for the
-   personal file under the worktree path; when the worktree appears, no
-   observed answer changes, so in a repository with no checked-in
-   `.lf/config.yaml` the Task shows settings without the `lf set` values for
-   as long as a subscription holds the slot. Read from the code, not run.
-   Fix: `observe::exists(&repo.join(".git"))` in the settings computation
-   before `private_path`. Passed over: keying on the resolved private path
-   (a canonicalize and ancestor walk per Task per reading), and routing
-   `git::worktree_root` through `observe` (launches and mutations call it).
-   Not covered, on purpose: a `.git` file rewritten to name another repository.
-2. **`GlobalSettings` has one home.** The key holds `home` and
-   `outside.home`. Keep one: drop the field and read `outside.home`, unless a
-   caller's `store.home_dir()` can differ from `lf_home_dir()`, in which case
-   `home` stays and is the only one the computation uses.
-3. **The global computation takes the forwarded profile from its key.**
-   `remote::apply_document` inside `resolve_global_settings`
-   (`config/placement.rs`) calls `incoming()` and `lf_home_dir()` itself. Pass
-   `outside.remote` and the home in, as `remote::layers` already takes them.
+1. **A checkout's `.git` is a dependency of its settings**
+   (`personal_file_layers`, `config.rs`). Not covered, on purpose: a `.git`
+   file rewritten to name another repository, and the forwarded-profile path
+   (`remote::layers`), which no served request takes.
+2. **`GlobalSettings` has one home.** A store's home can differ from
+   `LF_HOME` (it is the database's directory), so `global_settings_at` puts
+   the store's home in `outside.home` and the key holds `outside` alone.
+3. **`remote::apply_document` takes the profile text and the home.** The
+   global computation passes `outside.remote` and `outside.home`;
+   `placement::read_at` passes `incoming_text()` and its own `home`, where it
+   compared against `lf_home_dir()` before.
 
-Test, in `read_stream::tests::` or beside
-`readings_share_resolved_settings_until_a_settings_file_changes`: a checkout
-path with no `.lf/config.yaml` and a personal file beside its main checkout;
-a reading through `Cache::capture` before the worktree exists, `git worktree
-add`, `refresh_all`, then `dependencies.changed()` and the next reading shows
-the personal value. It fails on the branch as it stands.
+Checks run by implement, from the checkout with `LF_*` unset:
+
+- `cargo test -p loopflow-execution --lib -- personal_settings_reach_a_task_whose_worktree readings_share config::placement::tests config::remote::tests`:
+  10 passed. `read_stream::tests::personal_settings_reach_a_task_whose_worktree_appears_after_a_reading`
+  failed at `dependencies.changed()` before edit 1.
+- `cargo clippy -p loopflow-execution --all-targets -- -D warnings`: clean.
+  Gate runs clippy for the workspace.
 
 ## Larger than this Task
 

@@ -547,11 +547,16 @@ pub fn inspect(replace: bool, keep: bool) -> Result<serde_json::Value> {
 }
 
 /// Apply origin authority to a domain reader without consulting retention metadata.
-pub(crate) fn apply_document(path: &Path, document: &mut Value) -> Result<()> {
-    let Some(profile) = incoming()? else {
+pub(crate) fn apply_document(
+    profile: Option<&str>,
+    home: &Path,
+    path: &Path,
+    document: &mut Value,
+) -> Result<()> {
+    let Some(profile) = profile.map(parse).transpose()? else {
         return Ok(());
     };
-    if path == crate::store::lf_home_dir().join("config.yaml") {
+    if path == home.join("config.yaml") {
         replace_projection(document, &profile.global);
     } else if path
         .file_name()

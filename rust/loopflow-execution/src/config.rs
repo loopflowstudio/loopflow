@@ -869,6 +869,9 @@ fn personal_file_layers(
         });
     }
     if let Some(repo) = repo_root {
+        // Where the personal file lives depends on whether `repo` is a
+        // checkout yet: a worktree that appears later moves it.
+        crate::observe::exists(&repo.join(".git"));
         let path = files::private_path(repo)
             .map_err(|error| LoadError::InvalidGraph(error.to_string()))?;
         if let Some(mut value) = load_yaml_file(&path)? {

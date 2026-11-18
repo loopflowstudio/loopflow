@@ -539,44 +539,40 @@ Must survive:
    Left: acceptance check 5 (SIGTERM to a holder's group), the real reboot (qa).
 
 5. **What the count and the lines promise** (concept review after qa,
-   `scratch/concept-review.html`; choices made for review, questions 1–3).
-   - A person's start resets the restart count. Any start of a Task
-     conversation whose request is not `recover:…` (`lf resume`, Desktop,
-     `session.continue`) sets `starts_since_turn` to 0 and clears
-     `start_failure`, in the same write that records the new agent. qa saw
-     `running (started again 15:39, attempt 3)` after a person's resume, and the
-     next deaths had fewer starts left. `docs/sessions.md` gains the clause.
-     Test: died 4 times, a person resumes, then dies again: the pass starts it
-     (attempt 1), not gives up at 5.
-   - One waker for one schedule. `restart_runs` (`ops/task/ship.rs:666`)
-     returns the soonest `died.next_at()` it skipped; `settle()` passes it up
-     and `Watcher::read` (`server/recovery.rs`) wakes at the earlier of that
-     and the conversations' `next_at`. Test: a died run with a backoff due in
-     5 s is carried within the next second after it, without a store change.
-   - A promise only when someone keeps it. With no server answering
-     (`machine.sock` not accepting), the session line
-     (`lf/commands/session.rs` ~line 465) reads `· starts again when the server
-     runs` instead of `starting again`/`starts again <t>`. The DTO stays as is:
-     this is presentation over `start.next_at`. Test in
-     `lf::commands::session::tests::`.
-
-   Built: the pass's start runs with `LF_RECOVERING_SESSION=<session>`
-   (`ops::recovery::RECOVERING_ENV`); `lf session resume` calls
-   `ops::recovery::record_start`, which resets the count
-   (`reset_conversation_starts`) unless that names this Session. Not the same
-   write as the attach: every start, the pass's included, attaches through
-   `lf session resume`, and only the launcher knows who asked. A `--prepare`
-   counts as a person's. `restart_runs` returns ship and died-run backoffs;
-   `Watcher` keeps `conversations_due` and `runs_due`, and a reading settles
-   when a run came due even inside the 10 s throttle. `conversation_line`
-   takes `server_runs` (a connect to `machine.sock`). Tests:
-   `server::recovery::tests::a_persons_start_counts_the_passs_starts_from_zero`,
-   `…::a_runs_backoff_wakes_the_watcher_and_settles` (Watcher-level, not a
-   live carrier), `lf::commands::session::tests::with_no_server_a_died_conversation_waits_for_one`.
+   `scratch/concept-review.html`; choices 1a/2a/3a made for review,
+   `questions.md`). Built:
+   - A person's start resets the restart count. qa had seen `running (started
+     again 15:39, attempt 3)` after a person's resume. `lf session resume`
+     calls `ops::recovery::record_start`, which sets `starts_since_turn` to 0
+     and clears `start_failure` (`reset_conversation_starts`) unless
+     `LF_RECOVERING_SESSION` (`RECOVERING_ENV`, set on the pass's own start)
+     names this Session. It is not in the attach write: the pass and a person
+     both start through `lf session resume`, and only the launcher knows who
+     asked. A `--prepare` counts as a person's. `docs/sessions.md` says so.
+   - One waker for one schedule. `restart_runs` returns the soonest ship or
+     died-run backoff it skipped; `settle()` passes it up; `Watcher` keeps
+     `conversations_due` and `runs_due`, wakes at the earlier, and a reading
+     settles when a run came due even inside the 10 s throttle. Limit waits
+     still wake on the minute tick.
+   - A promise only when someone keeps it. `conversation_line` takes
+     `server_runs` (a connect to `machine.sock`) and reads `· starts again
+     when the server runs` without one. The DTO is unchanged.
+   - Tests: `server::recovery::tests::a_persons_start_counts_the_passs_starts_from_zero`,
+     `…::a_runs_backoff_wakes_the_watcher_and_settles` (Watcher-level, not a
+     live carrier), `lf::commands::session::tests::with_no_server_a_died_conversation_waits_for_one`.
 
    Recorded, not built: resuming a conversation with no transcript (killed
-   before its first turn) fails five times; the SIGTERM quit window
+   before its first turn) fails five times (3a); the SIGTERM quit window
    (`holder_stopping`) waits on real Claude's SIGTERM exit code.
+
+## Remaining
+
+Nothing left to implement in this Task's scope. Left for later steps:
+- gate: the named checks under Checks, and CI's full matrix;
+- a person: acceptance check 5 against real Claude (does a SIGTERM'd provider
+  exit 0?), and the real reboot with three Tasks;
+- delivery: when LOO-953's Session columns land, rewrite
+  `conversations_to_start` and `summary_query`'s `agent_end` onto them (slice 4).
 
 ## Checks
 

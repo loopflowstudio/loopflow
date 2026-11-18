@@ -135,7 +135,7 @@ pub fn checkout_execution_boundary(
 /// transcript; an inherited `CODEX_SANDBOX` hands a nested Codex its parent's
 /// sandbox. Settings a person chooses (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
 /// credentials) are not markers and pass through.
-pub(crate) const CALLER_SESSION_ENV: [&str; 32] = [
+pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     crate::steer::PROVIDER_CONTEXT_ENV,
     crate::steer::BARE_STEER_ENV,
     crate::steer::STEER_SEEN_ENV,
@@ -995,7 +995,7 @@ fn run_admitted_agent(
     };
     let mut process = process.clone();
     for name in CALLER_SESSION_ENV {
-        launch.env.remove(name);
+        launch.env.remove(*name);
     }
     if let Some(runtime) = &implicit_runtime {
         process.runtime = Some(runtime.clone());

@@ -20,7 +20,7 @@ const CALLER: &str = "caller";
 fn providers(home: &Path) {
     let bin = home.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let caller_session = serde_json::to_string(&crate::agent::CALLER_SESSION_ENV).unwrap();
+    let caller_session = serde_json::to_string(crate::agent::CALLER_SESSION_ENV).unwrap();
     let record = format!(
         r#"
 import json, os, sys, uuid
@@ -104,7 +104,8 @@ fn every_harness_runs_all_four_launch_kinds() {
     // markers must not reach a provider, while a person's own setting does.
     // lf's markers stay unset: this process is lf and reads them itself.
     let provider_markers: Vec<&str> = crate::agent::CALLER_SESSION_ENV
-        .into_iter()
+        .iter()
+        .copied()
         .filter(|name| !name.starts_with("LF_"))
         .collect();
     let _caller = crate::test_ambient::EnvGuard::clear(&provider_markers);

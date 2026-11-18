@@ -306,9 +306,7 @@ pub(crate) fn start_lf(
         .stdout(log.try_clone()?)
         .stderr(log)
         .env_remove("LF_SERVER_STATUS")
-        .env_remove(crate::transport::STREAM_ENV)
-        // It names a descriptor the child does not inherit.
-        .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+        .env_remove(crate::transport::STREAM_ENV);
     spawn(command, inherit)?.acknowledged()
 }
 
@@ -368,11 +366,8 @@ fn shell_command(cwd: &Path, argv: &[String], env: &[(&str, &str)]) -> String {
 const PROCESS_CONTEXT_ENV: &[&str] = &[
     crate::config::AGENT_OVERRIDE_ENV,
     crate::ops::WORK_DECLARATION_ENV,
-    crate::ops::human_session::HUMAN_SESSION_ENV,
-    crate::ops::human_session::PREPARED_CAPTURE_ENV,
     "LF_RUN_DIR",
     "LF_EXECUTION_ID",
-    "LF_HUMAN_SESSION_RUN",
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,

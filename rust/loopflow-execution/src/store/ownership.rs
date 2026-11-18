@@ -190,7 +190,7 @@ pub(crate) fn promote_task(
     placement: Option<&(PathBuf, TaskPr)>,
     session: Option<&crate::session::LfSession>,
     destination: Option<&Path>,
-    receipt: Option<&loopflow_storage::sqlite::creation::CreationIdentity>,
+    receipt: Option<&loopflow_storage::sqlite::creation::TaskCreationRecord>,
 ) -> StoreResult<Task> {
     let caller = if session.is_some() {
         super::sessions::session_caller()?

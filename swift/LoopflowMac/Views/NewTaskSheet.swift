@@ -2,8 +2,8 @@ import Loopflow
 import SwiftUI
 
 /// ⌘N: your words, where the Task lives and the workflow it takes up, drawn as
-/// its steps with yours named. Start runs `lf task create REQUEST --run` and
-/// opens the Task's conversation.
+/// its steps with yours named. Start closes the sheet into the Task's
+/// conversation and runs `lf task create REQUEST --run`.
 struct NewTaskSheet: View {
     let model: WorkModel
     @Environment(\.palette) private var palette
@@ -13,8 +13,6 @@ struct NewTaskSheet: View {
     @State private var waveID: String?
     /// A graph other than the scope's default; nil takes up the default.
     @State private var graph: String?
-    @State private var creating = false
-    @State private var error: String?
     @State private var choosingWorkflow = false
     @FocusState private var focused: Bool
 
@@ -58,10 +56,6 @@ struct NewTaskSheet: View {
                 if let workflow {
                     WorkflowSteps(workflow: workflow).accessibilityIdentifier("new-task-steps")
                 }
-                if let error {
-                    Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
-                        .textSelection(.enabled).accessibilityIdentifier("new-task-error")
-                }
             }
             .padding(22)
             Divider()
@@ -71,7 +65,7 @@ struct NewTaskSheet: View {
                     .buttonStyle(.plain).foregroundStyle(palette.textSecondary)
                     .keyboardShortcut(.cancelAction)
                 Button { create() } label: {
-                    Text(creating ? "Starting…" : "Start  ⌘↩")
+                    Text("Start  ⌘↩")
                         .font(Typography.strong(13))
                         .padding(.horizontal, 15).padding(.vertical, 7)
                         .foregroundStyle(palette.accentText)
@@ -79,8 +73,8 @@ struct NewTaskSheet: View {
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
-                .disabled(trimmed.isEmpty || creating)
-                .opacity(trimmed.isEmpty || creating ? 0.45 : 1)
+                .disabled(trimmed.isEmpty)
+                .opacity(trimmed.isEmpty ? 0.45 : 1)
                 .accessibilityIdentifier("new-task-create")
             }
             .padding(.horizontal, 22).padding(.vertical, 12)
@@ -150,22 +144,7 @@ struct NewTaskSheet: View {
     private var scopeName: String { wave?.displayName ?? repositoryName }
 
     private func create() {
-        creating = true
-        error = nil
-        let (request, wave, graph) = (trimmed, wave, graph)
-        let owner = model.navigation.performanceOwner
-        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: "new-task",
-                        repository: model.repoPath, liveSessions: model.liveSessionCount, owner: owner) {
-            Perf.acknowledged(.startTask, id: "new-task", owner: owner)
-            Task {
-                defer { creating = false }
-                do { try await model.createTask(request: request, wave: wave, graph: graph) }
-                catch {
-                    Perf.finish(.startTask, id: "new-task", owner: owner, outcome: .failed)
-                    self.error = error.localizedDescription
-                }
-            }
-        }
+        StartingTaskView.start(model: model, request: trimmed, wave: wave, graph: graph)
     }
 
     /// Whose default the reported workflow is, named for the scope it follows.
@@ -298,5 +277,55 @@ private struct WorkflowChooser: View {
                 .accessibilityIdentifier("new-task-workflow-\(entry.name)")
             }
         }
+    }
+}
+
+/// A New Task between the click and its installed conversation: the words you
+/// typed, and the failure if the request could not be filed.
+struct StartingTaskView: View {
+    let model: WorkModel
+    let starting: StartingTask
+    @Environment(\.palette) private var palette
+
+    /// The sheet closes at once; the answer opens the Task's conversation.
+    @MainActor
+    static func start(model: WorkModel, request: String, wave: WaveSnapshot?, graph: String?) {
+        let owner = model.navigation.performanceOwner
+        let requestID = UUID().uuidString
+        Perf.userAction(.startTask, scenario: "new_task_to_typing", id: requestID, repository: model.repoPath,
+                        machine: model.machineKind, liveSessions: model.liveSessionCount, owner: owner) {
+            Perf.acknowledged(.startTask, id: requestID, owner: owner)
+            if model.navigation.palette == .newTask { model.navigation.palette = nil }
+            Task {
+                do { try await model.createTask(request: request, wave: wave, graph: graph, requestID: requestID) }
+                catch { Perf.finish(.startTask, id: requestID, owner: owner, outcome: .failed) }
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ScrollView {
+                Text(starting.request)
+                    .font(Typography.body(15))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if let error = starting.error {
+                Text(error).font(Typography.body(12)).foregroundStyle(palette.warning)
+                    .textSelection(.enabled).accessibilityIdentifier("new-task-error")
+                HStack {
+                    Button("Try again") {
+                        Self.start(model: model, request: starting.request, wave: starting.wave, graph: starting.graph)
+                    }
+                    Button("Discard") { model.navigation.startingTask = nil }
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(28)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(palette.background)
+        .accessibilityIdentifier("starting-task-conversation")
     }
 }

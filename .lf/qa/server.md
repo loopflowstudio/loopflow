@@ -30,8 +30,12 @@ branch: `lf session history <id>` is empty until `lf machine prune` or the
 branch server's start-up pass moves the old rows. To make a history write fail,
 hold `BEGIN EXCLUSIVE` on `history.db` from Python. A process's first write
 then waits about 5 s (a 2 s busy timeout, retried by
-SQLite's WAL path) and records a gap; its later writes fail at once. Sample the
-branch `lf` itself (`$LF_BIN …&`), not a shell wrapper's PID.
+SQLite's WAL path) and logs one `recording gap: history.db: …` line; its later
+writes fail at once, at debug. Sample the
+branch `lf` itself (`$LF_BIN …&`), not a shell wrapper's PID. Set `LF_BIN` to
+the branch binary for every turn: hook settings name `LF_BIN`, else the
+installed `lf`, whose hooks write history rows (transitions) into `loopflow.db`.
+`lf machine prune` moves them, which is the upgrade skew, not a branch bug.
 
 # Loopflow's local server
 

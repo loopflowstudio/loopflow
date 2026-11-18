@@ -134,7 +134,9 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
     assert!(endings > 0, "missing completed performance receipt");
     // Each store open still reads the whole schema_migrations ledger, so every
     // release batch adds rows here; the schema itself is read once per process.
-    assert!(rows < 20_000, "launch read {rows} SQLite rows");
+    // Each connection also loads the schema of the history.db it attaches,
+    // about 1,100 rows across this launch.
+    assert!(rows < 21_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"

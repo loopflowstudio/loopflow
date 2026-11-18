@@ -11,10 +11,10 @@ struct SessionView: View {
     @FocusState private var replying: Bool
     @Environment(\.scenePhase) private var scenePhase
 
-    init(client: RemoteMobileClient, task: WorkViewPlan.Content, theme: ThemeDefinition, draft: Binding<String>) {
+    init(client: RemoteMobileClient, task: MobileTask, session: String, theme: ThemeDefinition, draft: Binding<String>) {
         self.theme = theme
         _draft = draft
-        _link = State(initialValue: SessionLink(client: client, task: task))
+        _link = State(initialValue: SessionLink(client: client, task: task, session: session))
     }
 
     var body: some View {

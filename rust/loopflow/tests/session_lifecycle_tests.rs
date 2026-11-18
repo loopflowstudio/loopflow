@@ -897,7 +897,7 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     assert!(fixture.sessions().is_empty());
     assert!(fixture.session_row(&input).3);
     let history = fixture.json(&["session", "history", &id, "--json"]);
-    assert!(history
+    assert!(history["events"]
         .as_array()
         .unwrap()
         .iter()

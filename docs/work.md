@@ -74,10 +74,34 @@ rerunning the command without it is a new submission.
 
 The JSON creation result contains `task`, `graph`, `session_id` and `milestone`,
 including without `--run`. Scripts read the identifier at `.task.identifier`.
-For `--run`, an interrupted launch can return `outcome_unknown` with the created
-Task and `run_requested` milestone. Inspect `lf task status <ID>` before starting
-anything: recovery never launches a second Graph when the first launch is
-unconfirmed. A receipt for a removed Task does not recreate it.
+Without `--run` the milestone is `filed`. With `--run` the answer arrives once
+the Task, its claim, its Graph and its conversation are recorded, before any
+checkout or network call: the milestone is `admitted`. The conversation then
+does the rest, one line per step:
+
+```
+Checkout ready  0.2 s
+Graph code started
+```
+
+Repeating the request ID during setup returns the same Task and Session and
+starts no second Graph. If a setup step fails, the conversation shows the error
+and the Task's position reads `Setup stopped: checkout failed` (or `graph`) in
+`lf task status` and Desktop; `lf resume --task <ID>` reopens it and runs setup
+again. Tracker
+sync and the assignee check run after the answer; a failure there is a Task
+event, not a creation failure.
+
+A new Task's branch starts from `origin/<default>` as of the last background
+fetch, not a fetch at creation; its first `lf sync` catches up. To make the
+checkout instant, Loopflow keeps one prepared checkout per repository at
+`<repo>.ready` beside your Task worktrees and replaces it after each Task takes
+it. `lf wt prune` leaves it alone. Deleting it is safe: the next Task makes its
+checkout the slower way and a new one is prepared.
+
+A receipt for a removed Task does not recreate it. An earlier release may have
+left a `run_requested` receipt: its launch is unconfirmed, so inspect
+`lf task status <ID>` before starting anything.
 
 Desktop saves and recovers these submissions automatically, including after it
 quits. Showing the resulting Task clears its saved submission; promotion from a

@@ -900,3 +900,77 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
         );
     assert!(store.task_by_issue("LOO-2").unwrap().is_none());
 }
+
+#[test]
+fn an_admitted_creation_commits_task_graph_claim_and_conversation_together() {
+    use loopflow_storage::sqlite::creation::{
+        CreationIdentity, RecoveryDisposition, TaskAdmission, TaskCreationRecord,
+    };
+    let directory = tempfile::tempdir().unwrap();
+    let store =
+        crate::store::opening::open_ephemeral(&directory.path().join("loopflow.db")).unwrap();
+    let repository_id = local_repository(&store);
+    let admit = |request: &str, graph: &str| {
+        let creation = NewTask {
+            repository_id: repository_id.clone(),
+            due_date: None,
+            id: TaskId::new(),
+            project_id: None,
+            title: "Start in the conversation".into(),
+            description: "Start in the conversation".into(),
+        };
+        let mut session = loopflow_storage::test_fixture::unpublished_conversation(
+            Some(creation.id.clone()),
+            None,
+            1,
+        );
+        session.interactive = true;
+        let record = TaskCreationRecord {
+            identity: CreationIdentity {
+                request_id: request.into(),
+                kind: "task.create",
+                fingerprint: "f".into(),
+                run: true,
+            },
+            admission: Some(TaskAdmission {
+                graph: Some(graph.into()),
+                session: session.clone(),
+                caller: None,
+            }),
+        };
+        let result = crate::store::ownership::promote_task(
+            &store,
+            &creation.id,
+            Some(&creation),
+            None,
+            None,
+            None,
+            Some(&record),
+        );
+        (creation.id, session, result)
+    };
+
+    // A write failing inside admission leaves nothing: no Task without its
+    // Graph or conversation, and no receipt to answer a repeat with.
+    let (failed, _, result) = admit("broken", "not json");
+    assert!(result.is_err());
+    assert!(store.task(&failed).unwrap().is_none());
+    assert!(store.creation_receipt("broken").unwrap().is_none());
+
+    let (task, session, result) = admit("req", r#"{"name":"code","steps":[]}"#);
+    result.unwrap();
+    // One reading holds all of it.
+    assert_eq!(
+        store.task_graph_row(&task).unwrap().unwrap().step,
+        loopflow_storage::sqlite::task_work::START
+    );
+    assert!(store.task_claimed_here(&task).unwrap());
+    assert_eq!(store.task_primary(&task).unwrap().unwrap().id, session.id);
+    let admitted = store.creation_receipt("req").unwrap().unwrap();
+    assert_eq!(admitted.milestone, "admitted");
+    assert_eq!(admitted.disposition, RecoveryDisposition::Complete);
+    let result = admitted.result.unwrap();
+    assert_eq!(result["milestone"], "admitted");
+    assert_eq!(result["graph"], "code");
+    assert_eq!(result["session_id"], session.id.as_str());
+}

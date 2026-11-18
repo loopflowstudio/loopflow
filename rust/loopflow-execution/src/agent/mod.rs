@@ -225,6 +225,9 @@ pub struct AgentConfig {
     /// to this path. The caller reads it after the agent exits and forwards
     /// safe directives (e.g. `cd`) to the real directive file.
     pub directive_relay: Option<std::path::PathBuf>,
+    /// The Session launch lock of the `session resume` running this launch,
+    /// released once the provider is recorded.
+    pub launch_lock: Option<crate::ops::human_session::LaunchLock>,
     /// Environment scoped to this provider process and its descendants.
     pub env: BTreeMap<String, String>,
     /// Exact attachment selected before provider launch. Never
@@ -280,6 +283,7 @@ impl std::fmt::Debug for AgentConfig {
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
             .field("directive_relay", &self.directive_relay)
+            .field("launch_lock", &self.launch_lock.is_some())
             .field("env_keys", &self.env.keys().collect::<Vec<_>>())
             .finish()
     }

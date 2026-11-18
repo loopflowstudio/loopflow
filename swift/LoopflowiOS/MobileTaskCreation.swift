@@ -43,9 +43,50 @@ struct MobileCreationContext {
     let repositories: [PortfolioRepo]
 }
 
+/// The Task as its phone workspace shows it: from `task.create`'s answer on
+/// Start, or from a reading's row in the Task list.
+struct MobileTask: Hashable {
+    let id: String
+    let identifier: String?
+    let title: String
+    let primarySession: String?
+
+    init(_ row: WorkViewPlan.Content) {
+        id = row.work.id
+        identifier = row.identifier
+        title = row.title
+        primarySession = row.primarySession
+    }
+
+    init(_ created: TaskCreated) {
+        id = created.receipt.task.id
+        identifier = created.receipt.task.identifier
+        title = created.receipt.task.title
+        primarySession = created.session?.id ?? created.receipt.sessionId
+    }
+}
+
+/// A first Start's live answer: the outcome kept for recovery, and the Task to open.
+struct MobileTaskStart {
+    let outcome: MobileTaskOutcome
+    let task: MobileTask
+
+    init(outcome: MobileTaskOutcome, task: MobileTask) {
+        self.outcome = outcome
+        self.task = task
+    }
+
+    init(_ created: TaskCreated) {
+        let recorded = ["admitted", "started"].contains(created.receipt.milestone)
+        self.init(outcome: MobileTaskOutcome(taskId: created.receipt.task.id, state: recorded ? .started : .unknown,
+                                             receipt: created.receipt, message: nil),
+                  task: MobileTask(created))
+    }
+}
+
 @MainActor
 struct MobileTaskOpening {
-    let task: WorkViewPlan.Content
+    let task: MobileTask
     let presented: () -> Void
 }
 
@@ -61,8 +102,12 @@ struct MobileTaskSubmission: Codable, Equatable {
 @MainActor
 protocol MobileTaskCreationClient {
     func creationContext() async throws -> MobileCreationContext
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content
+    /// The first send: saved, sent, and the Machine's answer.
+    func startTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskStart
+    /// A saved request whose answer was lost: asks the Machine, resends only when told to.
+    func recoverTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome
+    /// A recovered Task's row; its receipt names no Session to open.
+    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> MobileTask
     func taskPresented(_ submission: MobileTaskSubmission) async throws
 }
 
@@ -130,8 +175,12 @@ final class MobileTaskCreation: Identifiable {
     private var savedDraft = MobileTaskDraft()
     private(set) var context: MobileCreationContext?
     private(set) var busy = false
+    /// A first Start is on its one send; recovery and opening are other work.
+    private(set) var starting = false
     private(set) var error: String?
     private(set) var storageUnavailable = false
+    /// Tasks a first Start's answer named, by submission; opening one reads nothing.
+    @ObservationIgnored private var answered: [UUID: MobileTask] = [:]
 
     init(client: any MobileTaskCreationClient, store: MobileTaskDraftStore = .application) {
         self.client = client
@@ -235,7 +284,8 @@ final class MobileTaskCreation: Identifiable {
         if savedRequestID != nil && saved == nil { return }
         let previous = savedRequestID == nil ? draft.outcome : saved?.outcome
         if let previous, previous.state != .inProgress { return }
-        if savedRequestID == nil && draft.submission == nil {
+        let first = savedRequestID == nil && draft.submission == nil
+        if first {
             guard canCreate, let context else { return }
             draft.submission = MobileTaskSubmission(id: UUID(), machineID: context.machineID,
                 machineName: context.name, directory: draft.directory, request: draft.text)
@@ -246,7 +296,16 @@ final class MobileTaskCreation: Identifiable {
         error = nil
         defer { busy = false }
         do {
-            let outcome = try await client.createTask(submission)
+            let outcome: MobileTaskOutcome
+            if first {
+                starting = true
+                defer { starting = false }
+                let start = try await client.startTask(submission)
+                answered[submission.id] = start.task
+                outcome = start.outcome
+            } else {
+                outcome = try await client.recoverTask(submission)
+            }
             try Task.checkCancellation()
             if let previous, previous.taskId != outcome.taskId {
                 throw RegistryQueryError("The Machine returned a different Task for this request")
@@ -275,16 +334,18 @@ final class MobileTaskCreation: Identifiable {
         if savedRequestID != nil && saved == nil { return nil }
         guard let submission = saved?.submission ?? draft.submission,
               let outcome = savedRequestID == nil ? draft.outcome : saved?.outcome else { return nil }
+        let presented = { self.didPresentTask(submission, taskID: outcome.taskId) }
+        if let task = answered[submission.id], task.id == outcome.taskId {
+            return MobileTaskOpening(task: task, presented: presented)
+        }
         busy = true
         error = nil
         defer { busy = false }
         do {
             let task = try await client.createdTask(submission, taskID: outcome.taskId)
             try Task.checkCancellation()
-            guard task.work.id == outcome.taskId else { throw RegistryQueryError("The Machine returned a different Task") }
-            return MobileTaskOpening(task: task) {
-                self.didPresentTask(submission, taskID: outcome.taskId)
-            }
+            guard task.id == outcome.taskId else { throw RegistryQueryError("The Machine returned a different Task") }
+            return MobileTaskOpening(task: task, presented: presented)
         } catch {
             if !Task.isCancelled { self.error = error.localizedDescription }
             return nil

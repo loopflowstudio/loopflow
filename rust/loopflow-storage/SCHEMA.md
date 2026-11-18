@@ -97,9 +97,9 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## LfSession
 
-- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, transport_lf_process_id, fence_locator, moved_to_machine_id, held_terminal_id, skill_version
+- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, transport_lf_process_id, fence_locator, moved_to_machine_id, held_terminal_id, skill_version, opened_at, transition, departed_attachment, departure
 - `session_activity`: session_id, observed_at, open_tools, pending_input, yielded, program_status, status_stream, status_sequence, attachment_token, agent_process_id, preview, cpu_sampled_at, cpu_quiet_since
-- `session_events`: seq, session_id, provider_thread, provider_turn, kind, receipt_key, provider_generation, lf_process_id, task_id, wave_id, observed_at, payload, captured_event, agent_process_id
+- `session_events`: seq, session_id, provider_thread, provider_turn, kind, receipt_key, provider_generation, lf_process_id, task_id, wave_id, observed_at, payload, captured_event, agent_process_id, provider_account, independent, provider_lineage, turn_thread, turn_id, turn_ended_at, turn_status, turn_error
 - `session_moves`: session_id, agent, requested_at
 
 ## Machine

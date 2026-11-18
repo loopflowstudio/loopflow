@@ -1,4 +1,4 @@
-//! Task mutation previews validate local input, without acquisition, saving or delivery.
+//! Task mutation previews validate local input, without a tracker fetch, save or action.
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};

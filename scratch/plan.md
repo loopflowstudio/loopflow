@@ -201,6 +201,23 @@ Survives: the Graph step's waits and recorded recoveries, pinning by `-a` and
    that a refused first agent yields the second's message.
 4. **Docs and comments** listed under What goes.
 
+## Docs written ahead of the code
+
+Slice 4's prose is in place and describes the intended behavior; implement
+makes it true and still owes the `agent/mod.rs` comments and the `agents`
+description in `config/catalog.rs:274`.
+
+- `docs/config.md` "Keep going when a provider runs out": `lf pr open` example
+  with the move lines, the spent-order error, commands never wait.
+- `docs/subscriptions.md`: refusal table rows for other headless work, Pi and
+  OpenCode; a turn refused before any reply restarts from its prompt.
+- `docs/troubleshooting.md` "Rate limits".
+- `docs/orchestration.md`: `default_agent` for `commit-message` and
+  `pr-message`; "headless work", not "a step", moves through `agents`.
+
+The docs state that Pi and OpenCode entries stop at a refusal. `docs/sessions.md`
+needed no change.
+
 ## Demo
 
 Acceptance check at gate, headless:

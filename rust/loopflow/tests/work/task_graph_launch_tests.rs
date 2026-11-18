@@ -2037,8 +2037,80 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
     }
 }
 
+/// A harness that is not installed fails the same way on every attempt, so the
+/// run is not started again; with another agent in the order the step runs there.
 #[test]
-fn a_failed_run_starts_again_at_the_step_that_failed() {
+fn a_step_that_cannot_launch_is_not_started_again() {
+    let codex = support::codex_app_server_script("Worker finished.", "");
+    let task = GraphTask::with_tools(&[("codex", &codex)]);
+    task.repo.create_file(
+        ".lf/graphs/worker.yaml",
+        "- implement\n- interactive: {name: demo, id: review}\n",
+    );
+    task.repo.stage_all();
+    task.repo.commit("Define a worker followed by a review");
+
+    let pinned = task.task_run(&[
+        "task",
+        "run",
+        "INF-123",
+        "worker",
+        "-a",
+        "opencode:opencode/fixture",
+    ]);
+    assert!(!pinned.success(), "{}", pinned.text);
+    let hint = "'opencode' is not installed. Install OpenCode 2 or later";
+    assert!(pinned.text.contains(hint), "{}", pinned.text);
+    assert!(
+        pinned.text.contains("stopped before any agent started"),
+        "{}",
+        pinned.text
+    );
+    assert!(
+        !pinned.text.contains("starting it again"),
+        "{}",
+        pinned.text
+    );
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
+    let status = task.text_status();
+    assert!(status.contains("'opencode' is not installed"), "{status}");
+
+    task.ok(&[
+        "set",
+        "--global",
+        "agents",
+        "opencode:opencode/fixture,codex",
+    ]);
+    let moved = task.task_run(&["task", "run", "INF-123"]);
+    assert!(moved.success(), "{}", moved.text);
+    assert_eq!(task.graph()["position"], at("review"));
+    assert_eq!(support::recorded_graphs(task.home.path()).len(), 2);
+    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+    let ran_on_codex: bool = db
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE task_id=?1 AND provider='codex'
+                 AND skill='implement' AND interactive=0 AND completed_at IS NOT NULL)",
+            [task.registered.task.id.as_str()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(ran_on_codex, "{}", moved.text);
+    let recorded: String = db
+        .query_row("SELECT reason FROM agent_limit_recoveries", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert!(
+        recorded.starts_with(&format!(
+            "'opencode' is not installed{}codex",
+            loopflow_execution::ops::task_execution::MOVED_TO
+        )),
+        "{recorded}"
+    );
+}
+
+#[test]
+fn a_failed_command_step_is_started_again() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);
     assert!(!failed.success(), "{}", failed.text);

@@ -1,8 +1,6 @@
 use crate::lf::commands::context::preview::PromptPreview;
 use crate::lf::Cli;
 use anyhow::{anyhow, bail, Result};
-use loopflow_execution::agent::check_cli_available;
-use loopflow_execution::agent::missing_agent_message;
 use loopflow_execution::agent::run_agent;
 use loopflow_execution::agent::AgentConfig;
 use loopflow_execution::agent::ProcessConfig;
@@ -321,6 +319,7 @@ pub(crate) fn bound_message(
     context
 }
 
+#[derive(Clone)]
 struct PromptBuild {
     repo_root: PathBuf,
     agent_config: AgentConfig,
@@ -726,10 +725,10 @@ fn run_prompt(
         None,
     );
     let cli_check_start = Instant::now();
-    let harness = built.agent_config.agent.harness;
-    if !check_cli_available(harness.as_str()) {
-        return Err(anyhow!(missing_agent_message(harness)));
-    }
+    let mut built = built.clone();
+    loopflow_execution::agent::start_on_installed_agent(&mut built.agent_config, &built.process)
+        .map_err(|missing| anyhow!(missing))?;
+    let built = &built;
     debug!(
         elapsed_ms = cli_check_start.elapsed().as_millis(),
         "checked cli availability"

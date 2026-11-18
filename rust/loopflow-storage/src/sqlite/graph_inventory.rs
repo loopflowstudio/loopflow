@@ -580,6 +580,28 @@ impl SqliteStore {
         )))
     }
 
+    /// Whether the Graph run `id` failed at a skill step that opened no
+    /// conversation: lf refused the launch before any agent started, and
+    /// would refuse the same launch again.
+    pub fn graph_failed_before_its_agent(&self, id: &LfProcessId) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
+            return Ok(false);
+        };
+        let Some(step) = run
+            .steps
+            .last()
+            .filter(|step| step.run.result() == ExecutionResult::Failed)
+        else {
+            return Ok(false);
+        };
+        let skill = run
+            .compiled
+            .node_at(step.key)
+            .is_some_and(|node| node.kind == crate::graph::GraphNodeKind::Skill);
+        Ok(skill && process_inputs(&conn, &[&step.run.id])?.is_empty())
+    }
+
     /// The conversation, captured input and its event a process opened last.
     pub fn process_input(
         &self,

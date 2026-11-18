@@ -308,7 +308,7 @@ fn _record_limit_wait(provider: &str, reason: &str, delay: Duration) {
 
 /// The step left `agent` for the next agent in its order. The terminal gets
 /// one line; the recorded recovery keeps the provider's whole `reason`.
-fn _record_agent_move(agent: &Agent, failure: AgentFailure, reason: &str, next: &Agent) {
+fn _record_agent_move(agent: &Agent, failure: impl std::fmt::Display, reason: &str, next: &Agent) {
     eprintln!("{agent}: {failure}; continuing on {next}");
     let provider = agent.harness.as_str();
     _record_limit_recovery(
@@ -981,7 +981,7 @@ fn _run_with_retries(
     mut run: impl FnMut(&AgentConfig, bool) -> Result<AgentProcessResult, CoreError>,
     mut wait: impl FnMut(Duration),
 ) -> Result<AgentProcessResult, CoreError> {
-    let rungs = _fallthrough_rungs(launch, process)?;
+    let rungs = _fallthrough_rungs(launch, process);
     let mut rung = 0;
     let mut attempt = launch.clone();
     let mut launched = false;
@@ -1100,13 +1100,10 @@ fn _with_original_task(prompt: &str, launch: &AgentConfig) -> String {
 /// as written, a bare harness on its configured model. With none, a bare
 /// harness tries its other models and an explicit `harness:model` stays put.
 /// Only a Graph step moves automatically.
-fn _fallthrough_rungs(
-    launch: &AgentConfig,
-    process: &ProcessConfig,
-) -> Result<Vec<Agent>, CoreError> {
+fn _fallthrough_rungs(launch: &AgentConfig, process: &ProcessConfig) -> Vec<Agent> {
     let first = launch.agent.to_owned();
     if !process.wait_for_capacity {
-        return Ok(vec![first]);
+        return vec![first];
     }
     let mut order: Vec<Agent> = std::iter::once(first.clone())
         .chain(launch.fallback_agents.iter().cloned())
@@ -1130,7 +1127,7 @@ fn _fallthrough_rungs(
             rungs.push(rung);
         }
     }
-    Ok(rungs)
+    rungs
 }
 
 /// Put the current attempt on `agent`. The thread moves within its provider;
@@ -1386,9 +1383,56 @@ fn _run_harness_once(
 
 /// What to tell someone whose agent CLI is missing.
 pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
-    let cli = kind.as_str();
     let hint = kind.harness().capabilities().install_hint;
-    format!("'{cli}' is not installed. {hint}")
+    format!("{}. {hint}", _not_installed(kind))
+}
+
+fn _not_installed(kind: crate::harness::HarnessKind) -> String {
+    format!("'{}' is not installed", kind.as_str())
+}
+
+/// Put a headless launch on the first agent of its order whose CLI is
+/// installed, and take the missing ones out of the order. A Graph step passes
+/// over a missing first choice and records the move where a limit move is
+/// recorded; a chat or batch has no order to move through. With none
+/// installed, the error is the first choice's install hint. Call it before the
+/// launch opens its conversation, so a refused launch leaves no agent behind.
+///
+/// # Errors
+///
+/// [`missing_agent_message`] for the first choice when no agent the launch may
+/// use is installed.
+pub fn start_on_installed_agent(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+) -> Result<(), String> {
+    let is_installed = |kind: crate::harness::HarnessKind| check_cli_available(kind.as_str());
+    let first =
+        _pass_over_missing_agents(launch, process, is_installed).map_err(missing_agent_message)?;
+    if first != launch.agent {
+        let reason = _not_installed(first.harness);
+        _record_agent_move(&first, "not installed", &reason, &launch.agent);
+    }
+    Ok(())
+}
+
+/// Returns the agent the launch asked for first; `launch.agent` is where it starts.
+fn _pass_over_missing_agents(
+    launch: &mut AgentConfig,
+    process: &ProcessConfig,
+    is_installed: impl Fn(crate::harness::HarnessKind) -> bool,
+) -> Result<Agent, crate::harness::HarnessKind> {
+    let first = launch.agent.clone();
+    let start = _fallthrough_rungs(launch, process)
+        .into_iter()
+        .find(|rung| is_installed(rung.harness))
+        .ok_or(first.harness)?;
+    launch.agent = start;
+    // The order stays as written: a list keeps being a list, minus what is missing.
+    launch
+        .fallback_agents
+        .retain(|agent| is_installed(agent.harness));
+    Ok(first)
 }
 
 /// Check if a CLI is available.
@@ -1399,6 +1443,46 @@ pub fn check_cli_available(cli: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_graph_step_passes_over_an_agent_that_is_not_installed() {
+        use crate::harness::HarnessKind;
+        let agent = |text: &str| Agent::parse(text).unwrap();
+        let launch = AgentConfig {
+            agent: agent("opencode:opencode/fixture"),
+            fallback_agents: vec![agent("pi:fixture/model"), agent("codex"), agent("claude")],
+            ..Default::default()
+        };
+        let step = ProcessConfig {
+            wait_for_capacity: true,
+            ..Default::default()
+        };
+        let installed =
+            |kind: HarnessKind| matches!(kind, HarnessKind::Codex | HarnessKind::Claude);
+
+        let mut moved = launch.clone();
+        let first = _pass_over_missing_agents(&mut moved, &step, installed).unwrap();
+        assert_eq!(first, launch.agent);
+        assert_eq!(moved.agent, agent("codex"));
+        assert_eq!(
+            _fallthrough_rungs(&moved, &step),
+            [agent("codex"), agent("claude")]
+        );
+
+        // Nothing installed in the order: the first choice is the one named.
+        let mut pinned = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut pinned, &step, |_| false),
+            Err(HarnessKind::OpenCode)
+        );
+
+        // A chat or batch stays on its choice.
+        let mut batch = launch.clone();
+        assert_eq!(
+            _pass_over_missing_agents(&mut batch, &ProcessConfig::default(), installed),
+            Err(HarnessKind::OpenCode)
+        );
+    }
 
     #[test]
     #[cfg(unix)]

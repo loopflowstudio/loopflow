@@ -3,6 +3,7 @@
 use super::tracker_actions::{self, ActionKind, Resolution, TrackerAction};
 use super::{self as sqlite, planning_write, SqliteStore};
 use crate::planning::{revision_nanos, TrackerItem, TrackerProject};
+use crate::planning_sync::TrackerKind;
 use crate::work::edit::{Disposition, WorkValue as Edit};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
@@ -15,9 +16,9 @@ pub fn accept_linear_project_in(
     initiative: &str,
     project: &TrackerProject,
     observed_at: i64,
-    tracker: crate::planning_sync::TrackerKind,
+    tracker: TrackerKind,
 ) -> StoreResult<()> {
-    let provider = tracker.as_str();
+    let tracker = tracker.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let repo: String = conn.query_row(
         "SELECT repo FROM waves WHERE id=?1",
@@ -30,17 +31,17 @@ pub fn accept_linear_project_in(
             project.id
         )));
     }
-    validate_project_membership(&conn, &repo, project, provider)?;
+    validate_project_membership(&conn, &repo, project, tracker)?;
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
-    put_project(&tx, &repo, observed_at, project, provider)?;
-    associate_project(&tx, &repo, &project.id, wave, initiative, provider)?;
+    put_project(&tx, &repo, observed_at, project, tracker)?;
+    associate_project(&tx, &repo, &project.id, wave, initiative, tracker)?;
     project_accepted_planning(
         &tx,
         &repo,
         &[project.id.as_str()],
         &[],
         Some((wave, initiative)),
-        provider,
+        tracker,
     )?;
     tx.commit()?;
     Ok(())
@@ -54,7 +55,7 @@ pub fn reconcile_linear_project_teams_in(
     observed_at: i64,
 ) -> StoreResult<()> {
     // Linear-only: Teams, Initiative inventories and ordered issues.
-    let provider = crate::provider::Provider::Linear.as_str();
+    let tracker = TrackerKind::Linear.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let repo: String = conn.query_row(
         "SELECT repo FROM waves WHERE id=?1",
@@ -71,7 +72,7 @@ pub fn reconcile_linear_project_teams_in(
     let previous: Option<String> = tx
         .query_row(
             "SELECT initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
-            params![repo, provider, project.id],
+            params![repo, tracker, project.id],
             |row| row.get(0),
         )
         .optional()?;
@@ -88,21 +89,21 @@ pub fn reconcile_linear_project_teams_in(
              WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![
                 repo,
-                provider,
+                tracker,
                 project.id,
                 serde_json::to_string(&project.team_ids)?
             ],
         )?;
     }
-    put_project(&tx, &repo, observed_at, project, provider)?;
-    associate_project(&tx, &repo, &project.id, wave, initiative, provider)?;
+    put_project(&tx, &repo, observed_at, project, tracker)?;
+    associate_project(&tx, &repo, &project.id, wave, initiative, tracker)?;
     project_accepted_planning(
         &tx,
         &repo,
         &[project.id.as_str()],
         &[],
         Some((wave, initiative)),
-        provider,
+        tracker,
     )?;
     tx.commit()?;
     Ok(())
@@ -115,37 +116,37 @@ pub fn accept_linear_issue_in(
     project: Option<&TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(&WaveId, &str)>,
-    tracker: crate::planning_sync::TrackerKind,
+    tracker: TrackerKind,
 ) -> StoreResult<()> {
-    let provider = tracker.as_str();
+    let tracker = tracker.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     if let Some(project) = project {
-        validate_project_membership(&conn, repo, project, provider)?;
+        validate_project_membership(&conn, repo, project, tracker)?;
     }
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let mut item = issue.clone();
     // Detail queries do not observe relative list order.
     if let Some(rank) = tx.query_row(
         "SELECT rank FROM tracker_items WHERE repo=?1 AND tracker=?2 AND id=?3 AND project_id IS ?4",
-        params![repo,provider,item.id,item.project_id], |row| row.get::<_,u32>(0),
+        params![repo,tracker,item.id,item.project_id], |row| row.get::<_,u32>(0),
     ).optional()? {
         item.rank = rank;
     }
     // Project revisions are independent of the issue revision and request age.
     if let Some(project) = project {
-        put_project(&tx, repo, observed_at, project, provider)?;
+        put_project(&tx, repo, observed_at, project, tracker)?;
     }
-    if put_item(&tx, repo, observed_at, &item, provider)? {
+    if put_item(&tx, repo, observed_at, &item, tracker)? {
         tx.execute(
             "UPDATE tracker_items SET needs_refresh=0 WHERE repo=?1 AND tracker=?2 AND id=?3",
-            params![repo, provider, issue.id],
+            params![repo, tracker, issue.id],
         )?;
     }
     if let Some((wave, initiative)) = confirmed_wave {
         let project_id = issue.project_id.as_deref().ok_or_else(|| {
             StoreError::InvalidData("confirmed Wave requires a Project association".into())
         })?;
-        associate_project(&tx, repo, project_id, wave, initiative, provider)?;
+        associate_project(&tx, repo, project_id, wave, initiative, tracker)?;
     }
     project_accepted_planning(
         &tx,
@@ -153,7 +154,7 @@ pub fn accept_linear_issue_in(
         project.map(|project| project.id.as_str()).as_slice(),
         &[issue.id.as_str()],
         confirmed_wave,
-        provider,
+        tracker,
     )?;
     tx.commit()?;
     Ok(())
@@ -168,7 +169,7 @@ pub fn accept_linear_inventory_in(
     observed_at: i64,
 ) -> StoreResult<()> {
     // Linear-only: Teams, Initiative inventories and ordered issues.
-    let provider = crate::provider::Provider::Linear.as_str();
+    let tracker = TrackerKind::Linear.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let repo: String = conn.query_row(
         "SELECT repo FROM waves WHERE id=?1",
@@ -176,7 +177,7 @@ pub fn accept_linear_inventory_in(
         |row| row.get(0),
     )?;
     for project in projects {
-        validate_project_membership(&conn, &repo, project, provider)?;
+        validate_project_membership(&conn, &repo, project, tracker)?;
     }
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let known = {
@@ -185,7 +186,7 @@ pub fn accept_linear_inventory_in(
              WHERE m.wave_id=?1 AND p.repo=?2 AND p.tracker=?3 AND p.archived=0",
         )?;
         let rows = query
-            .query_map(params![wave, repo, provider], |row| row.get::<_, String>(0))?
+            .query_map(params![wave, repo, tracker], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         rows
     };
@@ -198,17 +199,17 @@ pub fn accept_linear_inventory_in(
         )));
     }
     for project in projects {
-        put_project(&tx, &repo, observed_at, project, provider)?;
-        require_accepted_initiative(&tx, &repo, &project.id, initiative, provider)?;
+        put_project(&tx, &repo, observed_at, project, tracker)?;
+        require_accepted_initiative(&tx, &repo, &project.id, initiative, tracker)?;
     }
     for item in issues {
-        put_item(&tx, &repo, observed_at, item, provider)?;
+        put_item(&tx, &repo, observed_at, item, tracker)?;
     }
     tx.execute(
         "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,?2,?3,?4)
          ON CONFLICT(wave_id) DO UPDATE SET tracker=excluded.tracker,
          initiative=excluded.initiative,synced_at=MAX(tracker_wave_sync.synced_at,excluded.synced_at)",
-        params![wave, provider, initiative, observed_at],
+        params![wave, tracker, initiative, observed_at],
     )?;
     for (position, project) in projects.iter().enumerate() {
         tx.execute(
@@ -223,7 +224,7 @@ pub fn accept_linear_inventory_in(
         &projects.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
         &issues.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
         None,
-        provider,
+        tracker,
     )?;
     for project in projects {
         observe_order(
@@ -235,7 +236,7 @@ pub fn accept_linear_inventory_in(
                 .filter(|i| i.project_id.as_deref() == Some(&project.id))
                 .cloned()
                 .collect::<Vec<_>>(),
-            provider,
+            tracker,
         )?;
     }
     tx.commit()?;
@@ -249,12 +250,12 @@ pub fn accept_linear_project_order_in(
     items: &[TrackerItem],
 ) -> StoreResult<bool> {
     // Linear-only: Teams, Initiative inventories and ordered issues.
-    let provider = crate::provider::Provider::Linear.as_str();
+    let tracker = TrackerKind::Linear.as_str();
     let mut conn = store.conn.lock().expect("store mutex poisoned");
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let now = crate::rows::now_unix();
     for item in items {
-        put_item(&tx, repo, now, item, provider)?;
+        put_item(&tx, repo, now, item, tracker)?;
     }
     project_accepted_planning(
         &tx,
@@ -262,9 +263,9 @@ pub fn accept_linear_project_order_in(
         &[],
         &items.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(),
         None,
-        provider,
+        tracker,
     )?;
-    let accepted = observe_order(&tx, repo, project, items, provider)?;
+    let accepted = observe_order(&tx, repo, project, items, tracker)?;
     tx.commit()?;
     Ok(accepted)
 }
@@ -277,14 +278,14 @@ fn validate_project_membership(
     conn: &Connection,
     repo: &str,
     project: &TrackerProject,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<()> {
     // Run before the ingestion transaction: disputed ownership must remain
     // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous = conn
         .query_row(
             "SELECT revision,initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
-            params![repo, provider, project.id],
+            params![repo, tracker, project.id],
             |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
         )
         .optional()?;
@@ -302,7 +303,7 @@ fn validate_project_membership(
         &serde_json::from_str::<Vec<String>>(&initiatives)?,
     ) {
         conn.execute("UPDATE tracker_projects SET membership_unresolved=1 WHERE repo=?1 AND tracker=?2 AND id=?3",
-            params![repo, provider, project.id])?;
+            params![repo, tracker, project.id])?;
         return Err(StoreError::InvalidData(format!(
             "Project {} moved to another Initiative in Linear; move it back, then run `lf wave sync`",
             project.id
@@ -316,7 +317,7 @@ fn put_project(
     repo: &str,
     observed_at: i64,
     project: &TrackerProject,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<()> {
     let krs = serde_json::to_string(&project.krs)?;
     let metric_targets = serde_json::to_string(&project.metric_targets)?;
@@ -324,7 +325,7 @@ fn put_project(
     let team_ids = serde_json::to_string(&project.team_ids)?;
     let status = project.status.as_str();
     let values = named_params! {
-        ":repo": repo, ":tracker": provider, ":id": &project.id,
+        ":repo": repo, ":tracker": tracker, ":id": &project.id,
         ":observed_at": observed_at,
         ":slug": &project.slug,
         ":name": &project.name,
@@ -342,7 +343,7 @@ fn put_project(
         .query_row(
             "SELECT revision,observed_at,archived FROM tracker_projects
              WHERE repo=?1 AND tracker=?2 AND id=?3",
-            params![repo, provider, project.id],
+            params![repo, tracker, project.id],
             |row| {
                 Ok((
                     row.get::<_, Option<String>>(0)?,
@@ -381,7 +382,7 @@ fn put_item(
     repo: &str,
     observed_at: i64,
     item: &TrackerItem,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<bool> {
     let revision = revision_nanos(item.revision.as_deref())?;
     let change: Option<(Option<i64>, bool)> = conn
@@ -398,7 +399,7 @@ fn put_item(
         .query_row(
             "SELECT revision,observed_at,state IS NOT :state OR completed IS NOT :completed
              FROM tracker_items WHERE repo=:repo AND tracker=:tracker AND id=:id",
-            named_params! { ":repo": repo, ":tracker": provider, ":id": &item.id,
+            named_params! { ":repo": repo, ":tracker": tracker, ":id": &item.id,
                 ":completed": &item.completed,
                 ":state": &item.state,
             },
@@ -426,7 +427,7 @@ fn put_item(
          ON CONFLICT(repo,tracker,id) DO UPDATE SET observed_at=excluded.observed_at,
          identifier=excluded.identifier,project_id=excluded.project_id,revision=excluded.revision,branch_name=excluded.branch_name,url=excluded.url,name=excluded.name,description=excluded.description,rank=excluded.rank,completed=excluded.completed,completed_at=excluded.completed_at,due_date=excluded.due_date,state=excluded.state,team_id=excluded.team_id,assignee=excluded.assignee,
          claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1",
-        named_params! { ":repo": repo, ":tracker": provider, ":id": &item.id,
+        named_params! { ":repo": repo, ":tracker": tracker, ":id": &item.id,
             ":observed_at": observed_at, ":rank": item.rank, ":revision": &item.revision,
             ":identifier": &item.identifier,
             ":project_id": &item.project_id,
@@ -468,7 +469,7 @@ fn observe_order(
     repo: &str,
     external: &str,
     items: &[TrackerItem],
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<bool> {
     let project: Option<String> = conn.query_row("SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.external_project_id=?1 AND w.repo=?2", params![external,repo], |row| row.get(0)).optional()?;
     let Some(project) = project.map(ProjectId::from_raw) else {
@@ -483,7 +484,7 @@ fn observe_order(
             "SELECT t.id,i.revision,i.rank,i.project_id
              FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
              WHERE i.repo=?1 AND i.tracker=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
-            params![repo,provider,item.id,project.as_str()], |row| Ok((
+            params![repo,tracker,item.id,project.as_str()], |row| Ok((
                 row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
                 row.get::<_, u32>(2)?, row.get::<_, Option<String>>(3)?,
             ))).optional()?;
@@ -517,7 +518,7 @@ fn project_accepted_planning(
     projects: &[&str],
     items: &[&str],
     confirmed_wave: Option<(&WaveId, &str)>,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<()> {
     let (confirmed_wave, confirmed_initiative) = confirmed_wave.unzip();
     let project_ids = serde_json::to_string(projects)?;
@@ -537,7 +538,7 @@ fn project_accepted_planning(
         .query_and_then(
             params![
                 repo,
-                provider,
+                tracker,
                 project_ids,
                 confirmed_wave,
                 confirmed_initiative
@@ -622,7 +623,7 @@ fn project_accepted_planning(
          AND i.id IN (SELECT value FROM json_each(?2))",
     )?;
     let observed = query
-        .query_map(params![repo, item_ids, provider], |row| {
+        .query_map(params![repo, item_ids, tracker], |row| {
             let mut edits = vec![
                 Edit::TaskTitle(Some(row.get(2)?)),
                 Edit::TaskDescription(Some(row.get(3)?)),
@@ -676,7 +677,7 @@ fn project_accepted_planning(
         .query_map(
             params![
                 repo,
-                provider,
+                tracker,
                 item_ids,
                 confirmed_wave,
                 confirmed_initiative
@@ -791,9 +792,9 @@ fn associate_project(
     project_id: &str,
     wave: &WaveId,
     initiative: &str,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<()> {
-    require_accepted_initiative(tx, repo, project_id, initiative, provider)?;
+    require_accepted_initiative(tx, repo, project_id, initiative, tracker)?;
     let wave_repo: String = tx.query_row("SELECT repo FROM waves WHERE id=?1", [wave], |row| {
         row.get(0)
     })?;
@@ -816,11 +817,11 @@ fn require_accepted_initiative(
     repo: &str,
     project_id: &str,
     initiative: &str,
-    provider: &str,
+    tracker: &str,
 ) -> StoreResult<()> {
     let initiatives: String = conn.query_row(
         "SELECT initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
-        params![repo, provider, project_id],
+        params![repo, tracker, project_id],
         |row| row.get(0),
     )?;
     if serde_json::from_str::<Vec<String>>(&initiatives)?.as_slice() != [initiative] {
@@ -845,7 +846,7 @@ mod tests {
     #[test]
     fn project_reads_at_one_revision_keep_the_later_one() {
         // "Customer requests" stands for both a projected prefixed name and a
-        // verbatim plain provider name; Linear may re-render either at the same
+        // verbatim plain tracker name; Linear may re-render either at the same
         // `updatedAt`.
         for historical_name in ["Customer requests", "Product — Customer requests"] {
             let conn = Connection::open_in_memory().unwrap();

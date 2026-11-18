@@ -516,7 +516,7 @@ pub struct Task {
     /// The record’s ID in the repository's tracker.
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<LinearIssueId>,
-    /// Acquisition time of the retained Linear observation, never a write clock.
+    /// Time of the last successful tracker refresh.
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: LinearWritebackState,
     /// Read projection from the Project join, validated against the Project on save.
@@ -714,7 +714,7 @@ pub struct TaskEvent {
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskLinearObservation {
+pub struct TaskTrackerCursor {
     pub task_id: TaskId,
     /// Linear issue `updatedAt` last folded in. Monotonic: a read whose revision
     /// is older is dropped as a stale/out-of-order response.
@@ -730,7 +730,7 @@ pub struct TaskLinearObservation {
 
 /// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearObservationOutcome {
+pub struct TrackerEventOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
     /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,

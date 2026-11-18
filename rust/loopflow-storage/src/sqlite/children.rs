@@ -22,9 +22,9 @@ use crate::rows::now_unix;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::NewTask;
 use crate::work::task::{
-    CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
-    PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId, TaskPrRepairKind,
+    CiObservation, GithubObservation, GithubPr, LinearWritebackState, PrMergeRequest, PrPhase,
+    PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId, TaskPr, TaskPrId,
+    TaskPrRepairKind, TaskTrackerCursor, TrackerEventOutcome,
 };
 use crate::{PlanningState, StoreError, StoreResult};
 use loopflow_model::durable::{Author, RepositoryId};
@@ -219,7 +219,7 @@ fn place_task_in(
     if pr.publication.is_some() {
         insert_task_pr(conn, pr)?;
     }
-    seed_task_linear_observation(conn, &task)?;
+    seed_task_tracker_cursor(conn, &task)?;
     insert_task_event_in(
         conn,
         task_id,
@@ -989,17 +989,14 @@ impl SqliteStore {
         Ok(outcome)
     }
 
-    pub fn task_linear_observation(
-        &self,
-        task_id: &TaskId,
-    ) -> StoreResult<Option<TaskLinearObservation>> {
+    pub fn task_tracker_cursor(&self, task_id: &TaskId) -> StoreResult<Option<TaskTrackerCursor>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT task_id, last_revision, last_title, last_description,
                     last_success_at, degraded_reason, updated_at
              FROM task_linear_observations WHERE task_id=?1",
             params![task_id.as_str()],
-            map_task_linear_observation_row,
+            map_task_tracker_cursor_row,
         )
         .optional()
         .map_err(StoreError::from)
@@ -1008,14 +1005,14 @@ impl SqliteStore {
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
     /// comments are imported on the first read and deduplicated by revision.
     /// Issue revisions guard definition changes independently of comments.
-    pub fn apply_linear_observation_prepared(
+    pub fn apply_tracker_event_prepared(
         &self,
         task_id: &TaskId,
-        observation: &crate::planning::TrackerObservation,
+        event: &crate::planning::TrackerEvent,
         observed_at: OffsetDateTime,
         planning_connected: bool,
         machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
-    ) -> StoreResult<LinearObservationOutcome> {
+    ) -> StoreResult<TrackerEventOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -1036,7 +1033,7 @@ impl SqliteStore {
 
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
-        for comment in &observation.comments {
+        for comment in &event.comments {
             if !super::task_comments::ingest_task_comment(
                 &transaction,
                 task_id,
@@ -1083,14 +1080,14 @@ impl SqliteStore {
                  ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?5)",
                 params![
                     task_id.as_str(),
-                    observation.revision,
-                    observation.title,
-                    observation.description,
+                    event.revision,
+                    event.title,
+                    event.description,
                     observed_at,
                 ],
             )?;
             transaction.commit()?;
-            return Ok(LinearObservationOutcome {
+            return Ok(TrackerEventOutcome {
                 baselined: true,
                 content_steer_applied: false,
                 follow_ups_created,
@@ -1099,9 +1096,9 @@ impl SqliteStore {
 
         // Monotonic guard: an out-of-order response older than what we have
         // carries stale content, so drop it rather than let it revert direction.
-        if observation.revision.as_str() < last_revision.as_str() {
+        if event.revision.as_str() < last_revision.as_str() {
             transaction.commit()?;
-            return Ok(LinearObservationOutcome {
+            return Ok(TrackerEventOutcome {
                 baselined: false,
                 content_steer_applied: false,
                 follow_ups_created,
@@ -1109,12 +1106,12 @@ impl SqliteStore {
         }
 
         let content_steer_applied =
-            last_title != observation.title || last_description != observation.description;
+            last_title != event.title || last_description != event.description;
         if content_steer_applied {
             let text = format!(
                 "The linked planning task was edited; use this current definition.\n\n\
                  Title: {}\n\n{}",
-                observation.title, observation.description,
+                event.title, event.description,
             );
             Self::save_task_steer_in(
                 &transaction,
@@ -1122,7 +1119,7 @@ impl SqliteStore {
                 &Author::User,
                 &text,
                 &format!("task-definition:{task_id}"),
-                &observation.revision,
+                &event.revision,
             )?;
         }
 
@@ -1133,23 +1130,23 @@ impl SqliteStore {
              WHERE task_id=?1",
             params![
                 task_id.as_str(),
-                observation.revision,
-                observation.title,
-                observation.description,
+                event.revision,
+                event.title,
+                event.description,
                 observed_at,
             ],
         )?;
         transaction.commit()?;
-        Ok(LinearObservationOutcome {
+        Ok(TrackerEventOutcome {
             baselined: false,
             content_steer_applied,
             follow_ups_created,
         })
     }
 
-    /// Record that the latest observation failed, without moving the cursor. A
+    /// Record that the latest event failed, without moving the cursor. A
     /// Task with no baseline yet has no row to mark, which is fine — status
-    /// then simply shows no observation.
+    /// then simply shows no event.
     pub fn mark_task_linear_degraded(&self, task_id: &TaskId, reason: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1652,7 +1649,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
 /// Seed the Linear observation cursor from the planning directive, in the Task's
 /// creation transaction, so the first observed edit becomes direction rather than
 /// a baseline. The empty revision lets any Linear `updatedAt` advance the cursor.
-fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<()> {
+fn seed_task_tracker_cursor(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO task_linear_observations (
             task_id, last_revision, last_title, last_description,
@@ -2433,14 +2430,12 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
     Ok(pr)
 }
 
-fn map_task_linear_observation_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<TaskLinearObservation> {
+fn map_task_tracker_cursor_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskTrackerCursor> {
     let last_success_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(4)?)
         .map_err(|error| invalid_column(4, error))?;
     let updated_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(6)?)
         .map_err(|error| invalid_column(6, error))?;
-    Ok(TaskLinearObservation {
+    Ok(TaskTrackerCursor {
         task_id: TaskId::from_raw(row.get::<_, String>(0)?),
         last_revision: row.get(1)?,
         last_title: row.get(2)?,
@@ -2684,7 +2679,7 @@ impl SqliteStore {
         if let Some(me) = me {
             super::task_ownership::claim_in(&tx, &task.id, me)?;
         }
-        seed_task_linear_observation(&tx, task)?;
+        seed_task_tracker_cursor(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(saved)

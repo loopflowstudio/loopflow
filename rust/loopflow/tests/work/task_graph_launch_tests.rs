@@ -136,7 +136,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
             .unwrap();
         if condition.starts_with("invalid") || condition == "removed" {
             runtime
-                .block_on(registered.store.observe_pm_issue_change(
+                .block_on(registered.store.record_tracker_event(
                     registered.task.tracker_id.as_ref().unwrap().as_str(),
                     None,
                     condition == "removed",

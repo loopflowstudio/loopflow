@@ -1,6 +1,6 @@
 //! Provider planning operations shared by Task, Wave, and repository commands.
 //!
-//! Work owns authored Project content and Tasks. Linear refresh accepts provider
+//! Work owns authored Project content and Tasks. Linear refresh accepts tracker
 //! facts through the shared writer; ordinary readers consume saved Work.
 
 use super::planning_sync::{lock_wave_planning, planning_store};
@@ -19,8 +19,8 @@ use crate::provider_auth::{
 };
 use crate::repository::RepoId;
 use crate::store::{
-    open_existing_store, LinearIssueEvidence, PlanningState, ProviderToken,
-    ProviderTokenReplacement, StorageConfig, Store,
+    open_existing_store, LinearIssueState, PlanningState, ProviderToken, ProviderTokenReplacement,
+    StorageConfig, Store,
 };
 use crate::work::wave::config::{read_wave_config, update_wave_config};
 use crate::work::wave::Wave;
@@ -258,7 +258,7 @@ pub(crate) async fn resolve_context(
     Ok((repository, initiative))
 }
 
-/// Planning providers authenticate via OAuth: the access token and refresh grant
+/// Trackers authenticate via OAuth: the access token and refresh grant
 /// live in store, and access refreshes the grant before the access token expires.
 pub(super) async fn resolve_planning_token(provider: Provider) -> OpsResult<String> {
     Ok(planning_token(provider, false).await?.access_token)
@@ -511,8 +511,8 @@ pub(crate) async fn refresh_inventory(
                 "no Wave {wave} here; run `lf wave add {wave}` first"
             ))
         })?;
-    let acquisition = lock_wave_planning(&registered).await?;
-    refresh_inventory_locked(repo, &registered, ctx, initiative, &store, acquisition).await
+    let locks = lock_wave_planning(&registered).await?;
+    refresh_inventory_locked(repo, &registered, ctx, initiative, &store, locks).await
 }
 
 pub(crate) async fn refresh_inventory_locked(
@@ -521,7 +521,7 @@ pub(crate) async fn refresh_inventory_locked(
     ctx: &LinearRepository,
     initiative: &str,
     store: &Store,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let projects = checked_projects_with_store(repo, ctx, initiative, wave.slug(), store).await?;
@@ -535,14 +535,14 @@ pub(crate) async fn refresh_inventory_locked(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     items.retain(|item| !removed.contains(&item.id));
-    crate::linear::acceptance::accept_linear_inventory(
+    crate::linear::events::accept_linear_inventory(
         store,
         wave.id().clone(),
         initiative.to_owned(),
         projects,
         items,
         observed_at,
-        Some(acquisition),
+        Some(locks),
     )
     .await
     .map_err(|err| OpsError::Message(format!("failed to accept Linear inventory: {err}")))?;
@@ -690,7 +690,7 @@ pub fn list_linear_waves(repo: &Path) -> OpsResult<Vec<String>> {
 
 #[derive(Debug)]
 pub(crate) struct TaskPlanningInspection {
-    pub observation: LinearIssueEvidence,
+    pub issue_state: LinearIssueState,
     pub refresh_error: Option<String>,
 }
 
@@ -704,7 +704,7 @@ pub(crate) async fn inspect_task_planning_async(
         .to_string();
     let store = planning_store().await?;
     let existing = store
-        .linear_issue_evidence(&scope, issue)
+        .linear_issue_state(&scope, issue)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -717,7 +717,7 @@ pub(crate) async fn inspect_task_planning_async(
                 || super::tracker_events::team_current(&store, &scope).await))
     {
         return Ok(TaskPlanningInspection {
-            observation: existing,
+            issue_state: existing,
             refresh_error: None,
         });
     }
@@ -746,7 +746,7 @@ pub(crate) async fn inspect_task_planning_async(
         } else {
             None
         };
-        let mut acquisition = None;
+        let mut locks = None;
         let mut confirmed_wave = None;
         if let Some(initiative) = discovered_initiative {
             let wave = wave_for_initiative(repo, &initiative)?;
@@ -757,7 +757,7 @@ pub(crate) async fn inspect_task_planning_async(
                 .await
                 .map_err(|error| OpsError::Message(error.to_string()))?
                 .ok_or_else(|| OpsError::Message(format!("Wave {wave} is not initialized")))?;
-            acquisition = Some(lock_wave_planning(&registered).await?);
+            locks = Some(lock_wave_planning(&registered).await?);
             observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
             observation = repository
                 .client
@@ -776,7 +776,7 @@ pub(crate) async fn inspect_task_planning_async(
         let Some((item, project)) = observation else {
             if existing.issue_id.is_some() {
                 store
-                    .invalidate_linear_issue(&scope, existing.clone(), acquisition)
+                    .invalidate_linear_issue(&scope, existing.clone(), locks)
                     .await
                     .map_err(|error| OpsError::Message(error.to_string()))?;
             }
@@ -790,14 +790,14 @@ pub(crate) async fn inspect_task_planning_async(
                 repository.team_id
             )));
         }
-        crate::linear::acceptance::accept_linear_issue(
+        crate::linear::events::accept_linear_issue(
             &store,
             &scope,
             item,
             project,
             observed_at,
             confirmed_wave,
-            acquisition,
+            locks,
         )
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -810,30 +810,30 @@ pub(crate) async fn inspect_task_planning_async(
             LINEAR_REFRESH_TIMEOUT.as_secs()
         ))),
     };
-    // Read again: an event may have invalidated the record while acquisition ran.
-    let mut observation = store
-        .linear_issue_evidence(&scope, selector)
+    // Read again: an event may have invalidated the record during the refresh.
+    let mut issue_state = store
+        .linear_issue_state(&scope, selector)
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?;
     let refresh_error = match result {
-        Ok(false) if matches!(observation.state, PlanningState::Removed | PlanningState::Available) => None,
+        Ok(false) if matches!(issue_state.state, PlanningState::Removed | PlanningState::Available) => None,
         Ok(false) => {
-            observation.state = PlanningState::Absent;
+            issue_state.state = PlanningState::Absent;
             Some(format!("task {issue:?} is absent from repository planning"))
         }
-        Ok(true) if observation.state != PlanningState::Available => Some(format!(
-            "Task {issue:?} observation cannot repair stored invalidation, unresolved Project ownership or confirmed removal"
+        Ok(true) if issue_state.state != PlanningState::Available => Some(format!(
+            "Task {issue:?} refresh cannot repair stored invalidation, unresolved Project ownership or confirmed removal"
         )),
         Ok(true) => None,
         Err(error) => {
-            if observation.state == PlanningState::Available {
-                observation.state = PlanningState::Unavailable;
+            if issue_state.state == PlanningState::Available {
+                issue_state.state = PlanningState::Unavailable;
             }
             Some(format!("unable to resolve task {issue:?}: {error}"))
         }
     };
     Ok(TaskPlanningInspection {
-        observation,
+        issue_state,
         refresh_error,
     })
 }
@@ -844,7 +844,7 @@ pub(crate) async fn acquire_task(
     refresh: LinearRefresh,
 ) -> OpsResult<Task> {
     let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    let evidence = read.observation;
+    let evidence = read.issue_state;
     if evidence.state != PlanningState::Available {
         return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
             format!(
@@ -880,11 +880,11 @@ pub(crate) async fn acquire_task(
         .ok_or_else(|| {
             OpsError::Message("accepted planning did not retain the Task identity".into())
         })?;
-    let acquisition = store
+    let tracker_state = store
         .sqlite
         .task_tracker_state(&task.id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    if acquisition.state != PlanningState::Available {
+    if tracker_state.state != PlanningState::Available {
         return Err(OpsError::Message(format!(
             "Task {issue} has invalid retained ownership; run `lf task sync {issue}`"
         )));
@@ -1001,7 +1001,7 @@ async fn accept_reteam_project(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
     project: &TrackerProject,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    locks: Arc<crate::store::PlanningLocks>,
     expected_teams: &[String],
 ) -> OpsResult<()> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -1022,13 +1022,13 @@ async fn accept_reteam_project(
             project.id
         )));
     }
-    crate::linear::acceptance::reconcile_linear_project_teams(
+    crate::linear::events::reconcile_linear_project_teams(
         &resolved.store,
         wave.id(),
         &project.initiative_ids[0],
         confirmed,
         observed_at,
-        acquisition,
+        locks,
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))
@@ -1039,7 +1039,7 @@ async fn accept_reteam_task(
     resolved: &ResolvedReteamContext,
     wave: &crate::work::wave::Wave,
     issue: &str,
-    acquisition: Arc<crate::store::PlanningLocks>,
+    locks: Arc<crate::store::PlanningLocks>,
 ) -> OpsResult<(String, bool)> {
     let observed_at = time::OffsetDateTime::now_utc().unix_timestamp();
     let (item, project) = resolved
@@ -1067,14 +1067,14 @@ async fn accept_reteam_task(
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .is_some_and(|previous| previous != identifier);
-    crate::linear::acceptance::accept_linear_issue(
+    crate::linear::events::accept_linear_issue(
         &resolved.store,
         wave.repo(),
         item,
         Some(project),
         observed_at,
         Some((wave.id().clone(), initiative)),
-        Some(acquisition),
+        Some(locks),
     )
     .await
     .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -1120,8 +1120,8 @@ async fn apply_or_plan_repository_reteam(
     registered.sort_by(|left, right| left.id().as_str().cmp(right.id().as_str()));
     let mut locked_waves = BTreeMap::new();
     for wave in registered {
-        let acquisition = lock_wave_planning(&wave).await?;
-        locked_waves.insert(wave.slug().to_string(), (wave, acquisition));
+        let locks = lock_wave_planning(&wave).await?;
+        locked_waves.insert(wave.slug().to_string(), (wave, locks));
     }
     let mut project_moves = Vec::new();
     let mut moves = Vec::new();
@@ -1160,7 +1160,7 @@ async fn apply_or_plan_repository_reteam(
             if project.initiative_ids.as_slice() != [initiative.as_str()] {
                 return Err(OpsError::Message(format!(
                     "Linear Project `{}` ({}) in wave/{wave} belongs to Initiatives [{}]; \
-                     reteam requires exactly {initiative} before any provider mutation",
+                     reteam requires exactly {initiative} before any tracker mutation",
                     project.name,
                     project.id,
                     project.initiative_ids.join(", ")
@@ -1232,9 +1232,9 @@ async fn apply_or_plan_repository_reteam(
 
     if apply {
         // Linear requires the destination Team on a Project before its Issues
-        // can move. Expand first; narrowing is the final provider phase.
+        // can move. Expand first; narrowing is the final tracker phase.
         for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
+            let (wave, locks) = &locked_waves[*wave];
             let mut expected_teams = project.team_ids.clone();
             if !expected_teams.contains(team_id) {
                 expected_teams.push(team_id.clone());
@@ -1249,20 +1249,12 @@ async fn apply_or_plan_repository_reteam(
                     .await
                     .map_err(linear_error)?;
             }
-            accept_reteam_project(
-                resolved,
-                wave,
-                project,
-                acquisition.clone(),
-                &expected_teams,
-            )
-            .await?;
+            accept_reteam_project(resolved, wave, project, locks.clone(), &expected_teams).await?;
         }
         for update in identifier_updates {
-            let (wave, acquisition) = &locked_waves[&update.wave];
+            let (wave, locks) = &locked_waves[&update.wave];
             let (_, changed) =
-                accept_reteam_task(repo, resolved, wave, &update.issue_id, acquisition.clone())
-                    .await?;
+                accept_reteam_task(repo, resolved, wave, &update.issue_id, locks.clone()).await?;
             task_updates += usize::from(changed);
         }
 
@@ -1271,7 +1263,7 @@ async fn apply_or_plan_repository_reteam(
             let comment_bodies = resolved
                 .repository
                 .client
-                .observe_issue(&mv.id)
+                .fetch_issue(&mv.id)
                 .await
                 .map_err(linear_error)?
                 .comments
@@ -1296,9 +1288,9 @@ async fn apply_or_plan_repository_reteam(
                 .move_item_to_team(&mv.id, team_id)
                 .await
                 .map_err(linear_error)?;
-            let (wave, acquisition) = &locked_waves[&mv.wave];
+            let (wave, locks) = &locked_waves[&mv.wave];
             let (confirmed_identifier, changed) =
-                accept_reteam_task(repo, resolved, wave, &mv.id, acquisition.clone()).await?;
+                accept_reteam_task(repo, resolved, wave, &mv.id, locks.clone()).await?;
             if confirmed_identifier != new_identifier {
                 return Err(OpsError::Message(format!(
                     "Task {} move is not confirmed",
@@ -1310,7 +1302,7 @@ async fn apply_or_plan_repository_reteam(
         }
 
         for (wave, project) in &projects {
-            let (wave, acquisition) = &locked_waves[*wave];
+            let (wave, locks) = &locked_waves[*wave];
             if project_needs_reteam(team_id, &project.team_ids) {
                 progress.status(&format!(
                     "narrowing Project `{}` onto team {team_key}",
@@ -1327,7 +1319,7 @@ async fn apply_or_plan_repository_reteam(
                 resolved,
                 wave,
                 project,
-                acquisition.clone(),
+                locks.clone(),
                 std::slice::from_ref(team_id),
             )
             .await?;
@@ -1338,16 +1330,9 @@ async fn apply_or_plan_repository_reteam(
             let initiative =
                 read_initiative(repo, wave).expect("preflight required every Initiative");
             let ctx = &resolved.repository;
-            let (registered, acquisition) = &locked_waves[wave];
-            refresh_inventory_locked(
-                repo,
-                registered,
-                ctx,
-                &initiative,
-                store,
-                acquisition.clone(),
-            )
-            .await?;
+            let (registered, locks) = &locked_waves[wave];
+            refresh_inventory_locked(repo, registered, ctx, &initiative, store, locks.clone())
+                .await?;
         }
     }
 
@@ -1586,7 +1571,7 @@ async fn refresh_async(
             }
         }
         actions.push(format!(
-            "refresh wave/{wave} Linear observations from Linear Initiative {initiative_id}"
+            "refresh wave/{wave} Project and Task data from Linear Initiative {initiative_id}"
         ));
     }
 
@@ -2756,7 +2741,6 @@ mod tests {
                         .seed_inventory(
                             InventoryFixture {
                                 wave_id: wave.id().clone(),
-                                provider: "linear".into(),
                                 initiative: "initiative-survival".into(),
                                 synced_at: 1,
                                 snapshot: Inventory { projects, items },

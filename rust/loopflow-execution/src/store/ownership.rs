@@ -321,25 +321,19 @@ pub fn task_detail_facts(
     Ok(facts)
 }
 
-pub(crate) fn apply_linear_observation(
+pub(crate) fn apply_tracker_event(
     store: &SqliteStore,
     task_id: &TaskId,
-    observation: &loopflow_storage::planning::TrackerObservation,
+    event: &loopflow_storage::planning::TrackerEvent,
     observed_at: time::OffsetDateTime,
     planning_connected: bool,
-) -> StoreResult<loopflow_storage::work::task::LinearObservationOutcome> {
+) -> StoreResult<loopflow_storage::work::task::TrackerEventOutcome> {
     let mut names = machine_names(store)?;
     names.insert(
         crate::store::machines::local_machine(store)?.id,
         local_label(),
     );
-    store.apply_linear_observation_prepared(
-        task_id,
-        observation,
-        observed_at,
-        planning_connected,
-        &names,
-    )
+    store.apply_tracker_event_prepared(task_id, event, observed_at, planning_connected, &names)
 }
 
 #[cfg(test)]

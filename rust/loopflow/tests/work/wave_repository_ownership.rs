@@ -217,7 +217,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: legacy.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative-infrastructure".into(),
                     synced_at: 1,
                     snapshot: snapshot.clone(),
@@ -259,7 +258,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             );
         }
         let observation = store
-            .linear_issue_evidence(resolved.repo(), "LOO-2")
+            .linear_issue_state(resolved.repo(), "LOO-2")
             .await
             .unwrap();
         assert_eq!(
@@ -350,7 +349,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: alpha.id().clone(),
-                provider: "linear".to_string(),
                 initiative: "initiative-alpha".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {
@@ -425,7 +423,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: occupied.id().clone(),
-                provider: "linear".to_string(),
                 initiative: "initiative-occupied".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {

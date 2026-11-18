@@ -309,7 +309,7 @@ pub enum MergeMethod {
 
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
-/// Every remote provider names the team that owns the repository's Tasks.
+/// Every remote tracker names the team that owns the repository's Tasks.
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "RawTrackerConfig", into = "RawTrackerConfig")]
 pub enum TrackerConfig {
@@ -431,7 +431,7 @@ fn default_planning_remote() -> String {
 }
 
 impl TrackerConfig {
-    /// The remote planning provider's product name; Git planning has none.
+    /// The remote tracker's product name; Git planning has none.
     pub fn remote_name(&self) -> Option<&'static str> {
         match self {
             Self::Git { .. } => None,

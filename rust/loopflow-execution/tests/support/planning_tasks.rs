@@ -19,7 +19,7 @@ pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wa
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
     .unwrap();
-    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &fixture.store.sqlite,
         wave.id(),
         "initiative-1",
@@ -619,8 +619,7 @@ pub async fn planning_response(
             mark_issue_updated(&mut state.issues[0]);
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
-    } else if query.contains("query TrackerObservation") || query.contains("query IssueObservation")
-    {
+    } else if query.contains("query IssueEvent") {
         let mut issue = state
             .issues
             .iter()

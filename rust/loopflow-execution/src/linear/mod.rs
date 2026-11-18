@@ -1,7 +1,6 @@
-//! Linear acquisition and delivery. Work owns local content; this adapter owns provider facts.
+//! Linear requests, actions and events.
 
-pub mod acceptance;
-pub mod observations;
+pub mod events;
 
 use self::project_document::parse_project_document;
 mod actions;
@@ -27,10 +26,10 @@ pub use loopflow_storage::planning::local_identifier;
 pub use loopflow_storage::planning::{project_slug, terminal_reason};
 pub use loopflow_storage::planning::{LinearBindingError, LinearIssueId, LinearProjectId};
 use loopflow_storage::planning::{
-    StateHistory, TrackerComment, TrackerItem, TrackerObservation, TrackerProject,
+    StateHistory, TrackerComment, TrackerEvent, TrackerItem, TrackerProject,
 };
 
-/// The result of adopting or creating a provider team for a repository. The stable
+/// The result of adopting or creating a tracker team for a repository. The stable
 /// `id` owns identity; `key` is mutable presentation (the Task prefix).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TeamBinding {
@@ -490,7 +489,7 @@ const LINK_ATTACHMENT_MUTATION: &str = r#"mutation LinkAttachment($issueId: Stri
 // separate requester metadata. `updatedAt` is the revision marker. The
 // reconciler orders delivery itself and dedupes against the cursor, so page
 // order only bounds how many comments one read can surface (OBSERVATION_COMMENT_PAGE).
-const ISSUE_OBSERVATION_QUERY: &str = r#"query IssueObservation($id: String!, $comments: Int!) {
+const ISSUE_EVENT_QUERY: &str = r#"query IssueEvent($id: String!, $comments: Int!) {
   issue(id: $id) {
     updatedAt
     title
@@ -1044,7 +1043,7 @@ impl LinearClient {
             projects.extend(
                 page.nodes
                     .into_iter()
-                    .map(ProjectNode::into_observation)
+                    .map(ProjectNode::into_tracker_project)
                     .collect::<LinearResult<Vec<_>>>()?,
             );
             if !page.page_info.has_next_page {
@@ -1264,7 +1263,7 @@ impl LinearClient {
             r#type: String,
         }
         let nanos = |revision: &str| {
-            crate::linear::observations::revision_nanos(Some(revision))
+            loopflow_storage::planning::revision_nanos(Some(revision))
                 .map_err(|error| LinearError::Message(error.to_string()))
         };
         let base = nanos(base_revision)?;
@@ -1328,7 +1327,7 @@ impl LinearClient {
             .map(|issue| {
                 if issue.id != id {
                     return Err(LinearError::Message(
-                        "Linear trash observation returned a different issue".into(),
+                        "Linear trash query returned a different issue".into(),
                     ));
                 }
                 Ok((issue.trashed == Some(true), issue.revision))
@@ -1368,7 +1367,7 @@ impl LinearClient {
     ) -> LinearResult<Option<TrackerProject>> {
         // A filtered collection has an explicit empty result. The singular Project
         // endpoint can return NOT_FOUND as a GraphQL error, indistinguishable from
-        // inaccessible evidence without provider-specific error guessing.
+        // inaccessible evidence without tracker-specific error guessing.
         let response: ProjectsData = self
             .graphql(
                 r#"query FindProject($id: ID!) {
@@ -1394,22 +1393,22 @@ impl LinearClient {
                         "Project {project_id} is archived; reconcile its status in Linear"
                     )));
                 }
-                project.into_observation()
+                project.into_tracker_project()
             })
             .transpose()
     }
 
     pub(crate) async fn project_ownership(&self, project_id: &str) -> LinearResult<TrackerProject> {
-        self.project_node(project_id).await?.into_observation()
+        self.project_node(project_id).await?.into_tracker_project()
     }
 
-    pub(crate) async fn project_content_observation(
+    pub(crate) async fn fetch_project_content(
         &self,
         id: &str,
     ) -> LinearResult<(TrackerProject, String)> {
         let node = self.project_node(id).await?;
         let content = node.content.clone().unwrap_or_default();
-        Ok((node.into_observation()?, content))
+        Ok((node.into_tracker_project()?, content))
     }
 
     pub(crate) async fn project_field_input(
@@ -1521,7 +1520,7 @@ impl LinearClient {
                 "Project attachment returned a different identity".into(),
             ));
         }
-        node.into_observation()
+        node.into_tracker_project()
     }
 
     /// The mutation's own response supplies confirmation; no follow-up read.
@@ -1761,10 +1760,10 @@ impl LinearClient {
     }
 
     /// Read one issue's title, description, comments, and revision marker.
-    pub(crate) async fn observe_issue(&self, issue_id: &str) -> LinearResult<TrackerObservation> {
-        let response: IssueObservationData = self
+    pub(crate) async fn fetch_issue(&self, issue_id: &str) -> LinearResult<TrackerEvent> {
+        let response: IssueEventData = self
             .graphql(
-                ISSUE_OBSERVATION_QUERY,
+                ISSUE_EVENT_QUERY,
                 json!({ "id": issue_id, "comments": OBSERVATION_COMMENT_PAGE }),
             )
             .await?;
@@ -1800,7 +1799,7 @@ impl LinearClient {
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(TrackerObservation {
+        Ok(TrackerEvent {
             revision: issue.updated_at,
             title: issue.title,
             description: issue.description.unwrap_or_default(),
@@ -1846,7 +1845,7 @@ fn planning_response(payload: &Value, project: bool, id: &str) -> LinearResult<P
             .map_err(|error| LinearError::Message(error.to_string()))?;
         let content = node.content.clone().unwrap_or_default();
         Ok(PlanningResponse::Project {
-            project: Box::new(node.into_observation()?),
+            project: Box::new(node.into_tracker_project()?),
             content,
         })
     } else {
@@ -1976,12 +1975,12 @@ struct IssueTeamNode {
 }
 
 #[derive(Deserialize)]
-struct IssueObservationData {
-    issue: Option<IssueObservationNode>,
+struct IssueEventData {
+    issue: Option<IssueEventNode>,
 }
 
 #[derive(Deserialize)]
-struct IssueObservationNode {
+struct IssueEventNode {
     #[serde(rename = "updatedAt")]
     updated_at: String,
     #[serde(default)]
@@ -2130,7 +2129,7 @@ impl IssueFields {
         let team = self.team.ok_or_else(|| {
             LinearError::Message(format!("Linear issue {identifier} has no Team"))
         })?;
-        // Validate revision precision before admitting provider facts.
+        // Validate revision precision before admitting tracker facts.
         time::OffsetDateTime::parse(
             &self.updated_at,
             &time::format_description::well_known::Rfc3339,
@@ -2170,7 +2169,7 @@ impl IssueNode<ProjectNode> {
         Ok((
             item,
             self.project
-                .map(ProjectNode::into_observation)
+                .map(ProjectNode::into_tracker_project)
                 .transpose()?,
         ))
     }
@@ -2303,7 +2302,7 @@ struct ProjectNode {
     teams: IdConnection,
 }
 
-// Replace only the selected planning field, retaining unrelated provider prose.
+// Replace only the selected planning field, retaining unrelated tracker prose.
 fn patch_project_field(
     content: &str,
     value: &loopflow_storage::work::edit::WorkValue,
@@ -2332,7 +2331,7 @@ fn patch_project_field(
 }
 
 impl ProjectNode {
-    fn into_observation(self) -> LinearResult<TrackerProject> {
+    fn into_tracker_project(self) -> LinearResult<TrackerProject> {
         let content = parse_project_document(self.content.as_deref().unwrap_or_default())?;
         Ok(TrackerProject {
             description: Some(content.observed_description()),
@@ -2684,7 +2683,7 @@ mod tests {
     }
 
     #[test]
-    fn task_history_provider_facts_require_valid_observed_completion_dates() {
+    fn task_history_tracker_facts_require_valid_observed_completion_dates() {
         let planning: crate::test_linear_input::Inventory = serde_json::from_str(include_str!(
             "../../../../tests/fixtures/dto/task_history_planning.json"
         ))
@@ -2751,7 +2750,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observe_issue_reads_revision_content_and_comment_authors() {
+    async fn fetch_issue_reads_revision_content_and_comment_authors() {
         let (base_url, requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({
@@ -2775,15 +2774,12 @@ mod tests {
         .await;
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
-        let observation = client
-            .observe_issue("issue-1")
-            .await
-            .expect("observe issue");
-        assert_eq!(observation.revision, "2026-07-15T18:00:00.000Z");
-        assert_eq!(observation.title, "Stream Linear edits");
-        assert_eq!(observation.description, "New body");
+        let event = client.fetch_issue("issue-1").await.expect("observe issue");
+        assert_eq!(event.revision, "2026-07-15T18:00:00.000Z");
+        assert_eq!(event.title, "Stream Linear edits");
+        assert_eq!(event.description, "New body");
         assert_eq!(
-            observation.comments,
+            event.comments,
             vec![
                 TrackerComment {
                     author_name: Some("Jack".to_string()),
@@ -2843,7 +2839,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observe_issue_reads_every_comment_page_in_revision_order() {
+    async fn fetch_issue_reads_every_comment_page_in_revision_order() {
         // Model GraphQL's field selection so a response fixture cannot supply
         // author names that a continuation query forgot to request.
         let app = axum::Router::new().route("/", axum::routing::post(|axum::Json(request): axum::Json<Value>| async move {
@@ -2870,7 +2866,7 @@ mod tests {
         let url = format!("http://{}", listener.local_addr().unwrap());
         let server = tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
         let client = LinearClient::with_base_url("fixture-token".into(), None, url);
-        let observed = client.observe_issue("issue-1").await.unwrap();
+        let observed = client.fetch_issue("issue-1").await.unwrap();
         server.abort();
         assert_eq!(
             observed
@@ -2895,7 +2891,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn observe_issue_reports_a_missing_issue() {
+    async fn fetch_issue_reports_a_missing_issue() {
         let (base_url, _requests) = test_server::spawn(vec![json_response(
             StatusCode::OK,
             json!({ "data": { "issue": null } }),
@@ -2904,7 +2900,7 @@ mod tests {
         let client = LinearClient::with_base_url("linear-secret".to_string(), None, base_url);
 
         let error = client
-            .observe_issue("issue-missing")
+            .fetch_issue("issue-missing")
             .await
             .expect_err("missing issue errors");
         assert!(error.to_string().contains("issue-missing"));

@@ -1,6 +1,6 @@
 //! The outbound tracker queue: one row per change a tracker carries, in the
 //! store's words. Writers enqueue inside their own transaction; the drain reads
-//! unconfirmed rows in `seq` order and records what the provider answered.
+//! unconfirmed rows in `seq` order and records what the tracker answered.
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
@@ -178,7 +178,7 @@ pub struct TrackerAction {
     pub subject: Option<String>,
     pub kind: ActionKind,
     pub value: Value,
-    /// `{revision, value}` as the provider held it at enqueue.
+    /// `{revision, value}` as the tracker held it at enqueue.
     pub base: Option<Value>,
     pub conflict: Option<Value>,
     pub phase: ActionPhase,
@@ -288,7 +288,7 @@ pub enum Resolution {
         revision: Option<String>,
         remote_id: Option<String>,
     },
-    /// The provider's value won: `remote` is `{revision, value}` as it held
+    /// The tracker's value won: `remote` is `{revision, value}` as it held
     /// it; the action keeps the local value that lost.
     Conflicted {
         remote: Value,
@@ -508,7 +508,7 @@ fn withdraw_unsent(conn: &Connection, owner: &ActionOwner) -> StoreResult<bool> 
     Ok(unsent)
 }
 
-/// The owner's provider observation, joined from its binding.
+/// The owner's tracker observation, joined from its binding.
 fn observation_source(owner: &ActionOwner) -> Option<&'static str> {
     match owner {
         ActionOwner::Task(_) => Some(
@@ -761,7 +761,7 @@ pub(crate) fn queued_changes_in(
     Ok(changes)
 }
 
-/// Acceptance of the provider's copy of `owner` at `revision`, before it is
+/// Acceptance of the tracker's copy of `owner` at `revision`, before it is
 /// written: sent actions the copy answers resolve (the rule the drain
 /// uses), unsent values rebase onto it, and every unconfirmed value replaces the
 /// observed one in `edits`, so the write keeps local intent until it resolves.
@@ -834,7 +834,7 @@ pub(crate) fn reconcile_in(
             .as_ref()
             .and_then(|base| serde_json::from_value::<WorkValue>(base["value"].clone()).ok());
         if action.phase == ActionPhase::Queued && base.as_ref() != Some(edit) {
-            // The unsent value now replaces what the provider holds.
+            // The unsent value now replaces what the tracker holds.
             conn.execute(
                 "UPDATE tracker_actions SET base_json=?2 WHERE id=?1",
                 params![
@@ -995,7 +995,7 @@ pub(crate) fn retain_filing_create_in(
     )?;
     conn.execute(
         "UPDATE tracker_actions SET phase='sent',sent_at=?2,
-         error='Historical creation outcome is unknown; awaiting exact provider readback'
+         error='Historical creation outcome is unknown; awaiting exact tracker readback'
          WHERE id=?1",
         params![id, now_unix()],
     )?;
@@ -1227,7 +1227,7 @@ impl SqliteStore {
         )? == 1)
     }
 
-    /// A request the provider rejected before acting leaves the action unsent.
+    /// A request the tracker rejected before acting leaves the action unsent.
     pub fn reject_tracker_action(&self, id: &str, error: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1248,7 +1248,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Part of a multi-request action landed: what the provider now holds is
+    /// Part of a multi-request action landed: what the tracker now holds is
     /// the base the rest of it, or a lost reply, is judged against.
     pub fn rebase_tracker_action(&self, id: &str, base: &Value) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1259,7 +1259,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a look in the provider for a sent action's lost reply.
+    /// Record a look in the tracker for a sent action's lost reply.
     pub fn look_tracker_action(&self, id: &str, at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

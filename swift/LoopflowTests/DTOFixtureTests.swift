@@ -1090,7 +1090,7 @@ struct DTOFixtureTests {
     }
 
     @Test("Task tracker state is required independently of delivery")
-    func taskAcquisitionEvidence() throws {
+    func taskTrackerState() throws {
         let root = try loadFixture("local_task.json")
         let detail = try #require(root["task"] as? [String: Any])
         var task = try #require(detail["task"] as? [String: Any])

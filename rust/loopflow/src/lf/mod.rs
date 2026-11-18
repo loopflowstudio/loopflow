@@ -2008,7 +2008,7 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// Refresh one Wave's planning from its tracker, then show its status;
     /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
@@ -2466,7 +2466,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Zero-based position in the Project's Task order
         #[arg(long)]
         rank: Option<u32>,
-        /// Assignee identity; provider user ID in connected plans
+        /// Assignee identity; tracker user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
         #[arg(short = 'w', long)]

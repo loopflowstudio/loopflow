@@ -1,4 +1,4 @@
-//! Saved acquisition and ownership facts shared by storage commands.
+//! Saved tracker and ownership state shared by storage commands.
 
 use crate::work::wave::WaveLocator;
 use loopflow_model::id::WaveId;
@@ -34,9 +34,9 @@ pub struct TrackerState {
     pub synced_at: Option<i64>,
 }
 
-/// Retained Linear acquisition facts, including observations without owned Work.
+/// Last known state of a Linear issue, including issues without locally owned Work.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearIssueEvidence {
+pub struct LinearIssueState {
     pub issue_id: Option<String>,
     pub revision: Option<String>,
     pub observed_at: Option<i64>,

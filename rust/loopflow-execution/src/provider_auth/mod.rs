@@ -356,9 +356,9 @@ struct OAuthErrorResponse {
     error_description: Option<String>,
 }
 
-// ── Planning provider OAuth ─────────────────────────────────────────
+// ── Tracker OAuth ─────────────────────────────────────────
 
-/// One planning provider's OAuth application. Every provider uses loopback
+/// One tracker's OAuth application. Every provider uses loopback
 /// consent; their registered ports, client authentication and refresh grants differ.
 #[derive(Debug)]
 pub(crate) struct PmOAuthSpec {
@@ -435,10 +435,10 @@ struct PmOAuthTokenResponse {
 
 impl PmOAuthBroker {
     /// # Panics
-    /// Panics when `provider` is not a planning provider.
+    /// Panics when `provider` is not a tracker.
     pub fn new(provider: Provider) -> Self {
         Self {
-            spec: pm_oauth(provider).expect("planning providers have an OAuth application"),
+            spec: pm_oauth(provider).expect("trackers have an OAuth application"),
             completed_token: Arc::new(Mutex::new(None)),
         }
     }
@@ -2157,7 +2157,7 @@ struct OAuthRefreshResponse {
     expires_in: Option<i64>,
 }
 
-/// Exchange a planning provider's refresh grant without retaining provider error bodies.
+/// Exchange a tracker's refresh grant without retaining provider error bodies.
 ///
 /// # Errors
 /// Returns a sanitized protocol or configuration category. The caller owns retry

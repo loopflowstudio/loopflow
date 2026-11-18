@@ -25,8 +25,8 @@ pub mod desktop_shells;
 pub mod durable;
 mod github_people;
 mod graph_inventory;
-pub mod linear_acceptance;
-mod linear_observations;
+pub mod linear_events;
+mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 

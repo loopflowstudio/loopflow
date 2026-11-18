@@ -157,7 +157,7 @@ mod tests {
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",
-        // Acquisition attempts and watermarks do not change displayed Work.
+        // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.

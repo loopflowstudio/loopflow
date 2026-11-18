@@ -1601,7 +1601,7 @@ final class WorkModel {
         return succeeded
     }
 
-    /// A saved Project or Task change has not reached its planning provider.
+    /// A saved Project or Task change has not reached its tracker.
     private var planningPending: Bool {
         visibleRoadmaps.contains { roadmap in
             roadmap.projects.items.contains { $0.sync.actions.contains { $0.phase == .queued } }
@@ -3680,4 +3680,3 @@ enum TaskOrderDrag {
         token.hasPrefix("task-order:") ? String(token.dropFirst("task-order:".count)) : nil
     }
 }
-

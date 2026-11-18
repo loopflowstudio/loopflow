@@ -135,7 +135,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot: historical,
@@ -148,7 +147,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot,
@@ -356,10 +354,10 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                     .unwrap();
                 if condition == "removed" {
                     runtime
-                        .block_on(store.observe_pm_issue_change("issue-1", None, true))
+                        .block_on(store.record_tracker_event("issue-1", None, true))
                         .unwrap();
                 }
-                // Acquisition may update shared content and state. Refusing execution
+                // Refresh may update shared content and state. Refusing execution
                 // must preserve the Task as it stands after that observation.
                 let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
                 let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);

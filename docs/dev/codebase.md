@@ -21,7 +21,7 @@ uv run python scripts/check_architecture.py
 | Shared operations | `rust/loopflow-execution/src/{engine,ops}/` | Typed Work operations, execution launches, delivery and planning |
 | Client access | `rust/loopflow/src/server/`, `rust/loopflow-execution/src/machine/` | Server admission and dispatch; shared Machine clients and wire types |
 | Execution | `rust/loopflow-execution/src/{agent,graph,prompt,skills,harness}/` | Skill/Graph discovery, prompts, provider processes and streams |
-| Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and planning-provider models |
+| Tracked Work | `rust/loopflow-execution/src/work/`, `rust/loopflow-storage/src/work/` | Wave, Project and Task facts, delivery identity and tracker models |
 | Persistence | `rust/loopflow-storage/src/`, `rust/loopflow-execution/src/{store,journal}/` | Synchronous records and SQL; acquisition and command/conversation history |
 | Authentication and history | `rust/loopflow-execution/src/{provider_auth,transcript}/` | Service authentication, native homes and transcript adoption |
 | Installation | `rust/loopflow-execution/src/installation{.rs,/}` | Selected artifacts, server registration, update and rollback |
@@ -109,7 +109,7 @@ not resolve either from the planning store.
 
 ## External transport
 
-The CLI talks to planning and model providers. The independent Discord bridge
+The CLI talks to trackers and model providers. The independent Discord bridge
 uses outbound REST requests. Remote execution reaches the target Machine through
 `lf --machine`; see [Machines and processes](machines.md).
 

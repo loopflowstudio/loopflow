@@ -1347,7 +1347,6 @@ mod tests {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".to_string(),
                     initiative: "initiative-1".to_string(),
                     synced_at: OffsetDateTime::now_utc().unix_timestamp(),
                     snapshot,

@@ -6575,7 +6575,7 @@
           "type": "string"
         },
         "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
+          "description": "Time of the last successful tracker refresh.",
           "format": "int64",
           "type": [
             "integer",
@@ -12124,7 +12124,7 @@
           ]
         },
         "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
+          "description": "Time of the last successful tracker refresh.",
           "format": "int64",
           "type": [
             "integer",
@@ -13673,7 +13673,7 @@
           ]
         },
         "person_id": {
-          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "description": "The person's `people` id, their tracker's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
           "type": [
             "string",
             "null"

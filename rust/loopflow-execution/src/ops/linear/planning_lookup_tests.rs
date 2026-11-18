@@ -42,7 +42,6 @@ fn project() -> serde_json::Value {
 fn snapshot(wave: &WaveId, record: &IssueFixture) -> InventoryFixture {
     InventoryFixture {
         wave_id: wave.clone(),
-        provider: "linear".into(),
         initiative: "initiative-1".into(),
         synced_at: record.observed_at,
         snapshot: Inventory {
@@ -240,7 +239,6 @@ async fn rejected_project_snapshot_preserves_durable_project_facts() {
     snapshot.projects[0].initiative_ids = vec!["initiative-1".into()];
     let mut snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
-        provider: "linear".into(),
         initiative: "initiative-1".into(),
         synced_at: 1,
         snapshot,
@@ -354,7 +352,7 @@ async fn missing_and_unavailable_tasks_do_not_create_planning_or_execution() {
                 assert!(error.to_string().contains(diagnostic), "{error}");
                 assert!(fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .issue_id
@@ -396,11 +394,11 @@ async fn failed_refresh_preserves_the_last_observation_and_its_age() {
                 .await
                 .unwrap();
             assert_eq!(
-                inspection.observation.state,
+                inspection.issue_state.state,
                 crate::store::PlanningState::Unavailable
             );
             assert_eq!(
-                inspection.observation.observed_at,
+                inspection.issue_state.observed_at,
                 Some(original.observed_at)
             );
             assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
@@ -523,7 +521,7 @@ async fn missing_detail_invalidates_cached_admission_without_claiming_deletion()
             assert_ne!(
                 fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -584,11 +582,11 @@ async fn automatic_refresh_reports_failure_with_retained_observation_age() {
                 .await
                 .unwrap();
             assert_eq!(
-                read.observation.state,
+                read.issue_state.state,
                 crate::store::PlanningState::Unavailable
             );
             assert!(read.refresh_error.unwrap().contains("provider unavailable"));
-            assert_eq!(read.observation.observed_at, Some(record.observed_at));
+            assert_eq!(read.issue_state.observed_at, Some(record.observed_at));
             assert_eq!(fixture.retained_task(&repo, "issue-1"), record);
             assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Auto)
                 .await
@@ -695,7 +693,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             );
             fixture
                 .store
-                .observe_pm_issue_change("issue-1", Some("2026-09-29T12:00:00.125Z"), false)
+                .record_tracker_event("issue-1", Some("2026-09-29T12:00:00.125Z"), false)
                 .await
                 .unwrap();
             let mut delayed = confirmed.clone();
@@ -711,7 +709,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert_ne!(
                 fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -729,7 +727,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             for revision in ["2026-09-29T12:00:00.125Z", "2026-09-29T12:00:00.123Z"] {
                 fixture
                     .store
-                    .observe_pm_issue_change("issue-1", Some(revision), false)
+                    .record_tracker_event("issue-1", Some(revision), false)
                     .await
                     .unwrap();
             }
@@ -742,7 +740,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             // A content edit without ordering evidence still invalidates planning.
             fixture
                 .store
-                .observe_pm_issue_change("issue-1", None, false)
+                .record_tracker_event("issue-1", None, false)
                 .await
                 .unwrap();
             assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
@@ -761,7 +759,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             );
             fixture
                 .store
-                .observe_pm_issue_change("issue-1", Some("2026-09-29T12:00:00.125Z"), true)
+                .record_tracker_event("issue-1", Some("2026-09-29T12:00:00.125Z"), true)
                 .await
                 .unwrap();
             confirmed.item.revision = Some("2026-09-29T12:00:00.126Z".into());
@@ -777,7 +775,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             assert_ne!(
                 fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -786,7 +784,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
             // A removal received before acquisition also fences future list/detail writes.
             fixture
                 .store
-                .observe_pm_issue_change("issue-2", Some("2026-09-29T12:00:00.125Z"), true)
+                .record_tracker_event("issue-2", Some("2026-09-29T12:00:00.125Z"), true)
                 .await
                 .unwrap();
             let mut uncached = original;
@@ -836,7 +834,7 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                     &repo.to_string_lossy(),
                     fixture
                         .store
-                        .linear_issue_evidence(&repo.to_string_lossy(), "issue-1")
+                        .linear_issue_state(&repo.to_string_lossy(), "issue-1")
                         .await
                         .unwrap(),
                     None,
@@ -847,10 +845,10 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 .await
                 .unwrap();
             assert_eq!(
-                invalid.observation.state,
+                invalid.issue_state.state,
                 crate::store::PlanningState::Invalid
             );
-            assert_eq!(invalid.observation.observed_at, Some(original.observed_at));
+            assert_eq!(invalid.issue_state.observed_at, Some(original.observed_at));
             assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
                 .await
@@ -859,25 +857,25 @@ async fn inspection_retains_invalid_removed_and_absent_facts_without_admitting_w
                 .await
                 .unwrap();
             assert_eq!(
-                absent.observation.state,
+                absent.issue_state.state,
                 crate::store::PlanningState::Absent
             );
-            assert_eq!(absent.observation.observed_at, Some(original.observed_at));
+            assert_eq!(absent.issue_state.observed_at, Some(original.observed_at));
             assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             // Null is an absence observation, not a confirmed deletion receipt.
             fixture
                 .store
-                .observe_pm_issue_change("issue-1", None, true)
+                .record_tracker_event("issue-1", None, true)
                 .await
                 .unwrap();
             let removed = inspect_task_planning_async(&repo, "FIX-1", LinearRefresh::Force)
                 .await
                 .unwrap();
             assert_eq!(
-                removed.observation.state,
+                removed.issue_state.state,
                 crate::store::PlanningState::Removed
             );
-            assert_eq!(removed.observation.observed_at, Some(original.observed_at));
+            assert_eq!(removed.issue_state.observed_at, Some(original.observed_at));
             assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
             assert!(refresh_task_input(&repo, "FIX-1", LinearRefresh::Never)
                 .await
@@ -922,7 +920,7 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
                     entered.wait().await;
                     fixture
                         .store
-                        .observe_pm_issue_change("issue-1", None, true)
+                        .record_tracker_event("issue-1", None, true)
                         .await
                         .unwrap();
                     release.wait().await;
@@ -930,11 +928,11 @@ async fn removal_during_absent_lookup_preserves_confirmed_evidence() {
             );
             let inspection = inspection.unwrap();
             assert_eq!(
-                inspection.observation.state,
+                inspection.issue_state.state,
                 crate::store::PlanningState::Removed
             );
             assert_eq!(
-                inspection.observation.observed_at,
+                inspection.issue_state.observed_at,
                 Some(original.observed_at)
             );
             assert_eq!(fixture.retained_task(&repo, "issue-1"), original);
@@ -1053,7 +1051,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
                 }
                 let evidence = fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap();
                 assert_eq!(evidence.observed_at, Some(stored.observed_at));
@@ -1079,7 +1077,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
             assert_ne!(
                 fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap()
                     .state,
@@ -1311,7 +1309,7 @@ async fn cancelled_acceptance(detail: bool) {
     assert!(recovered.moves.is_empty());
     let accepted = fixture
         .store
-        .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+        .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
         .await
         .unwrap();
     assert!(
@@ -1400,7 +1398,7 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
             // Stable-ID reobservation still finds a renamed Task after the requested identifier changes.
             let stored = fixture
                 .store
-                .linear_issue_evidence(&repo.to_string_lossy(), "issue-1")
+                .linear_issue_state(&repo.to_string_lossy(), "issue-1")
                 .await
                 .unwrap();
             assert_eq!(stored.state, crate::store::PlanningState::Available);
@@ -1415,10 +1413,10 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
                 inspection.refresh_error
             );
             assert_eq!(
-                inspection.observation.state,
+                inspection.issue_state.state,
                 crate::store::PlanningState::Available
             );
-            assert_eq!(inspection.observation.issue_id.as_deref(), Some("issue-1"));
+            assert_eq!(inspection.issue_state.issue_id.as_deref(), Some("issue-1"));
         })
         .await;
 }
@@ -1444,7 +1442,7 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
                 .unwrap();
             let before = fixture
                 .store
-                .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                 .await
                 .unwrap();
             let project_before = fixture
@@ -1473,7 +1471,7 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
             assert_eq!(
                 fixture
                     .store
-                    .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                    .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                     .await
                     .unwrap(),
                 before
@@ -1491,10 +1489,10 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
                     .await
                     .unwrap();
                 assert_eq!(
-                    rejected.observation.state,
+                    rejected.issue_state.state,
                     crate::store::PlanningState::Invalid
                 );
-                assert_eq!(rejected.observation.observed_at, before.observed_at);
+                assert_eq!(rejected.issue_state.observed_at, before.observed_at);
                 conn.execute(
                     &format!("UPDATE tracker_projects SET {column}=0 WHERE id='project-1'"),
                     [],
@@ -1504,12 +1502,12 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
             // A change receipt invalidates admission even when unrelated content is unreadable.
             fixture
                 .store
-                .observe_pm_issue_change("issue-1", None, false)
+                .record_tracker_event("issue-1", None, false)
                 .await
                 .unwrap();
             let invalidated = fixture
                 .store
-                .linear_issue_evidence(&repo.to_string_lossy(), "FIX-1")
+                .linear_issue_state(&repo.to_string_lossy(), "FIX-1")
                 .await
                 .unwrap();
             assert_eq!(invalidated.state, crate::store::PlanningState::Invalid);

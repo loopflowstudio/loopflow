@@ -43,7 +43,6 @@ impl Fixture {
     async fn seed_snapshot(&self, wave: &Wave) -> InventoryFixture {
         let row = InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
             snapshot: Inventory {

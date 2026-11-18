@@ -343,7 +343,6 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
             snapshot: crate::test_linear_input::Inventory {

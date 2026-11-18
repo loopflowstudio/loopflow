@@ -724,7 +724,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
         .unwrap()
-        .observe_pm_issue_change("fixture-deleted", None, true)
+        .record_tracker_event("fixture-deleted", None, true)
         .unwrap();
     let refused = fixture
         .command(&["session", "resume", &session])

@@ -99,7 +99,6 @@ fn put_project_snapshot(home: &Path, wave: &Wave, project: &Project) {
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
             initiative: "initiative-infrastructure".to_string(),
             synced_at: OffsetDateTime::now_utc().unix_timestamp(),
             snapshot: serde_json::from_value(payload).expect("parse PM snapshot"),
@@ -391,7 +390,6 @@ fn seed_stale_project_work(
     });
     let snapshot = InventoryFixture {
         wave_id: wave.id().clone(),
-        provider: "linear".into(),
         initiative: "initiative-product".into(),
         synced_at: now.unix_timestamp(),
         snapshot: serde_json::from_value(payload).unwrap(),
@@ -664,7 +662,6 @@ Count dispatched Task loops that settle without rescue.
     sqlite
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
             initiative: "initiative-product".to_string(),
             synced_at: now.unix_timestamp(),
             snapshot: serde_json::from_value(project_payload.clone()).expect("parse PM snapshot"),

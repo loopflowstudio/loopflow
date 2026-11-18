@@ -92,7 +92,7 @@ mod tests {
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -147,7 +147,7 @@ mod tests {
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -166,7 +166,7 @@ mod tests {
             .remove(0);
         assert_eq!(change.base, None);
         observed.description = Some(String::new());
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -206,7 +206,7 @@ mod tests {
             "id":"linear-project", "revision":"2026-10-10T12:00:00Z", "slug":"product", "name":"Product", "summary":"", "description":"Baseline",
             "workflow":"", "krs":[], "metric_targets":[], "status":"started", "initiative_ids":["initiative"], "team_ids":["team"]
         })).unwrap();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -219,7 +219,7 @@ mod tests {
         observed.description = None;
         observed.revision = Some("2026-10-10T12:01:00Z".into());
         observed.summary = "New summary".into();
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -257,7 +257,7 @@ mod tests {
             serde_json::json!({"value":"Baseline", "revision":"2026-10-10T12:00:00Z", "observed_at":17})
         );
         observed.description = Some("Baseline".into());
-        crate::sqlite::linear_acceptance::accept_linear_project_in(
+        crate::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",

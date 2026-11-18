@@ -544,7 +544,6 @@ mod tests {
 
         let mut snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative-1".into(),
             synced_at: 1,
             snapshot: crate::test_linear_input::Inventory {

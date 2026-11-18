@@ -1,10 +1,10 @@
 //! Turn a tracker read into durable Task direction.
 //!
 //! Someone editing a tracker item's title or description or adding a comment
-//! appends an ordered Steer. This module maps one observation onto that input
-//! spine, and [`Store::apply_linear_observation`] persists it atomically.
+//! appends an ordered Steer. This module maps one event onto that input
+//! spine, and [`Store::apply_tracker_event`] persists it atomically.
 //! Exactly-once, the baseline, and the monotonic-revision guard all live in the
-//! store; acquisition supplies observations without proposing a second write.
+//! store; refresh supplies events without proposing a second write.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -44,17 +44,14 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
     if client.removed(issue.as_str()).await.map_err(message)? {
         store
             .sqlite
-            .observe_pm_issue_change(issue.as_str(), None, true)
+            .record_tracker_event(issue.as_str(), None, true)
             .map_err(message)?;
         return Ok(());
     }
-    let mut observation = client
-        .observe_issue(issue.as_str())
-        .await
-        .map_err(message)?;
-    claim_local_comments(store, &task, &client, &mut observation)?;
-    // Linear's team feed accepts provider edits into Work. Asana has
-    // none, so this exact read is their acceptance: a renamed or completed task
+    let mut event = client.fetch_issue(issue.as_str()).await.map_err(message)?;
+    claim_local_comments(store, &task, &client, &mut event)?;
+    // Linear's team feed accepts tracker edits into Work. Asana has
+    // none, so an exact Asana read applies the change: a renamed or completed task
     // updates the Task, and an unsent local edit stays as a visible conflict.
     if !matches!(client, super::tracker::Tracker::Linear(_)) {
         if let Some((item, project)) = client
@@ -73,9 +70,9 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         }
     }
     store
-        .apply_linear_observation(
+        .apply_tracker_event(
             &task.id,
-            observation,
+            event,
             OffsetDateTime::now_utc(),
             planning_connected,
         )
@@ -91,13 +88,13 @@ fn claim_local_comments(
     store: &Store,
     task: &Task,
     client: &super::tracker::Tracker,
-    observation: &mut loopflow_storage::planning::TrackerObservation,
+    event: &mut loopflow_storage::planning::TrackerEvent,
 ) -> OpsResult<()> {
     if matches!(client, super::tracker::Tracker::Linear(_)) {
         return Ok(());
     }
     let local = store.task_comments(&task.id).map_err(message)?.comments;
-    for comment in &mut observation.comments {
+    for comment in &mut event.comments {
         if let Some(saved) = local.iter().find(|saved| {
             uuid::Uuid::parse_str(&saved.id).is_ok()
                 && client.claimed_comment(&saved.body).as_deref() == Some(comment.body.as_str())
@@ -187,7 +184,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         .await
         .map_err(message)?;
     let changed = !changes.is_empty();
-    for (issue, project, observation) in changes {
+    for (issue, project, event) in changes {
         // Provider filters limit traffic; the current local decision still wins
         // when completion races the request.
         let existing = store.get_task_by_issue(&issue.id).await.map_err(message)?;
@@ -233,10 +230,10 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         )
         .await?;
         if let Some(task) = store.get_task_by_issue(&issue.id).await.map_err(message)? {
-            let mut observation = observation;
-            claim_local_comments(store, &task, &client, &mut observation)?;
+            let mut event = event;
+            claim_local_comments(store, &task, &client, &mut event)?;
             store
-                .apply_linear_observation(&task.id, observation, now, planning_connected)
+                .apply_tracker_event(&task.id, event, now, planning_connected)
                 .await
                 .map_err(message)?;
         }
@@ -284,7 +281,7 @@ pub(crate) async fn team_current(store: &Store, repository: &str) -> bool {
 }
 
 /// Bring the repository's scope delta up to date within five seconds; whether
-/// it changed local state. Unavailable or slow providers leave state as it is.
+/// it changed local state. Unavailable or slow trackers leave state as it is.
 async fn check_repository_bounded(store: &Store, repository: &str, fresh_for: i64) -> bool {
     let check = tokio::time::timeout(
         Duration::from_secs(5),

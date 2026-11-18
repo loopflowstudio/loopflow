@@ -363,7 +363,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         .unwrap();
     fs2::FileExt::lock_exclusive(&effect_lock).unwrap();
     fs::rename(&disconnected, remote).unwrap();
-    // Acquisition must proceed even while this machine cannot publish.
+    // Refresh must proceed even while this machine cannot publish.
     wait_for(|| {
         runtime
             .block_on(fixture.store.get_task(&fixture.task.id))

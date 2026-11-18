@@ -289,20 +289,20 @@ impl Store {
         self.sqlite.apply_migration_for_test(name)
     }
 
-    pub async fn linear_issue_evidence(
+    pub async fn linear_issue_state(
         &self,
         repo: &str,
         selector: &str,
-    ) -> StoreResult<LinearIssueEvidence> {
+    ) -> StoreResult<LinearIssueState> {
         let repo = repo.to_string();
         let selector = selector.to_string();
         run_sqlite(&self.sqlite, move |store| {
-            store.linear_issue_evidence(&repo, &selector)
+            store.linear_issue_state(&repo, &selector)
         })
         .await
     }
 
-    pub async fn observe_pm_issue_change(
+    pub async fn record_tracker_event(
         &self,
         issue_id: &str,
         revision: Option<&str>,
@@ -311,7 +311,7 @@ impl Store {
         let issue_id = issue_id.to_string();
         let revision = revision.map(str::to_string);
         run_sqlite(&self.sqlite, move |store| {
-            store.observe_pm_issue_change(&issue_id, revision.as_deref(), removed)
+            store.record_tracker_event(&issue_id, revision.as_deref(), removed)
         })
         .await
     }
@@ -319,7 +319,7 @@ impl Store {
     pub async fn invalidate_linear_issue(
         &self,
         repo: &str,
-        expected: LinearIssueEvidence,
+        expected: LinearIssueState,
         acquisition: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
         let repo = repo.to_string();
@@ -910,7 +910,6 @@ mod tests {
         snapshot.items[0].revision = Some("2026-10-05T12:00:00Z".into());
         InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: snapshot.projects[0].initiative_ids[0].clone(),
             synced_at: 1,
             snapshot,
@@ -1359,7 +1358,7 @@ mod tests {
         store.sqlite.seed_unplaced_task(&task);
         let mut before = store.get_task(&task.id).await.unwrap().unwrap();
         store
-            .observe_pm_issue_change(task.tracker_id.as_ref().unwrap().as_str(), None, true)
+            .record_tracker_event(task.tracker_id.as_ref().unwrap().as_str(), None, true)
             .await
             .unwrap();
         let removed = store.get_task(&task.id).await.unwrap().unwrap();
@@ -1404,7 +1403,7 @@ mod tests {
         task.worktree = Some(directory.path().join("checkout"));
         store.sqlite.seed_unplaced_task(&task);
         store
-            .observe_pm_issue_change(task.tracker_id.as_ref().unwrap().as_str(), None, true)
+            .record_tracker_event(task.tracker_id.as_ref().unwrap().as_str(), None, true)
             .await
             .unwrap();
         rusqlite::Connection::open(directory.path().join("registry.db"))
@@ -1753,7 +1752,7 @@ mod tests {
         response.snapshot.projects.push(conflict);
         assert!(store.seed_inventory(response, None).await.is_err());
         let retained_observation = store
-            .linear_issue_evidence(wave.repo(), &task.identifier)
+            .linear_issue_state(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
@@ -1821,7 +1820,7 @@ mod tests {
         newer.snapshot.projects.push(successor);
         store.seed_inventory(newer, None).await.unwrap();
         let accepted = store
-            .linear_issue_evidence(wave.repo(), &task.identifier)
+            .linear_issue_state(wave.repo(), &task.identifier)
             .await
             .unwrap();
         let transferred = store.get_task(&task.id).await.unwrap().unwrap();
@@ -1831,7 +1830,7 @@ mod tests {
         assert!(store.seed_inventory(delayed, None).await.is_err());
         assert_eq!(
             store
-                .linear_issue_evidence(wave.repo(), &task.identifier)
+                .linear_issue_state(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted
@@ -1956,7 +1955,7 @@ mod tests {
             .await
             .unwrap();
         assert!(
-            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_events::accept_linear_project_in(
                 &store.sqlite,
                 wave.id(),
                 &snapshot.initiative,
@@ -1974,7 +1973,7 @@ mod tests {
             .unwrap()
             .is_empty());
         let retained = store
-            .linear_issue_evidence(wave.repo(), task.tracker_id.as_ref().unwrap().as_str())
+            .linear_issue_state(wave.repo(), task.tracker_id.as_ref().unwrap().as_str())
             .await
             .unwrap();
         assert_eq!(retained.project_team_ids, current.team_ids);
@@ -2006,7 +2005,7 @@ mod tests {
                 holds: false,
             });
         confirmed.revision = Some("2026-10-05T12:00:01Z".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -2016,7 +2015,7 @@ mod tests {
         )
         .unwrap();
         let accepted = store
-            .linear_issue_evidence(wave.repo(), &task.identifier)
+            .linear_issue_state(wave.repo(), &task.identifier)
             .await
             .unwrap();
         assert_eq!(
@@ -2039,7 +2038,7 @@ mod tests {
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
         store.create_wave(&other).await.unwrap();
         assert!(
-            loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_storage::sqlite::linear_events::accept_linear_project_in(
                 &store.sqlite,
                 other.id(),
                 &snapshot.initiative,
@@ -2061,7 +2060,7 @@ mod tests {
         store.seed_inventory(snapshot, None).await.unwrap();
         assert_eq!(
             store
-                .linear_issue_evidence(wave.repo(), &task.identifier)
+                .linear_issue_state(wave.repo(), &task.identifier)
                 .await
                 .unwrap(),
             accepted
@@ -2619,7 +2618,7 @@ mod tests {
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
         let mut observed = snapshot.snapshot.projects.remove(0);
         observed.status = loopflow_storage::work::project::ProjectStatus::Completed;
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_project_in(
             &store.sqlite,
             wave.id(),
             &snapshot.initiative,
@@ -3338,7 +3337,7 @@ mod attachment_lifecycle_tests;
 mod program_status_tests;
 
 #[cfg(test)]
-mod linear_observation_tests;
+mod linear_event_tests;
 
 #[cfg(test)]
 mod settlement_lifecycle_tests;

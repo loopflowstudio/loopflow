@@ -51,7 +51,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Live exclusion | Kernel-held locks and fenced database mutations |
 | Selected executable and installation progress | Installation receipts |
 
-A Machine owns its local store and payloads. Planning providers and GitHub hold their shared records;
+A Machine owns its local store and payloads. Trackers and GitHub hold their shared records;
 a local snapshot cannot authorize a provider mutation when a fresh observation
 is required. An identifier joins evidence without transferring authority.
 The [checked inventory](reference.md#complete-ownership-map)

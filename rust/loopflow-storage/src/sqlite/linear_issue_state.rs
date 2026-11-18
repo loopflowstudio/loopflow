@@ -7,7 +7,7 @@ use loopflow_model::id::WaveId;
 use rusqlite::{params, OptionalExtension};
 
 impl SqliteStore {
-    pub fn observe_pm_issue_change(
+    pub fn record_tracker_event(
         &self,
         issue_id: &str,
         revision: Option<&str>,
@@ -62,10 +62,10 @@ impl SqliteStore {
     pub fn invalidate_linear_issue(
         &self,
         repo: &str,
-        expected: &crate::LinearIssueEvidence,
+        expected: &crate::LinearIssueState,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A null detail response invalidates cached admission, not provider history.
+        // A null detail response invalidates cached admission, not tracker history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
         conn.execute(
             "UPDATE tracker_items SET needs_refresh=1 WHERE repo=?1 AND tracker IN ('linear','asana') AND id=?2
@@ -80,11 +80,11 @@ impl SqliteStore {
         Ok(())
     }
 
-    pub fn linear_issue_evidence(
+    pub fn linear_issue_state(
         &self,
         repo: &str,
         selector: &str,
-    ) -> StoreResult<crate::LinearIssueEvidence> {
+    ) -> StoreResult<crate::LinearIssueState> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
             "SELECT i.id,i.revision,i.observed_at,
@@ -140,7 +140,7 @@ impl SqliteStore {
                 params![selector, repo],
                 |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
             )?;
-            return Ok(crate::LinearIssueEvidence {
+            return Ok(crate::LinearIssueState {
                 issue_id: None,
                 revision: None,
                 observed_at: None,
@@ -157,7 +157,7 @@ impl SqliteStore {
                 },
             });
         };
-        Ok(crate::LinearIssueEvidence {
+        Ok(crate::LinearIssueState {
             issue_id: Some(id),
             revision,
             observed_at: Some(observed_at),
@@ -207,7 +207,7 @@ impl SqliteStore {
                     },
                 )
                 .optional()?;
-            let Some((repo, provider, initiative)) = metadata else {
+            let Some((repo, tracker, initiative)) = metadata else {
                 continue;
             };
             // A malformed observation belongs to this Wave's acquisition status.
@@ -220,7 +220,7 @@ impl SqliteStore {
                      AND p.archived=0 AND p.membership_unresolved=0 ORDER BY m.position,p.id",
                 )?;
                 let mut project_claims = query
-                    .query_map(params![wave_id, repo, provider], |row| {
+                    .query_map(params![wave_id, repo, tracker], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,
@@ -249,7 +249,7 @@ impl SqliteStore {
                      ORDER BY m.position,i.id",
                 )?;
                 let issue_claims = query
-                    .query_map(params![wave_id, repo, provider, initiative], |row| {
+                    .query_map(params![wave_id, repo, tracker, initiative], |row| {
                         Ok((
                             row.get::<_, String>(0)?,
                             row.get::<_, String>(1)?,

@@ -176,12 +176,12 @@ pub(crate) async fn refresh_task_input(
     refresh: super::LinearRefresh,
 ) -> crate::ops::OpsResult<crate::test_linear_input::IssueFixture> {
     let read = super::inspect_task_planning_async(repo, selector, refresh).await?;
-    if read.observation.state != crate::store::PlanningState::Available {
+    if read.issue_state.state != crate::store::PlanningState::Available {
         return Err(crate::ops::OpsError::Message(
             read.refresh_error.unwrap_or_else(|| {
                 format!(
                     "Task {selector:?} planning is {:?}; run `lf task sync {selector}`",
-                    read.observation.state
+                    read.issue_state.state
                 )
             }),
         ));

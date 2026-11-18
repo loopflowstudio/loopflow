@@ -15,7 +15,7 @@ first, then the engineering words it borrows.
 | **Deciding step** | The step that chooses between moving on and going back. |
 | **Task** | One piece of work with a finish line. |
 | **Wave** | A goal Loopflow keeps working on. It has a written objective, a memory, and a schedule. |
-| **Planning** | A Wave's plan: its Tasks, KRs and targets. `lf wave plan` reads it; `lf plan list` reads every Wave's. |
+| **Plan** | The shared Waves, Projects and Tasks. `lf wave plan` shows one Wave’s part, and `lf plan list` shows the repository’s plan. |
 | **KR** | Key result. A result you can check, stated before the work starts. |
 | **Memory** | A text file, `MEMORY.md`, where a Wave writes down what it learned. |
 | **LfSession**, **Session** | One continuable agent conversation, interactive or headless, with identity, feedback and native history. |
@@ -55,7 +55,7 @@ execution owner in the accepted model.
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |
 | **GitHub** | A website that stores repositories and hosts pull requests. |
-| **Planning provider** | Where your Tasks and Wave planning are shared: a Git ref by default, or Linear or Asana. |
+| **Tracker** | Where your Tasks and Wave planning are shared: a Git ref by default, or Linear or Asana. |
 | **Linear** | A planning tool. Loopflow can keep Tasks and Wave planning there instead of in Git. |
 | **Token** | The unit AI tools count text in, and charge by. Roughly three quarters of a word. |
 | **YAML**, **Markdown** | Two plain text formats. Graphs are written in YAML; skills and docs in Markdown. |

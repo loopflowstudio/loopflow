@@ -277,7 +277,7 @@ It does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+definitions and memory. The tracker (Git, Linear or Asana) and GitHub
 keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.
 
@@ -305,8 +305,8 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 | LfSession | An interactive or headless conversation across attachments and native reconnection | `agent_sessions`, subordinate history and provider-native conversation |
 | Running Graph | One Graph process and the steps it starts, including taskless execution | The Graph process and its child step processes in `processes` |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments | Wave files, local Wave identity and, with Linear, Initiative membership |
-| Project | A Wave's plan, Tasks, KRs and targets | `projects` row, shared through the planning provider |
-| Task | A concrete change, investigation or document | `tasks`, the planning provider, Git and GitHub |
+| Project | A Wave’s Tasks, KRs and targets | `projects` row, shared through the tracker |
+| Task | A concrete change, investigation or document | `tasks`, the tracker, Git and GitHub |
 | Steer | An authored correction to Work | Ordered Work input |
 | Machine | A machine's store, credentials and exact process authority | Machine identity and observed route |
 | Task ownership | Who works on a Task, on which Machine, or unowned | Append-only `task_ownership` log; each person's Machine-local Wave → Machine default places their unowned Work |

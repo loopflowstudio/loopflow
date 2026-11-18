@@ -109,7 +109,7 @@ async fn graphql(
         json!({"comment":comment})
     } else if query.contains("query IssueTrash") {
         json!({"issue": {"id": vars["id"], "updatedAt": "2026-09-24T12:00:00Z", "trashed": false}})
-    } else if query.contains("query IssueObservation") {
+    } else if query.contains("query IssueEvent") {
         assert_eq!(
             vars["id"], "issue-uuid",
             "read uses the resolved provider UUID"

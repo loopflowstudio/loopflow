@@ -1845,7 +1845,7 @@ pub fn task_create(
         if let Err(error) =
             super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
         {
-            tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
+            tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
         }
         let receipt = receipt.map(|identity| Receipt {
             identity,
@@ -2413,9 +2413,9 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     comments: None,
                 };
                 if let Some(read) = inspection {
-                    // Foreign observations remain acquisition evidence, not owned Work.
-                    result.tracker_state.state = read.observation.state;
-                    result.tracker_state.synced_at = read.observation.observed_at;
+                    // An unmapped issue can still supply tracker state.
+                    result.tracker_state.state = read.issue_state.state;
+                    result.tracker_state.synced_at = read.issue_state.observed_at;
                 }
                 result
             }

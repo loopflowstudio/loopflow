@@ -201,9 +201,7 @@ rebuild each and are noted in `scratch/questions.md`.
    Config reads both tracker spellings, writes the released layout and
    replaces the selected tracker on a dotted edit. LOO-784 carries the writer cutover.
 3. **Wire + Project vocabulary (implemented).** Task status and Work share `tracker_state {state, synced_at}`. Tasks and Projects expose `tracker_id`; metric issues use `project_unavailable`, and Wave removal counts `projects`. Rust, Swift, CLI text, the server schema and shared fixtures match. Stored creation receipts keep the binding readable by released writers.
-4. **Events + provider prose (next).** Type/module renames for inbound, `provider`
-   → tracker in planning code and docs, glossary's "Older code" line deleted.
-   File the contract Task.
+4. **Events and tracker prose (implemented).** Linear and Asana produce `TrackerEvent`. Task steering keeps a per-Task cursor, and planning reads the latest `LinearIssueState`. CLI help, Desktop comment conflicts and planning docs name the tracker. LOO-960 owns the contract migration 30 days after merge.
 
 ## What goes
 
@@ -221,6 +219,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - Historical upgrades seed at their original migration, through temporary views for the two journal tables. Upgrading an existing journal copies its rows once. Mirror comparisons use binary collation for case-only identifier edits.
 - Slice 2: six config-key tests and four documented-command checks passed. A temporary Git repository exercised tracker status, journal, key creation and lookup, and the switch from Linear to Git. Installed lf read the Linear team written by the candidate. Offline Project edits passed in both connection modes, the server schema matched the candidate CLI, and clippy passed for all targets.
 - Slice 3: 52 Rust DTO fixtures, the stream timestamp test, four documented-command checks and all-target clippy passed. Changed Swift sources parsed. A server restart replayed the creation receipt. Installed and candidate CLIs each replayed the other’s creation in an isolated Git repo; Task show and Work agreed on the unbound ID and sync state.
+- Slice 4: 23 focused event, historical upgrade, schema and documented-command tests passed, plus the issue-fetch and end-to-end Task comment tests. All-target clippy passed. Candidate `lf help wave sync` names the tracker. The architecture HTML matches its source.
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
 
@@ -232,5 +231,3 @@ Changed in place: `docs/work.md`, `docs/config.md`, `docs/surfaces.md`,
 `docs/dev/reference-cutover.md`, `AGENTS.md`, `swift/README.md`,
 `rust/loopflow/src/server/README.md`, `rust/loopflow-execution/src/ops/README.md`,
 builtin `wave/skill/split-wave.md`.
-Dev-doc prose still saying provider/observation/delivery for the tracker
-(`docs/dev/planning.md` beyond § Words) is slice 4.

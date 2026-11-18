@@ -321,7 +321,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             .block_on(fixture.store.seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: fixture.task.wave_id.clone().unwrap(),
-                    provider: "linear".into(),
                     initiative: snapshot.projects[0].initiative_ids[0].clone(),
                     synced_at: 7,
                     snapshot,

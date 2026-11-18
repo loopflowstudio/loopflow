@@ -71,7 +71,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
             store.invalidate_linear_issue(
                 &scope.to_string_lossy(),
                 runtime
-                    .block_on(store.linear_issue_evidence(&scope.to_string_lossy(), "FIX-3"))
+                    .block_on(store.linear_issue_state(&scope.to_string_lossy(), "FIX-3"))
                     .unwrap(),
                 None,
             ),
@@ -90,10 +90,10 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         ))
         .unwrap();
     runtime
-        .block_on(store.observe_pm_issue_change("issue-4", None, true))
+        .block_on(store.record_tracker_event("issue-4", None, true))
         .unwrap();
     runtime
-        .block_on(store.observe_pm_issue_change("uncached-removal", None, true))
+        .block_on(store.record_tracker_event("uncached-removal", None, true))
         .unwrap();
     let lf = |args: &[&str]| {
         let mut command = Command::new(loopflow_test_support::lf_binary());

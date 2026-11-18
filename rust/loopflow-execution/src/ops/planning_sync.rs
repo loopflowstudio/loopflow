@@ -1,5 +1,5 @@
 //! Foreground Git exchange and local-save delivery for the selected transport.
-//! Acquisition and delivery run independently; the common writer alone changes Work.
+//! Inbound and outbound sync run independently; the common writer alone changes Work.
 //! Blocking workers retain their locks through cancellation, commit and readback.
 
 use crate::work::wave::Wave;
@@ -43,12 +43,12 @@ pub(crate) async fn find_task(
         return Ok(Some(task));
     }
     if let Err(error) = acquire_repository(store, repo).await {
-        tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
+        tracing::warn!(%error, "tracker refresh pending; resolving retained Task");
     }
     read().map_err(message)
 }
 
-/// One acquisition per destination, also used before resolving a cold Task.
+/// One fetch per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
 pub async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
     exchange_repository(store, repo, Exchange::Acquire).await
@@ -351,7 +351,7 @@ fn exchange_destination(
 ) -> OpsResult<()> {
     let publish = matches!(exchange, Exchange::Publish { .. });
     // The blocking worker retains effect ownership through status writes, even
-    // if its async waiter is canceled. Acquisition never takes this lock.
+    // if its async waiter is canceled. Refresh never takes this lock.
     let _lock = if let Exchange::Publish { wait } = exchange {
         let path = store
             .home_dir()
@@ -383,12 +383,12 @@ fn exchange_destination(
             acquire_destination(store, repo, id, &git).map(|_| ())
         }
     })();
-    // Do not persist provider data or credential-bearing destinations in errors.
+    // Do not persist tracker data or credential-bearing destinations in errors.
     let error = result.as_ref().err().map(|_| {
         if publish {
             "Git publication pending; local planning retained"
         } else {
-            "Git acquisition failed; retained import unchanged"
+            "Git fetch failed; retained import unchanged"
         }
     });
     store
@@ -596,7 +596,7 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
+                        _ = repeat_sync("Git plan fetch", Duration::from_secs(5), || {
                             acquire_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
@@ -621,7 +621,7 @@ impl PlanningSync {
 }
 
 // Each branch has its own delay after an attempt. A slow delivery cannot
-// postpone acquisition or cause missed ticks to burst when the request returns.
+// postpone fetches or cause missed ticks to burst when the request returns.
 async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
     operation: &str,
     delay: Duration,
@@ -693,7 +693,7 @@ pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::stor
         .truncate(false)
         .open(path.join(format!("{}.lock", wave.id())))
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    // OS ownership releases on crash; provider state makes the next holder a resumer.
+    // The OS releases the lock if the holder exits.
     for _ in 0..300 {
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),

@@ -54,7 +54,7 @@ pub struct Project {
     /// The record’s ID in the repository's tracker.
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<LinearProjectId>,
-    /// Acquisition time of the retained Linear observation, never a write clock.
+    /// Time of the last successful tracker refresh.
     pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,

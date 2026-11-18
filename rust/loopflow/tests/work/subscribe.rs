@@ -109,7 +109,6 @@ impl Machine {
         self.store
             .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
-                provider: "linear".into(),
                 initiative: "initiative-product".into(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 snapshot: serde_json::from_value(payload).unwrap(),

@@ -196,7 +196,7 @@ provider generation in caller provenance, turn origin and Program Status.
 | --- | --- |
 | `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
-| `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and provider revision; no Machine-local column |
+| `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and tracker revision; no Machine-local column |
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
 | `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
 | `task_ownership` | Append-only `claim`/`unclaim` entries (`own_…`; `lf task unassign` writes `unclaim`, shown as unassign) with person, the Machine they name, the Machine that wrote them and time; a move is a claim naming another Machine, and earlier `handoff` entries read as one |
@@ -254,7 +254,7 @@ completion nor Graph authority.
 A primary Session is the one ongoing conversation of a scope. It is an ordinary
 interactive conversation whose row names that scope; a repository and each
 Wave have at most one uncompleted primary. The repository's needs no Wave,
-Task or planning provider. `lf resume` finds or admits it, prepares its
+Task or tracker. `lf resume` finds or admits it, prepares its
 workspace, reserves the first input and owns the foreground launch; `--prepare`
 stops before launch. Task primaries are admitted lazily on the owner Machine, on first resume;
 explicit Wave admission also admits the repository conversation. A Session may
@@ -277,7 +277,7 @@ an already selected Task primary unchanged.
 
 AgentSessionId preserves the provider's exact id, including non-UUID ids. The
 selected AgentSession belongs to the LfSession row; the provider endpoint belongs
-to the AgentProcess. Captured provider observations retain native resume references.
+to the AgentProcess. Captured tracker events retain native resume references.
 A replacement preserves LfSession identity. Immutable turn/capture history keeps
 earlier AgentSessions and their account attribution: replacement does not
 reassign old usage. A new AgentProcess resumes the selected AgentSession.

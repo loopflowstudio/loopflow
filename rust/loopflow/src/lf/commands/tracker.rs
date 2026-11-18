@@ -63,7 +63,7 @@ pub fn refresh(checkout: &Path) -> Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
         let repo_key = repo.to_string_lossy();
-        // Acquisition records its own failure and never waits on publication.
+        // Refresh records its own failure and never waits on publication.
         // A refresh waits out another process's publication, then sends this
         // Machine's pending changes out.
         let acquired =

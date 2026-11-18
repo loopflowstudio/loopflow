@@ -91,7 +91,6 @@ fn put_snapshot(
     store
         .seed_inventory(&InventoryFixture {
             wave_id: registered.id().clone(),
-            provider: "linear".to_string(),
             initiative: initiative.to_string(),
             synced_at: chrono::Utc::now().timestamp(),
             snapshot,
@@ -337,7 +336,6 @@ fn repository_team_matrix() {
     let accepted = reopened.list_projects(Some(survival.id())).unwrap();
     let mut planning = InventoryFixture {
         wave_id: survival.id().clone(),
-        provider: "linear".into(),
         initiative: "initiative-survival".into(),
         synced_at: 2,
         snapshot: survival_snapshot,

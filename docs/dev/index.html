@@ -2138,7 +2138,7 @@ It does not centralize execution across Machines. Machine routing selects
 where commands run, the server admits clients, and installation owns server
 registration and updates. A Machine owns its processes, credentials,
 planning store, execution history, and OS locks. Repository files carry authored
-definitions and memory. The planning provider (a Git ref or Linear) and GitHub
+definitions and memory. The tracker (Git, Linear or Asana) and GitHub
 keep shared planning and delivery truth. Readers join those sources; they do not replace them with a universal
 ledger.</p>
 <h2 id="core-models">Core models<a class="anchor-link" href="#core-models" title="Link to this section">#</a></h2>
@@ -2195,13 +2195,13 @@ Graph                          one lf process; cursor in its memory, graph in Gr
 </tr>
 <tr>
 <td>Project</td>
-<td>A Wave's plan, Tasks, KRs and targets</td>
-<td><code>projects</code> row, shared through the planning provider</td>
+<td>A Wave’s Tasks, KRs and targets</td>
+<td><code>projects</code> row, shared through the tracker</td>
 </tr>
 <tr>
 <td>Task</td>
 <td>A concrete change, investigation or document</td>
-<td><code>tasks</code>, the planning provider, Git and GitHub</td>
+<td><code>tasks</code>, the tracker, Git and GitHub</td>
 </tr>
 <tr>
 <td>Steer</td>

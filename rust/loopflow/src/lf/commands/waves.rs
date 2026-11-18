@@ -3450,7 +3450,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: serde_json::from_str(include_str!(
@@ -3522,7 +3521,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: planning.clone(),
@@ -3633,7 +3631,6 @@ mod tests {
                 .seed_inventory(
                     crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative".into(),
                         synced_at: 2,
                         snapshot: serde_json::from_value(serde_json::json!({"projects":[{
@@ -3719,7 +3716,6 @@ mod tests {
         items.push(item);
         let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
@@ -3809,7 +3805,7 @@ mod tests {
             [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
+            wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
                 "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
                 "metric_targets":[], "workflow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
@@ -3835,7 +3831,6 @@ mod tests {
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 3,
             snapshot: crate::test_linear_input::Inventory {
@@ -3934,7 +3929,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 2,
                     snapshot: crate::test_linear_input::Inventory {

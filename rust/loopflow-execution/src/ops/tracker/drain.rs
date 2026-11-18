@@ -72,7 +72,7 @@ pub enum Scope<'a> {
 }
 
 /// One bounded pass for `repo` when it has a tracker. With nothing unconfirmed
-/// it asks the provider nothing, not even to build the tracker.
+/// it asks the tracker nothing, not even to build the tracker.
 pub(crate) async fn drain_repository(
     store: &Store,
     repo: &str,
@@ -260,7 +260,7 @@ fn bound(store: &Store, owner: &ActionOwner) -> OpsResult<Option<String>> {
     })
 }
 
-/// Serialize provider actions only; saves and acquisition never take this lock.
+/// Serialize tracker actions only; saves and acquisition never take this lock.
 /// The file stays in place so another connection always locks the same inode.
 pub(crate) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
     std::fs::create_dir_all(path.parent().expect("delivery lock has a parent directory"))?;
@@ -428,7 +428,7 @@ impl Drain<'_> {
                 }
             }
             _ if parent => return Ok(Step::Wait),
-            // Moving Tasks needs the provider's complete list first.
+            // Moving Tasks needs the tracker's complete list first.
             _ if action.kind == ActionKind::Order => Some(self.look(&action).await?),
             _ => None,
         };

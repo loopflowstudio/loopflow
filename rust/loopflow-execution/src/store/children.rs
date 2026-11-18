@@ -5,8 +5,8 @@ use std::sync::Arc;
 use loopflow_model::id::WaveId;
 use loopflow_storage::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use loopflow_storage::work::task::{
-    LinearObservationOutcome, Task, TaskEvent, TaskEventKind, TaskId, TaskLinearObservation,
-    TaskPr, TaskPrId,
+    Task, TaskEvent, TaskEventKind, TaskId, TaskPr, TaskPrId, TaskTrackerCursor,
+    TrackerEventOutcome,
 };
 use time::OffsetDateTime;
 
@@ -278,30 +278,30 @@ impl Store {
         .await
     }
 
-    pub async fn task_linear_observation(
+    pub async fn task_tracker_cursor(
         &self,
         task_id: &TaskId,
-    ) -> StoreResult<Option<TaskLinearObservation>> {
+    ) -> StoreResult<Option<TaskTrackerCursor>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            store.task_linear_observation(&task_id)
+            store.task_tracker_cursor(&task_id)
         })
         .await
     }
 
-    pub(crate) async fn apply_linear_observation(
+    pub(crate) async fn apply_tracker_event(
         &self,
         task_id: &TaskId,
-        observation: loopflow_storage::planning::TrackerObservation,
+        event: loopflow_storage::planning::TrackerEvent,
         observed_at: OffsetDateTime,
         planning_connected: bool,
-    ) -> StoreResult<LinearObservationOutcome> {
+    ) -> StoreResult<TrackerEventOutcome> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| {
-            crate::store::ownership::apply_linear_observation(
+            crate::store::ownership::apply_tracker_event(
                 &store,
                 &task_id,
-                &observation,
+                &event,
                 observed_at,
                 planning_connected,
             )

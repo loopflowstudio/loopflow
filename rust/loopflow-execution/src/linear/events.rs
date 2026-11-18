@@ -1,10 +1,10 @@
-//! Attribute asynchronous Linear acceptance to the application request.
+//! Apply Linear events within the originating request.
 
 use crate::store::{run_planning_write, PlanningLocks, Store, StoreResult};
 use loopflow_model::id::WaveId;
 use std::sync::Arc;
 
-use loopflow_storage::sqlite::linear_acceptance::{
+use loopflow_storage::sqlite::linear_events::{
     accept_linear_inventory_in, accept_linear_issue_in, reconcile_linear_project_teams_in,
 };
 
@@ -15,9 +15,9 @@ pub(crate) async fn accept_linear_inventory(
     projects: Vec<loopflow_storage::planning::TrackerProject>,
     issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
-    acquisition: Option<Arc<PlanningLocks>>,
+    locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
-    run_planning_write(&store.sqlite, acquisition, move |store| {
+    run_planning_write(&store.sqlite, locks, move |store| {
         accept_linear_inventory_in(&store, &wave, &initiative, &projects, &issues, observed_at)
     })
     .await
@@ -29,11 +29,11 @@ pub(crate) async fn reconcile_linear_project_teams(
     initiative: &str,
     project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
-    acquisition: Arc<PlanningLocks>,
+    locks: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
     let wave = wave.clone();
     let initiative = initiative.to_string();
-    run_planning_write(&store.sqlite, Some(acquisition), move |store| {
+    run_planning_write(&store.sqlite, Some(locks), move |store| {
         reconcile_linear_project_teams_in(&store, &wave, &initiative, &project, observed_at)
     })
     .await
@@ -46,10 +46,10 @@ pub(crate) async fn accept_linear_issue(
     project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
-    acquisition: Option<Arc<PlanningLocks>>,
+    locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
     let repo = repo.to_string();
-    run_planning_write(&store.sqlite, acquisition, move |store| {
+    run_planning_write(&store.sqlite, locks, move |store| {
         if store.repository_id(&repo)?.is_none() {
             crate::repository::location::ensure_repository(&store, &repo)?;
         }
@@ -96,7 +96,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: snapshot.projects[0].initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
@@ -106,7 +105,7 @@ mod tests {
         // Unmapped Project evidence cannot manufacture a standalone Task.
         issue.project_id = Some("unknown-project".into());
         issue.revision = Some("2026-10-17T01:00:00Z".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -135,10 +134,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(
-            store
-                .linear_issue_evidence("/repo", &issue.id)
-                .unwrap()
-                .state,
+            store.linear_issue_state("/repo", &issue.id).unwrap().state,
             PlanningState::Invalid
         );
         assert_eq!(
@@ -148,7 +144,7 @@ mod tests {
         // A complete, newer observation explicitly clearing Project detaches it.
         issue.project_id = None;
         issue.revision = Some("2026-10-17T02:00:00Z".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -169,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
+    fn task_admission_reads_released_evidence_without_reconstructing_tracker_content() {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
         use loopflow_storage::work::project::ProjectId;
         use loopflow_storage::work::task::TaskId;
@@ -239,10 +235,10 @@ mod tests {
                 Some(std::path::Path::new("/retained/checkout"))
             );
             assert!(store.task_by_issue("OTHER-2").unwrap().is_none());
-            let acquisition = store.task_tracker_state(&task).unwrap();
-            assert_eq!(acquisition.state, expected, "{sql}");
+            let state = store.task_tracker_state(&task).unwrap();
+            assert_eq!(state.state, expected, "{sql}");
             assert_eq!(
-                acquisition.synced_at,
+                state.synced_at,
                 (!sql.contains("DELETE FROM pm_items")).then_some(42),
                 "{sql}"
             );
@@ -285,7 +281,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
@@ -384,7 +379,6 @@ mod tests {
         snapshot.items.truncate(1);
         let mut row = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative,
             synced_at: 42,
             snapshot,
@@ -440,7 +434,7 @@ mod tests {
             Some(44)
         );
         store
-            .observe_pm_issue_change(&detail.id, Some("2099-01-03T00:00:00Z"), false)
+            .record_tracker_event(&detail.id, Some("2099-01-03T00:00:00Z"), false)
             .unwrap();
         store.seed_inventory(&row).unwrap();
         assert_eq!(
@@ -453,7 +447,7 @@ mod tests {
         assert!(store.validate_task_planning(&refreshed).is_err());
         assert_eq!(store.task(&task.id).unwrap().unwrap(), refreshed);
         store
-            .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
+            .record_tracker_event(&row.snapshot.items[0].id, None, true)
             .unwrap();
         store.seed_inventory(&row).unwrap();
         assert_eq!(
@@ -494,7 +488,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
@@ -515,7 +508,7 @@ mod tests {
 
         // Linear adds a Team without moving the Project's `updatedAt`.
         project.team_ids.push("another-team".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -531,7 +524,7 @@ mod tests {
         // An Initiative move is held, and released once Linear moves it back.
         let initiative = project.initiative_ids[0].clone();
         project.initiative_ids = vec!["another-initiative".into()];
-        let error = loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        let error = loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -550,7 +543,7 @@ mod tests {
         );
         assert_eq!(state(), PlanningState::Invalid);
         project.initiative_ids = vec![initiative];
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,

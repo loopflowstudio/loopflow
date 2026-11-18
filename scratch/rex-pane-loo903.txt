@@ -1,5 +1,0 @@
-Last login: Wed Nov 18 11:41:19 on ttys044
-You have mail.
-Error: Codex config/read failed: codex CLI not found: codex
-
-Conversation ended with an error. Correct the error above and retry lf open. Press Enter to close.

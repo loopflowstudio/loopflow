@@ -602,6 +602,61 @@ Must survive:
    restart waited a full backoff minute and only passed by a second; it now
    clears both, as `steers.rs` does.
 
+7. **One outlook; could not start; who started it; the PTY cause** (concept
+   review after the LOO-953 sync, answers "1a", "2a"; 4 and 5 decided for
+   review). Built:
+   - `SessionRecord.outlook {kind, at, reason, command}`, folded once in
+     `ops::human_session::session_ending`. `coming_back` (`at` is the next
+     start; a time already past is a start under way; `reason` is "last start
+     failed: …" when one did), `waiting_for_you` (died and nothing here
+     starts it: not a Task's conversation, "started 5 times", "its Task is not
+     checked out here", "its Task is not claimed on this Machine", "no server
+     runs here to start it"; `command` opens it), `quit`, `could_not_start`
+     (no agent ever ran; `reason` is the failure; `at` or `command`). `start`
+     is `{attempts, last_started_at}`, null until the pass has started it.
+   - "Checked out here" is `SessionSummary.in_task_checkout`, one correlated
+     subquery in `summary_query` (plan on this Machine's store:
+     `task_checkouts_root`, then the `task_primary_sessions` key). Claimed
+     here and "a server runs" (`left_alone`) are read only for a Task
+     conversation that is down, has starts left and is checked out here.
+   - `SessionFacts::conversation_line(task, now)` and Swift's
+     `conversationLine(now:)` print the outlook; `now` only picks "starting"
+     over "starts". `server_runs` left the printer. Desktop now shows the
+     command and "starts again 12:05".
+   - `lf session resume --request-id recover:<session>:<agent>:<n>`:
+     `ops::recovery::record_start` skips a `recover:` request
+     (`RECOVER_REQUEST`). `LF_RECOVERING_SESSION` and `RECOVERING_ENV` are
+     deleted.
+   - `transport::pty_usage`/`PtyUsage` (moved from doctor) and
+     `transport::pty_failure`: the holder's `openpty` failure answers "no PTY
+     left: N in use (<limit>)" when none is left, else the OS error beside
+     the usage.
+   - Fixtures: `session_memberships.json` has one conversation per kind;
+     every Session fixture carries `outlook`; `server_schema.json`
+     regenerated; 8 Swift files' inline fixtures gained the key.
+   - Docs: `docs/sessions.md` (the three status lines, the `outlook` kinds),
+     `rust/loopflow/src/server/README.md`, `.lf/qa/task-conversations.md`.
+
+   Taught:
+   - A conversation that never had an agent reads state `unknown`, not
+     `closed`: the first fold required `closed` and `lf task status` printed
+     "unknown" for the not-installed fixture. The fold now keys on "not
+     running".
+   - **The pass missed commits.** After the LOO-953 sync all three
+     `context_launch_tests` recovery fixtures failed every run (3 of 3,
+     three times), and passed whenever a trace slowed the watcher. The WAL
+     watch (`loopflow-storage/src/changes.rs`) wakes on the log write; the
+     pass read `store_revisions` before the writer published the commit
+     (trace: `woke` twice with unchanged revisions `planning: 31, sessions: 1`,
+     then no wake for 30 s while `lf checkout`'s Session existed). Process
+     rows used to supply a later write. `StoreChanges::wait` now wakes its
+     reader every 50 ms until the log has been quiet for a second
+     (`changes::tests::a_write_is_followed_by_another_look`). It serves
+     `server/wake.rs` too.
+   - The kill fixture read Process rows nothing writes (launcher exit,
+     holder pid). The exit assertion went (coming back is the proof); the
+     holder is found through the provider's ancestry (`holder_of`).
+
 ## Concept review after slice 6
 
 `scratch/concept-review.html` (HEAD `4040a941`). Nothing to change before
@@ -622,31 +677,8 @@ updates the proposed graph to be auto mode, and has grown into this sprawling
 concept. lets reduce its impact on the overall system and protocol", "4 no
 idea", "5 no idea". 4 and 5 were decided here, for review.
 
-To build in this Task, next implement pass:
-1. **One outlook on the Session (1a).** Rust folds "is it coming back" once:
-   `SessionRecord.outlook {kind: coming_back | waiting_for_you | quit |
-   could_not_start, at, reason, command}`, null while it runs normally.
-   `start` keeps only facts (`attempts`, `last_started_at`); `next_at`,
-   `gave_up` and `failure` move into the outlook (`at`, `waiting_for_you`,
-   `reason`). `SessionFacts::conversation_line` and Swift's
-   `conversationLine` print `outlook`; neither derives. The fold reads
-   "checked out here" and whether a server runs, so a Task checked out
-   elsewhere never reads `coming_back`. Fixtures: `session_memberships.json`
-   one case per kind, `task_detail.json`; Swift decodes with
-   `decode(T?.self)`.
-2. **Could not start (2a).** A conversation whose start failed before any
-   agent ran is `could_not_start` with the reason, never "died" or "closed".
-3. **Who started it (4, decided: a).** The pass's start passes its
-   `recover:<session>:<agent>:<n>` request through the held terminal's argv to
-   `reopen`'s `request_id`; `record_start` skips a `recover:` request.
-   `LF_RECOVERING_SESSION` and `RECOVERING_ENV` are deleted. Passed over:
-   scrubbing the variable from provider launches. It keeps an inherited
-   marker that must be scrubbed on every path; a request is not inherited.
-4. **PTY cause (5, decided: a).** A held-terminal start whose `openpty`
-   fails records "no PTY left: N in use (kern.tty.ptmx_max)", reading usage
-   the way `doctor`'s `ptys` check does (one function, shared). Passed over:
-   dropping the promise from the docs; the docs and the plan's question 1
-   already promise it and the code is small.
+Built (slice 7, below): the outlook (1a), could not start (2a), the pass's
+request through argv (4a) and the PTY cause (5a).
 
 Not built here (3): ship is reduced in its own Task. Until then the shared
 `task_graphs.restarts` keeps its two rules (runs wait after 5, ships keep
@@ -734,6 +766,18 @@ Left for later steps:
   `server::recovery::tests::`, `native_exit::`, `human_session::`, `ship::tests::`,
   storage `sessions`/`session_recovery`/`query_plans`, `dto_fixtures::`
   (`task_create_receipt.json` gained `ended`/`start`), clippy clean.
+
+- Slice 7 (implement): `ops::human_session::tests::` (33), `transport::tests::a_pty_failure…`,
+  storage `changes::` (3) and `query_plans`/`session_recovery`; `server::recovery::tests::`,
+  `lf::commands::session::tests::`, `doctor::tests::`, `lf::tests::` (54); `server::schema::tests::` (8,
+  fixture regenerated); `dto_fixtures::` + `documented_commands::` (54);
+  `context_launch_tests::a_killed_task_conversation`, `…a_task_conversation_whose_agent`,
+  `…a_task_checkout_starts` (3 of 3, twice, after the watch fix); clippy `--all-targets` clean;
+  `scripts/test_desktop.sh --filter 'DTOFixtureTests'` (55 pass).
+- Gate: every Swift suite with an inline Session fixture (key `outlook` added to 8 files),
+  `binary(session_lifecycle_tests)` (`work_first_entry.json`), `test(performance_tests::)`
+  (`summary_query` gained a correlated subquery), `test(transport::)` and `binary(transport_tests)`
+  (the store watch changed), `test(session_cli_tests::)`, `test(lf::tests::)`.
 
 ## Docs
 

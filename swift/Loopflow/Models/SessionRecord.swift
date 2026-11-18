@@ -354,6 +354,10 @@ public struct SessionOutlook: Codable, Sendable, Hashable {
     /// The command that opens it; nil while the server brings it back.
     public let command: String?
 
+    enum CodingKeys: String, CodingKey {
+        case kind, at, reason, command
+    }
+
     public func encode(to encoder: Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
         try values.encode(kind, forKey: .kind)

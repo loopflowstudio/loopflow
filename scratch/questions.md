@@ -288,3 +288,41 @@ Slice 5 (implement):
 - `lf session history show` is served as `session.history.get`, not the
   planned `session.history`: that kind already serves `lf session history`.
   Reversible; `session.show` was the other candidate.
+
+## Slice 7: outlook (implement, 2026-11-18, headless)
+
+- With no server running, a died Task conversation is `waiting_for_you`
+  ("no server runs here to start it", with `lf resume --task <ID>`), not
+  `coming_back`. The earlier line said "starts again when the server runs".
+  Chosen because the outlook promises a start only when this Machine will
+  make one, and the command starts the server anyway. Reversible: one arm of
+  `left_alone`.
+- Every interactive Session that died gets an outlook, not only a Task's:
+  a Wave's, a repository's or a chat reads `waiting_for_you` with
+  `lf resume <session>`. A done Task's conversation reads the same.
+- `outlook.reason` is ready-to-print text, not a code: "started 5 times",
+  "last start failed: …". Desktop cannot style by cause. A `cause` enum
+  would be the next step if it needs to.
+- Desktop's quit line now ends with the command ("Quit; `lf resume …` opens
+  it"); it used to read "Quit".
+- "A server runs" is a connect to `machine.sock` from whatever process reads
+  the Session, the server itself included (it connects to its own socket).
+  Only for a Task conversation that is down with starts left.
+- The store watch's follow-up looks are a clock (50 ms for 1 s after a log
+  write), not a proof the commit is visible: a writer that takes longer than
+  a second to publish after its last log write is still missed until the
+  next write or the 60 s reading. Exact alternatives passed over: taking the
+  write lock after each event (`BEGIN IMMEDIATE; ROLLBACK`), which queues the
+  watchers behind every writer on the one write lock. Not checked: Linux,
+  which already polls every 50 ms.
+- `Watch::open` registers its kqueue after opening the log; a log unlinked
+  between the two is never reported, and a timeout keeps that watch. Seen
+  only by reading the code; not fixed.
+- For LOO-953: `loopflow_test_support::end_recorded_processes` and
+  `transport_tests`' `Fixture::drop` find holders in `processes`, which
+  nothing writes now, so fixtures leave `lf holder run` behind (four from
+  this checkout's runs today, stopped by hand). `/private/tmp` holds 2,406
+  `lf-501-*` socket directories from fixtures.
+- `PtyUsage.in_use` on macOS counts `/dev/ttysNNN` nodes; "none left" is
+  `in_use >= max`. Not checked against a real exhaustion (which errno
+  `openpty` returns there).

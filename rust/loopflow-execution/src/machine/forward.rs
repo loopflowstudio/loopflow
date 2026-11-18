@@ -75,6 +75,12 @@ const AGENT_LOGIN_ENV: [&str; 2] = ["CLAUDE_CODE_OAUTH_TOKEN", "CODEX_ACCESS_TOK
 const AGENT_LOGIN_FILES: [&str; 2] = [".claude/.credentials.json", ".codex/auth.json"];
 
 impl Forwarded {
+    /// The environment values, which a request carries itself; the files stay
+    /// for [`deliver`].
+    pub fn take_secrets(&mut self) -> crate::machine::wire::Secrets {
+        crate::machine::wire::Secrets(std::mem::take(&mut self.env))
+    }
+
     fn carries_agent_login(&self) -> bool {
         self.env
             .iter()
@@ -109,16 +115,16 @@ const UNREAD_MINUTES: u32 = 10;
 /// Put the named files and environment on `machine` over one SSH exchange whose
 /// script carries only names and lengths; the values travel on its stdin. A
 /// destination that already has a named file keeps its own; when its copy
-/// differs, `notices` says so. Returns `preamble` preceded by reading the
-/// forwarded environment and removing its file.
+/// differs, `notices` says so. Returns the one-time file under the
+/// destination's home that holds the environment, which a command there
+/// reads with [`sourced`].
 pub fn deliver(
     machine: &Machine,
     forwarded: &Forwarded,
-    preamble: &str,
     notices: &mut dyn Write,
-) -> Result<String> {
+) -> Result<Option<String>> {
     if forwarded.env.is_empty() && forwarded.files.is_empty() {
-        return Ok(preamble.to_owned());
+        return Ok(None);
     }
     let mut script = vec![
         "set -e".to_owned(),
@@ -190,13 +196,11 @@ pub fn deliver(
             writeln!(notices, "{name} keeps its own {path}")?;
         }
     }
-    Ok(match env_file {
-        Some(file) => sourced(&file, preamble),
-        None => preamble.to_owned(),
-    })
+    Ok(env_file)
 }
 
-fn sourced(env_file: &str, preamble: &str) -> String {
+/// `preamble`, after reading the delivered environment and removing its file.
+pub fn sourced(env_file: &str, preamble: &str) -> String {
     format!(
         "f={}; . \"$f\"; rm -f \"$f\"\n{preamble}",
         remote_path(env_file)

@@ -85,15 +85,10 @@ mod operation_spellings {
                 .and_then(Cli::checked)
                 .unwrap_or_else(|error| panic!("{args:?}: {error}"))
         };
-        for verb in ["ship", "hold", "claim", "unassign"] {
-            let cli = parse(task::spell_task("LOO-1", verb));
-            if verb == "ship" {
-                assert!(matches!(
-                    cli.command,
-                    Some(Commands::Ship { json: true, .. })
-                ));
-            }
-        }
+        assert!(matches!(
+            parse(task::spell_ship("LOO-1")).command,
+            Some(Commands::Ship { json: true, .. })
+        ));
         for populated in [false, true] {
             let optional = |value| populated.then_some(value);
             let cli = parse(task::spell_run(

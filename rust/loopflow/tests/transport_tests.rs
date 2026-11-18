@@ -940,15 +940,15 @@ fn piped_resume_json_runs_here_and_returns_once() {
         .spawn()
         .unwrap();
     let launch = fixture.launches(1).pop().unwrap();
-    // The `resume` that opened the Session starts the provider itself; it
-    // execs no `lf -i`.
+    // The held `resume` that opened the Session becomes the provider: no
+    // `lf -i` or launcher sits between it and the holder.
     let parent = launch.split(':').nth(1).unwrap();
     let parent = std::process::Command::new("/bin/ps")
         .args(["-o", "command=", "-p", parent])
         .output()
         .unwrap();
     let parent = String::from_utf8_lossy(&parent.stdout);
-    assert!(parent.contains(&format!(" resume {session}")), "{parent}");
+    assert!(parent.contains("holder run"), "{parent}");
     viewer.stdin.take().unwrap().write_all(b"done\n").unwrap();
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(result.status.success(), "{result:?}");
@@ -1028,7 +1028,8 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(result.status.success(), "{result:?}");
     // Exactly one JSON record, for the resulting conversation.
-    let returned: Value = serde_json::from_slice(&result.stdout).unwrap();
+    let returned: Value =
+        serde_json::from_slice(&result.stdout).unwrap_or_else(|e| panic!("{e}: {result:?}"));
     let id = returned["id"].as_str().unwrap();
     assert_eq!(id != source_id, fork);
     assert_eq!(returned["provider"], "claude");
@@ -2406,6 +2407,7 @@ fn server_task_watch_replaces_readings_across_repositories() {
     let tasks = watch
         .subscribe(
             serde_json::from_value::<loopflow::lf::commands::read::Read>(query.clone()).unwrap(),
+            None,
         )
         .unwrap();
     let first = watch.reading(&tasks).unwrap().expect("a reading");
@@ -2711,6 +2713,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
     let watched = watch
         .subscribe(
             serde_json::from_value::<loopflow::lf::commands::read::Read>(roadmap.clone()).unwrap(),
+            None,
         )
         .unwrap();
     let initial = watch.reading(&watched).unwrap().expect("a reading");
@@ -2796,7 +2799,7 @@ fn server_mobile_changes_preserve_local_connections_and_saved_disable() {
         assert!(welcome["machine"]["id"].is_string(), "{welcome}");
         reader
             .send(Message::Text(
-                json!({"type":"subscribe","id":"remote-watch","operation":roadmap})
+                json!({"type":"subscribe","id":"remote-watch","operation":roadmap,"sender":null})
                     .to_string()
                     .into(),
             ))

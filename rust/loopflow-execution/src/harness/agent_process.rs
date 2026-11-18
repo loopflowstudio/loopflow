@@ -7,35 +7,22 @@ use crate::journal::{
 use crate::os_process::terminate_process_group;
 use crate::process::attachment;
 
-use crate::process::SessionAttachment;
-use crate::session::Holder;
+use crate::harness::LaunchKind;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
 use loopflow_storage::sqlite::SqliteStore;
 use std::collections::{HashMap, HashSet};
 
-/// The store, LfSession and frozen attachment one invocation launches and
-/// writes under.
-pub(crate) type AttachmentOwner = (SqliteStore, String, SessionAttachment);
-
-/// Open the invocation's attachment without refreshing its authority from the
-/// store. A launch without one is refused: every AgentProcess is recorded.
-pub(super) fn open_owner(
-    attachment: Option<&(String, SessionAttachment)>,
-) -> Result<AttachmentOwner> {
-    let (session, attachment) = attachment
-        .ok_or_else(|| anyhow::anyhow!("AgentProcess requires an admitted invocation"))?;
-    Ok((
-        crate::store::open_sqlite(&crate::store::database_path_from_env()?)?,
-        session.clone(),
-        attachment.clone(),
-    ))
-}
+use crate::harness::Recording;
 
 /// The pre-exec recorder both launch paths share: the child's PID and birth
 /// reach its record under the owner's attachment before the provider runs.
 fn record_identity(
-    (store, session, attachment): &AttachmentOwner,
+    Recording {
+        store,
+        session,
+        attachment,
+    }: &Recording,
 ) -> impl FnOnce(u32) -> std::io::Result<()> + Send + '_ {
     move |pid| {
         let started_at = process_started_at(pid)?
@@ -52,12 +39,16 @@ fn record_identity(
 pub fn spawn(
     mut command: tokio::process::Command,
     lifeline: Option<&std::path::Path>,
-    owner: &AttachmentOwner,
-    holder: Holder,
+    owner: &Recording,
+    kind: LaunchKind,
 ) -> Result<tokio::process::Child> {
-    let (store, session, attachment) = owner;
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = owner;
     super::dispatch::off_reactor(|| -> Result<tokio::process::Child> {
-        context_environment(command.as_std_mut(), owner, holder)?;
+        context_environment(command.as_std_mut(), owner, kind)?;
         let program = command
             .as_std()
             .get_program()
@@ -82,12 +73,16 @@ pub fn spawn(
 /// pre-exec recording as headless launches.
 pub(crate) fn spawn_native(
     mut command: std::process::Command,
-    owner: &AttachmentOwner,
-    holder: Holder,
+    owner: &Recording,
+    kind: LaunchKind,
 ) -> Result<std::process::Child> {
-    let (store, session, attachment) = owner;
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = owner;
     crate::agent_input_timing::record("provider_spawn_begin", session);
-    context_environment(&mut command, owner, holder)?;
+    context_environment(&mut command, owner, kind)?;
     let cwd = command.get_current_dir().map(std::path::Path::to_path_buf);
     let child = store
         .with_session_attachment(session, attachment, || {
@@ -115,10 +110,9 @@ pub(crate) fn spawn_native(
     Ok(child)
 }
 
-/// A managed launch is recorded and steered through the Machine server, so
-/// its agent starts only once that server welcomes a connection, as the hooks
-/// will need it to. A stopped server is started the way a managed view starts
-/// it: by the selected installation, never by this build.
+/// A managed launch reports turns to the Machine server, so its agent starts
+/// once the server welcomes a connection. The selected installation starts
+/// a stopped server, as it does when opening a work session.
 pub(crate) fn require_server() -> Result<()> {
     use crate::machine::client::Connection;
     if Connection::open().is_ok() {
@@ -140,15 +134,18 @@ pub(crate) fn require_server() -> Result<()> {
 }
 
 /// Capture identity in the launch's delivery file and give the launch its
-/// steer capability. A launch the Machine server holds starts beside it and
-/// presents the capability to that server. A bare launch reaches no server:
-/// its hook presents the capability to the store.
+/// steer capability. Managed hooks use it when reporting to the Machine
+/// server. Every launch uses it when reading steers from the store.
 fn context_environment(
     command: &mut std::process::Command,
-    owner: &AttachmentOwner,
-    holder: Holder,
+    owner: &Recording,
+    kind: LaunchKind,
 ) -> Result<()> {
-    let (store, session, attachment) = owner;
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = owner;
     if let Some(path) = command.get_envs().find_map(|(name, value)| {
         (name == crate::context_block::CONTEXT_DELIVERY_ENV)
             .then_some(value)
@@ -159,12 +156,11 @@ fn context_environment(
         delivery.identify(store, session)?;
         delivery.save(path)?;
     }
-    let capability_env = match holder {
-        Holder::Caller => crate::steer::BARE_STEER_ENV,
-        Holder::Server => {
-            require_server()?;
-            crate::steer::PROVIDER_CONTEXT_ENV
-        }
+    let capability_env = if kind.is_managed() {
+        require_server()?;
+        crate::steer::PROVIDER_CONTEXT_ENV
+    } else {
+        crate::steer::BARE_STEER_ENV
     };
     let capability = store.reserve_steer_adapter(session, attachment)?;
     let home = crate::store::lf_home_dir();
@@ -192,14 +188,18 @@ fn context_environment(
 /// the launch recorded as never spawned.
 pub(crate) fn exec_native(
     mut command: std::process::Command,
-    owner: &AttachmentOwner,
-    holder: Holder,
+    owner: &Recording,
+    kind: LaunchKind,
     launch_lock: Option<std::fs::File>,
 ) -> std::io::Error {
     use std::os::unix::process::CommandExt;
-    let (store, session, attachment) = owner;
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = owner;
     crate::agent_input_timing::record("provider_exec_begin", session);
-    if let Err(error) = context_environment(&mut command, owner, holder) {
+    if let Err(error) = context_environment(&mut command, owner, kind) {
         return std::io::Error::other(error.to_string());
     }
     let pid = std::process::id();
@@ -246,7 +246,7 @@ pub(crate) fn exec_client(
 /// no provider attachment; ending it must not settle the surviving provider.
 pub(crate) fn stop_native(
     child: &mut std::process::Child,
-    owner: Option<&AttachmentOwner>,
+    owner: Option<&Recording>,
 ) -> Result<()> {
     let mut stop = || {
         let mut wait = || -> std::io::Result<()> {
@@ -257,15 +257,22 @@ pub(crate) fn stop_native(
             Ok(())
         };
         wait().map_err(|error| StoreError::InvalidData(error.to_string()))?;
-        if let Some((store, session, attachment)) = owner {
+        if let Some(Recording {
+            store,
+            session,
+            attachment,
+        }) = owner
+        {
             store.record_agent_process_exit(session, attachment, true)?;
         }
         Ok(())
     };
     match owner {
-        Some((store, session, attachment)) => {
-            store.with_session_attachment(session, attachment, stop)
-        }
+        Some(Recording {
+            store,
+            session,
+            attachment,
+        }) => store.with_session_attachment(session, attachment, stop),
         None => stop(),
     }
     .map_err(Into::into)
@@ -292,18 +299,19 @@ pub(crate) fn stop_session_agent(
     };
     // Already-dead providers have no observed interruption outcome. Preserve that
     // uncertainty instead of attributing their death to this Move request.
+    // When its own exit settled it first, stop whatever the Session holds now.
     if agent_evidence(store, &agent.id) == ProcessIdentityEvidence::Dead {
-        anyhow::ensure!(
-            attachment::settle_agent_process(store, &agent, || {
-                if agent_evidence(store, &agent.id) != ProcessIdentityEvidence::Dead {
-                    return Err(StoreError::InvalidAuthority(
-                        "AgentProcess death changed".into(),
-                    ));
-                }
-                Ok(())
-            })?,
-            "Session attachment changed before observing death"
-        );
+        let settled = attachment::settle_agent_process(store, &agent, || {
+            if agent_evidence(store, &agent.id) != ProcessIdentityEvidence::Dead {
+                return Err(StoreError::InvalidAuthority(
+                    "AgentProcess death changed".into(),
+                ));
+            }
+            Ok(())
+        })?;
+        if !settled {
+            return stop_session_agent(store, session, departure);
+        }
         return Ok(());
     }
     let stop = || -> Result<()> {
@@ -363,7 +371,13 @@ pub(crate) fn stop_session_agent(
 
 /// Stop a harness's provider without settling its invocation. Group death and
 /// the exit receipt remain under the same frozen attachment fence.
-pub fn stop((store, session, attachment): &AttachmentOwner) -> Result<()> {
+pub fn stop(
+    Recording {
+        store,
+        session,
+        attachment,
+    }: &Recording,
+) -> Result<()> {
     super::dispatch::off_reactor(|| {
         store.with_session_attachment(session, attachment, || {
             if !close_session_agent_process(store, session)? {
@@ -416,15 +430,13 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
             "AgentProcess OS identity has multiple owners".into(),
         ));
     }
-    // A Codex server may host unrelated conversations. This is a refusal check,
-    // not another provider-specific signaling path.
-    if agent.provider.as_deref() == Some("codex") {
-        let endpoint = store.agent_endpoint(&agent.id)?.ok_or_else(|| {
-            StoreError::InvalidAuthority("Codex AgentProcess connection is unavailable".into())
-        })?;
-        let thread = store.session_thread(session)?;
-        crate::harness::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
-            .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
+    if let Some(kind) = agent
+        .provider
+        .as_deref()
+        .and_then(super::HarnessKind::parse)
+    {
+        kind.harness()
+            .validate_agent_process_close(store, session, &agent.id)?;
     }
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
@@ -681,30 +693,9 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
     {
         return false;
     }
-    let has = |word: &str| process.command.split_whitespace().any(|part| part == word);
-    let program = |name: &str| {
-        process.command.split_whitespace().any(|part| {
-            std::path::Path::new(part)
-                .file_name()
-                .is_some_and(|file| file == name)
-        })
-    };
-    match provider {
-        Some("codex") => program("codex") && has("app-server") && has("--listen"),
-        Some("opencode") => program("opencode") && has("serve"),
-        Some("pi") => {
-            (program("pi")
-                || process
-                    .command
-                    .split_whitespace()
-                    .any(|part| part.contains("/pi-coding-agent/") && part.ends_with("/cli.js")))
-                && has("--mode")
-                && has("rpc")
-        }
-        // Headless Claude has no subcommand to match; identity and group carry it.
-        Some("claude") => program("claude"),
-        _ => false,
-    }
+    provider
+        .and_then(super::HarnessKind::parse)
+        .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 
 /// Stop the AgentProcess's group, then any group one of its descendants leads.
@@ -768,7 +759,7 @@ fn descendant_group_leaders(pid: u32, processes: &[OsProcess]) -> Vec<(u32, i64)
 mod tests {
     use crate::process::attachment;
 
-    use crate::session::Holder;
+    use crate::harness::LaunchKind;
     use loopflow_model::id::LfProcessId;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
@@ -814,8 +805,12 @@ mod tests {
         command.env_clear();
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.to_string(), attachment.clone()),
-            Holder::Caller,
+            &crate::harness::Recording {
+                store: store.clone(),
+                session: session.id.to_string(),
+                attachment: attachment.clone(),
+            },
+            LaunchKind::Batch,
         )
         .unwrap();
         child.wait().unwrap();
@@ -945,8 +940,12 @@ mod tests {
             command.env_clear().arg("60");
             let mut child = super::spawn_native(
                 command,
-                &(store.clone(), session.id.to_string(), attachment.clone()),
-                Holder::Caller,
+                &crate::harness::Recording {
+                    store: store.clone(),
+                    session: session.id.to_string(),
+                    attachment: attachment.clone(),
+                },
+                LaunchKind::Batch,
             )
             .unwrap();
             let stopped = super::stop_session_agent(&store, &session.id, departure.clone());
@@ -1006,8 +1005,12 @@ mod tests {
         command.env_clear().arg("60");
         let mut child = super::spawn_native(
             command,
-            &(store.clone(), session.id.to_string(), attachment.clone()),
-            Holder::Caller,
+            &crate::harness::Recording {
+                store: store.clone(),
+                session: session.id.to_string(),
+                attachment: attachment.clone(),
+            },
+            LaunchKind::Batch,
         )
         .unwrap();
         store
@@ -1156,8 +1159,12 @@ mod tests {
             command.env_clear();
             let mut child = super::spawn_native(
                 command,
-                &(store.clone(), session.id.to_string(), attachment.clone()),
-                Holder::Caller,
+                &crate::harness::Recording {
+                    store: store.clone(),
+                    session: session.id.to_string(),
+                    attachment: attachment.clone(),
+                },
+                LaunchKind::Batch,
             )
             .unwrap();
             child.wait().unwrap();
@@ -1192,13 +1199,17 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
-        let first_owner = (store.clone(), session.id.to_string(), first.clone());
+        let first_owner = crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment: first.clone(),
+        };
         let command = || {
             let mut command = Command::new("/bin/sleep");
             command.env_clear().arg("60");
             command
         };
-        let mut child = super::spawn_native(command(), &first_owner, Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command(), &first_owner, LaunchKind::Batch).unwrap();
         let pid = child.id();
         super::stop_native(&mut child, Some(&first_owner)).unwrap();
         let exited = store
@@ -1210,15 +1221,27 @@ mod tests {
         assert!(exited.completed_at.is_some());
 
         let next = attachment::prepare_session_agent_process(&store, &session.id, &first).unwrap();
-        let next_owner = (store.clone(), session.id.to_string(), next.clone());
-        let mut provider = super::spawn_native(command(), &next_owner, Holder::Caller).unwrap();
+        let next_owner = crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment: next.clone(),
+        };
+        let mut provider = super::spawn_native(command(), &next_owner, LaunchKind::Batch).unwrap();
         let recorded = store
             .agent_process(&next.agent_process_id)
             .unwrap()
             .unwrap();
+        // A late wait receipt from the previous provider cannot settle this one.
+        assert!(store
+            .record_agent_process_exit(&session.id, &first, true)
+            .is_err());
+        assert_eq!(
+            store.agent_process(&next.agent_process_id).unwrap(),
+            Some(recorded.clone())
+        );
         // Reusing the current attachment is not permission for a second spawn.
         // Reject before fork, without recording failure on the running process.
-        let duplicate = super::spawn_native(command(), &next_owner, Holder::Caller);
+        let duplicate = super::spawn_native(command(), &next_owner, LaunchKind::Batch);
         assert!(duplicate.is_err());
         assert_eq!(
             store.agent_process(&next.agent_process_id).unwrap(),
@@ -1256,10 +1279,14 @@ mod tests {
             &store.test_lf_process(),
         )
         .unwrap();
-        let owner = (store.clone(), session.id.to_string(), attachment.clone());
+        let owner = crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment: attachment.clone(),
+        };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command, &owner, LaunchKind::Batch).unwrap();
         // Reap only this throwaway child outside its handle, forcing ECHILD.
         // SAFETY: waitpid observes the exact fixture child; it signals nothing.
         assert_eq!(
@@ -1283,10 +1310,15 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
-        let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
+        let owner = |attachment| crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment,
+        };
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn(command, None, &owner(first.clone()), Holder::Caller).unwrap();
+        let mut child =
+            super::spawn(command, None, &owner(first.clone()), LaunchKind::Batch).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1307,7 +1339,7 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn(stale, None, &owner(first.clone()), Holder::Caller).is_err());
+        assert!(super::spawn(stale, None, &owner(first.clone()), LaunchKind::Batch).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
@@ -1321,7 +1353,7 @@ mod tests {
             .is_none());
 
         let missing = tokio::process::Command::new(home.path().join("absent-provider"));
-        assert!(super::spawn(missing, None, &owner(next.clone()), Holder::Caller).is_err());
+        assert!(super::spawn(missing, None, &owner(next.clone()), LaunchKind::Batch).is_err());
         let failed = store
             .agent_process(&next.agent_process_id)
             .unwrap()
@@ -1348,8 +1380,8 @@ mod tests {
     fn a_bare_launch_carries_only_a_store_steer_capability() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let capability = |holder: crate::session::Holder| {
-            let id = format!("{holder:?}");
+        let capability = |kind: crate::harness::LaunchKind| {
+            let id = format!("{kind:?}");
             let session = store.test_session(&id, &crate::session_record::new_artifact_key());
             let attachment = attachment::claim_session_attachment(
                 &store,
@@ -1369,18 +1401,22 @@ mod tests {
                     seen.display()
                 ),
             ]);
-            let owner = (store.clone(), session.id.to_string(), attachment);
-            super::spawn_native(command, &owner, holder)
+            let owner = crate::harness::Recording {
+                store: store.clone(),
+                session: session.id.to_string(),
+                attachment,
+            };
+            super::spawn_native(command, &owner, kind)
                 .unwrap()
                 .wait()
                 .unwrap();
             std::fs::read_to_string(seen).unwrap()
         };
-        let output = capability(Holder::Caller);
+        let output = capability(LaunchKind::Batch);
         let (server, bare) = output.split_once('\n').unwrap();
         assert_eq!(server, "");
         let adapter: crate::steer::SteerAdapter = serde_json::from_str(bare).unwrap();
-        assert_eq!(adapter.session, "Caller");
+        assert_eq!(adapter.session, "Batch");
     }
 
     #[test]
@@ -1391,10 +1427,14 @@ mod tests {
         let parent = store.test_lf_process();
         let first =
             attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
-        let owner = (store.clone(), session.id.to_string(), first.clone());
+        let owner = crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment: first.clone(),
+        };
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
-        let mut child = super::spawn_native(command, &owner, Holder::Caller).unwrap();
+        let mut child = super::spawn_native(command, &owner, LaunchKind::Batch).unwrap();
         let recorded = store
             .agent_process(&first.agent_process_id)
             .unwrap()
@@ -1412,17 +1452,21 @@ mod tests {
             .env_clear()
             .args(["-c", "printf effect > \"$1\"", "fixture"])
             .arg(&marker);
-        assert!(super::spawn_native(stale, &owner, Holder::Caller).is_err());
+        assert!(super::spawn_native(stale, &owner, LaunchKind::Batch).is_err());
         assert!(!marker.exists());
         assert_eq!(
             store.session_attachment(&session.id).unwrap(),
             Some(next.clone())
         );
-        let owner = (store.clone(), session.id.to_string(), next.clone());
+        let owner = crate::harness::Recording {
+            store: store.clone(),
+            session: session.id.to_string(),
+            attachment: next.clone(),
+        };
         let error = super::spawn_native(
             Command::new(home.path().join("absent")),
             &owner,
-            Holder::Caller,
+            LaunchKind::Batch,
         )
         .unwrap_err();
         assert_eq!(

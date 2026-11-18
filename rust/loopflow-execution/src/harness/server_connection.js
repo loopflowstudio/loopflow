@@ -28,7 +28,7 @@ function ownNews(callback, log, args = [], options = {}) {
   }
 }
 
-// A held launch reports each boundary for the server to record: one
+// A managed launch reports each boundary for the server to record: one
 // machine.sock connection, as a hook makes one request: connect, the hello a
 // hook sends, one session.boundary, close. The server's connection slot is
 // back as soon as the answer arrives. Nothing here throws: an unanswered
@@ -64,7 +64,7 @@ function machineServer(delivery, log) {
         try { message = JSON.parse(buffer.slice(0, end)); } catch (error) { return finish(error); }
         buffer = buffer.slice(end + 1);
         if (message.type === "welcome") {
-          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, request_id: null })}\n`);
+          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, sender: null, request_id: null })}\n`);
         } else if (message.type === "response") {
           finish(undefined, message.result);
         } else if (message.type === "error") {

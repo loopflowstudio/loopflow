@@ -146,10 +146,16 @@ static READ: AtomicBool = AtomicBool::new(false);
 /// Set by a Graph on the step it starts, and only on that child.
 pub const GRAPH_STEP_ENV: &str = "LF_GRAPH_STEP";
 static GRAPH_STEP: AtomicBool = AtomicBool::new(false);
+static WORKER_STEP: AtomicBool = AtomicBool::new(false);
 /// Whether a Graph started this process as its step. Clears the mark, so the
 /// step's own children are not steps.
 pub fn take_graph_step() -> bool {
-    let step = std::env::var_os(GRAPH_STEP_ENV).is_some();
+    let value = std::env::var_os(GRAPH_STEP_ENV);
+    let step = value.is_some();
+    WORKER_STEP.fetch_or(
+        value.is_some_and(|value| value == "worker"),
+        Ordering::Relaxed,
+    );
     std::env::remove_var(GRAPH_STEP_ENV);
     GRAPH_STEP.fetch_or(step, Ordering::Relaxed) || step
 }
@@ -157,6 +163,11 @@ pub fn take_graph_step() -> bool {
 /// Whether a Graph started this process as its step, once taken.
 pub(crate) fn graph_step() -> bool {
     GRAPH_STEP.load(Ordering::Relaxed)
+}
+
+/// Whether Task delivery started this Graph step as a headless worker.
+pub(crate) fn worker_step() -> bool {
+    WORKER_STEP.load(Ordering::Relaxed)
 }
 
 /// A command that changes no Work records no Process. Admission still

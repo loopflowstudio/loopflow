@@ -1,6 +1,7 @@
 //! Standalone transport for shared reads and commands; owns no execution.
 mod answers;
 pub(crate) mod boundary;
+pub mod connect;
 mod maintenance;
 pub mod mobile;
 mod outbox;

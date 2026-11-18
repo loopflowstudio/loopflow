@@ -185,10 +185,12 @@ fn worktree_task(cli: &Cli, directory: &Path) -> Result<Option<String>> {
 #[derive(Debug)]
 pub struct Forward {
     pub machine: MachineId,
-    /// The command as the destination parses it, when it differs from the caller's.
-    resumed: Option<Cli>,
     args: Vec<String>,
-    route: Option<TaskExecutionRoute>,
+    pub(super) route: Option<TaskExecutionRoute>,
+    /// The Wave a bare resume resolved here, which the destination opens.
+    pub(super) wave: Option<String>,
+    /// The repository the destination resolves its own checkout from.
+    pub(super) repository: Option<RepositoryId>,
 }
 
 impl Forward {
@@ -217,7 +219,7 @@ impl Forward {
         super::ssh::run_with_io(
             self.machine.as_str(),
             false,
-            self.resumed.as_ref().unwrap_or(cli),
+            cli,
             &args,
             self.route,
             directory,
@@ -241,7 +243,7 @@ pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let result = super::ssh::run(
         forward.machine.as_str(),
         false,
-        forward.resumed.as_ref().unwrap_or(cli),
+        cli,
         &forward.args,
         forward.route,
     );
@@ -282,9 +284,8 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     if ownership && store.task_move_in_flight(&route.task_id)?.is_some() {
         return Ok(None);
     }
-    if !loopflow_execution::journal::request::active()
-        && std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Err(anyhow!("Task {selector} resolves to Machine {} on the destination; reconcile its planning/location before retrying (no work was started)", route.machine_id));
     }
     let mut forwarded = args[1..].to_vec();
@@ -296,9 +297,10 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
         }
         return Ok(Some(Forward {
             machine: route.machine_id.clone(),
-            resumed: None,
             args: forwarded,
             route: Some(route),
+            wave: None,
+            repository: None,
         }));
     }
     // Carry the observed exact target in addition to the positional selector.
@@ -333,9 +335,10 @@ pub fn forward(cli: &Cli, args: &[String], directory: &Path) -> Result<Option<Fo
     }
     Ok(Some(Forward {
         machine: route.machine_id.clone(),
-        resumed: None,
         args: forwarded,
         route: Some(route),
+        wave: None,
+        repository: None,
     }))
 }
 
@@ -370,9 +373,8 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     let Some(id) = resumed_session(cli) else {
         return Ok(None);
     };
-    if !loopflow_execution::journal::request::active()
-        && std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Ok(None);
     }
     let Some(store) = read_registry()? else {
@@ -391,9 +393,10 @@ fn moved_session(cli: &Cli, args: &[String]) -> Result<Option<Forward>> {
     };
     Ok(machine.map(|machine| Forward {
         machine,
-        resumed: None,
         args: args[1..].to_vec(),
         route: None,
+        wave: None,
+        repository: None,
     }))
 }
 
@@ -433,9 +436,8 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
     else {
         return Ok(None);
     };
-    if !loopflow_execution::journal::request::active()
-        && std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some()
-    {
+    // A command that arrived over SSH runs where it arrived.
+    if std::env::var_os(loopflow_execution::machine::ssh::EXPECTED_MACHINE_ID_ENV).is_some() {
         return Ok(None);
     }
     let Some(registry) = loopflow_execution::store::read_existing_registry()? else {
@@ -507,16 +509,17 @@ fn primary_session(cli: &Cli, args: &[String], directory: &Path) -> Result<Optio
             forwarded.splice(0..0, ["--wave".into(), wave.clone()]);
         }
     }
-    if cli.repository.is_none() {
-        let repository = repository
+    let repository = repository
         .ok_or_else(|| anyhow!("{scope} runs on Machine {machine}; run `lf repo` here so it can address the repository"))?;
+    if cli.repository.is_none() {
         forwarded.splice(0..0, ["--repo-id".into(), repository.to_string()]);
     }
     Ok(Some(Forward {
         machine,
-        resumed: None,
         args: forwarded,
         route: None,
+        wave,
+        repository: Some(repository),
     }))
 }
 

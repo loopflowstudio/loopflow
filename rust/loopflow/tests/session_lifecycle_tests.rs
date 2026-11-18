@@ -636,25 +636,21 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .output()
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
-    let config: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(fixture.home.path().join("native-server-config.json")).unwrap(),
+    // A chat is a bare Codex terminal: Codex keeps its own configured roots
+    // and argv adds the main checkout the worktree's Git metadata lives in.
+    let argv: Vec<String> = serde_json::from_str(
+        std::fs::read_to_string(fixture.home.path().join("native-argv.jsonl"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
     )
     .unwrap();
-    let roots = config["sandbox_workspace_write.writable_roots"]
-        .as_array()
-        .unwrap();
+    let main_checkout = fixture.repo.path().canonicalize().unwrap();
     assert!(
-        roots.contains(&serde_json::json!(fixture
-            .home
-            .path()
-            .canonicalize()
-            .unwrap()
-            .join("configured-root"))),
-        "{roots:?}"
-    );
-    assert!(
-        roots.len() >= 2,
-        "worktree Git access must retain configured roots"
+        argv.windows(2)
+            .any(|pair| pair[0] == "--add-dir" && Path::new(&pair[1]) == main_checkout),
+        "worktree Git access needs the main checkout: {argv:?}"
     );
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
@@ -1275,10 +1271,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         .unwrap();
         let failed = fixture.run(&["session", "resume", id]);
         assert!(!failed.status.success());
-        // The connect became the launcher, so the launcher's own error is the
-        // connect's: the provider exited before publishing resumable history.
-        let stderr = String::from_utf8_lossy(&failed.stderr);
-        assert!(stderr.contains("failed to start"), "{stderr}");
+        // The reopening runs in a held terminal, so its error reaches the
+        // viewer's screen: the provider exited before publishing resumable history.
+        let screen = format!(
+            "{}{}",
+            String::from_utf8_lossy(&failed.stdout),
+            String::from_utf8_lossy(&failed.stderr)
+        );
+        assert!(screen.contains("failed to start"), "{screen}");
         let previous = fixture.launches()[0].clone();
         fixture
             .db()

@@ -16,8 +16,8 @@ use loopflow_storage::work::task::Task;
 /// `lf --machine M resume <session>`: move the Session, if this Machine knows
 /// it, to `target` unless it is already there. A Task's conversation moves only
 /// with its Task, as `lf task move` moves it, and is the conversation the Task
-/// carries.
-pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
+/// carries, its Graph continuing through `run`.
+pub fn move_session(id: &str, target: &str, forward_agent: bool, run: ContinueRun) -> Result<()> {
     let task = tokio::runtime::Runtime::new()?.block_on(async {
         let Some(store) = crate::store::open_existing_store().await? else {
             return Ok(None);
@@ -34,7 +34,7 @@ pub fn move_session(id: &str, target: &str, forward_agent: bool) -> Result<()> {
         relay(&store, &session, &target).await.map(|()| None)
     })?;
     if let Some((task, session)) = task {
-        move_task(task.as_str(), target, Some(session.as_str()))?;
+        move_task(task.as_str(), target, Some(session.as_str()), run)?;
     }
     Ok(())
 }
@@ -73,10 +73,20 @@ async fn relay(store: &SharedStore, session: &LfSession, target: &Machine) -> Re
     Ok(())
 }
 
+/// How a moved Task's Graph continues: `task.run` from a checkout of its
+/// repository, sent to the Machine that now runs it.
+pub type ContinueRun =
+    fn(&std::path::Path, &str, Option<&str>) -> Result<crate::engine::task::TaskRun>;
+
 /// `lf task move X --machine M`. A Graph the move stopped continues where the
-/// Task arrives. `conversation` is the Session it carries; `None` carries the
-/// Task's own conversation.
-pub fn move_task(issue: &str, target: &str, conversation: Option<&str>) -> Result<TaskOwnership> {
+/// Task arrives, through `run`. `conversation` is the Session it carries;
+/// `None` carries the Task's own conversation.
+pub fn move_task(
+    issue: &str,
+    target: &str,
+    conversation: Option<&str>,
+    run: ContinueRun,
+) -> Result<TaskOwnership> {
     let (ownership, stopped) = tokio::runtime::Runtime::new()?.block_on(async {
         let store: SharedStore = std::sync::Arc::new(
             crate::store::open_existing_store()
@@ -86,7 +96,7 @@ pub fn move_task(issue: &str, target: &str, conversation: Option<&str>) -> Resul
         relay_task(&store, issue, target, conversation).await
     })?;
     if let Some(stopped) = stopped {
-        stopped.resume();
+        stopped.resume(run);
     }
     Ok(ownership)
 }
@@ -107,18 +117,11 @@ struct StoppedRun {
 impl StoppedRun {
     /// Start the Task's run on its new owner. The move already happened, so a
     /// run that does not start is reported, never an error.
-    fn resume(&self) {
+    fn resume(&self, run: ContinueRun) {
         let name = &self.identifier;
         let started = self.repository.clone().and_then(|repository| {
-            crate::engine::task::run(
-                &repository,
-                self.task.as_str(),
-                self.from.as_deref(),
-                None,
-                None,
-                false,
-            )
-            .map_err(|error| error.message)
+            run(&repository, self.task.as_str(), self.from.as_deref())
+                .map_err(|error| format!("{error:#}"))
         });
         match started {
             Ok(crate::engine::task::TaskRun::Running {

@@ -31,14 +31,13 @@ pub fn session_connection(
 pub(crate) fn resume_session_attachment(
     store: &SqliteStore,
     session: &str,
-    expected: Option<&SessionAttachment>,
     process: &LfProcessId,
     close: impl FnOnce() -> StoreResult<bool>,
 ) -> StoreResult<SessionAttachment> {
     let caller = crate::store::sessions::session_caller()?;
     let canonical = loopflow_model::id::canonical_session(session);
     let session = canonical.as_str();
-    let resume = store.begin_session_transfer(session, expected)?;
+    let resume = store.begin_session_resume(session)?;
     let previous = prepare_resume(store, &resume, close)?;
     let start = current_start(process);
     resume.claim_attachment(process, previous, start.as_ref(), &caller)

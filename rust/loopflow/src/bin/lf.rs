@@ -331,7 +331,11 @@ fn in_directory_runtime<T>(
     with_runtime(&directory, command, || run(&directory))
 }
 
-fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
+fn run_default_agent(
+    kind: loopflow_execution::harness::LaunchKind,
+    cli: &Cli,
+    command: &[String],
+) -> anyhow::Result<()> {
     let repo_root = loopflow_execution::repo::find_repo_root()?;
     let moved = loopflow_execution::git::worktrees::move_default_agent_to_worktree(&repo_root)?;
     match moved {
@@ -339,11 +343,11 @@ fn run_default_agent(cli: &Cli, command: &[String]) -> anyhow::Result<()> {
             eprintln!("moved to `{}`", worktree.path.display());
             let _cwd = CwdGuard::enter(&worktree.path)?;
             with_runtime(&worktree.path, command, || {
-                loopflow::lf::commands::run::run(&worktree.path, Some("default"), None, cli)
+                loopflow::lf::commands::run::run(kind, &worktree.path, Some("default"), None, cli)
             })
         }
         None => with_runtime(&repo_root, command, || {
-            loopflow::lf::commands::run::run(&repo_root, Some("default"), None, cli)
+            loopflow::lf::commands::run::run(kind, &repo_root, Some("default"), None, cli)
         }),
     }
 }
@@ -452,6 +456,7 @@ fn resolve_cli_target(
 }
 
 fn execute_target(
+    kind: loopflow_execution::harness::LaunchKind,
     target: loopflow_execution::definition::Target,
     message: Option<&str>,
     cli: &Cli,
@@ -479,14 +484,19 @@ fn execute_target(
                         || loopflow::lf::commands::run::implicit_binding(cli)?.is_some();
                     match binding {
                         Some(binding) => loopflow::lf::commands::run::run_bound(
+                            kind,
                             Some(name),
                             message,
                             cli,
                             binding,
                         )?,
-                        None => {
-                            loopflow::lf::commands::run::run(&repo_root, Some(name), message, cli)?
-                        }
+                        None => loopflow::lf::commands::run::run(
+                            kind,
+                            &repo_root,
+                            Some(name),
+                            message,
+                            cli,
+                        )?,
                     }
                     // Shared contributions leave checkpoint composition to the caller.
                     if !shared
@@ -551,6 +561,7 @@ fn launch_conversation(
         first_turn,
         prepared_capture,
         lock,
+        kind,
         ..
     } = launch;
     let mut cli = Cli {
@@ -594,13 +605,7 @@ fn launch_conversation(
         }
         None => (None, None),
     };
-    let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
-        Some((target, message)) => {
-            execute_target(target, message.as_deref(), &cli, args, binding.as_ref())
-        }
-        None => execute_command(&cli, args, binding.as_ref()),
-    });
-    finish_command(result)
+    finish_command(dispatch_launch(kind, &mut cli, args, binding.as_ref()))
 }
 
 fn prepare_work_binding(
@@ -1195,6 +1200,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             ..
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            // A Task another Machine runs is read where it runs.
+            if let Some(task) = &status.task {
+                if loopflow::lf::commands::waves::print_remote_task_status(
+                    repo,
+                    &task.identifier,
+                    *json,
+                    *subscribe,
+                )? {
+                    return Ok(());
+                }
+            }
             if *subscribe {
                 let task = status
                     .task
@@ -1609,7 +1625,11 @@ fn run() -> anyhow::Result<()> {
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref())?;
+        loopflow_execution::transport::relay(
+            &relay.terminal,
+            relay.session.as_ref(),
+            relay.json_session.is_some(),
+        )?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
@@ -1904,8 +1924,8 @@ fn run() -> anyhow::Result<()> {
     );
     let desktop_read = desktop_intent_read(&cli);
     init_tracing(cli.verbose);
-    // A turn or tool boundary binds no Work. A held launch's asks the Machine
-    // server and opens no store; a bare launch's steer check opens it itself.
+    // A turn or tool boundary binds no Work. A managed launch reports to
+    // the Machine server. Steer checks open the store locally.
     if let Some(Commands::ContextBlock {
         delivery,
         moment:
@@ -2584,7 +2604,7 @@ fn run_task_and_open(
     run(&open, receipt)
 }
 
-fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
+fn dispatch(cli: Cli, args: &[String]) -> anyhow::Result<()> {
     // Own direct conversations and Graphs. Delivery controllers may launch an
     // independently owned agent, but retain their own cancellation/lifetime.
     let execution = matches!(
@@ -2596,9 +2616,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
             | Some(Commands::Graph {
                 cmd: GraphCommand::External(_)
             })
-            | Some(Commands::Task {
-                cmd: TaskCommand::Run { .. }
-            })
             | Some(Commands::Session {
                 cmd: loopflow::lf::SessionCommand::History {
                     cmd: Some(loopflow::lf::commands::history::HistoryCommand::Replay { .. }),
@@ -2606,20 +2623,36 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
                 },
             })
     );
-    let task_run = matches!(
+    if matches!(
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
         })
-    );
-    if execution
-        && loopflow_execution::transport::delegate_current(
-            cli.batch,
-            task_run || cli.work_subject_selector().is_some(),
-        )?
+    ) && loopflow_execution::transport::detach_current()?
     {
         return Ok(());
     }
+    if execution {
+        let kind = loopflow_execution::transport::LaunchInput {
+            batch: cli.batch,
+            interactive: cli.interactive,
+            has_prompt: cli.command.is_some() || cli.skill_input.is_some(),
+        }
+        .kind();
+        return dispatch_here(cli, args, |cli, binding| {
+            dispatch_launch(kind, cli, args, binding)
+        });
+    }
+    dispatch_here(cli, args, |cli, binding| {
+        execute_command(cli, args, binding)
+    })
+}
+
+fn dispatch_here(
+    mut cli: Cli,
+    args: &[String],
+    execute: impl FnOnce(&mut Cli, Option<&loopflow_execution::ops::WorkBinding>) -> anyhow::Result<()>,
+) -> anyhow::Result<()> {
     // Only the operation a launcher started reports; a held terminal in
     // between passes the handoff on untouched.
     if matches!(
@@ -2906,7 +2939,14 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
         return match loopflow::lf::commands::session::run(cmd, &cli)? {
-            Some(launch) => launch_conversation(launch, args),
+            Some(launch) => {
+                let session = launch.session_id.clone();
+                launch_conversation(launch, args)?;
+                if loopflow::lf::commands::session::returns_record(cmd, &cli) {
+                    loopflow::lf::commands::session::print_returned(&session)?;
+                }
+                Ok(())
+            }
             None => Ok(()),
         };
     }
@@ -3023,25 +3063,45 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
         return finish_command(result);
     }
 
-    let result = resolve_cli_target(&mut cli).and_then(|selected| match selected {
-        Some((target, message)) => execute_target(
-            target,
-            message.as_deref(),
-            &cli,
-            args,
-            direct_binding.as_ref(),
-        ),
-        None if cli.command.is_some() => execute_command(&cli, args, direct_binding.as_ref()),
-        None => {
-            cli.interactive = !cli.batch;
-            match direct_binding.as_ref() {
-                Some(binding) => loopflow::lf::commands::run::run_bound(None, None, &cli, binding),
-                None => run_default_agent(&cli, args),
-            }
-        }
-    });
+    finish_command(execute(&mut cli, direct_binding.as_ref()))
+}
 
-    finish_command(result)
+fn dispatch_launch(
+    kind: loopflow_execution::harness::LaunchKind,
+    cli: &mut Cli,
+    args: &[String],
+    binding: Option<&loopflow_execution::ops::WorkBinding>,
+) -> anyhow::Result<()> {
+    match resolve_cli_target(cli)? {
+        Some((target, message)) => {
+            execute_target(kind, target, message.as_deref(), cli, args, binding)
+        }
+        None => match &cli.command {
+            Some(Commands::Inline { prompt }) => {
+                let text = prompt.join(" ");
+                in_directory_runtime(args, |repo| match binding {
+                    Some(binding) => loopflow::lf::commands::run::run_bound(
+                        kind,
+                        None,
+                        Some(&text),
+                        cli,
+                        binding,
+                    ),
+                    None => loopflow::lf::commands::run::run(kind, repo, None, Some(&text), cli),
+                })
+            }
+            None => {
+                cli.interactive = !cli.batch;
+                match binding {
+                    Some(binding) => {
+                        loopflow::lf::commands::run::run_bound(kind, None, None, cli, binding)
+                    }
+                    None => run_default_agent(kind, cli, args),
+                }
+            }
+            _ => execute_command(cli, args, binding),
+        },
+    }
 }
 
 fn execute_command(
@@ -3050,15 +3110,7 @@ fn execute_command(
     binding: Option<&loopflow_execution::ops::WorkBinding>,
 ) -> anyhow::Result<()> {
     match &cli.command {
-        Some(Commands::Inline { prompt }) => {
-            let text = prompt.join(" ");
-            in_directory_runtime(args, |repo| match binding {
-                Some(binding) => {
-                    loopflow::lf::commands::run::run_bound(None, Some(&text), cli, binding)
-                }
-                None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
-            })
-        }
+        Some(Commands::Inline { .. }) => unreachable!("inline prompts dispatch as launches"),
         Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }

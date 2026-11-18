@@ -71,6 +71,20 @@ fn codex_task(
     (server, worktree, id)
 }
 
+fn native_logs(home: &Path) -> String {
+    fs::read_dir(home.join("logs"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            fs::read_to_string(entry.path())
+                .ok()
+                .map(|text| format!("{}: {text}", entry.path().display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Live agent Processes once their exit records are written. The terminal
 /// gets the provider's exit after a short wait; its host lingers to settle the
 /// provider, so a reader waits for it.
@@ -127,8 +141,11 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
                     .unwrap();
                 assert!(
                     output.status.success(),
-                    "{mode}/{setting:?} {args:?}: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "{mode}/{setting:?} {args:?}: {}\n{}\n{}\n{}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    native_logs(home.path())
                 );
             };
             if let Some(setting) = setting {
@@ -141,10 +158,27 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             let read = |name: &str| -> serde_json::Value {
                 serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
             };
+            let session = (mode == "-i").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &worktree,
+                    "codex",
+                    None,
+                    "Tier probe",
+                )
+            });
             let args = if mode == "-b" {
                 vec![mode, "-a", "codex", "graph", "tier-check"]
             } else {
-                vec![mode, "--task", &task, "-a", "codex", ":", "Tier probe"]
+                vec![
+                    mode,
+                    "--task",
+                    &task,
+                    "-a",
+                    "codex",
+                    "resume",
+                    session.as_ref().unwrap(),
+                ]
             };
             run(&args);
             let params = read("native-config.json");
@@ -254,19 +288,18 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         fs::write(native.join("config.toml"), config).unwrap();
         fs::write(native.join("history.jsonl"), unrelated).unwrap();
         fs::write(home.path().join(failure), "").unwrap();
+        let session = support::prepare_native_conversation(
+            &home.path().join("loopflow.db"),
+            &worktree,
+            "codex",
+            None,
+            "Preserve this request",
+        );
         let start = std::time::Instant::now();
         let output = native_codex_command(
             &worktree,
             home.path(),
-            &[
-                "-i",
-                "--task",
-                &task,
-                "-a",
-                "codex",
-                ":",
-                "Preserve this request",
-            ],
+            &["-i", "--task", &task, "resume", &session],
         )
         .output()
         .unwrap();
@@ -323,11 +356,6 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             adopted, 0,
             "failed startup must not adopt unrelated history"
         );
-        let session: String = database
-            .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
         fs::remove_file(home.path().join(failure)).unwrap();
         let output = native_codex_command(&worktree, home.path(), &["session", "resume", &session])
             .output()
@@ -383,17 +411,16 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         ],
     );
     let command = |args: &[&str]| native_codex_command(&worktree, home.path(), args);
-    let output = command(&[
-        "-i",
-        "--task",
-        &task,
-        "-a",
+    let session = support::prepare_native_conversation(
+        &home.path().join("loopflow.db"),
+        &worktree,
         "codex",
-        "probe",
+        Some("probe"),
         "Find the bug.",
-    ])
-    .output()
-    .unwrap();
+    );
+    let output = command(&["-i", "--task", &task, "resume", &session])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -449,29 +476,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert!(!state.contains_key("/<session-flags>/config.toml:session_start:0:0"));
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // The Task's own conversation may start beside this one.
-    let session: String = database
-        .query_row(
-            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
-            [key],
-            |row| row.get(0),
-        )
-        .unwrap();
     // Closing before subscription must not report the already-recorded first
     // request as unsent. A genuine terminal failure must still fail.
     for marker in ["close-terminal", "fail-terminal"] {
+        assert_eq!(settled_live_agents(&database), 0);
         fs::write(home.path().join(marker), "").unwrap();
         let output = command(&["session", "resume", &session]).output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.success(),
             marker == "close-terminal",
-            "{stderr}"
+            "{marker}: {stderr}"
         );
         assert!(!stderr.contains("before submitting"), "{stderr}");
         assert_eq!(read("native-turns.json").as_array().unwrap().len(), 1);
         fs::remove_file(home.path().join(marker)).unwrap();
     }
+    assert_eq!(settled_live_agents(&database), 0);
     let output = command(&["session", "resume", &session]).output().unwrap();
     assert!(
         output.status.success(),
@@ -533,7 +554,7 @@ for arg in "$@"; do
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
-printf '%s' "$LF_PROVIDER_CONTEXT" > "$HOME/provider-context"
+printf '%s' "$LF_BARE_STEER" > "$HOME/bare-steer"
 cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
@@ -597,9 +618,10 @@ exit 23
             .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
             .collect()
     };
-    let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
+    // A chat reports to no server; its hooks read steers from the store.
+    let bare_steer = fs::read_to_string(home.path().join("bare-steer")).unwrap();
     let adapter: loopflow_execution::steer::SteerAdapter =
-        serde_json::from_str(&provider_context).unwrap();
+        serde_json::from_str(&bare_steer).unwrap();
     let identity = format!("This Session: {}\n", adapter.session);
     assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
@@ -612,7 +634,7 @@ exit 23
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
-            .env("LF_PROVIDER_CONTEXT", &provider_context)
+            .env("LF_BARE_STEER", &bare_steer)
             .env(
                 "LF_CONTEXT_DELIVERY",
                 fs::read_to_string(home.path().join("delivery-path")).unwrap(),
@@ -1632,13 +1654,30 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             assert!(!home.path().join("runs").exists());
             // Creating the Task opened the store; preview still writes nothing.
             assert_eq!(home.path().join("loopflow.db").exists(), work.is_some());
+            let managed_session = (selection == "external").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &checkout,
+                    "codex",
+                    Some("probe"),
+                    "Report final marker.",
+                )
+            });
+            if let Some(session) = &managed_session {
+                let skill = args.iter().position(|arg| *arg == "skill").unwrap();
+                args.truncate(skill);
+                args.extend(["resume", session]);
+            }
             let output = native_codex_command(&checkout, home.path(), &args)
                 .output()
                 .unwrap();
             assert!(
                 output.status.success(),
-                "{selection}/{large}: {}",
-                String::from_utf8_lossy(&output.stderr)
+                "{selection}/{large}: {}\n{}\n{}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+                native_logs(home.path())
             );
             let turns: serde_json::Value =
                 serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())

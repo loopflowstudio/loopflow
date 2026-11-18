@@ -485,6 +485,8 @@ mod tests {
                     store.resolve_history_input("missing-capture"),
                     Err(crate::StoreError::NotFound)
                 ));
+                store.idle_conversation_candidates(None).unwrap();
+                store.idle_conversation_candidates(Some("viewed")).unwrap();
                 // The first read files the steer's receipt; the second has nothing to file.
                 store.session_steers("viewed", 0, 10).unwrap();
                 store.session_steers("viewed", 0, 10).unwrap();

@@ -136,6 +136,11 @@ pub enum Read {
     #[serde(rename = "task.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::waves::DesktopTaskPane>()))]
     TaskGet { directory: PathBuf, issue: String },
+    /// `lf --cwd <directory> task status <issue> --json`: one Task's status
+    /// and its planning.
+    #[serde(rename = "task.status")]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::machine::schema::Untyped>()))]
+    TaskStatus { directory: PathBuf, issue: String },
     /// `lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.
     #[serde(rename = "task.changes")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::ops::task::TaskChangesSnapshot>()))]
@@ -421,6 +426,9 @@ impl Read {
                 argv
             }
             Self::TaskGet { directory, issue } => at(directory, &["task", "show", issue, "--json"]),
+            Self::TaskStatus { directory, issue } => {
+                at(directory, &["task", "status", issue, "--json"])
+            }
             Self::TaskChanges { issue, base, head } => {
                 let mut argv = words(&["task", "changes", issue, "--base", base, "--json"]);
                 argv.extend(optional("--head", head.as_ref()));
@@ -627,8 +635,20 @@ impl Read {
     }
 
     /// What `lf <argv>` prints, as a JSON value, read on the caller's thread.
-    /// A command that prints bare text (`config repo --path`) is a string.
+    /// A Task another Machine runs is read by that Machine's server.
     pub fn read(&self) -> anyhow::Result<serde_json::Value> {
+        if let Self::TaskStatus { directory, issue } = self {
+            if let Some(detail) = super::waves::remote_task_detail(directory, issue)? {
+                return Ok(detail);
+            }
+        }
+        self.read_here()
+    }
+
+    /// `read` on this Machine, never sent on: what a request another Machine
+    /// sent runs. A command that prints bare text (`config repo --path`) is a
+    /// string.
+    pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
         match self {
             Self::ProcessHistory { id } => value(&super::history::render(
                 id,
@@ -676,6 +696,9 @@ impl Read {
             }
             Self::TaskGet { directory, issue } => {
                 value(&super::desktop::read_task_pane(directory, issue)?)
+            }
+            Self::TaskStatus { directory, issue } => {
+                value(&super::waves::read_task_detail(directory, issue)?)
             }
             Self::TaskChanges { issue, base, head } => {
                 value(&task_changes(issue, base, head.as_deref())?)
@@ -874,6 +897,60 @@ impl Read {
         }
     }
 
+    /// The directory this read is scoped by, which a read another Machine
+    /// sent names on that Machine.
+    pub(crate) fn directory_mut(&mut self) -> Option<&mut PathBuf> {
+        match self {
+            Self::DesktopViewList { directory }
+            | Self::SessionList { directory, .. }
+            | Self::PlanBoard { directory, .. }
+            | Self::TaskDetail { directory, .. }
+            | Self::TaskGet { directory, .. }
+            | Self::TaskStatus { directory, .. }
+            | Self::ConfigSettings { directory, .. }
+            | Self::DesktopLayout { directory, .. }
+            | Self::RepoPeople { directory }
+            | Self::GraphList { directory }
+            | Self::DesktopViewGet { directory, .. }
+            | Self::TaskRuns { directory, .. }
+            | Self::WavePlan { directory, .. }
+            | Self::TaskList { directory, .. }
+            | Self::PlanList { directory, .. }
+            | Self::RepoPlan { directory }
+            | Self::WorkResolve { directory, .. }
+            | Self::WaveGraph { directory, .. }
+            | Self::RepoTokens { directory, .. }
+            | Self::SkillList { directory, .. }
+            | Self::PrChecks { directory, .. }
+            | Self::PrReviews { directory, .. } => Some(directory),
+            Self::ProcessHistory { .. }
+            | Self::CreationGet { .. }
+            | Self::ProcessList
+            | Self::ViewSelect { .. }
+            | Self::SessionCard { .. }
+            | Self::TaskChanges { .. }
+            | Self::TaskDiff { .. }
+            | Self::TaskFile { .. }
+            | Self::WaveList
+            | Self::MachineSelf
+            | Self::DesktopPortfolio
+            | Self::ConfigCatalog
+            | Self::ConfigGet { .. }
+            | Self::ConfigExplain { .. }
+            | Self::ProcessGet { .. }
+            | Self::SessionUsage { .. }
+            | Self::TaskContext { .. }
+            | Self::MachineList
+            | Self::SessionHistory(_)
+            | Self::RepoPath { .. }
+            | Self::SessionRetention
+            | Self::MachineDoctor
+            | Self::RepoCi { .. }
+            | Self::AccountList { .. }
+            | Self::TaskWait { .. } => None,
+        }
+    }
+
     /// Serve this read's subscription inside this process, as `lf <argv> --subscribe`
     /// prints it, keeping only `select`'s dotted paths of each body. `wake` is called from any thread when a
     /// [`Subscription::pull`] may find a reading or occurrences; dropping the subscription ends
@@ -891,6 +968,7 @@ impl Read {
         let events = matches!(
             self,
             Self::TaskGet { .. }
+                | Self::TaskStatus { .. }
                 | Self::TaskWait { .. }
                 | Self::PlanList { .. }
                 | Self::DesktopViewList { .. }
@@ -920,6 +998,9 @@ impl Read {
             } => super::session::subscribe_list(self.session_filter(directory)?, transport),
             Self::TaskGet { directory, issue } => {
                 super::desktop::subscribe_task_pane(&directory, &issue, transport)
+            }
+            Self::TaskStatus { directory, issue } => {
+                super::waves::subscribe_task_status(&directory, issue, transport)
             }
             Self::SessionHistory(window) => super::activity::subscribe(window, transport),
             Self::PlanList {

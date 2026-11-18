@@ -584,7 +584,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .planAnswer(let directory, let action, let answer):
             TaggedFields("plan.answer", ["directory": directory, "action": action, "answer": answer])
         case .taskHold(let directory, let issue):
-            TaggedFields("task.hold", ["directory": directory, "issue": issue])
+            TaggedFields("task.hold", ["directory": directory, "issue": issue, "reason": String?.none])
         case .taskSteer(let directory, let issue, let message):
             TaggedFields("task.steer", ["directory": directory, "issue": issue, "message": message])
         case .taskReport(let directory, let issue, let message):

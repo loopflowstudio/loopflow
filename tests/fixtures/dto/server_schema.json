@@ -1165,7 +1165,7 @@
     },
     "ClientIdentity": {
       "additionalProperties": false,
-      "description": "Who connected, for diagnostics; it grants nothing.",
+      "description": "Who connected; it grants nothing. A `kind` of [`MACHINE_CLIENT`] is\nanother Machine: every operation it sends runs here and is never sent on.",
       "properties": {
         "kind": {
           "type": "string"
@@ -1279,6 +1279,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "What the Machine that sent the request runs with; null from a\nclient on this Machine."
+            },
             "type": {
               "const": "request",
               "type": "string"
@@ -1289,6 +1300,7 @@
             "id",
             "operation",
             "select",
+            "sender",
             "request_id"
           ],
           "type": "object"
@@ -1319,6 +1331,17 @@
                 "null"
               ]
             },
+            "sender": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Sender"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "As for a request."
+            },
             "type": {
               "const": "subscribe",
               "type": "string"
@@ -1329,7 +1352,8 @@
             "id",
             "operation",
             "select",
-            "resume"
+            "resume",
+            "sender"
           ],
           "type": "object"
         },
@@ -6956,6 +6980,31 @@
         },
         {
           "additionalProperties": false,
+          "description": "`lf --cwd <directory> task status <issue> --json`: one Task's status\nand its planning.",
+          "properties": {
+            "directory": {
+              "type": "string"
+            },
+            "issue": {
+              "type": "string"
+            },
+            "kind": {
+              "const": "task.status",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "directory",
+            "issue"
+          ],
+          "type": "object",
+          "x-result": {
+            "$ref": "#/$defs/Untyped"
+          }
+        },
+        {
+          "additionalProperties": false,
           "description": "`lf task changes <issue> --base <base> [--head <head>]`: a Task's changed files.",
           "properties": {
             "base": {
@@ -8704,6 +8753,13 @@
         "boolean"
       ]
     },
+    "Secrets": {
+      "additionalProperties": {
+        "type": "string"
+      },
+      "description": "Values by environment variable name; never logged.",
+      "type": "object"
+    },
     "Selection": {
       "properties": {
         "expression": {
@@ -8716,6 +8772,56 @@
       "required": [
         "id",
         "expression"
+      ],
+      "type": "object"
+    },
+    "Selection2": {
+      "additionalProperties": false,
+      "description": "Who asks, and how: what a launch the request starts runs with.",
+      "properties": {
+        "agent": {
+          "description": "`--agent` as the sender selected it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participant": {
+          "description": "The name its person's Task claims carry.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "profile": {
+          "$ref": "#/$defs/Untyped",
+          "description": "The sender's personal settings and definitions."
+        },
+        "settings": {
+          "description": "Command-line settings (`LF_SETTINGS`), as YAML.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Untyped"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "A shipped Task's branch and Linear mapping, which resolve here."
+        }
+      },
+      "required": [
+        "profile",
+        "participant",
+        "agent",
+        "settings",
+        "source"
       ],
       "type": "object"
     },
@@ -8976,6 +9082,27 @@
           "type": "string"
         }
       ]
+    },
+    "Sender": {
+      "additionalProperties": false,
+      "description": "What the Machine that sent a request runs with. An operation names the\nsender's own directory; it runs in this Machine's checkout of `repository`.",
+      "properties": {
+        "repository": {
+          "type": "string"
+        },
+        "secrets": {
+          "$ref": "#/$defs/Secrets"
+        },
+        "selection": {
+          "$ref": "#/$defs/Selection2"
+        }
+      },
+      "required": [
+        "repository",
+        "selection",
+        "secrets"
+      ],
+      "type": "object"
     },
     "ServerMessage": {
       "description": "One message from the server.",
@@ -16012,7 +16139,14 @@
             {
               "directory": "/repo",
               "issue": "LOO-1",
-              "kind": "task.hold"
+              "kind": "task.hold",
+              "reason": null
+            },
+            {
+              "directory": "/laptop/repo",
+              "issue": "LOO-1",
+              "kind": "task.hold",
+              "reason": null
             }
           ],
           "properties": {
@@ -16025,12 +16159,20 @@
             "kind": {
               "const": "task.hold",
               "type": "string"
+            },
+            "reason": {
+              "description": "Why, as `--reason` records it.",
+              "type": [
+                "string",
+                "null"
+              ]
             }
           },
           "required": [
             "kind",
             "directory",
-            "issue"
+            "issue",
+            "reason"
           ],
           "type": "object",
           "x-result": {
@@ -18293,8 +18435,8 @@
     }
   ],
   "title": "Loopflow server protocol",
-  "x-min-revision": 7,
-  "x-revision": 7,
+  "x-min-revision": 8,
+  "x-revision": 8,
   "x-terminal-close": {
     "payload": {
       "$ref": "#/$defs/Close"

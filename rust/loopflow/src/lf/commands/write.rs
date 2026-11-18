@@ -1,12 +1,16 @@
 //! Writes submitted by native clients to the Loopflow server. [`Write::run`]
 //! calls the shared functions the CLI handlers call and returns the value the
-//! CLI prints with `--json`; the carrier owns its trace.
+//! CLI prints with `--json`; the carrier owns its trace. A write for a Task or
+//! Session another Machine runs goes to that Machine's server as this same
+//! value, over SSH, with the [`Sender`] it runs with there.
 
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
+use anyhow::anyhow;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
+use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -21,7 +25,7 @@ pub(crate) enum TaskMoveResult {
 // constructs that variant before the server serializes it, so returning a
 // different Rust type is a compile error.
 macro_rules! writes {
-    (run($this:ident, $directory:ident, $task_repo:ident); $(
+    (run($this:ident, $directory:ident, $task_repo:ident, $remote:ident, $environment:ident); $(
         $(#[$meta:meta])*
         $name:ident { $($(#[$field_meta:meta])* $field:ident: $input:ty),* $(,)? }
         => $output:ty;
@@ -49,8 +53,25 @@ macro_rules! writes {
         }
 
         impl Write {
-            /// Run the shared operation and keep its declared result until serialization.
-            pub(crate) fn run(&$this) -> anyhow::Result<WriteResult> {
+            /// Run the shared operation where its Work lives and keep its
+            /// declared result until serialization.
+            pub(crate) fn run(&self) -> anyhow::Result<WriteResult> {
+                self.execute(self.remote()?, &[])
+            }
+
+            /// Run a write another Machine sent here, never sending it on: in
+            /// this Machine's checkout of the sender's repository, a launch
+            /// it starts running with the sender's selection and secrets.
+            pub(crate) fn run_here(mut self, sender: &Sender) -> anyhow::Result<WriteResult> {
+                if let Some(directory) = self.directory_mut() {
+                    *directory = super::work_route::repository_path(&sender.repository)?;
+                }
+                let environment = sender.selection.environment(&sender.secrets)?;
+                self.execute(None, &environment)
+            }
+
+            /// `remote` is the Machine a Task or Session write goes to instead.
+            fn execute(&$this, $remote: Option<Remote>, $environment: &[(String, String)]) -> anyhow::Result<WriteResult> {
                 let $directory = $this.directory();
                 let $task_repo = |issue: &str| loopflow_execution::ops::task::task_repository($directory, Some(issue));
                 match $this {
@@ -65,7 +86,7 @@ macro_rules! writes {
 }
 
 writes! {
-    run(self, directory, task_repo);
+    run(self, directory, task_repo, remote, environment);
     /// File or adopt a Task, with a durable request identity; optionally start it.
     #[serde(rename = "task.create")]
     TaskCreate {
@@ -135,20 +156,26 @@ writes! {
     /// `lf task claim <issue> --json`.
     #[serde(rename = "task.claim")]
     TaskClaim { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
-    { issue, .. } => task::ownership(
-        directory,
-        issue,
-        loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
-    )?,
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::ownership(
+            directory,
+            issue,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Claim,
+        )?,
+    },
 
     /// `lf task unassign <issue> --json`.
     #[serde(rename = "task.unassign")]
     TaskUnassign { directory: PathBuf, issue: String } => loopflow_model::durable::TaskOwnership;
-    { issue, .. } => task::ownership(
-        directory,
-        issue,
-        loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
-    )?,
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::ownership(
+            directory,
+            issue,
+            loopflow_execution::ops::task_ownership::OwnershipChange::Unassign,
+        )?,
+    },
 
     /// `lf [-b] [-a <agent>] task run <issue> [--from <step>] --json`, started
     /// detached: the Graph process it started, or where the Task now waits.
@@ -169,24 +196,40 @@ writes! {
         agent,
         approve,
         ..
-    } => task::run(
-        directory,
-        issue,
-        from.as_deref(),
-        graph.as_deref(),
-        agent.as_deref(),
-        *approve,
-    )?,
+    } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::run(
+            directory,
+            issue,
+            from.as_deref(),
+            graph.as_deref(),
+            agent.as_deref(),
+            *approve,
+            environment,
+        )?,
+    },
 
     /// `lf --task <issue> ship --json`, started detached: approves Auto-Ship.
     #[serde(rename = "task.ship")]
     TaskShip { directory: PathBuf, issue: String } => task::TaskShip;
-    { issue, .. } => task::ship(directory, issue)?,
+    { issue, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::ship(directory, issue, environment)?,
+    },
 
     /// `lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.
     #[serde(rename = "task.hold")]
-    TaskHold { directory: PathBuf, issue: String } => task::Hold;
-    { issue, .. } => task::hold(directory, issue, None)?,
+    TaskHold {
+        directory: PathBuf,
+        issue: String,
+        /// Why, as `--reason` records it.
+        #[serde(deserialize_with = "Option::deserialize")]
+        reason: Option<String>,
+    } => task::Hold;
+    { issue, reason, .. } => match remote {
+        Some(remote) => remote.call()?,
+        None => task::hold(issue, reason.as_deref())?,
+    },
 
     /// `lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the
     /// Task with its tracker now, first answering every value it lost.
@@ -252,7 +295,7 @@ writes! {
         machine: Option<String>,
     } => TaskMoveResult;
     { issue, wave, machine, .. } => match machine {
-        Some(machine) => TaskMoveResult::Machine(Box::new(loopflow_execution::ops::session_move::move_task(issue, machine, None)?)),
+        Some(machine) => TaskMoveResult::Machine(Box::new(loopflow_execution::ops::session_move::move_task(issue, machine, None, run_task)?)),
         None => TaskMoveResult::Wave(Box::new(loopflow_execution::ops::task::task_move_membership(
             &task_repo(issue)?, issue, wave.as_deref(),
         )?)),
@@ -364,7 +407,7 @@ writes! {
         wave: Option<String>,
         agent: Option<String>,
     } => loopflow_execution::ops::human_session::SessionRecord;
-    { .. } => self.prepare_session()?,
+    { .. } => self.prepare_session(remote)?,
 
     /// `lf [--agent <agent>] session new <id> --prepare --json`: the
     /// conversation on a fresh provider thread, not yet started.
@@ -375,7 +418,7 @@ writes! {
         id: String,
         agent: Option<String>,
     } => loopflow_execution::ops::human_session::SessionRecord;
-    { .. } => self.prepare_session()?,
+    { .. } => self.prepare_session(remote)?,
 
     #[serde(rename = "wave.rename")]
     WaveRename {
@@ -1030,45 +1073,193 @@ writes! {
     },
 }
 
+/// The directory a write runs in, borrowed as `$write` is: none for a
+/// Machine-wide write.
+macro_rules! directory_of {
+    ($write:expr) => {
+        match $write {
+            Write::TaskCreate { directory, .. }
+            | Write::TaskComplete { directory, .. }
+            | Write::TaskReopen { directory, .. }
+            | Write::TaskAbandon { directory, .. }
+            | Write::TaskUpdate { directory, .. }
+            | Write::TaskClaim { directory, .. }
+            | Write::TaskUnassign { directory, .. }
+            | Write::TaskRun { directory, .. }
+            | Write::TaskShip { directory, .. }
+            | Write::TaskHold { directory, .. }
+            | Write::TaskSync { directory, .. }
+            | Write::PlanAnswer { directory, .. }
+            | Write::TaskSteer { directory, .. }
+            | Write::TaskReport { directory, .. }
+            | Write::TaskInterrupt { directory, .. }
+            | Write::TaskMove { directory, .. }
+            | Write::TaskSave { directory, .. }
+            | Write::SessionSteer { directory, .. }
+            | Write::SessionRename { directory, .. }
+            | Write::SessionBind { directory, .. }
+            | Write::SessionStatus { directory, .. }
+            | Write::SessionResume { directory, .. }
+            | Write::SessionNew { directory, .. }
+            | Write::SessionMove { directory, .. }
+            | Write::WaveCreate { directory, .. }
+            | Write::WaveRename { directory, .. }
+            | Write::WaveRemove { directory, .. }
+            | Write::WaveMachine { directory, .. }
+            | Write::WaveSync { directory, .. }
+            | Write::WavePlanBind { directory, .. }
+            | Write::WavePlanConnect { directory, .. }
+            | Write::WavePlanReteam { directory, .. }
+            | Write::GraphCustomize { directory, .. }
+            | Write::RepoRelease { directory, .. }
+            | Write::CheckoutCommit { directory, .. }
+            | Write::CheckoutSync { directory, .. }
+            | Write::CheckoutCreate { directory, .. }
+            | Write::GraphRun { directory, .. }
+            | Write::SkillRun { directory, .. }
+            | Write::PrPublish { directory, .. }
+            | Write::PrOpen { directory, .. }
+            | Write::PrSubmit { directory, .. }
+            | Write::PrArm { directory, .. }
+            | Write::PrLand { directory, .. }
+            | Write::PrAbandon { directory, .. }
+            | Write::PrReconcile { directory }
+            | Write::PrRequestReview { directory, .. }
+            | Write::DesktopDashboardQuery { directory, .. }
+            | Write::DesktopDashboardPin { directory, .. }
+            | Write::DesktopDashboardUnpin { directory, .. }
+            | Write::DesktopDashboardRename { directory, .. }
+            | Write::DesktopDashboardHide { directory, .. }
+            | Write::DesktopDashboardShow { directory, .. }
+            | Write::DesktopDashboardSlots { directory, .. }
+            | Write::DesktopDashboardMove { directory, .. } => Some(directory),
+            Write::DesktopPortfolioSet { .. }
+            | Write::AccountDisconnect { .. }
+            | Write::AccountConnect { .. }
+            | Write::ConfigSet { .. }
+            | Write::ConfigUnset { .. }
+            | Write::ConfigTheme { .. } => None,
+        }
+    };
+}
+
 impl Write {
-    fn prepare_session(
-        &self,
-    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionRecord> {
-        let directory = self.directory();
-        let (cli, args) = self
-            .cli()
-            .expect("a Session preparation has a CLI spelling")?;
-        let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
-            return super::session::prepared(&cli, directory);
+    /// The Machine a Task or Session write goes to when its Work runs
+    /// elsewhere, with the write naming that Work exactly. `None` runs it here.
+    fn remote(&self) -> anyhow::Result<Option<Remote>> {
+        use loopflow_execution::machine::task::{remote_ownership_writer, remote_task};
+        // A run or ship starts agents there, which carry what `forward` names.
+        let (route, launching) = match self {
+            Self::SessionResume { .. } => return self.remote_session(),
+            Self::TaskRun { issue, .. } | Self::TaskShip { issue, .. } => {
+                (remote_task(issue)?, true)
+            }
+            Self::TaskHold { issue, .. } => (remote_task(issue)?, false),
+            Self::TaskClaim { issue, .. } | Self::TaskUnassign { issue, .. } => {
+                (remote_ownership_writer(issue)?, false)
+            }
+            _ => return Ok(None),
         };
-        let (mut output, mut error) = (Vec::new(), Vec::new());
-        let ran = forward.run(
-            &cli,
-            directory,
-            &mut loopflow_execution::command::CommandIo {
-                input: &mut std::io::empty(),
-                output: &mut output,
-                error: &mut error,
-            },
-        );
-        let diagnostics = String::from_utf8_lossy(&error);
-        if let Err(failed) = ran {
-            return Err(match diagnostics.trim() {
-                "" => failed,
-                said => failed.context(format!("the destination said: {said}")),
-            });
+        let Some(route) = route else {
+            return Ok(None);
+        };
+        // A shipped Task's Linear mapping resolves on the destination, whose
+        // own Task ID may differ.
+        let source = match self {
+            Self::TaskShip { .. } => tokio::runtime::Runtime::new()?.block_on(
+                loopflow_execution::machine::task::resolve_task_source(
+                    Some(route.task_id.as_str()),
+                    self.directory(),
+                ),
+            )?,
+            _ => None,
+        };
+        let mut write = self.clone();
+        if let Self::TaskRun { issue, .. }
+        | Self::TaskShip { issue, .. }
+        | Self::TaskHold { issue, .. }
+        | Self::TaskClaim { issue, .. }
+        | Self::TaskUnassign { issue, .. } = &mut write
+        {
+            *issue = source
+                .as_ref()
+                .and_then(|source| source.issue_id.clone())
+                .unwrap_or_else(|| route.task_id.to_string());
         }
-        for line in diagnostics.lines() {
-            loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
-        }
-        Ok(serde_json::from_slice(&output)?)
+        let machine = find_machine(route.machine_id.as_str())?;
+        Remote::new(machine, route.repository_id, write, launching, source).map(Some)
     }
 
-    /// The Session writes whose Work can live on another Machine, and whose
-    /// preparation reads the CLI's selectors, as `lf` spells them. SSH runs
-    /// this spelling on the destination; nothing else parses it. Task writes
-    /// route through [`loopflow_execution::engine::task`].
-    fn cli(&self) -> Option<anyhow::Result<(crate::lf::Cli, Vec<String>)>> {
+    /// A resume of a conversation that lives on another Machine, carrying the
+    /// Task and Wave this host resolved.
+    fn remote_session(&self) -> anyhow::Result<Option<Remote>> {
+        let Self::SessionResume {
+            directory,
+            id,
+            task,
+            wave,
+            agent,
+        } = self
+        else {
+            return Ok(None);
+        };
+        let (cli, args) = self.session_spelling()?;
+        let Some(forward) = super::work_route::forward(&cli, &args, directory)? else {
+            return Ok(None);
+        };
+        let machine = find_machine(forward.machine.as_str())?;
+        let repository = match forward.repository.clone().or(forward
+            .route
+            .as_ref()
+            .map(|route| route.repository_id.clone()))
+        {
+            Some(repository) => repository,
+            None => loopflow_execution::machine::task::current_repository(directory)?
+                .ok_or_else(|| {
+                    anyhow!(
+                        "this Session runs on Machine {}; run `lf repo` here so it can address the repository",
+                        machine.id
+                    )
+                })?,
+        };
+        let write = Self::SessionResume {
+            directory: directory.clone(),
+            id: id.clone(),
+            task: match (&forward.route, id) {
+                (Some(route), None) => Some(route.task_id.to_string()),
+                _ => task.clone(),
+            },
+            wave: wave.clone().or(forward.wave),
+            agent: agent.clone(),
+        };
+        Remote::new(machine, repository, write, false, None).map(Some)
+    }
+
+    /// `session.resume` / `session.new`: the conversation prepared where it
+    /// lives, no provider started.
+    fn prepare_session(
+        &self,
+        remote: Option<Remote>,
+    ) -> anyhow::Result<loopflow_execution::ops::human_session::SessionRecord> {
+        let Some(remote) = remote else {
+            let (cli, _) = self.session_spelling()?;
+            return super::session::prepared(&cli, self.directory());
+        };
+        if let Self::SessionResume { id: Some(id), .. } = self {
+            // A Session resumes on the Machine it moved to, carried there first.
+            loopflow_execution::ops::session_move::move_session(
+                id,
+                remote.machine.id.as_str(),
+                false,
+                run_task,
+            )?;
+        }
+        super::ssh::prepared_remotely(remote.call()?, &remote.machine, false)
+    }
+
+    /// The Session preparation as `lf` spells it. Its local preparation still
+    /// reads Clap's Session arguments; nothing sends this spelling.
+    fn session_spelling(&self) -> anyhow::Result<(crate::lf::Cli, Vec<String>)> {
         let mut args = vec![
             "lf".to_owned(),
             "--cwd".to_owned(),
@@ -1121,15 +1312,12 @@ impl Write {
                 ]);
                 words
             }
-            _ => return None,
+            _ => anyhow::bail!("not a Session preparation"),
         };
         args.extend(words.into_iter().map(str::to_owned));
-        Some(
-            <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
-                .and_then(crate::lf::Cli::checked)
-                .map_err(anyhow::Error::from)
-                .map(|cli| (cli, args)),
-        )
+        let cli = <crate::lf::Cli as clap::Parser>::try_parse_from(&args)
+            .and_then(crate::lf::Cli::checked)?;
+        Ok((cli, args))
     }
 
     /// What the command reads from stdin.
@@ -1142,70 +1330,96 @@ impl Write {
     }
 
     pub(crate) fn directory(&self) -> &Path {
-        match self {
-            Self::TaskCreate { directory, .. }
-            | Self::TaskComplete { directory, .. }
-            | Self::TaskReopen { directory, .. }
-            | Self::TaskAbandon { directory, .. }
-            | Self::TaskUpdate { directory, .. }
-            | Self::TaskClaim { directory, .. }
-            | Self::TaskUnassign { directory, .. }
-            | Self::TaskRun { directory, .. }
-            | Self::TaskShip { directory, .. }
-            | Self::TaskHold { directory, .. }
-            | Self::TaskSync { directory, .. }
-            | Self::PlanAnswer { directory, .. }
-            | Self::TaskSteer { directory, .. }
-            | Self::TaskReport { directory, .. }
-            | Self::TaskInterrupt { directory, .. }
-            | Self::TaskMove { directory, .. }
-            | Self::TaskSave { directory, .. }
-            | Self::SessionSteer { directory, .. }
-            | Self::SessionRename { directory, .. }
-            | Self::SessionBind { directory, .. }
-            | Self::SessionStatus { directory, .. }
-            | Self::SessionResume { directory, .. }
-            | Self::SessionNew { directory, .. }
-            | Self::SessionMove { directory, .. }
-            | Self::WaveCreate { directory, .. }
-            | Self::WaveRename { directory, .. }
-            | Self::WaveRemove { directory, .. }
-            | Self::WaveMachine { directory, .. }
-            | Self::WaveSync { directory, .. }
-            | Self::WavePlanBind { directory, .. }
-            | Self::WavePlanConnect { directory, .. }
-            | Self::WavePlanReteam { directory, .. }
-            | Self::GraphCustomize { directory, .. }
-            | Self::RepoRelease { directory, .. }
-            | Self::CheckoutCommit { directory, .. }
-            | Self::CheckoutSync { directory, .. }
-            | Self::CheckoutCreate { directory, .. }
-            | Self::GraphRun { directory, .. }
-            | Self::SkillRun { directory, .. }
-            | Self::PrPublish { directory, .. }
-            | Self::PrOpen { directory, .. }
-            | Self::PrSubmit { directory, .. }
-            | Self::PrArm { directory, .. }
-            | Self::PrLand { directory, .. }
-            | Self::PrAbandon { directory, .. }
-            | Self::PrReconcile { directory }
-            | Self::PrRequestReview { directory, .. }
-            | Self::DesktopDashboardQuery { directory, .. }
-            | Self::DesktopDashboardPin { directory, .. }
-            | Self::DesktopDashboardUnpin { directory, .. }
-            | Self::DesktopDashboardRename { directory, .. }
-            | Self::DesktopDashboardHide { directory, .. }
-            | Self::DesktopDashboardShow { directory, .. }
-            | Self::DesktopDashboardSlots { directory, .. }
-            | Self::DesktopDashboardMove { directory, .. } => directory,
-            Self::DesktopPortfolioSet { .. }
-            | Self::AccountDisconnect { .. }
-            | Self::AccountConnect { .. }
-            | Self::ConfigSet { .. }
-            | Self::ConfigUnset { .. }
-            | Self::ConfigTheme { .. } => Path::new("/"),
-        }
+        directory_of!(self).map_or(Path::new("/"), PathBuf::as_path)
     }
+
+    fn directory_mut(&mut self) -> Option<&mut PathBuf> {
+        directory_of!(self)
+    }
+}
+
+/// A Task or Session write for the Machine that runs its Work.
+#[derive(Debug)]
+pub(super) struct Remote {
+    machine: loopflow_model::durable::Machine,
+    change: Write,
+    sender: Sender,
+}
+
+impl Remote {
+    /// `change` for `machine`'s checkout of `repository`, with what this `lf`
+    /// runs with and, for a launch, the secrets `forward` names. Its files are
+    /// delivered to `machine` now.
+    fn new(
+        machine: loopflow_model::durable::Machine,
+        repository: loopflow_model::durable::RepositoryId,
+        change: Write,
+        launching: bool,
+        source: Option<loopflow_execution::ops::task::remote::TaskSource>,
+    ) -> anyhow::Result<Self> {
+        let selection = Selection::capture(change.directory(), source)?;
+        let secrets = match launching {
+            true => {
+                let mut forwarded = loopflow_execution::machine::forward::read(change.directory())?;
+                let secrets = forwarded.take_secrets();
+                let mut notices = Vec::new();
+                loopflow_execution::machine::forward::deliver(&machine, &forwarded, &mut notices)?;
+                for line in String::from_utf8_lossy(&notices).lines() {
+                    loopflow_execution::journal::request::diagnostic(format_args!("{line}"));
+                }
+                secrets
+            }
+            false => Secrets::default(),
+        };
+        Ok(Self {
+            machine,
+            change,
+            sender: Sender {
+                repository,
+                selection,
+                secrets,
+            },
+        })
+    }
+
+    /// The answer of the destination's server; nothing runs here instead.
+    pub(super) fn call<T: DeserializeOwned>(&self) -> anyhow::Result<T> {
+        let mut connection = loopflow_execution::machine::client::Connection::open_on(
+            &self.machine,
+            self.sender.clone(),
+        )?;
+        let answer =
+            connection.request(crate::server::wire::Operation::Write(self.change.clone()))?;
+        Ok(serde_json::from_value(answer.result)?)
+    }
+}
+
+/// `task.run` for `issue` from `directory`, where its Work lives.
+pub(super) fn run_task(
+    directory: &Path,
+    issue: &str,
+    from: Option<&str>,
+) -> anyhow::Result<task::TaskRun> {
+    let write = Write::TaskRun {
+        directory: directory.to_path_buf(),
+        issue: issue.to_owned(),
+        graph: None,
+        from: from.map(str::to_owned),
+        agent: None,
+        approve: false,
+    };
+    let WriteResult::TaskRun(run) = write.run()? else {
+        unreachable!("task.run answers with a run")
+    };
+    Ok(*run)
+}
+
+pub(crate) fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
+    let registry = loopflow_execution::store::read_existing_registry()?
+        .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
+    tokio::runtime::Runtime::new()?.block_on(loopflow_execution::machine::connection::find_machine(
+        &registry, selector,
+    ))
 }
 
 #[cfg(test)]
@@ -1291,7 +1505,7 @@ mod tests {
             r#"{"kind":"task.move","directory":"/r","issue":"FIX-1","wave":null,"machine":null}"#,
             r#"{"kind":"desktop.dashboard.unpin","directory":"/r","id":"picked","revision":3}"#,
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
+            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
             r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
@@ -1327,60 +1541,6 @@ mod tests {
                 serde_json::to_value(&write).unwrap(),
                 serde_json::from_str::<serde_json::Value>(json).unwrap()
             );
-        }
-    }
-
-    #[test]
-    fn routed_writes_spell_the_command_ssh_runs() {
-        let spelled = |json: &str| {
-            let (_, args) = serde_json::from_str::<Write>(json)
-                .unwrap()
-                .cli()
-                .expect("a routed write")
-                .unwrap();
-            args
-        };
-        assert_eq!(
-            spelled(
-                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
-            ),
-            [
-                "lf",
-                "--cwd",
-                "/r",
-                "--repo",
-                "/r",
-                "session",
-                "resume",
-                "--prepare",
-                "--json"
-            ]
-        );
-        assert_eq!(
-            spelled(
-                r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#
-            ),
-            [
-                "lf",
-                "--cwd",
-                "/r",
-                "--agent",
-                "codex",
-                "session",
-                "new",
-                "session_1",
-                "--prepare",
-                "--json",
-                "--request-id",
-                "new-thread"
-            ]
-        );
-        for json in [
-            r#"{"kind":"task.complete","directory":"/r","issue":"FIX-1"}"#,
-            r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
-            r#"{"kind":"task.claim","directory":"/r","issue":"FIX-1"}"#,
-        ] {
-            assert!(serde_json::from_str::<Write>(json).unwrap().cli().is_none());
         }
     }
 }

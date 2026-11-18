@@ -1084,7 +1084,7 @@ mod tests {
                         Some(&history),
                         &Default::default(),
                         None,
-                        false,
+                        crate::harness::LaunchKind::Batch,
                     )
                 },
             );

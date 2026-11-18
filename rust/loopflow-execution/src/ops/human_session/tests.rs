@@ -63,12 +63,12 @@ impl LiveSessionFixture {
         RunningAgent(
             crate::harness::agent_process::spawn_native(
                 command,
-                &(
-                    self.store.sqlite.clone(),
-                    session.id.to_string(),
+                &crate::harness::Recording {
+                    store: self.store.sqlite.clone(),
+                    session: session.id.to_string(),
                     attachment,
-                ),
-                crate::session::Holder::Caller,
+                },
+                crate::harness::LaunchKind::Batch,
             )
             .unwrap(),
         )
@@ -124,11 +124,11 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
             let mut provider = crate::harness::agent_process::spawn(
                 command,
                 None,
-                &(store.sqlite.clone(), session.id.to_string(), first.clone()),
-                crate::session::Holder::Caller,
+                &crate::harness::Recording { store: store.sqlite.clone(), session: session.id.to_string(), attachment: first.clone() },
+                crate::harness::LaunchKind::Batch,
             )?;
-            let opened = super::open(&store, home, &session.id, None, None, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, None, None, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, false).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -848,7 +848,6 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
             false,
             true,
             false,
-            false,
         )
         .await;
         let message = opened.unwrap_err().to_string();
@@ -942,19 +941,9 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
                 ),
                 super::SessionResumeIntent::Resume
             );
-            super::open(
-                &store,
-                home,
-                &session.id,
-                None,
-                None,
-                false,
-                true,
-                false,
-                false,
-            )
-            .await
-            .map(|_| ())
+            super::open(&store, home, &session.id, None, None, false, true, false)
+                .await
+                .map(|_| ())
         })
     });
     std::env::set_var("PATH", path);
@@ -980,7 +969,6 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             &record.id,
             None,
             None,
-            false,
             false,
             false,
             false,
@@ -1044,7 +1032,6 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             false,
             false,
             false,
-            false,
         )
         .await
         .unwrap()
@@ -1081,7 +1068,6 @@ fn recovery_refresh_follows_current_holder_and_history() {
             false,
             false,
             false,
-            false,
         )
         .await
         .unwrap()
@@ -1099,19 +1085,18 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let holder =
-            attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher)
-                .unwrap();
+        let run = attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher)
+            .unwrap();
         store
             .sqlite
             .record_agent_process_launch(
                 &record.id,
-                &holder,
+                &run,
                 &std::process::Command::new("fixture-provider"),
                 true,
             )
             .unwrap();
-        // An admitted holder with unknown OS evidence: opening takes it over,
+        // An admitted run with unknown OS evidence: opening takes it over,
         // and preparing leaves it attached.
         let refreshed = listed_session(&store, &record.id);
         assert_eq!(refreshed.action.as_ref().unwrap().label, "Take over");
@@ -1124,7 +1109,6 @@ fn recovery_refresh_follows_current_holder_and_history() {
             false,
             false,
             false,
-            false,
         )
         .await
         .unwrap()
@@ -1133,16 +1117,16 @@ fn recovery_refresh_follows_current_holder_and_history() {
         assert_eq!(prepared.action, refreshed.action);
         assert_eq!(
             store.sqlite.session_attachment(&record.id).unwrap(),
-            Some(holder.clone())
+            Some(run.clone())
         );
 
         store
             .sqlite
-            .record_session_agent_session(&record.id, &holder, &"saved-thread".into())
+            .record_session_agent_session(&record.id, &run, &"saved-thread".into())
             .unwrap();
         store
             .sqlite
-            .record_agent_process_exit(&record.id, &holder, true)
+            .record_agent_process_exit(&record.id, &run, true)
             .unwrap();
         let refreshed = listed_session(&store, &record.id);
         assert_eq!(refreshed.action.unwrap().label, "Start conversation");
@@ -1180,7 +1164,6 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             false,
             false,
             false,
-            false,
         )
         .await
         .unwrap()
@@ -1202,7 +1185,6 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             &next.id,
             None,
             None,
-            false,
             false,
             false,
             false,
@@ -1266,7 +1248,7 @@ fn a_session_switched_to_another_provider_resumes_on_it() {
         let config =
             crate::agent::resolve_session_config(&resumed, serde_yaml_ng::Value::Null, None, false)
                 .unwrap();
-        assert_eq!(config.agent().unwrap(), "codex");
+        assert_eq!(config.agent.to_string(), "codex");
         assert_eq!(config.resume_token, Some("codex-thread".into()));
     });
 }

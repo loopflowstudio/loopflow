@@ -68,7 +68,8 @@ pub fn select_output(paths: Option<Vec<String>>) {
     SELECTED.with(|selected| *selected.borrow_mut() = paths);
 }
 
-fn selected() -> Option<Vec<String>> {
+/// This invocation's `--select`, which a subscription on another Machine sends.
+pub fn selected() -> Option<Vec<String>> {
     SELECTED.with(|selected| selected.borrow().clone())
 }
 

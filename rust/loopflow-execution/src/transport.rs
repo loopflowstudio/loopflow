@@ -28,6 +28,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -216,152 +217,161 @@ pub fn current() -> Option<&'static TerminalId> {
     HANDOFF.get().map(|handoff| &handoff.terminal)
 }
 
-/// Where a delegated launch runs; running here needs no delegation.
+/// Whether this process runs the launch or handed it to its owner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Place {
-    Held,
-    Detached,
+pub enum Delegation {
+    Delegated,
+    Here { kind: crate::harness::LaunchKind },
 }
 
-/// `SqliteStore::is_work` for the Session a launch opens. An unreadable store
-/// keeps the launch Work.
-fn works(named_work: bool, session: Option<&str>) -> bool {
-    let Some(session) = session else {
-        return named_work;
-    };
-    crate::journal::process_ledger()
-        .and_then(|store| store.is_work(named_work, store.session(session)?.as_ref()))
-        .unwrap_or(true)
+/// Inputs that select the native client or stream driver before delegation.
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchInput {
+    pub batch: bool,
+    pub interactive: bool,
+    pub has_prompt: bool,
 }
 
-/// Delegate before capture admission or provider effects. A missing startup
-/// acknowledgement is uncertainty, never permission to launch again. Returns
-/// false when this process runs the launch itself: inside its host or
-/// launcher, or as a bare launch in its own terminal or headless.
-///
-/// `named_work` says the command names its Task or Wave or starts a Task's
-/// Graph; its conversation is held for the Machine server when a terminal
-/// views it.
-pub fn delegate_current(batch: bool, named_work: bool) -> Result<bool> {
-    let argv: Vec<String> = std::env::args().collect();
-    delegate(batch, None, None, argv, named_work)
+impl LaunchInput {
+    /// Select the native client or stream driver from the invocation and terminal.
+    pub fn mode(self) -> crate::harness::Mode {
+        self.mode_with_tty(io::stdin().is_terminal() || io::stdout().is_terminal())
+    }
+
+    /// A direct command is a chat or batch in its caller's terminal or pipe,
+    /// whatever its Task attribution; Task delivery's step is a worker and a
+    /// held child takes up a work session.
+    pub fn kind(self) -> crate::harness::LaunchKind {
+        use crate::harness::{LaunchKind, Mode};
+
+        if crate::journal::worker_step() {
+            LaunchKind::Worker
+        } else if current().is_some() {
+            LaunchKind::WorkSession
+        } else {
+            match self.mode() {
+                Mode::Interactive => LaunchKind::Chat,
+                Mode::Headless => LaunchKind::Batch,
+            }
+        }
+    }
+
+    fn mode_with_tty(self, tty: bool) -> crate::harness::Mode {
+        if !self.batch && (self.interactive || tty || !self.has_prompt) {
+            crate::harness::Mode::Interactive
+        } else {
+            crate::harness::Mode::Headless
+        }
+    }
 }
 
-/// Delegate the reopening of a recorded Session; `named_work` as for
-/// `delegate_current`. The delegated process decides again under its own
-/// launch lock, so this one releases `launch_lock` before it starts; the lock
-/// comes back when this process launches.
+/// `lf task run` leaves its terminal: the Graph it starts outlives the caller,
+/// and `lf -b task run` waits for it. Returns whether a detached child ran the
+/// command; in a held terminal, an already detached process or a Graph step it
+/// runs here.
+pub fn detach_current() -> Result<bool> {
+    if cfg!(test)
+        || current().is_some()
+        || crate::os_process::detached::launched()
+        || crate::journal::graph_step()
+    {
+        return Ok(false);
+    }
+    let mut argv: Vec<String> = std::env::args().collect();
+    let cwd = admit_current(&mut argv)?;
+    let code = crate::os_process::detached::run(&argv, &cwd, false, &|command| {
+        // No terminal shows detached work; it claims none.
+        command
+            .env_remove(STREAM_ENV)
+            .env_remove("LF_TERMINAL_ID")
+            .env_remove("LF_TERMINAL_TTY");
+    })?;
+    if code != 0 {
+        return Err(crate::process::CommandExit(code).into());
+    }
+    Ok(true)
+}
+
+/// Reopen a recorded Session as a chat or a work session. Only an interactive
+/// Session has a last screen to preview. A held terminal decides again under
+/// its own launch lock, so this process releases `launch_lock` before it
+/// starts one. Returns the kind and the lock when the launch runs here, None
+/// when a held terminal took it.
 pub(crate) fn delegate_session(
-    json_session: Option<&str>,
-    preview_session: Option<&str>,
-    named_work: bool,
+    id: &str,
+    json: bool,
+    preview: bool,
     launch_lock: File,
-) -> Result<Option<File>> {
-    let Some(place) = place(false, json_session, preview_session, named_work) else {
-        return Ok(Some(launch_lock));
-    };
+) -> Result<Option<(crate::harness::LaunchKind, File)>> {
+    let kind = session_kind(id);
+    if runs_here(kind) {
+        return Ok(Some((kind, launch_lock)));
+    }
     drop(launch_lock);
     let mut argv: Vec<String> = std::env::args().collect();
-    if json_session.is_some() {
+    if json {
         // The viewer owns this continuation, including an early detach.
         argv.retain(|arg| arg != "--json");
     }
-    run_delegated(place, json_session, preview_session, argv)?;
+    delegate(kind, json.then_some(id), preview.then_some(id), argv)?;
     Ok(None)
 }
 
 /// Open the resulting Session after a fork or thread replacement, without
 /// repeating the command that prepared it.
-pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<bool> {
+pub(crate) fn delegate_prepared_session(id: &str, json: bool) -> Result<Delegation> {
     delegate(
-        false,
+        session_kind(id),
         json.then_some(id),
         Some(id),
         vec![String::new(), "session".into(), "resume".into(), id.into()],
-        false,
     )
 }
 
-/// The one place a launch's place is chosen
-/// ([What runs on a Machine](../../../docs/dev/index.md#what-runs-on-a-machine)).
-/// A launch something views (a terminal for Work, or a Desktop or framed
-/// relay for any conversation) runs in a terminal the Machine server's holder
-/// keeps. Other Work runs as a plain detached process that this one prints
-/// until it exits or lets go. Everything else runs here: as the terminal's
-/// foreground program, as a Graph's step, or headless as its caller's child.
-fn delegate(
-    batch: bool,
-    json_session: Option<&str>,
-    preview_session: Option<&str>,
-    argv: Vec<String>,
-    named_work: bool,
-) -> Result<bool> {
-    let Some(place) = place(batch, json_session, preview_session, named_work) else {
-        return Ok(false);
-    };
-    run_delegated(place, json_session, preview_session, argv)?;
-    Ok(true)
-}
+/// Chats reopen as chats; bound and primary Sessions as work sessions. A held
+/// child keeps its parent's choice. A relayed viewer (a Desktop pane or a
+/// framed `lf --machine` stream) is no terminal a chat can own, so the holder
+/// keeps what it opens.
+fn session_kind(id: &str) -> crate::harness::LaunchKind {
+    use crate::harness::LaunchKind;
 
-/// Where `delegate` runs a launch, or None to run it here.
-fn place(
-    batch: bool,
-    json_session: Option<&str>,
-    preview_session: Option<&str>,
-    named_work: bool,
-) -> Option<Place> {
-    // Library tests do not execute the CLI entry point.
-    if cfg!(test) || current().is_some() || crate::os_process::detached::launched() {
-        return None;
+    if current().is_some()
+        || std::env::var_os("LF_SERVER_STATUS").is_some()
+        || std::env::var_os(STREAM_ENV).is_some()
+    {
+        return LaunchKind::WorkSession;
     }
-    let work = works(named_work, preview_session.or(json_session));
-    // A Desktop pane or a framed `lf --machine` view relays this launch.
-    let relayed =
-        std::env::var_os("LF_SERVER_STATUS").is_some() || std::env::var_os(STREAM_ENV).is_some();
-    // `lf -b … > file` typed at a terminal writes only the answer, never a
-    // relayed screen; an interactive run keeps the terminal it reads from.
-    let terminal = io::stdout().is_terminal() || (!batch && io::stdin().is_terminal());
-    if !batch && (relayed || (work && terminal)) {
-        Some(Place::Held)
-    // A Graph waits on its step; the step has no caller to outlive.
-    } else if work && !crate::journal::graph_step() {
-        Some(Place::Detached)
+    static GAP: LazyLock<Mutex<crate::store::RecordingGap>> = LazyLock::new(Default::default);
+    let bare = crate::journal::process_ledger().and_then(|store| {
+        store
+            .session(id)?
+            .map(|session| store.is_bare(&session))
+            .transpose()
+    });
+    let mut gap = GAP.lock().expect("resume gap lock poisoned");
+    match &bare {
+        Ok(_) => gap.recovered(),
+        Err(error) => gap.note("resume lifetime", error),
+    }
+    if matches!(bare, Ok(Some(true))) {
+        LaunchKind::Chat
     } else {
-        None
+        LaunchKind::WorkSession
     }
 }
 
-fn run_delegated(
-    place: Place,
+/// Carry out the selected launch kind before admission or provider effects.
+/// A work session runs in a held terminal; every other kind runs here.
+fn delegate(
+    kind: crate::harness::LaunchKind,
     json_session: Option<&str>,
     preview_session: Option<&str>,
     mut argv: Vec<String>,
-) -> Result<()> {
-    crate::journal::admit_process(
-        &std::env::current_dir()?,
-        &std::env::args().collect::<Vec<_>>(),
-    );
-    crate::journal::current_lf_process_id().context(
-        "Execution requires an admitted invocation; check the process ledger and caller provenance",
-    )?;
-    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
-    let cwd = std::env::current_dir()?;
-    if place == Place::Detached {
-        // A reopened conversation reads what its caller pipes in; other work
-        // never consumes this process's stdin.
-        let input = preview_session.is_some() && !io::stdin().is_terminal();
-        let code = crate::os_process::detached::run(&argv, &cwd, input, &|command| {
-            // No terminal shows detached work; it claims none.
-            command
-                .env_remove(STREAM_ENV)
-                .env_remove("LF_TERMINAL_ID")
-                .env_remove("LF_TERMINAL_TTY");
-        })?;
-        if code != 0 {
-            return Err(crate::process::CommandExit(code).into());
-        }
-        return Ok(());
+) -> Result<Delegation> {
+    if runs_here(kind) {
+        return Ok(Delegation::Here { kind });
     }
+    let cwd = admit_current(&mut argv)?;
     let preview = if std::env::var_os(STREAM_ENV).is_some() {
         if let Some(screen) = preview_session.and_then(snapshot::last_screen) {
             io::stdout().write_all(&wire::frame(Tag::Snapshot, &screen))?;
@@ -373,7 +383,28 @@ fn run_delegated(
     let session = preview_session.map(LfSessionId::from);
     let terminal = start_held(&argv, &cwd, session.as_ref(), &|_| {})?;
     relay_with_preview(&terminal, session.as_ref(), json_session, preview)?;
-    Ok(())
+    Ok(Delegation::Delegated)
+}
+
+/// Whether a launch of `kind` runs in this process: everything but a work
+/// session, and a work session already inside its held terminal or detached.
+fn runs_here(kind: crate::harness::LaunchKind) -> bool {
+    cfg!(test)
+        || current().is_some()
+        || crate::os_process::detached::launched()
+        || kind != crate::harness::LaunchKind::WorkSession
+}
+
+/// Admit this invocation before another process takes over its work, and point
+/// `argv` at this build. Returns the working directory the child starts in.
+fn admit_current(argv: &mut [String]) -> Result<PathBuf> {
+    let cwd = std::env::current_dir()?;
+    crate::journal::admit_process(&cwd, &std::env::args().collect::<Vec<_>>());
+    crate::journal::current_lf_process_id().context(
+        "Execution requires an admitted invocation; check the process ledger and caller provenance",
+    )?;
+    argv[0] = std::env::current_exe()?.to_string_lossy().into_owned();
+    Ok(cwd)
 }
 
 /// Start `argv` in a terminal this build's holder keeps, through the Machine
@@ -1020,6 +1051,16 @@ struct ViewerState {
 }
 
 impl ViewerState {
+    /// The held terminal's output stream `stream` here: stdout's goes to
+    /// stderr while stdout holds a JSON record.
+    fn screen(&mut self, stream: u8) -> &mut std::fs::File {
+        if stream == 2 || STDOUT_HOLDS_RECORD.load(Ordering::Relaxed) {
+            &mut self.output.stderr
+        } else {
+            &mut self.output.stdout
+        }
+    }
+
     fn reset_display(&mut self) -> io::Result<()> {
         // Kitty keyboard state belongs to each screen; reset both when leaving.
         self.output.stdout.write_all(terminal::RESET_MODES)?;
@@ -1125,30 +1166,26 @@ impl ViewerTerminal {
     fn report_focus(&mut self) -> io::Result<()> {
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.reports_focus = true;
-        state.output.stdout.write_all(FOCUS_ON)
+        state.screen(1).write_all(FOCUS_ON)
     }
 
     fn handoff(&mut self) -> io::Result<()> {
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.reset_display()?;
         // The live terminal is authoritative even when its first screen is blank.
-        state.output.stdout.write_all(b"\x1b[H\x1b[2J")
+        state.screen(1).write_all(b"\x1b[H\x1b[2J")
     }
 
     fn write(&mut self, stream: u8, bytes: &[u8]) -> io::Result<()> {
         // An interrupt cannot restore the terminal midway through an output write.
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.alternate.observe(bytes);
-        if stream == 2 {
-            state.output.stderr.write_all(bytes)
-        } else {
-            state.output.stdout.write_all(bytes)?;
-            // An agent that stops its own focus reports leaves this view's on.
-            if state.reports_focus && contains(bytes, b"\x1b[?1004l") {
-                state.output.stdout.write_all(FOCUS_ON)?;
-            }
-            Ok(())
+        state.screen(stream).write_all(bytes)?;
+        // An agent that stops its own focus reports leaves this view's on.
+        if stream != 2 && state.reports_focus && contains(bytes, b"\x1b[?1004l") {
+            state.screen(stream).write_all(FOCUS_ON)?;
         }
+        Ok(())
     }
 }
 const FOCUS_ON: &[u8] = b"\x1b[?1004h";
@@ -1333,10 +1370,17 @@ pub(crate) fn shell_history(terminal: &TerminalId) -> Result<()> {
     Ok(())
 }
 
+/// A `--json` relay whose stdout is no terminal keeps stdout for the Session
+/// record printed after relaying; the held terminal's bytes go to stderr.
+static STDOUT_HOLDS_RECORD: AtomicBool = AtomicBool::new(false);
+
 /// Relay this terminal to a held terminal: socket in, terminal out.
-pub fn relay(id: &TerminalId, session: Option<&LfSessionId>) -> Result<()> {
+pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, json: bool) -> Result<()> {
     if std::env::var_os(STREAM_ENV).is_some() {
         return stream::bridge(id);
+    }
+    if json && !io::stdout().is_terminal() {
+        STDOUT_HOLDS_RECORD.store(true, Ordering::Relaxed);
     }
     let preview = std::env::var(RELAY_PREVIEW_ENV).ok();
     std::env::remove_var(RELAY_PREVIEW_ENV);
@@ -2167,7 +2211,7 @@ fn acknowledge_open() {
 fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {
     if let Some(terminal) = terminal {
         terminal.write(stream, bytes)
-    } else if stream == 2 {
+    } else if stream == 2 || STDOUT_HOLDS_RECORD.load(Ordering::Relaxed) {
         io::stderr().write_all(bytes)?;
         io::stderr().flush()
     } else {
@@ -2673,5 +2717,193 @@ mod tests {
         let mut exec = Command::new("lf");
         carry_across_exec(&mut exec);
         assert_eq!(exec.get_envs().count(), 0);
+    }
+}
+
+#[cfg(test)]
+mod launch_mode_tests {
+    use super::LaunchInput;
+    use crate::harness::{LaunchKind, Mode};
+
+    #[test]
+    fn mode_keeps_batch_interactive_tty_and_empty_prompt_semantics() {
+        for (batch, interactive, has_prompt, tty, expected) in [
+            (true, false, false, false, Mode::Headless),
+            (true, true, false, true, Mode::Headless),
+            (false, true, true, false, Mode::Interactive),
+            (false, false, true, true, Mode::Interactive),
+            (false, false, true, false, Mode::Headless),
+            (false, false, false, false, Mode::Interactive),
+        ] {
+            let input = LaunchInput {
+                batch,
+                interactive,
+                has_prompt,
+            };
+            assert_eq!(input.mode_with_tty(tty), expected, "{input:?}, tty={tty}");
+        }
+    }
+
+    #[test]
+    fn direct_commands_keep_their_mode_and_caller() {
+        for (batch, kind) in [(true, LaunchKind::Batch), (false, LaunchKind::Chat)] {
+            let input = LaunchInput {
+                batch,
+                interactive: true,
+                has_prompt: true,
+            };
+            assert_eq!(input.kind(), kind);
+        }
+    }
+
+    #[test]
+    fn inherited_task_attribution_keeps_a_direct_command_bare() {
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::new();
+        std::env::set_var(crate::ops::WORK_DECLARATION_ENV, "task:inherited");
+        for (batch, kind) in [(false, LaunchKind::Chat), (true, LaunchKind::Batch)] {
+            let input = LaunchInput {
+                batch,
+                interactive: true,
+                has_prompt: true,
+            };
+            assert_eq!(input.kind(), kind);
+        }
+    }
+
+    #[test]
+    fn reopening_keeps_bare_attribution_and_managed_conversations() {
+        use crate::session::WorkSource;
+        use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
+
+        let ledger = crate::journal::TestLedgerGuard::new();
+        crate::journal::with_process(|| {
+            crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
+            let store = crate::journal::process_ledger().unwrap();
+            // Attribution selects a launch kind independently of the stored
+            // surface. Resume eligibility is checked before delegation.
+            for (surface, source, bound, primary, expected) in [
+                ("headless", None, false, false, LaunchKind::Chat),
+                ("interactive", None, false, false, LaunchKind::Chat),
+                (
+                    "interactive",
+                    Some(WorkSource::Checkout),
+                    false,
+                    false,
+                    LaunchKind::Chat,
+                ),
+                (
+                    "interactive",
+                    Some(WorkSource::Declared),
+                    false,
+                    false,
+                    LaunchKind::Chat,
+                ),
+                (
+                    "interactive",
+                    Some(WorkSource::Inherited),
+                    false,
+                    false,
+                    LaunchKind::Chat,
+                ),
+                (
+                    "interactive",
+                    Some(WorkSource::Bound),
+                    true,
+                    false,
+                    LaunchKind::WorkSession,
+                ),
+                (
+                    "interactive",
+                    Some(WorkSource::Declared),
+                    false,
+                    true,
+                    LaunchKind::WorkSession,
+                ),
+            ] {
+                let capture = SessionRecorder::begin_at(
+                    ledger.home(),
+                    SessionCaptureSpec {
+                        harness: "claude".into(),
+                        model: None,
+                        surface: surface.into(),
+                        cwd: ledger.home().into(),
+                        repo: None,
+                        worktree: None,
+                        skill: None,
+                        subjects: vec![],
+                        graph: SessionGraphMembership::Independent,
+                        work: None,
+                    },
+                )
+                .unwrap();
+                let session = store
+                    .session_for_artifact(&capture.artifact_key())
+                    .unwrap()
+                    .unwrap();
+                rusqlite::Connection::open(ledger.home().join("loopflow.db"))
+                    .unwrap()
+                    .execute(
+                        "UPDATE agent_sessions SET work_source=?2,bound_at=?3,
+                         primary_scope=CASE WHEN ?4 THEN 'repository' END,repo=?5 WHERE id=?1",
+                        rusqlite::params![
+                            session.id,
+                            source.map(|value| serde_json::to_value(value)
+                                .unwrap()
+                                .as_str()
+                                .unwrap()
+                                .to_owned()),
+                            bound.then_some(1),
+                            primary,
+                            ledger.home().to_str().unwrap(),
+                        ],
+                    )
+                    .unwrap();
+                let lock = tempfile::tempfile().unwrap();
+                let (kind, _) =
+                    super::delegate_session(&session.id, false, surface == "interactive", lock)
+                        .unwrap()
+                        .unwrap();
+                assert_eq!(
+                    kind, expected,
+                    "surface={surface}, source={source:?}, bound={bound}, primary={primary}",
+                );
+                assert_eq!(
+                    super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
+                    super::Delegation::Here { kind: expected },
+                    "prepared: source={source:?}, bound={bound}, primary={primary}",
+                );
+                // A Desktop pane or framed remote viewer has no terminal for
+                // a chat to own; the holder keeps every Session it opens.
+                for relay in ["LF_SERVER_STATUS", super::STREAM_ENV] {
+                    std::env::set_var(relay, "1");
+                    let relayed = super::delegate_session(
+                        &session.id,
+                        false,
+                        true,
+                        tempfile::tempfile().unwrap(),
+                    );
+                    std::env::remove_var(relay);
+                    let (kind, _) = relayed.unwrap().unwrap();
+                    assert_eq!(kind, LaunchKind::WorkSession, "{relay}: source={source:?}");
+                }
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn reopening_with_an_unreadable_store_stays_managed() {
+        let ledger = crate::journal::TestLedgerGuard::new();
+        let database = ledger.home().join("unreadable.db");
+        std::fs::write(&database, "not a database").unwrap();
+        ledger.set_db_path(database);
+        assert_eq!(
+            super::delegate_prepared_session("unreadable-session", false).unwrap(),
+            super::Delegation::Here {
+                kind: crate::harness::LaunchKind::WorkSession
+            }
+        );
     }
 }

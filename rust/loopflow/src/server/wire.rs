@@ -51,6 +51,27 @@ mod tests {
     use super::ClientMessage;
 
     #[test]
+    fn a_request_another_machine_sent_carries_its_secrets_and_never_prints_them() {
+        let raw = include_str!(
+            "../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"
+        );
+        let message: ClientMessage = serde_json::from_str(raw).unwrap();
+        let loopflow_execution::machine::wire::ClientMessage::Request {
+            sender: Some(sender),
+            ..
+        } = &message
+        else {
+            panic!("no sender: {message:?}");
+        };
+        assert_eq!(sender.secrets.0[0].0, "CLAUDE_CODE_OAUTH_TOKEN");
+        assert!(!format!("{message:?}").contains("sk-fixture"));
+        assert_eq!(
+            serde_json::to_value(&message).unwrap(),
+            serde_json::from_str::<serde_json::Value>(raw).unwrap()
+        );
+    }
+
+    #[test]
     fn shared_client_fixtures_decode_and_round_trip_without_defaults() {
         for raw in [
             include_str!(

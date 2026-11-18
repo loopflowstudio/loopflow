@@ -159,16 +159,9 @@ fn completion(harness: HarnessKind, turn: &Turn, started: Option<i64>, ended: i6
         "completed_at": ended,
         "duration_ms": turn.receipt.duration_ms,
     });
-    if harness == HarnessKind::Claude {
-        detail["result_id"] = Value::Null;
-        detail["subtype"] = Value::Null;
-        detail["errors"] = match turn.receipt.errors.is_empty() {
-            true => Value::Null,
-            false => turn.receipt.errors.clone().into(),
-        };
-    } else {
-        detail["error"] = Value::Null;
-    }
+    harness
+        .harness()
+        .transcript_completion_detail(turn, &mut detail);
     detail
 }
 

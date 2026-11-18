@@ -278,50 +278,6 @@ pub enum WorkSource {
     Bound,
 }
 
-impl WorkSource {
-    /// A launch is managed when a Task or Wave command named its Work (a
-    /// selector, a Task's run, a Task or Wave conversation, a binding); a bare
-    /// `lf` in a Task's checkout, or a child run a Session's agent started,
-    /// only counts toward the Task. What each kind gets is in
-    /// `server/README.md` ("Turn and tool boundaries").
-    pub fn is_managed(self) -> bool {
-        matches!(self, Self::Declared | Self::Bound)
-    }
-}
-
-/// Who holds a launch's provider process. It decides the launch's hooks,
-/// whether it needs the Machine server and whether it takes steers, and is
-/// decided once, where the launch is configured.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum Holder {
-    /// A bare launch: the terminal it runs in, or the caller waiting on a
-    /// headless run. It behaves as the harness alone would, with no server:
-    /// two context hooks, and a steer check that reads the store itself.
-    #[default]
-    Caller,
-    /// Task, Wave or repository work: every hook and steers, beside a
-    /// Machine server that must be up before the agent starts.
-    Server,
-}
-
-impl Holder {
-    /// `work`: the launch's Work was selected with `--task` or `--wave`, or
-    /// the Session it reopens is not bare (`SqliteStore::is_bare`).
-    pub fn of(work: bool) -> Self {
-        if work {
-            Self::Server
-        } else {
-            Self::Caller
-        }
-    }
-
-    /// Whether the provider reports its turn boundaries to the Machine server.
-    pub fn reports_turns(self) -> bool {
-        self != Self::Caller
-    }
-}
-
-/// Which scopes' current primary conversations to list.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
 pub enum SessionPrimary {
     All,

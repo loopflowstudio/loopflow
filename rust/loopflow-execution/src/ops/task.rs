@@ -2584,9 +2584,9 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let acquired = super::planning_sync::fetch_repository(&store, &repo).await;
+            let fetched = super::planning_sync::fetch_repository(&store, &repo).await;
             super::planning_sync::publish_repository_now(&store, &repo).await?;
-            acquired?;
+            fetched?;
             return synced(&store, &task.id).await;
         };
         let project = task

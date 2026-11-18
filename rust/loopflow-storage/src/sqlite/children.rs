@@ -1482,9 +1482,8 @@ fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
 /// Planning ownership remains relevant when finishing already completed work.
 pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_not_deleted(conn, task)?;
-    let acquisition = task_tracker_state_in(conn, task, false)?;
     if matches!(
-        acquisition.state,
+        task_tracker_state_in(conn, task, false)?.state,
         PlanningState::Invalid | PlanningState::Removed
     ) {
         return Err(StoreError::InvalidAuthority(format!(

@@ -99,8 +99,10 @@ writes! {
         graph: Option<String>,
         session: Option<String>,
         run: bool,
-    } => loopflow_execution::engine::creation::TaskCreateReceipt;
-    { request_id, title, request, wave, graph, session, run, .. } => loopflow_execution::engine::creation::create(
+    } => super::task_create::TaskCreated;
+    { request_id, title, request, wave, graph, session, run, .. } => {
+    // Served, planning exchange starts once the answer is written.
+    let created = loopflow_execution::engine::creation::create(
         request_id,
         loopflow_execution::engine::creation::TaskCreation {
             directory: directory.to_path_buf(),
@@ -114,7 +116,9 @@ writes! {
             agent: None,
             approve: false,
         },
-    )?,
+    )?;
+    super::task_create::answer(request_id, created.receipt, created.session)?
+    },
 
     /// `lf task complete <issue>`.
     #[serde(rename = "task.complete")]

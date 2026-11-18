@@ -232,6 +232,37 @@ fn place_task_in(
     Ok(())
 }
 
+/// Take up the admitted Graph unless the Task has one, and record its
+/// primary conversation. Returns the Graph's name and the conversation.
+fn admit_in(
+    conn: &Connection,
+    task_id: &TaskId,
+    admission: &super::creation::TaskAdmission,
+) -> StoreResult<(String, crate::session::LfSession)> {
+    if let Some(graph) = &admission.graph {
+        conn.execute(
+            "INSERT INTO task_graphs(task_id,graph,step,updated_at) VALUES(?1,?2,?3,?4)
+             ON CONFLICT(task_id) DO NOTHING",
+            params![task_id.as_str(), graph, super::task_work::START, now_unix()],
+        )?;
+    }
+    let graph: String = conn
+        .query_row(
+            "SELECT json_extract(graph,'$.name') FROM task_graphs WHERE task_id=?1",
+            [task_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| StoreError::InvalidData("admitted Task has no Graph".into()))?;
+    let session = super::sessions::admit_task_primary_in(
+        conn,
+        task_id,
+        &admission.session,
+        admission.caller.as_ref(),
+    )?;
+    Ok((graph, session))
+}
+
 impl SqliteStore {
     /// Apply the placement transaction's admission rule before preparing Git work.
     pub fn validate_task_planning(&self, task: &Task) -> StoreResult<()> {
@@ -273,7 +304,7 @@ impl SqliteStore {
         placement: Option<&(PathBuf, TaskPr)>,
         session: Option<&crate::session::LfSession>,
         destination: Option<&Path>,
-        receipt: Option<&super::creation::CreationIdentity>,
+        receipt: Option<&super::creation::TaskCreationRecord>,
         me: &super::task_ownership::OwnershipFacts,
         caller: &super::SessionCaller,
     ) -> StoreResult<Option<Task>> {
@@ -323,8 +354,11 @@ impl SqliteStore {
                 )?;
             }
         }
-        if let Some(session) = session {
+        let admission = receipt.and_then(|receipt| receipt.admission.as_ref());
+        if session.is_some() || admission.is_some() {
             super::task_ownership::claim_in(&tx, task_id, me)?;
+        }
+        if let Some(session) = session {
             // Transfer only the selected conversation out of its shared primary
             // scope. The checkout and historical captures retain their owners.
             tx.execute(
@@ -357,21 +391,28 @@ impl SqliteStore {
                 )?;
             }
         }
+        let admitted = admission
+            .map(|admission| admit_in(&tx, task_id, admission))
+            .transpose()?;
         let task = task_on(&tx, task_id)?.ok_or(StoreError::NotFound)?;
-        if let Some(identity) = receipt {
+        if let Some(receipt) = receipt {
+            let (graph, session_id, milestone) = match admitted {
+                Some((graph, conversation)) => (Some(graph), Some(conversation.id), "admitted"),
+                None => (None, session.map(|s| s.id.clone()), "filed"),
+            };
             let result = serde_json::to_value(crate::sqlite::creation::TaskCreateReceipt {
                 task: task.clone(),
-                graph: None,
-                session_id: session.map(|s| s.id.clone()),
-                milestone: "filed".into(),
+                graph,
+                session_id: session_id.clone(),
+                milestone: milestone.into(),
             })?;
             super::creation::insert_in(
                 &tx,
-                identity,
+                &receipt.identity,
                 Some(task_id.as_str()),
-                session.map(|s| s.id.as_str()),
+                session_id.as_ref().map(|id| id.as_str()),
                 None,
-                "filed",
+                milestone,
                 Some(&result),
             )?;
         }

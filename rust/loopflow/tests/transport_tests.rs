@@ -870,7 +870,16 @@ fn piped_resume_json_runs_here_and_returns_once() {
         .stderr(Stdio::piped())
         .spawn()
         .unwrap();
-    fixture.launches(1);
+    let launch = fixture.launches(1).pop().unwrap();
+    // The `resume` that opened the Session starts the provider itself; it
+    // execs no `lf -i`.
+    let parent = launch.split(':').nth(1).unwrap();
+    let parent = std::process::Command::new("/bin/ps")
+        .args(["-o", "command=", "-p", parent])
+        .output()
+        .unwrap();
+    let parent = String::from_utf8_lossy(&parent.stdout);
+    assert!(parent.contains(&format!(" resume {session}")), "{parent}");
     viewer.stdin.take().unwrap().write_all(b"done\n").unwrap();
     let result = wait_for_viewer(viewer, Duration::from_secs(30));
     assert!(result.status.success(), "{result:?}");

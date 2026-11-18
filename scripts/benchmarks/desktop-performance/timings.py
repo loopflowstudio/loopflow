@@ -7,6 +7,7 @@ uv run python scripts/benchmarks/desktop-performance/timings.py --home /path/to/
 
 Reads daily interaction journals and launch/read diagnostics under
 `<Machine>/desktop-cache/timings/`. Launch diagnostics count from kernel process start.
+Start's creation and conversation setup steps come from `<Machine>/logs/lf.log`.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import html
 import json
 import math
 import os
+import re
 import statistics
 from collections import Counter
 from pathlib import Path
@@ -67,6 +69,38 @@ def _lines(path: Path) -> list[dict]:
         if isinstance(record, dict) and isinstance(record.get("ms"), (int, float)):
             records.append(record)
     return records
+
+
+# A creation step under its request's span, or a conversation setup step.
+_STEP = re.compile(
+    r'(?:task_creation\{request_id="(?P<creation>[^"]+)"\}\S*?creation_step\{step="(?P<server>\w+)"\}'
+    r'|conversation_setup\{request_id="(?P<setup>[^"]+)" step="(?P<conversation>\w+)"\})'
+    r".*?elapsed_ms=(?P<ms>[0-9.]+)"
+)
+
+
+def _machine_steps(log: Path | None) -> dict[str, list[dict]]:
+    """Creation and setup step timings in lf.log, by lower-case request ID."""
+    steps: dict[str, list[dict]] = {}
+    if log is None or not log.exists():
+        return steps
+    with log.open(encoding="utf-8", errors="replace") as lines:
+        for line in lines:
+            if "step finished" not in line:
+                continue
+            match = _STEP.search(line)
+            if not match:
+                continue
+            request = match["creation"] or match["setup"]
+            source = "server" if match["creation"] else "conversation"
+            steps.setdefault(request.lower(), []).append(
+                {
+                    "source": source,
+                    "step": match["server"] or match["conversation"],
+                    "ms": float(match["ms"]),
+                }
+            )
+    return steps
 
 
 def _stats(values: list[float]) -> dict:
@@ -140,7 +174,8 @@ def _interactions(records: list[dict]) -> dict:
     }
 
 
-def _journal(directory: Path) -> dict:
+def _journal(directory: Path, log: Path | None = None) -> dict:
+    machine_steps = _machine_steps(log)
     attempts = {}
     errors = []
     stalls = []
@@ -239,6 +274,7 @@ def _journal(directory: Path) -> dict:
             json.dumps(build, sort_keys=True),
             method,
             attempt["context"].get("repository"),
+            attempt["context"].get("machine"),
         )
         group = groups.setdefault(
             key,
@@ -249,6 +285,7 @@ def _journal(directory: Path) -> dict:
                 "measurement": method,
                 "comparable_build": known_revision,
                 "repository": attempt["context"].get("repository"),
+                "machine": attempt["context"].get("machine"),
                 "attempts": [],
             },
         )
@@ -317,15 +354,21 @@ def _journal(directory: Path) -> dict:
                 "work": (outcomes[-1] if outcomes else events[-1])["work"],
                 "context": attempt["context"],
                 "stalls": attributed_stalls,
+                "machine_steps": machine_steps.get(observation.lower(), []),
                 "receipt": attempt["receipt"],
             }
         )
     result = []
     for group in groups.values():
         samples = [a for a in group["attempts"] if a["measured"]]
+        steps = {}
+        for attempt in samples:
+            for step in attempt["machine_steps"]:
+                steps.setdefault(f"{step['source']} {step['step']}", []).append(step["ms"])
         result.append(
             {
                 **group,
+                "machine_steps": {name: _stats(values) for name, values in steps.items()},
                 "samples": len(samples),
                 "outcomes": dict(Counter(a["outcome"] for a in group["attempts"])),
                 "acknowledged": _stats([a["phases"]["acknowledged"] for a in samples]),
@@ -353,7 +396,7 @@ def _journal(directory: Path) -> dict:
     }
 
 
-def summarize(directory: Path) -> dict:
+def summarize(directory: Path, log: Path | None = None) -> dict:
     launches = _lines(directory / "launches.ndjson")
     reads = _lines(directory / "reads.ndjson")
     interactions = _lines(directory / "interactions.ndjson")
@@ -378,7 +421,7 @@ def summarize(directory: Path) -> dict:
         }
     return {
         "source": str(directory),
-        "experiences": _journal(directory),
+        "experiences": _journal(directory, log),
         "endpoints": {
             "first_frame": "first window content committed to the render server; "
             "not on-glass presentation",
@@ -412,12 +455,15 @@ def _experience_text(report: dict) -> list[str]:
         if not groups:
             lines.append("  Unmeasured — no interaction journal observations")
         for group in groups:
+            machine = f" / {group['machine']} Machine" if group["machine"] else ""
             lines.append(
-                f"  {group['build']} / {group['scenario']}: {group['samples']} measured; "
-                f"outcomes {group['outcomes']}"
+                f"  {group['build']} / {group['scenario']}{machine}: "
+                f"{group['samples']} measured; outcomes {group['outcomes']}"
             )
             for phase in ("acknowledged", "usable"):
                 lines.append(f"    {phase}: {_cell(group[phase])}")
+            for name, stats in group["machine_steps"].items():
+                lines.append(f"      {name}: {_cell(stats)}")
     lines += [
         "",
         "App-state/commit callbacks cannot supply presented-frame latencies.",
@@ -579,11 +625,16 @@ def render_html(report: dict) -> str:
             "send_to_response_observed": "Send → response observed",
         }.get(scenario, title)
         bars = []
-        by_repository = {g["repository"]: g for g in groups}
-        for repository in sorted(set(repositories) | set(by_repository), key=lambda r: r or ""):
-            group = by_repository.get(repository)
+        by_repository = {(g["repository"], g["machine"]): g for g in groups}
+        rows = set(by_repository) | {
+            (r, None) for r in repositories if not any(key[0] == r for key in by_repository)
+        }
+        for repository, machine in sorted(rows, key=lambda r: (r[0] or "", r[1] or "")):
+            group = by_repository.get((repository, machine))
             repo = Path((repository or "").rstrip("/")).name or "Repository not recorded"
             label = {"loopflow": "Loopflow", "manabot": "Manabot", "kata": "Kata"}.get(repo, repo)
+            if machine:
+                label += f" · {machine}"
             if group is None:
                 bars.append(
                     f'<div class="bar-row"><div class="repo">{escape(label)}</div>'
@@ -801,7 +852,8 @@ def main() -> int:
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--html", type=Path, help="Write a standalone chart and table")
     args = parser.parse_args()
-    report = summarize(args.home.expanduser() / "desktop-cache" / "timings")
+    home = args.home.expanduser()
+    report = summarize(home / "desktop-cache" / "timings", home / "logs" / "lf.log")
     if args.html:
         args.html.write_text(render_html(report), encoding="utf-8")
         print(args.html)

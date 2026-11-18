@@ -337,8 +337,7 @@ fn delegate(
             command
                 .env_remove(STREAM_ENV)
                 .env_remove("LF_TERMINAL_ID")
-                .env_remove("LF_TERMINAL_TTY")
-                .env_remove(crate::ops::human_session::LAUNCH_LOCK_ENV);
+                .env_remove("LF_TERMINAL_TTY");
         })?;
         if code != 0 {
             return Err(crate::process::CommandExit(code).into());

@@ -94,13 +94,22 @@ final class RemoteMobileClient: MobileTaskCreationClient {
         return MobileCreationContext(machineID: machineID, name: savedMachine.endpoint.host ?? "Machine", repositories: portfolio.repos)
     }
 
-    /// Saved before it is sent; a repeat asks the Machine first and resends the
-    /// same payload only when the Machine says to continue.
-    func createTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+    /// Saved before it is sent, then sent once; the answer names the Task and
+    /// its conversation, so opening it reads nothing more.
+    func startTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskStart {
         try verifySubmission(submission)
         let id = submission.id.uuidString.lowercased()
-        let record = try await journal.record(.taskCreate(directory: submission.directory, requestID: id, title: nil,
-            request: submission.request, wave: nil, graph: nil, session: nil, run: true), requestID: id)
+        let answer = try await journal.submit(taskCreate(submission, requestID: id), requestID: id)
+        do { return MobileTaskStart(try RegistryQuery.decode(TaskCreated.self, from: answer)) }
+        catch { throw SubmittedCreationError(requestID: id, cause: error) }
+    }
+
+    /// A saved request asks the Machine first and resends the same payload
+    /// only when the Machine says to continue.
+    func recoverTask(_ submission: MobileTaskSubmission) async throws -> MobileTaskOutcome {
+        try verifySubmission(submission)
+        let id = submission.id.uuidString.lowercased()
+        let record = try await journal.record(taskCreate(submission, requestID: id), requestID: id)
         guard let lookup = try await journal.reconcile(record) else {
             throw RegistryQueryError("This request is already being sent")
         }
@@ -116,18 +125,23 @@ final class RemoteMobileClient: MobileTaskCreationClient {
             receipt: receipt, message: lookup.disposition == .inspect ? lookup.explanation : nil)
     }
 
+    private func taskCreate(_ submission: MobileTaskSubmission, requestID: String) -> ServedWrite {
+        .taskCreate(directory: submission.directory, requestID: requestID, title: nil,
+                    request: submission.request, wave: nil, graph: nil, session: nil, run: true)
+    }
+
     /// The created Task is on screen: its saved creation is done.
     func taskPresented(_ submission: MobileTaskSubmission) async throws {
         try await journal.presented(submission.id.uuidString.lowercased())
     }
 
-    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> WorkViewPlan.Content {
+    func createdTask(_ submission: MobileTaskSubmission, taskID: String) async throws -> MobileTask {
         try verifySubmission(submission)
         let plan = try await query.viewPlan(expression: "task:\(taskID)", repoPath: submission.directory)
         guard let task = try mobileTasks(plan).first(where: { $0.work.id == taskID }) else {
             throw RegistryQueryError("The Task was created, but its workspace is not available yet. Try Open Task again.")
         }
-        return task
+        return MobileTask(task)
     }
 
     private func verifySubmission(_ submission: MobileTaskSubmission) throws {

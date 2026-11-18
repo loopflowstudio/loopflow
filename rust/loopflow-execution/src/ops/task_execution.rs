@@ -14,7 +14,9 @@ use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
 use crate::store::{SharedStore, StoreResult};
 use loopflow_model::durable::TaskId;
-use loopflow_storage::sqlite::{entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore};
+use loopflow_storage::sqlite::{
+    entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore, UnrunGraph,
+};
 use loopflow_storage::work::task::Task;
 
 use super::error::{OpsError, OpsResult};
@@ -65,13 +67,8 @@ pub async fn execution_of_latest_graph(
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
         return Ok((
-            open_graph_execution_from_facts(&task.id, facts).unwrap_or(TaskExecutionSnapshot {
-                state: TaskExecutionState::Idle,
-                reason: "No Task Graph has run; independent Sessions may still be active"
-                    .to_string(),
-                step: None,
-                captured: None,
-            }),
+            open_graph_execution_from_facts(&task.id, facts)
+                .unwrap_or_else(|| unrun_execution(&task.identifier, facts.unrun.get(&task.id))),
             None,
         ));
     };
@@ -135,6 +132,36 @@ pub async fn execution_of_latest_graph(
         }
     }
     Ok((snapshot, Some(graph.detail(entry))))
+}
+
+/// A Task with no Graph history: starting the Graph it took up, stopped
+/// where its last attempt to start failed, or idle when it took up none.
+fn unrun_execution(identifier: &str, unrun: Option<&UnrunGraph>) -> TaskExecutionSnapshot {
+    let (state, reason) = match unrun {
+        Some(UnrunGraph {
+            stopped: Some(error),
+            ..
+        }) => (
+            TaskExecutionState::Blocked,
+            format!(
+                "{}. Reopen the conversation or run `lf task run {identifier}` to retry.",
+                error.trim_end().trim_end_matches('.')
+            ),
+        ),
+        Some(UnrunGraph { graph, .. }) => {
+            (TaskExecutionState::Starting, format!("Starting {graph}"))
+        }
+        None => (
+            TaskExecutionState::Idle,
+            "No Task Graph has run; independent Sessions may still be active".to_string(),
+        ),
+    };
+    TaskExecutionSnapshot {
+        state,
+        reason,
+        step: None,
+        captured: None,
+    }
 }
 
 /// Execution in the Task's work can predate checkout adoption. It prevents

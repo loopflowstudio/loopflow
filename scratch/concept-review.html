@@ -65,27 +65,27 @@ and says why.</p>
 <tr><td>Drag a tile onto another Project's Task</td><td><code>InvalidData</code> refusal</td><td class="no">no</td><td>A person sees one board; the code has a precondition the person must learn. See mismatch B.</td></tr>
 <tr><td>The Task's work: its Processes</td><td><code>processes.task_id</code>, set once</td><td class="yes">yes</td><td>Path matching and <code>relocated_task_processes</code> are gone from membership.</td></tr>
 <tr><td>The Task's conversations</td><td><code>agent_sessions.task_id</code></td><td class="yes">yes</td><td>A nested checkout's Session now belongs to the deepest Task only.</td></tr>
-<tr><td>The Task's primary conversation</td><td><code>task_primary_sessions(task_id, session_id)</code></td><td class="no">no</td><td>One idea, two representations: a Repository's or Wave's primary is <code>agent_sessions.primary_scope</code>, a Task's is a table. And "which Task" is written twice for a primary (the row, the Session's <code>task_id</code>); <code>choose_task_primary_in</code> keeps them equal at write, nothing structural does. Mismatch A.</td></tr>
+<tr><td>The Task's primary conversation</td><td><code>agent_sessions.primary_scope='task'</code> on the row whose <code>task_id</code> names it</td><td class="yes">yes</td><td>Fixed at human review (<code>a3e6e71981</code>), was Mismatch A. One mark for every scope; "which Task" lives in <code>task_id</code> only. <code>task_primary_sessions</code> is leaving (LOO-877), mirrored by triggers for released lf until then.</td></tr>
 <tr><td>The branch</td><td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td><td class="no">no</td><td>One name for what a person sees as one thing, three homes. Already LOO-934's (questions.md). Mismatch C.</td></tr>
 <tr><td>(nothing)</td><td><code>process_task_backfill</code>, <code>tasks_completed_follows_state_*</code></td><td class="yes">yes</td><td>Window-only machinery, each marked to drop with LOO-877. Not a concept, correctly.</td></tr>
 <tr><td>A duplicate can't come back</td><td><code>leaving_guard.rs</code> authorizer in storage test stores</td><td class="yes">yes</td><td>Blind to FK-column reads and to other crates' stores; stated in the plan.</td></tr>
 </table>
 
-<h2>Biggest mismatch: A, the primary conversation</h2>
+<h2>A, the primary conversation (fixed in this PR)</h2>
+<p>At human review: "i think mismatch A should bei nthis PR". Built as proposed, with one change: the index is
+plain until LOO-877, because <code>check_migrations.py</code> refuses a new unique index while older writers run;
+every write clears the old mark first.</p>
 <div class="ba">
-<div class="card"><b>Before / now</b><br>
+<div class="card"><b>Before</b><br>
 <code>agent_sessions.primary_scope = 'repository' | 'wave'</code><br>
 <code>task_primary_sessions(task_id PK, session_id UNIQUE)</code><br>
 <code>agent_sessions.task_id</code> (must equal the row's task_id)<br>
-<span class="mute">Three places answer "is this the primary, and of what". The 3 live disagreements were repaired by the migration; the shape that allowed them stays.</span></div>
-<div class="card prop"><span class="tag">proposed, not this Task</span><br>
+<span class="mute">Three places answer "is this the primary, and of what".</span></div>
+<div class="card"><b>Now</b><br>
 <code>agent_sessions.primary_scope = 'task' | 'repository' | 'wave'</code>,
-with a partial unique index on <code>(task_id) WHERE primary_scope='task'</code>.<br>
-<span class="mute">"Which Task" has one home (the Session's <code>task_id</code>); "primary" has one representation for every scope; a disagreement is unspellable. Costs a table drop (staged, LOO-877's contract) and moving <code>task_primary_sessions</code> readers. LOO-932 makes the primary exist at filing and is the natural owner.</span></div>
+with an index on <code>(task_id) WHERE primary_scope='task'</code>, unique once LOO-877 drops the table.<br>
+<span class="mute">Still open: the wire carries both <code>task_primary</code> and <code>primary_scope="task"</code>; a released lf process still running after the upgrade fails <code>primary_scope()</code> on a Task primary until it exits.</span></div>
 </div>
-<p>Why it is not in this work: LOO-874 just created <code>task_primary_sessions</code> as the expand step for
-<code>tasks.primary_session_id</code>; replacing it now stacks a second expand on an unfinished contract.
-Nothing in LOO-937 makes it worse.</p>
 
 <h2>B, the cross-Project drop</h2>
 <p>The board is grouped by Project, so dropping a tile among another Project's Tasks reads as "put it there".
@@ -95,11 +95,11 @@ the refusal is honest and visible.</p>
 
 <h2>Verdict for this Task</h2>
 <p><b>Nothing to change.</b> Every fact the brief named has one home or is explained as desired-vs-observed;
-membership is a column; one order. A, B and C are larger than this work and are written above with what they take.</p>
+membership is a column; one order; one primary mark (A, fixed here). B and C are larger than this work and are written above with what they take.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Primary conversation: (a) fold Task primaries into <code>agent_sessions.primary_scope='task'</code> under LOO-932; (b) keep the table and add a trigger keeping the Session's <code>task_id</code> equal; (c) leave as is.</li>
+<li>Wire <code>task_primary</code>, now beside <code>primary_scope="task"</code>: (a) drop it in this PR (~80 Swift and fixture sites); (b) drop it in its own Task; (c) keep both.</li>
 <li>Cross-Project drop on the Working board: (a) moves the Task into that Project at that position; (b) keeps refusing with the reason; (c) the board stops accepting the drop at all.</li>
 <li>The branch's three homes: (a) LOO-934 decides whether one "the Task's branch" suffices; (b) file it as its own Task now.</li>
 <li><code>Disposition.planning_completed</code> on the wire: (a) file the release that accepts its absence with LOO-877; (b) leave it until the peer protocol next changes.</li>

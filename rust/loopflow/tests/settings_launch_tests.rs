@@ -861,7 +861,7 @@ def run(*args):
 
 def worker(task):
     text = run('task', 'run', task, 'proof', '--from', 'implement')
-    graph = text.split('running as Graph process ')[1].split()[0]
+    graph = text.split('running as Graph run ')[1].split()[0]
     carrier = db.execute('SELECT parent_lf_process_id FROM processes WHERE id=?', (graph,)).fetchone()[0]
     deadline = time.monotonic() + 90
     while True:

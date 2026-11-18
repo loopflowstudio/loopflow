@@ -3210,7 +3210,7 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
         "at `",
         "Committed and pushed",
         "Arrived on mini",
-        "Running on mini as Graph process",
+        "Running on mini as Graph run",
     ] {
         assert!(stderr.contains(stage), "{stage:?} missing from:\n{stderr}");
     }
@@ -3319,7 +3319,7 @@ fn a_move_killed_while_leaving_shows_in_status_and_the_same_command_carries_it_o
     for stage in [
         "Carrying on".to_string(),
         format!("Arrived on mini (Graph at `{step}`)"),
-        "Running on mini as Graph process".into(),
+        "Running on mini as Graph run".into(),
     ] {
         assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
     }
@@ -3397,7 +3397,7 @@ fn a_moved_task_comes_back_with_the_same_command() {
         format!("Stopped {identifier} at `{step}`"),
         "Committed and pushed".into(),
         format!("Arrived on {laptop} (this Machine) (Graph at `{step}`)"),
-        format!("Running on {laptop} (this Machine) as Graph process"),
+        format!("Running on {laptop} (this Machine) as Graph run"),
     ] {
         assert!(stderr.contains(&stage), "{stage:?} missing from:\n{stderr}");
     }

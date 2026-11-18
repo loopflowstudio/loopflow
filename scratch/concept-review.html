@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-953 Concept Review</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6b675f; --line:#dedad2; --card:#ffffff;
+  --yes:#1f7a4d; --yes-bg:#e5f3ea; --no:#a8321f; --no-bg:#f8e6e1; --part:#8a5a00; --part-bg:#f6eed9;
+  --prop:#2c4fa3; --prop-bg:#e7ecf8; --code:#f1efe9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161514; --fg:#ebe8e2; --muted:#a39e94; --line:#34322e; --card:#1e1d1b;
+    --yes:#6fcf9b; --yes-bg:#16301f; --no:#f08c78; --no-bg:#3a1c16; --part:#e6b85c; --part-bg:#33280f;
+    --prop:#8fb0ff; --prop-bg:#1a2440; --code:#26241f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161514; --fg:#ebe8e2; --muted:#a39e94; --line:#34322e; --card:#1e1d1b;
+  --yes:#6fcf9b; --yes-bg:#16301f; --no:#f08c78; --no-bg:#3a1c16; --part:#e6b85c; --part-bg:#33280f;
+  --prop:#8fb0ff; --prop-bg:#1a2440; --code:#26241f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:980px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:20px;margin:40px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:20px 0 6px}
+p,li{max-width:72ch}
+.sub{color:var(--muted);margin:0 0 20px}
+code{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:8px 0}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--muted)}
+.wrap{overflow-x:auto}
+.tag{display:inline-block;font-weight:600;font-size:13px;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.yes{color:var(--yes);background:var(--yes-bg)}
+.no{color:var(--no);background:var(--no-bg)}
+.part{color:var(--part);background:var(--part-bg)}
+.prop{color:var(--prop);background:var(--prop-bg)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+.big{border-left:4px solid var(--no)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:720px){.grid{grid-template-columns:1fr}}
+.proposed{border:1px dashed var(--prop);background:var(--prop-bg)}
+.proposed h3{color:var(--prop)}
+ol.q>li{margin:10px 0}
+ol.q ol{list-style:lower-alpha;margin-top:4px}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>Do the product's concepts and the code's line up?</h1>
+<p class="sub">LOO-953 · PR #1974 · branch as of <code>0c80e7d1dc</code>, reviewed against <code>origin/main</code> (265 files, +8,140 / −11,725)</p>
+
+<p><strong>Area taken:</strong> how a person finds out what is running and how it ended. That covers Sessions, Task runs, Graph runs and steps, shipping, Project activations, CI repairs, and the Machine's stray processes, plus every record and read behind them. The branch replaces one <code>processes</code> table with liveness kept on each owner record, so the whole of "is it running / how did it end" is in scope, not only the deleted commands.</p>
+
+<h2>The interaction walked: tonight's crash</h2>
+<p>The machine crashed while LOO-953's run was in realign. What a person saw with the <em>released</em> lf afterwards:</p>
+<pre>$ lf task status LOO-953 --json   → graph_processes:
+  50a2863f  code  stopped  loop-or-next · loop 1 pass 2
+  578364c8  code  current  realign · loop 1 pass 3       ← dead, reads "current"
+$ lf process show 578364c8
+  601a3dba  realign · loop 1 pass 3  no recorded exit
+$ lf process list                  → nothing for LOO-953</pre>
+<p>Three commands gave three answers ("current", "no recorded exit", absent). After the relaunch, the status showed <em>two</em> "current" runs for one Task (<code>578364c8</code> and <code>8a132276</code>). The relaunch itself worked: <code>lf task run LOO-953 --from realign</code> set out from the cursor, as the plan's "carrier keeps <code>lf_process_id</code>" decision intends.</p>
+<p>On this branch: <code>lf graph list</code> and <code>lf task status</code> observe the run's own pid (<code>projection.graph_result</code>, <code>graph_inventory.rs:401</code>), so <code>578364c8</code> reads <code>stopped</code> right away, and on the server's next prune pass <code>end_dead_owners</code> ends it as <code>unknown</code>. That fixes the failure this Task is about, and it is the demo.</p>
+
+<h2>Pairings</h2>
+<div class="wrap">
+<table>
+<thead><tr><th>What a person knows / does</th><th>What the code has</th><th></th><th>What's wrong</th></tr></thead>
+<tbody>
+<tr><td><strong>A Session</strong>: a conversation that is open, available, or closed; resume it, stop it</td>
+<td><code>agent_sessions</code> row: attachment (<code>AttachingLf</code>, holder), agent lifetime (<code>agent_pid</code>, <code>agent_ended_at</code>…), <code>Owner::SessionAgent</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>One row now answers every fence and every "is it live" question. That's the branch's clearest win. Small leftover: <code>agent_process_id</code> is now a generation id, and the name still says Process.</td></tr>
+
+<tr><td><strong>What's running here</strong></td>
+<td><code>lf session list</code>, <code>lf graph list --runs</code>, both OS-confirmed; <code>lf machine doctor</code> → <code>strays</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>One rule (<code>RecordedProcess::evidence</code>) behind every owner, and no second registry. Strays are reported, never killed.</td></tr>
+
+<tr><td><strong>A Graph run</strong>, which <code>lf task run</code> prints and <code>lf task status</code> lists</td>
+<td>table <code>graph_processes</code>; types <code>GraphProcess*</code>; <code>GraphExecution</code>; <code>Execution</code>; read <code>graph.run.get</code>; flag <code>--runs</code>; JSON key <code>graph_processes</code></td>
+<td><span class="tag no">no</span></td>
+<td><strong>One idea under five names.</strong> Slice 4b's aim was that "user-facing names lose Process", but three person-facing places still say it:
+<code>engine/task.rs:58</code> "running as Graph process …" (printed on every <code>lf task run</code>), <code>ops/session_move.rs:132</code>, and the <code>lf task status --json</code> key. Operate skills (<code>task_operate.md:9,14,66</code>) and <code>docs/surfaces.md:233</code>, <code>docs/telemetry.md:61</code> also say "Graph process". The internal type rename is already deferred to a follow-up Task.</td></tr>
+
+<tr><td><strong>How a run is doing / ended</strong></td>
+<td><code>ExecutionResult</code> {Running, Succeeded, Interrupted, Failed, Unknown} projected onto <code>GraphProcessSummaryState</code> {Current, Completed, Stopped}</td>
+<td><span class="tag part">partly</span></td>
+<td>Two vocabularies for one idea. "current" reads as "the run the Task stands on", but it means "running". Its doc comment still says "has no recorded exit". "stopped" merges failed, interrupted and unknown, so a person reading status can't tell a crash from a failure without opening the run.</td></tr>
+
+<tr><td><strong>"LOO-953 is moving"</strong></td>
+<td><code>TaskCarrier</code> (<code>task_graphs.run_pid</code>) + the Graph run's own pid + <code>ShipCarrier</code> (<code>task_ship_events.pid</code>)</td>
+<td><span class="tag no">no</span></td>
+<td><strong>The biggest mismatch</strong>, described below.</td></tr>
+
+<tr><td><strong>A Task is shipping</strong>; who started it</td>
+<td><code>ShipCarrier</code> on the approving <code>task_ship_events</code> row; failure cause from the latest Graph run</td>
+<td><span class="tag yes">yes</span></td>
+<td>One record per shipping, and its result is on the row it started.</td></tr>
+
+<tr><td><strong>A Wave's Project activation</strong></td>
+<td><code>waves.project_activation_*</code>, <code>RunOwner::ProjectActivation</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>—</td></tr>
+
+<tr><td><strong>A CI repair</strong> on a PR</td>
+<td><code>ci_incidents.repair_{started_at,pid,os_started_at}</code></td>
+<td><span class="tag part">partly</span></td>
+<td>The pid is read inline (<code>run_evidence</code>), but <code>ci_incidents</code> is not a <code>RunOwner</code> and <code>end_dead_owners</code> doesn't close it. A SIGKILLed repair keeps <code>repair_finished_at</code> NULL until something reads it. That's harmless if every reader asks the OS. Not verified here, so it's question 4.</td></tr>
+
+<tr><td><strong>The lf I'm running under</strong> (scripts, agents)</td>
+<td><code>LF_PROCESS_ID</code> (the parent lf) and <code>LF_EXECUTION_ID</code> (adopt this id)</td>
+<td><span class="tag part">partly</span></td>
+<td>The distinction is real and was kept on purpose. But the name points at a record kind that no longer exists. It belongs with the deferred rename.</td></tr>
+
+<tr><td><strong>What happened</strong></td>
+<td>journal traces, <code>logs/lf.log</code>, <code>session.history.get</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>No store log, as planned. The internal <code>ledger</code> and <code>admit_process</code> names are already on the rename follow-up.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The biggest mismatch: one Task run, three liveness owners</h2>
+<div class="card big">
+<p>A person thinks of one thing: <em>LOO-953 is running <code>code</code> from realign</em>. <code>lf task run</code> prints one id for it (<code>8a132276</code>, the Graph run). The code holds up to three OS processes, each with its own pid on its own record:</p>
+<ul>
+<li><strong>Task carrier</strong>, <code>task_graphs.run_pid</code>: the <code>lf task run</code> loop. It spans Graphs and the handoff to shipping. Task state "moving" and retirement read <em>this</em> (<code>durable.rs:353</code>, <code>task_retirement.rs:70</code>), and so does the double-run refusal (<code>carrier_evidence</code>).</li>
+<li><strong>Graph run</strong>, <code>graph_processes.pid</code>: the child the carrier spawns. <code>lf graph list --runs</code>, <code>lf task status</code>'s run lines and the docs' "what runs" read <em>this</em>.</li>
+<li><strong>Ship carrier</strong>, <code>task_ship_events.pid</code>: the same lf as the Task carrier after handoff, written on a second record.</li>
+</ul>
+<p>Nobody can see the carrier. It has no id they're shown and no command that lists it, yet it decides whether the Task is "moving" and whether a second <code>lf task run</code> is refused.</p>
+<p><strong>Counterexamples to test</strong> (reasoned from the code, not run):</p>
+<ul>
+<li>The carrier is killed and its Graph child lives. Status lines say the run is <code>current</code> while the Task reads idle. The child's carrier check (<code>graph.rs:79–101</code>) should stop it at its next step, so the window is one step long. Inside that window, does a new <code>lf task run</code> start a second Graph?</li>
+<li>The Graph child dies and the carrier lives, e.g. between Graphs or at the handoff. The Task reads moving with no run in <code>lf graph list</code>. This is correct behaviour, but there's nothing to show the person.</li>
+</ul>
+</div>
+
+<div class="grid">
+<div class="card">
+<h3>Before (as built)</h3>
+<pre>Task ─ task_graphs.run_pid ......... "moving"
+   └ Graph run ─ graph_processes.pid  "current"
+        └ step ─ graph_process_steps.pid
+   └ ship event ─ task_ship_events.pid  (same lf)
+person sees: Graph run id only</pre>
+</div>
+<div class="card proposed">
+<h3>Proposed (larger than this PR)</h3>
+<pre>Task run ─ one record, one id, one pid
+   ├ Graph run   (part; result only)
+   │   └ step    (pid, result)
+   └ shipping    (part; result only)
+person sees: Task run id; "moving" = its pid</pre>
+<p class="muted">The Task run already exists in the data as the <code>task_graphs</code> cursor plus its carrier. What it would take: name the record, print its id from <code>lf task run</code>, hold the pid there only, and give Graph runs inside a Task run a result and no pid of their own. That rewrites the carrier/handoff code and a wire DTO, so it is its own Task.</p>
+</div>
+</div>
+
+<h2>Recommendation</h2>
+<p><strong>For this PR:</strong> the model is right. Every owner record answers its own liveness, there is one rule behind it, and a crash now reads as stopped. Keep it. The one change that belongs here is finishing 4b's own goal: change "running as Graph process" in <code>engine/task.rs:58</code> and <code>session_move.rs:132</code> to "Graph run", along with the two user docs and <code>task_operate.md</code>. The JSON key moves with the <code>GraphProcess*</code> → <code>GraphRun*</code> follow-up, since it's a wire field.</p>
+<p><strong>Larger than this work:</strong> the Task run as one record (above), and showing <code>ExecutionResult</code> instead of the three-state projection. Neither is needed for LOO-953 to land.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>The person-facing "Graph process" strings (stdout, two user docs, <code>task_operate.md</code>):
+  <ol><li>fix them in this PR</li><li>leave them for the <code>GraphRun*</code> rename follow-up</li></ol></li>
+<li>The Task run as one record with one id and pid:
+  <ol><li>file it as a Task now</li><li>note it in the <code>GraphRun*</code> rename Task</li><li>drop it; the carrier is internal and stays so</li></ol></li>
+<li>Run state in <code>lf task status</code> / <code>lf graph list</code>:
+  <ol><li>show the result (running · succeeded · failed · interrupted · unknown) and retire Current/Completed/Stopped, as a follow-up</li><li>keep the three states</li></ol></li>
+<li>CI repairs and the dead-owner pass:
+  <ol><li>add <code>ci_incidents</code> to <code>end_dead_owners</code> in this PR</li><li>check first that every reader asks the OS, and leave it if so</li></ol></li>
+<li>The carrier-killed counterexample (one step with a live Graph child under an idle Task):
+  <ol><li>write a test at gate</li><li>accept the one-step window</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

@@ -42,7 +42,7 @@ An unreadable owner makes the Task unknown: report it and leave it.
 
 | Disposition | When, and what to do |
 | --- | --- |
-| moving | A live Graph process is running. Leave it alone. An open conversation is not a Graph process. |
+| moving | A live Graph run. Leave it alone. An open conversation is not a Graph run. |
 | acted | This pass continued, repaired or delivered it with an `lf` command, then reread status and saw the change. |
 | available | A review, demo, choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
 | dependency or capacity | Waiting on a named Task, PR, running check, account or limit. |

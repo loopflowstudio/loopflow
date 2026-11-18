@@ -2109,7 +2109,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     };
     // The run's carrier: this process, or the bare run's Graph process's parent.
     let carrier_exit = || -> Option<i64> {
-        let graph = printed("running as Graph process ")?;
+        let graph = printed("running as Graph run ")?;
         db.query_row(
             "SELECT c.exit_code FROM processes g JOIN processes c ON c.id=g.parent_lf_process_id
              WHERE g.id=?1 AND c.completed_at IS NOT NULL",
@@ -2158,7 +2158,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
             break code == 0;
         }
         if let Some(status) = waiter.0.try_wait().unwrap() {
-            if printed("running as Graph process ").is_none() {
+            if printed("running as Graph run ").is_none() {
                 break status.success();
             }
         }

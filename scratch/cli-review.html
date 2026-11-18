@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>lf CLI Review</title>
+<style>
+:root{
+  --bg:#fbfaf7; --fg:#1d1c1a; --muted:#6b675f; --line:#dedad2; --card:#ffffff;
+  --yes:#1f7a4d; --yes-bg:#e5f3ea; --no:#a8321f; --no-bg:#f8e6e1; --part:#8a5a00; --part-bg:#f6eed9;
+  --prop:#2c4fa3; --prop-bg:#e7ecf8; --code:#f1efe9;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#161514; --fg:#ebe8e2; --muted:#a39e94; --line:#34322e; --card:#1e1d1b;
+    --yes:#6fcf9b; --yes-bg:#16301f; --no:#f08c78; --no-bg:#3a1c16; --part:#e6b85c; --part-bg:#33280f;
+    --prop:#8fb0ff; --prop-bg:#1a2440; --code:#26241f;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#161514; --fg:#ebe8e2; --muted:#a39e94; --line:#34322e; --card:#1e1d1b;
+  --yes:#6fcf9b; --yes-bg:#16301f; --no:#f08c78; --no-bg:#3a1c16; --part:#e6b85c; --part-bg:#33280f;
+  --prop:#8fb0ff; --prop-bg:#1a2440; --code:#26241f;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:32px 16px 64px}
+h1{font-size:28px;margin:0 0 6px}
+h2{font-size:20px;margin:40px 0 10px;border-bottom:1px solid var(--line);padding-bottom:6px}
+h3{font-size:16px;margin:18px 0 6px}
+p,li{max-width:74ch}
+.sub{color:var(--muted);margin:0 0 20px}
+code{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{font:13px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:12px 14px;border-radius:8px;overflow-x:auto;margin:8px 0}
+table{border-collapse:collapse;width:100%;font-size:14.5px}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600;color:var(--muted)}
+.wrap{overflow-x:auto}
+.tag{display:inline-block;font-weight:600;font-size:13px;padding:1px 8px;border-radius:999px;white-space:nowrap}
+.yes{color:var(--yes);background:var(--yes-bg)}
+.no{color:var(--no);background:var(--no-bg)}
+.part{color:var(--part);background:var(--part-bg)}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:14px 0}
+.big{border-left:4px solid var(--no)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.proposed{border:1px dashed var(--prop);background:var(--prop-bg)}
+.proposed h3{color:var(--prop)}
+.bar{display:flex;align-items:center;gap:10px;font-size:14px;margin:3px 0}
+.bar span.n{width:2.5em;text-align:right;color:var(--muted)}
+.bar span.b{height:12px;background:var(--part);border-radius:3px;opacity:.75}
+.bar span.b.pl{background:var(--muted)}
+ol.q>li{margin:10px 0}
+ol.q ol{list-style:lower-alpha;margin-top:4px}
+.muted{color:var(--muted)}
+</style>
+</head>
+<body>
+<main>
+<h1>The lf command line, top down</h1>
+<p class="sub">Built from <code>lf help --all</code> on branch <code>jack/loo-953…</code>: 234 commands under 27 roots. Facts here come from help text; I didn't run any command beyond <code>--help</code>.</p>
+
+<p><strong>Area taken:</strong> the whole <code>lf</code> surface, read by what a person is trying to do. The <code>lf graph</code> confusion is where this started: is it for running Graphs, listing the Graphs you can run, or seeing the ones that are running? It's one case of a wider pattern. Nouns a person knows (Task, Run, Definition) are split across roots, and roots mix things a person does with plumbing that only Desktop and the server call.</p>
+
+<h2>Where the 234 commands are</h2>
+<div class="card">
+<div class="bar"><span class="n">53</span><span class="b pl" style="width:318px"></span>desktop <span class="muted">(pane automation: send-key, zoom, page-back…)</span></div>
+<div class="bar"><span class="n">30</span><span class="b" style="width:180px"></span>task</div>
+<div class="bar"><span class="n">27</span><span class="b" style="width:162px"></span>machine <span class="muted">(pools, rentals, credentials)</span></div>
+<div class="bar"><span class="n">20</span><span class="b" style="width:120px"></span>session</div>
+<div class="bar"><span class="n">20</span><span class="b" style="width:120px"></span>repo <span class="muted">(10 of them release)</span></div>
+<div class="bar"><span class="n">16</span><span class="b" style="width:96px"></span>wave</div>
+<div class="bar"><span class="n">12</span><span class="b" style="width:72px"></span>config</div>
+<div class="bar"><span class="n">11</span><span class="b" style="width:66px"></span>pr</div>
+<div class="bar"><span class="n">7</span><span class="b" style="width:42px"></span>wt · <span class="n">7</span> server · 4 graph · 4 self · 3 plan · 3 account · 2 skill · 2 holder · …</div>
+<p class="muted">Grey is plumbing a client calls. Counting <code>desktop</code>, <code>holder</code>, <code>server run/connect/receipt</code>, <code>task files/file/save/watch-files</code> and <code>session observe-status</code>, about 65 of the 234 commands are for programs, not people. All of them show in <code>lf help --all</code>.</p>
+</div>
+
+<h2>What a person does, and where it lives</h2>
+<div class="wrap">
+<table>
+<thead><tr><th>Job</th><th>Commands today</th><th></th><th>What's wrong</th></tr></thead>
+<tbody>
+<tr><td><strong>Run a definition</strong></td>
+<td><code>lf &lt;skill&gt;</code>, <code>lf skill &lt;name&gt;</code>, <code>lf graph &lt;name&gt;</code>, <code>lf pursue</code>, <code>lf :</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>One shape, <code>lf &lt;name&gt; [message]</code>, with explicit forms for when names collide.</td></tr>
+
+<tr><td><strong>Browse definitions</strong></td>
+<td><code>lf list</code> (commands, skills, graphs), <code>lf graph list</code>, <code>lf graph show &lt;name&gt;</code>, <code>lf help &lt;name&gt;</code>, <code>lf skill customize</code>, <code>lf graph customize</code></td>
+<td><span class="tag part">partly</span></td>
+<td>Graphs can be listed in two places, skills in one. <code>lf help</code> and <code>lf graph show</code> both explain a Graph.</td></tr>
+
+<tr><td><strong>See runs, live or past</strong></td>
+<td><code>lf graph list --runs</code>, <code>lf graph show &lt;run-id&gt;</code>, <code>lf task runs</code>, <code>lf task status</code>, <code>lf desktop graph-log</code></td>
+<td><span class="tag no">no</span></td>
+<td><strong>Runs have no home of their own.</strong> They sit inside <code>graph</code> behind a flag, where <code>list</code> and <code>show</code> each take either a definition or a run. They also appear under <code>task</code>. "Is anything running?" is <code>lf session list</code> plus <code>lf graph list --runs --state current</code>.</td></tr>
+
+<tr><td><strong>Read a Task</strong></td>
+<td><code>task status</code>, <code>task detail</code>, <code>task show</code> (Desktop JSON), <code>task runs</code>, <code>task context</code>, <code>task diff</code>, <code>task changes</code>, <code>task location</code></td>
+<td><span class="tag no">no</span></td>
+<td>Three overlapping whole-Task reads (status, detail, show), and the help doesn't say which to reach for.</td></tr>
+
+<tr><td><strong>Read a plan</strong></td>
+<td><code>wave show</code>, <code>wave status</code>, <code>wave plan</code>, <code>wave list</code>, <code>wave sync</code> ("then show its status"), <code>plan list</code>, <code>plan board</code>, <code>desktop view show</code></td>
+<td><span class="tag no">no</span></td>
+<td>Eight ways to see Projects and Tasks. <code>wave plan</code> also holds <code>bind/connect/reteam</code>, which change where planning lives.</td></tr>
+
+<tr><td><strong>Get back to a conversation</strong></td>
+<td><code>lf open</code>, <code>lf session resume</code> (<code>lf resume</code>), <code>lf session new</code>, <code>lf desktop switch</code></td>
+<td><span class="tag part">partly</span></td>
+<td><code>open</code> and <code>resume</code> overlap. LOO-958 ("One verb per want for existing Sessions") already owns this.</td></tr>
+
+<tr><td><strong>Move a Task forward</strong></td>
+<td><code>task run</code>, <code>lf -b task run</code>, <code>lf ship</code>, <code>task create --run</code>, <code>lf --task X graph &lt;g&gt;</code></td>
+<td><span class="tag part">partly</span></td>
+<td><code>ship</code> is a Task verb that sits at the root, and <code>-b task run</code> does the same as <code>ship</code> ("approving Auto-Ship"), so two spellings mean one action.</td></tr>
+
+<tr><td><strong>Stop or end a Task</strong></td>
+<td><code>task interrupt</code>, <code>task hold</code>, <code>task complete</code>, <code>task abandon</code>, <code>task delete</code>, <code>task unassign</code></td>
+<td><span class="tag part">partly</span></td>
+<td>Six verbs. abandon ("cancel… close its PRs") and delete ("cancel unfinished work… trash the tracker item") differ in ways you can't tell from their names.</td></tr>
+
+<tr><td><strong>Deliver a PR</strong></td>
+<td><code>pr open</code>, <code>pr publish</code>, <code>pr submit</code>, <code>pr arm</code>, <code>pr land</code>, <code>pr abandon</code>, plus <code>commit</code>, <code>sync</code></td>
+<td><span class="tag part">partly</span></td>
+<td>Five steps on the way to merged (draft → ready → prepared → auto-merge requested → settled). Each is real, but <code>submit</code> vs <code>arm</code> vs <code>land</code> needs the help text to tell apart.</td></tr>
+
+<tr><td><strong>Direct running work</strong></td>
+<td><code>lf steer</code>, <code>session move</code>, <code>task update</code>, <code>task move</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>—</td></tr>
+
+<tr><td><strong>Set up the Machine</strong></td>
+<td><code>machine</code>, <code>account</code>, <code>config</code>, <code>self</code>, <code>repo</code></td>
+<td><span class="tag yes">yes</span></td>
+<td>Large, but each root has one subject.</td></tr>
+</tbody>
+</table>
+</div>
+
+<h2>The biggest mismatch: <code>lf graph</code> is three things</h2>
+<div class="card big">
+<p><code>lf graph</code>'s own help says "Run or inspect authored graphs", but it holds three nouns:</p>
+<ul>
+<li><strong>a definition you can run</strong>: <code>lf graph code</code>, <code>lf graph list</code>, <code>lf graph show code</code>, <code>lf graph customize</code>;</li>
+<li><strong>a run that happened</strong>: <code>lf graph list --runs</code>, <code>lf graph show 8a132276…</code>;</li>
+<li><strong>a run that's live now</strong>: <code>lf graph list --runs --state current</code>.</li>
+</ul>
+<p><code>show</code> decides which noun you meant from whether the argument looks like an id. Runs are also listed under <code>lf task runs</code> and shown in <code>lf task status</code>, so one record has three homes. <code>lf skill</code> has the definition half and nothing else. A skill run is a Session, and those are listed under <code>lf session list</code>.</p>
+</div>
+
+<div class="grid">
+<div class="card">
+<h3>Today</h3>
+<pre>lf graph code               run a definition
+lf graph list               definitions
+lf graph list --runs        runs (all, any state)
+lf graph show code          a definition
+lf graph show &lt;run-id&gt;      a run
+lf task runs LOO-953        that Task's runs
+lf session list             live conversations</pre>
+</div>
+<div class="card proposed">
+<h3>Sketch (one noun per root)</h3>
+<pre>lf graph code               run a definition
+lf graph list | show code   definitions only
+lf run list                 runs; --task, --live
+lf run show &lt;id&gt;            one run and its steps
+lf session list             live conversations
+lf ps                       what's live: Sessions + runs</pre>
+<p class="muted">This is only a sketch. A <code>lf run</code> root collides with "run" as a verb (<code>lf task run</code>), so the noun may want another name. <code>lf ps</code> was deleted on this branch ("i thikn we delete lf ps?"); it shows up here only as one possible "is anything running" answer.</p>
+</div>
+</div>
+
+<h2>The same pattern elsewhere</h2>
+<ul>
+<li><strong>Plumbing in the person's namespace.</strong> About 65 commands are a client protocol. Hiding them from <code>lf help</code> (Clap <code>hide</code>), or putting them under one root, would cut the visible surface by roughly a quarter without changing behavior.</li>
+<li><strong>Reads with no single owner.</strong> A Task has three whole reads and a plan has eight. One <code>show</code> per noun, with <code>--json</code> for the Desktop shape, is the usual fix; which shape wins is a product choice.</li>
+<li><strong>Two spellings for one action.</strong> <code>lf ship</code> and <code>lf -b task run</code>; <code>lf open</code> and <code>lf resume</code> (LOO-958's).</li>
+</ul>
+
+<h2>What this would take</h2>
+<p>It's bigger than LOO-953. Each row is a CLI change that also touches docs (<code>documented_commands</code> checks examples), the operate skills, Desktop's action registry and saved-Graph translations. It splits into Tasks naturally: runs as a noun, hiding plumbing, one read per noun, and the end-a-Task verbs. Only the first relates to this branch: LOO-953 already renamed <code>--processes</code> to <code>--runs</code>, and the internal <code>GraphProcess*</code> → <code>GraphRun*</code> rename is queued.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Runs:
+  <ol><li>give runs their own root (name to pick) and take them out of <code>lf graph</code></li><li>keep them in <code>lf graph</code>, but as <code>lf graph runs</code> / <code>lf graph run &lt;id&gt;</code> instead of a flag</li><li>runs belong to Tasks: <code>lf task runs</code> is the only list</li></ol></li>
+<li>"What's running here": should one command answer it?
+  <ol><li>yes: bring back a <code>ps</code>-like view over Sessions and runs (owner rows only, unlike the deleted one)</li><li>no: <code>lf session list</code> and the runs list are enough</li></ol></li>
+<li>Plumbing commands (<code>desktop</code>, <code>holder</code>, <code>server run/connect</code>, <code>task files/save/watch-files</code>…):
+  <ol><li>hide them from help</li><li>move them under one root</li><li>leave them</li></ol></li>
+<li>Reads: pick one whole-Task read and one plan read, with the rest as <code>--json</code> shapes or deleted?
+  <ol><li>yes, file it</li><li>not now</li></ol></li>
+<li>How to carry this forward:
+  <ol><li>one Task per row above</li><li>one design Task covering the whole tree first</li><li>just runs now, the rest later</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

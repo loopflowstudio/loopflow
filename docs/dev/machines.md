@@ -290,7 +290,7 @@ Checked mini: it can take MTG-321
 Stopped MTG-321 at `implement`
 Committed and pushed MTG-321 on mtg-321
 Arrived on mini (Graph at `implement`); its Session moved with it
-Running on mini as Graph process 0199a213-81c0-7800-8aa1-bbab2a035a55
+Running on mini as Graph run 0199a213-81c0-7800-8aa1-bbab2a035a55
   follow: lf task status MTG-321
 ```
 

@@ -2818,7 +2818,7 @@ final class WorkModel {
     func answerLost(repo: String, action: TrackerActionStatus, answer: LostAnswer) {
         let name = answer == .keepTheirs ? "Keep theirs" : "Use mine"
         pendingChanges.request(name, subject: action.id,
-                               write: .trackerAnswer(directory: WaveOrigin.resolve(repo), action: action.id, answer: answer),
+                               write: .repoTrackerAnswer(directory: WaveOrigin.resolve(repo), action: action.id, answer: answer),
                                notices: navigation.notices,
                                answered: { [weak self] in try? await self?.confirmWorkUpdate() })
     }

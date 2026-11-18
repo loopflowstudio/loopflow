@@ -1225,7 +1225,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                         );
                     }
                 } else {
-                    println!("No saved Task; retained observations are not Work.");
+                    println!("No saved Task; retained tracker events are not Work.");
                 }
                 if let Some(at) = status.tracker_state.synced_at {
                     println!("Synced at: {at}");

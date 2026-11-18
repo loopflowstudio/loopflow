@@ -316,7 +316,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
     /// Answer one lost line of the directory's repository, whoever owns it.
-    case trackerAnswer(directory: String, action: String, answer: LostAnswer)
+    case repoTrackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
@@ -420,7 +420,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
-        case .trackerAnswer(_, let action, let answer):
+        case .repoTrackerAnswer(_, let action, let answer):
             return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
@@ -604,7 +604,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                       "approve": approve])
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
-        case .trackerAnswer(let directory, let action, let answer):
+        case .repoTrackerAnswer(let directory, let action, let answer):
             TaggedFields("repo.tracker.answer", ["directory": directory, "action": action, "answer": answer])
         case .taskHold(let directory, let issue):
             TaggedFields("task.hold", ["directory": directory, "issue": issue])

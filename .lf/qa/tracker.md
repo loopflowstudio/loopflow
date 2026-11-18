@@ -27,3 +27,18 @@ built from main for mirror-table checks.
 
 The `sqlite3` CLI here refuses `-readonly` on a WAL store (error 14); read with
 Python: `sqlite3.connect("file:…/loopflow.db?mode=ro", uri=True)`.
+
+A second Machine is a second `HOME`/`LF_HOME` pair on a fresh clone of the
+same bare origin: its first save fetches and imports the shared ref, and
+`lf task list` shows both Machines' Tasks. A second clone under the *same*
+`LF_HOME` is a different repository to lf; its import fails with "planning
+record belongs to another repository", which `lf repo tracker` and the
+`fetch_error` field only report as "Git fetch failed; retained import
+unchanged". Nothing logs the cause; to see it, print the error in
+`ops/planning_sync.rs::exchange_destination` in a throwaway build.
+
+To make a fetch fail, `git remote set-url origin /nonexistent.git` and save;
+the destination's `fetch_error` and `publication_error` both fill in. Restore
+the URL afterwards.
+
+`lf server status` already prints compact JSON; it has no `--json` flag.

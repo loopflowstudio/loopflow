@@ -605,8 +605,8 @@ pub enum Commands {
         json: bool,
     },
 
-    /// This repository: its identity and checkout, where it exchanges planning,
-    /// its releases, CI, people and size
+    /// This repository: its identity and checkout, its tracker, releases, CI,
+    /// people and size
     #[command(args_conflicts_with_subcommands = true)]
     Repo {
         /// Print the identity as JSON

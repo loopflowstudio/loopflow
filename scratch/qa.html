@@ -39,15 +39,37 @@ cargo test -p loopflow --test integration documented_commands::        4 passed
 cargo test -p loopflow --lib server::schema::                          8 passed
 cargo clippy -p loopflow -p loopflow-execution --all-targets -D warnings  clean</pre>
 
+<h2>Second pass: Git destinations and Task JSON (slice 5, 690fee6dc)</h2>
+<p>Fresh private Machine (<code>/tmp/lfq5</code>), branch <code>lf</code>, a bare origin, and a second Machine (its own HOME/LF_HOME) on a clone.</p>
+<table><tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>First visit</td><td><code>lf repo tracker</code>, <code>task create --json</code> in a remote-less repo</td><td class="ok">“Saves stay on this Machine until its remote takes them.” Task JSON has <code>tracker_id</code>, <code>tracker_synced_at</code>, <code>tracker_writeback {state: current}</code>; Work row has <code>tracker_state {state, synced_at}</code>. No <code>pm_</code>, <code>linear_id</code> or <code>acquisition</code> keys in <code>task show</code> / <code>task status --json</code>.</td></tr>
+<tr><td>Publish</td><td><code>git remote add origin</code>, push, save</td><td class="ok"><code>refs/loopflow/planning/shared/main</code> on origin; <code>repo tracker --json</code> destination carries <code>fetch_error: null</code>, <code>publication_state: confirmed</code>.</td></tr>
+<tr><td>Second Machine</td><td>Clone, new HOME/LF_HOME, save</td><td class="ok">Imports the ref; <code>task list</code> shows both Machines’ Tasks; publication confirmed.</td></tr>
+<tr><td>Unreachable remote</td><td><code>remote set-url origin /nope.git</code>, save</td><td class="ok">Text: “Git fetch failed; retained import unchanged / Git publication pending”. JSON and the served <code>repo.tracker</code> route both carry <code>fetch_error</code> and <code>publication_error</code>; <code>repo.plan</code> is refused naming the update.</td></tr>
+<tr><td>Same Machine, second clone</td><td>Clone into a sibling dir under the same LF_HOME, save</td><td class="bad">Import fails: “planning record belongs to another repository” (found with a throwaway print; nothing logs it). Shown only as “Git fetch failed”. Same check is on main (<code>planning_peers.rs:613</code>), so not this change.</td></tr>
+<tr><td>Desktop decoding</td><td><code>scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests'</code></td><td class="fix">DTO fixtures and headless views passed; <code>ServerProtocolTests</code> failed: Swift encoded <code>repo.tracker.answer</code> from a case named <code>trackerAnswer</code>, the test requires <code>repoTrackerAnswer</code>. Fixed; 39 tests in the two suites pass.</td></tr>
+</table>
+
+<h2>Fixed in the second pass</h2>
+<ul>
+<li>Swift <code>RegistryWrite.trackerAnswer</code> → <code>repoTrackerAnswer</code> (matches its route; <code>ServerProtocolTests</code> now passes).</li>
+<li><code>lf task status</code> with no saved Task said “retained observations are not Work”; now “retained tracker events”.</li>
+<li><code>lf repo</code> help: “where it exchanges planning” → “its tracker”.</li>
+</ul>
+
+<h2>Checks</h2>
+<pre>scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests'   1 failure → fixed
+scripts/test_desktop.sh --filter 'ServerProtocolTests|DesktopHeadlessTests'                     39 passed</pre>
+
 <h2>Not reached</h2>
-<ul><li>Desktop UI: not built or opened; its served route was checked over the socket. <code>swift test --filter DTOFixtureTests</code> stays at gate.</li>
+<ul><li>Desktop live window: headless view tests only; <code>GitDestinationsView</code> showing <code>fetchError</code> was read in source, not seen on screen.</li>
 <li>Live Linear/Asana exchange: no stand-in in a shipped binary, and the Machine's real store wasn't touched.</li></ul>
 
 <h2>Still wrong, worst first</h2>
 <ol>
-<li>The plan's Modules renames aren't done: <code>planning_git.rs</code>, <code>planning_peers.rs</code>, <code>peer_records.rs</code>, <code>PeerPlanning*.swift</code>. Git destination status still sends <code>acquisition_error</code> on the wire (Swift and fixture too), against the event vocabulary.</li>
-<li><code>pm_writeback</code> and <code>pm_snapshot_synced_at</code> stay on Task JSON. That follows the decision to keep the columns, but people still see them.</li>
-<li>Outside this change: <code>lf config set</code> prints <code>saved; DomainAction</code> (Debug output), and a rejected tracker value says <code>invalid graph: planning: …</code>.</li>
-<li><code>lf repo</code> help says “where it exchanges planning”, and <code>lf wave</code> help says “identity and planning”. Both are acceptable but use the old wording.</li>
+<li>Git fetch and publication errors are replaced by a fixed string and never logged, so “Git fetch failed” can't be diagnosed from <code>lf.log</code> (pre-existing).</li>
+<li>Two checkouts of one repository on one Machine can't share a Git plan (“belongs to another repository”; pre-existing).</li>
+<li><code>lf task status</code> prints <code>Tracker state:</code> before the Task's title line (pre-existing order, now more visible).</li>
+<li>Outside this change: <code>lf config set</code> prints <code>saved; DomainAction</code>; a rejected tracker value says <code>invalid graph: planning: …</code>.</li>
 </ol>
 </body></html>

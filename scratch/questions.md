@@ -19,3 +19,4 @@
 - Larger than this change, on `scratch/concept-review.html`: `LinearIssueId` holds every tracker's record ID; `tracker_state.synced_at` and the Task's own sync time may be one fact; Git has conflicts where Linear and Asana have actions.
 - Seen in QA, outside this change: `lf config set` prints `saved; DomainAction` (a Debug-formatted lifecycle); a rejected tracker value says `invalid graph: planning: …`.
 - Compress pass: inbound function names outside the plan still say accept/acquire (`accept_linear_issue_in`, `project_accepted_planning`, `ops::linear::acquire_task`, `import_binding(&acquisition)`); left for a follow-up rename rather than growing this change.
+- QA second pass, pre-existing: Git fetch/publication errors are stored as fixed strings and never logged; a second checkout of one repo under the same LF_HOME fails import with "planning record belongs to another repository", shown only as "Git fetch failed".

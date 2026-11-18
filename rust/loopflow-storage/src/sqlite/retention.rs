@@ -328,8 +328,8 @@ fn assign_process_tasks(conn: &Connection) -> StoreResult<u64> {
                     JOIN agent_sessions a ON a.id=se.session_id
                     WHERE se.lf_process_id=p.id AND se.kind IN ('captured','started')
                     AND a.primary_scope IS NULL AND a.task_id IS NOT NULL LIMIT 1),
-                {lf}) END
-         FROM processes p WHERE p.rowid=?1",
+                {lf}) END AS task_id
+         FROM processes p WHERE p.rowid=?1 AND p.task_id IS NULL",
         super::task_work::agent_task("s")
     );
     let mut assigned = 0;
@@ -337,18 +337,19 @@ fn assign_process_tasks(conn: &Connection) -> StoreResult<u64> {
         let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
         let rows = tx
             .prepare(
-                "SELECT rowid,task_id IS NULL FROM processes
+                "SELECT rowid FROM processes
                  WHERE rowid>(SELECT after_rowid FROM process_task_backfill) ORDER BY rowid LIMIT ?1",
             )?
-            .query_map([TASK_BATCH], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)))?
+            .query_map([TASK_BATCH], |row| row.get::<_, i64>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
-        let Some(&(last, _)) = rows.last() else {
+        let Some(&last) = rows.last() else {
             return Ok(assigned);
         };
         let mut assign = tx.prepare(&format!(
-            "UPDATE processes SET task_id=({task}) WHERE rowid=?1 AND ({task}) IS NOT NULL"
+            "UPDATE processes SET task_id=found.task_id FROM ({task}) found
+             WHERE processes.rowid=?1 AND found.task_id IS NOT NULL"
         ))?;
-        for (row, _) in rows.iter().filter(|(_, unassigned)| *unassigned) {
+        for row in &rows {
             assigned += assign.execute([row])? as u64;
         }
         drop(assign);

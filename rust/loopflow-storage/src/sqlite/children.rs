@@ -40,7 +40,11 @@ const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?
 /// Task's, as if it had started there: Processes and Sessions record their
 /// Task once, and nothing matches paths later.
 fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    let Some(worktree) = &task.worktree else {
+    let Some(root) = task
+        .worktree
+        .as_ref()
+        .map(|path| path.display().to_string())
+    else {
         conn.execute(
             "DELETE FROM task_checkouts WHERE task_id=?1",
             [task.id.as_str()],
@@ -54,7 +58,7 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
          base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
         params![
             task.id.as_str(),
-            worktree.display().to_string(),
+            root,
             task.branch,
             task.base_commit,
             task.parent_pr_id.as_ref().map(TaskPrId::as_str)
@@ -62,7 +66,6 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     )?;
     // Whole path components: `/repo.task` does not hold `/repo.task-other`.
     let inside = |cwd: &str| format!("({cwd}=rtrim(?2,'/') OR instr({cwd},rtrim(?2,'/')||'/')=1)");
-    let root = worktree.display().to_string();
     conn.execute(
         &format!(
             "UPDATE processes SET task_id=?1 WHERE id IN (SELECT id FROM processes

@@ -81,9 +81,10 @@ pub(super) fn process_task(parent: &str, cwd: &str, session: &str, agent: &str) 
     format!(
         "coalesce({},
             (SELECT task_id FROM processes WHERE id={agent}),
-            (SELECT task_id FROM agent_sessions WHERE id={session} AND primary_scope IS NULL),
+            (SELECT {} FROM agent_sessions s WHERE s.id={session}),
             (SELECT task_id FROM processes WHERE id={parent}))",
-        deepest_checkout(cwd)
+        deepest_checkout(cwd),
+        agent_task("s")
     )
 }
 
@@ -97,12 +98,13 @@ pub(super) fn agent_task(session: &str) -> String {
 /// Process attached to each) of its Sessions, which may be bound after they start.
 pub(super) fn lf_process_ids(selector: &str) -> String {
     format!(
-        "WITH tw AS MATERIALIZED ({}), members AS MATERIALIZED ({})
+        "WITH tw AS MATERIALIZED ({}),
+        members AS MATERIALIZED (SELECT a.id FROM tw JOIN agent_sessions a ON {})
         SELECT p.id FROM tw CROSS JOIN processes p INDEXED BY processes_task ON p.task_id=tw.id
         UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
         UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
         tasks(selector),
-        session_ids(selector)
+        session_membership("a")
     )
 }
 

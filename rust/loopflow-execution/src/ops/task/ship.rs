@@ -148,9 +148,11 @@ pub fn ship_stop(issue: &str, note: Option<&str>) -> OpsResult<bool> {
         let before = store
             .sqlite
             .set_task_auto_ship(&task.id, &stopped, false, note)
-            .map_err(task_error)?
-            .flatten();
-        Ok((task, AutoShip::is_on(before.as_ref())))
+            .map_err(task_error)?;
+        Ok((
+            task,
+            before.is_some_and(|before| before.state == AutoShipState::On),
+        ))
     })?;
     if was_on {
         if let Ok(worktree) = task.worktree() {

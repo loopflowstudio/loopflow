@@ -304,12 +304,6 @@ pub struct AutoShip {
     pub by: crate::process::Starter,
 }
 
-impl AutoShip {
-    pub fn is_on(mark: Option<&Self>) -> bool {
-        mark.is_some_and(|mark| mark.state == AutoShipState::On)
-    }
-}
-
 pub(super) fn auto_ship_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
@@ -824,28 +818,23 @@ impl SqliteStore {
 
     /// Set the Task's Auto-Ship mark, noting it in the Task's history. With
     /// `keeps_stop`, a standing stop stays and nothing is written. Returns the
-    /// mark it had, or `None` when the Task has no Graph to carry one.
+    /// mark it had; a Task with no Graph has none and keeps none.
     pub fn set_task_auto_ship(
         &self,
         task: &TaskId,
         mark: &AutoShip,
         keeps_stop: bool,
         note: Option<&str>,
-    ) -> StoreResult<Option<Option<AutoShip>>> {
+    ) -> StoreResult<Option<AutoShip>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let has_graph = tx
-            .prepare_cached("SELECT 1 FROM task_graphs WHERE task_id=?1")?
-            .exists([task.as_str()])?;
-        if !has_graph {
-            return Ok(None);
-        }
         let before = auto_ship_in(&tx, task)?;
-        let stopped = before
-            .as_ref()
-            .is_some_and(|before| before.state == AutoShipState::Stopped);
-        if keeps_stop && stopped {
-            return Ok(Some(before));
+        if keeps_stop
+            && before
+                .as_ref()
+                .is_some_and(|before| before.state == AutoShipState::Stopped)
+        {
+            return Ok(before);
         }
         let state = super::durable::task_state_in(&tx, task)?;
         if mark.state == AutoShipState::On && state.is_terminal() {
@@ -853,7 +842,7 @@ impl SqliteStore {
                 "Task is {state}; it cannot ship"
             )));
         }
-        tx.execute(
+        let set = tx.execute(
             "UPDATE task_graphs SET auto_ship=?2,auto_ship_at=?3,auto_ship_by=?4 WHERE task_id=?1",
             rusqlite::params![
                 task.as_str(),
@@ -862,6 +851,9 @@ impl SqliteStore {
                 serde_json::to_string(&mark.by)?
             ],
         )?;
+        if set == 0 {
+            return Ok(None);
+        }
         if before.as_ref().map(|before| before.state) != Some(mark.state) {
             let what = match mark.state {
                 AutoShipState::On => "Auto-Ship on",
@@ -878,7 +870,7 @@ impl SqliteStore {
             )?;
         }
         tx.commit()?;
-        Ok(Some(before))
+        Ok(before)
     }
 
     /// The Task's Auto-Ship mark, if anyone set one.
@@ -1074,12 +1066,10 @@ mod tests {
         let on = mark(super::AutoShipState::On, 10);
         let stopped = mark(super::AutoShipState::Stopped, 20);
         // No Graph, nothing to carry the mark.
-        assert_eq!(
-            store
-                .set_task_auto_ship(&task.id, &on, false, None)
-                .unwrap(),
-            None
-        );
+        store
+            .set_task_auto_ship(&task.id, &on, false, None)
+            .unwrap();
+        assert_eq!(store.task_auto_ship(&task.id).unwrap(), None);
         store
             .take_up_task_graph(&task.id, r#"{"name":"code","steps":[]}"#)
             .unwrap();
@@ -1087,7 +1077,7 @@ mod tests {
             store
                 .set_task_auto_ship(&task.id, &on, false, None)
                 .unwrap(),
-            Some(None)
+            None
         );
         store
             .set_task_auto_ship(&task.id, &stopped, false, Some("hold"))

@@ -20,3 +20,7 @@
 - The Runner's interactive decision moved into the executor: `GraphRunner::stopping_at_interactive` is gone, `RunningGraph::stands_in` reads Auto-Ship at each interactive step, and `SkillOutcome::Unapproved` became `StopsAt` (the landing stop and the interactive stop are one outcome).
 - `TaskGraphRecord.auto_ship` carries `#[serde(default)]` for Moves from released senders; LOO-971 removes it with the `approval` key.
 - Hand-merged PRs on graphs with no land step: the run still finishes its steps into `end` and completion settles; no merge check between steps was added.
+
+## Compress (2026-11-18, headless)
+
+- `a_restarted_wait_keeps_its_explicit_agent` and `a_shipping_tasks_restarted_wait_keeps_its_explicit_agent` time out "waiting for the restart" here, with and without the compress edits (HEAD 77c670ae85). Gate should check whether CI sees it.

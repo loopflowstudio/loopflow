@@ -834,15 +834,17 @@ async fn start_task_run(
     }
     // Auto-Ship on runs through the interactive steps, standing in at each;
     // stopped, no run merges.
-    let auto_ship = store
+    let (on, ships) = match store
         .sqlite
         .task_auto_ship(&task.id)
         .map_err(task_error)?
-        .map(|mark| mark.state);
-    let on = auto_ship == Some(loopflow_storage::sqlite::AutoShipState::On);
+        .map(|mark| mark.state)
+    {
+        Some(loopflow_storage::sqlite::AutoShipState::On) => (true, true),
+        Some(loopflow_storage::sqlite::AutoShipState::Stopped) => (false, false),
+        None => (false, reaches_end),
+    };
     let through = mode.runs_through() || on;
-    let ships =
-        auto_ship != Some(loopflow_storage::sqlite::AutoShipState::Stopped) && (on || reaches_end);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;

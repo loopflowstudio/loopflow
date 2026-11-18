@@ -567,8 +567,8 @@ struct WorkModelStreamTests {
         defer { keeping.cancel() }
         try await feed.opened(1)
         let scope = try await feed.request(1)
-        let onHub = #"{"tracker":null,"plan":{"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null}},"actions":[]}"#
-        let here = #"{"tracker":null,"plan":{"hub":null},"actions":[]}"#
+        let onHub = #"{"tracker":null,"plan":{"git":null,"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null}},"actions":[]}"#
+        let here = #"{"tracker":null,"plan":{"git":null,"hub":null},"actions":[]}"#
         func planFrame(_ sequence: Int, _ answers: Int, repo: String, body: String) throws -> WorkFrame {
             try fixture.frame("plan_home", sequence: sequence, answers: answers,
                               scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
@@ -582,7 +582,7 @@ struct WorkModelStreamTests {
         await feed.send(WorkFrame(sequence: 3, answers: scope.id,
                                  unavailable: "sync read failed", content: .planHome(nil), wire: nil))
         try await eventually { model.repositoryPlan.failure == "sync read failed" }
-        #expect(model.repositoryPlan.value?.plan?.hub?.unsent == 1)
+        #expect(model.repositoryPlan.value?.plan?.hub?.standing.unsent == 1)
         #expect(model.roadmap.failure == nil)
         await feed.send(try planFrame(4, scope.id, repo: "/src/loopflow", body: onHub))
         try await eventually { model.repositoryPlan.failure == nil }

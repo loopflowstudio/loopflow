@@ -73,10 +73,11 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `tracker_wave_projects`: wave_id, project_id, position
 - `tracker_wave_sync`: wave_id, tracker, initiative, synced_at
 
-## Hub plan
+## Shared plan
 
 - `plan_carriers`: repo, carrier, peer, sent_seq, seen_seq, error, failing_since
 - `plan_changes`: seq, repo, owner_table, owner_id
+- `plan_refs`: repo, machine_id, tip
 - `plan_stamps`: owner_id, field, at, machine_id
 - `repository_plans`: id, repo, selected
 

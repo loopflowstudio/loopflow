@@ -306,6 +306,13 @@
       "body": {
         "tracker": null,
         "plan": {
+          "git": {
+            "remote": "origin",
+            "unsent": 0,
+            "records": [],
+            "error": null,
+            "failing_since": null
+          },
           "hub": {
             "machine": "mini",
             "unsent": 1,

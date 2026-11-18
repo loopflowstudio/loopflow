@@ -270,7 +270,7 @@ etude checkout and `lf` version are unknown.
   Linear manual order for the backlog, a person's order of their claimed Tasks
   (a rank keyed by person and Task, shown only to them), and a person's own
   Machines exchanging through Git on a tracker repository. This needs its own
-  Task, not filed yet: it needs "which refs are mine" and a decision on which
+  Task, LOO-980: it needs "which refs are mine" and a decision on which
   rule owns a field both a tracker and a stamp carry. The two orders are
   designed together there. Two things said for it on 2026-11-18 are in
   `scratch/explore.md` and the design's tracker section: backlog reorders
@@ -344,9 +344,37 @@ etude checkout and `lf` version are unknown.
      newer is caught by the protocol revision; a plan ref file needs it
      (slice 2), which means parsing fields one at a time, not a typed
      `Vec<StampedValue>`.
-2. **Git refs.** The same records written as files, fetch, import, the
-   server's timer, the repository id check, the Git line in `lf repo tracker`
-   and Desktop, the acceptance test with a bare remote, docs. etude moved.
+2. **Git refs.** *Built* (`ops/plan_git.rs`, `plan_refs`), except etude's
+   move, which is by hand. The same records written as files, fetch, import,
+   the server's timer (`server/maintenance.rs`), the repository id check, the
+   Git line in `lf repo tracker`, `lf task sync` and Desktop, the acceptance
+   test with a bare remote and a third home.
+
+   What it taught:
+   - The repository id check passes: `bind_repository` keeps the first id as
+     a local locator and rows saved under it stay with the checkout, so a
+     clone takes the lowest id any fetched ref names. The `repository` file
+     stays and the docs need no `--bind` for a repository with a remote.
+   - A clone that has saved nothing must still read: the exchange registers
+     the repository itself (`ensure_repository`). Skipping an unregistered
+     clone left a second Machine with an empty plan.
+   - A Machine whose ref is missing from the remote publishes its whole plan
+     whatever its cursor says, so a deleted ref or a new remote heals.
+   - The exchange commits only when the tree would differ, so two Machines
+     that agree stop writing commits (checked: refs unchanged after extra
+     exchanges).
+   - Between convergence on a lower repository id and the hub's own fetch,
+     the hub is addressed by an id it has not seen and answers "no checkout"
+     for up to a minute. The acceptance test runs mini's fetch first.
+   - A second clone of one remote on the same Machine cannot take the shared
+     id (`bind_repository` refuses an id that locates another path); it keeps
+     its own and logs. Untested.
+   - Not built from "Acceptance check at gate": the home whose push is
+     refused retitling through the hub, read by a fourth Git-only home.
+   - Reads that are not asked for do not fetch: `lf repo tracker --subscribe`
+     and a provider exit exchange with the hub only; `lf task sync`,
+     `lf wave status --sync`, a Task lookup that misses, a served command and
+     the server's minute do Git too.
 3. **Claims are first-wins.** An ownership entry's order is its comment's
    stamp, the same on every Machine (today `journal_order_in` orders by
    arrival, so two Machines can read one log differently). An entry names the
@@ -371,4 +399,10 @@ etude checkout and `lf` version are unknown.
   and Swift `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
   (`RepositoryPlan.swift`, `RepositoryPlanView.swift` and three test files
   changed with the `--json` shape and were not compiled here).
-- Next: slice 2, Git refs.
+- Slice 2, run by implement, passed 2026-11-18:
+  `cargo test -p loopflow-execution --lib ops::plan_git::`.
+  SLICE2_ACCEPTANCE
+- Not compiled here: Swift (`RepositoryPlan.swift` gained `GitCarrier` and
+  `CarrierStanding`; three test files follow). `server_schema.json` is
+  regenerated at gate if `server::schema::tests::` asks.
+- Next: slice 3, first-wins claims.

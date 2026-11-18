@@ -16,7 +16,7 @@ Made for review in `scratch/plan.md`; each is reversible before release.
 - Tracker repositories are untouched in this Task: a person's own Machines do
   not exchange through Git or the hub there. The design says they do. Needs
   "which refs are mine" and one owner per field; left for the tracker Task
-  (your slice, Linear manual order), which is not filed yet.
+  (your slice, Linear manual order), LOO-980.
 - Concept review, 2026-11-18, each reversible before release
   (`scratch/concept-review.html`, questions 1-5): a Machine's ref holds its
   whole plan, not only the fields it stamped newest; both carriers keep one
@@ -41,6 +41,18 @@ Made for review in `scratch/plan.md`; each is reversible before release.
     `<id>: hub, N unsent` for the whole repository, not that Task's fields.
   - The hub acceptance test took 136 s on a loaded Machine (nextest kills at
     300 s). Not measured before this slice, so unknown whether it grew.
+
+- Slice 2 (implement, 2026-11-18), each reversible before release:
+  - The plan's remote is `origin`, else the first remote by name. No setting.
+  - The server's first fetch is a minute after it starts, not at start, so
+    test fixtures with a served home do not push refs into their remotes.
+  - `lf task sync` fails when either carrier fails, and Git still runs when
+    the hub is down. It prints `<id>: Git origin, N unsent; hub, N unsent`.
+  - A record another Machine's ref carries that cannot be written here (a
+    comment whose Task is missing) is skipped and logged; the rest applies.
+  - A plan ref commit's author is the machine id at `loopflow@localhost`.
+  - A deleted record's file is never removed from a ref: deletion is a field.
+  - `lf repo tracker` runs `git remote` on each read to name the Git line.
 
 Still open from before:
 

@@ -5,7 +5,8 @@
 //! `lf machine prune` runs, at start and then every hour, so `history.db`
 //! keeps 90 days and history an earlier lf wrote into `loopflow.db` moves out.
 //! Neither runs per connection or per command. Failures are logged and retried
-//! at the next tick.
+//! at the next tick. The Git plan exchange shares this clock: once a minute
+//! for every repository without Linear or Asana that has a remote.
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
@@ -21,6 +22,36 @@ pub(super) fn start() {
         .spawn(|| loopflow_execution::journal::request::isolate(maintain));
     if let Err(error) = spawned {
         tracing::warn!(%error, "the store is not maintained by this server");
+    }
+}
+
+/// How often this server fetches and pushes the plan refs of every
+/// repository it plans without Linear or Asana. Commands it answers push
+/// sooner; this is how another Machine's change arrives with no hub.
+const PLAN_EVERY: Duration = Duration::from_secs(60);
+
+pub(super) fn start_plan_exchange() {
+    let spawned = std::thread::Builder::new()
+        .name("plan-git".into())
+        .spawn(|| loopflow_execution::journal::request::isolate(exchange_plans));
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "this server does not carry plans by Git");
+    }
+}
+
+fn exchange_plans() {
+    let path = loopflow_execution::store::default_db_path();
+    loop {
+        std::thread::sleep(PLAN_EVERY);
+        if !path.exists() {
+            continue;
+        }
+        let exchanged = loopflow_execution::store::open_sqlite(&path)
+            .map_err(anyhow::Error::from)
+            .and_then(|store| loopflow_execution::ops::plan_git::exchange_all(&store));
+        if let Err(error) = exchanged {
+            tracing::warn!(error = %format!("{error:#}"), "Git plan exchange did not run");
+        }
     }
 }
 

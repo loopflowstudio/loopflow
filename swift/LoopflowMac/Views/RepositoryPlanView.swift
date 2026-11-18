@@ -1,8 +1,8 @@
 import Loopflow
 import SwiftUI
 
-/// How the repository's plan travels, as `lf repo tracker` prints it: the
-/// hub's line and each record it has yet to take.
+/// How the repository's plan travels, as `lf repo tracker` prints it: a line
+/// for Git and one for the hub, each with the records it has yet to take.
 struct RepositoryPlanView: View {
     let reading: Reading<RepositoryPlan>
 
@@ -12,13 +12,10 @@ struct RepositoryPlanView: View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             if let plan = reading.value {
                 Text(plan.line)
+                if let git = plan.plan?.git { standing(git.standing) }
                 if let hub = plan.plan?.hub {
                     Text(hub.line)
-                    ForEach(hub.records, id: \.self) { Text($0) }
-                    if hub.unsent > hub.records.count {
-                        Text("and \(hub.unsent - hub.records.count) more")
-                    }
-                    if let error = hub.error { Text(error) }
+                    standing(hub.standing)
                 }
             } else if reading.isLoading {
                 Text("Reading how the plan travels…")
@@ -29,5 +26,15 @@ struct RepositoryPlanView: View {
         .textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityIdentifier("repository-plan")
+    }
+
+    /// A carrier's unsent records and why it did not take them.
+    @ViewBuilder
+    private func standing(_ standing: CarrierStanding) -> some View {
+        ForEach(standing.records, id: \.self) { Text($0) }
+        if standing.unsent > standing.records.count {
+            Text("and \(standing.unsent - standing.records.count) more")
+        }
+        if let error = standing.error { Text(error) }
     }
 }

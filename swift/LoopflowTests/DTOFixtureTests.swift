@@ -989,13 +989,14 @@ struct DTOFixtureTests {
         let plan = try JSONDecoder().decode(RepositoryPlan.self, from: JSONSerialization.data(withJSONObject: body))
         #expect(plan.tracker == nil)
         #expect(plan.plan?.hub?.machine == "mini")
-        #expect(plan.plan?.hub?.records == ["3e1c9a07"])
-        #expect(plan.line == "Plan: this Machine.")
+        #expect(plan.plan?.hub?.standing.records == ["3e1c9a07"])
+        #expect(plan.plan?.git?.remote == "origin")
+        #expect(plan.line == "Plan: Git origin.")
         #expect(plan.plan?.hub?.line.hasPrefix("Hub mini, unreachable since ") == true)
         #expect(plan.plan?.hub?.line.hasSuffix(", 1 unsent.") == true)
         let linear = #"{"tracker":"linear","plan":null,"actions":[]}"#
         #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(linear.utf8)).line == "Tracker: linear.")
-        let here = #"{"tracker":null,"plan":{"hub":null}}"#
+        let here = #"{"tracker":null,"plan":{"git":null,"hub":null}}"#
         #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(here.utf8)).line == "Plan: this Machine.")
         for key in ["tracker", "plan"] {
             var object = body

@@ -1436,15 +1436,15 @@ sys.exit(child.wait())
     );
 }
 
-/// LOO-938's acceptance over the real hub carrier: the laptop names mini its
-/// hub and reaches it with `ssh mini lf server connect`.
+/// LOO-938's acceptance over the real carriers: three homes clone one bare
+/// remote and meet through its plan refs; the laptop then names mini its hub
+/// and reaches it with `ssh mini lf server connect`.
 #[test]
 fn the_later_change_shows_on_both_machines_through_the_hub() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let flags = fixture.root.path().join("ssh-flags");
     hub_ssh(&fixture, &flags);
-    assert_success(&fixture.run(&["machine", "hub", "mini"]));
     let laptop = |args: &[&str]| {
         fixture
             .command(args)
@@ -1458,27 +1458,88 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
         assert_success(&output);
         String::from_utf8(output.stdout).unwrap()
     };
+    // A teammate: another home, another identity, their own clone.
+    let third = fixture.root.path().join("third");
+    support::seed_store(&third);
+    fs::write(
+        third.join(".gitconfig"),
+        "[user]\n\temail = teammate@test.com\n\tname = Ada\n",
+    )
+    .unwrap();
+    git(
+        fixture.root.path(),
+        &[
+            "clone",
+            "-q",
+            plan._repos[0].bare_path().to_str().unwrap(),
+            third.join("checkout").to_str().unwrap(),
+        ],
+    );
+    let teammate = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", &third)
+            .env("LF_HOME", &third)
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env(
+                "PATH",
+                format!(
+                    "{}:/usr/bin:/bin",
+                    fixture.root.path().join("bin").display()
+                ),
+            )
+            .current_dir(third.join("checkout"))
+            .stdin(Stdio::null())
+            .args(args)
+            .output()
+            .unwrap();
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let teammate_store =
+        || loopflow_execution::store::open_sqlite(&third.join("loopflow.db")).unwrap();
+    let remote_path = plan.remote_path.to_str().unwrap();
+
+    // No hub is named: the remote carries the plan.
     let created: Value =
-        serde_json::from_str(&ok(&["task", "create", "hub smoke", "--json"])).unwrap();
+        serde_json::from_str(&ok(&["task", "create", "git smoke", "--json"])).unwrap();
     let task = loopflow_execution::durable::TaskId::parse(created["task"]["id"].as_str().unwrap())
         .unwrap();
     let identifier = created["task"]["identifier"].as_str().unwrap().to_owned();
     let title = |store: &loopflow_execution::store::sqlite::SqliteStore| {
         store.task(&task).unwrap().map(|task| task.title)
     };
-    // The save went at once.
-    assert_eq!(title(&plan.remote).as_deref(), Some("hub smoke"));
+    let waiting = ok(&["repo", "tracker"]);
+    assert!(waiting.starts_with("Plan: Git origin, "), "{waiting}");
+    assert!(waiting.contains(" unsent.\n"), "{waiting}");
+    assert!(waiting.contains(&format!("  {identifier}\n")), "{waiting}");
+    assert!(!waiting.contains("Hub "), "{waiting}");
     assert_eq!(
-        ok(&["repo", "tracker"]).trim(),
-        "Plan: this Machine.\nHub mini."
+        ok(&["task", "sync", &identifier]).trim(),
+        format!("{identifier}: nothing unsent")
+    );
+    assert_eq!(ok(&["repo", "tracker"]).trim(), "Plan: Git origin.");
+    // The teammate never heard of the laptop: the Task is in the remote.
+    teammate(&["task", "sync", &identifier]);
+    assert_eq!(title(&teammate_store()).as_deref(), Some("git smoke"));
+    // mini's server fetches once a minute; every clone ends on one repository.
+    loopflow_execution::ops::plan_git::exchange(&plan.remote, remote_path).unwrap();
+    assert_eq!(title(&plan.remote).as_deref(), Some("git smoke"));
+    ok(&["task", "sync", &identifier]);
+    assert_eq!(
+        plan.local
+            .repository_id(plan.local_path.to_str().unwrap())
+            .unwrap(),
+        plan.remote.repository_id(remote_path).unwrap()
     );
 
-    // A Wave made here is on mini when the command returns.
+    // With a hub, a save is on mini when the command returns.
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
+    let hub_line = |status: &str| status[status.find("Hub ").expect(status)..].to_owned();
+    ok(&["task", "update", &identifier, "--title", "hub smoke"]);
+    assert_eq!(title(&plan.remote).as_deref(), Some("hub smoke"));
     ok(&["wave", "create", "billing"]);
-    assert_eq!(
-        ok(&["repo", "tracker"]).trim(),
-        "Plan: this Machine.\nHub mini."
-    );
+    assert_eq!(hub_line(&ok(&["repo", "tracker"])).trim(), "Hub mini.");
 
     // mini changes the title, then stops answering; the laptop changes it later.
     let revision = plan.remote.task(&task).unwrap().unwrap().revision;
@@ -1494,16 +1555,20 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
         .unwrap();
     fs::write(flags.join("down"), "").unwrap();
     ok(&["task", "update", &identifier, "--title", "two"]);
-    let offline = ok(&["repo", "tracker"]);
+    let offline = hub_line(&ok(&["repo", "tracker"]));
     assert!(
-        offline.starts_with("Plan: this Machine.\nHub mini, unreachable since "),
+        offline.starts_with("Hub mini, unreachable since "),
         "{offline}"
     );
     assert!(offline.contains(", 1 unsent.\n"), "{offline}");
     assert!(offline.contains(&format!("  {identifier}\n")), "{offline}");
+    // The hub is off and Git still carries the change to the teammate.
+    assert!(!laptop(&["task", "sync", &identifier]).status.success());
+    teammate(&["task", "sync", &identifier]);
+    assert_eq!(title(&teammate_store()).as_deref(), Some("two"));
     // A Task made offline is one more record, and the reason is said once.
     ok(&["task", "create", "made offline"]);
-    let offline = ok(&["repo", "tracker"]);
+    let offline = hub_line(&ok(&["repo", "tracker"]));
     assert!(offline.contains(", 2 unsent.\n"), "{offline}");
     assert_eq!(
         offline.matches("Operation timed out").count(),
@@ -1516,7 +1581,6 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     fs::write(flags.join("drop-apply"), "").unwrap();
     assert!(!laptop(&["task", "sync", &identifier]).status.success());
     assert_eq!(title(&plan.remote).as_deref(), Some("two"));
-    let remote_path = plan.remote_path.to_str().unwrap();
     let written = plan
         .remote
         .plan_records_since(remote_path, 0, usize::MAX)
@@ -1538,7 +1602,7 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     assert_eq!(title(&plan.remote).as_deref(), Some("two"));
     assert_eq!(
         ok(&["repo", "tracker"]).trim(),
-        "Plan: this Machine.\nHub mini."
+        "Plan: Git origin.\nHub mini."
     );
 }
 

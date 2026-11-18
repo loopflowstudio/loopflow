@@ -47,6 +47,13 @@ pub async fn sync(store: &crate::store::Store, repo: &str) -> Result<()> {
     crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo)).await?
 }
 
+/// One exchange for `repo` by each carrier it has: the hub, then Git, which
+/// runs whether or not the hub answered. The first failure is returned.
+pub async fn sync_carriers(store: &crate::store::Store, repo: &str) -> Result<()> {
+    let by_hub = super::plan_hub::sync(store, repo, false).await;
+    sync(store, repo).await.and(by_hub)
+}
+
 /// One Git exchange for every repository this Machine plans without Linear
 /// or Asana. The Machine server runs this on its timer.
 pub fn exchange_all(store: &SqliteStore) -> Result<()> {

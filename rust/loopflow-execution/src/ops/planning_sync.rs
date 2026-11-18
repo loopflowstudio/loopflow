@@ -21,7 +21,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 /// Saved Tasks need no network before a read or local save. On a cache miss,
-/// read the hub once, without allocating execution.
+/// read the hub and the remote once, without allocating execution.
 pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
@@ -36,8 +36,8 @@ pub(crate) async fn find_task(
     if let Some(task) = read().map_err(message)? {
         return Ok(Some(task));
     }
-    if let Err(error) = super::plan_hub::sync(store, repo, false).await {
-        tracing::warn!(error = %format!("{error:#}"), "hub read pending; resolving retained Task");
+    if let Err(error) = super::plan_git::sync_carriers(store, repo).await {
+        tracing::warn!(error = %format!("{error:#}"), "plan read pending; resolving retained Task");
     }
     read().map_err(message)
 }
@@ -175,9 +175,13 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
         .block_on(async {
             let store = planning_store().await?;
             if !super::tracker::connected(&repo) {
-                return super::plan_hub::sync(&store, &repo, false)
-                    .await
-                    .map_err(message);
+                // A provider exit reads the hub; an asked-for refresh fetches too.
+                let synced = if refresh {
+                    super::plan_git::sync_carriers(&store, &repo).await
+                } else {
+                    super::plan_hub::sync(&store, &repo, false).await
+                };
+                return synced.map_err(message);
             }
             if refresh {
                 super::tracker_events::refresh_repository(&store, &repo).await;

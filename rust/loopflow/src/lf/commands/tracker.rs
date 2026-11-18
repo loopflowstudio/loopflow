@@ -47,12 +47,12 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
 }
 
 /// `lf wave status --sync` in a repository without Linear or Asana: one
-/// exchange with this Machine's hub, when it has one.
+/// exchange by each carrier its plan has.
 pub fn refresh(checkout: &Path) -> Result<()> {
     let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        loopflow_execution::ops::plan_hub::sync(&store, &repo.to_string_lossy(), false).await
+        loopflow_execution::ops::plan_git::sync_carriers(&store, &repo.to_string_lossy()).await
     })
 }
 
@@ -143,8 +143,19 @@ pub(crate) struct TrackerStatus {
 /// holds the whole plan; with none of these it stays on this one.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct PlanCarriers {
+    /// The repository's remote; `null` without one.
+    git: Option<GitCarrier>,
     /// The Machine `lf machine hub` names; `null` without one.
     hub: Option<HubCarrier>,
+}
+
+/// Git's line: `Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.`
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct GitCarrier {
+    /// The remote's name.
+    remote: String,
+    #[serde(flatten)]
+    standing: CarrierStanding,
 }
 
 /// The hub's line: `Hub mini, unreachable since Nov 18 14:02, 2 unsent.`
@@ -152,14 +163,21 @@ pub(crate) struct PlanCarriers {
 pub(crate) struct HubCarrier {
     /// The hub's name.
     machine: String,
-    /// How many records changed here the hub has not taken.
+    #[serde(flatten)]
+    standing: CarrierStanding,
+}
+
+/// What a carrier has yet to take, and why when it cannot.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct CarrierStanding {
+    /// How many records changed here the carrier has not taken.
     unsent: usize,
     /// The first of them in change order: a Task's identifier, `wave <name>`,
     /// `project <name>` or `comment <id>`.
     records: Vec<String>,
-    /// Why the last exchange failed, while the hub still does not answer.
+    /// Why the last exchange failed, while it still fails.
     error: Option<String>,
-    /// When the hub stopped answering (Unix seconds), while it still does not.
+    /// When the carrier stopped working (Unix seconds), while it still does not.
     failing_since: Option<i64>,
 }
 
@@ -227,15 +245,11 @@ fn status(store: Option<&Store>, repo: &str) -> Result<TrackerStatus> {
 
 fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
     use loopflow_execution::store::sqlite::plan_carriers::Carrier;
-    let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? else {
-        return Ok(PlanCarriers { hub: None });
-    };
-    let held = store.sqlite.plan_carrier(repo, Carrier::Hub)?;
-    let unsent = store.sqlite.plan_unsent(repo, Carrier::Hub, NAMED)?;
-    let failing_since = held.as_ref().and_then(|held| held.failing_since);
-    Ok(PlanCarriers {
-        hub: Some(HubCarrier {
-            machine: hub.name().to_owned(),
+    let standing = |carrier| -> Result<CarrierStanding> {
+        let held = store.sqlite.plan_carrier(repo, carrier)?;
+        let unsent = store.sqlite.plan_unsent(repo, carrier, NAMED)?;
+        let failing_since = held.as_ref().and_then(|held| held.failing_since);
+        Ok(CarrierStanding {
             unsent: unsent.count,
             records: unsent
                 .first
@@ -244,7 +258,25 @@ fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
                 .collect::<Result<_>>()?,
             error: failing_since.and(held.and_then(|held| held.error)),
             failing_since,
-        }),
+        })
+    };
+    Ok(PlanCarriers {
+        git: loopflow_execution::ops::plan_git::remote(Path::new(repo))
+            .map(|remote| {
+                Ok::<_, anyhow::Error>(GitCarrier {
+                    remote,
+                    standing: standing(Carrier::Git)?,
+                })
+            })
+            .transpose()?,
+        hub: loopflow_execution::ops::plan_hub::hub(&store.sqlite)?
+            .map(|hub| {
+                Ok::<_, anyhow::Error>(HubCarrier {
+                    machine: hub.name().to_owned(),
+                    standing: standing(Carrier::Hub)?,
+                })
+            })
+            .transpose()?,
     })
 }
 
@@ -279,31 +311,37 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     print_actions(store, &actions)
 }
 
-/// `Plan: this Machine.`, then a line for the hub when one is named: its
-/// unsent records by name, then why it did not take them.
+/// One line per carrier, `Plan: Git origin.` and `Hub mini.`, each with its
+/// unsent records by name and why it did not take them; `Plan: this Machine.`
+/// for a repository with no remote.
 fn print_plan(plan: &PlanCarriers) {
-    println!("Plan: this Machine.");
-    let Some(hub) = &plan.hub else {
-        return;
-    };
-    let mut line = format!("Hub {}", hub.machine);
-    if let Some(since) = hub.failing_since {
+    match &plan.git {
+        Some(git) => print_carrier(format!("Plan: Git {}", git.remote), &git.standing),
+        None => println!("Plan: this Machine."),
+    }
+    if let Some(hub) = &plan.hub {
+        print_carrier(format!("Hub {}", hub.machine), &hub.standing);
+    }
+}
+
+fn print_carrier(mut line: String, standing: &CarrierStanding) {
+    if let Some(since) = standing.failing_since {
         line.push_str(&format!(
             ", unreachable since {}",
             loopflow_execution::output::format_time(since)
         ));
     }
-    if hub.unsent > 0 {
-        line.push_str(&format!(", {} unsent", hub.unsent));
+    if standing.unsent > 0 {
+        line.push_str(&format!(", {} unsent", standing.unsent));
     }
     println!("{line}.");
-    for record in &hub.records {
+    for record in &standing.records {
         println!("  {record}");
     }
-    if hub.unsent > hub.records.len() {
-        println!("  and {} more", hub.unsent - hub.records.len());
+    if standing.unsent > standing.records.len() {
+        println!("  and {} more", standing.unsent - standing.records.len());
     }
-    if let Some(error) = &hub.error {
+    if let Some(error) = &standing.error {
         println!("  {error}");
     }
 }

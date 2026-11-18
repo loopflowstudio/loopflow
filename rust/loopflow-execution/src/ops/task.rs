@@ -2645,8 +2645,8 @@ pub fn start_conversation_beside(task: &Task) {
 
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
 /// look for every sent action and resend what the tracker lacks; without a
-/// tracker, the repository's plan is exchanged with the hub, so a Task another
-/// Machine made is found there. An `answer` first
+/// tracker, the repository's plan is exchanged with its hub and its remote, so
+/// a Task another Machine made is found there. An `answer` first
 /// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
@@ -2675,10 +2675,10 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            super::plan_hub::sync(&store, &repo, false)
+            super::plan_git::sync_carriers(&store, &repo)
                 .await
                 .map_err(|error| task_error(format!("{error:#}")))?;
-            return hub_synced(&store, &repo, &task).await;
+            return carriers_synced(&store, &repo, &task);
         };
         let project = task
             .project_id
@@ -2728,22 +2728,35 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
     Ok(open_lines(&saved.identifier, &open))
 }
 
-/// What `lf task sync` prints after a hub exchange: what the hub has yet to
-/// take of the repository's plan.
-async fn hub_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
-    let unsent = store
-        .sqlite
-        .plan_unsent(
-            repo,
-            loopflow_storage::sqlite::plan_carriers::Carrier::Hub,
-            0,
-        )
-        .map_err(task_error)?
-        .count;
-    Ok(if unsent == 0 {
+/// What `lf task sync` prints without a tracker: what each carrier has yet
+/// to take of the repository's plan.
+fn carriers_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
+    use loopflow_storage::sqlite::plan_carriers::Carrier;
+    let mut unsent = Vec::new();
+    for carrier in [Carrier::Git, Carrier::Hub] {
+        let Some(held) = store
+            .sqlite
+            .plan_carrier(repo, carrier)
+            .map_err(task_error)?
+        else {
+            continue;
+        };
+        let count = store
+            .sqlite
+            .plan_unsent(repo, carrier, 0)
+            .map_err(task_error)?
+            .count;
+        if count > 0 {
+            unsent.push(match carrier {
+                Carrier::Git => format!("Git {}, {count} unsent", held.peer),
+                Carrier::Hub => format!("hub, {count} unsent"),
+            });
+        }
+    }
+    Ok(if unsent.is_empty() {
         format!("{}: nothing unsent", task.identifier)
     } else {
-        format!("{}: hub, {unsent} unsent", task.identifier)
+        format!("{}: {}", task.identifier, unsent.join("; "))
     })
 }
 

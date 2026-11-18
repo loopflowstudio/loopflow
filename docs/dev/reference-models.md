@@ -517,7 +517,7 @@ not imported. Runtime readers use only the final schema and current encodings.
 Linear statuses are the owner: one In Progress Linear Project per Wave. Planned
 Linear Projects express future plans; Completed ones retain history. A Task without
 a graph takes up an explicitly named one, its Wave default, repository `graph:`, then builtin `code`.
-There is no Chapter, packet or local switch. A plan is replaced in place, preserving
+There is no packet or local switch. A Wave's Project is replaced in place, preserving
 active Task identity/worktree/PR/execution and refusing unrelated competing plans.
 A second Machine adopts the same state through ordinary synchronization.
 

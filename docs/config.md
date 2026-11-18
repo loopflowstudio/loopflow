@@ -380,11 +380,12 @@ a setter to edit that file; setters preserve comments and unrelated content.
 personal global file. Bare `set` edits private repository settings; `--wave`
 selects a Wave within that private file. Add `--shared` to edit the committed repository or Wave file.
 
-Keys sit on their primitive: `repo.plan.team`, `skill.<name>.agent`,
+Keys sit on their primitive: `repo.tracker.linear.team`, `skill.<name>.agent`,
 `wave.graph`, `wave.<id>.agent`. A file or command may spell a key by its
-trailing path (`planning.team`, `graph`), by the typed layout
+trailing path (`tracker.linear.team`, `graph`), by the typed layout
 (`skills.<name>.agent`, `waves.<id>.agent`) or, for the Linear team, the
-released `linear.team`. `lf set` gathers the key's group into the typed layout,
+released `linear.team`. A repository has one tracker, so setting another tracker's key
+replaces the block. `lf set` gathers the key's group into the typed layout,
 the one released `lf` reads too; `lf config catalog` lists each key with its
 shorthands.
 
@@ -423,7 +424,7 @@ Then the list is the whole order, and `--explain` marks `default_agent` unused.
 
 Lists and compound settings follow their declared merge rules. `context.docs`,
 `context.exclude`, `summaries` and `supported_harnesses` add in precedence order; `[]`
-clears earlier contributions. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `planning` replaces its complete tagged provider
+clears earlier contributions. Keyed maps merge by key. `agents` preserves order and replaces as a unit. `tracker` replaces its complete tagged
 configuration. `false` is a value; omission and `unset` reveal lower declarations.
 
 ## Source, scope and target
@@ -510,7 +511,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Planning synchronization](work.md#share-the-plan) | — | `repo.plan`: `{provider: linear, team: "<id>"}`, `{provider: asana, team: "<gid-or-url>"}` or `{provider: git, shared: team}` |
+| [Tracker](work.md#share-the-plan) | — | `tracker`: `{linear: {team: "<id>"}}`, `{asana: {team: "<gid-or-url>"}}` or `{git: {shared: team}}` |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |

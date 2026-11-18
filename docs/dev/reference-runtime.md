@@ -46,7 +46,7 @@ Session/Process caller provenance supplies ancestry and mutation authority.
   not confer Graph or Task settlement authority.
 - GitHub workflow/check runs, release-run operations, gate execution receipts,
   launchd `RunAtLoad`, Swift attributed-text runs and ordinary execution verbs
-  name other things. Published release notes, dated benchmark reports and chapter
+  name other things. Published release notes, dated benchmark reports and old
   archives retain historical terminology. The old heading anchor above preserves
   documentation links, not a runtime interface.
 - Current Wave JSON exposes `history: Evidence<SessionHistory>`; Rust, Swift and

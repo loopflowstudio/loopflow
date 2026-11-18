@@ -260,10 +260,9 @@ those lines by binary.
 ## Planning and external transitions
 
 A Wave's selected Project holds its Tasks, KRs and targets. Project rows own saved
-planning, with optional provider bindings and separate delivery observations.
-“Chapter” names that plan rather than another runtime object. Local changes save
-before provider delivery; observed provider conflicts follow the planning writer's
-rules. Replanning preserves started Tasks and their worktree, PR and execution;
+planning, with optional tracker bindings and separate tracker events. Local
+changes save before their tracker actions send; conflicts a tracker reports follow
+the planning writer's rules. Replanning preserves started Tasks and their worktree, PR and execution;
 competing current provider Projects require reconciliation.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider

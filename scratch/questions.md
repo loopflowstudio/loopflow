@@ -8,3 +8,5 @@
 - Wave Project commands: `lf wave edit-plan`/`update-plan` → `edit-project`/`update-project` (`--plan` → `--file`); `lf wave plan` and its `bind`/`connect`/`reteam` keep "plan". Passed over: one `lf wave project edit|update|bind` group (moves bind out of the plan group for little gain).
 - `LinearIssueEvidence` → `LinearIssueState` (concept review).
 - Authored Wave files still say "chapter" and are left as written: `.lf/wave/growth/MEMORY.md:4`, `.lf/wave/infrastructure/GOAL.md:38,49`, `.lf/wave/infrastructure/MEMORY.md:653`, and GOAL/MEMORY of intelligence, product. GOAL.md lines are read by agents; rewording them is their author's call.
+- Served routes follow the CLI: `repo.plan` → `repo.tracker`, `plan.answer` → `repo.tracker.answer` (write-docs; `rust/loopflow/src/server/README.md`, `docs/dev/planning.md`).
+- `lf repo tracker` output keeps today's "Tracker: linear. 3 open · 1 lost." shape in `docs/work.md`; the plan's sketch (`tracker  linear (team …)` columns) was not adopted.

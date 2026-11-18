@@ -220,3 +220,15 @@ names. Released migrations, release notes and released-schema fixtures under
 - slice 1: `cargo test -p loopflow-storage` mirror test + `check_migrations.py` — implement
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
+
+## Docs (written first)
+
+Changed in place: `docs/work.md`, `docs/config.md`, `docs/surfaces.md`,
+`docs/dev/planning.md`, `docs/dev/reference.md`, `docs/dev/data.md`,
+`docs/dev/reference-models.md`, `docs/dev/reference-runtime.md`,
+`docs/dev/reference-cutover.md`, `AGENTS.md`, `swift/README.md`,
+`rust/loopflow/src/server/README.md`, `rust/loopflow-execution/src/ops/README.md`,
+builtin `wave/skill/split-wave.md`. `documented_commands` fails until slice 2
+adds `lf repo tracker` and `lf wave edit-project` / `update-project --file`.
+Dev-doc prose still saying provider/observation/delivery for the tracker
+(`docs/dev/planning.md` beyond § Words) is slice 4.

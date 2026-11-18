@@ -274,7 +274,8 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `wave.plan.bind`, `.connect`, `.reteam` | `lf wave plan bind`, `connect`, `reteam` | write; `engine::wave::planning_bind`, `planning_connect`, `planning_reteam` |
 | `plan.list` | `lf plan list` | read |
 | `plan.board` | `lf plan board` | read |
-| `repo.plan` | `lf repo plan` | read |
+| `repo.tracker` | `lf repo tracker` | read |
+| `repo.tracker.answer` | `lf repo tracker answer <id>` | write |
 | `repo.people`, `.tokens`, `.path` | `lf repo people`, `lf repo tokens`, `lf repo path` | read |
 | `repo.release` | `lf repo release run [<version>] [-t <target>]`; the other `release` verbs are its steps, CLI only | write, detached; `engine::repo::release` |
 | `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
@@ -347,7 +348,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
-  `plan.list`, `repo.plan` and `process.list`. It answers
+  `plan.list`, `repo.tracker` and `process.list`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/unavailable/body` subscription frame. Typed
   [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint

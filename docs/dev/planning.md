@@ -6,13 +6,13 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave update-plan --wave product --plan scratch/product-plan.json
+lf wave update-project --wave product --file scratch/product-plan.json
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
-cadence, budget and metric instruments across plans. Its planning owns Tasks,
-KRs and targets; connected to Linear, that planning is one In Progress Linear
-Project. Each Wave's plan is authored in place and `lf wave plan bind`
+cadence, budget and metric instruments across Projects. Its current Project
+owns Tasks, KRs and targets; connected to Linear, it is one In Progress Linear
+Project. A Wave's Project is edited in place and `lf wave plan bind`
 selects another existing Linear Project.
 [Cutover status](reference-cutover.md#cutover-status) records
 other implementation and proof gaps.
@@ -21,16 +21,13 @@ other implementation and proof gaps.
 
 | Word | Means | Not |
 |---|---|---|
-| plan | the shared Waves, Projects and Tasks; a Wave's plan is its Project | |
-| Project | the Wave's current plan | Chapter |
-| tracker | where the plan is mirrored: Git, Linear or Asana | bridge; provider means the agent's provider |
-| action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect |
-| event | one incoming change from a tracker | |
+| plan | the shared Waves, Projects and Tasks | |
+| Project | a Wave's current Project: its KRs, targets and Tasks | Chapter |
+| tracker | where the plan is mirrored: Git, Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
+| action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect, receipt, delivery, export |
+| event | one incoming change from a tracker | observation, acceptance, acquisition |
 | sync | moving the plan in either direction | |
 | Work | the model's name, in dev docs only | |
-
-Older code still says observation, acceptance and acquisition for events,
-provider for the tracker, and Chapter for the Project.
 
 ## Planning authority and identity
 
@@ -276,20 +273,20 @@ Session/Process records and checkout paths never enter the Git document.
 One view answers "where does my change stand" on every tracker:
 `TrackerActionStatus` (`planning_sync.rs`). An action is open while `queued`
 or `sent`, and lost while `conflicted`, with the losing `local_value` and the
-winning `tracker_value`. `lf repo plan` lists the repository's open and lost
+winning `tracker_value`. `lf repo tracker` lists the repository's open and lost
 actions ("3 open · 1 lost"), and a Task's or Project's `sync` is its slice. A
 lost action retires when it is answered: a later save of its subject
 ("answered by a later save"), an event that changes that field again at a
 newer revision ("changed again in Linear"), or `answer_lost` over action ids
-of any owner (`lf repo plan answer <id> --keep-theirs | --use-mine`, served
-as `plan.answer` for Desktop's Keep / Use mine on every line; `lf task sync
+of any owner (`lf repo tracker answer <id> --keep-theirs | --use-mine`, served
+as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task sync
 --keep-theirs | --use-mine` answers a Task's whole slice). Git
 has no queue: a field's competing journal heads are its lost values, the
 winner's value as `tracker_value`, until a save names them all as parents;
-an answer records the chosen value with every head as a parent. `lf repo plan`
-on Git lists its destinations, its acquisition/publication receipts and held
+an answer records the chosen value with every head as a parent. `lf repo tracker`
+on Git lists its destinations, its fetch and publication receipts and held
 projections, then its lost values. The retained
-mutation journal grows with every edit, so `lf repo plan journal` reads it on
+mutation journal grows with every edit, so `lf repo tracker journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
@@ -394,21 +391,20 @@ untouched. An imported completed Project stays selected history and cannot be re
 Activation records its exact Process on the Wave; that Process remains the sole owner of
 its terminal outcome and error. Swift retains command transport feedback only.
 
-## Replace the plan, preserve the work
+## Replace a Wave's Project, keep the work
 
 ```bash
-lf wave edit-plan product --name "2026-10 — customer work"
-lf wave update-plan --wave product --plan scratch/product-plan.json
+lf wave edit-project product --name "2026-10 — customer work"
+lf wave update-project --wave product --file scratch/product-plan.json
 lf wave plan bind product <Project UUID>     # select another existing Project
 ```
 
-`update-plan` replaces the current Project's KRs and metric targets with the
+`update-project` replaces the current Project's KRs and metric targets with the
 supplied JSON (`{"metric_targets":[],"krs":[]}`); names, summaries and
 unrelated content stay. `bind` moves the Wave's shared selection to an
 existing non-terminal Project. Neither moves a Task: started Tasks keep their
 identity, checkout, PR and captured execution where they are, and `lf task
-move` is the one way a Task changes Wave. There is no rotation operation and
-no Chapter.
+move` is the one way a Task changes Wave. There is no rotation operation.
 
 ## Inspect planning before starting execution
 

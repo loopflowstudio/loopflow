@@ -181,35 +181,6 @@ sent again and applied once.
   ("Linear, Asana or a Git ref is the repository's tracker"),
   `rust/loopflow/src/server/README.md`, `rust/loopflow-storage/SCHEMA.md`.
 
-## What goes
-
-- `planning_git.rs` (437 lines); Git half of `ops/planning_sync.rs`
-  (`fetch_repository`, `publish_repository*`, `exchange_destination`,
-  `fetch_destination`, `publish_destination`, `wait_for_publication`,
-  `git_destinations`, `git_journal`, `adopt_personal_key`,
-  `configured_destination`, `defer_exchange`, `PlanningSync` and its three
-  starters: `harness/native_session.rs:526`, `agent/mod.rs:1019`,
-  `transport/hosted.rs:101,904`).
-- `loopflow-storage`: `git_tracker.rs`, `sqlite/git_tracker.rs` (1116),
-  `planning_exchange.rs` (`PlanningMutation`, causal parents),
-  `planning_destination.rs`, journal parts of `planning_sync.rs` /
-  `sqlite/planning_sync.rs`, `planning_write::capture` / `retain` /
-  `settle` (journal recording), `execution/store/git_tracker.rs`,
-  `WriteOrigin::Import`'s "Git peer" meaning (it becomes "the hub's value").
-- `TrackerConfig::Git`, `GitPlan` (`Shared`/`Personal`) after the marked
-  fallback.
-- Tests: `tests/planning_git_tests.rs`, `planning_reconnect_tests.rs`,
-  `tests/e2e/planning_reconnect.py`, Git parts of `planning_setup_tests.rs`,
-  `planning_foreground_tests.rs`, `store/planning_sync_tests.rs`,
-  `planning_exchange_lifecycle_tests.rs`.
-- Swift: `GitDestination.swift`, `GitDestinationsView.swift`,
-  `PeerPlanning.swift` and their DTO fixture `git_destinations.json`.
-- PR #1971 and LOO-899 / LOO-868 patches go with the code they patched.
-
-Survives: every Wave, Project, Task and comment id and value, ownership
-entries; the Linear/Asana `tracker_actions` queue; Machine-local Sessions, Processes,
-checkouts, reservations (Infrastructure Wave memory "Plan ownership").
-
 ## Cutover for etude
 
 Not code (no cross-repo migrations). Before installing: with the released
@@ -254,37 +225,60 @@ origin, inert; deleting it is one hand-run
   reached mini at once. A swapped hub binary answered "Loopflow server uses
   another executable".
 
-## What remains: slice 2, delete Git
+## What slice 2 built (2026-11-18)
 
-1. **Give the hub exchange its own call sites.** Today it rides
-   `planning_sync::exchange_repository`, which goes with Git. Reads come only
-   at the Git boundaries (`lf task sync`, a cold Task lookup, a foreground
-   provider's loop, `lf wave status --sync`); `docs/work.md` says "Each `lf`
-   command sends what is open and reads what changed on the hub". Sends hold
-   that; reads must too.
-2. **Delete everything in "What goes"**, with `-- leaving:` marks in
-   `plan_hub.sql` for every `git_tracker_*` table and the `planning_peer_*` /
-   `planning_destinations` copies (and `planning_user` if nothing else reads
-   it). `WriteOrigin::Import` then means only "the hub's value".
-3. **`lf repo tracker --json` / `TrackerStatus` and Desktop's tracker line**
-   report the hub (they still report Git destinations with a hub set);
-   `Plan: this Machine (hub)` on the hub, which today prints the Git status.
-4. **`lf task sync` output**: prints `<id>: synchronized`
-   (`ops/task.rs:2640`); `docs/work.md:245` shows `nothing open`.
-5. **`.lf/config.yaml` `tracker: { git: … }`**: parsed as "no tracker",
-   marked with a removal Task filed in this change.
-6. **Docs** in "Affected surfaces" that still describe Git.
-7. **Rust integration test** of the acceptance sequence with the carrier
-   mocked at the `lf server connect` pipe, including a lost `plan.apply`
-   reply sent again (store tests cover the sequence; the two-home run covered
-   the carrier).
-8. **etude cutover against mini** (below), by hand.
+- Git planning is deleted: `planning_git.rs`, the Git half of
+  `ops/planning_sync.rs` and `PlanningSync` with its three starters, storage
+  `git_tracker*`, `planning_exchange.rs`, `planning_destination.rs`, the
+  writer's journal capture and the migration seed hook, `lf repo tracker key`
+  / `journal`, `session receive --planning-key`, `TrackerKind::Git`, Swift
+  `GitDestination(s)View`, their fixtures and tests, the `two-people` World and
+  `codex_connect.py --planning-peers`. `task_history.rs` (filing recovery, only
+  the Git publish called it) and the World's `person`/`teammate` went with them.
+- `plan_hub.sql` marks every `git_tracker_*`, `planning_peer_*`,
+  `planning_destinations` and `planning_user` table `-- leaving: … LOO-938`;
+  SCHEMA.md regenerated.
+- Hub call sites: the Machine server calls `plan_hub::after_command` after each
+  command it answers (coalesced per repository, quiet 5 s after the last);
+  saves send at once (`sync_after_save`); `lf task sync`, cold Task lookup,
+  provider exit (`check_directory`), `lf wave status --sync` and
+  `lf repo tracker --subscribe` read. One exchange per repository at a time
+  (file lock under `locks/plan-hub`).
+- `TrackerConfig` is Linear | Asana | `ReleasedGit`; `planning_transport()`
+  returns `None` for no tracker. Task a94893 removes `ReleasedGit`.
+- `lf repo tracker --json`: `{tracker, plan: {hub, is_hub, unreachable_since,
+  error, open: [{owner, field, phase}]}, actions}`; text prints
+  `Plan: this Machine.`, `Plan: this Machine (hub).` or the hub lines. Desktop's
+  `RepositoryPlanView` shows the same line (part `plan_home`).
+- `lf task sync` prints `<id>: nothing open` or the Task's open lines.
+- Acceptance test over the real carrier:
+  `machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines`
+  (stand-in ssh relaying to mini's `lf server connect`; offline edit; a
+  `plan.apply` answer dropped after mini wrote it, sent again, mini's change
+  watermark unchanged). Passes in 16 s.
 
-Known and left: a foreground provider's loop opens `ssh … lf server connect`
-every 5 s to read; LOO-861's persistent connection replaces it.
+## What slice 2 taught
 
-Checks: focused Rust tests per slice; `lf repo tracker` on etude before and
-after cutover (gate, by hand); Desktop view tests for the tracker line (CI).
+- **The Git import did more than write values.** It parsed ownership markers
+  from arriving comments, steered the Task with a person's direction comment
+  and re-claimed open claims the arrived log no longer showed. Slice 1's hub
+  import did none of it. `import_hub_plan` and `apply_hub_edits` now do all
+  three (`comments_arrived`), with the person's Machine names.
+- **A cold move needed the plan on the target first.** A Task moving to a hub
+  that had no checkout could not be found there. `session_move::ready` now
+  sends the plan to the hub after the check has cloned it, then asks again.
+- `planning_reconnect_tests` is Linear, not Git; it stays.
+
+## What remains
+
+- etude cutover against mini, by hand at gate (below).
+- Swift view tests for `RepositoryPlanView`, run locally once; CI owns the rest.
+
+## Checks
+
+- `cargo nextest … -E 'test(sqlite::plan_hub::) | test(sqlite::planning_write::) | test(planning_config_tests::) | test(store::ownership_lifecycle_tests::) | test(store::children_tests::) | test(store::planning_sync_tests::) | test(migration_runner::) | test(query_plans::)'`: passed (implement).
+- `… --test integration --test global_commands -E 'test(machine_commands::) | test(planning_setup_tests::) | test(subscribe::the_plan_s_home) | test(dto_fixtures::) | test(repository_identity_binding)'`: passed after one test's expected text moved to "not found" (implement).
+- Gate: `server::schema::tests::`, `lf::tests::`, `documented_commands::`, `binary(golden_prompt)` if prompts changed, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
 
 ## User docs (written first, 2026-11-18)
 

@@ -32,3 +32,15 @@
 - Implement: owners hard-deleted on the hub (Wave removal) leave their
   `plan_changes` rows; `plan.changes` skips them and other Machines keep
   their copies. Deletion that travels is still `task_deleted_at` only.
+- Implement slice 2 (2026-11-18): "each `lf` command reads" is built as the
+  Machine server exchanging after each command it answers, coalesced and
+  quiet for 5 s after the last. A command run without the server only sends.
+  Reversible: a periodic server-side exchange instead.
+- Implement slice 2: the `two-people` World and its binary are deleted with Git
+  sharing (no coworker sharing without Linear/Asana). Claims across two
+  people's Machines are now covered only by the ownership tests over a hub.
+- Implement slice 2: `lf session receive --planning-key` is gone, so a released
+  lf moving a Task to a branch-built Machine fails on the unknown flag until
+  both run the same release.
+- Implement slice 2: `lf repo tracker --subscribe` exchanges when it reads,
+  which is when the store changes, not on a clock.

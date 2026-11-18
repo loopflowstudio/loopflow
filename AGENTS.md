@@ -340,7 +340,13 @@ them.
 - Claude's stand-in endpoints (`LF_TEST_CLAUDE_*`) exist only in execution's `cfg(test)`: a real `lf` calls the provider. A detached child that must reach them is the test binary re-executed behind an `LF_BIN` script; its ctor drops `CLAUDE_CONFIG_DIR`, so pass the home in a fixture variable.
 - With `LF_HOME` unset, `lf_home_dir` finds the account's real `~/.lf` even under an isolated `HOME`, so a fixture changing `LF_HOME` holds the env lock.
 - A fixture that launches an agent for a Task or a Wave holds a `loopflow_test_support::MachineServer` for its `LF_HOME`. Without one the launch runs `lf install server`, which registers a launchd or systemd job for the temporary home.
-- A headless fixture that expects turn hooks or `LF_PROVIDER_CONTEXT` launches managed: its command names the Task (`--task`), with a connected fixture account and a `MachineServer`. Plain `lf -b <skill>` in a Task's checkout is bare: two context hooks, a steer check that reads the store (`LF_BARE_STEER`), no turn hooks, no server. A managed interactive launch, held by the server, keeps every hook; a bare one has the same hooks as `-b`, at a terminal or held in a Desktop pane.
+- A fixture expecting turn hooks or `LF_PROVIDER_CONTEXT` launches a Task Graph
+  worker or resumes a work session, with a `MachineServer` for its home.
+  Direct `lf <skill>` and `lf graph <name>` launches are chats or batches, including with
+  `--task` or `LF_AS`: context hooks, `LF_BARE_STEER` reads the store, no turn
+  reports or required server. The [four launch names](docs/glossary.md#loopflows-words)
+  are work session, worker, chat and batch. The launch matrix covers all four
+  harnesses in each cell.
 - Claims name their person by the repository's Git `user.email`; fixtures set a repository-local identity (`TestRepo` does).
 - Fixtures that change process environment share `loopflow_test_support::env_lock`.
 - macOS SMAppService fixtures register temporary bundles with LaunchServices and launch bundle-owned update code through it. An external test runner writing a registered app can fail App Management; it does not model an app update. Cleanup unregisters the unique service job and LaunchServices entry.

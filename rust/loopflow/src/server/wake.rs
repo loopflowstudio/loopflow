@@ -525,7 +525,10 @@ mod tests {
                 [],
             )
             .unwrap();
-        let (listener, _) = fixture.idle_claude();
+        // Bare hooks read steers directly; they never report a Stop or inbox.
+        let socket = fixture.home.path().join("inbox.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        fixture.claude(&socket);
         listener.set_nonblocking(true).unwrap();
         fixture.comment(&fixture.store, "c-1", "PR: https://example.test/pr/1");
         after_turn(&fixture.store, "wake-bare");

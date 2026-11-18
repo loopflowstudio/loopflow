@@ -9,6 +9,7 @@ import os
 import select
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -72,14 +73,6 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
         )
         assert json.loads(_message(stream))["id"] == 1
         _send(stream, {"method": "initialized"}, True)
-        if started := os.environ.get("FIXTURE_STARTED"):
-            Path(started).touch()
-            deadline = time.monotonic() + 75
-            while not Path(os.environ["FIXTURE_STOP"]).exists():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("idle terminal was not released")
-                time.sleep(0.1)
-            return
         _send(
             stream,
             {
@@ -231,6 +224,43 @@ def _overrides(args: list[str]) -> dict:
     return overrides
 
 
+def _start_hooks(args: list[str]) -> None:
+    """Like Codex, a bare terminal tells its SessionStart hooks its thread."""
+    resumed = "resume" in args
+    thread = args[args.index("resume") + 2] if resumed else str(uuid.uuid4())
+    event = json.dumps({
+        "hook_event_name": "SessionStart",
+        "session_id": thread,
+        "source": "resume" if resumed else "startup",
+        "cwd": os.getcwd(),
+    })
+    hooks = _overrides(args).get("hooks", {})
+    for group in hooks.get("SessionStart", []):
+        for hook in group["hooks"]:
+            subprocess.run(
+                ["/bin/sh", "-c", hook["command"]],
+                input=event.encode(),
+                stdout=subprocess.DEVNULL,
+                check=True,
+            )
+    return thread
+
+
+def _record_rollout(home: Path, args: list[str], thread: str) -> None:
+    """A bare first prompt leaves a rollout an app-server can resume."""
+    if "resume" in args or "--" not in args or args[-1] == "--":
+        return
+    prompt = args[args.index("--") + 1]
+    (home / "native-thread").write_text(thread)
+    turn = {
+        "id": "turn-0",
+        "status": "completed",
+        "items": [{"id": "user-0", "type": "userMessage",
+                   "content": [{"type": "text", "text": prompt}]}],
+    }
+    (home / "native-turns.json").write_text(json.dumps([turn]))
+
+
 def _server(endpoint: str, home: Path) -> None:
     server_config = json.loads((home / "native-server-config.json").read_text())
     tier_file = home / "native-tier.json"
@@ -281,6 +311,14 @@ def _server(endpoint: str, home: Path) -> None:
                     method = rpc.get("method")
                     params = rpc.get("params", {})
                     if method is None:
+                        if started := os.environ.get("FIXTURE_STARTED"):
+                            # The turn stays open until its test releases it.
+                            Path(started).touch()
+                            deadline = time.monotonic() + 75
+                            while not Path(os.environ["FIXTURE_STOP"]).exists():
+                                if time.monotonic() >= deadline:
+                                    raise TimeoutError("open turn was not released")
+                                time.sleep(0.1)
                         with lock:
                             (home / "native-approval.json").write_text(json.dumps(rpc["result"]))
                             (home / "native-answer.json").write_text(json.dumps(rpc))
@@ -417,7 +455,10 @@ def main() -> None:
         _stdio(home)
     else:
         # A bare launch is plain `codex` in its terminal, configured by argv.
+        if (home / "fail-terminal").exists():
+            raise SystemExit(24)
         print("\n".join(args), flush=True)
+        _record_rollout(home, args, _start_hooks(args))
         with (home / "launched").open("a") as file:
             file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
 

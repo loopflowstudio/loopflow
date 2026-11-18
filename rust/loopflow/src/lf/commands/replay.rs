@@ -30,8 +30,8 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
             source.artifact_key
         )
     })?;
-    let (harness, model) = loopflow_execution::config::parse_agent(&request.agent);
-    if harness != source.harness || model != source.model {
+    let agent = loopflow_execution::config::Agent::parse(&request.agent)?;
+    if agent.harness.as_str() != source.harness || agent.model != source.model {
         return Err(anyhow!(
             "capture {} has inconsistent provider identity",
             source.artifact_key
@@ -43,7 +43,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         task_prompt: request.task_prompt.clone(),
         skill_invocation: request.skill_invocation.clone(),
         output_schema: request.output_schema.clone(),
-        agent: Some(request.agent.clone()),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
         write_scope: request.write_scope,
@@ -51,16 +50,17 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         skip_permissions: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
-        ..AgentConfig::default()
+        ..AgentConfig::new(agent)
     };
-    config.apply_agent_override();
-    let (selected_harness, model) = loopflow_execution::config::parse_agent(config.agent()?);
+    config.apply_agent_override()?;
+    let selected_harness = config.agent.harness.as_str().to_owned();
+    let model = config.agent.model.clone();
     if !check_cli_available(&selected_harness) {
         return Err(anyhow!(
             "'{selected_harness}' CLI is unavailable on this Machine"
         ));
     }
-    request.agent = config.agent()?.to_owned();
+    request.agent = config.agent.to_string();
     request.account_id = None;
     let spec = SessionCaptureSpec {
         harness: selected_harness,
@@ -101,13 +101,16 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         Some(file)
     };
     let process = ProcessConfig {
-        auto: true,
         stream: true,
         runtime: Some(capture.clone()),
         context_file: context_file.as_ref().map(|file| file.path().to_path_buf()),
         ..ProcessConfig::default()
     };
-    let result = run_agent(&config, &process);
+    let result = run_agent(
+        &config,
+        &process,
+        loopflow_execution::harness::LaunchKind::Batch,
+    );
     let outcome = match &result {
         Ok(result) if result.exit_code == 0 => "completed",
         Ok(_) | Err(_) => "failed",

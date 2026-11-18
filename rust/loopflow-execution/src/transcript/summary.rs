@@ -111,15 +111,8 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
         let Some(harness) = HarnessKind::parse(&session.harness) else {
             continue;
         };
-        let (state, modified, after) = match (harness, &session.thread) {
-            (_, None) => (RetentionState::Facts, None, None),
-            (HarnessKind::OpenCode, Some(_)) => (RetentionState::Unknown, None, None),
-            (HarnessKind::Pi, Some(thread)) => match super::modified(thread.as_str().as_ref()) {
-                Some(modified) => (RetentionState::Provider, Some(modified), None),
-                None => (RetentionState::Facts, None, None),
-            },
-            (HarnessKind::Claude | HarnessKind::Codex, Some(thread)) => {
-                let provider = harness.provider().expect("Claude and Codex have providers");
+        let (state, modified, after) = if let Some(thread) = &session.thread {
+            if let Some(provider) = harness.provider() {
                 match conversation_home(store, provider, thread)? {
                     None => (RetentionState::Facts, None, None),
                     Some(home) => {
@@ -139,7 +132,12 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
                         }
                     }
                 }
+            } else {
+                let (state, modified) = harness.harness().transcript_retention(thread);
+                (state, modified, None)
             }
+        } else {
+            (RetentionState::Facts, None, None)
         };
         let age = AgeBucket::of(now - modified.unwrap_or(session.last_at));
         *groups

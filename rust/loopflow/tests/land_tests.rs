@@ -2009,7 +2009,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         &launcher,
         if failed_startup {
             // The repair's `lf` is admitted, then fails before it opens a Session.
-            "#!/bin/sh\nif [ \"$4 $5\" = 'skill ci-fix' ]; then set -- \"$1\" \"$2\" \"$3\" skill absent-ci-fix \"$6\"; fi\nexec \"$LF_TEST_BIN\" \"$@\"\n"
+            "#!/bin/sh\nfor arg do shift; [ \"$prev $arg\" = 'skill ci-fix' ] && arg=absent-ci-fix; set -- \"$@\" \"$arg\"; prev=$arg; done\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         } else {
             "#!/bin/sh\nexec \"$LF_TEST_BIN\" \"$@\"\n"
         },

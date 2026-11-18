@@ -11,7 +11,6 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
-use crate::config::parse_agent;
 use crate::ops::error::{OpsError, OpsResult};
 use crate::ops::task_actions::{derive_task_actions, TaskActionEvidence, TaskActionModel};
 use crate::store::SharedStore;
@@ -109,7 +108,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         &personal,
         None,
     );
-    let provider = agent.ok().map(|agent| parse_agent(&agent).0);
+    let provider = agent.ok().map(|agent| agent.harness.as_str().to_owned());
     // A Task's worktree is its checkout on this Machine.
     let local_machine = store.local_machine().await.map_err(task_error)?;
     let machine_id = task.worktree.is_some().then(|| local_machine.id.clone());

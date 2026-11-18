@@ -639,7 +639,7 @@ mod tests {
             )
             .unwrap();
             assert_eq!(
-                prepared.config.agent().unwrap(),
+                prepared.config.agent.to_string(),
                 inspection.config.agent().unwrap()
             );
             assert_eq!(prepared.config.chrome, Some(true));

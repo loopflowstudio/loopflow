@@ -485,6 +485,8 @@ mod tests {
                     Err(crate::StoreError::NotFound)
                 ));
                 store.unrecorded_agent_ancestry().unwrap();
+                store.idle_conversation_candidates(None).unwrap();
+                store.idle_conversation_candidates(Some("viewed")).unwrap();
                 // The first read files the steer's receipt; the second has nothing to file.
                 store.session_steers("viewed", 0, 10).unwrap();
                 store.session_steers("viewed", 0, 10).unwrap();

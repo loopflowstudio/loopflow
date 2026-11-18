@@ -1544,26 +1544,10 @@ impl SqliteStore {
         Ok(attachment)
     }
 
-    /// Whether a recorded Session is bare: neither recorded as Task, Wave or
-    /// repository work nor a scope's ongoing conversation.
+    /// A bound or primary conversation reopens managed; attribution alone
+    /// leaves a Session bare.
     pub fn is_bare(&self, session: &crate::session::LfSession) -> StoreResult<bool> {
-        Ok(!session
-            .work_source
-            .is_some_and(crate::session::WorkSource::is_managed)
-            && self.primary_scope(&session.id)?.is_none())
-    }
-
-    /// Whether a launch is Work: its command names a Task or Wave
-    /// (`named_work`), or the recorded Session it opens is not bare.
-    pub fn is_work(
-        &self,
-        named_work: bool,
-        session: Option<&crate::session::LfSession>,
-    ) -> StoreResult<bool> {
-        match session {
-            Some(session) if !named_work => Ok(!self.is_bare(session)?),
-            _ => Ok(named_work),
-        }
+        Ok(session.bound_at.is_none() && self.primary_scope(&session.id)?.is_none())
     }
 
     /// Whether this interactive Session runs as the foreground program of the
@@ -1594,6 +1578,21 @@ impl SqliteStore {
             store: self,
             session,
             expected: expected.cloned(),
+            _dispatch: dispatch,
+        })
+    }
+
+    /// Take over whatever attachment the Session has once its fence is held. A
+    /// previous provider's exit may still be settling; reading the attachment
+    /// before the fence would race that settlement.
+    pub fn begin_session_resume(&self, session: &str) -> StoreResult<SessionTransfer<'_>> {
+        let session = loopflow_model::id::canonical_session(session);
+        let dispatch = self.lock_session_attachment(&session)?;
+        let expected = self.session_attachment(&session)?;
+        Ok(SessionTransfer {
+            store: self,
+            session,
+            expected,
             _dispatch: dispatch,
         })
     }

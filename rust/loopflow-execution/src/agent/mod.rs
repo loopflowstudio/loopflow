@@ -1496,7 +1496,12 @@ mod tests {
     }
 
     fn terminal_args(config: &AgentConfig) -> Vec<String> {
-        let admitted = crate::harness::admit_for_test(tempfile::tempdir().unwrap().path());
+        let _lock = crate::journal::test_env_lock();
+        let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+        // OpenCode's and Pi's context extensions call back into this checkout's lf.
+        std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
+        let home = tempfile::tempdir().unwrap();
+        let admitted = crate::harness::admit_for_test(home.path());
         let launch = crate::harness::launch_for_test(config.agent.harness, config, &admitted);
         launch
             .harness

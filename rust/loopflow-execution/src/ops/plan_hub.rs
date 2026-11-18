@@ -3,6 +3,8 @@
 //! Asana never comes here.
 use std::collections::BTreeMap;
 use std::path::Path;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 
@@ -33,6 +35,15 @@ pub fn hub(store: &SqliteStore) -> Result<Option<Machine>> {
         .ok_or_else(|| anyhow!("hub {id} is not an added Machine; run `lf machine add` for it, or `lf machine hub --clear`"))
 }
 
+/// Whether this Machine is the hub its own setting names, where other
+/// Machines keep their plan.
+pub fn is_hub(store: &SqliteStore) -> Result<bool> {
+    let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;
+    Ok(config.hub.is_some_and(|id| {
+        crate::store::machines::local_machine(store).is_ok_and(|local| local.id == id)
+    }))
+}
+
 /// `lf machine hub <machine>` and `--clear` (`None`). Clearing keeps every
 /// plan here and drops what was waiting for the hub; changing the hub reads
 /// the new one's whole plan first.
@@ -53,6 +64,87 @@ pub fn set_hub(
 
 // ---- Another Machine's side ----
 
+/// Exchange `repo`'s plan with this Machine's hub, when it has one and the
+/// repository has no Linear or Asana. With `send_only`, see [`exchange`].
+pub async fn sync(store: &crate::store::Store, repo: &str, send_only: bool) -> Result<()> {
+    if crate::ops::tracker::connected(repo) {
+        return Ok(());
+    }
+    let Some(hub) = hub(&store.sqlite)? else {
+        return Ok(());
+    };
+    let (sqlite, repo) = (store.sqlite.clone(), repo.to_owned());
+    crate::journal::request::spawn_blocking(move || exchange(&sqlite, &repo, &hub, send_only))
+        .await?
+}
+
+/// After a command on this Machine's server answers: one exchange for its
+/// repository, on a thread of its own. Commands arriving while one runs, or
+/// within [`QUIET`] of the last, share it.
+pub fn after_command(directory: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        if let Err(error) = exchange_after_command(&directory) {
+            tracing::debug!(error = %format!("{error:#}"), "hub exchange after a command failed");
+        }
+    });
+}
+
+const QUIET: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Default)]
+struct Turn {
+    running: bool,
+    again: bool,
+    finished: Option<Instant>,
+}
+
+static TURNS: Mutex<BTreeMap<String, Turn>> = Mutex::new(BTreeMap::new());
+
+fn exchange_after_command(directory: &Path) -> Result<()> {
+    // Most Machines have no hub: answer that before any Git or SQLite.
+    if crate::config::placement::global_settings_at(&crate::store::lf_home_dir())?
+        .hub
+        .is_none()
+    {
+        return Ok(());
+    }
+    let repo = crate::repository::discover(directory)?.to_string();
+    if crate::ops::tracker::connected(&repo) {
+        return Ok(());
+    }
+    let path = crate::store::default_db_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let store = crate::store::open_sqlite(&path)?;
+    let Some(hub) = hub(&store)? else {
+        return Ok(());
+    };
+    {
+        let mut turns = TURNS.lock().expect("hub turns are never poisoned");
+        let turn = turns.entry(repo.clone()).or_default();
+        if turn.running {
+            turn.again = true;
+            return Ok(());
+        }
+        if turn.finished.is_some_and(|at| at.elapsed() < QUIET) {
+            return Ok(());
+        }
+        turn.running = true;
+    }
+    loop {
+        let result = exchange(&store, &repo, &hub, false);
+        let mut turns = TURNS.lock().expect("hub turns are never poisoned");
+        let turn = turns.entry(repo.clone()).or_default();
+        if std::mem::take(&mut turn.again) && result.is_ok() {
+            continue;
+        }
+        turn.running = false;
+        turn.finished = Some(Instant::now());
+        return result;
+    }
+}
+
 /// Read what changed on `hub` for `repo`, then send what is open. With
 /// `send_only`, a repository with nothing open and past first contact asks
 /// the hub nothing. The outcome is recorded for `lf repo tracker`.
@@ -60,6 +152,8 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
+    // One exchange per repository at a time; the next one reads what this one wrote.
+    let _turn = lock(store, &repository)?;
     let plan = store.select_hub(repo, hub.id.as_str())?;
     if send_only && plan.seq.is_some() && store.open_hub_sends(repo)?.is_empty() {
         return Ok(());
@@ -90,6 +184,22 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
     let error = result.as_ref().err().map(|error| format!("{error:#}"));
     store.record_hub_exchange(repo, error.as_deref())?;
     result
+}
+
+fn lock(store: &SqliteStore, repository: &RepositoryId) -> Result<std::fs::File> {
+    let path = store
+        .home_dir()?
+        .join("locks/plan-hub")
+        .join(format!("{repository}.lock"));
+    std::fs::create_dir_all(path.parent().expect("a lock path has a parent"))?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&path)?;
+    fs2::FileExt::lock_exclusive(&file)?;
+    Ok(file)
 }
 
 fn open(

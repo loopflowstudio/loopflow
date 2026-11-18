@@ -146,10 +146,6 @@ impl SqliteStore {
             "repository_plans",
             "waves",
             "agent_sessions",
-            "git_tracker_destinations",
-            "git_tracker_routes",
-            "git_tracker_imports",
-            "git_tracker_conflicts",
             "tracker_projects",
             "tracker_items",
         ] {

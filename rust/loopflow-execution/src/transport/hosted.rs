@@ -98,7 +98,6 @@ pub(super) struct Hosted {
     /// that takes it up later has it too.
     kept: Option<std::path::PathBuf>,
     execution_directory_reported: bool,
-    planning: Option<crate::ops::planning_sync::PlanningSync>,
     title: crate::terminal_title::OutputTitle,
     /// The Program Status viewers were last sent.
     reported_status: Option<loopflow_model::program_status::Records>,
@@ -165,7 +164,6 @@ impl Hosted {
             departure: None,
             kept: None,
             execution_directory_reported: false,
-            planning: None,
             title: crate::terminal_title::OutputTitle::new(&id, &watchers.titles),
             reported_status: None,
             replayed_through: 0,
@@ -187,7 +185,6 @@ impl Hosted {
     /// taking up what an earlier server kept there.
     pub fn keep_in(&mut self, directory: std::path::PathBuf) {
         if let Some(record) = read_kept::<Box<NativeExit>>(&directory.join(EXIT_RECORD)) {
-            self.planning = start_planning(&record.cwd);
             self.attachment.set(Some(&record));
             self.exit_record = Some(record);
         }
@@ -258,7 +255,6 @@ impl Hosted {
                 departure,
                 kept,
                 execution_directory_reported,
-                planning,
                 close_notice,
                 ..
             } = self;
@@ -382,9 +378,6 @@ impl Hosted {
                                     viewer.reply(answers, Reply::Busy);
                                     continue;
                                 }
-                                // The launcher kept its repository's planning in
-                                // sync while it waited; that wait is now ours.
-                                *planning = start_planning(&record.cwd);
                                 if let Some(directory) = kept {
                                     keep(&directory.join(EXIT_RECORD), &record);
                                 }
@@ -400,7 +393,6 @@ impl Hosted {
                                 if let Some(directory) = kept {
                                     remove_kept(&directory.join(EXIT_RECORD));
                                 }
-                                *planning = None;
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::Attach {
@@ -698,7 +690,6 @@ impl Hosted {
                 },
                 None,
             );
-            self.planning = None;
             self.exit = Some((settled.code, Instant::now()));
         }
         // Include held native output and exit reports before announcing the end.
@@ -899,14 +890,6 @@ impl Hosted {
         }
         child.poll(!self.pending_input.is_empty(), fds);
     }
-}
-
-fn start_planning(cwd: &std::path::Path) -> Option<crate::ops::planning_sync::PlanningSync> {
-    crate::ops::planning_sync::PlanningSync::start_for_directory(cwd)
-        .inspect_err(
-            |error| tracing::warn!(%error, "planning sync unavailable to this held terminal"),
-        )
-        .ok()
 }
 
 /// The launcher's handed-off exit record, beside its held terminal.

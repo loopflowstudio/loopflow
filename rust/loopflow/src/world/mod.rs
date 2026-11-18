@@ -304,7 +304,6 @@ impl World {
             },
             &repo,
         )?;
-        loopflow_execution::ops::planning_sync::defer_exchange(true);
         Ok(Self {
             dir,
             env,
@@ -1051,18 +1050,8 @@ impl World {
         Ok(())
     }
 
-    /// Publish the planning saved while building, write `env.json` and return
-    /// the environment.
+    /// Write `env.json` and return the environment.
     pub fn finish(self) -> Result<WorldEnv> {
-        loopflow_execution::ops::planning_sync::defer_exchange(false);
-        self.runtime.block_on(async {
-            let store = loopflow_execution::ops::planning_sync::planning_store().await?;
-            loopflow_execution::ops::planning_sync::publish_repository(
-                &store,
-                &self.repo.to_string_lossy(),
-            )
-            .await
-        })?;
         std::fs::write(
             self.dir.join("env.json"),
             serde_json::to_string_pretty(&self.env)? + "\n",

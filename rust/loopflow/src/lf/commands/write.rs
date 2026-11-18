@@ -1333,7 +1333,7 @@ impl Write {
         directory_of!(self).map_or(Path::new("/"), PathBuf::as_path)
     }
 
-    fn directory_mut(&mut self) -> Option<&mut PathBuf> {
+    pub(crate) fn directory_mut(&mut self) -> Option<&mut PathBuf> {
         directory_of!(self)
     }
 }

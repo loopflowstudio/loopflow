@@ -1273,6 +1273,11 @@ async fn request(
     #[cfg(test)]
     let completion = tests::take_request_completion(&id);
     let write = operation.is_write();
+    let mut operation = operation;
+    // A command run here reads what changed on the hub and sends what it saved.
+    let planned = matches!(origin, Origin::Local)
+        .then(|| operation.directory())
+        .flatten();
     let started = Instant::now();
     let trace_id = loopflow_model::id::TraceId::default();
     let answer = match operation {
@@ -1309,6 +1314,9 @@ async fn request(
             ServerMessage::written_error(Some(id.clone()), refusal, answer.revisions)
         }
     };
+    if let Some(directory) = planned {
+        loopflow_execution::ops::plan_hub::after_command(directory);
+    }
     // A closed connection drops the answer; the effect stands.
     if let Err(failure) = outgoing.deliver(message, reservation).await {
         let _ = deliver(

@@ -79,11 +79,10 @@ impl From<crate::linear::LinearError> for TrackerError {
 /// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
 fn transport(repo: &Path) -> Option<TrackerConfig> {
-    crate::config::load_planning_transport(repo).ok()
+    crate::config::load_planning_transport(repo).ok().flatten()
 }
 
-/// The tracker that sends through the action queue: Linear or Asana. Git
-/// exchanges its journal instead, so it answers none.
+/// The tracker that sends through the action queue: Linear or Asana.
 pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
     match transport(repo)? {
         TrackerConfig::Linear { .. } => Some(TrackerKind::Linear),

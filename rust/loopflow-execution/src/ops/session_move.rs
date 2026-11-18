@@ -435,9 +435,6 @@ async fn ready(
                 .to_string(),
             ]);
         }
-        if let Some(key) = store.sqlite.planning_user_key()? {
-            args.extend(["--planning-key".into(), key]);
-        }
     }
     crate::machine::ssh::request(target, &args, None)
         .await

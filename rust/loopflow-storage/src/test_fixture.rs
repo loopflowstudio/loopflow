@@ -399,36 +399,6 @@ pub fn process(store: &SqliteStore, number: u32, started_at: i64) -> LfProcessId
     id
 }
 
-/// Apply a validated peer snapshot against explicit disconnected fixture facts.
-pub fn import_saved(
-    store: &SqliteStore,
-    repo: &str,
-    destination: &str,
-    revision: &str,
-    incoming: &crate::planning_exchange::PlanningSnapshot,
-) -> StoreResult<()> {
-    repository(store, repo);
-    let inputs = store.repository_registration(repo)?;
-    let incoming = incoming
-        .canonicalized()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    incoming
-        .validate()
-        .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
-    assert!(
-        store.import_prepared_git_plan(&super::sqlite::GitPlanImport {
-            inputs: &inputs,
-            repo,
-            destination,
-            revision,
-            incoming: &incoming,
-            planning_connected: false,
-            machine_names: Default::default(),
-        })?
-    );
-    Ok(())
-}
-
 pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
     let attachment = store
         .session_attachment(session)

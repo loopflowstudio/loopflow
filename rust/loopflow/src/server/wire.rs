@@ -26,6 +26,15 @@ impl Operation {
             Self::Write(_) | Self::Measured(MeasuredOperation::Write { .. })
         )
     }
+
+    /// The directory a command names, whose repository it reads or changes.
+    pub(super) fn directory(&mut self) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Read(read) => read.directory_mut().cloned(),
+            Self::Write(write) => write.directory_mut().cloned(),
+            Self::Server(_) | Self::Measured(_) => None,
+        }
+    }
 }
 
 /// The ordinary operation and its per-request work receipt in one response.

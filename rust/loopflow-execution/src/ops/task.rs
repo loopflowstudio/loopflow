@@ -969,15 +969,13 @@ pub(crate) async fn fetch_from_tracker(
         .unwrap_or_default()
         .planning_transport()
     {
-        crate::config::TrackerConfig::Linear { .. } => {
+        Some(crate::config::TrackerConfig::Linear { .. }) => {
             super::linear::fetch_task(repo, issue, refresh).await
         }
-        crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in the Git tracker"
-        ))),
-        crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
+        Some(crate::config::TrackerConfig::Asana { .. }) => Err(task_error(format!(
             "Task {issue:?} not saved on this Machine; Asana Tasks are not fetched yet"
         ))),
+        _ => Err(task_error(format!("Task {issue:?} not found"))),
     }
 }
 
@@ -1847,10 +1845,8 @@ pub fn task_create(
     let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
-        if let Err(error) =
-            super::planning_sync::fetch_repository(&store, &main.to_string_lossy()).await
-        {
-            tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
+        if let Err(error) = super::plan_hub::sync(&store, &main.to_string_lossy(), false).await {
+            tracing::debug!(error = %format!("{error:#}"), "hub read pending; creating from this Machine's plan");
         }
         let receipt = receipt.map(|identity| Receipt {
             identity,
@@ -1915,8 +1911,8 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
-            tracing::warn!(%error, "tracker fetch after creation failed");
+        if let Err(error) = super::plan_hub::sync(&store, &repo, false).await {
+            tracing::warn!(error = %format!("{error:#}"), "hub read after creation failed");
         }
         super::planning_sync::sync_after_save(
             &store,
@@ -2555,9 +2551,9 @@ pub fn start_conversation_beside(task: &Task) {
 }
 
 /// `lf task sync`: exchange the Task with its tracker now. Linear and Asana
-/// look for every sent action and resend what the tracker lacks; Git
-/// exchanges the repository's planning ref, so a peer's Task this Machine
-/// has not fetched yet is found in `repo`'s planning. An `answer` first
+/// look for every sent action and resend what the tracker lacks; without a
+/// tracker, the repository's plan is exchanged with the hub, so a Task another
+/// Machine made is found there. An `answer` first
 /// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
@@ -2586,10 +2582,10 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let fetched = super::planning_sync::fetch_repository(&store, &repo).await;
-            super::planning_sync::publish_repository_now(&store, &repo).await?;
-            fetched?;
-            return synced(&store, &task.id).await;
+            super::plan_hub::sync(&store, &repo, false)
+                .await
+                .map_err(|error| task_error(format!("{error:#}")))?;
+            return hub_synced(&store, &repo, &task).await;
         };
         let project = task
             .project_id
@@ -2636,11 +2632,40 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
         .map_err(task_error)?
         .ok_or_else(|| task_error("Task is missing"))?;
     let open = store.task_tracker_sync(task).map_err(task_error)?.lines();
-    Ok(if open.is_empty() {
-        format!("{}: synchronized", saved.identifier)
+    Ok(open_lines(&saved.identifier, &open))
+}
+
+/// What `lf task sync` prints after a hub exchange: the Task's values still
+/// on their way to the hub.
+async fn hub_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
+    let open = store
+        .sqlite
+        .open_hub_sends(repo)
+        .map_err(task_error)?
+        .into_iter()
+        .filter(|send| send.edit.target == task.id.as_str())
+        .map(|send| {
+            let field = send.edit.change.field();
+            format!(
+                "{} · {}",
+                field.strip_prefix("task_").unwrap_or(field),
+                if send.sent_at.is_some() {
+                    "sent"
+                } else {
+                    "queued"
+                }
+            )
+        })
+        .collect::<Vec<_>>();
+    Ok(open_lines(&task.identifier, &open))
+}
+
+fn open_lines(identifier: &str, open: &[String]) -> String {
+    if open.is_empty() {
+        format!("{identifier}: nothing open")
     } else {
-        format!("{}: {}", saved.identifier, open.join("\n"))
-    })
+        format!("{identifier}: {}", open.join("\n"))
+    }
 }
 
 pub fn completion_pending(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {

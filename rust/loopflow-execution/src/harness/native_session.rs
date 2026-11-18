@@ -517,13 +517,6 @@ pub fn run(
     launch_lock: Option<File>,
     capture: Option<&LfProcessRuntime>,
 ) -> Result<NativeOutcome> {
-    let cwd = launch
-        .config
-        .cwd
-        .clone()
-        .map(Ok)
-        .unwrap_or_else(std::env::current_dir)?;
-    let _planning_sync = crate::ops::planning_sync::PlanningSync::start_for_directory(&cwd)?;
     let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));

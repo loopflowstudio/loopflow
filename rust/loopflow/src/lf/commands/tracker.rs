@@ -1,4 +1,4 @@
-//! Inspect configured planning and recover personal Git identity.
+//! Where the repository's plan lives and what is still on its way there.
 
 use std::path::Path;
 
@@ -11,7 +11,7 @@ use loopflow_execution::store::planning_sync::{
 use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
 use loopflow_execution::store::Store;
 
-/// `lf repo tracker [key|journal]`; bare, the planning status.
+/// `lf repo tracker [answer]`; bare, the planning status.
 pub fn run(cmd: Option<&RepoTrackerCommand>, json: bool, subscribe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
     if let Some(RepoTrackerCommand::Answer {
@@ -46,41 +46,13 @@ pub(crate) fn status_repository(directory: &Path) -> Result<std::path::PathBuf> 
     )
 }
 
-/// Whether the repository containing `checkout` plans through a Git ref.
-pub fn plans_through_git(checkout: &Path) -> Result<bool> {
-    let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
-    let config = loopflow_execution::config::load_config(Some(&repo))?.unwrap_or_default();
-    Ok(matches!(
-        config.planning_transport(),
-        loopflow_execution::config::TrackerConfig::Git { .. }
-    ))
-}
-
-/// Exchange the repository's Git planning ref now. The exchange is per
-/// repository, so a Wave selection has no effect.
+/// `lf wave status --sync` in a repository without Linear or Asana: one
+/// exchange with this Machine's hub, when it has one.
 pub fn refresh(checkout: &Path) -> Result<()> {
     let repo = loopflow_execution::git::worktrees::main_repo_root(checkout)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        let repo_key = repo.to_string_lossy();
-        // Refresh records its own failure and never waits on publication.
-        // A refresh waits out another process's publication, then sends this
-        // Machine's pending changes out.
-        let fetched =
-            loopflow_execution::ops::planning_sync::fetch_repository(&store, &repo_key).await;
-        loopflow_execution::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
-        fetched?;
-        let destinations =
-            loopflow_execution::ops::planning_sync::git_destinations(&store, &repo_key).await?;
-        let Some(active) = destinations.into_iter().find(|d| d.active) else {
-            return Err(anyhow!(
-                "no Git planning destination is configured; see `lf repo tracker`"
-            ));
-        };
-        if let Some(error) = active.fetch_error {
-            return Err(anyhow!("planning refresh failed: {error}"));
-        }
-        Ok(())
+        loopflow_execution::ops::plan_hub::sync(&store, &repo.to_string_lossy(), false).await
     })
 }
 
@@ -100,25 +72,7 @@ async fn run_async(repo: &Path, cmd: Option<&RepoTrackerCommand>, status_json: b
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
-        Some(RepoTrackerCommand::Key { new, recover }) => {
-            let saved = store.planning_user_key().await?;
-            let key = match (recover, saved, new) {
-                (Some(key), _, _) => key.clone(),
-                (None, Some(key), _) => key,
-                (None, None, true) => uuid::Uuid::new_v4().to_string(),
-                _ => return Err(anyhow!(
-                    "No planning user key. Use `lf repo tracker key --new` once, then recover that key on other machines with `--recover <UUID>`."
-                )),
-            };
-            if *new || recover.is_some() {
-                store.provision_planning_user_key(&key).await?;
-            }
-            println!("{key}");
-        }
         None => print_status(&store, &repo_key, status_json).await?,
-        Some(RepoTrackerCommand::Journal { json }) => {
-            print_journal(&store, &repo_key, *json).await?
-        }
         Some(RepoTrackerCommand::Answer { .. }) => {
             unreachable!("answering runs before the status read")
         }
@@ -145,8 +99,7 @@ fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<(
 }
 
 /// `lf repo tracker --subscribe`: `lf repo tracker --json` now and each time
-/// it changes. The subscription reads stored status; `lf wave status --sync` and
-/// foreground providers exchange planning.
+/// it changes. With a hub it also exchanges with the hub while it runs.
 pub(crate) fn subscribe_status(
     repo: &Path,
     transport: loopflow_execution::read_stream::Transport,
@@ -157,53 +110,60 @@ pub(crate) fn subscribe_status(
         (),
         move |store, ()| {
             let repo_key = repo_key.clone();
-            async move { Ok(status(store.as_deref(), &repo_key).await?.report()) }
+            async move {
+                if let Some(store) = store.as_deref() {
+                    if let Err(error) =
+                        loopflow_execution::ops::plan_hub::sync(store, &repo_key, false).await
+                    {
+                        tracing::debug!(error = %format!("{error:#}"), "hub exchange pending");
+                    }
+                }
+                status(store.as_deref(), &repo_key)
+            }
         },
         transport,
     )
 }
 
-/// What `repo.tracker` answers: the tracker, for Git its destinations with
-/// their import and publication evidence, and every open and lost tracker
-/// action.
+/// What `repo.tracker` answers: the tracker, or for a repository without
+/// one where its plan lives, and every open and lost tracker action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct TrackerStatus {
-    /// `git`, `linear` or `asana`.
-    tracker: String,
-    destinations: Vec<loopflow_execution::store::GitDestination>,
+    /// `linear` or `asana`; `null` when the plan is in Loopflow's store.
+    tracker: Option<String>,
+    /// Where a plan without a tracker lives; `null` with a tracker.
+    plan: Option<PlanHome>,
     /// What the tracker has yet to confirm (open: `queued`, `sent`), in send
     /// order, and each value it kept over a local one (lost: `conflicted`)
-    /// until it is answered. On Git, only lost values: Git keeps no queue.
+    /// until it is answered.
     actions: Vec<TrackerActionStatus>,
 }
 
-/// Where a repository's planning is exchanged.
-enum Status {
-    /// The tracker its config names, and its open and lost actions.
-    Remote(TrackerKind, Vec<TrackerActionStatus>),
-    /// Git's destinations, and each value its journal lost.
-    Git(
-        Vec<loopflow_execution::store::GitDestination>,
-        Vec<TrackerActionStatus>,
-    ),
+/// The Machine that holds a plan without a tracker.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct PlanHome {
+    /// The hub's name when the plan is on another Machine; `null` when it is
+    /// on this one.
+    hub: Option<String>,
+    /// Whether this Machine is the hub other Machines keep their plan on.
+    is_hub: bool,
+    /// When the hub stopped answering (Unix seconds), while it still does not.
+    unreachable_since: Option<i64>,
+    /// Why the last exchange with the hub failed.
+    error: Option<String>,
+    /// Values saved here the hub has yet to confirm, in send order.
+    open: Vec<HubOpen>,
 }
 
-impl Status {
-    /// What `lf repo tracker --json` prints.
-    fn report(self) -> TrackerStatus {
-        match self {
-            Self::Remote(tracker, actions) => TrackerStatus {
-                tracker: tracker.as_str().to_owned(),
-                destinations: Vec::new(),
-                actions,
-            },
-            Self::Git(destinations, actions) => TrackerStatus {
-                tracker: TrackerKind::Git.as_str().to_owned(),
-                destinations,
-                actions,
-            },
-        }
-    }
+/// One value on its way to the hub: `3e1c9a07  title · queued`.
+#[derive(Debug, serde::Serialize, schemars::JsonSchema)]
+pub(crate) struct HubOpen {
+    /// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
+    owner: String,
+    /// The field without its record prefix: `title`, `name`.
+    field: String,
+    /// `queued`, or `sent` while its answer is outstanding.
+    phase: String,
 }
 
 /// The name a person reads for an action's owner: a Task's identifier, a
@@ -228,8 +188,7 @@ fn remote_transport(repo: &str) -> Result<Option<TrackerKind>> {
         loopflow_execution::config::load_config(Some(Path::new(repo)))?.unwrap_or_default();
     Ok(config
         .planning_transport()
-        .remote_name()
-        .map(|name| TrackerKind::parse(&name.to_ascii_lowercase()))
+        .map(|tracker| TrackerKind::parse(&tracker.name().to_ascii_lowercase()))
         .transpose()?)
 }
 
@@ -238,156 +197,49 @@ pub(crate) fn read_status(directory: &Path) -> Result<TrackerStatus> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
-        Ok(status(Some(&store), &repo.to_string_lossy())
-            .await?
-            .report())
+        status(Some(&store), &repo.to_string_lossy())
     })
 }
 
-/// Stored status only: an exchange binds the configured destination.
-async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
+/// Stored status only; exchanges happen around commands.
+fn status(store: Option<&Store>, repo: &str) -> Result<TrackerStatus> {
     let tracker = remote_transport(repo)?;
-    let actions = match store {
-        Some(store) => store
-            .sqlite
-            .repository_tracker_actions(repo, tracker.unwrap_or(TrackerKind::Git))?,
-        None => Vec::new(),
+    let Some(store) = store else {
+        return Ok(TrackerStatus {
+            tracker: tracker.map(|tracker| tracker.as_str().to_owned()),
+            plan: None,
+            actions: Vec::new(),
+        });
     };
     if let Some(tracker) = tracker {
-        return Ok(Status::Remote(tracker, actions));
+        return Ok(TrackerStatus {
+            tracker: Some(tracker.as_str().to_owned()),
+            plan: None,
+            actions: store.sqlite.repository_tracker_actions(repo)?,
+        });
     }
-    Ok(Status::Git(
-        match store {
-            Some(store) => {
-                loopflow_execution::ops::planning_sync::git_destinations(store, repo).await?
-            }
-            None => Vec::new(),
-        },
-        actions,
-    ))
+    Ok(TrackerStatus {
+        tracker: None,
+        plan: Some(plan_home(store, repo)?),
+        actions: Vec::new(),
+    })
 }
 
-/// The command binds the configured destination first, so a changed
-/// selection shows at once; the in-app read and the subscription show stored status.
-async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
-    loopflow_execution::ops::planning_sync::configured_destination(store, repo).await?;
-    let status = status(Some(store), repo).await?;
-    if json {
-        println!(
-            "{}",
-            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(
-                &status.report()
-            )?)?
-        );
-        return Ok(());
-    }
-    let (destinations, lost) = match status {
-        Status::Remote(tracker, actions) => {
-            let open = actions
-                .iter()
-                .filter(|action| action.phase != ActionPhase::Conflicted)
-                .count();
-            let lost = actions.len() - open;
-            if actions.is_empty() {
-                println!("Tracker: {}. Nothing open.", tracker.as_str());
-                return Ok(());
-            }
-            println!("Tracker: {}. {open} open · {lost} lost.", tracker.as_str());
-            // Open lines in send order, then lost ones.
-            let mut actions = actions;
-            actions.sort_by_key(|action| action.phase == ActionPhase::Conflicted);
-            print_actions(store, &actions)?;
-            return Ok(());
-        }
-        Status::Git(destinations, lost) => (destinations, lost),
+fn plan_home(store: &Store, repo: &str) -> Result<PlanHome> {
+    let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? else {
+        return Ok(PlanHome {
+            hub: None,
+            is_hub: loopflow_execution::ops::plan_hub::is_hub(&store.sqlite)?,
+            unreachable_since: None,
+            error: None,
+            open: Vec::new(),
+        });
     };
-    if let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
-        return print_hub(store, repo, &hub);
-    }
-    if !destinations.iter().any(|d| d.active) {
-        println!("Tracker: git. Saves stay on this Machine until its remote takes them.");
-    }
-    for destination in destinations {
-        println!(
-            "{}  {}{}  {} records",
-            destination.id,
-            destination.reference,
-            if destination.active {
-                " (configured)"
-            } else {
-                ""
-            },
-            destination.selected_records
-        );
-        println!(
-            "  Retained import: {}",
-            destination.imported_revision.as_deref().unwrap_or("none")
-        );
-        println!(
-            "  Fetched: {}",
-            destination.fetched_revision.as_deref().unwrap_or("none")
-        );
-        println!(
-            "  Publication: {} ({}){}",
-            destination
-                .publication_state
-                .as_deref()
-                .unwrap_or("not attempted"),
-            destination
-                .publication_revision
-                .as_deref()
-                .unwrap_or("none"),
-            if destination.pending_local {
-                "; local changes pending"
-            } else {
-                ""
-            }
-        );
-        for error in [destination.fetch_error, destination.publication_error]
-            .into_iter()
-            .flatten()
-        {
-            println!("  {error}");
-        }
-        for conflict in destination.conflicts {
-            println!("  Held {}: {}", conflict.target, conflict.reason);
-        }
-    }
-    println!(
-        "Import retention is not publication; `lf repo tracker journal` lists retained values."
-    );
-    if !lost.is_empty() {
-        println!("Tracker: git. {} lost.", lost.len());
-        print_actions(store, &lost)?;
-    }
-    Ok(())
-}
-
-/// `Plan: hub mini. 2 open.`, then each open value under its owner's name.
-fn print_hub(store: &Store, repo: &str, hub: &loopflow_model::durable::Machine) -> Result<()> {
     let plan = store.sqlite.hub_plan(repo)?;
-    let sends = store.sqlite.open_hub_sends(repo)?;
-    let failing = plan.as_ref().and_then(|plan| {
-        plan.failing_since
-            .map(|since| (since, plan.error.clone().unwrap_or_default()))
-    });
-    let place = match &failing {
-        Some((since, _)) => format!(
-            "hub {}, unreachable since {}",
-            hub.name(),
-            loopflow_execution::output::format_time(*since)
-        ),
-        None => format!("hub {}", hub.name()),
-    };
-    if sends.is_empty() {
-        println!("Plan: {place}. Nothing open.");
-        if let Some((_, error)) = &failing {
-            println!("  {error}");
-        }
-        return Ok(());
-    }
-    println!("Plan: {place}. {} open.", sends.len());
-    let lines = sends
+    let failing = plan.as_ref().and_then(|plan| plan.failing_since);
+    let open = store
+        .sqlite
+        .open_hub_sends(repo)?
         .iter()
         .map(|send| {
             // `task_title` reads `title` under its Task.
@@ -396,29 +248,99 @@ fn print_hub(store: &Store, repo: &str, hub: &loopflow_model::durable::Machine) 
                 .iter()
                 .find_map(|prefix| field.strip_prefix(prefix))
                 .unwrap_or(field);
-            let mut line = format!(
-                "{field} · {}",
-                if send.sent_at.is_some() {
+            Ok(HubOpen {
+                owner: hub_owner_name(store, send)?,
+                field: field.to_owned(),
+                phase: if send.sent_at.is_some() {
                     "sent"
                 } else {
                     "queued"
                 }
-            );
-            if let Some((_, error)) = &failing {
-                line.push_str(&format!(" · {error}"));
-            }
-            Ok((hub_owner_name(store, send)?, line))
+                .to_owned(),
+            })
         })
         .collect::<Result<Vec<_>>>()?;
-    let width = lines
+    Ok(PlanHome {
+        hub: Some(hub.name().to_owned()),
+        is_hub: false,
+        unreachable_since: failing,
+        error: failing.and(plan.and_then(|plan| plan.error)),
+        open,
+    })
+}
+
+async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
+    let status = status(Some(store), repo)?;
+    if json {
+        println!(
+            "{}",
+            serde_json::to_string(&loopflow_execution::read_stream::selected_answer(&status)?)?
+        );
+        return Ok(());
+    }
+    if let Some(plan) = status.plan {
+        print_plan(&plan);
+        return Ok(());
+    }
+    let tracker = status.tracker.unwrap_or_default();
+    let actions = status.actions;
+    let open = actions
         .iter()
-        .map(|(owner, _)| owner.len())
+        .filter(|action| action.phase != ActionPhase::Conflicted)
+        .count();
+    let lost = actions.len() - open;
+    if actions.is_empty() {
+        println!("Tracker: {tracker}. Nothing open.");
+        return Ok(());
+    }
+    println!("Tracker: {tracker}. {open} open · {lost} lost.");
+    // Open lines in send order, then lost ones.
+    let mut actions = actions;
+    actions.sort_by_key(|action| action.phase == ActionPhase::Conflicted);
+    print_actions(store, &actions)
+}
+
+/// `Plan: hub mini. 2 open.`, then each open value under its owner's name.
+fn print_plan(plan: &PlanHome) {
+    let Some(hub) = &plan.hub else {
+        println!(
+            "Plan: {}.",
+            if plan.is_hub {
+                "this Machine (hub)"
+            } else {
+                "this Machine"
+            }
+        );
+        return;
+    };
+    let place = match plan.unreachable_since {
+        Some(since) => format!(
+            "hub {hub}, unreachable since {}",
+            loopflow_execution::output::format_time(since)
+        ),
+        None => format!("hub {hub}"),
+    };
+    if plan.open.is_empty() {
+        println!("Plan: {place}. Nothing open.");
+        if let Some(error) = &plan.error {
+            println!("  {error}");
+        }
+        return;
+    }
+    println!("Plan: {place}. {} open.", plan.open.len());
+    let width = plan
+        .open
+        .iter()
+        .map(|open| open.owner.len())
         .max()
         .unwrap_or(0);
-    for (owner, line) in lines {
-        println!("  {owner:width$}  {line}");
+    for open in &plan.open {
+        let mut line = format!("{} · {}", open.field, open.phase);
+        if let Some(error) = &plan.error {
+            line.push_str(&format!(" · {error}"));
+        }
+        println!("  {:width$}  {line}", open.owner);
     }
-    Ok(())
 }
 
 /// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
@@ -476,31 +398,4 @@ fn print_actions(store: &Store, actions: &[TrackerActionStatus]) -> Result<()> {
 /// The prefix `lf repo tracker answer` accepts for a line.
 fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
-}
-
-async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let journals = loopflow_execution::ops::planning_sync::git_journal(store, repo).await?;
-    if json {
-        println!("{}", serde_json::to_string(&journals)?);
-        return Ok(());
-    }
-    for journal in journals {
-        println!("{}", journal.destination);
-        for (id, change) in journal.changes {
-            println!(
-                "  {} {} [{}; {}]: {}",
-                change.edit.target,
-                change.edit.change.field(),
-                id,
-                if journal.candidates.contains(&id) {
-                    "candidate, not confirmed"
-                } else {
-                    "retained alternative"
-                },
-                change.edit.change.value()?
-            );
-        }
-    }
-    println!("Copy a retained value into an ordinary edit to save it again.");
-    Ok(())
 }

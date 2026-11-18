@@ -1,7 +1,7 @@
 //! Launch and settle AgentProcesses in the inventory used by gates and live views.
 //! Unknown identity, duplicate PID/birth and unknown attachment life grant no signal authority.
 use crate::journal::{
-    agent_evidence, lf_evidence, process_identity_evidence, process_started_at, OsProcess,
+    agent_evidence, process_identity_evidence, process_started_at, OsProcess,
     ProcessIdentityEvidence,
 };
 use crate::os_process::terminate_process_group;
@@ -10,7 +10,6 @@ use crate::process::attachment;
 use crate::harness::LaunchKind;
 use crate::store::{StoreError, StoreResult};
 use anyhow::{anyhow, Result};
-use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
 use std::collections::{HashMap, HashSet};
 
@@ -294,16 +293,16 @@ pub(crate) fn stop_session_agent(
     let agent = store
         .agent_processes()?
         .into_iter()
-        .find(|agent| agent.process.id == attachment.agent_process_id);
+        .find(|agent| agent.id == attachment.agent_process_id);
     let Some(agent) = agent else {
         return Ok(());
     };
     // Already-dead providers have no observed interruption outcome. Preserve that
     // uncertainty instead of attributing their death to this Move request.
     // When its own exit settled it first, stop whatever the Session holds now.
-    if agent_evidence(store, &agent.process.id) == ProcessIdentityEvidence::Dead {
+    if agent_evidence(store, &agent.id) == ProcessIdentityEvidence::Dead {
         let settled = attachment::settle_agent_process(store, &agent, || {
-            if agent_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
+            if agent_evidence(store, &agent.id) != ProcessIdentityEvidence::Dead {
                 return Err(StoreError::InvalidAuthority(
                     "AgentProcess death changed".into(),
                 ));
@@ -316,13 +315,9 @@ pub(crate) fn stop_session_agent(
         return Ok(());
     }
     let stop = || -> Result<()> {
-        let (pid, birth) = agent
-            .process
-            .pid
-            .zip(agent.process.os_started_at)
-            .ok_or_else(|| {
-                anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
-            })?;
+        let (pid, birth) = agent.pid.zip(agent.os_started_at).ok_or_else(|| {
+            anyhow::anyhow!("AgentProcess identity is unknown; resume was not started")
+        })?;
         match process_identity_evidence(pid, birth) {
             ProcessIdentityEvidence::Dead => return Ok(()),
             ProcessIdentityEvidence::Unknown => {
@@ -405,11 +400,11 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     let agents = store.agent_processes()?;
     let Some(agent) = agents
         .iter()
-        .find(|agent| agent.process.id == attachment.agent_process_id)
+        .find(|agent| agent.id == attachment.agent_process_id)
     else {
         return Ok(false);
     };
-    let Some((pid, started)) = agent.process.pid.zip(agent.process.os_started_at) else {
+    let Some((pid, started)) = agent.pid.zip(agent.os_started_at) else {
         return Ok(false);
     };
     if agent.interactive {
@@ -429,9 +424,7 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         ProcessIdentityEvidence::Live => {}
     }
     if agents.iter().any(|other| {
-        other.process.id != agent.process.id
-            && other.process.pid == Some(pid)
-            && other.process.os_started_at == Some(started)
+        other.id != agent.id && other.pid == Some(pid) && other.os_started_at == Some(started)
     }) {
         return Err(StoreError::InvalidAuthority(
             "AgentProcess OS identity has multiple owners".into(),
@@ -443,7 +436,7 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
         .and_then(super::HarnessKind::parse)
     {
         kind.harness()
-            .validate_agent_process_close(store, session, &agent.process.id)?;
+            .validate_agent_process_close(store, session, &agent.id)?;
     }
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
@@ -519,79 +512,42 @@ pub struct AgentProcessCleanup {
     pub reason: String,
 }
 
-/// The recovery pass's AgentProcess settlement: reap orphans, then release
-/// ancestry it can prove was never recorded.
+/// The recovery pass's AgentProcess settlement: reap orphans.
 pub fn settle_agent_processes() -> Result<AgentProcessReapReport> {
     let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-    let mut report = reap_in(&store)?;
-    let repaired =
-        repair_unrecorded_ancestry_in(&store, crate::journal::current_lf_process_id().as_ref())?;
-    report.records.extend(repaired.records);
-    report.errors.extend(repaired.errors);
-    Ok(report)
+    Ok(reap_in(&store)?)
 }
 
-fn repair_unrecorded_ancestry_in(
-    store: &SqliteStore,
-    repairer: Option<&LfProcessId>,
-) -> StoreResult<AgentProcessReapReport> {
-    let mut report = AgentProcessReapReport::default();
-    for agent in store.unrecorded_agent_ancestry()? {
-        let mut record = AgentProcessCleanup {
-            id: agent.agent_process_id.clone(),
-            action: "repaired".into(),
-            reason: format!(
-                "parent LfProcess {} was never recorded",
-                agent.parent_lf_process_id
-            ),
-        };
-        match attachment::release_unrecorded_ancestry(store, &agent, repairer) {
-            Ok(true) => {}
-            Ok(false) => {
-                record.action = "retained".into();
-                record.reason = "ancestry changed during repair".into();
-            }
-            Err(error) => {
-                record.action = "retained".into();
-                record.reason = error.to_string();
-                report
-                    .errors
-                    .push(format!("AgentProcess {}: {error}", agent.agent_process_id));
-            }
-        }
-        report.records.push(record);
-    }
-    Ok(report)
+/// A Session agent's holder is dead when no lf holds its attachment, or the
+/// lf holding it no longer runs.
+fn holder_dead(agent: &crate::process::AgentProcessState) -> bool {
+    agent.holder.as_ref().is_none_or(|holder| {
+        crate::journal::holder_evidence(holder) == ProcessIdentityEvidence::Dead
+    })
 }
 
 fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
     let agents = store.agent_processes()?;
     let mut counts = HashMap::new();
     for agent in &agents {
-        if let Some(identity) = agent.process.pid.zip(agent.process.os_started_at) {
+        if let Some(identity) = agent.pid.zip(agent.os_started_at) {
             *counts.entry(identity).or_insert(0usize) += 1;
         }
     }
-    let dead_lf =
-        |process: &LfProcessId| lf_evidence(store, process) == ProcessIdentityEvidence::Dead;
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
         let mut record = AgentProcessCleanup {
-            id: agent.process.id.clone(),
+            id: agent.id.clone(),
             action: "retained".into(),
             reason: "provider identity is unknown; PID absence is not exit evidence".into(),
         };
-        let Some((pid, start)) = agent.process.pid.zip(agent.process.os_started_at) else {
+        let Some((pid, start)) = agent.pid.zip(agent.os_started_at) else {
             // A reservation never requested a launch. Serialize with launch/takeover,
-            // and require the exact owning lf to be dead before retiring it.
-            let owner = agent
-                .attached_lf_process_id
-                .as_ref()
-                .or(agent.process.parent_lf_process_id.as_ref());
-            if agent.spawn_reserved && owner.is_some_and(dead_lf) {
+            // and require the lf holding it to be dead before retiring it.
+            if agent.spawn_reserved && holder_dead(agent) {
                 record.reason = "launch never requested and owning LfProcess is dead".into();
                 match attachment::settle_agent_process(store, agent, || {
-                    if !owner.is_some_and(dead_lf) {
+                    if !holder_dead(agent) {
                         return Err(StoreError::InvalidAuthority(
                             "reservation owner death changed".into(),
                         ));
@@ -606,7 +562,7 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
                         record.reason = error.to_string();
                         report
                             .errors
-                            .push(format!("AgentProcess {}: {error}", agent.process.id));
+                            .push(format!("AgentProcess {}: {error}", agent.id));
                     }
                 }
             }
@@ -617,10 +573,9 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
             Ok(process) => process,
             Err(error) => {
                 record.reason = format!("cannot observe PID {pid}: {error}");
-                report.errors.push(format!(
-                    "AgentProcess {}: {}",
-                    agent.process.id, record.reason
-                ));
+                report
+                    .errors
+                    .push(format!("AgentProcess {}: {}", agent.id, record.reason));
                 report.records.push(record);
                 continue;
             }
@@ -633,7 +588,7 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
         let dead = evidence == ProcessIdentityEvidence::Dead;
         let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
-            && agent.attached_lf_process_id.as_ref().is_none_or(dead_lf)
+            && holder_dead(agent)
             && observed
                 .as_ref()
                 .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
@@ -661,7 +616,7 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
                 }
             } else {
                 // Attachment life is sampled again beneath the transfer lock.
-                if !agent.attached_lf_process_id.as_ref().is_none_or(dead_lf) {
+                if !holder_dead(agent) {
                     return Err(StoreError::InvalidAuthority(
                         "attached LfProcess death is unresolved".into(),
                     ));
@@ -685,7 +640,7 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
             Err(error) => {
                 report
                     .errors
-                    .push(format!("AgentProcess {}: {error}", agent.process.id));
+                    .push(format!("AgentProcess {}: {error}", agent.id));
                 record.action = "retained".into();
                 record.reason = error.to_string();
                 report.records.push(record);
@@ -693,14 +648,13 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
             }
         }
         report.records.push(record);
-        let Some(session) = agent.process.agent_session_id.as_deref() else {
-            continue;
-        };
+        let session = agent.session_id.as_str();
         let Some(attachment) = store.session_attachment(session)? else {
             continue;
         };
-        if attachment.agent_process_id != agent.process.id
-            || !attachment.lf_process_id.as_ref().is_some_and(dead_lf)
+        if attachment.agent_process_id != agent.id
+            || attachment.lf_process_id.is_none()
+            || !holder_dead(agent)
         {
             continue;
         }
@@ -795,141 +749,8 @@ mod tests {
 
     use crate::harness::LaunchKind;
     use loopflow_model::id::LfProcessId;
-    use loopflow_storage::sqlite::SqliteStore;
     use std::os::unix::process::CommandExt;
     use std::process::{Command, Stdio};
-
-    /// The live LOO-643 shape: an ended agent reserved under an lf whose
-    /// start receipt never landed, still attached to that unrecorded lf.
-    fn unrecorded_ancestry_fixture(
-        store: &SqliteStore,
-        sql: &rusqlite::Connection,
-        name: &str,
-    ) -> (String, LfProcessId, loopflow_model::id::AgentProcessId) {
-        let session = store.test_session(name, &crate::session_record::new_artifact_key());
-        let ghost = store.test_lf_process();
-        let attachment =
-            attachment::claim_session_attachment(store, &session.id, None, &ghost, true).unwrap();
-        sql.execute_batch(&format!(
-            "UPDATE processes SET trace_id=id,completed_at=2 WHERE id='{agent}';
-             DELETE FROM processes WHERE id='{ghost}';
-             UPDATE agent_sessions SET provider_thread='thread-1' WHERE id='{session}';",
-            agent = attachment.agent_process_id,
-            session = session.id,
-        ))
-        .unwrap();
-        (session.id.to_string(), ghost, attachment.agent_process_id)
-    }
-
-    fn lineage(store: &SqliteStore) -> crate::process::diagnosis::Check {
-        crate::process::diagnosis::check_lineage(
-            &store.processes_since(0).unwrap(),
-            store.unrecorded_agent_ancestry().unwrap().len(),
-        )
-    }
-
-    #[test]
-    fn settlement_releases_unrecorded_ancestry_and_the_session_resumes() {
-        let (home, store, task) = loopflow_storage::test_fixture::store_with_task();
-        let sql = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-        let (session, ghost, agent) = unrecorded_ancestry_fixture(&store, &sql, "ladder");
-        let saved = store.session(&session).unwrap().unwrap();
-        store
-            .bind_session_prepared(
-                &session,
-                saved.captured,
-                &task,
-                &saved.cwd,
-                &crate::store::sessions::session_caller().unwrap(),
-            )
-            .unwrap();
-        let events = |_: &rusqlite::Connection| -> i64 {
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .query_row(
-                    "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
-                        +(SELECT count(*) FROM history.session_history WHERE session_id=?1)",
-                    [&session],
-                    |row| row.get(0),
-                )
-                .unwrap()
-        };
-        let before = events(&sql);
-        let resumer = store.test_lf_process();
-
-        assert!(
-            attachment::resume_session_attachment(&store, &session, &resumer, || Ok(false))
-                .is_err()
-        );
-        let check = lineage(&store);
-        assert!(
-            check.detail.contains("the server's recovery pass repairs"),
-            "{check:?}"
-        );
-        assert_eq!(events(&sql), before);
-
-        let applied = super::repair_unrecorded_ancestry_in(&store, Some(&resumer)).unwrap();
-        assert_eq!(applied.records.len(), 1);
-        assert_eq!(applied.records[0].id, agent);
-        assert_eq!(applied.records[0].action, "repaired");
-        assert!(applied.records[0].reason.contains(ghost.as_str()));
-        assert!(applied.errors.is_empty());
-        // The repair is a log line, not Session history.
-        assert_eq!(events(&sql), before);
-        assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
-
-        let rerun = super::repair_unrecorded_ancestry_in(&store, Some(&resumer)).unwrap();
-        assert!(rerun.records.is_empty());
-
-        // The Session resumes through the ordinary claim with native history intact.
-        assert_eq!(store.session_attachment(&session).unwrap(), None);
-        let resumed =
-            attachment::resume_session_attachment(&store, &session, &resumer, || Ok(false))
-                .unwrap();
-        assert_ne!(resumed.agent_process_id, agent);
-        let thread: Option<String> = sql
-            .query_row(
-                "SELECT provider_thread FROM agent_sessions WHERE id=?1",
-                [&session],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert_eq!(thread.as_deref(), Some("thread-1"));
-        assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
-    }
-
-    #[test]
-    fn settlement_leaves_pruned_parents_live_agents_and_recorded_owners_failing_doctor() {
-        let home = tempfile::tempdir().unwrap();
-        let database = home.path().join("db");
-        let store = crate::store::opening::open_ephemeral(&database).unwrap();
-        let sql = rusqlite::Connection::open(&database).unwrap();
-        let (_, _, pruned) = unrecorded_ancestry_fixture(&store, &sql, "pruned");
-        let (_, _, live) = unrecorded_ancestry_fixture(&store, &sql, "live");
-        let (_, _, owned) = unrecorded_ancestry_fixture(&store, &sql, "owned");
-        sql.execute(
-            "UPDATE processes SET attached_lf_process_id=?2 WHERE id=?1",
-            rusqlite::params![owned, store.test_lf_process()],
-        )
-        .unwrap();
-        sql.execute(
-            "UPDATE processes SET trace_id=?2 WHERE id=?1",
-            rusqlite::params![pruned, loopflow_model::id::TraceId::new()],
-        )
-        .unwrap();
-        sql.execute(
-            "UPDATE processes SET completed_at=NULL WHERE id=?1",
-            [&live],
-        )
-        .unwrap();
-        let report = super::repair_unrecorded_ancestry_in(&store, None).unwrap();
-        assert!(report.records.is_empty());
-        let check = lineage(&store);
-        assert!(check.status == crate::process::diagnosis::Status::Fail);
-        assert!(!check.detail.contains("recovery pass repairs"), "{check:?}");
-    }
 
     #[test]
     fn attachment_records_its_lf_when_the_start_receipt_was_lost() {
@@ -943,12 +764,14 @@ mod tests {
                 .execute("DELETE FROM processes WHERE id=?1", [&process])?;
             let session = store.test_session("lost", &crate::session_record::new_artifact_key());
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &process, true)?;
+                attachment::claim_session_attachment(&store, &session.id, None, &process)?;
             let parent = store.lf_process(&process)?.unwrap();
             let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(agent.trace_id, parent.trace_id);
             assert!(parent.command.is_some());
-            assert!(lineage(&store).status == crate::process::diagnosis::Status::Ok);
+            let lineage =
+                crate::process::diagnosis::check_lineage(&store.processes_since(0).unwrap());
+            assert!(lineage.status == crate::process::diagnosis::Status::Ok);
             Ok(())
         })
         .unwrap();
@@ -964,7 +787,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         let mut command = Command::new("/usr/bin/true");
@@ -998,42 +820,71 @@ mod tests {
     }
 
     #[test]
-    fn a_launcher_that_ended_before_recording_identity_never_started_its_agent() {
+    fn a_reservation_under_a_killed_holder_is_not_live_and_the_next_pass_ends_it() {
         let home = tempfile::tempdir().unwrap();
-        let database = home.path().join("db");
-        let store = crate::store::opening::open_ephemeral(&database).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let session = store.test_session("reserved", &crate::session_record::new_artifact_key());
-        let sql = rusqlite::Connection::open(&database).unwrap();
-        sql.execute(
-            "UPDATE agent_sessions SET interactive=1 WHERE id=?1",
-            [&session.id],
-        )
-        .unwrap();
+        let mut holder = Command::new("/bin/sleep").arg("30").spawn().unwrap();
+        let pid = holder.id();
+        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
         let launcher = LfProcessId::new();
-        sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at,completed_at,exit_code)
-             VALUES(?1,?1,strftime('%s','now'),strftime('%s','now'),1)",
-            [&launcher],
-        )
-        .unwrap();
-        let attachment =
-            attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
-                .unwrap();
+        let start = crate::process::LfProcessStart {
+            process: crate::process::LfProcess {
+                id: launcher.clone(),
+                pid: Some(pid),
+                os_started_at: Some(birth),
+                trace_id: loopflow_model::id::TraceId::new(),
+                parent_lf_process_id: None,
+                via_agent: None,
+                caller_session_id: None,
+                caller_agent_process_id: None,
+                command: None,
+                repo: None,
+                cwd: None,
+                started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
+                completed_at: None,
+                outcome: None,
+                exit_code: None,
+                signal: None,
+                error: None,
+            },
+            terminal: None,
+        };
+        let nobody = loopflow_storage::sqlite::SessionCaller {
+            agent: None,
+            capture_key: None,
+        };
+        let attachment = store
+            .attach_session(&session.id, None, &launcher, Some(&start), &nobody)
+            .unwrap();
+        let live = || {
+            crate::store::session_projection::session_summary(
+                &store,
+                &session.id,
+                loopflow_storage::rows::now_unix(),
+            )
+            .unwrap()
+            .unwrap()
+            .agent_process_evidence
+        };
+        assert_eq!(live(), crate::journal::ProcessIdentityEvidence::Unknown);
+
+        holder.kill().unwrap();
+        holder.wait().unwrap();
+        assert_eq!(live(), crate::journal::ProcessIdentityEvidence::Dead);
         assert_eq!(
             crate::journal::agent_evidence(&store, &attachment.agent_process_id),
             crate::journal::ProcessIdentityEvidence::Dead
         );
-        super::stop_session_agent(
-            &store,
-            &session.id,
-            crate::process::Departure::Terminal { to: None },
-        )
-        .unwrap();
-        let process = store
-            .agent_process(&attachment.agent_process_id)
+
+        let report = super::reap_in(&store).unwrap();
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        let agent = store
+            .agent_state(&attachment.agent_process_id)
             .unwrap()
             .unwrap();
-        assert!(process.completed_at.is_some());
+        assert!(agent.ended_at.is_some());
+        assert!(store.agent_processes().unwrap().is_empty());
     }
 
     #[test]
@@ -1071,7 +922,6 @@ mod tests {
                 &session.id,
                 current.as_ref(),
                 &parent,
-                true,
             )
             .unwrap();
             let mut command = Command::new("/bin/sleep");
@@ -1107,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn native_move_uses_process_identity_and_terminal_follows_attachment() {
+    fn native_move_uses_process_identity_and_clears_the_terminal() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
@@ -1119,18 +969,15 @@ mod tests {
         )
         .unwrap();
         let parent = LfProcessId::new();
-        let next = LfProcessId::new();
-        // Launchers that may still be running; an ended launcher would make
+        // A launcher that may still be running; an ended launcher would make
         // its unidentified agent dead instead.
-        for id in [&parent, &next] {
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
-                [id],
-            )
-            .unwrap();
-        }
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
+            [&parent],
+        )
+        .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         // Missing birth cannot become permission to signal or replace.
         assert!(super::stop_session_agent(
             &store,
@@ -1164,35 +1011,6 @@ mod tests {
         assert_eq!(
             summary.agent_process_evidence,
             crate::journal::ProcessIdentityEvidence::Live
-        );
-        let replacement = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            Some(&attachment),
-            &next,
-            false,
-        )
-        .unwrap();
-        assert!(
-            crate::store::session_projection::session_summary(&store, &session.id, 1)
-                .unwrap()
-                .unwrap()
-                .terminal_id
-                .is_none()
-        );
-        assert!(store
-            .record_session_terminal(&session.id, &attachment, Some("stale"))
-            .is_err());
-        store
-            .record_session_terminal(&session.id, &replacement, Some("second-pane"))
-            .unwrap();
-        assert_eq!(
-            crate::store::session_projection::session_summary(&store, &session.id, 1)
-                .unwrap()
-                .unwrap()
-                .terminal_id
-                .as_deref(),
-            Some("second-pane")
         );
         let stopped = super::stop_session_agent(
             &store,
@@ -1235,21 +1053,25 @@ mod tests {
             ("unresolved-owner", Some("reserved"), false),
         ] {
             let session = store.test_session(name, &crate::session_record::new_artifact_key());
-            let parent = LfProcessId::new();
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
-                rusqlite::params![
-                    parent,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    ended.then_some(1)
-                ],
+            let attachment = attachment::claim_session_attachment(
+                &store,
+                &session.id,
+                None,
+                &LfProcessId::new(),
             )
             .unwrap();
-            let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &parent, true)
-                    .unwrap();
+            // This test's own process holds each attachment; one recorded
+            // with another start time is an lf that has exited.
+            let birth = crate::journal::process_started_at(std::process::id())
+                .unwrap()
+                .unwrap();
+            store.test_set_holder(
+                &session.id,
+                std::process::id(),
+                if ended { birth - 3600 } else { birth },
+            );
             sql.execute(
-                "UPDATE processes SET spawn_state=?2 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_spawn_state=?2 WHERE agent_process_id=?1",
                 rusqlite::params![attachment.agent_process_id, state],
             )
             .unwrap();
@@ -1282,25 +1104,27 @@ mod tests {
         let _ambient = crate::test_ambient::EnvGuard::new();
         let database = ledger.home().join("loopflow.db");
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
-        let sql = rusqlite::Connection::open(database).unwrap();
         for ended in [false, true] {
             let session = store.test_session(
                 if ended { "ended" } else { "unknown" },
                 &crate::session_record::new_artifact_key(),
             );
-            let parent = LfProcessId::new();
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,?2,?3)",
-                rusqlite::params![
-                    parent,
-                    time::OffsetDateTime::now_utc().unix_timestamp(),
-                    ended.then_some(1)
-                ],
+            let attachment = attachment::claim_session_attachment(
+                &store,
+                &session.id,
+                None,
+                &LfProcessId::new(),
             )
             .unwrap();
-            let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &parent, true)
-                    .unwrap();
+            // A holder recorded with another start time has exited.
+            let birth = crate::journal::process_started_at(std::process::id())
+                .unwrap()
+                .unwrap();
+            store.test_set_holder(
+                &session.id,
+                std::process::id(),
+                if ended { birth - 3600 } else { birth },
+            );
             let mut command = Command::new("/usr/bin/true");
             command.env_clear();
             let mut child = super::spawn_native(
@@ -1344,7 +1168,7 @@ mod tests {
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let first_owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
@@ -1414,55 +1238,6 @@ mod tests {
     }
 
     #[test]
-    fn native_cleanup_cannot_kill_the_same_agent_after_takeover() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
-        let first = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
-        let first_owner = crate::harness::Recording {
-            store: store.clone(),
-            session: session.id.to_string(),
-            attachment: first.clone(),
-        };
-        let mut command = Command::new("/bin/sleep");
-        command.env_clear().arg("60");
-        let mut child = super::spawn_native(command, &first_owner, LaunchKind::Batch).unwrap();
-        let next = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            Some(&first),
-            &LfProcessId::new(),
-            false,
-        )
-        .unwrap();
-        let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
-        let alive = child.try_wait().unwrap().is_none();
-        let unchanged = store
-            .agent_process(&first.agent_process_id)
-            .unwrap()
-            .unwrap();
-        super::stop_native(
-            &mut child,
-            Some(&crate::harness::Recording {
-                store: store.clone(),
-                session: session.id.to_string(),
-                attachment: next.clone(),
-            }),
-        )
-        .unwrap();
-        assert_eq!(first.agent_process_id, next.agent_process_id);
-        assert!(refused && alive);
-        assert!(unchanged.completed_at.is_none());
-    }
-
-    #[test]
     fn native_cleanup_failed_wait_retains_unknown_exit() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
@@ -1472,7 +1247,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         let owner = crate::harness::Recording {
@@ -1505,7 +1279,7 @@ mod tests {
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let owner = |attachment| crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
@@ -1584,7 +1358,6 @@ mod tests {
                 &session.id,
                 None,
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let seen = home.path().join(&id);
@@ -1623,7 +1396,7 @@ mod tests {
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let owner = crate::harness::Recording {
             store: store.clone(),
             session: session.id.to_string(),
@@ -1813,8 +1586,7 @@ mod tests {
                 )
                 .unwrap();
             let attached =
-                attachment::claim_session_attachment(&store, &session.id, None, &parent, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
             store
                 .record_agent_process_identity(&session.id, &attached, pid, start)
                 .unwrap();

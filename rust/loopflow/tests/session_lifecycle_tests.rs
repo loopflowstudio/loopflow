@@ -1542,7 +1542,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         .session_attachment(&session)
         .unwrap()
         .unwrap_or_else(|| {
-            attachment::claim_session_attachment(&store, &session, None, &origin, true).unwrap()
+            attachment::claim_session_attachment(&store, &session, None, &origin).unwrap()
         });
     let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
@@ -1618,8 +1618,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
-    attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin, true)
-        .unwrap();
+    attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin).unwrap();
     let before = fixture.launches().len();
     let stale = fixture
         .command(&LAUNCH)

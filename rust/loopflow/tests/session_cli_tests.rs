@@ -530,8 +530,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
                 [process.as_str()],
             )
             .unwrap();
-        let attachment =
-            attachment::claim_session_attachment(&store, &id, None, &process, true).unwrap();
+        let attachment = attachment::claim_session_attachment(&store, &id, None, &process).unwrap();
         let before = store.session(&id).unwrap().unwrap();
         let history = store.session_history(&id, 0, 0).unwrap();
         let mut paths = vec![bin];
@@ -748,8 +747,7 @@ fn available_lists_only_conversations_ready_for_input() {
     )
     .unwrap();
     for (id, pending) in [(&working, 0), (&asked, 1)] {
-        let attachment =
-            attachment::claim_session_attachment(&store, id, None, &parent, true).unwrap();
+        let attachment = attachment::claim_session_attachment(&store, id, None, &parent).unwrap();
         db.execute(
             "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
             rusqlite::params![attachment.agent_process_id, provider.0.id(), started],
@@ -1814,7 +1812,7 @@ fn program_status_cli_observes_available_without_completing_work() {
     )
     .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, &id, None, &lf_process_id, true).unwrap();
+        attachment::claim_session_attachment(&store, &id, None, &lf_process_id).unwrap();
     conn.execute(
         "UPDATE processes SET pid=?2,os_started_at=?3 WHERE id=?1",
         rusqlite::params![
@@ -2001,8 +1999,11 @@ fn program_status_cli_observes_available_without_completing_work() {
     assert!(ended["program_status"].is_null());
     assert!(ended["availability"].is_null());
     let attachment = store.session_attachment(&id).unwrap();
-    attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id, true)
+    // A Session runs one agent: the killed provider's exit lands first.
+    store
+        .record_agent_process_exit(&id, attachment.as_ref().unwrap(), true)
         .unwrap();
+    attachment::claim_session_attachment(&store, &id, attachment.as_ref(), &lf_process_id).unwrap();
     let stale = observe("pane-3", 1, &records("idle"));
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("Session provider changed"));

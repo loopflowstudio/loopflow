@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 use crate::git::worktrees::main_repo_root;
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
 use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
@@ -33,7 +34,7 @@ pub const START_TIMING_TARGET: &str = "loopflow::start_timing";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 /// The id a spawner minted for this process and already recorded on the run
 /// it owns (a Graph run or step). Taken once at start; children never see it.
-pub const LF_RUN_ID_ENV: &str = "LF_RUN_ID";
+pub const LF_EXECUTION_ID_ENV: &str = "LF_EXECUTION_ID";
 
 /// Serializes tests that mutate process-global store or Process identity variables.
 /// Every test in the crate that touches these variables must hold this lock.
@@ -214,10 +215,11 @@ struct ProcessContext {
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
     receipts: Arc<Mutex<ReceiptCost>>,
-    /// It runs under an id its spawner minted for a Graph run or step, or it
-    /// recorded a Graph run of its own.
+    /// The records this process runs as and writes its end on: the step its
+    /// Graph minted it for, and any Graph run, Task run or Project
+    /// activation it recorded.
     #[serde(skip)]
-    owns_run: Arc<AtomicBool>,
+    run_owners: Arc<Mutex<Vec<RunOwner>>>,
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
@@ -740,8 +742,8 @@ fn start_record(context: &ProcessContext) -> LfProcess {
 }
 
 /// What this process's own run record says at its start.
-pub fn current_run_start() -> Option<loopflow_storage::graph_process::RunStart> {
-    current_context().map(|context| loopflow_storage::graph_process::RunStart {
+pub fn current_execution_start() -> Option<loopflow_storage::graph_process::ExecutionStart> {
+    current_context().map(|context| loopflow_storage::graph_process::ExecutionStart {
         started_at: context.started_at,
         pid: Some(std::process::id()),
         os_started_at: context.process_started_at,
@@ -843,32 +845,41 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
     }
 }
 
-/// A Graph run or step writes its own end on its Graph record. Only a process
-/// that owns one tries, and only once its Process receipt landed, so a held
-/// write lock delays it once. When the journal stops recording Process rows
-/// (LOO-953 approach 2), this becomes the run's only write at exit, best-effort
-/// with the journal's warn-once gap.
+/// A run writes its own end on the record it owns. Only a process that owns
+/// one tries, and only once its Process receipt landed, so a held write lock
+/// delays it once. When the journal stops recording Process rows (LOO-953
+/// approach 2), this becomes the run's only write at exit, best-effort with
+/// the journal's warn-once gap.
 fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfProcess) {
     let Some(ended_at) = record.completed_at else {
         return;
     };
-    if !context.owns_run.load(Ordering::Acquire) {
-        return;
-    }
-    if let Err(error) = store.finish_run(
-        &record.id,
-        ended_at,
-        record.exit_code,
-        record.error.as_deref(),
-    ) {
-        warn!(%error, "could not record this run's end on its Graph record");
+    let owners = context
+        .run_owners
+        .lock()
+        .expect("run owner mutex poisoned")
+        .clone();
+    for owner in owners {
+        if let Err(error) = store.finish_run(
+            owner,
+            &record.id,
+            ended_at,
+            record.exit_code,
+            record.error.as_deref(),
+        ) {
+            warn!(%error, ?owner, "could not record this run's end on its owner record");
+        }
     }
 }
 
-/// This process recorded a Graph run under its own id and writes its end.
-pub fn mark_run_owner() {
+/// This process recorded itself on `owner` under its own id and writes its
+/// end there.
+pub fn mark_run_owner(owner: RunOwner) {
     if let Some(context) = current_context() {
-        context.owns_run.store(true, Ordering::Release);
+        let mut owners = context.run_owners.lock().expect("run owner mutex poisoned");
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
     }
 }
 
@@ -1020,12 +1031,21 @@ fn create_process_context(
             .flatten()
             .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
-    let minted = std::env::var(LF_RUN_ID_ENV)
+    let minted = std::env::var(LF_EXECUTION_ID_ENV)
         .ok()
         .and_then(|value| LfProcessId::parse(&value).ok());
-    std::env::remove_var(LF_RUN_ID_ENV);
+    std::env::remove_var(LF_EXECUTION_ID_ENV);
     let minted = minted.filter(|_| inherits);
-    let owns_run = Arc::new(AtomicBool::new(minted.is_some()));
+    // A Graph mints its steps' ids; a Task run mints its Graph run's, which
+    // that run marks once it records itself.
+    let run_owners = Arc::new(Mutex::new(
+        minted
+            .as_ref()
+            .filter(|_| graph_step() || std::env::var_os(GRAPH_STEP_ENV).is_some())
+            .map(|_| RunOwner::GraphStep)
+            .into_iter()
+            .collect(),
+    ));
     let lf_process_id = minted.unwrap_or_default();
     // Export the identity so prompt logs and child processes carry the same
     // trace and parent as the ledger rows. The export is removed when the
@@ -1108,7 +1128,7 @@ fn create_process_context(
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
         receipts: Arc::default(),
-        owns_run,
+        run_owners,
     };
     set_context(context.clone());
     // Only an `lf` executable exits on interrupt; library callers settle their
@@ -1296,13 +1316,47 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
     }
 }
 
+/// Whether the process an owner row recorded still runs. Without its OS
+/// start time a reused pid cannot be told apart, so it cannot be confirmed.
+fn pid_evidence(pid: u32, os_started_at: Option<i64>) -> ProcessIdentityEvidence {
+    match os_started_at {
+        Some(started_at) => process_identity_evidence(pid, started_at),
+        None => ProcessIdentityEvidence::Unknown,
+    }
+}
+
 /// Whether a Graph run or step is still running: one OS lookup against the
 /// pid it recorded. A run with no end and no pid cannot be confirmed.
-pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdentityEvidence {
-    match (run.ended_at, run.pid, run.os_started_at) {
-        (Some(_), _, _) => ProcessIdentityEvidence::Dead,
-        (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
-        (None, _, _) => ProcessIdentityEvidence::Unknown,
+pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> ProcessIdentityEvidence {
+    match (run.ended_at, run.pid) {
+        (Some(_), _) => ProcessIdentityEvidence::Dead,
+        (None, Some(pid)) => pid_evidence(pid, run.os_started_at),
+        (None, None) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// Whether the lf carrying a Task's run still runs. A carrier with no OS
+/// process ended, or was moved here from another Machine.
+pub fn carrier_evidence(
+    carrier: &loopflow_storage::graph_process::TaskCarrier,
+) -> ProcessIdentityEvidence {
+    match carrier.pid {
+        Some(pid) => pid_evidence(pid, carrier.os_started_at),
+        None => ProcessIdentityEvidence::Dead,
+    }
+}
+
+/// A recorded run's result as this Machine sees it: one that never wrote its
+/// end and whose pid is dead ended unseen, so it reads `Unknown`.
+pub fn observed_result(
+    run: &loopflow_storage::graph_process::Execution,
+) -> loopflow_storage::graph_process::ExecutionResult {
+    use loopflow_storage::graph_process::ExecutionResult;
+    match run.result() {
+        ExecutionResult::Running if run_evidence(run) == ProcessIdentityEvidence::Dead => {
+            ExecutionResult::Unknown
+        }
+        result => result,
     }
 }
 
@@ -1310,8 +1364,8 @@ pub fn run_evidence(run: &loopflow_storage::graph_process::Run) -> ProcessIdenti
 /// not started yet has no pid; it stands or falls with the Graph that would
 /// start it.
 pub fn step_evidence(
-    step: &loopflow_storage::graph_process::Run,
-    graph: &loopflow_storage::graph_process::Run,
+    step: &loopflow_storage::graph_process::Execution,
+    graph: &loopflow_storage::graph_process::Execution,
 ) -> ProcessIdentityEvidence {
     if step.ended_at.is_none() && step.pid.is_none() {
         return run_evidence(graph);
@@ -1330,27 +1384,55 @@ pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> Process
     )
 }
 
-/// A provider OS process's liveness, by its own recorded identity.
+/// Whether the lf holding a Session's attachment still runs, by the OS
+/// process it recorded when it attached.
+pub fn holder_evidence(holder: &crate::process::AttachmentHolder) -> ProcessIdentityEvidence {
+    match holder.pid {
+        Some(pid) => pid_evidence(pid, holder.os_started_at),
+        None => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// A Session agent's liveness, by its own recorded identity. Only the lf
+/// holding a reserved agent starts it, so a reservation stands or falls with
+/// its holder; with none, nothing will start it.
+pub fn session_agent_evidence(
+    completed_at: Option<i64>,
+    pid: Option<u32>,
+    os_started_at: Option<i64>,
+    started_at: Option<i64>,
+    holder: Option<&crate::process::AttachmentHolder>,
+) -> ProcessIdentityEvidence {
+    if completed_at.is_none()
+        && pid.is_none()
+        && holder.map_or(ProcessIdentityEvidence::Dead, holder_evidence)
+            == ProcessIdentityEvidence::Dead
+    {
+        return ProcessIdentityEvidence::Dead;
+    }
+    agent_process_evidence(
+        completed_at,
+        pid,
+        os_started_at,
+        started_at,
+        process_identity_evidence,
+    )
+}
+
+/// The liveness of agent `process` while it is its Session's current one.
 pub(crate) fn agent_evidence(
     store: &SqliteStore,
     process: &loopflow_model::id::AgentProcessId,
 ) -> ProcessIdentityEvidence {
-    let Ok(Some(record)) = store.agent_process(process) else {
+    let Ok(Some(agent)) = store.agent_state(process) else {
         return ProcessIdentityEvidence::Unknown;
     };
-    // Only its launcher records an agent's identity, before the provider runs.
-    // A launcher that ended first never started it.
-    if record.pid.is_none() && record.completed_at.is_none() {
-        if let Some(launcher) = &record.parent_lf_process_id {
-            if lf_evidence(store, launcher) == ProcessIdentityEvidence::Dead {
-                return ProcessIdentityEvidence::Dead;
-            }
-        }
-    }
-    recorded_process_evidence(
-        &crate::process::ProcessEntry::Agent(record),
-        &Ok(None),
-        process_identity_evidence,
+    session_agent_evidence(
+        agent.ended_at,
+        agent.pid,
+        agent.os_started_at,
+        agent.started_at,
+        agent.holder.as_ref(),
     )
 }
 
@@ -1693,7 +1775,7 @@ mod tests {
 
     #[test]
     fn a_reserved_step_ends_with_the_graph_that_would_start_it() {
-        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Run {
+        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Execution {
             id: LfProcessId::default(),
             started_at: 1,
             ended_at,
@@ -1703,7 +1785,7 @@ mod tests {
             error: None,
         };
         let reserved = run(None);
-        let live_graph = loopflow_storage::graph_process::Run {
+        let live_graph = loopflow_storage::graph_process::Execution {
             pid: Some(std::process::id()),
             os_started_at: super::process_started_at(std::process::id()).unwrap(),
             ..run(None)

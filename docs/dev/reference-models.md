@@ -123,9 +123,9 @@ for the current implementation boundary.
 Wave --< Task --< Graph (LfProcess)      a Wave's planning binds one Linear Project
 
 LfProcess --< LfProcess             causal ancestry, not control authority
-LfProcess --< AgentProcess          immutable launching parent
-LfSession --> AgentProcess         nullable current provider; old rows survive
-AgentProcess --> LfProcess          nullable current attachment, fenced by token
+LfProcess --< AgentProcess          immutable launching lf
+LfSession --- AgentProcess         one current provider, recorded on the Session
+LfSession --> LfProcess             nullable current attachment, fenced by token
 LfSession --< history              immutable provider outcomes and usage
 Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's exit
 ```
@@ -137,7 +137,7 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | Task | Worktree, optional PR, captured graph and position, and every associated Session, Graph and Process; independent Graphs do not move that position |
 | Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
 | LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
-| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`), a `processes` row of kind `agent` with its parent LfProcess, served Session, attached LfProcess and fresh attachment token; survives attachment handoff |
+| AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint and inbox, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
 | Machine | Store, payloads, credentials and exact local process authority |
@@ -194,8 +194,8 @@ provider generation in caller provenance, turn origin and Program Status.
 
 | Owner | Authoritative fields and operations |
 | --- | --- |
-| `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Agent rows own served Session, provider/launch mode, endpoint, attachment/token and exit reference. Lf rows retain incoming agent provenance. Admit, attach, finish, filter/page. |
-| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity and current AgentProcess reference; reserve, resume, bind and rename; historical feedback/completion retained |
+| `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Lf rows retain incoming agent provenance; agent rows are copied from their Sessions for a released lf until the contract migration drops them. Admit, finish, filter/page. |
+| `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and tracker revision; no Machine-local column |
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
 | `task_primary_sessions` | The conversation this Machine opens for a Task, with or without a checkout; absent on every other Machine |
@@ -245,7 +245,7 @@ panes keep local records; Session panes send each bounded snapshot to the
 server as one `session.status` write with the current terminal receipt and the
 reading's AgentProcess, on the connection Desktop already holds. No process
 runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
-An unchanged provider keeps reports across attachment handoff. Report text is literal
+A replaced agent's reports end with it. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
 Graph or completion authority. Detached relay observation remains unimplemented.
 `--headless` includes headless Sessions; `--all` means all repositories. Interactive mode grants neither review
@@ -290,9 +290,9 @@ a naming-only migration. Provider protocol names remain vendor-owned.
 
 An LfSession can have many historical attached Processes and at most one current
 attachment. Compare-and-set issues a fresh opaque token on every claim and release,
-including A → B → A. The token has no independent lifecycle. A continuing
-AgentProcess keeps its identity and origin through handoff and an unattached
-interval. Old clients may retain provider history but cannot start/steer turns or
+including A → B → A. The token has no independent lifecycle. Every claim starts
+a new AgentProcess, so a claim replaces the agent only after it exited or never
+spawned; a released agent keeps its identity and launcher until then. Old clients may retain provider history but cannot start/steer turns or
 change current attachment, connection, process evidence or stream activity.
 History retention grants no native-write or Graph authority. Passive connection
 acquires no claim. Dispatch fences include queued native RPCs and approval replies, not only database claim updates.
@@ -455,7 +455,7 @@ conversation: at most two corrective turns, then the Graph fails. After an
 operation step the Graph process looks for a landing of its checkout that is still
 being watched; the Graph stops there, and neither failed. Mechanical steps create
 no LfSession.
-A conversation attachment handoff grants no Graph authority.
+A conversation attachment grants no Graph authority.
 
 A Graph is `current` while its Graph process has no recorded exit, `completed` when the
 Graph process succeeded and `stopped` when it exited before the last step. A killed

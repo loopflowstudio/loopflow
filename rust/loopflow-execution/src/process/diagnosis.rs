@@ -43,7 +43,7 @@ impl Check {
     }
 }
 
-pub fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
+pub fn check_lineage(events: &[ProcessEntry]) -> Check {
     let processes: HashMap<&str, &str> = events
         .iter()
         .map(|event| (event.id(), event.trace_id().as_str()))
@@ -58,14 +58,11 @@ pub fn check_lineage(events: &[ProcessEntry], repairable: usize) -> Check {
     if dangling.is_empty() {
         return Check::ok("lineage", "every parent process resolves");
     }
-    let mut detail = format!(
-        "{} parent process id(s) are missing or belong to another trace",
-        dangling.len()
-    );
-    if repairable > 0 {
-        detail.push_str(&format!(
-            "; {repairable} AgentProcess parent(s) were never recorded, and the server's recovery pass repairs them"
-        ));
-    }
-    Check::fail("lineage", detail)
+    Check::fail(
+        "lineage",
+        format!(
+            "{} parent process id(s) are missing or belong to another trace",
+            dangling.len()
+        ),
+    )
 }

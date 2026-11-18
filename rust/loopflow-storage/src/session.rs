@@ -429,21 +429,14 @@ pub enum GraphProcessSummaryState {
 
 impl GraphProcessSummaryState {
     /// What a Graph run's result says of its Graph.
-    pub fn of_run(result: crate::graph_process::RunResult) -> Self {
-        use crate::graph_process::RunResult;
+    pub fn of_run(result: crate::graph_process::ExecutionResult) -> Self {
+        use crate::graph_process::ExecutionResult;
         match result {
-            RunResult::Succeeded => Self::Completed,
-            RunResult::Running => Self::Current,
-            RunResult::Interrupted | RunResult::Failed | RunResult::Unknown => Self::Stopped,
-        }
-    }
-
-    /// What a Graph process's recorded outcome and exit time say of its Graph.
-    pub fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
-        match (outcome, completed_at) {
-            (Some("succeeded"), _) => Self::Completed,
-            (None, None) => Self::Current,
-            _ => Self::Stopped,
+            ExecutionResult::Succeeded => Self::Completed,
+            ExecutionResult::Running => Self::Current,
+            ExecutionResult::Interrupted | ExecutionResult::Failed | ExecutionResult::Unknown => {
+                Self::Stopped
+            }
         }
     }
 }

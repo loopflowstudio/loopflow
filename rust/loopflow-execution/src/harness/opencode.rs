@@ -937,8 +937,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let first =
-            attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
+        let first = attachment::claim_session_attachment(&store, "stop", None, &process).unwrap();
         let owner = crate::harness::Recording {
             store: store.clone(),
             session: "stop".to_string(),
@@ -963,16 +962,6 @@ mod tests {
         harness.child = Some(child);
         harness.owner = owner;
         assert_eq!(harness.process_group_id(), Some(pid));
-        let current =
-            attachment::claim_session_attachment(&store, "stop", Some(&first), &process, false)
-                .unwrap();
-        assert!(harness.stop().await.is_err());
-        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.owner = crate::harness::Recording {
-            store,
-            session: "stop".into(),
-            attachment: current,
-        };
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);

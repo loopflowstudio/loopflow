@@ -25,6 +25,7 @@ use loopflow_execution::process::launch_log::{release_launcher, PendingLog};
 use loopflow_execution::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::Task;
 use std::path::Path;
@@ -178,7 +179,7 @@ impl TaskRunStopped {
 
 /// Carry one Task run: start the Task's Graph as a child Graph process, and
 /// retry failed Graphs unless a provider refusal stopped them. Each attempt records
-/// its own GraphRun beneath this process and sets out at the step the last
+/// its own GraphExecution beneath this process and sets out at the step the last
 /// one failed at. A Graph held for a person or a
 /// watcher, an interrupted one, and a launch refused before any Graph started
 /// are returned as they ended. Once someone interrupts the Task, nothing is
@@ -237,12 +238,7 @@ pub fn run_task_graph_for(
             Ok(())
         })?;
         // A child that died before writing its end leaves what this process saw.
-        store.finish_run(
-            &graph_run,
-            loopflow_storage::rows::now_unix(),
-            status.code(),
-            None,
-        )?;
+        record_spawner_end(store, RunOwner::GraphRun, &graph_run, status.code(), None);
         if status.success() {
             return Ok(());
         }
@@ -394,6 +390,28 @@ fn exit_of(status: std::process::ExitStatus) -> loopflow_execution::process::Com
     loopflow_execution::process::CommandExit(code)
 }
 
+/// What a spawner saw of a run that may have died before writing its end.
+/// Best-effort: a busy store must not fail a run whose child succeeded or
+/// replace the error that stopped it; the child's own write and the liveness
+/// read cover a missed one.
+fn record_spawner_end(
+    store: &SqliteStore,
+    owner: RunOwner,
+    run: &LfProcessId,
+    exit_code: Option<i32>,
+    error: Option<&str>,
+) {
+    if let Err(store_error) = store.finish_run(
+        owner,
+        run,
+        loopflow_storage::rows::now_unix(),
+        exit_code,
+        error,
+    ) {
+        tracing::warn!(error = %store_error, %run, "could not record the end of a run this process spawned");
+    }
+}
+
 /// Start `lf <args>` in `checkout` and wait for it, writing to `log` when given
 /// and to this terminal otherwise. A Graph child receives the Task's interrupt
 /// cursor; a skill's agent shell must never inherit it. `started` runs once the
@@ -417,7 +435,7 @@ fn spawn_task_child(
     let mut command = std::process::Command::new(&lf);
     command.args(args).current_dir(checkout);
     command.env(
-        loopflow_execution::journal::LF_RUN_ID_ENV,
+        loopflow_execution::journal::LF_EXECUTION_ID_ENV,
         graph_run.as_str(),
     );
     if let Some(cursor) = interrupt {
@@ -533,12 +551,13 @@ fn execute(
                 &running.process,
                 &loopflow_execution::graph::compiled::compile(graph_name, items),
                 running.task.as_ref(),
-                &journal::current_run_start().context("a Graph requires a registered Process")?,
+                &journal::current_execution_start()
+                    .context("a Graph requires a registered Process")?,
                 journal::current_repo().as_deref(),
                 Some(&running.cwd.display().to_string()),
             )
             .context("could not record the Graph; no steps launched")?;
-        journal::mark_run_owner();
+        journal::mark_run_owner(RunOwner::GraphRun);
         drop(admission);
         let outcome = drive(&running, start, stop_at_interactive).await?;
         // A Task run's Graph writes where it left the Task. Blocked at an
@@ -810,8 +829,9 @@ impl RunningGraph<'_> {
     /// step finds its row however fast it ends.
     fn reserve_step(&self, step: &LfProcessId) -> Result<()> {
         let (key, iterations) = self.location();
-        let start =
-            loopflow_storage::graph_process::RunStart::reserved(loopflow_storage::rows::now_unix());
+        let start = loopflow_storage::graph_process::ExecutionStart::reserved(
+            loopflow_storage::rows::now_unix(),
+        );
         self.store
             .sqlite
             .record_graph_step(&self.process, step, key, &iterations, &start)?;
@@ -888,7 +908,10 @@ impl RunningGraph<'_> {
         );
         // The step runs as the id this Graph mints and records for it.
         let run = LfProcessId::default();
-        command.env(loopflow_execution::journal::LF_RUN_ID_ENV, run.as_str());
+        command.env(
+            loopflow_execution::journal::LF_EXECUTION_ID_ENV,
+            run.as_str(),
+        );
         let step = (kind != StepKind::Commit).then_some(run);
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
@@ -916,12 +939,13 @@ impl RunningGraph<'_> {
             Ok(spawned) => spawned,
             Err(error) => {
                 if let Some(step) = &step {
-                    self.store.sqlite.finish_run(
+                    record_spawner_end(
+                        &self.store.sqlite,
+                        RunOwner::GraphStep,
                         step,
-                        loopflow_storage::rows::now_unix(),
                         None,
                         Some(&format!("{error:#}")),
-                    )?;
+                    );
                 }
                 return Err(error);
             }
@@ -957,12 +981,13 @@ impl RunningGraph<'_> {
                     Some(format!("could not wait for Graph step: {error}")),
                 ),
             };
-            self.store.sqlite.finish_run(
+            record_spawner_end(
+                &self.store.sqlite,
+                RunOwner::GraphStep,
                 step,
-                loopflow_storage::rows::now_unix(),
                 code,
                 error.as_deref(),
-            )?;
+            );
         }
         // A new installation can select a newer child. Never read its result
         // through an older schema.

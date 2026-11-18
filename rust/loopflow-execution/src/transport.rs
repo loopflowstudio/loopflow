@@ -94,7 +94,7 @@ impl Settling {
             "lf/{}",
             record
                 .attachment
-                .provider_lf_process_id
+                .launcher_lf_process_id
                 .as_str()
                 .replace('-', "")
         );
@@ -2871,10 +2871,6 @@ mod launch_mode_tests {
                     super::delegate_prepared_session(session.id.as_str(), false).unwrap(),
                     super::Delegation::Here { kind: expected },
                     "prepared: source={source:?}, bound={bound}, primary={primary}",
-                );
-                assert_eq!(
-                    store.runs_in_its_terminal(&session.id).unwrap(),
-                    surface == "interactive" && !expected.is_managed()
                 );
                 // A Desktop pane or framed remote viewer has no terminal for
                 // a chat to own; the holder keeps every Session it opens.

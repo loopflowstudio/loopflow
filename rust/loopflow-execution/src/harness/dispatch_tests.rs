@@ -69,8 +69,7 @@ async fn stalled_dispatch() {
     .unwrap();
     store.test_session("conversation", "run_00000000000000000000000000000001");
     let attachment =
-        attachment::claim_session_attachment(&store, "conversation", None, &process, false)
-            .unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &process).unwrap();
     let (socket, _unread_peer) = UnixStream::pair().unwrap();
     let mut socket = WebSocketStream::from_raw_socket(socket, Role::Client, None).await;
     let (entered, ready) = oneshot::channel();
@@ -156,7 +155,6 @@ async fn stalled_dispatch() {
             "conversation",
             Some(&original),
             &replacement,
-            false,
         )
         .unwrap();
         transferred.send(attachment).unwrap();

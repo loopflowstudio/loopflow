@@ -1,5 +1,5 @@
 //! A Graph process is one lf Process and the step Processes it starts. It writes
-//! a GraphRun: the Graph's name and graph as compiled at launch, then one row
+//! a GraphExecution: the Graph's name and graph as compiled at launch, then one row
 //! per step it starts. The record is append-only and only the Graph process writes
 //! it. Each step is an ordinary command that knows nothing of its Graph; whether
 //! the Graph or a step is running, finished or failed is read from their Processes.

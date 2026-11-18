@@ -308,9 +308,8 @@ mod tests {
         )
         .unwrap();
         let launcher = store.test_lf_process();
-        let claim =
-            attachment::claim_session_attachment(&store, session.as_str(), None, &launcher, true)
-                .unwrap();
+        let claim = attachment::claim_session_attachment(&store, session.as_str(), None, &launcher)
+            .unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(

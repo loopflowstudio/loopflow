@@ -1,4 +1,4 @@
-//! GraphRun: what a Graph run and its steps recorded of themselves. What each
+//! GraphExecution: what a Graph run and its steps recorded of themselves. What each
 //! launched with is immutable; only its end moves. Reading selects nothing and
 //! grants neither attachment nor process authority.
 
@@ -10,7 +10,9 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::execution::{GraphProcessFilter, GraphProcessInventoryEntry, GraphProcessPage};
 use crate::graph::CompiledGraph;
-use crate::graph_process::{GraphRun, GraphStep, Run, RunResult, RunStart};
+use crate::graph_process::{
+    Execution, ExecutionResult, ExecutionStart, GraphExecution, GraphStep, RunOwner,
+};
 use crate::session::{GraphProcessSummary, GraphProcessSummaryState};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
@@ -23,11 +25,8 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
     StoreError::InvalidData(error.to_string())
 }
 
-/// The tables that record a `Run`, each keyed by `lf_process_id`.
-const RUN_OWNERS: [&str; 2] = ["graph_processes", "graph_process_steps"];
-
-/// The columns every `Run` owner shares, prefixed by `alias`.
-fn run_columns(alias: &str) -> String {
+/// The columns every `Execution` owner shares, prefixed by `alias`.
+pub(super) fn run_columns(alias: &str) -> String {
     [
         "lf_process_id",
         "started_at",
@@ -42,8 +41,8 @@ fn run_columns(alias: &str) -> String {
 }
 
 /// A run read from the leading columns `run_columns` selects.
-fn read_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Run> {
-    Ok(Run {
+pub(super) fn read_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Execution> {
+    Ok(Execution {
         id: row.get(0)?,
         // A run a released lf recorded without its Process row has no start.
         started_at: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
@@ -61,7 +60,7 @@ pub(super) fn graphs_in(
     conn: &Connection,
     scope: &str,
     values: &[&dyn rusqlite::ToSql],
-) -> StoreResult<Vec<GraphRun>> {
+) -> StoreResult<Vec<GraphExecution>> {
     let graph_processes = conn
         .prepare(&format!(
             "SELECT {},g.repo,g.cwd,g.graph,g.compiled FROM graph_processes g
@@ -106,7 +105,7 @@ pub(super) fn graphs_in(
     graph_processes
         .into_iter()
         .map(|(run, repo, cwd, name, compiled)| {
-            Ok(GraphRun {
+            Ok(GraphExecution {
                 compiled: serde_json::from_str::<CompiledGraph>(&compiled)?,
                 steps: steps.remove(run.id.as_str()).unwrap_or_default(),
                 run,
@@ -121,7 +120,7 @@ pub(super) fn graphs_in(
 /// What the Graph process says of the Graph, including the Task it started for.
 pub(super) fn entry_in(
     conn: &Connection,
-    graph: &GraphRun,
+    graph: &GraphExecution,
 ) -> StoreResult<GraphProcessInventoryEntry> {
     let task = conn
         .query_row(
@@ -153,7 +152,7 @@ pub(super) fn entry_in(
 
 /// The Graph's inventory entry once its Task and Wave are known.
 pub fn entry_of(
-    graph: &GraphRun,
+    graph: &GraphExecution,
     task_id: Option<TaskId>,
     wave_id: Option<WaveId>,
 ) -> StoreResult<GraphProcessInventoryEntry> {
@@ -435,7 +434,7 @@ impl SqliteStore {
     pub fn graph_process(
         &self,
         selector: &str,
-    ) -> StoreResult<Option<(GraphRun, GraphProcessInventoryEntry)>> {
+    ) -> StoreResult<Option<(GraphExecution, GraphProcessInventoryEntry)>> {
         let canonical = selector.to_ascii_lowercase();
         let conn = self.conn.lock().expect("store mutex poisoned");
         // Exact identity wins; otherwise a unique literal prefix.
@@ -453,7 +452,7 @@ impl SqliteStore {
     }
 
     /// Graphs run from `cwd`, oldest first.
-    pub fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphRun>> {
+    pub fn graphs_at(&self, cwd: &std::path::Path) -> StoreResult<Vec<GraphExecution>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_in(&conn, "g.cwd=?1", &[&cwd.to_string_lossy()])
     }
@@ -465,7 +464,7 @@ impl SqliteStore {
         graph_process: &LfProcessId,
         compiled: &CompiledGraph,
         task: Option<&TaskId>,
-        start: &RunStart,
+        start: &ExecutionStart,
         repo: Option<&str>,
         cwd: Option<&str>,
     ) -> StoreResult<()> {
@@ -496,7 +495,7 @@ impl SqliteStore {
         step: &LfProcessId,
         key: u32,
         iterations: &[Vec<u32>],
-        start: &RunStart,
+        start: &ExecutionStart,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -515,30 +514,50 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The end of the run `id`, on whichever owner records it, unless it
-    /// already recorded one: the run writes its own at exit, and its spawner
-    /// writes what it saw if the run died first. Clears the OS process it ran
-    /// as. A run id is unique across owners, so at most one row changes.
+    /// The end of the run `id` on the record `owner`, unless it already
+    /// recorded one: the run writes its own at exit, and its spawner writes
+    /// what it saw if the run died first. Clears the OS process it ran as.
     pub fn finish_run(
         &self,
+        owner: RunOwner,
         id: &LfProcessId,
         ended_at: i64,
         exit_code: Option<i32>,
         error: Option<&str>,
     ) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        for owner in RUN_OWNERS {
-            let ended = conn.execute(
-                &format!(
-                    "UPDATE {owner} SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-                     WHERE lf_process_id=?1 AND ended_at IS NULL"
-                ),
-                params![id, ended_at, exit_code, error],
-            )?;
-            if ended > 0 {
-                break;
+        let sql = match owner {
+            // A carrier's result is its Graph run's: its end clears the OS
+            // process and keeps its id, where the next run sets out from.
+            RunOwner::TaskCarrier => {
+                let conn = self.conn.lock().expect("store mutex poisoned");
+                conn.execute(
+                    "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
+                     WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
+                    [id],
+                )?;
+                return Ok(());
             }
-        }
+            RunOwner::GraphRun => {
+                "UPDATE graph_processes SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+                 WHERE lf_process_id=?1 AND ended_at IS NULL"
+            }
+            RunOwner::GraphStep => {
+                "UPDATE graph_process_steps SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+                 WHERE lf_process_id=?1 AND ended_at IS NULL"
+            }
+            RunOwner::ProjectActivation => {
+                "UPDATE waves SET project_activation_ended_at=?2,project_activation_exit_code=?3,
+                    project_activation_error=?4,project_activation_pid=NULL,
+                    project_activation_os_started_at=NULL
+                 WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
+            }
+            RunOwner::ShipCarrier => {
+                "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+                 WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
+            }
+        };
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        conn.execute(sql, params![id, ended_at, exit_code, error])?;
         Ok(())
     }
 
@@ -575,7 +594,7 @@ impl SqliteStore {
         let Some(run) = graphs_in(&conn, "g.lf_process_id=?1", &[id])?.pop() else {
             return Ok(None);
         };
-        if run.run.result() != RunResult::Failed {
+        if run.run.result() != ExecutionResult::Failed {
             return Ok(None);
         }
         let at = run.run.ended_at.expect("a failed run has ended");
@@ -583,7 +602,7 @@ impl SqliteStore {
             .steps
             .iter()
             .rev()
-            .find(|step| step.run.result() == RunResult::Failed)
+            .find(|step| step.run.result() == ExecutionResult::Failed)
             .and_then(|step| step.run.error.clone());
         Ok(Some((
             at,
@@ -604,7 +623,7 @@ impl SqliteStore {
     /// open Graph execution in `tasks`, and the receipts of unfinished Processes.
     pub fn graph_execution_facts<'a>(
         &self,
-        graphs: impl IntoIterator<Item = &'a GraphRun>,
+        graphs: impl IntoIterator<Item = &'a GraphExecution>,
         tasks: &[&TaskId],
     ) -> StoreResult<GraphExecutionFacts> {
         let graphs: Vec<_> = graphs.into_iter().collect();
@@ -709,7 +728,7 @@ impl SqliteStore {
     ) -> LfProcessId {
         let graph_process = LfProcessId::new();
         let now = crate::rows::now_unix();
-        let start = RunStart::reserved(now);
+        let start = ExecutionStart::reserved(now);
         // The journal still records each run as a Process beside its Graph record.
         let process = |id: &LfProcessId, parent: Option<&LfProcessId>, outcome: Option<&str>| {
             let conn = self.conn.lock().expect("store mutex poisoned");
@@ -721,7 +740,7 @@ impl SqliteStore {
             .unwrap();
         };
         // The exit each outcome stands for, as the run would record it.
-        let finish = |id: &LfProcessId, outcome: Option<&str>| {
+        let finish = |owner: RunOwner, id: &LfProcessId, outcome: Option<&str>| {
             let Some(outcome) = outcome else { return };
             let (exit, error) = match outcome {
                 "succeeded" => (Some(0), None),
@@ -729,7 +748,7 @@ impl SqliteStore {
                 "unknown" => (None, None),
                 _ => (Some(1), Some("it failed")),
             };
-            self.finish_run(id, now, exit, error).unwrap();
+            self.finish_run(owner, id, now, exit, error).unwrap();
         };
         let compiled = crate::graph::CompiledGraph {
             name: name.into(),
@@ -777,9 +796,9 @@ impl SqliteStore {
             process(&step, Some(&graph_process), *outcome);
             self.record_graph_step(&graph_process, &step, index as u32, &[vec![]], &start)
                 .unwrap();
-            finish(&step, *outcome);
+            finish(RunOwner::GraphStep, &step, *outcome);
         }
-        finish(&graph_process, graph_outcome);
+        finish(RunOwner::GraphRun, &graph_process, graph_outcome);
         graph_process
     }
 }
@@ -789,6 +808,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::execution::GraphProcessFilter;
+    use crate::graph_process::RunOwner;
     use crate::session::GraphProcessSummaryState;
 
     /// Two waits on one Task's step and a later wait still running its time.
@@ -868,12 +888,26 @@ mod tests {
             .steps;
         assert_eq!(store.graph_failure_cause(&graph).unwrap(), None);
         store
-            .finish_run(&steps[1].run.id, 5, Some(1), Some("gate: tests failed"))
+            .finish_run(
+                RunOwner::GraphStep,
+                &steps[1].run.id,
+                5,
+                Some(1),
+                Some("gate: tests failed"),
+            )
             .unwrap();
         // The step's own exit stands; its spawner's later write does not replace it.
-        store.finish_run(&steps[1].run.id, 6, None, None).unwrap();
         store
-            .finish_run(&graph, 7, Some(1), Some("the run of code failed"))
+            .finish_run(RunOwner::GraphStep, &steps[1].run.id, 6, None, None)
+            .unwrap();
+        store
+            .finish_run(
+                RunOwner::GraphRun,
+                &graph,
+                7,
+                Some(1),
+                Some("the run of code failed"),
+            )
             .unwrap();
         assert_eq!(
             store.graph_failure_cause(&graph).unwrap(),

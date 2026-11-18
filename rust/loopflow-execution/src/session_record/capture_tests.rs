@@ -177,78 +177,60 @@ fn a_settled_runtime_cannot_launch_another_native_provider() {
 
 #[test]
 #[cfg(unix)]
-fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
+fn a_failed_terminal_receipt_still_closes_the_provider() {
     use std::os::unix::process::CommandExt;
 
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-        for takeover in [false, true] {
-            let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
-                .map(crate::process::LfProcessRuntime::new)?;
-            capture.claim_session_attachment()?;
-            capture.mark_spawn_requested();
-            let (session, attachment) = capture.session_attachment().unwrap();
-            let store = crate::session_record::row_store(&capture.artifact_dir())?;
-            let mut command = std::process::Command::new("/bin/sleep");
-            command.env_clear().arg("60").process_group(0);
-            store.record_agent_process_launch(&session, &attachment, &command, false)?;
-            let mut child = command.spawn()?;
-            let pid = child.id();
-            let birth = crate::journal::process_started_at(pid)?.unwrap();
-            store.record_agent_process_identity(&session, &attachment, pid, birth)?;
-            let replacement = takeover.then(|| {
-                attachment::claim_session_attachment(
-                    &store,
-                    &session,
-                    Some(&attachment),
-                    &store.test_lf_process(),
-                    false,
-                )
-                .unwrap()
-            });
-            // A directory at the receipt path makes the write fail independently
-            // of the store that owns the still-running provider.
-            let receipt = capture.artifact_dir().join("terminal.json");
-            fs::create_dir(&receipt)?;
-            let result = capture.finish("interrupted");
-            let life = crate::journal::process_identity_evidence(pid, birth);
-            let current = store.session_attachment(&session);
-            let _ = child.kill();
-            let _ = child.wait();
+        let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
+            .map(crate::process::LfProcessRuntime::new)?;
+        capture.claim_session_attachment()?;
+        capture.mark_spawn_requested();
+        let (session, attachment) = capture.session_attachment().unwrap();
+        let store = crate::session_record::row_store(&capture.artifact_dir())?;
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60").process_group(0);
+        store.record_agent_process_launch(&session, &attachment, &command, false)?;
+        let mut child = command.spawn()?;
+        let pid = child.id();
+        let birth = crate::journal::process_started_at(pid)?.unwrap();
+        store.record_agent_process_identity(&session, &attachment, pid, birth)?;
+        // A directory at the receipt path makes the write fail independently
+        // of the store that owns the still-running provider.
+        let receipt = capture.artifact_dir().join("terminal.json");
+        fs::create_dir(&receipt)?;
+        let result = capture.finish("interrupted");
+        let life = crate::journal::process_identity_evidence(pid, birth);
+        let current = store.session_attachment(&session);
+        let _ = child.kill();
+        let _ = child.wait();
 
-            assert!(
-                result.is_err(),
-                "the missing receipt remains a caller error"
-            );
-            let current = current?.unwrap();
-            if let Some(replacement) = replacement {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Live);
-                assert_eq!(current, replacement);
-            } else {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
-                assert!(current.lf_process_id.is_none());
-            }
-            assert!(capture.finish("failed").is_err());
-            assert!(crate::harness::agent_process::spawn_native(
-                std::process::Command::new("/bin/true"),
-                &crate::harness::Recording {
-                    store: store.clone(),
-                    session: session.clone(),
-                    attachment: attachment.clone()
-                },
-                crate::harness::LaunchKind::Batch,
-            )
-            .is_err());
-            fs::remove_dir(&receipt)?;
-            capture.finish("interrupted")?;
-            let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
-            assert_eq!(recorded.outcome, "interrupted");
-            let history = store.input_events(&capture.artifact_key())?;
-            capture.finish("interrupted")?;
-            assert_eq!(store.input_events(&capture.artifact_key())?, history);
-        }
+        assert!(
+            result.is_err(),
+            "the missing receipt remains a caller error"
+        );
+        assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
+        assert!(current?.unwrap().lf_process_id.is_none());
+        assert!(capture.finish("failed").is_err());
+        assert!(crate::harness::agent_process::spawn_native(
+            std::process::Command::new("/bin/true"),
+            &crate::harness::Recording {
+                store: store.clone(),
+                session: session.clone(),
+                attachment: attachment.clone()
+            },
+            crate::harness::LaunchKind::Batch,
+        )
+        .is_err());
+        fs::remove_dir(&receipt)?;
+        capture.finish("interrupted")?;
+        let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
+        assert_eq!(recorded.outcome, "interrupted");
+        let history = store.input_events(&capture.artifact_key())?;
+        capture.finish("interrupted")?;
+        assert_eq!(store.input_events(&capture.artifact_key())?, history);
         Ok(())
     })
     .unwrap();
@@ -909,7 +891,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             attachment.agent_process_id
         );
         assert_eq!(
-            Some(&next_attachment.provider_lf_process_id),
+            Some(&next_attachment.launcher_lf_process_id),
             next_attachment.lf_process_id.as_ref()
         );
         assert!(attachment::session_connection(&store, &session.id)?.is_none());
@@ -1032,24 +1014,16 @@ fn attached_session(
         .arg("30")
         .spawn()
         .unwrap();
-    let receipts = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
-    fs::create_dir_all(&receipts).unwrap();
-    fs::write(
-        receipts.join(format!("{first}.json")),
-        serde_json::to_vec(&crate::journal::ProcessReceipt {
-            schema_version: 1,
-            trace_id: trace.to_string(),
-            lf_process_id: first.to_string(),
-            pid: process.id(),
-            started_at: crate::journal::process_started_at(process.id())
-                .unwrap()
-                .unwrap(),
-        })
-        .unwrap(),
-    )
-    .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &first).unwrap();
+    // The `sleep` stands in for the lf holding the attachment.
+    store.test_set_holder(
+        "conversation",
+        process.id(),
+        crate::journal::process_started_at(process.id())
+            .unwrap()
+            .unwrap(),
+    );
     (store, attachment, process, second)
 }
 
@@ -1103,7 +1077,7 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     // Ending the AgentProcess may already have reaped this exact child.
     let _ = agent_process.wait();
     assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
-    assert_eq!(replacement.provider_lf_process_id, next);
+    assert_eq!(replacement.launcher_lf_process_id, next);
     assert!(attachment::session_connection(&store, "conversation")
         .unwrap()
         .is_none());
@@ -1115,59 +1089,6 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         store.session_thread("conversation").unwrap(),
         Some("saved-thread".into())
     );
-}
-
-#[test]
-#[cfg(unix)]
-fn resume_of_a_bare_conversation_starts_beside_its_running_agent() {
-    use std::os::unix::process::CommandExt;
-
-    let ledger = crate::journal::TestLedgerGuard::new();
-    let (store, attachment, mut process, next) = attached_session(&ledger);
-    // `lf <skill>` in another terminal: an interactive agent, no Work named,
-    // no run or owner, its lf still waiting.
-    let sql = rusqlite::Connection::open(ledger.home().join("loopflow.db")).unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET provider='claude',interactive=1,work_source=NULL",
-        [],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE processes SET agent_interactive=1 WHERE id=?1",
-        [&attachment.agent_process_id],
-    )
-    .unwrap();
-    let mut agent = std::process::Command::new("sleep")
-        .arg("30")
-        .process_group(0)
-        .spawn()
-        .unwrap();
-    let started = crate::journal::process_started_at(agent.id())
-        .unwrap()
-        .unwrap();
-    store
-        .record_agent_process_identity("conversation", &attachment, agent.id(), started)
-        .unwrap();
-
-    let beside =
-        crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
-    let first_running = agent.try_wait().unwrap().is_none();
-    let first_open: Option<i64> = sql
-        .query_row(
-            "SELECT completed_at FROM processes WHERE id=?1",
-            [&attachment.agent_process_id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    agent.kill().unwrap();
-    agent.wait().unwrap();
-    process.kill().unwrap();
-    process.wait().unwrap();
-
-    assert!(first_running, "the first agent keeps running");
-    assert_eq!(first_open, None, "a running agent is not recorded as ended");
-    assert_ne!(beside.agent_process_id, attachment.agent_process_id);
-    assert_eq!(beside.lf_process_id, Some(next));
 }
 
 #[test]

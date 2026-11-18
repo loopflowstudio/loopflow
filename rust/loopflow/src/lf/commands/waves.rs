@@ -669,7 +669,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let metric_portfolio =
         loopflow_execution::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
-        project_readiness: store.sqlite.project_readiness(wave.id())?,
+        project_readiness: loopflow_execution::ops::project::readiness(&store.sqlite, wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
                 &store.sqlite,
@@ -1545,7 +1545,10 @@ async fn roadmap_snapshot(
         }
         roadmaps.push(WaveRoadmap {
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
-            project_readiness: store.sqlite.project_readiness(wave.id())?,
+            project_readiness: loopflow_execution::ops::project::readiness(
+                &store.sqlite,
+                wave.id(),
+            )?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
             unavailable_tasks: Vec::new(),
@@ -1931,7 +1934,8 @@ struct DetailReads<'a> {
     /// validates every setting, so each distinct configuration resolves once.
     agents: std::sync::Mutex<HashMap<String, Option<loopflow_execution::config::Agent>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
-    graphs: HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphRun>,
+    graphs:
+        HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
     execution: loopflow_storage::sqlite::GraphExecutionFacts,
 }
 
@@ -3477,7 +3481,6 @@ mod tests {
             "bound",
             None,
             &store.sqlite.test_lf_process(),
-            true,
         )
         .unwrap();
         store

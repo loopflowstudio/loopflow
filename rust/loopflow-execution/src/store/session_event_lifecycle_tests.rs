@@ -31,7 +31,7 @@ fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
         conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,issue_title,issue_description,workspace_slug,created_at,updated_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,'issue','PROOF-1','Proof','','',1,1)", rusqlite::params![task.as_str(),project.as_str()]).unwrap();
     }
     let attachment =
-        attachment::claim_session_attachment(&store, &session.id, None, &process, false).unwrap();
+        attachment::claim_session_attachment(&store, &session.id, None, &process).unwrap();
     let before = store.session_turn_origin(&session.id, &attachment).unwrap();
     crate::store::sessions::bind_session(&store, &session.id, session.captured, &task).unwrap();
     let after = store.session_turn_origin(&session.id, &attachment).unwrap();
@@ -69,105 +69,72 @@ fn delayed_origin_preserves_pre_bind_assignment_through_a_conflicting_repeat() {
 
 #[test]
 #[cfg(unix)]
-fn session_exit_closes_agent_process_unless_ownership_transferred() {
+fn session_exit_closes_its_agent_process() {
     use std::os::unix::process::CommandExt;
     use std::process::Command;
 
-    for transfer in [false, true] {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
-        let session = store.test_session(
-            "conversation",
-            &loopflow_storage::session_record::new_artifact_key(),
-        );
-        let first = loopflow_model::id::LfProcessId::new();
-        let second = loopflow_model::id::LfProcessId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            for process in [&first, &second] {
-                // The AgentProcess inherits this trace; the inventory reads it typed.
-                conn.execute(
-                    "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
-                    rusqlite::params![process, loopflow_model::id::TraceId::new()],
-                )
-                .unwrap();
-            }
-            conn.execute(
-                "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
-                [&session.id],
-            )
-            .unwrap();
-        }
-        let original =
-            attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
-        let mut child = Command::new("sleep")
-            .arg("30")
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let started = crate::journal::process_started_at(child.id())
-            .unwrap()
-            .unwrap();
-        store
-            .record_agent_process_identity(&session.id, &original, child.id(), started)
-            .unwrap();
-        // An AgentProcess whose socket has gone must still be reaped on exit.
-        store
-            .record_session_connection(
-                &session.id,
-                &original,
-                home.path().join("agent.sock").to_str().unwrap(),
-                &"saved-thread".into(),
-            )
-            .unwrap();
-        let current = if transfer {
-            let replacement = attachment::claim_session_attachment(
-                &store,
-                &session.id,
-                Some(&original),
-                &second,
-                false,
-            )
-            .unwrap();
-            assert!(matches!(
-                crate::process::finish_session_attachment(
-                    &store,
-                    &session.id,
-                    &original,
-                    "completed"
-                ),
-                Err(crate::store::StoreError::InvalidAuthority(_))
-            ));
-            assert!(child.try_wait().unwrap().is_none());
-            assert!(attachment::session_connection(&store, &session.id)
-                .unwrap()
-                .is_some());
-            replacement
-        } else {
-            original
-        };
-        crate::process::finish_session_attachment(&store, &session.id, &current, "completed")
-            .unwrap();
-        // Close leaves reaping to the parent; an unreaped zombie is dead.
-        assert_eq!(
-            crate::journal::process_identity_evidence(child.id(), started),
-            crate::store::ProcessIdentityEvidence::Dead
-        );
-        let _ = child.wait();
-        assert!(attachment::session_connection(&store, &session.id)
-            .unwrap()
-            .is_none());
-        assert_eq!(
-            store.session_thread(&session.id).unwrap(),
-            Some("saved-thread".into())
-        );
-        assert!(store
-            .session_attachment(&session.id)
-            .unwrap()
-            .unwrap()
-            .lf_process_id
-            .is_none());
+    let home = tempfile::tempdir().unwrap();
+    let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
+    let session = store.test_session(
+        "conversation",
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
+    let first = loopflow_model::id::LfProcessId::new();
+    {
+        let conn = store.conn.lock().unwrap();
+        // The AgentProcess inherits this trace; the inventory reads it typed.
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?2,1)",
+            rusqlite::params![first, loopflow_model::id::TraceId::new()],
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET provider='codex',interactive=0 WHERE id=?1",
+            [&session.id],
+        )
+        .unwrap();
     }
+    let original = attachment::claim_session_attachment(&store, &session.id, None, &first).unwrap();
+    let mut child = Command::new("sleep")
+        .arg("30")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let started = crate::journal::process_started_at(child.id())
+        .unwrap()
+        .unwrap();
+    store
+        .record_agent_process_identity(&session.id, &original, child.id(), started)
+        .unwrap();
+    // An AgentProcess whose socket has gone must still be reaped on exit.
+    store
+        .record_session_connection(
+            &session.id,
+            &original,
+            home.path().join("agent.sock").to_str().unwrap(),
+            &"saved-thread".into(),
+        )
+        .unwrap();
+    crate::process::finish_session_attachment(&store, &session.id, &original, "completed").unwrap();
+    // Close leaves reaping to the parent; an unreaped zombie is dead.
+    assert_eq!(
+        crate::journal::process_identity_evidence(child.id(), started),
+        crate::store::ProcessIdentityEvidence::Dead
+    );
+    let _ = child.wait();
+    assert!(attachment::session_connection(&store, &session.id)
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        store.session_thread(&session.id).unwrap(),
+        Some("saved-thread".into())
+    );
+    assert!(store
+        .session_attachment(&session.id)
+        .unwrap()
+        .unwrap()
+        .lf_process_id
+        .is_none());
 }
 
 #[test]
@@ -223,8 +190,7 @@ fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task
                 .unwrap();
             }
         }
-        let attachment =
-            attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
+        let attachment = attachment::claim_session_attachment(&store, id, None, &process).unwrap();
         attachment::finish_session_attachment(&store, id, &attachment, outcome, None, || Ok(false))
             .unwrap();
         let saved = store.session(id).unwrap().unwrap();
@@ -260,7 +226,7 @@ fn session_exit_retires_orphans_and_headless_runs_but_preserves_primary_and_task
         .unwrap();
     let expected = store.session_attachment("task-run").unwrap();
     let turn =
-        attachment::claim_session_attachment(&store, "task-run", expected.as_ref(), &process, true)
+        attachment::claim_session_attachment(&store, "task-run", expected.as_ref(), &process)
             .unwrap();
     assert!(store
         .session("task-run")
@@ -330,8 +296,7 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
             )
             .unwrap();
     }
-    let original =
-        attachment::claim_session_attachment(&store, &session.id, None, &first, true).unwrap();
+    let original = attachment::claim_session_attachment(&store, &session.id, None, &first).unwrap();
     record_captured_start(&store, &session.id, "turn");
     store.record_turn_completion(
         &session.id,
@@ -347,7 +312,7 @@ fn stopped_turn_and_stale_attachment_cannot_retire_a_resumed_conversation() {
         .completed_at
         .is_none());
     let resumed =
-        attachment::claim_session_attachment(&store, &session.id, Some(&original), &second, true)
+        attachment::claim_session_attachment(&store, &session.id, Some(&original), &second)
             .unwrap();
     assert!(attachment::finish_session_attachment(
         &store,
@@ -422,7 +387,7 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
             .unwrap();
     }
     let original =
-        attachment::claim_session_attachment(&store, "conversation", None, &first, false).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &first).unwrap();
     store
         .record_session_connection(
             "conversation",
@@ -441,14 +406,12 @@ fn recovered_completion_keeps_missing_start_and_usage_and_its_first_answer() {
             .session_turn_origin("conversation", &original)
             .unwrap(),
     );
-    let replacement = attachment::claim_session_attachment(
-        &store,
-        "conversation",
-        Some(&original),
-        &second,
-        true,
-    )
-    .unwrap();
+    store
+        .record_agent_process_exit("conversation", &original, true)
+        .unwrap();
+    let replacement =
+        attachment::claim_session_attachment(&store, "conversation", Some(&original), &second)
+            .unwrap();
     assert_ne!(replacement.agent_process_id, original.agent_process_id);
     assert!(attachment::session_connection(&store, "conversation")
         .unwrap()

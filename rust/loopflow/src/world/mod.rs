@@ -664,7 +664,10 @@ impl World {
             &task.id,
             &row,
             &start.cursor,
-            &run.id,
+            (
+                &run.id,
+                &loopflow_storage::graph_process::ExecutionStart::reserved(run.started_at),
+            ),
             stops_at == END,
         )? {
             bail!("Task {issue} moved while starting {requested}");
@@ -762,10 +765,11 @@ impl World {
             }
         }
         let start = |process: &loopflow_storage::process::LfProcess| {
-            loopflow_storage::graph_process::RunStart::reserved(process.started_at)
+            loopflow_storage::graph_process::ExecutionStart::reserved(process.started_at)
         };
-        let finish = |process: &loopflow_storage::process::LfProcess| {
+        let finish = |owner, process: &loopflow_storage::process::LfProcess| {
             store.sqlite.finish_run(
+                owner,
                 &process.id,
                 process.completed_at.expect("a recorded step has ended"),
                 process.exit_code,
@@ -791,12 +795,15 @@ impl World {
                 &[Vec::new()],
                 &start(&process),
             )?;
-            finish(&process)?;
+            finish(
+                loopflow_storage::graph_process::RunOwner::GraphStep,
+                &process,
+            )?;
         }
         graph.completed_at = Some(begin);
         outcome.complete(&mut graph);
         store.sqlite.record_process(&graph)?;
-        finish(&graph)?;
+        finish(loopflow_storage::graph_process::RunOwner::GraphRun, &graph)?;
         Ok(())
     }
 

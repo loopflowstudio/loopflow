@@ -58,17 +58,12 @@ pub fn report() -> Result<DoctorReport> {
         Some(error) => Check::fail("store", error.clone()),
         None => Check::ok("store", "selected database is compatible with this build"),
     }];
-    // The remedy hint counts exactly what the recovery pass's ancestry repair releases.
     let events = match loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
         &database_path,
         loopflow_execution::store::token_key::encryption_key,
     )
-    .and_then(|store| {
-        Ok((
-            store.processes_since(0)?,
-            store.unrecorded_agent_ancestry()?.len(),
-        ))
-    }) {
+    .and_then(|store| store.processes_since(0))
+    {
         Ok(events) => Some(events),
         Err(error) => {
             checks.push(Check::fail(
@@ -78,14 +73,14 @@ pub fn report() -> Result<DoctorReport> {
             None
         }
     };
-    if let Some((events, repairable)) = &events {
+    if let Some(events) = &events {
         checks.extend([
             check_attribution(events),
             check_identity(events),
-            check_lineage(events, *repairable),
+            check_lineage(events),
         ]);
     }
-    let rows = events.as_ref().map_or(0, |(events, _)| events.len());
+    let rows = events.as_ref().map_or(0, Vec::len);
     // Binary freshness remains useful when the store cannot open.
     checks.extend(check_installation(&database_path));
     checks.push(check_history(
@@ -706,7 +701,7 @@ mod tests {
         [
             check_attribution(rows),
             check_identity(rows),
-            check_lineage(rows, 0),
+            check_lineage(rows),
         ]
         .into_iter()
         .find(|check| check.name == name)

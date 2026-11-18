@@ -673,10 +673,9 @@ pub fn admit_for_test(home: &std::path::Path) -> Recording {
         )
         .unwrap();
     store.test_session("fixture", &crate::session_record::new_artifact_key());
-    let attachment = crate::process::attachment::claim_session_attachment(
-        &store, "fixture", None, &process, true,
-    )
-    .unwrap();
+    let attachment =
+        crate::process::attachment::claim_session_attachment(&store, "fixture", None, &process)
+            .unwrap();
     Recording {
         store,
         session: "fixture".into(),

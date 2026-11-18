@@ -363,7 +363,7 @@ fn kept_exit_record(place: &Place, terminal: &TerminalId) -> crate::process::Ses
     let session = store.test_session("held", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
     let attachment =
-        attachment::claim_session_attachment(&store, &session.id, None, &launcher, true).unwrap();
+        attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
     let record = crate::harness::native_exit::NativeExit {
         session: session.id.to_string(),
         attachment: attachment.clone(),
@@ -635,8 +635,7 @@ fn a_held_terminal_with_no_view_reports_that_it_waits() {
     let session = store.test_session("asking", &crate::session_record::new_artifact_key());
     let launcher = store.test_lf_process();
     let attachment =
-        attachment::claim_session_attachment(&store, session.id.as_str(), None, &launcher, true)
-            .unwrap();
+        attachment::claim_session_attachment(&store, session.id.as_str(), None, &launcher).unwrap();
     let ask = ledger.home().join("ask");
     let script = format!(
         r"printf '\033]7501;state=working:app=claude-code\033\\'

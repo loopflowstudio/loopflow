@@ -670,7 +670,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn claude_stop_fences_takeover_and_ends_the_recorded_groups() {
+    async fn claude_stop_ends_each_recorded_group() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -704,7 +704,7 @@ mod tests {
             )
             .unwrap();
             let attachment =
-                attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
+                attachment::claim_session_attachment(&store, id, None, &process).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
 
             let config = live_config();
@@ -735,16 +735,6 @@ mod tests {
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
-        let original = harnesses[0].owner.attachment.clone();
-        let replacement =
-            attachment::claim_session_attachment(&store, "first", Some(&original), &process, false)
-                .unwrap();
-        assert!(harnesses[0].stop().await.is_err());
-        assert_eq!(
-            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
-            crate::journal::ProcessIdentityEvidence::Live
-        );
-        harnesses[0].owner.attachment = replacement;
         for harness in &mut harnesses {
             harness.stop().await.unwrap();
         }
@@ -1074,8 +1064,7 @@ mod tests {
                 )
                 .unwrap();
             let attachment =
-                attachment::claim_session_attachment(&self.store, id, None, &self.process, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&self.store, id, None, &self.process).unwrap();
             let mut config = live_config();
             config.cwd = Some(self.home.path().to_path_buf());
             (

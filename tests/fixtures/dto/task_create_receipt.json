@@ -77,7 +77,9 @@
       "preview": null,
       "transition": null,
       "turn": null,
-      "raw": false
+      "raw": false,
+      "ended": null,
+      "start": null
     },
     "row": {
       "task": {

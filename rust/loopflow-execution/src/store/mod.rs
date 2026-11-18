@@ -1201,7 +1201,7 @@ mod tests {
                     store.sqlite.selected_project(wave.id()).unwrap(),
                     Some(expected.clone())
                 );
-                let observed = store.sqlite.project_readiness(wave.id()).unwrap();
+                let observed = crate::ops::project::readiness(&store.sqlite, wave.id()).unwrap();
                 assert_eq!(observed.state, readiness);
                 assert_eq!(observed.project_id.as_deref(), Some(expected.id.as_str()));
                 assert_eq!(observed.observed_at, Some(17));
@@ -1239,7 +1239,9 @@ mod tests {
                 "{change}"
             );
             assert_eq!(
-                store.sqlite.project_readiness(wave.id()).unwrap().state,
+                crate::ops::project::readiness(&store.sqlite, wave.id())
+                    .unwrap()
+                    .state,
                 loopflow_storage::sqlite::ProjectReadinessState::Unavailable,
                 "{change}"
             );

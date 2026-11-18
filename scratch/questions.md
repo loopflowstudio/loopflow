@@ -178,8 +178,8 @@ worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
   reading's conversation starts, but it holds the recovery thread until done.
   Not timed at this Machine's size.
 - `lf process prune --dry-run` had no replacement: there is no way to preview
-  what the pass will settle. `lf machine doctor`'s lineage line still counts
-  repairable ancestry.
+  what the pass will settle. LOO-953 deleted the ancestry repair, so the
+  lineage line no longer counts repairable agents.
 
 ## Slice 4 (implement, 2026-11-17)
 

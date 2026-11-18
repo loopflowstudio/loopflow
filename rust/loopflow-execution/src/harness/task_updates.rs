@@ -146,9 +146,11 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         }
         let run = RunObservation {
             name: graph.entry.summary.name,
-            outcome: store
-                .graph_process(id.as_str())?
-                .and_then(|(graph, _)| graph.run.result().outcome().map(str::to_owned)),
+            outcome: store.graph_process(id.as_str())?.and_then(|(graph, _)| {
+                crate::journal::observed_result(&graph.run)
+                    .outcome()
+                    .map(str::to_owned)
+            }),
             completed: graph.entry.ended_at.is_some(),
             step: graph.steps.last().cloned(),
         };
@@ -278,7 +280,13 @@ mod tests {
         );
         assert!(quiet(&store), "between-step commits are silent");
         store
-            .finish_run(&graph, 20, Some(1), Some("it failed"))
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                &graph,
+                20,
+                Some(1),
+                Some("it failed"),
+            )
             .unwrap();
         let text = deliver(&store);
         assert!(text.contains(&format!("Run feature ({graph}) · failed")));
@@ -411,14 +419,28 @@ mod tests {
             _ => (1, Some("it failed")),
         };
         finish_step(store, run, exit, error);
-        store.finish_run(run, 20, Some(exit), error).unwrap();
+        store
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                run,
+                20,
+                Some(exit),
+                error,
+            )
+            .unwrap();
     }
 
     fn finish_step(store: &SqliteStore, run: &LfProcessId, exit: i32, error: Option<&str>) {
         let graph = store.graph_process(run.as_str()).unwrap().unwrap().0;
         for step in graph.steps {
             store
-                .finish_run(&step.run.id, 20, Some(exit), error)
+                .finish_run(
+                    loopflow_storage::graph_process::RunOwner::GraphStep,
+                    &step.run.id,
+                    20,
+                    Some(exit),
+                    error,
+                )
                 .unwrap();
         }
     }
@@ -437,7 +459,7 @@ mod tests {
                 rusqlite::params![step, run, serde_json::json!(["lf", label]).to_string()],
             )
             .unwrap();
-        let start = loopflow_storage::graph_process::RunStart::reserved(21);
+        let start = loopflow_storage::graph_process::ExecutionStart::reserved(21);
         store
             .record_graph_step(run, &step, key, &[vec![]], &start)
             .unwrap();

@@ -1755,19 +1755,18 @@ trust_level = "trusted"
     }
 
     #[test]
-    fn bare_harness_commands_do_not_select_a_model() {
-        for harness in ["claude", "opencode"] {
-            let launch = AgentConfig {
-                agent: crate::config::Agent::parse(harness).unwrap(),
-                ..default_launch()
-            };
-            let cmd = terminal_args(&launch);
-            assert!(
-                !cmd.iter()
-                    .any(|arg| { arg == "--model" || arg == "-m" || arg.starts_with("model=") }),
-                "bare {harness} selected a model: {cmd:?}"
-            );
-        }
+    fn bare_claude_command_does_not_select_a_model() {
+        // OpenCode opens a private server instead of an argv; opencode.rs covers its bare model.
+        let launch = AgentConfig {
+            agent: crate::config::Agent::parse("claude").unwrap(),
+            ..default_launch()
+        };
+        let cmd = terminal_args(&launch);
+        assert!(
+            !cmd.iter()
+                .any(|arg| arg == "--model" || arg.starts_with("model=")),
+            "bare claude selected a model: {cmd:?}"
+        );
     }
 
     #[test]

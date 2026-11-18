@@ -195,19 +195,42 @@ ended agent in every summary.
 
 ## Slices
 
-1. **The failing plan test, then deadlines.** Add `session_activity` to
-   `GROWING` and `MEASURED`, write the test, watch it fail on the scan, replace
-   the deadline statement using the guard shared with `available_sql`. Shows whether adding the table flags statements in
-   other traced paths, which is the one thing that could widen this change.
-2. **Identities are the unended agents**, in both reads, with Dead read from
-   the row in `read_summary` and `SessionProcessIdentity.completed_at` gone.
-   `a_session_reads_its_agent_lifetime_from_its_own_row` covers Unknown, Live
-   and Dead through the single read. Run `session_projection::` and the Session CLI tests that
-   assert `agent_process_evidence`
-   (`grep -rn agent_process_evidence rust/loopflow/tests`).
-3. **Graph runs as every unended run.**
-4. Re-measure the three statements on a copy of the store and put before and
-   after in the PR body.
+All three statements, Dead from the row and both tests are built. Left:
+
+- Gate runs the suites; the PR body carries the plans and times below.
+- `binary(session_cli_tests)` and `test(performance_tests::)` were not run
+  here; they read `agent_process_evidence` through the CLI.
+
+What the build showed (2026-11-18):
+
+- Adding `session_activity` to `GROWING` flagged only the deadline statement.
+  Every other `query_plans::tests::` path passed unchanged, so the change did
+  not widen.
+- The all-read statements carry `INDEXED BY agent_sessions_unended_agent`:
+  `completed_at IS NULL` in the deadline guard would otherwise let the planner
+  choose `open_sessions`.
+- The all-read's identities drop `completed_at IS NULL` as well as gaining the
+  two agent clauses, so "the agents that have not ended" is the whole rule.
+- The summary query no longer selects `a.attached_pid` and
+  `a.attached_os_started_at`; nothing read them.
+- The deadline test is `quiet_deadlines_come_only_from_agents_that_have_not_ended`
+  in `store/session_projection.rs`, next to the other reads of the inputs,
+  not in `observe.rs`.
+- `~/.lf/loopflow.db`, read-only, mean of 300 warm runs, all-Sessions read:
+
+  | statement | before rows | before | after rows | after | after plan |
+  |---|---|---|---|---|---|
+  | identities | 771 | 1,278 µs | 36 | 27 µs | `SEARCH s USING INDEX agent_sessions_unended_agent (agent_process_id>?)` |
+  | Graph runs | 5 | 2,034 µs | 5 | 3 µs | `SCAN g USING INDEX graph_processes_unended` + temp B-tree for ORDER BY |
+  | deadlines | 11 | 2,221 µs | 7 | 16 µs | `SEARCH s … agent_sessions_unended_agent`, `SEARCH act USING INDEX sqlite_autoindex_session_activity_1 (session_id=?)`, temp B-tree for DISTINCT |
+  | total | | 5,533 µs | | 46 µs | |
+
+- Under plain `cargo test` with several filters,
+  `ops::human_session::tests::resuming_an_ended_conversation_launches_its_provider_as_the_session`
+  failed once with "Native launch has no admitted invocation" and passed
+  twice alone. It sets the process `PATH`; whether it shares state with
+  another test in one process was not looked into. Nextest runs each test in
+  its own process.
 
 ## Demo
 

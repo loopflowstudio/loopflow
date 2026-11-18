@@ -13,11 +13,12 @@ use rusqlite::OptionalExtension;
 use super::sqlite::SqliteStore;
 
 /// Tables that grow with every Task, Session, turn, steer or Process.
-const GROWING: [&str; 16] = [
+const GROWING: [&str; 17] = [
     "agent_sessions",
     "git_tracker_changes",
     "git_tracker_routes",
     "processes",
+    "session_activity",
     "session_events",
     "steer_delivered",
     "steers",
@@ -51,12 +52,14 @@ const GROWING: [&str; 16] = [
 /// reference on November 16's store. `session_capture_turn` is estimated from
 /// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
 /// inputs with an ended turn, rarely two per Session thread.
+/// `session_activity` counts November 18's 20,732 readings, one per Session
+/// of 22,643, on a store where 37 agents had not ended.
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
          'git_tracker_changes','git_tracker_routes','repository_plans','steers',
          'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
-         'task_ownership','task_update_readings');
+         'task_ownership','task_update_readings','session_activity');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
          ('agent_sessions','agent_sessions_agent_process','17171 1'),
          ('agent_sessions','agent_sessions_attached','117 1'),
@@ -99,6 +102,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('projects','sqlite_autoindex_projects_2','63 2'),
          ('repository_plans','repository_selected_plan','53 1'),
          ('repository_plans','sqlite_autoindex_repository_plans_1','53 1'),
+         ('session_activity','sqlite_autoindex_session_activity_1','20732 1'),
          ('session_events','session_capture_caller','17360 15'),
          ('session_events','session_capture_key','17360 1'),
          ('session_events','session_capture_provider_thread','21078 1'),
@@ -495,6 +499,57 @@ mod tests {
                 store.session_steer_source("viewed", &steer.id).unwrap();
             })
         });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
+    // A reading of Sessions asks the OS about the agents that have not ended.
+    // It finds them, their quiet deadlines and the running Graphs without
+    // walking history, for every Session and for one.
+    #[test]
+    fn session_projection_inputs_plan_from_the_unended_agents() {
+        let (_home, store, _task, _viewer) = fixture();
+        let attachment = store
+            .attach_session(
+                "viewed",
+                None,
+                &store.test_lf_process(),
+                None,
+                &crate::sqlite::sessions::SessionCaller {
+                    agent: None,
+                    capture_key: None,
+                },
+            )
+            .unwrap();
+        store
+            .record_session_activity(
+                "viewed",
+                &attachment,
+                &crate::session::SessionActivity {
+                    preview: None,
+                    observed_at: 450,
+                    open_tools: 0,
+                    pending_input: 0,
+                    yielded: false,
+                },
+            )
+            .unwrap();
+        let traced = statements(&store, || {
+            for session in [None, Some("viewed")] {
+                let inputs = store.session_projection_inputs(500, session).unwrap();
+                assert_eq!(inputs.identities.len(), 1);
+                assert_eq!(inputs.deadlines, [450 + 120]);
+                let mut conn = store.conn.lock().unwrap();
+                assert!(inputs.pin(&mut conn).unwrap().is_some());
+            }
+        });
+        assert_eq!(
+            traced
+                .iter()
+                .filter(|sql| sql.starts_with("SELECT"))
+                .count(),
+            12
+        );
         let scans = growing_scans(&store, &traced);
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

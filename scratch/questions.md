@@ -19,3 +19,10 @@ Made without anyone to ask; each is reversible.
   the all-read.
 - **The deadline statement shares its guard with `available_sql`** rather than
   repeating three of its clauses.
+- **The all-read's identities ignore `completed_at`.** A completed Session
+  whose agent has not ended is asked about in both reads; the plan's wording
+  ("add" two clauses) would have kept `completed_at IS NULL` in one of them.
+- **`INDEXED BY agent_sessions_unended_agent` on the all-read.** It pins the
+  driver the design names; drop it if the planner should be free to choose.
+- **A possibly order-dependent test**, `resuming_an_ended_conversation_launches_its_provider_as_the_session`,
+  failed once under threaded `cargo test` and not alone. Not investigated.

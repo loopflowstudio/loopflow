@@ -1,6 +1,6 @@
 use std::fs::File;
 use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
@@ -281,6 +281,17 @@ impl AgentProcessSettlement<'_> {
     }
 }
 
+/// An lf an owner record says runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedLf {
+    /// What it runs as: `Graph run`, `Session` and the like.
+    pub what: String,
+    pub id: String,
+    pub pid: u32,
+    pub os_started_at: Option<i64>,
+    pub started_at: Option<i64>,
+}
+
 pub(super) const PROCESS_SELECT: &str =
     "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
@@ -322,35 +333,6 @@ fn read_agent_state(
         spawn_reserved: row.get(13)?,
     })
 }
-
-/// A finished `lf` Process nothing needs any more, over alias `p`: no agent
-/// issued it, no running parent may still read its result, and no row
-/// references it. Exit and prune both forget exactly these rows. Agent-side
-/// references (steers, Session activity, `caller_agent_process_id`) name only
-/// `kind='agent'` rows, which are never forgotten. History and turns name a
-/// Process without holding it: they keep it for 30 days after it finished,
-/// so recent Task history still finds its work, then let it go.
-pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
-    AND p.via_agent IS NOT 1
-    AND NOT EXISTS(SELECT 1 FROM processes r WHERE r.id=p.parent_lf_process_id AND r.completed_at IS NULL)
-    AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
-    AND (p.completed_at < CAST(strftime('%s','now') AS INTEGER) - 30*86400 OR (
-        NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
-        AND NOT EXISTS(SELECT 1 FROM history.turns WHERE lf_process_id=p.id)))
-    AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)";
 
 /// The row's `kind` column is the only place an id becomes either type.
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessEntry> {
@@ -681,11 +663,6 @@ pub(super) fn attach_in(
     let holder_pid = holder.and_then(|start| start.process.pid);
     let holder_started = holder.and_then(|start| start.process.os_started_at);
     let terminal = holder.and_then(|start| start.terminal.as_ref());
-    if let Some(start) = start {
-        // A best-effort start receipt can lose to a held write lock; the
-        // attaching lf's row lands here instead.
-        super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
-    }
     if let Some(previous) = &current {
         // A Session runs one agent: a replaced one has ended, or never spawned.
         let (ended, reserved) = agent_process_progress_in(tx, &previous.agent_process_id)?;
@@ -760,6 +737,43 @@ impl SqliteStore {
         Ok(records)
     }
 
+    /// Every lf an owner record says runs, with the OS process it recorded:
+    /// unended runs, carriers and CI repairs, and the lf attached to each
+    /// Session.
+    pub fn recorded_lfs(&self) -> StoreResult<Vec<RecordedLf>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let mut query = conn.prepare(
+            "SELECT 'Graph run',lf_process_id,pid,os_started_at,started_at FROM graph_processes
+                 WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'Graph step',lf_process_id,pid,os_started_at,started_at
+                 FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'Project activation',project_activation_lf_process_id,
+                 project_activation_pid,project_activation_os_started_at,
+                 project_activation_started_at FROM waves
+                 WHERE project_activation_ended_at IS NULL AND project_activation_pid IS NOT NULL
+             UNION ALL SELECT 'Task run',lf_process_id,run_pid,run_os_started_at,NULL
+                 FROM task_graphs WHERE run_pid IS NOT NULL
+             UNION ALL SELECT 'Auto-Ship',lf_process_id,pid,os_started_at,at FROM task_ship_events
+                 WHERE kind IN ('approved','carried') AND ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'CI repair',repair_lf_process_id,repair_pid,repair_os_started_at,
+                 repair_started_at FROM ci_incidents
+                 WHERE repair_finished_at IS NULL AND repair_pid IS NOT NULL
+             UNION ALL SELECT 'Session',attached_lf_process_id,attached_pid,attached_os_started_at,
+                 NULL FROM agent_sessions INDEXED BY agent_sessions_attached
+                 WHERE attached_lf_process_id IS NOT NULL AND attached_pid IS NOT NULL",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok(RecordedLf {
+                what: row.get(0)?,
+                id: row.get(1)?,
+                pid: row.get(2)?,
+                os_started_at: row.get(3)?,
+                started_at: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<ProcessEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -811,53 +825,6 @@ impl SqliteStore {
                 "Ambiguous Work selector {selector:?}"
             ))),
         }
-    }
-
-    pub fn process_receipt_locator(
-        &self,
-        id: &LfProcessId,
-    ) -> StoreResult<Option<(PathBuf, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let locator: Option<String> = conn
-            .query_row(
-                "SELECT receipt_locator FROM processes WHERE id=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let home = conn
-            .path()
-            .filter(|path| !path.is_empty())
-            .and_then(|path| Path::new(path).parent());
-        Ok(locator
-            .zip(home)
-            .map(|(locator, home)| (home.to_path_buf(), locator)))
-    }
-
-    pub fn process_for_receipt(&self, locator: &str) -> StoreResult<Option<LfProcess>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                &format!("{PROCESS_SELECT} WHERE e.receipt_locator=?1 AND e.kind='lf'"),
-                [locator],
-                read_lf_process,
-            )
-            .optional()?)
-    }
-
-    pub fn journal_trace_locator(
-        &self,
-        trace: &loopflow_model::id::TraceId,
-    ) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT journal_trace_locator FROM processes
-                 WHERE trace_id=?1 ORDER BY started_at,id LIMIT 1",
-                [trace],
-                |row| row.get(0),
-            )
-            .optional()?)
     }
 
     /// Read one command without decoding its event history or provider payloads.
@@ -2156,7 +2123,7 @@ mod attachment_tests {
     }
 
     #[test]
-    fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
+    fn attaching_and_its_terminal_commit_only_with_the_agent() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
@@ -2210,23 +2177,22 @@ mod attachment_tests {
                 },
             )
             .unwrap();
-        assert_eq!(
-            store.lf_process(&start.process.id).unwrap(),
-            Some(start.process.clone())
-        );
+        // No lf writes its own Process row: the attachment and its terminal
+        // are on the Session, and the agent row a released reader joins
+        // names its launcher.
+        assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
         let agent = store
             .agent_process(&attached.agent_process_id)
             .unwrap()
             .unwrap();
         assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&start.process.id));
-        assert_eq!(agent.trace_id, start.process.trace_id);
         let placement: loopflow_model::id::TerminalId = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT held_terminal_id FROM processes WHERE id=?1",
-                [&start.process.id],
+                "SELECT attached_terminal_id FROM agent_sessions WHERE id='conversation'",
+                [],
                 |row| row.get(0),
             )
             .unwrap();
@@ -2483,161 +2449,5 @@ mod attachment_tests {
         assert!(row.completed_at.is_some());
         assert_eq!(store.session_history(&session.id, 0, 0).unwrap(), history);
         assert!(store.agent_processes().unwrap().is_empty());
-    }
-}
-
-#[cfg(test)]
-mod forget_tests {
-    use rusqlite::params;
-
-    use loopflow_model::id::{LfProcessId, TraceId};
-
-    /// Forgetting a Process a row still names either fails the delete or, on a
-    /// connection that does not enforce foreign keys, leaves a reference no
-    /// migration can pass. The schema says which columns can name one.
-    #[test]
-    fn every_column_that_names_an_lf_process_keeps_it_from_being_forgotten() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        let mut statement = conn
-            .prepare(
-                "SELECT m.name, f.\"from\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f
-                 WHERE m.type='table' AND f.\"table\"='processes' AND f.on_delete!='CASCADE'",
-            )
-            .unwrap();
-        let references: Vec<(String, String)> = statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert!(!references.is_empty());
-        let unguarded: Vec<_> = references
-            .into_iter()
-            // Agent rows are never forgotten.
-            .filter(|(_, column)| column != "agent_process_id")
-            .filter(|(table, column)| {
-                !super::FORGETTABLE.contains(&format!("FROM {table} WHERE {column}=p.id"))
-            })
-            .collect();
-        assert_eq!(unguarded, Vec::<(String, String)>::new());
-    }
-
-    #[test]
-    fn an_exit_forgets_the_process_unless_something_still_needs_it() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-        let session = store.test_session("session", &crate::session_record::new_artifact_key());
-        let start = |parent: Option<&LfProcessId>, via_agent: bool| {
-            let process = crate::process::LfProcess {
-                id: LfProcessId::new(),
-                pid: None,
-                os_started_at: None,
-                trace_id: TraceId::new(),
-                parent_lf_process_id: parent.cloned(),
-                via_agent: Some(via_agent),
-                caller_session_id: None,
-                caller_agent_process_id: None,
-                command: None,
-                repo: None,
-                cwd: None,
-                started_at: 1,
-                completed_at: None,
-                outcome: None,
-                exit_code: None,
-                signal: None,
-                error: None,
-            };
-            store.record_process(&process).unwrap();
-            process
-        };
-        let finish = |process: &crate::process::LfProcess| {
-            store
-                .record_process(&crate::process::LfProcess {
-                    completed_at: Some(2),
-                    outcome: Some("succeeded".into()),
-                    ..process.clone()
-                })
-                .unwrap();
-        };
-        let kept = |process: &crate::process::LfProcess| {
-            store.process_is_recorded(process.id.as_str()).unwrap()
-        };
-
-        let human = start(None, false);
-        let agent_issued = start(None, true);
-        let graph = start(None, false);
-        let step = start(Some(&graph.id), false);
-        let narrated = start(None, false);
-        let holder = start(None, false);
-        let running_child = start(Some(&holder.id), false);
-        let shipper = start(None, false);
-        let task = loopflow_model::durable::TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: crate::test_fixture::repository(&store, "/repo"),
-                id: task.clone(),
-                project_id: None,
-                title: "Shipped Task".into(),
-                description: "Brief".into(),
-                due_date: None,
-            })
-            .unwrap();
-        store
-            .ship_task(
-                &task,
-                (
-                    &shipper.id,
-                    &crate::graph_process::ExecutionStart::reserved(1),
-                ),
-                "proof",
-            )
-            .unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
-                 VALUES(?1,'observed','narrated',1,'{}',?2)",
-                params![session.id, narrated.id],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'g','{}')",
-                [&graph.id],
-            )
-            .unwrap();
-        }
-        for process in [&human, &agent_issued, &step, &narrated, &holder, &shipper] {
-            finish(process);
-        }
-        assert!(kept(&shipper), "the Task names its ship process");
-        assert!(!kept(&human));
-        assert!(kept(&agent_issued));
-        assert!(kept(&narrated));
-        // A running Graph may still read its step's result.
-        assert!(kept(&step));
-        assert!(kept(&holder), "a running child names it");
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
-                 VALUES(?1,?2,0,'{}')",
-                [&graph.id, &step.id],
-            )
-            .unwrap();
-
-        finish(&running_child);
-        assert!(!kept(&running_child), "its parent had already finished");
-        finish(&graph);
-        assert!(kept(&graph) && kept(&step), "the Graph records its step");
-        // Without a step record, finishing the parent forgets its finished child.
-        let parent = start(None, false);
-        let child = start(Some(&parent.id), false);
-        finish(&child);
-        assert!(kept(&child));
-        finish(&parent);
-        assert!(!kept(&child) && !kept(&parent));
     }
 }

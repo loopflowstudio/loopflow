@@ -2090,7 +2090,6 @@ fn run() -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
-        journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
@@ -2172,7 +2171,6 @@ fn run() -> anyhow::Result<()> {
                 candidate,
             }) => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
-        journal::observe_process(&args);
         return result;
     }
 
@@ -2727,9 +2725,6 @@ fn dispatch_here(
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
     if let Some(Commands::Open(open)) = &cli.command {
-        // Bounded observation records this Process and the calling
-        // conversation, which tells a link to the caller's own Work apart.
-        journal::observe_process(args);
         let _cwd = cli
             .wt
             .as_deref()

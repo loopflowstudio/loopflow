@@ -247,7 +247,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
         fixture
             .store
             .sqlite
-            .record_process_within(&conversation, Some(&terminal), std::time::Duration::ZERO)
+            .record_process(&conversation)
             .unwrap();
         // Its provider, attached to it, binds the conversation to the Task.
         let agent = loopflow_model::id::AgentProcessId::new();

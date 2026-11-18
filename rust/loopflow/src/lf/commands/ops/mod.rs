@@ -1037,19 +1037,14 @@ fn wt_timing(json: bool) -> Result<()> {
             seconds(group.total_ms.max)
         );
         println!(
-            "  median / p95:  startup {}   local git {}   remote {}   receipts {}",
+            "  median / p95:  startup {}   local git {}   remote {}",
             phase(Some(group.startup_ms)),
             phase(group.local_git_ms),
-            phase(group.remote_ms),
-            phase(group.receipt_ms)
+            phase(group.remote_ms)
         );
         println!(
-            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}   receipts unrecorded {}",
-            group.failed,
-            group.interrupted,
-            group.remote_timed_out,
-            group.remote_unavailable,
-            group.receipts_unrecorded
+            "  failed {}   interrupted {}   remote timed out {}   remote unavailable {}",
+            group.failed, group.interrupted, group.remote_timed_out, group.remote_unavailable
         );
     }
     println!(

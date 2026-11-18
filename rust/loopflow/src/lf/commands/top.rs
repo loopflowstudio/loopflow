@@ -6,14 +6,11 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 
-use loopflow_execution::journal::{
-    prune_process_receipts_at, read_process_receipts_at, recorded_process_evidence,
-    recorded_process_receipt, OsProcess, ProcessIdentityEvidence, ProcessReceipt,
-};
+use loopflow_execution::journal::{recorded_process_evidence, OsProcess, ProcessIdentityEvidence};
 use loopflow_execution::output::truncate;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::rows::unix_to_datetime;
@@ -78,8 +75,6 @@ pub struct ProcessPruneReport {
     pub schema_version: u32,
     pub observed_at: i64,
     pub dry_run: bool,
-    pub stale_process_receipt_pids: Vec<u32>,
-    pub removed_process_receipts: u32,
     pub orphaned_agent_process_groups: Vec<u32>,
     pub reaped_agent_process_groups: u32,
     pub agent_process_records: Vec<loopflow_execution::harness::agent_process::AgentProcessCleanup>,
@@ -90,11 +85,10 @@ pub struct ProcessPruneReport {
 /// Only affirmative death removes a recorded process from the activity view.
 fn activity_state(
     record: &loopflow_execution::process::ProcessEntry,
-    receipt: &std::io::Result<Option<ProcessReceipt>>,
     processes: Option<&[OsProcess]>,
 ) -> Option<ActivityState> {
     let mut state = ActivityState::Unknown;
-    let evidence = recorded_process_evidence(record, receipt, |pid, start| {
+    let evidence = recorded_process_evidence(record, |pid, start| {
         let Some(processes) = processes else {
             return ProcessIdentityEvidence::Unknown;
         };
@@ -157,36 +151,19 @@ pub fn subscribe_ps(
 
 pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let lf_home = loopflow_execution::store::lf_home_dir();
-    let processes = OsProcess::sample(now)?;
-    let receipts =
-        read_process_receipts_at(&lf_home).context("failed to read live Process receipts")?;
-    // Attached LfProcess death is proven from Process receipts, so reap before
-    // pruning them.
     let agents = loopflow_execution::harness::agent_process::reap_agent_processes(dry_run)?;
     for error in &agents.errors {
         tracing::warn!(%error, "failed to clean up AgentProcess");
     }
-    let mut report = ProcessPruneReport {
+    let report = ProcessPruneReport {
         schema_version: SCHEMA_VERSION,
         observed_at: now,
         dry_run,
-        stale_process_receipt_pids: stale_process_receipt_pids(&processes, &receipts),
-        removed_process_receipts: 0,
         orphaned_agent_process_groups: agents.orphaned,
         reaped_agent_process_groups: agents.reaped,
         agent_process_records: agents.records,
         errors: u32::try_from(agents.errors.len()).unwrap_or(u32::MAX),
     };
-    if !dry_run {
-        match prune_process_receipts_at(&lf_home, &report.stale_process_receipt_pids) {
-            Ok(removed) => report.removed_process_receipts = removed,
-            Err(error) => {
-                tracing::warn!(error = %error, "failed to prune stale Process receipts");
-                report.errors += 1;
-            }
-        }
-    }
 
     if json {
         println!("{}", serde_json::to_string_pretty(&report)?);
@@ -203,29 +180,13 @@ pub fn run_prune(json: bool, dry_run: bool) -> Result<()> {
     }
 }
 
-fn stale_process_receipt_pids(processes: &[OsProcess], receipts: &[ProcessReceipt]) -> Vec<u32> {
-    let process_by_pid = processes
-        .iter()
-        .map(|process| (process.pid, process))
-        .collect::<HashMap<_, _>>();
-    let mut stale_process_receipt_pids = receipts
-        .iter()
-        .filter(|receipt| !receipt_matches_live_process(receipt, &process_by_pid))
-        .map(|receipt| receipt.pid)
-        .collect::<Vec<_>>();
-    stale_process_receipt_pids.sort_unstable();
-    stale_process_receipt_pids.dedup();
-
-    stale_process_receipt_pids
-}
-
 pub(crate) fn load_snapshot() -> Result<ActivitySnapshot> {
     ActivityReader::default().read()
 }
 
 /// Reads activity again and again, each time reading only the unfinished rows
 /// not yet proven dead. Death is permanent, so a row that never recorded its
-/// exit costs one reading of its receipt and PID, not one every tick.
+/// exit costs one reading of its PID, not one every tick.
 #[derive(Debug, Default)]
 pub(crate) struct ActivityReader {
     store: Option<SqliteStore>,
@@ -256,7 +217,7 @@ impl ActivityReader {
             Some((read_at, rows)) if read_at == revision => rows,
             _ => store.unfinished_processes_except(&mut self.dead)?,
         };
-        let snapshot = read_activity(store, records.clone())?;
+        let snapshot = read_activity(records.clone())?;
         let shown: HashSet<&str> = snapshot.nodes.iter().map(|node| node.id.as_str()).collect();
         let current = loopflow_execution::journal::current_lf_process_id();
         let (dead, alive) = records.into_iter().partition::<Vec<_>, _>(|row| {
@@ -270,43 +231,27 @@ impl ActivityReader {
 }
 
 fn read_activity(
-    store: &SqliteStore,
     records: Vec<loopflow_execution::process::ProcessEntry>,
 ) -> Result<ActivitySnapshot> {
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    // Each unfinished row reads its own receipt and its own OS processes, so
-    // cost follows live work, not history or the rest of the Machine.
-    let mut receipts: HashMap<_, _> = records
-        .iter()
-        .filter_map(loopflow_execution::process::ProcessEntry::as_lf)
-        .map(|record| (record.id.clone(), recorded_process_receipt(store, record)))
-        .collect();
+    // Each unfinished row reads its own OS process, so cost follows live
+    // work, not history or the rest of the Machine.
     let mut pids: Vec<u32> = records
         .iter()
         .filter_map(loopflow_execution::process::ProcessEntry::pid)
         .collect();
-    pids.extend(
-        receipts
-            .values()
-            .filter_map(|receipt| receipt.as_ref().ok()?.as_ref().map(|receipt| receipt.pid)),
-    );
     pids.sort_unstable();
     pids.dedup();
     let processes = OsProcess::read_each(&pids, now);
     if let Err(error) = &processes {
         tracing::warn!(%error, "activity OS observation unavailable");
     }
-    collect_activity(records, processes.as_deref().ok(), |record| {
-        receipts.remove(&record.id).unwrap_or(Ok(None))
-    })
+    collect_activity(records, processes.as_deref().ok())
 }
 
 fn collect_activity(
     records: Vec<loopflow_execution::process::ProcessEntry>,
     processes: Option<&[OsProcess]>,
-    mut receipt: impl FnMut(
-        &loopflow_execution::process::LfProcess,
-    ) -> std::io::Result<Option<ProcessReceipt>>,
 ) -> Result<ActivitySnapshot> {
     use loopflow_execution::process::ProcessEntry;
     let current = loopflow_execution::journal::current_lf_process_id();
@@ -315,11 +260,7 @@ fn collect_activity(
         if current.as_ref().map(LfProcessId::as_str) == Some(record.id()) {
             continue;
         }
-        let receipt = match &record {
-            ProcessEntry::Lf(process) => receipt(process),
-            ProcessEntry::Agent(_) => Ok(None),
-        };
-        let Some(state) = activity_state(&record, &receipt, processes) else {
+        let Some(state) = activity_state(&record, processes) else {
             continue;
         };
         nodes.push(ActivityNode {
@@ -373,15 +314,6 @@ fn agent_command_label(command: Option<&str>) -> String {
         Some(subcommand) => format!("{program} {subcommand}"),
         None => program.to_owned(),
     }
-}
-
-fn receipt_matches_live_process(
-    receipt: &ProcessReceipt,
-    processes: &HashMap<u32, &OsProcess>,
-) -> bool {
-    processes
-        .get(&receipt.pid)
-        .is_some_and(|process| process.matches_start(receipt.pid, receipt.started_at))
 }
 
 fn os_activity_state(process: &OsProcess) -> ActivityState {
@@ -519,22 +451,10 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     let action = if report.dry_run { "PREVIEW" } else { "PRUNED" };
     let mut output = format!("LOOPFLOW PROCESS PRUNE · {action}\n");
     output.push_str(&format!(
-        "{} stale Process receipt PIDs · {} orphaned AgentProcess process groups · {} errors\n",
-        report.stale_process_receipt_pids.len(),
+        "{} orphaned AgentProcess process groups · {} errors\n",
         report.orphaned_agent_process_groups.len(),
         report.errors,
     ));
-    if !report.stale_process_receipt_pids.is_empty() {
-        output.push_str(&format!(
-            "Process receipt PIDs (unfinished receipts retained): {}\n",
-            report
-                .stale_process_receipt_pids
-                .iter()
-                .map(u32::to_string)
-                .collect::<Vec<_>>()
-                .join(", ")
-        ));
-    }
     if !report.orphaned_agent_process_groups.is_empty() {
         output.push_str(&format!(
             "AgentProcess groups: {}\n",
@@ -554,8 +474,8 @@ fn render_prune_report(report: &ProcessPruneReport) -> String {
     }
     if !report.dry_run {
         output.push_str(&format!(
-            "removed {} receipts · reaped {} process groups\n",
-            report.removed_process_receipts, report.reaped_agent_process_groups,
+            "reaped {} process groups\n",
+            report.reaped_agent_process_groups,
         ));
     }
     output
@@ -730,7 +650,7 @@ mod tests {
         sql.execute("UPDATE processes SET cwd='/repo/task'", [])
             .unwrap();
 
-        // No receipt and no agent PID/birth: both are real blockers. A reused
+        // No OS start on either: both stay visible. A reused
         // PID equal to this reader's PID must not hide the unrelated lf row.
         let snapshot = load_snapshot().unwrap();
         assert_eq!(snapshot.nodes.len(), 2);
@@ -738,14 +658,8 @@ mod tests {
             .nodes
             .iter()
             .all(|node| node.state == ActivityState::Unknown));
-        let blockers =
-            loopflow_execution::ops::task_execution::task_execution_blockers(&store, &task)
-                .unwrap();
-        assert_eq!(blockers.len(), 2);
         for node in &snapshot.nodes {
-            let id = node.id.as_str();
-            assert!(blockers.iter().any(|blocker| blocker.contains(id)));
-            assert!(super::render_snapshot(&snapshot).contains(id));
+            assert!(super::render_snapshot(&snapshot).contains(node.id.as_str()));
         }
 
         let mut record = store.agent_process(&agent).unwrap().unwrap();
@@ -789,27 +703,13 @@ mod tests {
                 Some(ActivityState::Working),
             ),
         ] {
-            let actual = activity_state(&record, &Ok(None), sample.as_deref());
+            let actual = activity_state(&record, sample.as_deref());
             assert_eq!(actual, expected);
         }
+        // An unfinished lf row with no OS start cannot be confirmed.
         let lf = ProcessEntry::Lf(store.lf_process(&parent).unwrap().unwrap());
-        let receipt = loopflow_execution::journal::ProcessReceipt {
-            schema_version: 1,
-            lf_process_id: parent.to_string(),
-            trace_id: lf.trace_id().to_string(),
-            pid: 4242,
-            started_at: now,
-        };
         assert_eq!(
-            activity_state(&lf, &Ok(Some(receipt.clone())), None),
-            Some(ActivityState::Unknown)
-        );
-        let mut foreign = receipt;
-        foreign.trace_id = TraceId::new().to_string();
-        assert_eq!(
-            recorded_process_evidence(&lf, &Ok(Some(foreign)), |_, _| {
-                ProcessIdentityEvidence::Live
-            }),
+            recorded_process_evidence(&lf, |_, _| ProcessIdentityEvidence::Live),
             ProcessIdentityEvidence::Unknown
         );
         assert_eq!(
@@ -818,77 +718,8 @@ mod tests {
         );
     }
 
-    /// Activity reads each unfinished row's receipt by locator. Receipt history,
-    /// even one that cannot be listed, changes neither the result nor the cost.
-    #[test]
-    #[cfg(unix)]
-    fn activity_reads_only_the_receipts_of_unfinished_rows() {
-        use super::{load_snapshot, ActivitySnapshot, ActivityState, ProcessReceipt};
-
-        use std::os::unix::fs::PermissionsExt;
-
-        let _lock = loopflow_execution::journal::test_env_lock();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let _home = crate::test_ambient::EnvGuard::clear(&["LF_HOME"]);
-        let home = tempfile::tempdir().unwrap();
-        std::env::set_var("LF_HOME", home.path());
-        let path = home.path().join("loopflow.db");
-        loopflow_execution::store::opening::open_ephemeral(&path).unwrap();
-        let sql = rusqlite::Connection::open(path).unwrap();
-        let live = LfProcessId::new();
-        let pid = std::process::id();
-        let started_at = loopflow_execution::journal::process_started_at(pid)
-            .unwrap()
-            .unwrap();
-        sql.execute(
-            "INSERT INTO processes(id,trace_id,started_at,pid) VALUES(?1,?1,?2,?3)",
-            rusqlite::params![live, started_at, pid],
-        )
-        .unwrap();
-        let root = home
-            .path()
-            .join(loopflow_execution::journal::PROCESS_RECEIPT_ROOT);
-        std::fs::create_dir_all(&root).unwrap();
-        let receipt = |id: &str| ProcessReceipt {
-            schema_version: 1,
-            trace_id: id.into(),
-            lf_process_id: id.into(),
-            pid,
-            started_at,
-        };
-        std::fs::write(
-            root.join(format!("{live}.json")),
-            serde_json::to_vec(&receipt(live.as_str())).unwrap(),
-        )
-        .unwrap();
-        let ids = |snapshot: ActivitySnapshot| {
-            snapshot
-                .nodes
-                .into_iter()
-                .map(|node| (node.id, node.state != ActivityState::Unknown))
-                .collect::<Vec<_>>()
-        };
-        let before = ids(load_snapshot().unwrap());
-        assert_eq!(before, [(live.to_string(), true)]);
-
-        for _ in 0..10_000 {
-            let junk = LfProcessId::new();
-            std::fs::write(
-                root.join(format!("{junk}.json")),
-                serde_json::to_vec(&receipt(junk.as_str())).unwrap(),
-            )
-            .unwrap();
-        }
-        let permissions = std::fs::metadata(&root).unwrap().permissions();
-        // Traversal permits the locator read; listing the directory fails.
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o111)).unwrap();
-        let after = load_snapshot().map(ids);
-        std::fs::set_permissions(&root, permissions).unwrap();
-        assert_eq!(after.unwrap(), before);
-    }
-
     /// A subscription shows new rows and exits as they commit, and reads a row proven
-    /// dead only once: its receipt and PID are never read again.
+    /// dead only once: its PID is never read again.
     #[test]
     #[cfg(unix)]
     fn a_watch_reads_each_dead_row_once() {
@@ -977,18 +808,17 @@ mod tests {
                 kernel_state: "S".into(),
             }]
         };
-        let snapshot =
-            collect_activity(vec![record.clone()], Some(&os(100)), |_| Ok(None)).unwrap();
+        let snapshot = collect_activity(vec![record.clone()], Some(&os(100))).unwrap();
         assert_eq!(snapshot.nodes.len(), 1);
         assert_eq!(snapshot.nodes[0].kind, ActivityNodeKind::AgentProcess);
         assert_eq!(snapshot.nodes[0].id, id.to_string());
         assert_eq!(snapshot.nodes[0].parent_id, Some(parent.to_string()));
         assert_eq!(snapshot.nodes[0].label, "codex app-server");
-        assert!(collect_activity(vec![record], Some(&os(200)), |_| Ok(None))
+        assert!(collect_activity(vec![record], Some(&os(200)))
             .unwrap()
             .nodes
             .is_empty());
-        assert!(collect_activity(Vec::new(), Some(&os(100)), |_| Ok(None))
+        assert!(collect_activity(Vec::new(), Some(&os(100)))
             .unwrap()
             .nodes
             .is_empty());

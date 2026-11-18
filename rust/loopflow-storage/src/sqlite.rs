@@ -731,30 +731,6 @@ impl SqliteStore {
         Ok(store)
     }
 
-    /// Append process evidence to an existing compatible store, never initialize it.
-    pub fn open_existing_processes(
-        path: &Path,
-        wait: Duration,
-        token_key: token_crypto::TokenKeySource,
-    ) -> StoreResult<Self> {
-        let conn = Connection::open_with_flags(
-            path,
-            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE
-                | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX
-                | rusqlite::OpenFlags::SQLITE_OPEN_URI,
-        )?;
-        crate::instrumentation::observe_sqlite(&conn);
-        conn.busy_timeout(wait.min(Duration::from_secs(5)))?;
-        conn.execute_batch("PRAGMA foreign_keys = ON;")?;
-        // An older ledger without the current process owner is not a writable
-        // observation destination. Leave upgrade decisions to ordinary admission.
-        conn.prepare(
-            "SELECT id, trace_id, parent_lf_process_id, started_at, completed_at, outcome, exit_code, pid FROM processes LIMIT 0",
-        )?;
-        crate::history::attach(&conn, path);
-        Ok(Self::with_history(conn, token_key, Some(path)))
-    }
-
     pub fn open_read_only(
         path: &Path,
         token_key: token_crypto::TokenKeySource,
@@ -1508,92 +1484,25 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a Process start or exit. An exit forgets this Process and the
-    /// finished children it was keeping when nothing else needs them
-    /// ([`processes::FORGETTABLE`]). Each statement commits on its own so a
-    /// writer holds the lock only briefly; a row an interrupted exit leaves is
-    /// forgotten by the retention prune.
+    /// Write a Process row the way a released lf does; fixtures for the
+    /// readers a later change deletes (`lf ps`, doctor, history) seed with it.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
-        self.record_hosted_process(process, None)
-    }
-
-    /// Record a Process start or exit; a start inside a held terminal names it.
-    fn record_hosted_process(
-        &self,
-        process: &crate::process::LfProcess,
-        held_terminal: Option<&loopflow_model::id::TerminalId>,
-    ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        record_process_in(&conn, process, held_terminal)?;
-        if process.completed_at.is_some() {
-            let forget = |scope: &str| {
-                conn.execute(
-                    &format!(
-                        "DELETE FROM processes WHERE id IN (SELECT p.id FROM processes p
-                         WHERE {scope} AND {})",
-                        processes::FORGETTABLE
-                    ),
-                    [&process.id],
-                )
-            };
-            // Children first: any child left would keep this Process.
-            forget("p.parent_lf_process_id=?1")?;
-            forget("p.id=?1")?;
-        }
+        conn.execute(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+                via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)
+             ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+                outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+             WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
+            params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
+                process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
+                process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
+                process.os_started_at],
+        )?;
         Ok(())
     }
-
-    /// Record a process, waiting at most `wait` for another writer; a zero wait
-    /// is one attempt.
-    pub fn record_process_within(
-        &self,
-        process: &crate::process::LfProcess,
-        held_terminal: Option<&loopflow_model::id::TerminalId>,
-        wait: Duration,
-    ) -> StoreResult<()> {
-        let previous: u32 = {
-            let conn = self.conn.lock().expect("store mutex poisoned");
-            let previous = conn.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
-            conn.busy_timeout(wait)?;
-            previous
-        };
-        let result = self.record_hosted_process(process, held_terminal);
-        self.conn
-            .lock()
-            .expect("store mutex poisoned")
-            .busy_timeout(Duration::from_millis(u64::from(previous)))?;
-        result
-    }
-
-    pub fn process_is_recorded(&self, lf_process_id: &str) -> StoreResult<bool> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 1 FROM processes WHERE id=?1")?;
-        Ok(query.exists([lf_process_id])?)
-    }
-}
-
-/// A start record never overwrites an existing row; a terminal record completes
-/// the row it started. `held_terminal` is the terminal a held lf process runs
-/// in, so rules scoped to that terminal find the work started inside it.
-pub(super) fn record_process_in(
-    conn: &rusqlite::Connection,
-    process: &crate::process::LfProcess,
-    held_terminal: Option<&loopflow_model::id::TerminalId>,
-) -> StoreResult<()> {
-    conn.execute(
-        "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
-            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
-            held_terminal_id)
-         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
-         ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
-            outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
-         WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL",
-        params![process.id,process.trace_id,process.parent_lf_process_id,process.command,process.repo,process.cwd,
-            process.started_at,process.via_agent,process.caller_session_id,process.caller_agent_process_id,
-            process.completed_at,process.outcome,process.exit_code,process.signal,process.error,process.pid,
-            process.os_started_at,held_terminal],
-    )?;
-    Ok(())
 }
 
 #[cfg(test)]

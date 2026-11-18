@@ -115,15 +115,6 @@ pub fn finish_session_attachment(
     transfer.finish(outcome, departure, closed)
 }
 
-pub(crate) fn process_receipt_path(
-    store: &SqliteStore,
-    id: &LfProcessId,
-) -> StoreResult<Option<std::path::PathBuf>> {
-    Ok(store
-        .process_receipt_locator(id)?
-        .map(|(home, locator)| crate::journal::process_receipt_path(&home, &locator)))
-}
-
 /// A stale process cannot authorize termination. Retain the Session fence
 /// from the saved-image comparison through termination and settlement.
 pub(crate) fn settle_agent_process(

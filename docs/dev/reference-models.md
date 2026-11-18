@@ -310,9 +310,10 @@ Lock acquisition has an OS-clock deadline independent of the provider reactor.
 Lock files retain their inode across process exit; deleting a live lock file
 would let two processes own different locks for the same Session. The Session's
 immutable `fence_locator` retains that address independently of its ID spelling.
-Process rows likewise retain receipt basenames and trace journal directory names
-in `receipt_locator` and `journal_trace_locator`; an identity conversion never
-renames those files. New Processes in a retained trace reuse its directory name.
+Process rows a released lf wrote likewise retain receipt basenames and trace
+journal directory names in `receipt_locator` and `journal_trace_locator`; an
+identity conversion never renames those files. This lf writes no Process row
+or receipt, and names a trace's journal directory by its trace id.
 
 Identity migration tries affected Session fences without blocking and holds them
 through SQLite commit or rollback. Busy dispatch, live affected owners and unknown

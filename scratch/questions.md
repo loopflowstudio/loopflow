@@ -139,3 +139,10 @@ isolated child process, as AGENTS.md asks of process-global tests.
 - Call: open work counts only open Sessions (completed Sessions with an unended agent are strays for doctor) and unended Graph runs; an lf command running in a checkout that is neither (e.g. `lf task land`) no longer blocks retirement or landing.
 - Call: a Graph run whose step outlives it no longer holds the Task's work; the step's own Session does if it runs an agent.
 - Call: Desktop shells mark membership with an inherited `LF_HELD_TERMINAL`; a person can unset it in a shell and their work then blocks retirement, as an unknown process would.
+
+## Journal stop (2026-11-18)
+
+- Call: `binaries.rs` (install's and doctor's superseded-binary report) read live lf rows, which stop existing; it now reads `recorded_lfs()` (owner rows with a pid and each Session's attached lf) plus unfinished Process rows for a released lf. The plan had listed no fate for it.
+- Call: a read-only Graph step (`graph show …`) admits no Process, so it once wrote its end only through `observe_process`; `with_process` now creates the context at exit when `LF_EXECUTION_ID` is set, and nothing else.
+- Call: the CI repair arm stays out of the liveness pass; no Process end ever ended an incident's repair, and readers check its pid inline.
+- Open for slice 4: `lf ps` lists only released-lf rows and bridged agent rows now, since nothing else writes Process rows.

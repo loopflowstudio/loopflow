@@ -454,7 +454,6 @@ impl Registry {
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
         let mut client = Client::ensure(&self.place)?;
         let holder = client.hello()?;
-        crate::terminal_holder::client::record(holder.pid);
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
             .env
@@ -602,15 +601,13 @@ impl Registry {
             }
             unsettled.push(Unsettled::recorded(&place, terminal));
         }
-        crate::terminal_holder::client::settle_departed();
         (entries, pending)
     }
 
     /// Take up what the holder at `place` lists.
     fn take_up(&self, place: &Place, mut client: Client) -> Result<TakenUp> {
-        let holder = client.hello()?;
+        client.hello()?;
         let listed = client.list()?;
-        crate::terminal_holder::client::adopt(place, holder.pid);
         let mut taken = TakenUp {
             entries: Vec::new(),
             unsettled: Vec::new(),
@@ -658,7 +655,6 @@ impl Registry {
                         .iter()
                         .map(|terminal| Unsettled::recorded(&holder.place, terminal.clone()))
                         .collect();
-                    crate::terminal_holder::client::settle_departed();
                     (Vec::new(), unsettled)
                 }
                 Ok(client) => match self.take_up(&holder.place, client) {

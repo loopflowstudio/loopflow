@@ -1,4 +1,3 @@
-use crate::process::attachment;
 mod os_process;
 pub mod request;
 pub use os_process::OsProcess;
@@ -26,7 +25,6 @@ use loopflow_storage::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
-pub const PROCESS_RECEIPT_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
 /// The tracing target of a Start's timings: the server's creation steps and the
 /// conversation's setup steps. `logs/lf.log` keeps it at INFO for the report.
@@ -207,7 +205,6 @@ struct ProcessContext {
     /// Retain the first successful connection through Process completion.
     #[serde(skip)]
     ledger: Arc<OnceLock<SqliteStore>>,
-    receipt_wait: Duration,
     /// Serialized argv captured at Process start so terminal rows name their work.
     command: Option<String>,
     /// Optional repository trace journal. Early process observation uses only
@@ -220,7 +217,6 @@ struct ProcessContext {
     /// True when this process minted the trace id (vs inheriting LF_TRACE_ID);
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
-    receipts: Arc<Mutex<ReceiptCost>>,
     /// The records this process runs as and writes its end on: the step its
     /// Graph minted it for, and any Graph run, Task run or Project
     /// activation it recorded.
@@ -228,57 +224,9 @@ struct ProcessContext {
     run_owners: Arc<Mutex<Vec<RunOwner>>>,
 }
 
-/// What a process's ledger receipts cost, and how many did not land.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReceiptCost {
-    pub waited: Duration,
-    pub unrecorded: u32,
-}
-
-/// How long one Process waits for a contended store across all of its receipts.
-/// A start receipt that used the whole wait leaves its finish receipt a single
-/// attempt, so a held write lock delays a command once, not once per receipt.
-#[cfg(not(any(test, feature = "test-support")))]
-fn receipt_wait() -> Duration {
-    loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT
-}
-
-#[cfg(any(test, feature = "test-support"))]
-thread_local! {
-    static TEST_RECEIPT_WAIT: std::cell::Cell<Duration> =
-        const { std::cell::Cell::new(loopflow_storage::sqlite::SQLITE_WRITE_BUSY_TIMEOUT) };
-}
-
-#[cfg(any(test, feature = "test-support"))]
-fn receipt_wait() -> Duration {
-    TEST_RECEIPT_WAIT.with(std::cell::Cell::get)
-}
-
 /// Time since this lf process entered its entry point; `None` in a library caller.
 pub(crate) fn process_elapsed() -> Option<Duration> {
     PROCESS_START.get().map(Instant::elapsed)
-}
-
-/// Exact, process-local ownership evidence for a live Loopflow Process.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ProcessReceipt {
-    pub schema_version: u32,
-    pub trace_id: String,
-    #[serde(rename = "exec_id")] // Persisted receipt format survives upgrades.
-    pub lf_process_id: String,
-    pub pid: u32,
-    pub started_at: i64,
-}
-
-impl ProcessReceipt {
-    pub(crate) fn matches_process(&self, process: &str, trace: &str) -> bool {
-        self.lf_process_id.eq_ignore_ascii_case(process)
-            && self.trace_id.eq_ignore_ascii_case(trace)
-    }
-
-    pub(crate) fn process_evidence(&self) -> ProcessIdentityEvidence {
-        process_identity_evidence(self.pid, self.started_at)
-    }
 }
 
 pub use crate::store::ProcessIdentityEvidence;
@@ -363,67 +311,27 @@ pub fn with_process(run: impl FnOnce() -> anyhow::Result<()>) -> anyhow::Result<
         .set(Instant::now())
         .expect("one lf entry point per process");
     let result = run();
-    // Nothing can reference a Process no one saw running, so exit observation
-    // writes only a row the rule may keep: one an agent issued, or one a
-    // running lf parent may still read.
-    if std::env::var_os(AGENT_CALLER_ENV).is_some() || std::env::var_os(LF_PROCESS_ID_ENV).is_some()
-    {
-        observe_process(&std::env::args().collect::<Vec<_>>());
-    }
     crate::agent::wait_for_interrupt_cleanup();
-    let receipts = if let Some(context) = current_context() {
-        finish_runtime(&context.cwd, &result);
-        let cost = *context
-            .receipts
-            .lock()
-            .expect("receipt cost mutex poisoned");
-        Some(cost)
-    } else {
-        None
-    };
-    crate::ops::wt_timing::finish(result.is_ok(), receipts);
-    result
-}
-
-/// Observe a command without creating a Machine, migrating, or requiring Git:
-/// doctor before admission, and an install once its store has committed.
-/// Failure to observe never prevents help or installation recovery.
-pub fn observe_process(command: &[String]) {
-    let wait = receipt_wait();
-    // Failed early observation must not be retried at exit with a longer wait.
-    static ATTEMPTED: AtomicBool = AtomicBool::new(false);
-    if request::active()
-        || current_context().is_some()
-        || EFFECT_FREE_READ.load(Ordering::Relaxed)
-        || READ.load(Ordering::Relaxed)
-        || ATTEMPTED.swap(true, Ordering::Relaxed)
-    {
-        return;
-    }
-    let observe = || -> anyhow::Result<()> {
-        let path = crate::store::database_path_from_env()?;
-        // A Machine without a store (a fresh or disposable home) has nothing to record into.
-        if !path.exists() {
-            return Ok(());
+    // A read admits no Process, but a step its Graph minted still writes its end.
+    if current_context().is_none() && std::env::var_os(LF_EXECUTION_ID_ENV).is_some() {
+        if let Err(error) = std::env::current_dir().and_then(|directory| {
+            ensure_process_context(
+                &directory,
+                &LfEventFields {
+                    command: Some(std::env::args().collect()),
+                    worktree: Some(directory.display().to_string()),
+                    ..LfEventFields::default()
+                },
+            )
+        }) {
+            warn!(%error, "this step's end is not recorded");
         }
-        let ledger = SqliteStore::open_existing_processes(
-            &path,
-            wait,
-            crate::store::token_key::encryption_key,
-        )?;
-        let directory = std::env::current_dir()?;
-        let fields = LfEventFields {
-            command: Some(command.to_vec()),
-            worktree: Some(directory.display().to_string()),
-            ..LfEventFields::default()
-        };
-        create_process_context(&directory, &fields, path, Some(ledger), wait)?;
-        try_emit(&directory, LfNode::Process, LfEventType::Started, fields)?;
-        Ok(())
-    };
-    if let Err(error) = observe() {
-        warn!(%error, "Process observation unavailable; this command is not recorded");
     }
+    if let Some(context) = current_context() {
+        finish_runtime(&context.cwd, &result);
+    }
+    crate::ops::wt_timing::finish(result.is_ok());
+    result
 }
 
 pub fn command_exit_code<T>(result: &anyhow::Result<T>) -> u8 {
@@ -542,7 +450,7 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
 
 const EXEC_PROCESS_ENV: &str = "LF_EXEC_PROCESS";
 
-/// Keep this command's receipt across a relay exec, without its open store.
+/// Keep this command's identity across a relay exec, without its open store.
 pub(crate) fn carry_across_exec(command: &mut Command) -> anyhow::Result<()> {
     if let Some(context) = current_context() {
         command.env(
@@ -554,7 +462,7 @@ pub(crate) fn carry_across_exec(command: &mut Command) -> anyhow::Result<()> {
 }
 
 /// Restore the relay's command identity without opening its store. Its actual
-/// return or interruption writes the ordinary terminal receipt.
+/// return or interruption writes its end as usual.
 pub fn continue_after_exec() -> anyhow::Result<()> {
     let Some(value) = std::env::var_os(EXEC_PROCESS_ENV) else {
         return Ok(());
@@ -563,9 +471,9 @@ pub fn continue_after_exec() -> anyhow::Result<()> {
     let (pid, context): (u32, ProcessContext) = serde_json::from_str(
         value
             .to_str()
-            .ok_or_else(|| anyhow::anyhow!("exec process receipt is not UTF-8"))?,
+            .ok_or_else(|| anyhow::anyhow!("exec process identity is not UTF-8"))?,
     )?;
-    // Exec keeps the PID; a child cannot adopt its parent's command receipt.
+    // Exec keeps the PID; a child cannot adopt its parent's identity.
     if pid == std::process::id() {
         set_context(context.clone());
         crate::agent::register_interrupt_cleanup(move || record_process_interruption(&context));
@@ -681,7 +589,7 @@ fn try_emit(
         }
     }
 
-    ledger_insert(&context, &event, exit_code);
+    record_end(&context, &event, exit_code);
 
     if terminal {
         if context.minted_trace_id {
@@ -714,11 +622,10 @@ fn record_process_interruption(context: &ProcessContext) {
     };
     // ctrlc's termination hook does not identify which signal arrived.
     // Keep that unknown while recording the observed interrupted exit.
-    ledger_insert(context, &event, Some(130));
+    record_end(context, &event, Some(130));
 }
 
-/// This Process's row as its start receipt writes it. Attachment writes the
-/// same row in its own transaction, so an agent never names an unrecorded parent.
+/// This Process as it started: the attachment it takes records its OS process.
 fn start_record(context: &ProcessContext) -> LfProcess {
     LfProcess {
         os_started_at: context.process_started_at,
@@ -776,38 +683,29 @@ pub(crate) fn current_start_record(process: &LfProcessId) -> Option<LfProcess> {
         .map(|context| start_record(&context))
 }
 
-/// Best-effort write into the machine-grain SQLite ledger. Never fails the
-/// run: the first failure warns, and later failures log at debug. Local-only —
-/// the ledger never leaves the machine.
-fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i32>) {
+/// A run writes its own end on the records it owns, at its terminal event:
+/// the step its Graph minted it for, and any Graph run, Task run or Project
+/// activation it recorded. A command that owns none writes nothing. Never
+/// fails the run: the first failure warns, later ones log at debug.
+fn record_end(context: &ProcessContext, event: &LfEvent, exit_code: Option<i32>) {
     if event.node != LfNode::Process {
         return;
     }
-    let outcome = match event.event {
-        LfEventType::Completed => Some("succeeded"),
-        LfEventType::Errored => Some("failed"),
-        LfEventType::Escalated => Some("interrupted"),
-        _ => None,
-    };
-    let mut record = start_record(context);
-    record.completed_at = outcome.map(|_| event.ts.unix_timestamp());
-    record.outcome = outcome.map(str::to_owned);
-    record.exit_code = exit_code.or(match event.event {
+    let exit_code = exit_code.or(match event.event {
         LfEventType::Completed => Some(0),
         LfEventType::Errored => Some(1),
         LfEventType::Escalated => Some(130),
-        _ => None,
+        LfEventType::Started => return,
     });
-    record.signal = event.signal.clone();
-    record.error = event.error.clone();
-
-    let started = Instant::now();
-    let already_waited = context
-        .receipts
+    let owners = context
+        .run_owners
         .lock()
-        .expect("receipt cost mutex poisoned")
-        .waited;
-    let recorded = match context.ledger.get().cloned().map_or_else(
+        .expect("run owner mutex poisoned")
+        .clone();
+    if owners.is_empty() {
+        return;
+    }
+    let store = match context.ledger.get().cloned().map_or_else(
         || {
             let store = crate::store::open_sqlite(&context.ledger_path)?;
             let _ = context.ledger.set(store.clone());
@@ -815,72 +713,30 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
         },
         Ok,
     ) {
-        Ok(store) => {
-            let wait = context
-                .receipt_wait
-                .saturating_sub(already_waited + started.elapsed());
-            match store.record_process_within(&record, crate::transport::current(), wait) {
-                Ok(()) => {
-                    finish_owned_run(context, &store, &record);
-                    true
-                }
-                Err(err) => {
-                    let waited = (already_waited + started.elapsed()).as_secs_f64();
-                    if first_ledger_failure() {
-                        warn!(error = %err, trace_id = %record.trace_id, waited_seconds = waited, "ledger insert failed — this Process is not being recorded");
-                    } else {
-                        debug!(error = %err, trace_id = %record.trace_id, waited_seconds = waited, "ledger insert failed");
-                    }
-                    false
-                }
-            }
-        }
-        Err(err) => {
+        Ok(store) => store,
+        Err(error) => {
             if first_ledger_failure() {
-                warn!(error = %err, "ledger unavailable — Processes are not being recorded");
+                warn!(%error, "store unavailable — this run's end is not recorded");
             } else {
-                debug!(error = %err, "ledger unavailable");
+                debug!(%error, "store unavailable");
             }
-            false
+            return;
         }
     };
-    // Both ordinary completion and interrupt cleanup retain identity until settlement.
-    if recorded && record.completed_at.is_some() {
-        remove_process_receipt(context);
-    }
-    let mut cost = context
-        .receipts
-        .lock()
-        .expect("receipt cost mutex poisoned");
-    cost.waited += started.elapsed();
-    if !recorded {
-        cost.unrecorded += 1;
-    }
-}
-
-/// A run writes its own end on the record it owns. Only a process that owns
-/// one tries, and only once its Process receipt landed, so a held write lock
-/// delays it once. When the journal stops recording Process rows (LOO-953
-/// approach 2), this becomes the run's only write at exit, best-effort with
-/// the journal's warn-once gap.
-fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfProcess) {
-    let Some(ended_at) = record.completed_at else {
-        return;
-    };
-    let owners = context
-        .run_owners
-        .lock()
-        .expect("run owner mutex poisoned")
-        .clone();
+    let ended_at = event.ts.unix_timestamp();
     for owner in owners {
         if let Err(error) = store.finish_run(
             owner,
-            &record.id,
+            &context.lf_process_id,
             ended_at,
-            record.exit_code,
-            record.error.as_deref(),
+            exit_code,
+            event.error.as_deref(),
         ) {
-            warn!(%error, ?owner, "could not record this run's end on its owner record");
+            if first_ledger_failure() {
+                warn!(%error, ?owner, "could not record this run's end on its owner record");
+            } else {
+                debug!(%error, ?owner, "could not record this run's end");
+            }
         }
     }
 }
@@ -918,8 +774,8 @@ pub(crate) fn ledger_exists() -> bool {
     ledger_db_path().is_ok_and(|path| path.exists())
 }
 
-/// This Process's retained ledger connection, opening one only when no receipt
-/// has yet; every open revalidates the schema.
+/// This Process's retained store connection, opening one when it has none;
+/// every open revalidates the schema.
 pub(crate) fn process_ledger() -> Result<SqliteStore, crate::store::StoreError> {
     match current_context().and_then(|context| context.ledger.get().cloned()) {
         Some(store) => Ok(store),
@@ -957,8 +813,6 @@ fn ensure_process_context(
         repo_root,
         fields,
         ledger_db_path().map_err(std::io::Error::other)?,
-        None,
-        receipt_wait(),
     )
 }
 
@@ -966,30 +820,18 @@ fn create_process_context(
     repo_root: &Path,
     fields: &LfEventFields,
     ledger_path: PathBuf,
-    ledger: Option<SqliteStore>,
-    receipt_wait: Duration,
 ) -> Result<Option<ProcessContext>, std::io::Error> {
-    let early = ledger.is_some();
-    let same_store = ledger_db_path()
-        .is_ok_and(|path| crate::store::same_database_file(&path, &ledger_path).unwrap_or(false));
-    let main_repo = (!early).then(|| main_repo_root(repo_root).ok()).flatten();
-    let wave_name = if early {
-        None
-    } else {
-        let attribution = crate::work::wave::context::process_attribution(main_repo.as_deref());
-        if let Some(failure) = attribution.failure.as_deref() {
-            debug!(
-                error = failure,
-                "ambient wave identity failed validation; Process has no wave"
-            );
-        }
-        attribution.wave
-    };
+    let main_repo = main_repo_root(repo_root).ok();
+    let attribution = crate::work::wave::context::process_attribution(main_repo.as_deref());
+    if let Some(failure) = attribution.failure.as_deref() {
+        debug!(
+            error = failure,
+            "ambient wave identity failed validation; Process has no wave"
+        );
+    }
+    let wave_name = attribution.wave;
 
-    let inherits = same_store;
-    let agent_caller = inherits
-        .then(|| std::env::var_os(AGENT_CALLER_ENV))
-        .flatten()
+    let agent_caller = std::env::var_os(AGENT_CALLER_ENV)
         .map(|value| {
             let value = value
                 .into_string()
@@ -1002,20 +844,15 @@ fn create_process_context(
     std::env::remove_var(AGENT_CALLER_ENV);
     let inherited_trace = match agent_caller.as_ref() {
         Some(caller) => caller.trace_id.clone(),
-        None => inherits.then(|| configured_trace_id(repo_root)).flatten(),
+        None => configured_trace_id(repo_root),
     };
     let (trace_id, minted_trace_id) = match inherited_trace {
         Some(trace_id) => (trace_id, false),
         None => (TraceId::default(), true),
     };
 
-    // A parent process id only means "my parent within this trace, recorded in
-    // this ledger." A fresh trace id makes a lingering LF_PROCESS_ID belong to
-    // the old trace; and `ledger_insert` is best-effort, so a parent whose
-    // write never landed exported its identity anyway. Both spell a parent
-    // that resolves to nothing. Drop it so the violation is unspellable at
-    // write time; the trace id stays, so the trace still groups. A legitimate
-    // parent records its own start row before it can spawn anything.
+    // A parent process id only means "my parent within this trace": a fresh
+    // trace id makes a lingering LF_PROCESS_ID belong to the old trace.
     let parent_lf_process_id = if let Some(caller) = agent_caller.as_ref() {
         (!minted_trace_id).then(|| caller.origin_lf_process_id.clone())
     } else {
@@ -1026,13 +863,11 @@ fn create_process_context(
                     .and_then(|value| LfProcessId::parse(&value).ok())
             })
             .flatten()
-            .filter(|parent| parent_is_recorded(parent, ledger.as_ref()))
     };
     let minted = std::env::var(LF_EXECUTION_ID_ENV)
         .ok()
         .and_then(|value| LfProcessId::parse(&value).ok());
     std::env::remove_var(LF_EXECUTION_ID_ENV);
-    let minted = minted.filter(|_| inherits);
     // A Graph mints its steps' ids; a Task run mints its Graph run's, which
     // that run marks once it records itself.
     let run_owners = Arc::new(Mutex::new(
@@ -1045,7 +880,7 @@ fn create_process_context(
     ));
     let lf_process_id = minted.unwrap_or_default();
     // Export the identity so prompt logs and child processes carry the same
-    // trace and parent as the ledger rows. The export is removed when the
+    // trace and parent. The export is removed when the
     // Process ends (see try_emit).
     std::env::set_var(LF_TRACE_ID_ENV, trace_id.as_str());
     std::env::set_var(LF_PROCESS_ID_ENV, lf_process_id.as_str());
@@ -1053,9 +888,8 @@ fn create_process_context(
         .as_ref()
         .map(|caller| caller.session_id.clone())
         .or_else(|| {
-            inherits
-                .then(|| std::env::var(LF_CALLER_SESSION_ENV).ok())
-                .flatten()
+            std::env::var(LF_CALLER_SESSION_ENV)
+                .ok()
                 .map(LfSessionId::from)
         });
     match &caller_session {
@@ -1063,44 +897,27 @@ fn create_process_context(
         None => std::env::remove_var(LF_CALLER_SESSION_ENV),
     }
 
-    // Write the file journal wherever we can. Fall back to ledger-only when
-    // the journal can't be
-    // git-excluded (e.g. not a git repo).
-    let trace_dir = if early {
-        None
-    } else {
-        match crate::repo::discover_repo_root(repo_root)
-            .map_err(std::io::Error::other)
-            .and_then(|root| {
-                root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
-            })
-            .and_then(|root| {
-                crate::git::exclude(&root, JOURNAL_EXCLUDE_ENTRY)?;
-                let mut dir = traces_root(&root).join(trace_id.as_str());
-                // Only an inherited Trace from before canonical storage can retain
-                // another directory name; a minted or already-present one cannot.
-                if !minted_trace_id && !dir.is_dir() {
-                    let retained = ledger
-                        .clone()
-                        .map_or_else(open_ledger, Ok)
-                        .and_then(|store| store.journal_trace_locator(&trace_id))
-                        .map_err(std::io::Error::other)?;
-                    if let Some(retained) = retained {
-                        dir = traces_root(&root).join(retained);
-                    }
-                }
-                fs::create_dir_all(&dir)?;
-                Ok(dir)
-            }) {
-            Ok(dir) => Some(dir),
-            Err(err) => {
-                debug!(
-                    error = %err,
-                    repo = %repo_root.display(),
-                    "file journal unavailable; recording to ledger only"
-                );
-                None
-            }
+    // Write the file journal wherever the trace directory can be
+    // git-excluded (not outside a repository).
+    let trace_dir = match crate::repo::discover_repo_root(repo_root)
+        .map_err(std::io::Error::other)
+        .and_then(|root| {
+            root.ok_or_else(|| std::io::Error::other("no repository for file journal"))
+        })
+        .and_then(|root| {
+            crate::git::exclude(&root, JOURNAL_EXCLUDE_ENTRY)?;
+            let dir = traces_root(&root).join(trace_id.as_str());
+            fs::create_dir_all(&dir)?;
+            Ok(dir)
+        }) {
+        Ok(dir) => Some(dir),
+        Err(err) => {
+            debug!(
+                error = %err,
+                repo = %repo_root.display(),
+                "file journal unavailable"
+            );
+            None
         }
     };
 
@@ -1127,18 +944,16 @@ fn create_process_context(
         process_started_at,
         cwd: repo_root.to_path_buf(),
         ledger_path,
-        ledger: Arc::new(ledger.map(OnceLock::from).unwrap_or_default()),
-        receipt_wait,
+        ledger: Arc::default(),
         command: fields
             .command
             .as_ref()
             .and_then(|argv| serde_json::to_string(argv).ok()),
         trace_dir,
-        repo: (!early).then_some(repo),
+        repo: Some(repo),
         wave: wave_name.clone(),
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
-        receipts: Arc::default(),
         run_owners,
     };
     set_context(context.clone());
@@ -1147,12 +962,6 @@ fn create_process_context(
     if is_cli_process() {
         let interrupted = context.clone();
         crate::agent::register_interrupt_cleanup(move || record_process_interruption(&interrupted));
-    }
-    // Never write process-control receipts into a different inherited Machine.
-    if same_store {
-        if let Err(error) = write_process_receipt(&context) {
-            debug!(error = %error, lf_process_id = %context.lf_process_id, "live Process receipt unavailable");
-        }
     }
 
     if let Some(wave_name) = wave_name {
@@ -1167,50 +976,6 @@ fn create_process_context(
     }
 
     Ok(Some(context))
-}
-
-/// Whether the ledger holds a row for an inherited parent.
-///
-/// Read-only on purpose: this runs at the start of every nested `lf`, and
-/// asking who my parent was must not migrate, back up, or take the exclusive
-/// lock a full open does.
-///
-/// A ledger that isn't there records nothing, so a missing file answers
-/// `false`. Any other read failure answers `true` — never disown a real parent
-/// over a locked store; this process's own row is about to fail the same way,
-/// so there is no ghost to prevent.
-fn parent_is_recorded(parent: &LfProcessId, ledger: Option<&SqliteStore>) -> bool {
-    let path = match ledger_db_path() {
-        Ok(path) if path.exists() => path,
-        Ok(_) => return false,
-        Err(err) => {
-            debug!(error = %err, "no ledger path; keeping the inherited parent process id");
-            return true;
-        }
-    };
-    match ledger
-        .cloned()
-        .map_or_else(
-            || {
-                SqliteStore::open_processes_read_only(
-                    &path,
-                    crate::store::token_key::encryption_key,
-                )
-            },
-            Ok,
-        )
-        .and_then(|store| store.process_is_recorded(parent.as_str()))
-    {
-        Ok(recorded) => recorded,
-        Err(err) => {
-            debug!(
-                error = %err,
-                parent = parent.as_str(),
-                "ledger unreadable; keeping the inherited parent process id"
-            );
-            true
-        }
-    }
 }
 
 fn configured_trace_id(repo_root: &Path) -> Option<TraceId> {
@@ -1299,8 +1064,15 @@ fn current_context() -> Option<ProcessContext> {
 }
 
 /// Caller provenance captured at process entry, before the environment is consumed.
+/// The agent edge that issued this command: its Process's, or before
+/// admission (`lf open` admits none) the one it inherited.
 pub fn agent_caller() -> Option<AgentCaller> {
-    current_context().and_then(|context| context.agent_caller)
+    match current_context() {
+        Some(context) => context.agent_caller,
+        None => std::env::var(AGENT_CALLER_ENV)
+            .ok()
+            .and_then(|value| serde_json::from_str(&value).ok()),
+    }
 }
 
 /// A nested command leaves checkpoint composition to its caller.
@@ -1396,19 +1168,6 @@ pub fn step_evidence(
     run_evidence(step)
 }
 
-/// An lf row's liveness by its receipt; the journal's receipt tests read it.
-#[cfg(test)]
-pub(crate) fn lf_evidence(store: &SqliteStore, process: &LfProcessId) -> ProcessIdentityEvidence {
-    let Ok(Some(record)) = store.lf_process(process) else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    lf_process_evidence(
-        &record,
-        &recorded_process_receipt(store, &record),
-        process_identity_evidence,
-    )
-}
-
 /// Whether the lf holding a Session's attachment still runs, by the OS
 /// process it recorded when it attached.
 pub fn holder_evidence(holder: &crate::process::AttachmentHolder) -> ProcessIdentityEvidence {
@@ -1461,38 +1220,6 @@ pub(crate) fn agent_evidence(
     )
 }
 
-/// The recorded Process's own receipt, read by its locator without listing others.
-pub fn recorded_process_receipt(
-    store: &SqliteStore,
-    record: &crate::process::LfProcess,
-) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    match attachment::process_receipt_path(store, &record.id).map_err(std::io::Error::other)? {
-        Some(path) => read_process_receipt(&path),
-        None => Ok(None),
-    }
-}
-
-pub(crate) fn process_receipt_path(lf_home: &Path, locator: &str) -> PathBuf {
-    // Retained receipt basenames are opaque. A case-normalized Process keeps
-    // reading the original file, including on case-sensitive filesystems.
-    lf_home
-        .join(PROCESS_RECEIPT_ROOT)
-        .join(format!("{locator}.json"))
-}
-
-pub(crate) fn read_process_receipt(path: &Path) -> Result<Option<ProcessReceipt>, std::io::Error> {
-    let text = match crate::observe::read_to_string(path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(error) => return Err(error),
-    };
-    let receipt: ProcessReceipt = serde_json::from_str(&text).map_err(std::io::Error::other)?;
-    if receipt.schema_version != 1 {
-        return Err(std::io::Error::other("unsupported Process receipt schema"));
-    }
-    Ok(Some(receipt))
-}
-
 /// Completion is final. Otherwise only the recorded OS identity proves liveness;
 /// unknown evidence never ages into permission to replace or clean up a process.
 /// A restart since `began_at` (the Process record's start) still proves exit.
@@ -1514,15 +1241,14 @@ pub fn agent_process_evidence(
     }
 }
 
-/// One identity rule for control readers and sampled activity. An agent has
-/// no receipt; it is judged by its own recorded OS identity.
+/// One identity rule for a Process row, lf or agent: its own recorded OS
+/// identity.
 pub fn recorded_process_evidence(
     record: &crate::process::ProcessEntry,
-    receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
     observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
     match record {
-        crate::process::ProcessEntry::Lf(record) => lf_process_evidence(record, receipt, observe),
+        crate::process::ProcessEntry::Lf(record) => lf_process_evidence(record, observe),
         crate::process::ProcessEntry::Agent(record) => agent_process_evidence(
             record.completed_at,
             record.pid,
@@ -1533,26 +1259,15 @@ pub fn recorded_process_evidence(
     }
 }
 
-/// An unreadable receipt is not an absent one; neither permits invented OS identity.
+/// An unfinished lf row's own OS identity tells a reused pid apart.
 pub fn lf_process_evidence(
     record: &crate::process::LfProcess,
-    receipt: &Result<Option<ProcessReceipt>, std::io::Error>,
     mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
 ) -> ProcessIdentityEvidence {
-    let Ok(receipt) = receipt else {
-        return ProcessIdentityEvidence::Unknown;
-    };
-    match receipt {
-        Some(receipt) if receipt.matches_process(record.id.as_str(), record.trace_id.as_str()) => {
-            return observe(receipt.pid, receipt.started_at);
+    if record.completed_at.is_none() {
+        if let Some((pid, started_at)) = record.pid.zip(record.os_started_at) {
+            return observe(pid, started_at);
         }
-        // Without a receipt, an unfinished row's own OS identity still tells a reused PID.
-        None if record.completed_at.is_none() => {
-            if let Some((pid, started_at)) = record.pid.zip(record.os_started_at) {
-                return observe(pid, started_at);
-            }
-        }
-        _ => {}
     }
     // Historical Processes can lack identity evidence. A restart still proves exit.
     if record.completed_at.is_some() || began_before_boot(record.started_at) {
@@ -1637,124 +1352,6 @@ fn clear_context() {
     });
 }
 
-pub fn read_process_receipts_at(lf_home: &Path) -> Result<Vec<ProcessReceipt>, std::io::Error> {
-    Ok(read_process_receipt_files_at(lf_home)?
-        .into_iter()
-        .map(|(_, receipt)| receipt)
-        .collect())
-}
-
-fn read_process_receipt_files_at(
-    lf_home: &Path,
-) -> Result<Vec<(PathBuf, ProcessReceipt)>, std::io::Error> {
-    let root = lf_home.join(PROCESS_RECEIPT_ROOT);
-    let entries = match fs::read_dir(root) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => return Err(error),
-    };
-    let mut receipts = Vec::new();
-    for entry in entries {
-        let entry = entry?;
-        if !entry.file_type()?.is_file() {
-            continue;
-        }
-        let path = entry.path();
-        if path.extension().and_then(|value| value.to_str()) != Some("json") {
-            continue;
-        }
-        if let Ok(Some(receipt)) = read_process_receipt(&path) {
-            receipts.push((path, receipt));
-        }
-    }
-    Ok(receipts)
-}
-
-pub fn prune_process_receipts_at(lf_home: &Path, pids: &[u32]) -> Result<u32, std::io::Error> {
-    if pids.is_empty() {
-        return Ok(0);
-    }
-    let store = SqliteStore::open_processes_read_only(
-        &lf_home.join("loopflow.db"),
-        crate::store::token_key::encryption_key,
-    )
-    .map_err(std::io::Error::other)?;
-    let mut removed = 0;
-    for (path, receipt) in read_process_receipt_files_at(lf_home)? {
-        if !pids.contains(&receipt.pid)
-            || receipt.process_evidence() != ProcessIdentityEvidence::Dead
-        {
-            continue;
-        }
-        let retained = match path.file_stem().and_then(|stem| stem.to_str()) {
-            Some(locator) => store
-                .process_for_receipt(locator)
-                .map_err(std::io::Error::other)?,
-            None => None,
-        };
-        // Earlier receipts were named by PID; their recorded Process owns them.
-        let record = match retained {
-            Some(record) => Some(record),
-            None => match LfProcessId::parse(&receipt.lf_process_id) {
-                Ok(id) => store.lf_process(&id).map_err(std::io::Error::other)?,
-                Err(_) => None,
-            },
-        };
-        // An unfinished row's receipt is the only evidence of its exit. Only a
-        // Process writes its own row, so a dead one without a row never gets one.
-        let removable = record.is_none_or(|record| {
-            receipt.matches_process(record.id.as_str(), record.trace_id.as_str())
-                && record.completed_at.is_some()
-        });
-        if !removable {
-            continue;
-        }
-        match fs::remove_file(path) {
-            Ok(()) => removed += 1,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
-        }
-    }
-    Ok(removed)
-}
-
-fn write_process_receipt(context: &ProcessContext) -> Result<(), std::io::Error> {
-    let Some(started_at) = context.process_started_at else {
-        return Ok(());
-    };
-    let home = context
-        .ledger_path
-        .parent()
-        .ok_or_else(|| std::io::Error::other("Process ledger has no parent directory"))?;
-    let root = home.join(PROCESS_RECEIPT_ROOT);
-    fs::create_dir_all(&root)?;
-    let pid = std::process::id();
-    let receipt = ProcessReceipt {
-        schema_version: 1,
-        trace_id: context.trace_id.to_string(),
-        lf_process_id: context.lf_process_id.to_string(),
-        pid,
-        started_at,
-    };
-    let bytes = serde_json::to_vec(&receipt).map_err(std::io::Error::other)?;
-    let path = process_receipt_path(home, context.lf_process_id.as_str());
-    let temporary = root.join(format!(".{}.json.tmp", context.lf_process_id));
-    fs::write(&temporary, bytes)?;
-    fs::rename(temporary, path)
-}
-
-fn remove_process_receipt(context: &ProcessContext) {
-    let Some(home) = context.ledger_path.parent() else {
-        return;
-    };
-    let path = process_receipt_path(home, context.lf_process_id.as_str());
-    if let Err(error) = fs::remove_file(path) {
-        if error.kind() != std::io::ErrorKind::NotFound {
-            debug!(error = %error, "failed to remove live Process receipt");
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1763,7 +1360,7 @@ mod tests {
     };
     use crate::git::is_clean;
     use loopflow_model::id::{LfProcessId, TraceId};
-    use loopflow_test_support::{RunningParent, TestRepo};
+    use loopflow_test_support::TestRepo;
     use std::path::PathBuf;
     use std::process::{Command, Stdio};
 
@@ -1883,57 +1480,6 @@ mod tests {
         std::env::remove_var(super::LF_TRACE_ID_ENV);
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         guard
-    }
-
-    /// Export a [`RunningParent`] as the parent of the next Process.
-    fn adopt_by_running_parent(guard: &TestLedgerGuard) {
-        super::open_ledger().unwrap();
-        let parent = RunningParent::insert(&guard.home().join("loopflow.db"));
-        std::env::set_var(super::LF_PROCESS_ID_ENV, &parent.id);
-        std::env::set_var(super::LF_TRACE_ID_ENV, &parent.trace);
-    }
-
-    #[test]
-    fn canonical_ids_journal_appends_to_retained_trace_directory() {
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        super::open_ledger().unwrap();
-        let conn = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let trace = "CCCCCCCC-CCCC-4CCC-8CCC-CCCCCCCCCCCC";
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,journal_trace_locator,started_at,completed_at) VALUES(?1,?2,?3,1,2)",
-            rusqlite::params![LfProcessId::new(), trace.to_ascii_lowercase(), trace],
-        )
-        .unwrap();
-        let retained = traces_root(repo.path()).join(trace);
-        std::fs::create_dir_all(&retained).unwrap();
-        std::fs::write(retained.join("retained-evidence"), b"unchanged").unwrap();
-        std::env::set_var(super::LF_TRACE_ID_ENV, trace.to_ascii_lowercase());
-        super::with_runtime(repo.path(), &["lf".into(), "fixture".into()], || {
-            let process = super::current_lf_process_id().unwrap();
-            let store = super::open_ledger().unwrap();
-            assert_eq!(
-                super::lf_evidence(&store, &process),
-                ProcessIdentityEvidence::Live
-            );
-            Ok(())
-        })
-        .unwrap();
-        std::env::remove_var(super::LF_TRACE_ID_ENV);
-        let directories: Vec<_> = std::fs::read_dir(traces_root(repo.path()))
-            .unwrap()
-            .map(|entry| entry.unwrap().file_name())
-            .collect();
-        assert_eq!(directories, [std::ffi::OsString::from(trace)]);
-        assert_eq!(
-            std::fs::read(retained.join("retained-evidence")).unwrap(),
-            b"unchanged"
-        );
-        let events = read_events(&retained).unwrap();
-        assert_eq!(events.len(), 2);
-        assert!(events
-            .iter()
-            .all(|event| event.trace_id.as_str() == trace.to_ascii_lowercase()));
     }
 
     #[test]
@@ -2072,9 +1618,7 @@ mod tests {
         let repo = TestRepo::new();
         let fields = started_fields(&["lf".to_string(), "wave".to_string()], repo.path(), "main");
 
-        // The parent emits, which is what puts its row in the ledger and its
-        // identity in the environment. A child only inherits a parent the
-        // ledger holds, so the write is the thing under test, not a fixture.
+        // The parent emits, which puts its identity in the environment.
         super::emit(
             repo.path(),
             LfNode::Process,
@@ -2095,98 +1639,6 @@ mod tests {
             "a nested lf stays in the trace"
         );
         assert_eq!(child.parent_lf_process_id, Some(parent.lf_process_id));
-        super::clear_context();
-        std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_TRACE_ID_ENV);
-    }
-
-    #[test]
-    fn an_inherited_parent_the_ledger_never_recorded_is_dropped() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let fields = started_fields(
-            &["lf".to_string(), "status".to_string()],
-            repo.path(),
-            "main",
-        );
-
-        // A real Process first, so the ledger exists and holds rows. Without it the
-        // drop proves nothing: an absent database answers "not recorded" for
-        // every id, and this passes with the lookup hardwired to `true`.
-        super::emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Started,
-            fields.clone(),
-        );
-        let recorded = super::current_context().expect("recorded Process");
-        super::clear_context();
-
-        // A parent that exported its identity but never reached the ledger.
-        let ghost = LfProcessId::new();
-        std::env::set_var(super::LF_TRACE_ID_ENV, recorded.trace_id.as_str());
-        std::env::set_var(super::LF_PROCESS_ID_ENV, ghost.as_str());
-
-        let context = super::ensure_process_context(repo.path(), &fields)
-            .expect("Process context")
-            .expect("context");
-
-        assert!(
-            super::parent_is_recorded(&recorded.lf_process_id, None),
-            "the ledger must really hold a parent, or the assertion below \
-             passes for the wrong reason"
-        );
-
-        assert_eq!(
-            context.parent_lf_process_id, None,
-            "a parent the ledger never recorded is a ghost, not lineage"
-        );
-        assert!(
-            !context.minted_trace_id,
-            "the trace still groups; only the false pointer goes"
-        );
-
-        super::clear_context();
-        std::env::remove_var(super::LF_PROCESS_ID_ENV);
-        std::env::remove_var(super::LF_TRACE_ID_ENV);
-    }
-
-    #[test]
-    fn a_detached_body_keeps_its_trace_after_its_launcher_is_forgotten() {
-        let _guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let fields = started_fields(&["lf".to_string(), "task".to_string()], repo.path(), "main");
-
-        // A detached body inherits LF_TRACE_ID/LF_PROCESS_ID from a launcher that
-        // has already exited. Nothing referenced the launcher, so its exit forgot
-        // it: the body keeps the trace and drops the parent edge.
-        super::emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Started,
-            fields.clone(),
-        );
-        let launcher = super::current_context().expect("launcher");
-        super::emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-
-        // The body carries what the launcher handed it, not what the launcher
-        // left behind: a terminal Process clears LF_PROCESS_ID from the env.
-        std::env::set_var(super::LF_TRACE_ID_ENV, launcher.trace_id.as_str());
-        std::env::set_var(super::LF_PROCESS_ID_ENV, launcher.lf_process_id.as_str());
-        super::clear_context();
-
-        let body = super::ensure_process_context(repo.path(), &fields)
-            .expect("body context")
-            .expect("body");
-
-        assert_eq!(body.parent_lf_process_id, None);
-        assert_eq!(body.trace_id, launcher.trace_id);
-
         super::clear_context();
         std::env::remove_var(super::LF_PROCESS_ID_ENV);
         std::env::remove_var(super::LF_TRACE_ID_ENV);
@@ -2311,344 +1763,6 @@ mod tests {
         );
 
         assert!(is_clean(&worktree).expect("worktree should stay clean"));
-    }
-
-    #[test]
-    fn process_lifecycle_publishes_and_removes_exact_process_ownership() {
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let worktree = repo.create_named_worktree("runtime");
-        let command = vec!["lf".to_string(), "build".to_string()];
-
-        emit(
-            &worktree,
-            LfNode::Process,
-            LfEventType::Started,
-            started_fields(&command, &worktree, "runtime"),
-        );
-        let receipts = super::read_process_receipts_at(guard.home()).expect("read live receipt");
-        assert_eq!(receipts.len(), 1);
-        assert_eq!(receipts[0].pid, std::process::id());
-        assert_eq!(
-            receipts[0].lf_process_id,
-            std::env::var(super::LF_PROCESS_ID_ENV).expect("current Process id")
-        );
-
-        emit(
-            &worktree,
-            LfNode::Process,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-        assert!(super::read_process_receipts_at(guard.home())
-            .expect("read terminal receipt state")
-            .is_empty());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn attachment_identity_needs_no_receipt_directory_listing() {
-        use std::os::unix::fs::PermissionsExt;
-
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Started,
-            started_fields(&["lf".into()], repo.path(), "runtime"),
-        );
-        let context = super::current_context().unwrap();
-        let store = super::open_ledger().unwrap();
-        let root = guard.home().join(super::PROCESS_RECEIPT_ROOT);
-        let permissions = std::fs::metadata(&root).unwrap().permissions();
-        // Traversal permits the ID-keyed read; enumerating unrelated receipts
-        // is unavailable. This bounds the work without a wall-time assertion.
-        std::fs::set_permissions(&root, std::fs::Permissions::from_mode(0o111)).unwrap();
-        let evidence = super::lf_evidence(&store, &context.lf_process_id);
-        std::fs::set_permissions(&root, permissions).unwrap();
-        assert_eq!(evidence, ProcessIdentityEvidence::Live);
-    }
-
-    #[test]
-    fn attachment_receipt_failures_never_invent_process_identity() {
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        // Its finished row stays for the final Dead answer.
-        adopt_by_running_parent(&guard);
-        emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Started,
-            started_fields(&["lf".into()], repo.path(), "runtime"),
-        );
-        let context = super::current_context().unwrap();
-        let store = super::open_ledger().unwrap();
-        let path = guard
-            .home()
-            .join(super::PROCESS_RECEIPT_ROOT)
-            .join(format!("{}.json", context.lf_process_id));
-        let original = std::fs::read(&path).unwrap();
-        let receipt: super::ProcessReceipt = serde_json::from_slice(&original).unwrap();
-        for changed in [
-            super::ProcessReceipt {
-                schema_version: 2,
-                ..receipt.clone()
-            },
-            super::ProcessReceipt {
-                trace_id: "another-trace".into(),
-                ..receipt.clone()
-            },
-            super::ProcessReceipt {
-                lf_process_id: LfProcessId::new().to_string(),
-                ..receipt
-            },
-        ] {
-            std::fs::write(&path, serde_json::to_vec(&changed).unwrap()).unwrap();
-            assert_eq!(
-                super::lf_evidence(&store, &context.lf_process_id),
-                ProcessIdentityEvidence::Unknown
-            );
-        }
-        std::fs::write(&path, b"partial json").unwrap();
-        assert_eq!(
-            super::lf_evidence(&store, &context.lf_process_id),
-            ProcessIdentityEvidence::Unknown
-        );
-        // Without a receipt, the Process row's own OS identity still answers.
-        std::fs::remove_file(&path).unwrap();
-        assert_eq!(
-            super::lf_evidence(&store, &context.lf_process_id),
-            ProcessIdentityEvidence::Live
-        );
-        std::fs::create_dir(&path).unwrap();
-        assert_eq!(
-            super::lf_evidence(&store, &context.lf_process_id),
-            ProcessIdentityEvidence::Unknown
-        );
-        std::fs::remove_dir(&path).unwrap();
-        std::fs::write(&path, original).unwrap();
-        emit(
-            repo.path(),
-            LfNode::Process,
-            LfEventType::Completed,
-            LfEventFields::default(),
-        );
-        assert_eq!(
-            super::lf_evidence(&store, &context.lf_process_id),
-            ProcessIdentityEvidence::Dead
-        );
-    }
-
-    #[test]
-    fn prune_removes_dead_receipts_unless_an_unfinished_row_needs_them() {
-        let guard = journal_test_guard();
-        super::open_ledger().unwrap();
-        let sql = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-        let pid = std::process::id();
-        let born = super::process_started_at(pid).unwrap().unwrap();
-        let root = guard.home().join(super::PROCESS_RECEIPT_ROOT);
-        std::fs::create_dir_all(&root).unwrap();
-        let receipt = |started_at: i64, row: Option<Option<i64>>| {
-            let id = LfProcessId::new();
-            if let Some(completed_at) = row {
-                sql.execute(
-                    "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,?2)",
-                    rusqlite::params![id, completed_at],
-                )
-                .unwrap();
-            }
-            let path = root.join(format!("{id}.json"));
-            let receipt = super::ProcessReceipt {
-                schema_version: 1,
-                trace_id: id.to_string(),
-                lf_process_id: id.to_string(),
-                pid,
-                started_at,
-            };
-            std::fs::write(&path, serde_json::to_vec(&receipt).unwrap()).unwrap();
-            path
-        };
-        // A different birth time under this PID is affirmative death.
-        let completed = receipt(born - 60, Some(Some(2)));
-        let unrecorded = receipt(born - 60, None);
-        let unfinished = receipt(born - 60, Some(None));
-        let live = receipt(born, None);
-
-        assert_eq!(
-            super::prune_process_receipts_at(guard.home(), &[pid]).unwrap(),
-            2
-        );
-        assert!(!completed.exists());
-        assert!(!unrecorded.exists());
-        assert!(unfinished.exists());
-        assert!(live.exists());
-    }
-
-    #[test]
-    fn unfinished_process_retains_identity_across_terminal_failure_interrupt_and_pid_reuse() {
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        for interrupt in [false, true] {
-            emit(
-                repo.path(),
-                LfNode::Process,
-                LfEventType::Started,
-                started_fields(&["lf".into(), "task".into()], repo.path(), "runtime"),
-            );
-            let context = super::current_context().unwrap();
-            let store = super::open_ledger().unwrap();
-            let before = store.lf_process(&context.lf_process_id).unwrap().unwrap();
-            assert!(before.completed_at.is_none());
-            assert_eq!(before.pid, Some(std::process::id()));
-            let foreign = rusqlite::Connection::open(guard.home().join("loopflow.db")).unwrap();
-            foreign.execute_batch("BEGIN IMMEDIATE").unwrap();
-            super::TEST_RECEIPT_WAIT.with(|wait| wait.set(std::time::Duration::ZERO));
-            if interrupt {
-                super::record_process_interruption(&context);
-                super::clear_context();
-            } else {
-                emit(
-                    repo.path(),
-                    LfNode::Process,
-                    LfEventType::Completed,
-                    LfEventFields::default(),
-                );
-                // Cleanup following the failed ordinary finish must not erase identity.
-                super::record_process_interruption(&context);
-            }
-            foreign.execute_batch("ROLLBACK").unwrap();
-            assert_eq!(
-                super::lf_evidence(&store, &context.lf_process_id),
-                ProcessIdentityEvidence::Live
-            );
-
-            // Another Process with the same PID must neither replace nor remove this receipt.
-            let mut replacement = context.clone();
-            replacement.lf_process_id = LfProcessId::new();
-            super::write_process_receipt(&replacement).unwrap();
-            super::remove_process_receipt(&replacement);
-            assert_eq!(
-                super::prune_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
-                0
-            );
-            assert_eq!(
-                super::lf_evidence(&store, &context.lf_process_id),
-                ProcessIdentityEvidence::Live
-            );
-
-            // macOS reads identity natively; other hosts need ps on PATH.
-            let previous_path = std::env::var_os("PATH");
-            std::env::set_var("PATH", guard.home().join("no-programs"));
-            let without_path = super::lf_evidence(&store, &context.lf_process_id);
-            let pruned = super::prune_process_receipts_at(guard.home(), &[std::process::id()]);
-            match previous_path {
-                Some(path) => std::env::set_var("PATH", path),
-                None => std::env::remove_var("PATH"),
-            }
-            assert_eq!(
-                without_path,
-                if cfg!(target_os = "macos") {
-                    ProcessIdentityEvidence::Live
-                } else {
-                    ProcessIdentityEvidence::Unknown
-                }
-            );
-            assert_eq!(pruned.unwrap(), 0);
-
-            // Model a reused PID: the retained birth belongs to an earlier process.
-            let mut dead = context.clone();
-            dead.process_started_at = Some(context.process_started_at.unwrap() - 60);
-            super::write_process_receipt(&dead).unwrap();
-            assert_eq!(
-                super::lf_evidence(&store, &context.lf_process_id),
-                ProcessIdentityEvidence::Dead
-            );
-            assert_eq!(
-                super::prune_process_receipts_at(guard.home(), &[std::process::id()]).unwrap(),
-                0
-            );
-            assert_eq!(
-                store.lf_process(&context.lf_process_id).unwrap().unwrap(),
-                before
-            );
-        }
-    }
-
-    /// Run one Process while another connection holds SQLite's write lock, through
-    /// the finish receipt unless it is released first.
-    fn process_under_foreign_write_lock(
-        wait: std::time::Duration,
-        release_before_finish: bool,
-    ) -> (super::ReceiptCost, bool) {
-        let guard = journal_test_guard();
-        let repo = TestRepo::new();
-        let command = vec!["lf".to_string(), "wt".to_string(), "list".to_string()];
-        let run = |finish: &dyn Fn()| {
-            emit(
-                repo.path(),
-                LfNode::Process,
-                LfEventType::Started,
-                started_fields(&command, repo.path(), "main"),
-            );
-            let context = super::current_context().expect("Process context");
-            finish();
-            emit(
-                repo.path(),
-                LfNode::Process,
-                LfEventType::Completed,
-                LfEventFields::default(),
-            );
-            context
-        };
-        // An initialized Machine, as every real listing has.
-        run(&|| {});
-
-        // A running parent keeps the finished row a landed receipt writes.
-        adopt_by_running_parent(&guard);
-        let ledger = guard.home().join("loopflow.db");
-        let foreign = rusqlite::Connection::open(&ledger).unwrap();
-        foreign.execute_batch("BEGIN IMMEDIATE").unwrap();
-        super::TEST_RECEIPT_WAIT.with(|current| current.set(wait));
-        let context = run(&|| {
-            if release_before_finish {
-                foreign.execute_batch("ROLLBACK").unwrap();
-            }
-        });
-        if !release_before_finish {
-            foreign.execute_batch("ROLLBACK").unwrap();
-        }
-
-        let cost = *context.receipts.lock().unwrap();
-        let recorded = super::open_ledger()
-            .unwrap()
-            .process_is_recorded(context.lf_process_id.as_str())
-            .unwrap();
-        (cost, recorded)
-    }
-
-    #[test]
-    fn a_held_write_lock_delays_an_process_by_one_receipt_wait() {
-        let wait = std::time::Duration::from_millis(1500);
-
-        let (cost, recorded) = process_under_foreign_write_lock(wait, false);
-
-        assert!(cost.waited >= wait, "start receipt waited: {cost:?}");
-        assert!(
-            cost.waited < wait * 2,
-            "finish receipt waited again: {cost:?}"
-        );
-        assert_eq!(cost.unrecorded, 2);
-        assert!(!recorded);
-    }
-
-    #[test]
-    fn a_finish_receipt_lands_whole_once_the_write_lock_clears() {
-        let (cost, recorded) =
-            process_under_foreign_write_lock(std::time::Duration::from_millis(300), true);
-
-        assert_eq!(cost.unrecorded, 1);
-        assert!(recorded);
     }
 
     #[test]

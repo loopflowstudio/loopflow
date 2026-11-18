@@ -765,31 +765,6 @@ mod tests {
     use std::process::{Command, Stdio};
 
     #[test]
-    fn attachment_records_its_lf_when_the_start_receipt_was_lost() {
-        let ledger = crate::journal::TestLedgerGuard::new();
-        let _ambient = crate::test_ambient::EnvGuard::new();
-        let home = ledger.home();
-        crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-            let process = crate::journal::current_lf_process_id().unwrap();
-            let store = crate::store::open_sqlite(&home.join("loopflow.db"))?;
-            rusqlite::Connection::open(home.join("loopflow.db"))?
-                .execute("DELETE FROM processes WHERE id=?1", [&process])?;
-            let session = store.test_session("lost", &crate::session_record::new_artifact_key());
-            let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &process)?;
-            let parent = store.lf_process(&process)?.unwrap();
-            let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
-            assert_eq!(agent.trace_id, parent.trace_id);
-            assert!(parent.command.is_some());
-            let lineage =
-                crate::process::diagnosis::check_lineage(&store.processes_since(0).unwrap());
-            assert!(lineage.status == crate::process::diagnosis::Status::Ok);
-            Ok(())
-        })
-        .unwrap();
-    }
-
-    #[test]
     fn move_after_agent_death_preserves_unknown_outcome() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();

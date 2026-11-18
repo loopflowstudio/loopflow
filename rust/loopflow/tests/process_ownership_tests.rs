@@ -14,7 +14,6 @@ use loopflow_execution::store::sqlite::SqliteStore;
 use loopflow_execution::store::{open_ephemeral_store, StorageConfig};
 use loopflow_model::id::LfProcessId;
 use loopflow_test_support::{RunningParent, TestRepo};
-use rusqlite::OptionalExtension;
 
 #[tokio::test]
 async fn agent_settlement_on_read_reports_failed_observation_and_recovers_without_losing_history() {
@@ -897,92 +896,6 @@ fn reserve_session(store: &SqliteStore, session_id: &str, repo: &Path) {
         None,
     )
     .unwrap();
-}
-
-#[tokio::test]
-async fn monitor_prune_settles_proven_dead_processes_and_keeps_unknown_ones() {
-    let home = tempfile::tempdir().unwrap();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let mut child = Command::new("sleep").arg("30").spawn().unwrap();
-    let pid = child.id();
-    child.kill().unwrap();
-    child.wait().unwrap();
-    let directory = home.path().join("runtime/exec-processes");
-    std::fs::create_dir_all(&directory).unwrap();
-    // Started since boot, so only the missing receipt link leaves it unknown.
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-
-    for terminal in [false, true] {
-        let id = LfProcessId::new();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?1,?2,?3,?4)",
-            rusqlite::params![id, now, terminal.then_some(now), terminal.then_some("failed")],
-        )
-        .unwrap();
-        // A PID-named receipt never linked to its row leaves the row's exit
-        // unknown; the Process-named one proves it dead, so retention closes
-        // and forgets the row and its receipt goes with it.
-        for name in [pid.to_string(), id.to_string()] {
-            let settled = terminal || name == id.to_string();
-            let receipt = directory.join(format!("{name}.json"));
-            let bytes = serde_json::to_vec(&serde_json::json!({
-                "schema_version": 1, "trace_id": id, "exec_id": id,
-                "pid": pid, "started_at": 1,
-            }))
-            .unwrap();
-            for json in [false, true] {
-                std::fs::write(&receipt, &bytes).unwrap();
-                for dry_run in [true, false] {
-                    let mut args = vec!["monitor", "prune"];
-                    if dry_run {
-                        args.push("--dry-run");
-                    } else {
-                        // Store retention closes the row from its receipt, so
-                        // it runs before the receipt goes.
-                        let retention = command(home.path(), home.path(), &["machine", "prune"])
-                            .output()
-                            .unwrap();
-                        assert!(retention.status.success(), "{retention:?}");
-                    }
-                    if json {
-                        args.push("--json");
-                    }
-                    let output = command(home.path(), home.path(), &args).output().unwrap();
-                    assert!(output.status.success(), "{output:?}");
-                    assert_eq!(receipt.exists(), dry_run || !settled, "{args:?}");
-                    if !dry_run {
-                        let row: Option<Option<String>> = conn
-                            .query_row("SELECT outcome FROM processes WHERE id=?1", [&id], |row| {
-                                row.get(0)
-                            })
-                            .optional()
-                            .unwrap();
-                        assert_eq!(row, (!settled).then_some(None), "{args:?}");
-                    }
-                    if receipt.exists() {
-                        assert_eq!(std::fs::read(&receipt).unwrap(), bytes);
-                    }
-                    if json {
-                        let report: serde_json::Value =
-                            serde_json::from_slice(&output.stdout).unwrap();
-                        assert_eq!(report["dry_run"], dry_run);
-                        assert_eq!(
-                            report["removed_process_receipts"],
-                            u32::from(!dry_run && settled)
-                        );
-                        assert_eq!(report["errors"], 0);
-                    }
-                }
-            }
-            if receipt.exists() {
-                std::fs::remove_file(receipt).unwrap();
-            }
-        }
-    }
 }
 
 #[tokio::test]

@@ -237,7 +237,7 @@ runs outside any SQLite transaction. One exchange per repository at a time
 
 ## Acceptance check at gate
 
-Extend `machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines`
+Extend `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
 (stand-in `ssh`, real carrier) to three homes and a bare remote:
 
 ```bash
@@ -298,13 +298,48 @@ etude checkout and `lf` version are unknown.
 
 ## Slices
 
-1. **Stamps and one record shape, over the hub.** `plan_stamps`, the stamp on
-   every save, stamped records, the one way in, `plan_carriers` with the hub's
-   cursor, `plan.apply` / `plan.changes` carrying records, `hub_sends` and
-   first contact deleted, `lf repo tracker`'s hub line in records. Shows
-   whether the model holds: the acceptance sequence's hub half, the
-   stale-laptop case, and "an arrival that changes nothing bumps nothing", as
-   storage tests with the clock passed in and as the two-home test.
+1. **Stamps and one record shape, over the hub.** *Built.* `plan_stamps`,
+   the stamp on every local and tracker save, `StampedRecord`, the one way in
+   (`planning_write::apply`), `plan_carriers` with the hub's cursor,
+   `plan.apply` / `plan.changes` carrying records, `hub_sends`, `hub_plans`
+   and first contact deleted, `lf repo tracker`'s hub line in records, Swift
+   model and view. The storage module is `sqlite/plan_carriers.rs`.
+
+   What it taught:
+   - The model holds: later edit wins in either arrival order, a save after
+     seeing a fast clock beats it, a stale laptop takes the hub's newer value
+     at first contact, and a re-sent record changes no row (storage tests with
+     the clock set, `sqlite::plan_carriers::`).
+   - `plan_changes` is bumped when a *stamp* is adopted, not only a value.
+     Two Machines that wrote the same value keep different stamps otherwise,
+     and a third edit between them splits the plan.
+   - What a peer just gave is not owed back: an import from a carrier moves
+     that carrier's `sent_seq` to the end when nothing was unsent before it.
+     Without this `lf repo tracker` reads `N unsent` after every read. The Git
+     import needs the same call (`apply_plan_records(.., Some((Carrier::Git,
+     ..)))`), and a Git arrival still counts as unsent for the hub, which is
+     how one carrier feeds the other.
+   - A page of records carries what each record needs ahead of it (a
+     comment's Task, a Task's Project, a Project's Wave, a Wave's parent and
+     selected Project), so any page applies alone. The old send split parents
+     from children at a page boundary and would have stalled. A plan ref's
+     files are read through the same import, in one call per fetched ref, so
+     Git gets this from `create`'s parents-first order.
+   - Unstamped fields converge on the higher machine id at first contact, and
+     the lower one adopts every stamp once (its whole plan counts as changed,
+     then is marked sent to that carrier).
+   - `plan_changes` had no `store_revision_*` triggers and
+     `store_revisions_cover_every_table` was failing on the branch; it has
+     them now, since the unsent count is read from it.
+   - `--json` is `plan: {hub: {machine, unsent, records, error,
+     failing_since} | null}`: `unsent` is a count and `records` names the
+     first twenty. `git` joins it in slice 2.
+   - Without Git, the first line is `Plan: this Machine.` and the hub line
+     follows it. `lf machine hub` alone prints `Hub mini.` or `No hub.`
+   - Not built: skipping a field this build does not know. A hub older or
+     newer is caught by the protocol revision; a plan ref file needs it
+     (slice 2), which means parsing fields one at a time, not a typed
+     `Vec<StampedValue>`.
 2. **Git refs.** The same records written as files, fetch, import, the
    server's timer, the repository id check, the Git line in `lf repo tracker`
    and Desktop, the acceptance test with a bare remote, docs. etude moved.
@@ -318,6 +353,6 @@ etude checkout and `lf` version are unknown.
 
 ## Checks
 
-- Slice 1: `cargo nextest … -E 'test(sqlite::plan_hub::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::)'`, then `--test integration -E 'test(machine_commands::)'`: implement runs.
+- Slice 1: `cargo nextest … -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::) | test(revisions::)'`, then `--test integration -E 'test(machine_commands::)'`: implement runs.
 - Gate: `server::schema::tests::`, `dto_fixtures::`, `documented_commands::`, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
 - Swift view tests for `RepositoryPlanView`: once locally at gate; CI owns the rest.

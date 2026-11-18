@@ -322,16 +322,15 @@
       "body": {
         "tracker": null,
         "plan": {
-          "hub": "mini",
-          "unreachable_since": 1763474520,
-          "error": "ssh: mini: Operation timed out",
-          "open": [
-            {
-              "owner": "3e1c9a07",
-              "field": "title",
-              "phase": "queued"
-            }
-          ]
+          "hub": {
+            "machine": "mini",
+            "unsent": 1,
+            "records": [
+              "3e1c9a07"
+            ],
+            "error": "ssh: mini: Operation timed out",
+            "failing_since": 1763474520
+          }
         },
         "actions": []
       },

@@ -1,21 +1,23 @@
 //! The planning write boundary shared by local operations, tracker
-//! observations and the hub's values. Callers own their transaction; this
-//! writer changes planning columns, records each owner's newest change for a
-//! hub to answer from, and queues each value a local write changed for the
-//! tracker or the hub.
-use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
+//! observations and values arriving from other Machines. Callers own their
+//! transaction; this writer changes planning columns, stamps each field a
+//! save here changes, records which record changed last for carriers to send,
+//! and queues each value a local write changed for the tracker.
+use crate::work::edit::{
+    CommentContent, Disposition, StampedRecord, StampedValue, WorkEdit, WorkValue,
+};
 use crate::{StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Who a planning write comes from, which decides what else it records.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WriteOrigin {
-    /// A person or agent here: queued for the tracker or the hub.
+    /// A person or agent here: stamped, and queued for the tracker.
     Local,
-    /// A fact the tracker reported, never echoed back to it.
+    /// A fact the tracker reported: stamped, never echoed back to it.
     Tracker,
-    /// The hub's value, which the hub already holds.
+    /// Another Machine's value, which keeps the stamp it arrived with.
     Import,
 }
 
@@ -254,19 +256,20 @@ fn write_record(
             previous_identifier.as_deref(),
         )?;
     }
-    if changed || !queue {
-        // A hub learns a record created here from all of its values.
-        let created = if queue {
-            Vec::new()
+    if origin != WriteOrigin::Import {
+        // A record created here is new in every field it was given.
+        let written: Vec<&str> = if queue {
+            changes.iter().map(|change| change.field()).collect()
         } else {
-            read(conn, table, id)?
+            edits.iter().map(|edit| edit.change.field()).collect()
         };
-        let sent = match (origin, queue) {
-            (WriteOrigin::Local, true) => changes.clone(),
-            (WriteOrigin::Local, false) => created.iter().collect(),
-            _ => Vec::new(),
-        };
-        super::plan_hub::saved(conn, table, id, &sent)?;
+        if !written.is_empty() {
+            let (at, machine) = (next_at(conn)?, local_machine(conn)?);
+            for field in written {
+                stamp(conn, id, field, at, &machine)?;
+            }
+            super::plan_carriers::changed(conn, table, id)?;
+        }
     }
     if origin == WriteOrigin::Local && queue {
         for change in changes {
@@ -274,6 +277,135 @@ fn write_record(
         }
     }
     Ok(changed)
+}
+
+// ---- Stamps ----
+
+#[cfg(test)]
+thread_local! {
+    /// The wall clock a test sets instead of waiting for one.
+    pub(crate) static CLOCK_MS: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+fn wall_clock_ms() -> i64 {
+    #[cfg(test)]
+    if let Some(at) = CLOCK_MS.with(std::cell::Cell::get) {
+        return at;
+    }
+    (time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000) as i64
+}
+
+/// The next stamp a save here takes: the wall clock, or one past the highest
+/// stamp this Machine has written or taken in when the clock is behind it.
+pub(crate) fn next_at(conn: &Connection) -> StoreResult<i64> {
+    let highest: i64 = conn
+        .prepare_cached("SELECT COALESCE(MAX(at),0) FROM plan_stamps")?
+        .query_row([], |row| row.get(0))?;
+    Ok(wall_clock_ms().max(highest + 1))
+}
+
+fn local_machine(conn: &Connection) -> StoreResult<String> {
+    Ok(conn
+        .prepare_cached("SELECT id FROM machines WHERE is_local=1")?
+        .query_row([], |row| row.get(0))?)
+}
+
+fn stamp(conn: &Connection, id: &str, field: &str, at: i64, machine: &str) -> StoreResult<()> {
+    conn.prepare_cached(
+        "INSERT INTO plan_stamps(owner_id,field,at,machine_id) VALUES(?1,?2,?3,?4)
+         ON CONFLICT(owner_id,field) DO UPDATE SET at=excluded.at,machine_id=excluded.machine_id",
+    )?
+    .execute(params![id, field, at, machine])?;
+    Ok(())
+}
+
+fn stamps(conn: &Connection, id: &str) -> StoreResult<HashMap<String, (i64, String)>> {
+    let mut query =
+        conn.prepare_cached("SELECT field,at,machine_id FROM plan_stamps WHERE owner_id=?1")?;
+    let held = query
+        .query_map([id], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?
+        .collect::<Result<_, _>>()?;
+    Ok(held)
+}
+
+/// A record as it travels: every field it has, each with the stamp held for
+/// it. A field never stamped reads as `(0, this Machine)`.
+pub(crate) fn stamped(conn: &Connection, table: &str, id: &str) -> StoreResult<StampedRecord> {
+    let values = read(conn, table, id)?;
+    let mut held = stamps(conn, id)?;
+    let local = local_machine(conn)?;
+    Ok(StampedRecord {
+        table: table.to_owned(),
+        id: id.to_owned(),
+        fields: values
+            .into_iter()
+            .map(|value| {
+                let (at, machine) = held
+                    .remove(value.field())
+                    .unwrap_or_else(|| (0, local.clone()));
+                StampedValue { value, at, machine }
+            })
+            .collect(),
+    })
+}
+
+/// The one way values from another Machine come in. A field is written only
+/// when its stamp is newer than the one held; a record this Machine lacks is
+/// created from all of its fields. Returns what was written. Applying the
+/// same records again writes nothing and changes no `plan_changes` row.
+pub(crate) fn apply(
+    conn: &Connection,
+    repo: &str,
+    records: &[StampedRecord],
+) -> StoreResult<Vec<WorkEdit>> {
+    let local = local_machine(conn)?;
+    let mut won = Vec::new();
+    for record in records {
+        if !WORK_TABLES.contains(&record.table.as_str()) {
+            return Err(StoreError::InvalidData("unknown Work table".into()));
+        }
+        let mut held = None;
+        for field in &record.fields {
+            if table(&field.value) != record.table {
+                return Err(StoreError::InvalidData(
+                    "a record carries another table's field".into(),
+                ));
+            }
+            let edit = WorkEdit {
+                target: record.id.clone(),
+                change: field.value.clone(),
+            }
+            .canonicalized()?;
+            let (exists, held) = match &held {
+                Some(held) => held,
+                None => {
+                    let exists = conn.query_row(
+                        &format!("SELECT EXISTS(SELECT 1 FROM {} WHERE id=?1)", record.table),
+                        [&edit.target],
+                        |row| row.get::<_, bool>(0),
+                    )?;
+                    held.insert((exists, stamps(conn, &edit.target)?))
+                }
+            };
+            let mine = held
+                .get(edit.change.field())
+                .map_or((0, local.as_str()), |(at, machine)| (*at, machine.as_str()));
+            if !*exists || (field.at, field.machine.as_str()) > mine {
+                won.push((edit, field.at, field.machine.as_str()));
+            }
+        }
+    }
+    let edits: Vec<WorkEdit> = won.iter().map(|(edit, ..)| edit.clone()).collect();
+    create(conn, repo, &edits, WriteOrigin::Import)?;
+    let mut changed = BTreeSet::new();
+    for (edit, at, machine) in &won {
+        stamp(conn, &edit.target, edit.change.field(), *at, machine)?;
+        changed.insert((table(&edit.change), edit.target.as_str()));
+    }
+    for (table, id) in changed {
+        super::plan_carriers::changed(conn, table, id)?;
+    }
+    Ok(edits)
 }
 
 /// Registration is acquired by the application before the command transaction.

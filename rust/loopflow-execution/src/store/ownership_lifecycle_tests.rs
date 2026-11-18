@@ -232,30 +232,14 @@ impl Pair {
         }
     }
 
-    /// Read what changed on mini, then send what the laptop has open.
+    /// One exchange between the laptop and mini, its hub.
     fn exchange(&self) {
-        let (laptop, mini) = (&self.laptop, &self.mini);
-        let since = laptop.store.select_hub(&laptop.path, "mini").unwrap().seq;
-        let page = mini
-            .store
-            .plan_changes_since(&mini.path, since, usize::MAX)
-            .unwrap();
-        laptop
-            .store
-            .import_hub_plan(&laptop.path, &page.edits, page.seq, &Default::default())
-            .unwrap();
-        let sends = laptop.store.open_hub_sends(&laptop.path).unwrap();
-        let edits = sends
-            .iter()
-            .map(|send| send.edit.clone())
-            .collect::<Vec<_>>();
-        mini.store
-            .apply_hub_edits(&mini.path, &edits, &Default::default())
-            .unwrap();
-        laptop
-            .store
-            .confirm_hub_sends(&sends.iter().map(|send| send.seq).collect::<Vec<_>>())
-            .unwrap();
+        loopflow_storage::test_fixture::exchange(
+            &self.laptop.store,
+            &self.laptop.path,
+            &self.mini.store,
+            &self.mini.path,
+        );
     }
 
     fn to_laptop(&self) {

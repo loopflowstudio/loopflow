@@ -603,6 +603,39 @@ mod tests {
     }
 
     #[test]
+    fn stamps_and_unsent_records_are_read_by_index() {
+        let (_home, store, _task) = crate::test_fixture::store_with_task();
+        let conn = store.conn.lock().unwrap();
+        for (sql, index) in [
+            ("SELECT COALESCE(MAX(at),0) FROM plan_stamps", "plan_stamps_at"),
+            (
+                "SELECT field,at,machine_id FROM plan_stamps WHERE owner_id='t'",
+                "PRIMARY KEY",
+            ),
+            (
+                "SELECT COUNT(*) FROM plan_changes WHERE repo='r' AND seq>0",
+                "plan_changes_repo",
+            ),
+            (
+                "SELECT seq,owner_table,owner_id FROM plan_changes WHERE repo='r' AND seq>0 ORDER BY seq",
+                "plan_changes_repo",
+            ),
+        ] {
+            let plan: Vec<String> = conn
+                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+                .unwrap()
+                .query_map([], |row| row.get(3))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap();
+            assert!(
+                plan.iter().all(|step| step.contains(index)) && !plan.is_empty(),
+                "{sql}: {plan:?}"
+            );
+        }
+    }
+
+    #[test]
     fn a_walk_of_a_large_partial_index_is_a_scan() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("loopflow.db")).unwrap();

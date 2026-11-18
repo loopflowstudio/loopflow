@@ -35,15 +35,13 @@ fn local_project(store: &SqliteStore) -> ProjectId {
     .id
 }
 
-/// Write `edits` as the hub's values, the way an exchange imports them.
+/// Take `edits` in as another Machine's values, the way a carrier brings them.
 fn import_edits(
     store: &SqliteStore,
     edits: &[loopflow_storage::work::edit::WorkEdit],
 ) -> crate::store::StoreResult<()> {
     let repo = store.home_dir()?.canonicalize().unwrap();
-    let repo = repo.to_str().unwrap();
-    store.select_hub(repo, "home_hub")?;
-    store.import_hub_plan(repo, edits, 1, &Default::default())
+    loopflow_storage::test_fixture::arrive(store, repo.to_str().unwrap(), edits)
 }
 
 #[test]
@@ -418,14 +416,11 @@ fn canonical_task_fields_survive_restart_and_reach_another_machine_through_the_h
         .get_wave(saved.wave_id.as_ref().unwrap())
         .unwrap()
         .unwrap();
-    let page = store
-        .plan_changes_since(wave.repo(), None, 1 << 20)
-        .unwrap();
+    let page = store.plan_records_since(wave.repo(), 0, 1 << 20).unwrap();
     assert!(!page.more);
     let target_repo = local_repository_path(&peer);
-    peer.select_hub(&target_repo, "home_hub").unwrap();
     for _ in 0..2 {
-        peer.import_hub_plan(&target_repo, &page.edits, page.seq, &Default::default())
+        peer.apply_plan_records(&target_repo, &page.records, None, &Default::default())
             .unwrap();
         let imported = peer.task(&task.id).unwrap().unwrap();
         assert_eq!(imported.id, saved.id);

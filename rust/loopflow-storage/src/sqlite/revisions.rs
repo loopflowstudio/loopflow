@@ -152,6 +152,8 @@ mod tests {
         "planning_peer_imports",
         "planning_peer_observed",
         "planning_peer_routes",
+        // A field's stamp decides which value is kept; views read the value.
+        "plan_stamps",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",
@@ -635,8 +637,8 @@ mod tests {
             "task_changes",
             "task_state_deliveries",
             "tracker_actions",
-            "hub_sends",
-            "hub_plans",
+            "plan_carriers",
+            "plan_changes",
         ] {
             let trigger: String = conn
                 .query_row(

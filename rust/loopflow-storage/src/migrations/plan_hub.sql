@@ -1,10 +1,11 @@
--- The plan of a repository without Linear or Asana lives on one hub Machine
--- (LOO-938). Three tables, one per side of the exchange.
+-- The plan of a repository without Linear or Asana is the same on every
+-- Machine that holds it (LOO-938): one stamp per field, the newest wins, and
+-- carriers move stamped records between Machines.
 --
--- `plan_changes`: on every Machine, the newest change of each Wave, Project,
--- Task and comment. `seq` only grows (a change replaces its owner's row), so
--- a hub answers "what changed since N" from one index range. Seeded with every
--- owner, so any Machine can become a hub.
+-- `plan_changes`: the local order in which Waves, Projects, Tasks and comments
+-- last changed, by a save here or an arriving value that won. `seq` only grows
+-- (a change replaces its record's row), so "what changed since N" is one index
+-- range. Seeded with every record, so a first exchange sends the whole plan.
 CREATE TABLE plan_changes (
     seq INTEGER PRIMARY KEY AUTOINCREMENT,
     repo TEXT NOT NULL,
@@ -13,6 +14,16 @@ CREATE TABLE plan_changes (
     UNIQUE(owner_table,owner_id)
 );
 CREATE INDEX plan_changes_repo ON plan_changes(repo,seq);
+
+-- A carrier's unsent count is read from here, so views follow it.
+CREATE TRIGGER store_revision_plan_changes_insert AFTER INSERT ON plan_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_plan_changes_update AFTER UPDATE ON plan_changes
+WHEN NEW.seq IS NOT OLD.seq OR NEW.repo IS NOT OLD.repo OR
+    NEW.owner_table IS NOT OLD.owner_table OR NEW.owner_id IS NOT OLD.owner_id
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+CREATE TRIGGER store_revision_plan_changes_delete AFTER DELETE ON plan_changes
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 INSERT INTO plan_changes(repo,owner_table,owner_id)
 SELECT repo,'waves',id FROM waves;
@@ -24,52 +35,41 @@ INSERT INTO plan_changes(repo,owner_table,owner_id)
 SELECT r.repo,'task_comments',c.id FROM task_comments c
 JOIN tasks t ON t.id=c.task_id JOIN repository_plans r ON r.id=t.repository_id;
 
--- `hub_plans`: on a Machine whose plan is on a hub, one row per repository it
--- has exchanged with that hub. `seq` is the hub's `plan_changes` watermark;
--- NULL until the first read (first contact). A row is what makes the writer
--- queue `hub_sends`.
-CREATE TABLE hub_plans (
-    repo TEXT PRIMARY KEY,
-    hub_machine_id TEXT NOT NULL,
-    seq INTEGER,
-    error TEXT,
-    failing_since INTEGER
-);
-
--- `hub_sends`: each value saved here that the hub has not confirmed, newest
--- per field. A save replaces the field's row (a new `seq`); a confirmed send
--- deletes the rows it carried.
-CREATE TABLE hub_sends (
-    seq INTEGER PRIMARY KEY AUTOINCREMENT,
-    repo TEXT NOT NULL,
-    owner_table TEXT NOT NULL CHECK(owner_table IN ('waves','projects','tasks','task_comments')),
-    target TEXT NOT NULL,
+-- `plan_stamps`: when and where each field's value was written, `at` in
+-- milliseconds and never behind any stamp this Machine has seen. A field with
+-- no row reads as (0, this Machine), so any save beats it.
+CREATE TABLE plan_stamps (
+    owner_id TEXT NOT NULL,
     field TEXT NOT NULL,
-    edit_json TEXT NOT NULL CHECK(json_valid(edit_json)),
-    sent_at INTEGER,
-    UNIQUE(target,field)
-);
-CREATE INDEX hub_sends_repo ON hub_sends(repo,seq);
+    at INTEGER NOT NULL,
+    machine_id TEXT NOT NULL,
+    PRIMARY KEY(owner_id,field)
+) WITHOUT ROWID;
+CREATE INDEX plan_stamps_at ON plan_stamps(at);
 
-CREATE TRIGGER store_revision_hub_sends_insert AFTER INSERT ON hub_sends
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_hub_sends_update AFTER UPDATE ON hub_sends
-WHEN NEW.seq IS NOT OLD.seq OR NEW.repo IS NOT OLD.repo OR
-    NEW.owner_table IS NOT OLD.owner_table OR NEW.target IS NOT OLD.target OR
-    NEW.field IS NOT OLD.field OR NEW.edit_json IS NOT OLD.edit_json OR
-    NEW.sent_at IS NOT OLD.sent_at
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_hub_sends_delete AFTER DELETE ON hub_sends
-BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+-- `plan_carriers`: one row per repository and way its plan travels. `sent_seq`
+-- is how far into this Machine's `plan_changes` the carrier has taken, so the
+-- records past it are unsent; `seen_seq` is a hub's own watermark read to.
+CREATE TABLE plan_carriers (
+    repo TEXT NOT NULL,
+    carrier TEXT NOT NULL CHECK(carrier IN ('git','hub')),
+    peer TEXT NOT NULL,
+    sent_seq INTEGER NOT NULL,
+    seen_seq INTEGER,
+    error TEXT,
+    failing_since INTEGER,
+    PRIMARY KEY(repo,carrier)
+) WITHOUT ROWID;
 
-CREATE TRIGGER store_revision_hub_plans_insert AFTER INSERT ON hub_plans
+CREATE TRIGGER store_revision_plan_carriers_insert AFTER INSERT ON plan_carriers
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_hub_plans_update AFTER UPDATE ON hub_plans
-WHEN NEW.repo IS NOT OLD.repo OR NEW.hub_machine_id IS NOT OLD.hub_machine_id OR
-    NEW.seq IS NOT OLD.seq OR NEW.error IS NOT OLD.error OR
+CREATE TRIGGER store_revision_plan_carriers_update AFTER UPDATE ON plan_carriers
+WHEN NEW.repo IS NOT OLD.repo OR NEW.carrier IS NOT OLD.carrier OR
+    NEW.peer IS NOT OLD.peer OR NEW.sent_seq IS NOT OLD.sent_seq OR
+    NEW.seen_seq IS NOT OLD.seen_seq OR NEW.error IS NOT OLD.error OR
     NEW.failing_since IS NOT OLD.failing_since
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
-CREATE TRIGGER store_revision_hub_plans_delete AFTER DELETE ON hub_plans
+CREATE TRIGGER store_revision_plan_carriers_delete AFTER DELETE ON plan_carriers
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 -- The Git planning ref, its peer journal and destinations are gone; released

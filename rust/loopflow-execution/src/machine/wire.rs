@@ -260,18 +260,19 @@ pub enum ServerOperation {
     #[serde(rename = "session.boundary")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
     SessionBoundary(SessionBoundary),
-    /// The hub's side of a plan exchange: write another Machine's saves of
-    /// `repository`'s plan here, in one transaction, as this Machine's own.
-    /// Repeating it changes nothing. Answers `{}`.
+    /// The hub's side of a plan exchange: take in another Machine's stamped
+    /// records of `repository`'s plan, in one transaction. Each field is
+    /// written only when its stamp is newer than the one held here, so
+    /// repeating it changes nothing. Answers `{}`.
     #[serde(rename = "plan.apply")]
     #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
     PlanApply {
         repository: loopflow_model::durable::RepositoryId,
         #[schemars(with = "Vec<Untyped>")]
-        edits: Vec<loopflow_storage::work::edit::WorkEdit>,
+        records: Vec<loopflow_storage::work::edit::StampedRecord>,
     },
-    /// Every current value of each Wave, Project, Task and comment of
-    /// `repository`'s plan here that changed after the watermark `since`;
+    /// Each Wave, Project, Task and comment of `repository`'s plan here that
+    /// changed after the watermark `since`, whole, every field with its stamp;
     /// null reads the whole plan.
     #[serde(rename = "plan.changes")]
     #[schemars(extend("x-result" = generator.subschema_for::<PlanChanges>()))]
@@ -287,7 +288,7 @@ pub enum ServerOperation {
 #[serde(deny_unknown_fields)]
 pub struct PlanChanges {
     #[schemars(with = "Vec<Untyped>")]
-    pub edits: Vec<loopflow_storage::work::edit::WorkEdit>,
+    pub records: Vec<loopflow_storage::work::edit::StampedRecord>,
     /// The watermark to read from next.
     pub seq: i64,
     /// More changes follow `seq`; read again from it.

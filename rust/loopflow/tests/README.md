@@ -399,7 +399,7 @@ The peer implements team deltas with current revision timestamps. Graph acquisit
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
 Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
 `planning_setup_tests` proves tracker selection and that the released `provider: git`
-reads as no tracker. `machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines`
+reads as no tracker. `machine_commands::the_later_change_shows_on_both_machines_through_the_hub`
 runs a laptop and its hub over the real `ssh … lf server connect` carrier, through
 an offline edit and a lost `plan.apply` answer; `sqlite::plan_hub` covers the
 exchange's store half. `task_remote_tests` exercises actual target CLI dispatch

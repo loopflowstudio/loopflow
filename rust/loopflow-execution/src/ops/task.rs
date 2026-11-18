@@ -2635,21 +2635,23 @@ async fn synced(store: &Store, task: &loopflow_storage::work::task::TaskId) -> O
     Ok(open_lines(&saved.identifier, &open))
 }
 
-/// What `lf task sync` prints after a hub exchange: the Task's values still
-/// on their way to the hub.
+/// What `lf task sync` prints after a hub exchange: what the hub has yet to
+/// take of the repository's plan.
 async fn hub_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String> {
-    let sends = store
+    let unsent = store
         .sqlite
-        .open_hub_sends(repo)
+        .plan_unsent(
+            repo,
+            loopflow_storage::sqlite::plan_carriers::Carrier::Hub,
+            0,
+        )
         .map_err(task_error)?
-        .into_iter()
-        .filter(|send| send.edit.target == task.id.as_str())
-        .collect::<Vec<_>>();
-    let open = super::plan_hub::open_by_owner(&sends)
-        .into_iter()
-        .map(|(_, fields, phase)| format!("{fields} · {phase}"))
-        .collect::<Vec<_>>();
-    Ok(open_lines(&task.identifier, &open))
+        .count;
+    Ok(if unsent == 0 {
+        format!("{}: nothing unsent", task.identifier)
+    } else {
+        format!("{}: hub, {unsent} unsent", task.identifier)
+    })
 }
 
 fn open_lines(identifier: &str, open: &[String]) -> String {

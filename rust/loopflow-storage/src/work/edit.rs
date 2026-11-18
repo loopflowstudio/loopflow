@@ -40,6 +40,29 @@ impl WorkEdit {
     }
 }
 
+/// One field of a record, with when and where its value was written. The
+/// newest stamp is the field's value on every Machine: `at` first, then the
+/// Machine's id.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StampedValue {
+    #[serde(flatten)]
+    pub value: WorkValue,
+    /// Milliseconds, never behind a stamp its writer had seen.
+    pub at: i64,
+    pub machine: String,
+}
+
+/// A Wave, Project, Task or comment as it travels between Machines: every
+/// field it has, each with its stamp. A hub exchange and a plan ref carry
+/// exactly this.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StampedRecord {
+    /// `waves`, `projects`, `tasks` or `task_comments`.
+    pub table: String,
+    pub id: String,
+    pub fields: Vec<StampedValue>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Disposition {
     pub planning_state: Option<String>,

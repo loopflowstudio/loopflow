@@ -1,6 +1,6 @@
-//! The plan on the hub Machine: which Machine holds it, one exchange with it
-//! from another Machine, and the hub's answers. A repository with Linear or
-//! Asana never comes here.
+//! The hub: one reachable Machine that a plan without Linear or Asana is
+//! exchanged with live. It carries stamped records and decides nothing; this
+//! is which Machine it is, one exchange with it, and its answers.
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::Mutex;
@@ -12,49 +12,16 @@ use crate::engine::{Error, ErrorCode};
 use crate::machine::client::Connection;
 use crate::machine::wire::{PlanChanges, Secrets, Selection, Sender, ServerOperation};
 use loopflow_model::durable::{Machine, RepositoryId};
-use loopflow_storage::sqlite::plan_hub::HubSend;
+use loopflow_storage::sqlite::plan_carriers::Carrier;
 use loopflow_storage::sqlite::SqliteStore;
-use loopflow_storage::work::edit::WorkEdit;
+use loopflow_storage::work::edit::StampedRecord;
 
 /// About half a control message, so one request or answer never needs a
 /// ticketed connection.
 const BUDGET: usize = crate::machine::wire::MAX_MESSAGE / 2;
 
-/// An owner's open values as one line: its first send, then `title`,
-/// `title, description`, or `14 values` for a record the hub has yet to see,
-/// and `sent` only when every value's answer is outstanding.
-pub fn open_by_owner(sends: &[HubSend]) -> Vec<(&HubSend, String, &'static str)> {
-    let mut owners: Vec<(&HubSend, Vec<&HubSend>)> = Vec::new();
-    for send in sends {
-        match owners
-            .iter_mut()
-            .find(|(first, _)| first.edit.target == send.edit.target)
-        {
-            Some((_, values)) => values.push(send),
-            None => owners.push((send, vec![send])),
-        }
-    }
-    owners
-        .into_iter()
-        .map(|(first, values)| {
-            let fields = if values.len() > 3 {
-                format!("{} values", values.len())
-            } else {
-                let names: Vec<_> = values.iter().map(|send| send.field()).collect();
-                names.join(", ")
-            };
-            let phase = if values.iter().all(|send| send.sent_at.is_some()) {
-                "sent"
-            } else {
-                "queued"
-            };
-            (first, fields, phase)
-        })
-        .collect()
-}
-
-/// The Machine that holds this Machine's plan; `None` when it is here, on a
-/// Machine with no hub or that is its own hub.
+/// The Machine this one exchanges its plan with; `None` on a Machine with no
+/// hub or that is its own hub.
 pub fn hub(store: &SqliteStore) -> Result<Option<Machine>> {
     let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;
     let Some(id) = config.hub else {
@@ -68,23 +35,21 @@ pub fn hub(store: &SqliteStore) -> Result<Option<Machine>> {
         .ok_or_else(|| anyhow!("hub {id} is not an added Machine; run `lf machine add` for it, or `lf machine hub --clear`"))
 }
 
-/// `lf machine hub <machine>` and `--clear` (`None`). Clearing keeps every
-/// plan here and drops what was waiting for the hub; changing the hub reads
-/// the new one's whole plan first. Returns how many values a cleared hub
-/// never took.
+/// `lf machine hub <machine>` and `--clear` (`None`). The plan stays on this
+/// Machine either way; a new hub is sent all of it once.
 pub fn set_hub(
     store: &SqliteStore,
     hub: Option<&loopflow_model::durable::MachineId>,
-) -> Result<usize> {
+) -> Result<()> {
     crate::config::placement::write_global(
         &store.home_dir()?,
         &["hub"],
         hub.map(|id| id.as_str().into()),
     )?;
-    Ok(match hub {
-        Some(_) => 0,
-        None => store.forget_hub_plans()?,
-    })
+    if hub.is_none() {
+        store.forget_carrier(Carrier::Hub)?;
+    }
+    Ok(())
 }
 
 // ---- Another Machine's side ----
@@ -170,25 +135,26 @@ fn exchange_after_command(directory: &Path) -> Result<()> {
     }
 }
 
-/// Read what changed on `hub` for `repo`, then send what is open. With
-/// `send_only`, a repository with nothing open and past first contact asks
-/// the hub nothing. The outcome is recorded for `lf repo tracker`.
+/// Send `hub` the records of `repo` it has not taken, then take in what
+/// changed there. Either order gives the same plan. With `send_only`, a
+/// repository with nothing unsent that has read the hub before asks it
+/// nothing. The outcome is recorded for `lf repo tracker`.
 pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool) -> Result<()> {
     let Some(repository) = store.repository_id(repo)? else {
         return Ok(());
     };
     // One exchange per repository at a time; the next one reads what this one wrote.
     let _turn = lock(store, &repository)?;
-    let plan = store.select_hub(repo, hub.id.as_str())?;
-    if send_only && plan.seq.is_some() && store.open_hub_sends(repo)?.is_empty() {
+    let held = store.select_carrier(repo, Carrier::Hub, hub.id.as_str())?;
+    if send_only && held.seen_seq.is_some() && store.plan_unsent(repo, Carrier::Hub, 0)?.count == 0
+    {
         return Ok(());
     }
     let result = (|| {
         let mut connection = open(store, repo, hub, &repository)?;
-        // Read first: at first contact the hub's values win over a plan here
-        // that may be older, and only what the hub lacked is sent.
-        let mut since = plan.seq;
-        let mut edits = Vec::new();
+        send(store, &mut connection, repo, &repository, held.sent_seq)?;
+        let mut since = held.seen_seq;
+        let mut records = Vec::new();
         loop {
             let page: PlanChanges = request(
                 &mut connection,
@@ -197,17 +163,22 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
                     since,
                 },
             )?;
-            edits.extend(page.edits);
+            records.extend(page.records);
             since = Some(page.seq);
             if !page.more {
                 break;
             }
         }
-        store.import_hub_plan(repo, &edits, since.unwrap_or(0), &machine_names(store)?)?;
-        send(store, &mut connection, repo, &repository)
+        store.apply_plan_records(
+            repo,
+            &records,
+            Some((Carrier::Hub, since.unwrap_or(0))),
+            &machine_names(store)?,
+        )?;
+        Ok(())
     })();
     let error = result.as_ref().err().map(|error| format!("{error:#}"));
-    store.record_hub_exchange(repo, error.as_deref())?;
+    store.record_carrier_exchange(repo, Carrier::Hub, error.as_deref())?;
     result
 }
 
@@ -260,74 +231,49 @@ fn request<T: serde::de::DeserializeOwned>(
     Ok(serde_json::from_value(answer.result)?)
 }
 
-/// Every open send, an owner's values always in one request so the hub can
-/// create a record it lacks.
+/// Every record changed here past `sent_seq`, a page a request. The cursor
+/// moves once the hub has answered a page; a page whose answer is lost goes
+/// again, and the hub taking the same records twice changes nothing.
 fn send(
     store: &SqliteStore,
     connection: &mut Connection,
     repo: &str,
     repository: &RepositoryId,
+    mut sent_seq: i64,
 ) -> Result<()> {
-    let mut owners = BTreeMap::<String, (i64, Vec<HubSend>)>::new();
-    for send in store.open_hub_sends(repo)? {
-        owners
-            .entry(send.edit.target.clone())
-            .or_insert_with(|| (send.seq, Vec::new()))
-            .1
-            .push(send);
-    }
-    let mut owners = owners.into_values().collect::<Vec<_>>();
-    owners.sort_by_key(|(first, _)| *first);
-    let mut batch = Vec::new();
-    let mut bytes = 0;
-    for (_, sends) in owners {
-        let size = sends
-            .iter()
-            .map(|send| serde_json::to_vec(&send.edit).map(|bytes| bytes.len()))
-            .sum::<Result<usize, _>>()?;
-        if !batch.is_empty() && bytes + size > BUDGET {
-            apply(store, connection, repository, std::mem::take(&mut batch))?;
-            bytes = 0;
+    loop {
+        let page = store.plan_records_since(repo, sent_seq, BUDGET)?;
+        if !page.records.is_empty() {
+            let _: serde_json::Value = request(
+                connection,
+                ServerOperation::PlanApply {
+                    repository: repository.clone(),
+                    records: page.records,
+                },
+            )?;
         }
-        bytes += size;
-        batch.extend(sends);
+        store.plan_sent(repo, Carrier::Hub, page.seq)?;
+        sent_seq = page.seq;
+        if !page.more {
+            return Ok(());
+        }
     }
-    if !batch.is_empty() {
-        apply(store, connection, repository, batch)?;
-    }
-    Ok(())
-}
-
-/// A send whose answer is lost stays open and goes again: the hub writing
-/// the same values twice changes nothing.
-fn apply(
-    store: &SqliteStore,
-    connection: &mut Connection,
-    repository: &RepositoryId,
-    sends: Vec<HubSend>,
-) -> Result<()> {
-    let seqs = sends.iter().map(|send| send.seq).collect::<Vec<_>>();
-    store.mark_hub_sent(&seqs)?;
-    let _: serde_json::Value = request(
-        connection,
-        ServerOperation::PlanApply {
-            repository: repository.clone(),
-            edits: sends.into_iter().map(|send| send.edit).collect(),
-        },
-    )?;
-    store.confirm_hub_sends(&seqs)?;
-    Ok(())
 }
 
 // ---- The hub's side ----
 
-/// `plan.apply`: write another Machine's saves here.
+/// `plan.apply`: take in another Machine's records here.
 pub fn apply_here(
     store: &SqliteStore,
     repository: &RepositoryId,
-    edits: &[WorkEdit],
+    records: &[StampedRecord],
 ) -> Result<serde_json::Value> {
-    store.apply_hub_edits(&checkout(store, repository)?, edits, &machine_names(store)?)?;
+    store.apply_plan_records(
+        &checkout(store, repository)?,
+        records,
+        None,
+        &machine_names(store)?,
+    )?;
     Ok(serde_json::json!({}))
 }
 
@@ -337,9 +283,10 @@ pub fn changes_here(
     repository: &RepositoryId,
     since: Option<i64>,
 ) -> Result<PlanChanges> {
-    let page = store.plan_changes_since(&checkout(store, repository)?, since, BUDGET)?;
+    let page =
+        store.plan_records_since(&checkout(store, repository)?, since.unwrap_or(0), BUDGET)?;
     Ok(PlanChanges {
-        edits: page.edits,
+        records: page.records,
         seq: page.seq,
         more: page.more,
     })
@@ -347,7 +294,9 @@ pub fn changes_here(
 
 /// The person's names for their Machines, for the steers an arriving
 /// ownership entry writes.
-fn machine_names(store: &SqliteStore) -> Result<loopflow_storage::sqlite::plan_hub::MachineNames> {
+fn machine_names(
+    store: &SqliteStore,
+) -> Result<loopflow_storage::sqlite::plan_carriers::MachineNames> {
     let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;
     Ok(config
         .machines

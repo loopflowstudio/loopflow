@@ -215,24 +215,19 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
                 None if *clear => None,
                 None => {
                     match loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
-                        Some(hub) => println!("Plan: hub {}.", hub.name()),
-                        None => println!("Plan: this Machine."),
+                        Some(hub) => println!("Hub {}.", hub.name()),
+                        None => println!("No hub."),
                     }
                     return Ok(());
                 }
             };
-            let unsent = loopflow_execution::ops::plan_hub::set_hub(
+            loopflow_execution::ops::plan_hub::set_hub(
                 &store.sqlite,
                 selected.as_ref().map(|machine| &machine.id),
             )?;
             match selected {
-                Some(hub) => println!("This Machine keeps its plan on {}.", hub.name()),
-                None => println!("This Machine keeps its plan here."),
-            }
-            if unsent > 0 {
-                println!(
-                    "Never reached the hub, kept on this Machine only: {unsent} saved value(s)."
-                );
+                Some(hub) => println!("This Machine exchanges its plan with {}.", hub.name()),
+                None => println!("This Machine has no hub. Its plan stays here."),
             }
         }
         MachineCommand::List { label, json } => {

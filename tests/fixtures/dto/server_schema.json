@@ -3439,26 +3439,48 @@
       ],
       "type": "object"
     },
-    "HubOpen": {
-      "description": "One record's values on their way to the hub: `3e1c9a07  title · queued`.",
+    "HubCarrier": {
+      "description": "The hub's line: `Hub mini, unreachable since Nov 18 14:02, 2 unsent.`",
       "properties": {
-        "field": {
-          "description": "The open fields without their record prefix: `title`, `title, notes`, or `14 values` for a record the hub has yet to see.",
+        "error": {
+          "description": "Why the last exchange failed, while the hub still does not answer.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the hub stopped answering (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "machine": {
+          "description": "The hub's name.",
           "type": "string"
         },
-        "owner": {
-          "description": "A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.",
-          "type": "string"
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         },
-        "phase": {
-          "description": "`queued`, or `sent` while every answer is outstanding.",
-          "type": "string"
+        "unsent": {
+          "description": "How many records changed here the hub has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "required": [
-        "owner",
-        "field",
-        "phase"
+        "machine",
+        "unsent",
+        "records",
+        "error",
+        "failing_since"
       ],
       "type": "object"
     },
@@ -5459,19 +5481,39 @@
       ],
       "type": "object"
     },
+    "PlanCarriers": {
+      "description": "The ways a plan without a tracker reaches other Machines. Every Machine\nholds the whole plan; with none of these it stays on this one.",
+      "properties": {
+        "hub": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HubCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Machine `lf machine hub` names; `null` without one."
+        }
+      },
+      "required": [
+        "hub"
+      ],
+      "type": "object"
+    },
     "PlanChanges": {
       "additionalProperties": false,
       "description": "What `plan.changes` answers.",
       "properties": {
-        "edits": {
+        "more": {
+          "description": "More changes follow `seq`; read again from it.",
+          "type": "boolean"
+        },
+        "records": {
           "items": {
             "$ref": "#/$defs/Untyped"
           },
           "type": "array"
-        },
-        "more": {
-          "description": "More changes follow `seq`; read again from it.",
-          "type": "boolean"
         },
         "seq": {
           "description": "The watermark to read from next.",
@@ -5480,50 +5522,9 @@
         }
       },
       "required": [
-        "edits",
+        "records",
         "seq",
         "more"
-      ],
-      "type": "object"
-    },
-    "PlanHome": {
-      "description": "The Machine that holds a plan without a tracker.",
-      "properties": {
-        "error": {
-          "description": "Why the last exchange with the hub failed.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hub": {
-          "description": "The hub's name when the plan is on another Machine; `null` when it is\non this one.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "open": {
-          "description": "Each record with values the hub has yet to confirm, in send order.",
-          "items": {
-            "$ref": "#/$defs/HubOpen"
-          },
-          "type": "array"
-        },
-        "unreachable_since": {
-          "description": "When the hub stopped answering (Unix seconds), while it still does not.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "hub",
-        "unreachable_since",
-        "error",
-        "open"
       ],
       "type": "object"
     },
@@ -9841,17 +9842,17 @@
         },
         {
           "additionalProperties": false,
-          "description": "The hub's side of a plan exchange: write another Machine's saves of\n`repository`'s plan here, in one transaction, as this Machine's own.\nRepeating it changes nothing. Answers `{}`.",
+          "description": "The hub's side of a plan exchange: take in another Machine's stamped\nrecords of `repository`'s plan, in one transaction. Each field is\nwritten only when its stamp is newer than the one held here, so\nrepeating it changes nothing. Answers `{}`.",
           "properties": {
-            "edits": {
+            "kind": {
+              "const": "plan.apply",
+              "type": "string"
+            },
+            "records": {
               "items": {
                 "$ref": "#/$defs/Untyped"
               },
               "type": "array"
-            },
-            "kind": {
-              "const": "plan.apply",
-              "type": "string"
             },
             "repository": {
               "type": "string"
@@ -9860,7 +9861,7 @@
           "required": [
             "kind",
             "repository",
-            "edits"
+            "records"
           ],
           "type": "object",
           "x-result": {
@@ -9870,7 +9871,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "Every current value of each Wave, Project, Task and comment of\n`repository`'s plan here that changed after the watermark `since`;\nnull reads the whole plan.",
+          "description": "Each Wave, Project, Task and comment of `repository`'s plan here that\nchanged after the watermark `since`, whole, every field with its stamp;\nnull reads the whole plan.",
           "properties": {
             "kind": {
               "const": "plan.changes",
@@ -14625,7 +14626,7 @@
       "type": "object"
     },
     "TrackerStatus": {
-      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none where its plan lives, and every open and lost tracker action.",
+      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none how its plan travels, and every open and lost tracker action.",
       "properties": {
         "actions": {
           "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered.",
@@ -14637,13 +14638,13 @@
         "plan": {
           "anyOf": [
             {
-              "$ref": "#/$defs/PlanHome"
+              "$ref": "#/$defs/PlanCarriers"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Where a plan without a tracker lives; `null` with a tracker."
+          "description": "How a plan without a tracker travels; `null` with a tracker."
         },
         "tracker": {
           "description": "`linear` or `asana`; `null` when the plan is in Loopflow's store.",

@@ -1461,9 +1461,12 @@ async fn served(
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
         }
-        Operation::Server(ServerOperation::PlanApply { repository, edits }) => {
+        Operation::Server(ServerOperation::PlanApply {
+            repository,
+            records,
+        }) => {
             plan_here(reservation, move |store| {
-                loopflow_execution::ops::plan_hub::apply_here(store, &repository, &edits)
+                loopflow_execution::ops::plan_hub::apply_here(store, &repository, &records)
             })
             .await
         }

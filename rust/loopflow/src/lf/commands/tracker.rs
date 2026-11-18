@@ -126,44 +126,45 @@ pub(crate) fn subscribe_status(
 }
 
 /// What `repo.tracker` answers: the tracker, or for a repository without
-/// one where its plan lives, and every open and lost tracker action.
+/// one how its plan travels, and every open and lost tracker action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
 pub(crate) struct TrackerStatus {
     /// `linear` or `asana`; `null` when the plan is in Loopflow's store.
     tracker: Option<String>,
-    /// Where a plan without a tracker lives; `null` with a tracker.
-    plan: Option<PlanHome>,
+    /// How a plan without a tracker travels; `null` with a tracker.
+    plan: Option<PlanCarriers>,
     /// What the tracker has yet to confirm (open: `queued`, `sent`), in send
     /// order, and each value it kept over a local one (lost: `conflicted`)
     /// until it is answered.
     actions: Vec<TrackerActionStatus>,
 }
 
-/// The Machine that holds a plan without a tracker.
+/// The ways a plan without a tracker reaches other Machines. Every Machine
+/// holds the whole plan; with none of these it stays on this one.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct PlanHome {
-    /// The hub's name when the plan is on another Machine; `null` when it is
-    /// on this one.
-    hub: Option<String>,
-    /// When the hub stopped answering (Unix seconds), while it still does not.
-    unreachable_since: Option<i64>,
-    /// Why the last exchange with the hub failed.
-    error: Option<String>,
-    /// Each record with values the hub has yet to confirm, in send order.
-    open: Vec<HubOpen>,
+pub(crate) struct PlanCarriers {
+    /// The Machine `lf machine hub` names; `null` without one.
+    hub: Option<HubCarrier>,
 }
 
-/// One record's values on their way to the hub: `3e1c9a07  title · queued`.
+/// The hub's line: `Hub mini, unreachable since Nov 18 14:02, 2 unsent.`
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct HubOpen {
-    /// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
-    owner: String,
-    /// The open fields without their record prefix: `title`, `title, notes`,
-    /// or `14 values` for a record the hub has yet to see.
-    field: String,
-    /// `queued`, or `sent` while every answer is outstanding.
-    phase: String,
+pub(crate) struct HubCarrier {
+    /// The hub's name.
+    machine: String,
+    /// How many records changed here the hub has not taken.
+    unsent: usize,
+    /// The first of them in change order: a Task's identifier, `wave <name>`,
+    /// `project <name>` or `comment <id>`.
+    records: Vec<String>,
+    /// Why the last exchange failed, while the hub still does not answer.
+    error: Option<String>,
+    /// When the hub stopped answering (Unix seconds), while it still does not.
+    failing_since: Option<i64>,
 }
+
+/// How many unsent records a line names.
+const NAMED: usize = 20;
 
 /// The name a person reads for an action's owner: a Task's identifier, a
 /// Project's name.
@@ -219,38 +220,31 @@ fn status(store: Option<&Store>, repo: &str) -> Result<TrackerStatus> {
     }
     Ok(TrackerStatus {
         tracker: None,
-        plan: Some(plan_home(store, repo)?),
+        plan: Some(plan_carriers(store, repo)?),
         actions: Vec::new(),
     })
 }
 
-fn plan_home(store: &Store, repo: &str) -> Result<PlanHome> {
+fn plan_carriers(store: &Store, repo: &str) -> Result<PlanCarriers> {
+    use loopflow_execution::store::sqlite::plan_carriers::Carrier;
     let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? else {
-        return Ok(PlanHome {
-            hub: None,
-            unreachable_since: None,
-            error: None,
-            open: Vec::new(),
-        });
+        return Ok(PlanCarriers { hub: None });
     };
-    let plan = store.sqlite.hub_plan(repo)?;
-    let failing = plan.as_ref().and_then(|plan| plan.failing_since);
-    let sends = store.sqlite.open_hub_sends(repo)?;
-    let open = loopflow_execution::ops::plan_hub::open_by_owner(&sends)
-        .into_iter()
-        .map(|(send, field, phase)| {
-            Ok(HubOpen {
-                owner: hub_owner_name(store, send)?,
-                field,
-                phase: phase.to_owned(),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    Ok(PlanHome {
-        hub: Some(hub.name().to_owned()),
-        unreachable_since: failing,
-        error: failing.and(plan.and_then(|plan| plan.error)),
-        open,
+    let held = store.sqlite.plan_carrier(repo, Carrier::Hub)?;
+    let unsent = store.sqlite.plan_unsent(repo, Carrier::Hub, NAMED)?;
+    let failing_since = held.as_ref().and_then(|held| held.failing_since);
+    Ok(PlanCarriers {
+        hub: Some(HubCarrier {
+            machine: hub.name().to_owned(),
+            unsent: unsent.count,
+            records: unsent
+                .first
+                .iter()
+                .map(|(table, id)| record_name(store, table, id))
+                .collect::<Result<_>>()?,
+            error: failing_since.and(held.and_then(|held| held.error)),
+            failing_since,
+        }),
     })
 }
 
@@ -285,66 +279,55 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
     print_actions(store, &actions)
 }
 
-/// `Plan: hub mini. 2 open.`, then each record with open values, then why
-/// the hub did not take them.
-fn print_plan(plan: &PlanHome) {
+/// `Plan: this Machine.`, then a line for the hub when one is named: its
+/// unsent records by name, then why it did not take them.
+fn print_plan(plan: &PlanCarriers) {
+    println!("Plan: this Machine.");
     let Some(hub) = &plan.hub else {
-        println!("Plan: this Machine.");
         return;
     };
-    let place = match plan.unreachable_since {
-        Some(since) => format!(
-            "hub {hub}, unreachable since {}",
+    let mut line = format!("Hub {}", hub.machine);
+    if let Some(since) = hub.failing_since {
+        line.push_str(&format!(
+            ", unreachable since {}",
             loopflow_execution::output::format_time(since)
-        ),
-        None => format!("hub {hub}"),
-    };
-    if plan.open.is_empty() {
-        println!("Plan: {place}. Nothing open.");
-        if let Some(error) = &plan.error {
-            println!("  {error}");
-        }
-        return;
+        ));
     }
-    println!("Plan: {place}. {} open.", plan.open.len());
-    let width = plan
-        .open
-        .iter()
-        .map(|open| open.owner.len())
-        .max()
-        .unwrap_or(0);
-    for open in &plan.open {
-        println!("  {:width$}  {} · {}", open.owner, open.field, open.phase);
+    if hub.unsent > 0 {
+        line.push_str(&format!(", {} unsent", hub.unsent));
     }
-    if let Some(error) = &plan.error {
+    println!("{line}.");
+    for record in &hub.records {
+        println!("  {record}");
+    }
+    if hub.unsent > hub.records.len() {
+        println!("  and {} more", hub.unsent - hub.records.len());
+    }
+    if let Some(error) = &hub.error {
         println!("  {error}");
     }
 }
 
 /// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
-fn hub_owner_name(
-    store: &Store,
-    send: &loopflow_execution::store::sqlite::plan_hub::HubSend,
-) -> Result<String> {
-    let id = &send.edit.target;
-    Ok(match send.owner_table.as_str() {
+fn record_name(store: &Store, table: &str, id: &str) -> Result<String> {
+    Ok(match table {
         "tasks" => store
             .sqlite
             .task(&loopflow_model::durable::TaskId::from_raw(id))?
-            .map_or_else(|| id.clone(), |task| task.identifier),
+            .map_or_else(|| id.to_owned(), |task| task.identifier),
         "waves" => format!(
             "wave {}",
             store
                 .sqlite
                 .get_wave(&loopflow_model::id::WaveId::parse(id)?)?
-                .map_or_else(|| id.clone(), |wave| wave.name().to_owned())
+                .map_or_else(|| id.to_owned(), |wave| wave.name().to_owned())
         ),
         "projects" => format!(
             "project {}",
             store
                 .sqlite
                 .project(&loopflow_model::durable::ProjectId::from_raw(id))?
-                .map_or_else(|| id.clone(), |project| project.name)
+                .map_or_else(|| id.to_owned(), |project| project.name)
         ),
         _ => format!("comment {}", short_id(id)),
     })

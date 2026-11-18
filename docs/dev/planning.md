@@ -344,8 +344,8 @@ as `repo.tracker.answer` for Desktop's Keep / Use mine on every line; `lf task s
 `lf repo tracker` has one line per carrier, `Plan: Git origin, 2 unsent.` and
 `Hub mini.`, each with its unsent records by identifier and its last error, or
 `Plan: this Machine.` with no remote and no hub; `--json` carries the same as
-`plan: {git, hub}`, each `{remote | machine, unsent, error, failing_since}` or
-null. Linear checks run
+`plan: {git, hub}`, each `{remote | machine, unsent, records, error,
+failing_since}` or null; `unsent` counts and `records` names the first twenty. Linear checks run
 at the boundaries described below. A short save attempts delivery after its
 answer. No resident, whole-store callback, scheduler or
 implicit turn/Graph replay is involved.

@@ -87,7 +87,7 @@ Changes to Task/Graph membership or execution reads also include
 checks catch per-Task and per-Graph SQL growth beyond focused store tests.
 
 Store-wide schema or trigger changes also run
-`test(machine_commands::the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines)`,
+`test(machine_commands::the_later_change_shows_on_both_machines_through_the_hub)`,
 `test(transport::)` and `binary(transport_tests)`: hub exchanges, viewer holds and
 held-terminal lifetimes exercise writers beyond the changed store module.
 Task storage changes also run `binary(session_lifecycle_tests)`: creation and

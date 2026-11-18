@@ -1338,32 +1338,14 @@ impl SharedPlan {
         }
     }
 
-    /// One exchange as the local Machine makes it: read what changed on the
-    /// remote hub, then send what is open here.
+    /// One exchange as the local Machine makes it with the remote, its hub.
     fn exchange(&self) {
-        let (local, remote) = (
+        loopflow_storage::test_fixture::exchange(
+            &self.local,
             self.local_path.to_str().unwrap(),
+            &self.remote,
             self.remote_path.to_str().unwrap(),
         );
-        let since = self.local.select_hub(local, "remote").unwrap().seq;
-        let page = self
-            .remote
-            .plan_changes_since(remote, since, usize::MAX)
-            .unwrap();
-        self.local
-            .import_hub_plan(local, &page.edits, page.seq, &Default::default())
-            .unwrap();
-        let sends = self.local.open_hub_sends(local).unwrap();
-        let edits = sends
-            .iter()
-            .map(|send| send.edit.clone())
-            .collect::<Vec<_>>();
-        self.remote
-            .apply_hub_edits(remote, &edits, &Default::default())
-            .unwrap();
-        self.local
-            .confirm_hub_sends(&sends.iter().map(|send| send.seq).collect::<Vec<_>>())
-            .unwrap();
     }
 
     fn to_local(&self) {
@@ -1460,10 +1442,10 @@ sys.exit(child.wait())
     );
 }
 
-/// LOO-938's acceptance over the real carrier: the laptop keeps its plan on
-/// mini and reaches it with `ssh mini lf server connect`.
+/// LOO-938's acceptance over the real hub carrier: the laptop names mini its
+/// hub and reaches it with `ssh mini lf server connect`.
 #[test]
-fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
+fn the_later_change_shows_on_both_machines_through_the_hub() {
     let fixture = preview_machines();
     let plan = SharedPlan::cloned(&fixture);
     let flags = fixture.root.path().join("ssh-flags");
@@ -1494,17 +1476,17 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
     assert_eq!(title(&plan.remote).as_deref(), Some("hub smoke"));
     assert_eq!(
         ok(&["repo", "tracker"]).trim(),
-        "Plan: hub mini. Nothing open."
+        "Plan: this Machine.\nHub mini."
     );
 
     // A Wave made here is on mini when the command returns.
     ok(&["wave", "create", "billing"]);
     assert_eq!(
         ok(&["repo", "tracker"]).trim(),
-        "Plan: hub mini. Nothing open."
+        "Plan: this Machine.\nHub mini."
     );
 
-    // mini changes the title, then stops answering; the laptop changes it too.
+    // mini changes the title, then stops answering; the laptop changes it later.
     let revision = plan.remote.task(&task).unwrap().unwrap().revision;
     plan.remote
         .edit_task(
@@ -1520,20 +1502,15 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
     ok(&["task", "update", &identifier, "--title", "two"]);
     let offline = ok(&["repo", "tracker"]);
     assert!(
-        offline.starts_with("Plan: hub mini, unreachable since "),
+        offline.starts_with("Plan: this Machine.\nHub mini, unreachable since "),
         "{offline}"
     );
-    assert!(offline.contains(" 1 open."), "{offline}");
-    assert!(offline.contains("  title · queued\n"), "{offline}");
-    // A Task made offline is one line, and the reason is said once.
+    assert!(offline.contains(", 1 unsent.\n"), "{offline}");
+    assert!(offline.contains(&format!("  {identifier}\n")), "{offline}");
+    // A Task made offline is one more record, and the reason is said once.
     ok(&["task", "create", "made offline"]);
     let offline = ok(&["repo", "tracker"]);
-    assert!(offline.contains(" 2 open."), "{offline}");
-    assert_eq!(
-        offline.matches(" values · queued\n").count(),
-        1,
-        "{offline}"
-    );
+    assert!(offline.contains(", 2 unsent.\n"), "{offline}");
     assert_eq!(
         offline.matches("Operation timed out").count(),
         1,
@@ -1548,17 +1525,17 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
     let remote_path = plan.remote_path.to_str().unwrap();
     let written = plan
         .remote
-        .plan_changes_since(remote_path, None, usize::MAX)
+        .plan_records_since(remote_path, 0, usize::MAX)
         .unwrap()
         .seq;
-    // The send goes again and changes nothing more on mini.
+    // The records go again and change nothing more on mini.
     assert_eq!(
         ok(&["task", "sync", &identifier]).trim(),
-        format!("{identifier}: nothing open")
+        format!("{identifier}: nothing unsent")
     );
     assert_eq!(
         plan.remote
-            .plan_changes_since(remote_path, None, usize::MAX)
+            .plan_records_since(remote_path, 0, usize::MAX)
             .unwrap()
             .seq,
         written
@@ -1567,7 +1544,7 @@ fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
     assert_eq!(title(&plan.remote).as_deref(), Some("two"));
     assert_eq!(
         ok(&["repo", "tracker"]).trim(),
-        "Plan: hub mini. Nothing open."
+        "Plan: this Machine.\nHub mini."
     );
 }
 

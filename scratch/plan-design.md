@@ -131,11 +131,29 @@ Linear has no field for a Task's Wave or its order in the Wave. Proposed:
   - *The order of the Tasks you have claimed is yours.* It is not written to
     the Project and nobody else's view changes. It travels between your own
     Machines by Git and the hub.
-- **Anything later that must be shared and has no Linear field** goes in an
-  attachment on the issue: Linear's attachments take key-value `metadata`
-  (API only, not shown) and are keyed by URL per issue, so writing one again
-  updates it. One `loopflow://task/<id>` attachment per issue, shown to
-  everyone as a link.
+- **Nothing Loopflow-only is stored on a tracker item.** With membership
+  derived and claimed order private, no field needs it. If one appears:
+  Asana has `external.data` (hidden, 32 KB, shared by users of the same OAuth
+  app); Linear has only attachments, which every teammate sees as a link.
+
+Found by research (`scratch/tracker-research.md`, 2026-11-18; vendor claims
+carry sources there and are not all re-checked):
+- Linear's manual order (`Issue.sortOrder`) belongs to the issue, not the
+  Project. Writing it moves the issue in every manually sorted view in the
+  workspace. Asana's order is per Project (`addProject` with
+  `insert_before` / `insert_after`). Whether Linear backlog reorders are still
+  wanted at that reach is open.
+- `linear/actions.rs` writes `prioritySortOrder` with `sortOrder` today, which
+  moves Priority-sorted views; Asana order is retired as unsupported.
+- A Wave links to a Project on both: a Linear Initiative and an Asana
+  Portfolio hold Projects, never Tasks, and Portfolios need a paid tier.
+- Four things on `main` disturb a shared workspace and block "your slice":
+  the repository marker written into a Linear Team's description; refusing
+  Projects with several Teams or not exactly one Initiative; ingesting every
+  open issue of a Team; writing `external.gid` onto every open Asana task in
+  the Project during a read.
+- Polling "assigned to me" alone never sees an unassignment; the query also
+  names the issues already held.
 
 Passed over: a label group per Wave (membership only, and it fills the team's
 labels); markers in the description (people edit it); a Git ref
@@ -213,7 +231,7 @@ not see new changes, so the first exchange says which Machines still run it.
 - Whether a teammate needs anything beyond network reach to use someone's hub.
 - A non-user reassigns or closes an issue while its Graph runs: stop and keep
   the work, or keep running and say so on the issue.
-- Does a Wave link to a Project, an Initiative or either.
+- Linear backlog order moves every manual view in the workspace: still write it?
 
 ## Slices
 

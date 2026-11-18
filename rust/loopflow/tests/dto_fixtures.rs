@@ -648,8 +648,8 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "plan_home" => {
                 assert_eq!(body["tracker"], serde_json::Value::Null);
-                assert_eq!(body["plan"]["hub"], "mini");
-                assert_eq!(body["plan"]["open"][0]["phase"], "queued");
+                assert_eq!(body["plan"]["hub"]["machine"], "mini");
+                assert_eq!(body["plan"]["hub"]["unsent"], 1);
             }
             other => panic!("unknown subscription {other}"),
         }

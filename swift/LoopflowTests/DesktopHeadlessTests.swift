@@ -73,7 +73,7 @@ struct DesktopHeadlessTests {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
             if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
-                return #"{"tracker":null,"plan":{"hub":"mini","unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
+                return #"{"tracker":null,"plan":{"hub":{"machine":"mini","unsent":1,"records":["3e1c9a07"],"error":null,"failing_since":null}},"actions":[]}"#
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
@@ -81,11 +81,12 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.repositoryPlan.value?.plan?.hub == "mini")
+        #expect(model.repositoryPlan.value?.plan?.hub?.machine == "mini")
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
         let planView = try view.inspect().find(RepositoryPlanView.self)
-        #expect(try planView.find(text: "Plan: hub mini. 1 open.").string() == "Plan: hub mini. 1 open.")
-        #expect(try planView.find(text: "3e1c9a07  title · queued").string() == "3e1c9a07  title · queued")
+        #expect(try planView.find(text: "Plan: this Machine.").string() == "Plan: this Machine.")
+        #expect(try planView.find(text: "Hub mini, 1 unsent.").string() == "Hub mini, 1 unsent.")
+        #expect(try planView.find(text: "3e1c9a07").string() == "3e1c9a07")
     }
 
     @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")

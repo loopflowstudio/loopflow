@@ -1,61 +1,72 @@
 import Foundation
 
-/// Where a repository's plan lives, as `lf repo tracker --json` answers it:
-/// its tracker, or without one the Machine that holds the plan.
+/// How a repository's plan is kept, as `lf repo tracker --json` answers it:
+/// its tracker, or without one the ways the plan reaches other Machines.
 public struct RepositoryPlan: Decodable, Sendable, Equatable {
     public let tracker: TrackerKind?
-    public let plan: PlanHome?
+    public let plan: PlanCarriers?
 
     enum CodingKeys: String, CodingKey { case tracker, plan }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         tracker = try values.decode(TrackerKind?.self, forKey: .tracker)
-        plan = try values.decode(PlanHome?.self, forKey: .plan)
+        plan = try values.decode(PlanCarriers?.self, forKey: .plan)
     }
 
-    /// The line `lf repo tracker` starts with: `Tracker: linear.`,
-    /// `Plan: hub mini. 1 open.`, `Plan: this Machine.`
+    /// The line `lf repo tracker` starts with: `Tracker: linear.` or
+    /// `Plan: this Machine.`
     public var line: String {
         if let tracker { return "Tracker: \(tracker.rawValue)." }
-        guard let plan else { return "Plan: this Machine." }
-        guard let hub = plan.hub else { return "Plan: this Machine." }
-        let place = plan.unreachableSince.map { since in
-            "hub \(hub), unreachable since \(Date(timeIntervalSince1970: TimeInterval(since)).formatted(date: .omitted, time: .shortened))"
-        } ?? "hub \(hub)"
-        return plan.open.isEmpty ? "Plan: \(place). Nothing open." : "Plan: \(place). \(plan.open.count) open."
+        return "Plan: this Machine."
     }
 }
 
-/// The Machine that holds a plan without a tracker.
-public struct PlanHome: Decodable, Sendable, Equatable {
-    /// The hub's name when the plan is on another Machine; nil on this one.
-    public let hub: String?
-    /// Unix seconds since the hub stopped answering.
-    public let unreachableSince: Int?
+/// The ways a plan without a tracker reaches other Machines. Every Machine
+/// holds the whole plan; with none of these it stays on this one.
+public struct PlanCarriers: Decodable, Sendable, Equatable {
+    /// The Machine `lf machine hub` names; nil without one.
+    public let hub: HubCarrier?
+
+    enum CodingKeys: String, CodingKey { case hub }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        hub = try values.decode(HubCarrier?.self, forKey: .hub)
+    }
+}
+
+/// The hub's line: `Hub mini, unreachable since 14:02, 2 unsent.`
+public struct HubCarrier: Decodable, Sendable, Equatable {
+    public let machine: String
+    /// How many records changed here the hub has not taken.
+    public let unsent: Int
+    /// The first of them in change order, by name.
+    public let records: [String]
     public let error: String?
-    /// Each record with values the hub has yet to confirm, in send order.
-    public let open: [HubOpen]
+    /// Unix seconds since the hub stopped answering.
+    public let failingSince: Int?
 
     enum CodingKeys: String, CodingKey {
-        case hub, error, open
-        case unreachableSince = "unreachable_since"
+        case machine, unsent, records, error
+        case failingSince = "failing_since"
     }
 
     public init(from decoder: Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
-        hub = try values.decode(String?.self, forKey: .hub)
-        unreachableSince = try values.decode(Int?.self, forKey: .unreachableSince)
+        machine = try values.decode(String.self, forKey: .machine)
+        unsent = try values.decode(Int.self, forKey: .unsent)
+        records = try values.decode([String].self, forKey: .records)
         error = try values.decode(String?.self, forKey: .error)
-        open = try values.decode([HubOpen].self, forKey: .open)
+        failingSince = try values.decode(Int?.self, forKey: .failingSince)
     }
-}
 
-/// One record's values on their way to the hub: `3e1c9a07  title · queued`.
-public struct HubOpen: Decodable, Sendable, Equatable, Identifiable {
-    public let owner: String
-    public let field: String
-    public let phase: String
-
-    public var id: String { "\(owner) \(field)" }
+    public var line: String {
+        var line = "Hub \(machine)"
+        if let failingSince {
+            line += ", unreachable since \(Date(timeIntervalSince1970: TimeInterval(failingSince)).formatted(date: .omitted, time: .shortened))"
+        }
+        if unsent > 0 { line += ", \(unsent) unsent" }
+        return line + "."
+    }
 }

@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-938 concept review — the plan on the hub</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4f;--no:#b3402a;--prop:#2b5fb3;--propbg:#eaf1fc;--code:#f1eee8}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ecebe6;--mute:#9b978d;--line:#34322e;--card:#1f1e1b;--yes:#6cc38f;--no:#ef8a72;--prop:#8db4ff;--propbg:#1c2638;--code:#26241f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-serif,Georgia,serif}
+main{max-width:980px;margin:0 auto;padding:48px 24px 96px}
+h1{font-size:30px;margin:0 0 6px;line-height:1.2}
+h2{font-size:21px;margin:48px 0 12px;border-top:1px solid var(--line);padding-top:24px}
+h3{font-size:17px;margin:24px 0 8px}
+p.lede{color:var(--mute);margin:0 0 24px;font-size:17px}
+code{font:13.5px ui-monospace,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);padding:14px 16px;border-radius:8px;overflow:auto}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin:12px 0}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600}
+.y{color:var(--yes);font-weight:700}.n{color:var(--no);font-weight:700}
+.prop{border-left:4px solid var(--prop);background:var(--propbg);padding:12px 16px;border-radius:0 8px 8px 0;margin:14px 0}
+.prop b.tag{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 18px}
+.card h3{margin-top:4px}
+.flow{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font:13px ui-monospace,Menlo,monospace}
+.flow span{background:var(--code);padding:4px 8px;border-radius:6px}
+.flow i{color:var(--mute);font-style:normal}
+.flow .drop{color:var(--no);text-decoration:line-through}
+ol.q li{margin:10px 0}
+ol.q ol{list-style:lower-alpha;margin-top:4px}
+.mute{color:var(--mute)}
+</style>
+</head>
+<body>
+<main>
+<h1>Where the plan lives once there is a hub</h1>
+<p class="lede">Area reviewed: planning across Machines for repositories without Linear or Asana — how a change saved on one Machine reaches the others, what a person sees while it travels, and the records behind it. Taken because LOO-938 replaces the whole of that area (Git peer journal → hub), not one function of it. Reviewed against the kickoff plan at <code>2ac5bb7187</code>; no code is built yet.</p>
+
+<h2>The question</h2>
+<p>The kickoff plan says <em>the hub is a third tracker</em>. Does a hub that owns the plan line up with what a tracker is in this code?</p>
+<p><b>No.</b> A tracker here is a foreign system reached through a lens. The hub is the same store on another Machine. Treating it as a tracker would have dropped every Wave and half the Task fields on the floor.</p>
+
+<h2>One interaction, walked</h2>
+<p>Laptop, etude, hub = mini. Rename Wave <code>audio</code> to <code>sound</code>, create a Task, retitle it, close the lid on a plane, retitle again, land.</p>
+
+<div class="cols">
+<div class="card">
+<h3>Kickoff plan (tracker lens)</h3>
+<div class="flow"><span>wave_name</span><i>→</i><span>enqueue_local</span><i>→</i><span class="drop">table "waves": return</span></div>
+<p class="mute">The Wave rename never queues. <code>enqueue_local</code> only handles <code>tasks</code>, <code>projects</code>, <code>task_comments</code>.</p>
+<div class="flow"><span>task_title</span><i>→</i><span>ActionKind::Field</span><i>→</i><span>plan.apply</span><i>→</i><span>seq check</span><i>→</i><span>Conflicted</span></div>
+<p class="mute">The offline retitle comes back <code>lost</code> if mini moved — a rule <code>decide</code> never applies to an unsent value.</p>
+<div class="flow"><span>task_rank / due / branch / shipped_at</span><i>→</i><span class="drop">ActionKind::of → None</span></div>
+</div>
+<div class="card">
+<h3>Proposed (store words)</h3>
+<div class="flow"><span>wave_name</span><i>→</i><span>WorkEdit</span><i>→</i><span>tracker_actions (hub)</span><i>→</i><span>plan.apply</span><i>→</i><span>write(Local)</span></div>
+<p class="mute">Every value the writer saves is a <code>WorkEdit</code>; every one travels. Waves included.</p>
+<div class="flow"><span>offline retitle</span><i>→</i><span>open</span><i>→</i><span>reconnect</span><i>→</i><span>applied, sent last wins</span></div>
+<p class="mute">Same answer Linear gives and the Git journal's latest clock gives today.</p>
+<div class="flow"><span>plan.changes(since)</span><i>→</i><span>WorkEdit[]</span><i>→</i><span>write(Import)</span></div>
+<p class="mute">Inbound skips any field with an open local row, so a value on its way isn't overwritten by an older one.</p>
+</div>
+</div>
+
+<h3>Failure and recovery</h3>
+<table>
+<tr><th>Case</th><th>What a person sees</th><th>What survives</th></tr>
+<tr><td>mini unreachable</td><td><code>hub mini unreachable since 14:02 · 3 open</code>; reads show the local store</td><td>The open rows; nothing falls back to Git</td></tr>
+<tr><td><code>plan.apply</code> reply lost</td><td>Still <code>open</code>; next pass sends again</td><td>Setting a value twice is the same value — no idempotency table</td></tr>
+<tr><td>First contact (22 personal records)</td><td>Open count rises, then 0</td><td>Pull first, then push only owners mini lacked; pushing first would overwrite mini's newer values</td></tr>
+<tr><td>Two people retitle one Task, one offline</td><td>Both Machines show the later-sent title</td><td class="n">The earlier edit is gone silently — counterexample kept, same as Linear today</td></tr>
+</table>
+
+<h2>Concepts, paired</h2>
+<table>
+<tr><th>Product concept</th><th>Code concept</th><th>Line up?</th><th>Where it doesn't</th></tr>
+<tr><td>The plan (Waves, Projects, Tasks, comments)</td><td><code>WorkEdit</code> / <code>WorkValue</code>, <code>planning_write</code></td><td class="y">yes</td><td>One typed writer, all origins</td></tr>
+<tr><td>"Where my plan lives" (hub, or this Machine)</td><td>kickoff: <code>Tracker::Hub</code> · proposed: Machine hub setting + <code>tracker = 'hub'</code> rows</td><td class="n">no → yes</td><td>One name for two ideas: "tracker" meant both a foreign system (Linear) and the plan's own home. Proposed: tracker = Linear/Asana; hub = where the plan lives.</td></tr>
+<tr><td>"3 open" — a change on its way</td><td><code>tracker_actions</code> phases</td><td class="y">yes</td><td>One queue, one view, any destination</td></tr>
+<tr><td>A change that lost</td><td><code>Conflicted</code> + Keep / Use mine</td><td class="n">no → yes</td><td>Kickoff invented a hub-only rule (<code>plan_field_changes</code>, action ids) that marks offline edits lost. Proposed: hub never conflicts; lost stays Linear/Asana's lost-reply case.</td></tr>
+<tr><td>A Wave</td><td><code>waves</code> table, <code>WaveName</code>/<code>WaveParent</code>/…</td><td class="n">no → yes</td><td>The tracker lens has no Wave field action; the hub needs all of them</td></tr>
+<tr><td>Creating, ordering, deleting a Task</td><td>kickoff: <code>create</code>/<code>order</code>/<code>delete</code>/<code>link</code> kinds + UUID binding · proposed: first edits, <code>task_rank</code>, <code>task_deleted_at</code></td><td class="n">no → yes</td><td>Kinds exist to translate into Linear's API. The hub needs no translation and no <code>external_issue_id</code> binding.</td></tr>
+<tr><td>Which Machine is the hub</td><td><code>lf machine hub mini</code></td><td class="y">yes</td><td>Machine-level, as LOO-861 will own it</td></tr>
+<tr><td>Destinations, personal refs, publication receipts</td><td><code>planning_destinations</code>, <code>GitPlan</code>, journal</td><td class="y">deleted</td><td>A concept the code has and the person no longer needs</td></tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+<div class="prop"><b class="tag">Proposed, written into scratch/plan.md.</b> The hub is the plan's home, spoken in store words — not a tracker.</div>
+<div class="cols">
+<div class="card">
+<h3>Before (kickoff)</h3>
+<pre>enum Tracker { Linear, Asana, Hub }
+Hub: send / look / changes / fetch_issue
+     / removed / issue_ownership   // 4 unreachable
+enqueue via ActionKind::of        // lossy
+inbound via decide()              // Linear revisions
+plan_field_changes(owner, field,
+                   seq, action_id)
+external_issue_id = own UUID
+slices: one field → every kind → delete Git</pre>
+</div>
+<div class="card">
+<h3>After</h3>
+<pre>tracker_actions(tracker='hub', kind='field',
+                subject=field, value=WorkEdit)
+drain: hub sender, one plan.apply / pass
+plan.apply  { edits }      → { applied, seq }
+plan.changes{ since }      → { edits, seq }
+plan_changes(repo, table, owner_id, seq)
+inbound: write(Import), skip open fields
+slices: hub holds the plan → delete Git</pre>
+</div>
+</div>
+<p>Smaller on every axis: no Tracker variant, no seven-kind mapping, no binding, no second conflict rule, one slice fewer. It also closes a data-loss gap the kickoff plan would have shipped: today's Git journal carries Wave edits and the tracker lens doesn't.</p>
+
+<h2>Larger than this work</h2>
+<ul>
+<li><b>Hub-side conflicts.</b> If "sent last wins" proves wrong for two people on one hub, a per-field check belongs at the hub and would apply to everyone — a product decision for later, not part of replacing Git.</li>
+<li><b>The word "tracker".</b> <code>tracker_actions</code>, <code>lf repo tracker</code> and <code>TrackerKind</code> now carry a destination that isn't a tracker. Renaming the queue (e.g. "outbox") is a cross-surface rename; this work keeps the names and fixes the docs' definition.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Conflicts on the hub:
+ <ol><li>sent last wins, never <code>lost</code> (built into the plan)</li><li>the kickoff's per-field check, offline edits come back <code>lost</code></li></ol></li>
+<li>What crosses to the hub:
+ <ol><li>every <code>WorkValue</code>, Waves included (plan)</li><li>only what Linear can hold, as kickoff had</li></ol></li>
+<li>The hub in code:
+ <ol><li>a queue destination with its own sender (plan)</li><li>a <code>Tracker</code> variant</li></ol></li>
+<li>Naming:
+ <ol><li>keep <code>tracker_actions</code> / <code>lf repo tracker</code>; docs say tracker = Linear/Asana, hub = plan's home (plan)</li><li>rename the queue in this Task</li><li>rename in a follow-up Task</li></ol></li>
+<li>First contact:
+ <ol><li>pull, then push owners the hub lacked (plan)</li><li>cutover by hand only; unbound rows stay local</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

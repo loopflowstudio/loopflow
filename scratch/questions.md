@@ -13,3 +13,8 @@
   repository on the hub.
 - mini's etude checkout and `lf` version were not verified (mini unreachable
   during kickoff).
+- Concept review (2026-11-18): hub edits follow "the change sent last wins"
+  and never come back `lost`; the kickoff's per-field seq conflict check was
+  dropped. Reversible before release: a hub-side check could be added later.
+- Concept review: the hub is not a `Tracker` variant and carries every
+  `WorkValue` (Waves included), not the Linear action lens.

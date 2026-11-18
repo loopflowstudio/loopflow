@@ -66,7 +66,7 @@ pub async fn update_project(
     .map_err(project_error)?;
     let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     let project = current_project(&store, &wave)?;
-    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
+    super::metrics::validate_project_targets(&wave, metric_targets).map_err(project_error)?;
     store
         .sqlite
         .update_project_content(&project.id, krs, metric_targets)
@@ -164,7 +164,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         .collect();
     if let Some(project) = projects.iter().find(|project| {
         project
-            .linear_id
+            .tracker_id
             .as_ref()
             .is_some_and(|id| id.as_str() == loopflow_model::id::canonical_uuid(selector))
     }) {

@@ -228,7 +228,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
 
         summary: String::new(),
         status: crate::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+        tracker_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "probe".to_string(),
         name: "Probe".to_string(),
         description: "Probe Task execution".to_string(),
@@ -245,7 +245,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         &store,
         &wave_id,
         None,
-        project.linear_id.as_ref().unwrap().as_str(),
+        project.tracker_id.as_ref().unwrap().as_str(),
         &crate::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
@@ -254,7 +254,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         id: task_id.clone(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new("task-uuid").unwrap()),
+        tracker_id: Some(LinearIssueId::new("task-uuid").unwrap()),
         identifier: "PROBE-1".to_string(),
         title: "Probe Task execution".to_string(),
         description: "Exercise the Task Graph store".to_string(),
@@ -352,7 +352,7 @@ pub fn unregistered_task(
     let mut task = store.task(existing).unwrap().unwrap();
     let mut pr = store.task_prs(existing).unwrap().remove(0);
     task.id = TaskId::new();
-    task.linear_id = Some(LinearIssueId::new("later-issue").unwrap());
+    task.tracker_id = Some(LinearIssueId::new("later-issue").unwrap());
     task.identifier = "PROBE-2".into();
     task.worktree = Some(checkout);
     task.workspace_slug = "later-checkout".into();

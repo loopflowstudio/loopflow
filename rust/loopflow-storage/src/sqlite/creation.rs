@@ -110,6 +110,11 @@ impl SqliteStore {
         }).optional()?;
         row.map(|(mut receipt, result, launch)| {
             receipt.result = result.map(|text| serde_json::from_str(&text)).transpose()?;
+            if receipt.kind == "task.create" {
+                if let Some(result) = &mut receipt.result {
+                    rename_task_binding(result, "linear_id", "tracker_id");
+                }
+            }
             receipt.launch = launch.map(|text| serde_json::from_str(&text)).transpose()?;
             let (disposition, explanation) = recovery_in(&conn, &receipt)?;
             receipt.disposition = disposition;
@@ -230,4 +235,24 @@ pub struct TaskCreateReceipt {
     pub graph: Option<String>,
     pub session_id: Option<loopflow_model::id::LfSessionId>,
     pub milestone: String,
+}
+
+// The released CLI shares the receipt store and replays its original Task snapshot.
+impl TaskCreateReceipt {
+    pub fn stored_result(&self) -> serde_json::Result<serde_json::Value> {
+        let mut result = serde_json::to_value(self)?;
+        rename_task_binding(&mut result, "tracker_id", "linear_id");
+        Ok(result)
+    }
+}
+
+fn rename_task_binding(result: &mut serde_json::Value, from: &str, to: &str) {
+    if let Some(task) = result
+        .get_mut("task")
+        .and_then(serde_json::Value::as_object_mut)
+    {
+        if let Some(binding) = task.remove(from) {
+            task.insert(to.into(), binding);
+        }
+    }
 }

@@ -121,7 +121,7 @@ mod tests {
             original.project_id
         );
         assert_eq!(
-            store.task_acquisition(&original.id).unwrap().state,
+            store.task_tracker_state(&original.id).unwrap().state,
             PlanningState::Invalid
         );
         // An omitted field in retained historical evidence remains unknown.
@@ -163,7 +163,7 @@ mod tests {
         assert!(detached.wave_id.is_none());
         assert_eq!(detached.repository_id, original.repository_id);
         assert_eq!(
-            store.task_acquisition(&original.id).unwrap().state,
+            store.task_tracker_state(&original.id).unwrap().state,
             PlanningState::Available
         );
     }
@@ -242,10 +242,10 @@ mod tests {
                 Some(std::path::Path::new("/retained/checkout"))
             );
             assert!(store.task_by_issue("OTHER-2").unwrap().is_none());
-            let acquisition = store.task_acquisition(&task).unwrap();
+            let acquisition = store.task_tracker_state(&task).unwrap();
             assert_eq!(acquisition.state, expected, "{sql}");
             assert_eq!(
-                acquisition.observed_at,
+                acquisition.synced_at,
                 (!sql.contains("DELETE FROM pm_items")).then_some(42),
                 "{sql}"
             );
@@ -439,7 +439,7 @@ mod tests {
         store.seed_inventory(&row).unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap().title, detail.name);
         assert_eq!(
-            store.task_acquisition(&task.id).unwrap().observed_at,
+            store.task_tracker_state(&task.id).unwrap().synced_at,
             Some(44)
         );
         store
@@ -447,10 +447,10 @@ mod tests {
             .unwrap();
         store.seed_inventory(&row).unwrap();
         assert_eq!(
-            store.task_acquisition(&task.id).unwrap(),
-            crate::store::TaskAcquisition {
+            store.task_tracker_state(&task.id).unwrap(),
+            crate::store::TrackerState {
                 state: PlanningState::Invalid,
-                observed_at: Some(44),
+                synced_at: Some(44),
             }
         );
         assert!(store.validate_task_planning(&refreshed).is_err());
@@ -504,7 +504,7 @@ mod tests {
             })
             .unwrap();
         let task = store.task_by_issue(&issue.id).unwrap().unwrap();
-        let state = || store.task_acquisition(&task.id).unwrap().state;
+        let state = || store.task_tracker_state(&task.id).unwrap().state;
         let teams = || -> String {
             store
                 .conn

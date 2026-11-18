@@ -88,21 +88,21 @@ struct WorkModelTests {
         #expect(model.selection == nil)
     }
 
-    @Test("Current chapter source references navigate directly to the Wave")
-    func chapterReferencesSelectWave() async throws {
+    @Test("Current project source references navigate directly to the Wave")
+    func projectReferencesSelectWave() async throws {
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query)
         await model.refresh()
         let wave = try #require(fixture.roadmap.waves.first)
-        let chapter = try #require(wave.currentProject)
-        for reference in [chapter.id, chapter.slug, chapter.linearId].compactMap({ $0 }) {
+        let project = try #require(wave.currentProject)
+        for reference in [project.id, project.slug, project.trackerId].compactMap({ $0 }) {
             model.select(.project(id: reference))
             #expect(model.selection == .wave(id: wave.wave.id))
         }
     }
 
-    @Test("Selected Task survives a chapter transfer with temporarily absent membership")
-    func selectedTaskSurvivesChapterTransfer() async throws {
+    @Test("Selected Task survives a project transfer with temporarily absent membership")
+    func selectedTaskSurvivesProjectTransfer() async throws {
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query)
         await model.refresh()
@@ -125,7 +125,7 @@ struct WorkModelTests {
         var plans = try #require(projects["items"] as? [[String: Any]])
         var successor = plans[0]
         successor["id"] = "next"
-        successor["name"] = "Next chapter"
+        successor["name"] = "Next project"
         plans[0]["current"] = false
         plans.append(successor)
         projects["items"] = plans
@@ -140,8 +140,8 @@ struct WorkModelTests {
         #expect(model.task(id: "issue-now")?.wave!.projects.items.last?.id == "next")
     }
 
-    @Test("Chapter history remains reachable when the current plan is unavailable")
-    func historyOpensWithoutCurrentChapter() throws {
+    @Test("Project history remains reachable when the current plan is unavailable")
+    func historyOpensWithoutCurrentProject() throws {
         let fixture = try WorkTestFixture.load()
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
@@ -176,7 +176,7 @@ struct WorkModelTests {
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
-            "id": "old-plan", "linear_id": NSNull(), "slug": "old", "name": "Previous",
+            "id": "old-plan", "tracker_id": NSNull(), "slug": "old", "name": "Previous",
             "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
             "sync": ["actions": []]
         ]]]

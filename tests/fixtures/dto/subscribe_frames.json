@@ -285,10 +285,8 @@
         "sync": null,
         "task": null,
         "project": null,
-        "observed_at": null,
         "plan_error": null,
         "plan_stale": false,
-        "plan_state": "available",
         "execution": null,
         "ownership": null,
         "overview": {
@@ -304,7 +302,11 @@
           "refresh_error": null,
           "conflicts": {}
         },
-        "row": null
+        "row": null,
+        "tracker_state": {
+          "state": "available",
+          "synced_at": null
+        }
       },
       "work": null,
       "read_at": {

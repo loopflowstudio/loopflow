@@ -293,7 +293,7 @@ fn asana_task_create_mirrors_task_under_its_loopflow_identity() {
         )
         .unwrap();
         let id = saved
-            .linear_id
+            .tracker_id
             .as_ref()
             .expect("Task reached Asana")
             .as_str();
@@ -328,7 +328,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap();
+        let id = saved.tracker_id.clone().unwrap();
         let id = id.as_str();
 
         crate::ops::task::task_complete(repo, saved.id.as_str(), None).unwrap();
@@ -397,7 +397,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             None,
         )
         .unwrap();
-        assert!(saved.linear_id.is_none());
+        assert!(saved.tracker_id.is_none());
 
         runtime.block_on(state.lock()).offline = false;
         runtime.block_on(crate::ops::tracker_events::sync_repository(
@@ -408,7 +408,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
             .unwrap();
-        assert!(task.linear_id.is_some());
+        assert!(task.tracker_id.is_some());
         assert_eq!(runtime.block_on(state.lock()).creations, 1);
     });
 }
@@ -425,7 +425,7 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let id = saved.tracker_id.clone().unwrap().as_str().to_string();
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
             .unwrap()
@@ -506,7 +506,7 @@ fn asana_tasks_coworkers_create_become_tasks() {
         assert_eq!(task.description, "From the **meeting**");
         // Asana now carries the Loopflow identity every machine derives.
         let asana = runtime.block_on(state.lock());
-        let id = task.linear_id.as_ref().unwrap().as_str();
+        let id = task.tracker_id.as_ref().unwrap().as_str();
         assert_eq!(asana.tasks[id]["external"]["gid"], id);
         assert_eq!(asana.projects.len(), 2, "the existing project was reused");
     });
@@ -524,7 +524,7 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             None,
         )
         .unwrap();
-        let id = saved.linear_id.clone().unwrap().as_str().to_string();
+        let id = saved.tracker_id.clone().unwrap().as_str().to_string();
         runtime.block_on(state.lock()).tasks.remove(&id);
         let task = runtime
             .block_on(fixture.store.get_task(&saved.id))
@@ -557,7 +557,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
         )
         .unwrap();
         let id = saved
-            .linear_id
+            .tracker_id
             .clone()
             .expect("the Task reached Asana after its Project");
         let project = runtime
@@ -569,7 +569,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
             .unwrap()
             .unwrap();
         let mirrored = project
-            .linear_id
+            .tracker_id
             .clone()
             .expect("the Project reached Asana");
         let (repository, wave_project, task) = runtime.block_on(async {

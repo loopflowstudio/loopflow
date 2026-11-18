@@ -1043,7 +1043,7 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveAdded.self, from: await write(.waveCreate(directory: cwd, wave: name, objective: objective)))
     }
 
-    /// `lf wave rename`: same Wave id, Tasks and chapters; its files move on main.
+    /// `lf wave rename`: same Wave id, Tasks and projects; its files move on main.
     /// The receipt's `summary` names anything left to finish.
     public func renameWave(wave: String, newName: String, cwd: String) async throws -> WaveRenamed {
         try Self.decode(WaveRenamed.self, from: await write(.waveRename(directory: cwd, wave: wave, name: newName)))

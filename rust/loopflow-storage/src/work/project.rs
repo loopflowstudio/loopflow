@@ -51,8 +51,9 @@ pub struct Project {
     pub krs: Vec<ProjectKR>,
     pub metric_targets: Vec<crate::metric::MetricTarget>,
     pub status: ProjectStatus,
-    /// Optional Linear binding, not a second owner of this record.
-    pub linear_id: Option<LinearProjectId>,
+    /// The record’s ID in the repository's tracker.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<LinearProjectId>,
     /// Acquisition time of the retained Linear observation, never a write clock.
     pub pm_snapshot_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
@@ -138,8 +139,8 @@ impl HistoricalFailure {
 }
 
 impl Project {
-    pub fn linear_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
-        self.linear_id
+    pub fn tracker_id(&self) -> Result<&LinearProjectId, LinearBindingError> {
+        self.tracker_id
             .as_ref()
             .ok_or(LinearBindingError::NoLinearMapping)
     }

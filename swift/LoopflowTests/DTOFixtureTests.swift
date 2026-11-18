@@ -94,6 +94,7 @@ struct DTOFixtureTests {
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
         #expect(removal.name == "desktop")
         #expect(removal.destination == nil)
+        #expect(removal.projects == 1)
         #expect(removal.moved.filter(\.started).count == 1)
         #expect(removal.files == nil)
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
@@ -721,7 +722,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].runtime?.provider == nil)
         #expect(detail.tasks.items[0].task.sync.actions[0].kind == "create")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
-        #expect(detail.tasks.items[0].task.linearId == "issue-1")
+        #expect(detail.tasks.items[0].task.trackerId == "issue-1")
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
@@ -806,6 +807,7 @@ struct DTOFixtureTests {
             if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
         })
         #expect(portfolio.contractIssues.count == 5)
+        #expect(portfolio.contractIssues.contains(.projectUnavailable(waveId: "wave-other", reason: "PM snapshot unavailable")))
         #expect(
             portfolio.metrics[0].description
                 == "Fraction of qualifying events that settled successfully."
@@ -1093,20 +1095,25 @@ struct DTOFixtureTests {
         #expect(decoded == statuses)
     }
 
-    @Test("Task acquisition evidence is required independently of delivery")
+    @Test("Task tracker state is required independently of delivery")
     func taskAcquisitionEvidence() throws {
         let root = try loadFixture("local_task.json")
         let detail = try #require(root["task"] as? [String: Any])
         var task = try #require(detail["task"] as? [String: Any])
-        for state in ["available", "invalid", "removed", "unavailable"] {
-            task["acquisition"] = ["state": state, "observed_at": 17]
+        for state in ["available", "absent", "invalid", "removed", "unavailable"] {
+            task["tracker_state"] = ["state": state, "synced_at": 17]
             let decoded = try JSONDecoder().decode(TaskPlanningSnapshot.self,
                 from: JSONSerialization.data(withJSONObject: task))
-            #expect(decoded.acquisition.state.rawValue == state)
-            #expect(decoded.acquisition.observedAt == 17)
+            #expect(decoded.trackerState.state.rawValue == state)
+            #expect(decoded.trackerState.syncedAt == 17)
             #expect(decoded.id == task["id"] as? String)
         }
-        task.removeValue(forKey: "acquisition")
+        task["tracker_state"] = ["state": "available"]
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+        }
+        task.removeValue(forKey: "tracker_state")
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(TaskPlanningSnapshot.self,
                 from: JSONSerialization.data(withJSONObject: task))

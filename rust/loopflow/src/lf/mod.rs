@@ -1938,7 +1938,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Read chapter plans and Tasks without starting work; an explicit Wave includes history
+    /// Read Projects and Tasks without starting work; an explicit Wave includes history
     Show {
         wave: Option<String>,
         /// Find an exact Task, including historical planning
@@ -1974,7 +1974,7 @@ pub enum WaveCommand {
     },
 
     /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first chapter. Creating an existing Wave changes nothing.
+    /// and start its first Project. Creating an existing Wave changes nothing.
     Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
@@ -1984,7 +1984,7 @@ pub enum WaveCommand {
         json: bool,
     },
     /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; chapters, completed Tasks and Sessions stay readable in history.
+    /// repository; Projects, completed Tasks and Sessions stay readable in history.
     #[command(after_help = "Run again to finish an interrupted removal.")]
     Remove {
         wave: String,
@@ -2040,7 +2040,7 @@ pub enum WaveCommand {
         selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// chapters and Sessions keep their identity
+    /// Projects and Sessions keep their identity
     Rename {
         wave: String,
         /// The new name; omit to keep it while changing --repo or --title
@@ -3634,10 +3634,6 @@ mod tests {
         for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
-        assert!(
-            Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
-                .is_err()
-        );
         assert!(Cli::try_parse_from(["lf", "steer", "session_1", "m", "--repo"]).is_err());
         assert!(Cli::try_parse_from(["lf", "session", "steer", "session_1", "m"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "steer", "LOO-1", "m"]).is_err());

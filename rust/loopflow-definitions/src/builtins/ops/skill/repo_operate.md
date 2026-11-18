@@ -6,7 +6,7 @@ Clear your old work state, keep your started Tasks moving, and report what is ha
 A Task is yours when its person is `lf config user` or it names no person.
 Another person's Task is listed as theirs and left alone; unowned backlog is
 listed for someone to pick up. This pass works existing Tasks only. Plans,
-targets, chapters and new Tasks are out of scope: report gaps, don't file them.
+targets, projects and new Tasks are out of scope: report gaps, don't file them.
 
 ## Clear old work
 

@@ -1253,7 +1253,7 @@ final class WorkModel {
         didSet {
             reported(WorkPart.planning.rawValue, "The plan", from: oldValue, to: roadmap)
             taskIndexCache = nil
-            // Retain the latest observed Task across temporary chapter membership
+            // Retain the latest observed Task across temporary project membership
             // gaps, including selections saved in another repository.
             for navigation in navigationByRepo.values {
                 guard let selection = navigation.selection, selection.kind == .task else { continue }
@@ -2375,7 +2375,7 @@ final class WorkModel {
         }
         let selection: WorkReference?
         if let requested, requested.kind == .project {
-            if let current = waveForChapter(projectId: requested.id) {
+            if let current = waveForProject(projectId: requested.id) {
                 selection = .wave(id: current.wave.id)
             } else {
                 historyLookup = Task { await openHistoricalReference(requested.id) }
@@ -2413,7 +2413,7 @@ final class WorkModel {
             let result = try? await query.status(wave: wave.wave.name, cwd: wave.wave.repo)
             guard !Task.isCancelled else { return }
             guard let entries = result?.projects.items else { continue }
-            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.linearId == reference }) {
+            if entries.contains(where: { $0.id == reference || $0.slug == reference || $0.trackerId == reference }) {
                 select(.wave(id: wave.wave.id))
                 historyReference = reference
                 historyWave = wave.wave
@@ -3087,8 +3087,8 @@ final class WorkModel {
         visibleWaves.first { $0.id == id }
     }
 
-    func waveForChapter(projectId: String) -> WaveRoadmap? {
-        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.linearId == projectId }
+    func waveForProject(projectId: String) -> WaveRoadmap? {
+        roadmap.value?.waves.first { $0.currentProject?.id == projectId || $0.currentProject?.slug == projectId || $0.currentProject?.trackerId == projectId }
     }
 
     /// Current repository inventory only; retained navigation evidence is display-only.
@@ -3164,7 +3164,7 @@ final class WorkModel {
         case .wave:
             work.id
         case .project:
-            waveForChapter(projectId: work.id)?.wave.id
+            waveForProject(projectId: work.id)?.wave.id
         case .task:
             task(id: work.id)?.task.task.waveId
         }

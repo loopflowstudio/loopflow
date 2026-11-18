@@ -203,7 +203,7 @@ async fn prepare_abandon(
     }
     require_idle(store, task)?;
     if pr.is_some() {
-        if let Some(issue) = &task.linear_id {
+        if let Some(issue) = &task.tracker_id {
             require_known_prs(repo, pr.as_ref(), issue.as_str()).await?;
         }
     }

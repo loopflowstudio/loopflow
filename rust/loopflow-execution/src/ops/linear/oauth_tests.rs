@@ -111,7 +111,7 @@ async fn pm_read_linear_oauth_recovers() {
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         slug: "reliability".into(),
         name: "Reliability".into(),
         description: "Retain this planning history.".into(),
@@ -180,7 +180,7 @@ async fn pm_read_linear_oauth_recovers() {
     assert_eq!(refreshed.wave_id, project.wave_id);
     assert_eq!(refreshed.created_at, project.created_at);
     assert!(refreshed.updated_at >= project.updated_at);
-    assert_eq!(refreshed.linear_id, project.linear_id);
+    assert_eq!(refreshed.tracker_id, project.tracker_id);
     assert_eq!(
         refreshed.status,
         loopflow_storage::work::project::ProjectStatus::Started

@@ -1191,8 +1191,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 loopflow::lf::commands::waves::print_task_detail(status)?;
             } else {
                 println!(
-                    "Planning evidence: {}",
-                    serde_json::to_value(status.planning_state)?
+                    "Tracker state: {}",
+                    serde_json::to_value(status.tracker_state.state)?
                         .as_str()
                         .expect("planning state is a string")
                 );
@@ -1227,8 +1227,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 } else {
                     println!("No saved Task; retained observations are not Work.");
                 }
-                if let Some(at) = status.observed_at {
-                    println!("Observed at: {at}");
+                if let Some(at) = status.tracker_state.synced_at {
+                    println!("Synced at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {

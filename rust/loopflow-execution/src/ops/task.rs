@@ -2338,13 +2338,11 @@ pub struct TaskStatus {
     pub sync: Option<loopflow_storage::planning_sync::TrackerSync>,
     pub task: Option<Task>,
     pub project: Option<loopflow_storage::work::project::Project>,
-    pub observed_at: Option<i64>,
+    pub tracker_state: crate::store::TrackerState,
     #[serde(rename = "plan_error")]
     pub planning_error: Option<String>,
     #[serde(rename = "plan_stale")]
     pub planning_stale: bool,
-    #[serde(rename = "plan_state")]
-    pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<loopflow_model::durable::TaskOwnership>,
     /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
@@ -2402,10 +2400,12 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     sync: None,
                     task: None,
                     project: None,
-                    observed_at: None,
+                    tracker_state: crate::store::TrackerState {
+                        state: crate::store::PlanningState::Unavailable,
+                        synced_at: None,
+                    },
                     planning_error: None,
                     planning_stale: false,
-                    planning_state: crate::store::PlanningState::Unavailable,
                     execution: None,
                     ownership: None,
                     overview: None,
@@ -2414,16 +2414,16 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                 };
                 if let Some(read) = inspection {
                     // Foreign observations remain acquisition evidence, not owned Work.
-                    result.planning_state = read.observation.state;
-                    result.observed_at = read.observation.observed_at;
+                    result.tracker_state.state = read.observation.state;
+                    result.tracker_state.synced_at = read.observation.observed_at;
                 }
                 result
             }
         };
         if planning_error.is_some() {
             result.planning_error = planning_error;
-            if result.planning_state == crate::store::PlanningState::Available {
-                result.planning_state = crate::store::PlanningState::Unavailable;
+            if result.tracker_state.state == crate::store::PlanningState::Available {
+                result.tracker_state.state = crate::store::PlanningState::Unavailable;
             }
         }
         result.planning_stale = planning_stale(&result);
@@ -2451,9 +2451,9 @@ pub async fn read_task_status(
 }
 
 pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
-    let acquisition = store
+    let tracker_state = store
         .sqlite
-        .task_acquisition(&task.id)
+        .task_tracker_state(&task.id)
         .map_err(task_error)?;
     let (overview, graph_processes) =
         crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
@@ -2463,10 +2463,9 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
             Some(id) => store.get_project(id).await.map_err(task_error)?,
             None => None,
         },
-        observed_at: acquisition.observed_at,
+        tracker_state,
         planning_error: None,
         planning_stale: false,
-        planning_state: acquisition.state,
         execution: Some(read_task_snapshot(store, task.clone()).await?),
         ownership: Some(
             crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?,
@@ -2481,9 +2480,10 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
 }
 
 fn planning_stale(status: &TaskStatus) -> bool {
-    status.planning_state != crate::store::PlanningState::Available
+    status.tracker_state.state != crate::store::PlanningState::Available
         || status
-            .observed_at
+            .tracker_state
+            .synced_at
             .is_some_and(|at| crate::observe::deadline(at + super::linear::LINEAR_SOFT_STALE_SECS))
 }
 
@@ -2607,7 +2607,7 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
-        if saved.linear_id.is_none() {
+        if saved.tracker_id.is_none() {
             let sync = store.task_tracker_sync(&saved.id).map_err(task_error)?;
             let reason = sync
                 .actions
@@ -3233,7 +3233,7 @@ pub(crate) async fn task_comment_async(
     if let Some(message) = message {
         append_task_comment_async(&store, &task, message, steer).await?;
     }
-    let refresh_error = if message.is_none() && task.linear_id.is_some() {
+    let refresh_error = if message.is_none() && task.tracker_id.is_some() {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             super::tracker_events::refresh_task_comments(&store, &task),

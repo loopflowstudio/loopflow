@@ -507,7 +507,7 @@ fn register_task_fixture(
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,
-        linear_id: Some(
+        tracker_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
         ),
         slug: "task-pr-tests".to_string(),
@@ -530,7 +530,7 @@ fn register_task_fixture(
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        tracker_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
         identifier: "INF-123".to_string(),
         title: "Prove Task PR transitions".to_string(),
         description: "Exercise the persisted lifecycle.".to_string(),
@@ -632,7 +632,7 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.linear_id =
+    task.tracker_id =
         Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.identifier = identifier.to_string();
     task.title = format!("Sibling {identifier}");

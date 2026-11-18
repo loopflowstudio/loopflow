@@ -185,7 +185,7 @@ fn open_task(store: &SqliteStore) -> TaskId {
         due_date: None,
         state: None,
         completed_at: None,
-        linear_id: None,
+        tracker_id: None,
         pm_snapshot_synced_at: None,
         pm_writeback: LinearWritebackState::Current,
         wave_id: None,

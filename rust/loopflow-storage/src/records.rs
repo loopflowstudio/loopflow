@@ -24,13 +24,14 @@ pub enum PlanningState {
     Unavailable,
 }
 
-/// Acquisition evidence is independent of saved Work and outbound delivery.
+/// The tracker's last known state for a Task and when it was synced.
 #[derive(
     Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
 )]
-pub struct TaskAcquisition {
+pub struct TrackerState {
     pub state: PlanningState,
-    pub observed_at: Option<i64>,
+    #[serde(deserialize_with = "serde::Deserialize::deserialize")]
+    pub synced_at: Option<i64>,
 }
 
 /// Retained Linear acquisition facts, including observations without owned Work.

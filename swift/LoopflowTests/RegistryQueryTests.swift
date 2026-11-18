@@ -346,7 +346,7 @@ struct RegistryQueryTests {
     "items": [
       {
         "id": "project-1",
-        "linear_id": null,
+        "tracker_id": null,
         "sync": {"actions": []},
         "slug": "release-feedback",
         "name": "current",
@@ -377,7 +377,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"actions": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "tracker_state": {"state": "available", "synced_at": null}, "tracker_id": null, "sync": {"actions": []},
           "assignee": null
         },
         "reference": {

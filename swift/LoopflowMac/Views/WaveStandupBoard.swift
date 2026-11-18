@@ -94,7 +94,7 @@ struct WaveStandup: Equatable {
         return try? Date.ISO8601FormatStyle().parse(timestamp)
     }
 
-    /// A Wave's heading lines: name and status, objective, chapter Project and KRs.
+    /// A Wave's heading lines: name and status, objective, Project and KRs.
     static func heading(_ roadmap: WaveRoadmap) -> [String] {
         var lines = ["\(roadmap.wave.displayName) · \(roadmap.wave.status.label)"]
         if let objective = roadmap.wave.goal.split(separator: "\n").first { lines.append(String(objective)) }
@@ -139,7 +139,7 @@ enum WaveStandupDefaults {
 /// Large enough to read across a room, one section at a time, Backlog first. A row
 /// opens its Task through the Wave, as a tile does, so Backlog is where unstarted
 /// Tasks are seen and started. The repository page is the same board over every
-/// repository Task, without a chapter.
+/// repository Task, without a project.
 struct WaveStandupBoard: View {
     let model: WorkModel
     /// `.wave(id)` or `.repository`.
@@ -156,7 +156,7 @@ struct WaveStandupBoard: View {
         VStack(alignment: .leading, spacing: Spacing.lg) {
             if let roadmap {
                 header(roadmap)
-                chapter(roadmap)
+                project(roadmap)
             } else if view == .repository {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.md) {
                     Text(model.repositoryName).font(Typography.strong(24))
@@ -217,7 +217,7 @@ struct WaveStandupBoard: View {
     }
 
     @ViewBuilder
-    private func chapter(_ roadmap: WaveRoadmap) -> some View {
+    private func project(_ roadmap: WaveRoadmap) -> some View {
         if let error = roadmap.projects.unavailableReason {
             Text("Project unavailable · \(error)").foregroundStyle(palette.warning)
         } else if let project = roadmap.currentProject {
@@ -237,8 +237,8 @@ struct WaveStandupBoard: View {
                 }
             }
         } else {
-            Text("No current chapter Project").font(Typography.body(15)).foregroundStyle(palette.textSecondary)
-                .accessibilityIdentifier("wave-no-chapter")
+            Text("No current Project").font(Typography.body(15)).foregroundStyle(palette.textSecondary)
+                .accessibilityIdentifier("wave-no-project")
         }
     }
 

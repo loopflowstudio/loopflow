@@ -741,7 +741,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+        tracker_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
@@ -759,7 +759,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
+        tracker_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
         identifier: identifier.to_string(),
         title: "Task recovery fixture".to_string(),
         description: String::new(),
@@ -807,7 +807,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         &store.sqlite,
         wave.id(),
         None,
-        project.linear_id.as_ref().unwrap().as_str(),
+        project.tracker_id.as_ref().unwrap().as_str(),
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
@@ -893,7 +893,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                 fixture.task.id.as_str(),
                 &fixture.task.id.as_str()[5..9],
                 &fixture.task.id.as_str()[..9],
-                fixture.task.linear_id.as_ref().unwrap().as_str(),
+                fixture.task.tracker_id.as_ref().unwrap().as_str(),
             ] {
                 let file = super::task_file(issue, "scratch/note.md", false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
@@ -1794,7 +1794,7 @@ fn deleted_task_status_requires_explicit_history_lookup() {
         .unwrap();
     connection.execute(
             "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,456)",
-            rusqlite::params![fixture.task.wave_id.as_ref().unwrap().as_str(), fixture.task.linear_id.as_ref().unwrap().as_str(), fixture.task.identifier],
+            rusqlite::params![fixture.task.wave_id.as_ref().unwrap().as_str(), fixture.task.tracker_id.as_ref().unwrap().as_str(), fixture.task.identifier],
         ).unwrap();
     let pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
@@ -1925,7 +1925,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
         .unwrap();
     let mut parent_task = fixture.task.clone();
     parent_task.id = TaskId::new();
-    parent_task.linear_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
+    parent_task.tracker_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
     parent_task.identifier = "STACK-2".into();
     parent_task.worktree = Some(repo.path().join("parent"));
     parent_task.workspace_slug = "stack-parent".into();
@@ -1991,7 +1991,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     let mut next_task = parent_task.clone();
     next_task.id = TaskId::new();
     next_task.identifier = "STACK-3".into();
-    next_task.linear_id = None;
+    next_task.tracker_id = None;
     next_task.branch = "test/next-parent".into();
     next_task.workspace_slug = "next-parent".into();
     next_task.worktree = Some(repo.path().join("next-parent"));

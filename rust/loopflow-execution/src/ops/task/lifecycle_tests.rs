@@ -219,7 +219,7 @@ fi
         let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
         assert_eq!(graphs, 1);
         assert!(child.worktree.is_none());
-        assert!(child.linear_id.is_none());
+        assert!(child.tracker_id.is_none());
         assert_ne!(store.sqlite.task_state(&child.id).unwrap(), crate::durable::TaskState::Done);
         // Completion and filing are saved locally; provider delivery has its own receipt.
         assert!(provider.lock().unwrap().unavailable);
@@ -320,10 +320,10 @@ fn fixture(
     let project = Project {
         id: ProjectId::new(),
 
-        linear_id: Some(LinearProjectId::new("project-1").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
         summary: String::new(),
-        slug: "chapter".into(),
-        name: "Chapter".into(),
+        slug: "project".into(),
+        name: "Project".into(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
         description: String::new(),
         krs: Vec::new(),
@@ -339,7 +339,7 @@ fn fixture(
             .unwrap(),
         id: TaskId::new(),
 
-        linear_id: Some(LinearIssueId::new("source-issue").unwrap()),
+        tracker_id: Some(LinearIssueId::new("source-issue").unwrap()),
         revision: 0,
         identifier: "FIX-1".into(),
         title: "Deliver the command".into(),
@@ -398,7 +398,7 @@ fn fixture(
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();

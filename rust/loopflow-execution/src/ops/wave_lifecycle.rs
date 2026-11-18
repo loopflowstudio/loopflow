@@ -266,7 +266,7 @@ pub struct WaveRemoval {
     pub moved: Vec<RemovalTask>,
     pub deleted: Vec<RemovalTask>,
     pub completed_tasks: usize,
-    pub chapters: usize,
+    pub projects: usize,
     pub sessions: usize,
     pub initiatives: Vec<InitiativeArchive>,
     pub has_files: bool,
@@ -362,9 +362,9 @@ pub fn remove(
     let mut moved = Vec::new();
     let mut deleted = Vec::new();
     let mut completed_tasks = 0;
-    let mut chapters = 0;
+    let mut projects = 0;
     for id in &ids {
-        chapters += store
+        projects += store
             .sqlite
             .list_projects(Some(id))
             .map_err(lifecycle_error)?
@@ -441,7 +441,7 @@ pub fn remove(
         moved,
         deleted,
         completed_tasks,
-        chapters,
+        projects,
         sessions,
         initiatives,
         has_files,
@@ -802,11 +802,11 @@ fn removal_summary(removal: &WaveRemoval) -> Vec<String> {
             "completed Tasks",
         ));
     }
-    if removal.chapters > 0 {
-        kept.push(count(removal.chapters, "chapter", "chapters"));
+    if removal.projects > 0 {
+        kept.push(count(removal.projects, "Project", "Projects"));
     }
     if !kept.is_empty() {
-        let verb = if removal.completed_tasks + removal.chapters == 1 {
+        let verb = if removal.completed_tasks + removal.projects == 1 {
             "stays"
         } else {
             "stay"

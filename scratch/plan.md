@@ -47,7 +47,7 @@ $ lf wave plan product          # unchanged: the Wave's Projects and Tasks, the 
 
 ## Done when
 
-- `git grep -nwiE 'chapters?'` finds only released migrations, release notes, stored fixtures of released schemas and authored Wave files (`.lf/wave/**`: people's own words, listed in `scratch/questions.md`, not rewritten).
+- The chapter grep excludes released migrations and fixtures, release notes and authored Wave files. It also finds the released lock directory shared by concurrent writers, historical directory exclusions and this scratch plan. The Linux OAuth experiment still assumes a retired schema and CLI; see `scratch/questions.md`.
 - `provider` never names a tracker in `rust/**/{linear,asana,ops,store,config}`, `docs/`, CLI help, except the kept column names (`planning_provider_revision`) and the released config tag `planning.provider`.
 - `edit-plan` / `update-plan` / `WavePlanTarget` are gone; `docs/dev/planning.md` § Words and AGENTS.md no longer call the current Project "the plan".
 - `git grep -E 'TrackerObservation|linear_acceptance|Acquisition|pm_(items|projects|issue_changes|wave_projects|wave_sync)'` outside migrations, historical upgrade fixtures, and compatibility tests for released writers is empty.
@@ -200,10 +200,8 @@ rebuild each and are noted in `scratch/questions.md`.
    served routes. Wave Project edits use `edit-project` and `update-project --file`.
    Config reads both tracker spellings, writes the released layout and
    replaces the selected tracker on a dotted edit. LOO-784 carries the writer cutover.
-3. **Wire + Chapter (next).** `tracker_id`, `tracker_state`, `ProjectUnavailable`,
-   `projects` with Swift and fixtures; remaining chapter prose in
-   `waves.rs`, `lf/mod.rs` help, `wave_lifecycle.rs`, builtins, Swift views.
-4. **Events + provider prose.** Type/module renames for inbound, `provider`
+3. **Wire + Project vocabulary (implemented).** Task status and Work share `tracker_state {state, synced_at}`. Tasks and Projects expose `tracker_id`; metric issues use `project_unavailable`, and Wave removal counts `projects`. Rust, Swift, CLI text, the server schema and shared fixtures match. Stored creation receipts keep the binding readable by released writers.
+4. **Events + provider prose (next).** Type/module renames for inbound, `provider`
    → tracker in planning code and docs, glossary's "Older code" line deleted.
    File the contract Task.
 
@@ -222,6 +220,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - In-memory SQLite with 10,000 existing items: expand took 21.8 ms. 1,000 identifier lookups took 1.0 ms through `tracker_items_identifier`. Disk and lock wait are outside these timings.
 - Historical upgrades seed at their original migration, through temporary views for the two journal tables. Upgrading an existing journal copies its rows once. Mirror comparisons use binary collation for case-only identifier edits.
 - Slice 2: six config-key tests and four documented-command checks passed. A temporary Git repository exercised tracker status, journal, key creation and lookup, and the switch from Linear to Git. Installed lf read the Linear team written by the candidate. Offline Project edits passed in both connection modes, the server schema matched the candidate CLI, and clippy passed for all targets.
+- Slice 3: 52 Rust DTO fixtures, the stream timestamp test, four documented-command checks and all-target clippy passed. Changed Swift sources parsed. A server restart replayed the creation receipt. Installed and candidate CLIs each replayed the other’s creation in an isolated Git repo; Task show and Work agreed on the unbound ID and sync state.
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
 

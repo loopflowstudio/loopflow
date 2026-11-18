@@ -36,7 +36,7 @@ pub fn render_task_context(
     );
     if let Some(project) = project {
         context.push_str(&format!(
-            "\n\nChapter plan: {} (source {})\n{}",
+            "\n\nProject: {} (source {})\n{}",
             project.name,
             project.id,
             render_project_context(project)
@@ -378,7 +378,7 @@ mod tests {
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
+            tracker_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
             description: "Ship the requested behavior.".to_string(),
@@ -403,7 +403,7 @@ mod tests {
             id: TaskId::new(),
 
             revision: 0,
-            linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
+            tracker_id: Some(LinearIssueId::new("runtime-research").unwrap()),
             identifier: "LOO-267".to_string(),
             title: "Research the runtime".to_string(),
             description: "Compare independent findings.".to_string(),
@@ -449,7 +449,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -473,7 +473,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -930,7 +930,7 @@ mod tests {
 
         let error = resolve_work_binding(&store, directory.path(), "project:shared")
             .await
-            .expect_err("chapters are not independent operators");
+            .expect_err("projects are not independent operators");
 
         assert!(error.to_string().contains("expected task or wave"));
     }
@@ -1010,13 +1010,13 @@ mod tests {
             .unwrap()
             .execute(
                 "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.linear_id.as_ref().unwrap().as_str(), task.identifier],
+                rusqlite::params![wave.id().as_str(), task.tracker_id.as_ref().unwrap().as_str(), task.identifier],
             )
             .unwrap();
 
         for selector in [
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
             &task.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -1181,7 +1181,7 @@ mod tests {
         for selector in [
             task.identifier.as_str(),
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
         ] {
             let rows = crate::store::sessions::conversation_history(
                 &store.sqlite,

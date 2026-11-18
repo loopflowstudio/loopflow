@@ -22,7 +22,7 @@ other implementation and proof gaps.
 | Word | Means | Not |
 |---|---|---|
 | plan | the shared Waves, Projects and Tasks | |
-| Project | a Wave's current Project: its KRs, targets and Tasks | Chapter |
+| Project | a Wave's current Project: its KRs, targets and Tasks | |
 | tracker | where the plan is mirrored: Git, Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
 | action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect, receipt, delivery, export |
 | event | one incoming change from a tracker | observation, acceptance, acquisition |
@@ -355,7 +355,7 @@ does not compete with the binding. Already-started Tasks retain continuation in
 predecessor Projects.
 
 Wave and `plan list` Task summaries read saved Work directly: `id` is the local Task
-identity, `linear_id` is its optional provider binding, and `sync` is required
+identity, `tracker_id` is its optional tracker binding, and `sync` is required
 read-only evidence. Missing provider inventory does not erase saved prose, due
 dates or assignments. Graph, execution and checkout evidence remain separate.
 
@@ -413,8 +413,8 @@ lf task status INF-124 --json      # the Task row, Sessions, Graph processes, co
 lf task show INF-124 --json     # the planning evidence below
 ```
 
-`lf task show` returns canonical `task` and `project` records, `plan_state`,
-`observed_at`, `plan_error`, `plan_stale`, delivery `sync` and optional
+`lf task show` returns canonical `task` and `project` records, `tracker_state`
+(with `state` and `synced_at`), `plan_error`, `plan_stale`, delivery `sync` and optional
 `execution`. Local IDs and explicit Linear bindings stay distinct. A foreign or
 Project-less observation returns acquisition evidence without fabricating owned
 Work; its concrete record remains retained internally. Status may acquire planning
@@ -432,11 +432,11 @@ read repairs it. Confirmed deletion receipts continue to exclude removed Tasks,
 including after stale list ingestion.
 
 Status preserves dated facts even after hard-stale or forced acquisition fails.
-`plan_state` distinguishes `available`, `unavailable` acquisition, `invalid`
+`tracker_state.state` distinguishes `available`, `unavailable` acquisition, `invalid`
 evidence, confirmed `removed` planning, and an `absent` detail response. A null
 provider response observes absence for that acquisition; the stored record stays
 invalid until complete detail repairs it. This creates no deletion receipt.
-`observed_at` remains the last successful acquisition. An unresolved
+`tracker_state.synced_at` records the last successful sync. An unresolved
 selector returns an unavailable envelope even without execution.
 
 Invalid and removed facts remain inspectable and withdraw new-launch availability,

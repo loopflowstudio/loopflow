@@ -364,7 +364,7 @@ pub(crate) async fn remote_task(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Task is missing"))?;
-    Ok(task.linear_id()?.as_str().to_owned())
+    Ok(task.tracker_id()?.as_str().to_owned())
 }
 
 /// The provider id of a bound Project.
@@ -377,7 +377,7 @@ pub(crate) async fn remote_project(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Project is missing"))?;
-    Ok(project.linear_id()?.as_str().to_owned())
+    Ok(project.tracker_id()?.as_str().to_owned())
 }
 
 /// What the provider holds for a Task, as the values a Task action compares.
@@ -451,7 +451,7 @@ pub(crate) async fn ingest_task(
             .await
             .map_err(message)?
             .filter(|p| {
-                p.linear_id
+                p.tracker_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == project.id)
             })

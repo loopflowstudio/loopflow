@@ -86,7 +86,7 @@ impl Machine {
         self.dir.path()
     }
 
-    /// Commit a chapter plan holding Tasks `FIX-1..=count`, as a sync would.
+    /// Commit a Project plan holding Tasks `FIX-1..=count`, as a sync would.
     fn plan(&self, count: usize) {
         let items: Vec<_> = (1..=count)
             .map(|index| {

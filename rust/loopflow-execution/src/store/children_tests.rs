@@ -529,7 +529,7 @@ fn local_planning_creation_retry_keeps_identity_after_edit_and_restart() {
     };
     let task = store.create_task(&input).unwrap();
     assert!(task.worktree.is_none());
-    assert!(task.linear_id.is_none());
+    assert!(task.tracker_id.is_none());
     assert!(store.task_prs(&task.id).unwrap().is_empty());
     assert!(store.task_checkouts().unwrap().is_empty());
     let edited = store
@@ -648,7 +648,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
     assert!(store.list_tasks(None).unwrap().is_empty());
     let retained = store.task(&mapped.id).unwrap().unwrap();
     assert_eq!(retained.revision, edited.revision);
-    assert_eq!(retained.linear_id, edited.linear_id);
+    assert_eq!(retained.tracker_id, edited.tracker_id);
     assert_eq!(retained.identifier, edited.identifier);
     assert_eq!(retained.title, edited.title);
     assert_eq!(retained.description, edited.description);
@@ -892,11 +892,11 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     let retained = store.task(&task).unwrap().unwrap();
     assert_eq!(retained.id, task);
     assert_eq!(retained.project_id, Some(project.clone()));
-    assert_eq!(retained.linear_id.unwrap().as_str(), "linear-task");
+    assert_eq!(retained.tracker_id.unwrap().as_str(), "linear-task");
     assert_eq!(retained.identifier, "LOO-1");
     assert_eq!(retained.worktree.unwrap().to_str(), Some("/repo/task"));
     let project = store.project(&project).unwrap().unwrap();
-    assert_eq!(project.linear_id.unwrap().as_str(), "linear-project");
+    assert_eq!(project.tracker_id.unwrap().as_str(), "linear-project");
     assert_eq!(project.description, "Retain KRs");
     assert_eq!(
             store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),

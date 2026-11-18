@@ -26,7 +26,7 @@ pub(crate) async fn refresh_task_comments(store: &SharedStore, task: &Task) -> O
         .await
         .map_err(message)?
         .ok_or_else(|| message(format!("Task {} is missing", task.id)))?;
-    let Some(issue) = &task.linear_id else {
+    let Some(issue) = &task.tracker_id else {
         return Ok(());
     };
     let repository = super::task::repository_for_task(store, &task)?;
@@ -146,7 +146,7 @@ async fn check_scope(store: &Store, repository: &str, fresh_for: i64) -> OpsResu
         if !same_scope(&task_repo) {
             continue;
         }
-        let Some(issue) = task.linear_id else {
+        let Some(issue) = task.tracker_id else {
             continue;
         };
         if store

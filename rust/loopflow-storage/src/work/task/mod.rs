@@ -513,8 +513,9 @@ pub struct Task {
     /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
     pub completed_at: Option<String>,
-    /// Optional Linear binding, not a second owner of this record.
-    pub linear_id: Option<LinearIssueId>,
+    /// The record’s ID in the repository's tracker.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<LinearIssueId>,
     /// Acquisition time of the retained Linear observation, never a write clock.
     pub pm_snapshot_synced_at: Option<i64>,
     pub pm_writeback: LinearWritebackState,
@@ -541,8 +542,8 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn linear_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
-        self.linear_id
+    pub fn tracker_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
+        self.tracker_id
             .as_ref()
             .ok_or(LinearBindingError::NoLinearMapping)
     }
@@ -762,7 +763,7 @@ mod tests {
             id: TaskId::new(),
 
             revision: 0,
-            linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
+            tracker_id: Some(LinearIssueId::new("issue-1").unwrap()),
             identifier: "INF-123".to_string(),
             title: "Ship it".to_string(),
             description: String::new(),
@@ -796,7 +797,7 @@ mod tests {
         assert!(value.get("plan").is_none());
         assert_eq!(value["title"], "Ship it");
         assert_eq!(value["revision"], 17);
-        assert_eq!(value["linear_id"], "issue-1");
+        assert_eq!(value["tracker_id"], "issue-1");
         assert_eq!(value["pm_snapshot_synced_at"], 42);
         assert_eq!(serde_json::from_value::<Task>(value).unwrap(), task);
     }

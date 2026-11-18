@@ -248,13 +248,13 @@ fn bound(store: &Store, owner: &ActionOwner) -> OpsResult<Option<String>> {
             .sqlite
             .task(id)
             .map_err(message)?
-            .and_then(|task| task.linear_id)
+            .and_then(|task| task.tracker_id)
             .map(|id| id.as_str().to_owned()),
         ActionOwner::Project(id) => store
             .sqlite
             .project(id)
             .map_err(message)?
-            .and_then(|project| project.linear_id)
+            .and_then(|project| project.tracker_id)
             .map(|id| id.as_str().to_owned()),
         ActionOwner::Wave(_) => None,
     })
@@ -344,7 +344,7 @@ impl Drain<'_> {
             .project(&loopflow_model::durable::ProjectId::from_raw(project))
             .ok()
             .flatten()
-            .is_none_or(|project| project.linear_id.is_none())
+            .is_none_or(|project| project.tracker_id.is_none())
     }
 
     /// Whether this action relates its Task to one with no tracker object yet.

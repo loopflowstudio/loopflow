@@ -326,7 +326,7 @@ pub fn task_pr_context(repo: &Path) -> OpsResult<Option<TaskPrContext>> {
 }
 
 async fn _task_pr_context_from_store(store: &SharedStore, task: &Task) -> OpsResult<TaskPrContext> {
-    let url = if task.linear_id.is_some() {
+    let url = if task.tracker_id.is_some() {
         Some(
             store
                 .sqlite

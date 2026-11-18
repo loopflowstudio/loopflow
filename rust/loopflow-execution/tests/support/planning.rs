@@ -13,7 +13,7 @@ pub fn seed_unplaced_task(database: &Path, task: &Task) {
             params![
                 task.id.as_str(),
                 task.project_id.as_ref().map(|id| id.as_str()),
-                task.linear_id.as_ref().map(|id| id.as_str()),
+                task.tracker_id.as_ref().map(|id| id.as_str()),
                 task.identifier,
                 task.title,
                 task.description,
@@ -35,8 +35,8 @@ pub fn seed_linear_admission(
     task: &Task,
 ) {
     let conn = Connection::open(database).unwrap();
-    let external_project = project.linear_id.as_ref().unwrap().as_str();
-    let external_issue = task.linear_id.as_ref().unwrap().as_str();
+    let external_project = project.tracker_id.as_ref().unwrap().as_str();
+    let external_issue = task.tracker_id.as_ref().unwrap().as_str();
     conn.execute(
         "UPDATE projects SET planning_teams='[\"team-task-pr-tests\"]',planning_initiatives='[\"initiative-task-pr-tests\"]' WHERE id=?1",
         [project.id.as_str()],

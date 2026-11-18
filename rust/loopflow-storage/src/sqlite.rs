@@ -198,7 +198,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// A Task's checkout on this Machine, usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without project metadata.
 #[derive(Debug, Clone)]
 pub struct TaskCheckout {
     pub task_id: TaskId,

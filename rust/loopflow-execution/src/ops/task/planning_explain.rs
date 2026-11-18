@@ -266,7 +266,7 @@ async fn read_planning(
                 }
                 report.effects.push("Append one local comment with stable identity and authored provenance; attempt configured synchronization. Execution stays unchanged".into());
                 report.unavailable.push("Comment identity and caller/participant provenance are captured only when saving".into());
-            } else if task.linear_id.is_some() {
+            } else if task.tracker_id.is_some() {
                 report.effects.push("Refresh Linear comments with a bounded wait, then show the saved thread even if refresh fails".into());
             } else {
                 report
@@ -276,7 +276,7 @@ async fn read_planning(
             report.action = Some(TaskPlanningAction::Comment {
                 message: message.map(|value| value.trim().to_owned()),
                 steer: *steer,
-                refresh: message.is_none() && task.linear_id.is_some(),
+                refresh: message.is_none() && task.tracker_id.is_some(),
             });
         }
     }

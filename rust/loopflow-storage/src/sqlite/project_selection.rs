@@ -426,7 +426,7 @@ mod tests {
         assert_eq!(store.project(&id).unwrap().unwrap().name, "Later edit");
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
-        assert!(store.project(&id).unwrap().unwrap().linear_id.is_none());
+        assert!(store.project(&id).unwrap().unwrap().tracker_id.is_none());
     }
 
     #[test]

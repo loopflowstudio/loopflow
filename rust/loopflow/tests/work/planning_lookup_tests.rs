@@ -126,10 +126,10 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         assert_eq!(status.task.is_some(), expected.is_some(), "{selector}");
         assert!(status.project.is_none());
         assert_eq!(
-            status.observed_at,
+            status.tracker_state.synced_at,
             expected.map(|record| record.observed_at)
         );
-        assert_eq!(status.planning_state, state, "{selector}");
+        assert_eq!(status.tracker_state.state, state, "{selector}");
         if let Some(execution) = &status.execution {
             assert!(execution.worktree.is_none());
             assert!(execution.pr.is_none());
@@ -153,7 +153,7 @@ fn task_status_reads_projectless_planning_without_allocating_execution() {
         assert!(output.status.success(), "{selector}");
         let text = String::from_utf8_lossy(&output.stdout);
         assert!(
-            text.contains(&format!("Planning evidence: {evidence}")),
+            text.contains(&format!("Tracker state: {evidence}")),
             "{text}"
         );
         assert!(text.contains("No saved Task"), "{text}");

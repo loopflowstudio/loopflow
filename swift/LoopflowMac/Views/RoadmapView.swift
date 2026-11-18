@@ -273,7 +273,7 @@ private struct RoadmapWaveCard: View {
                     .textSelection(.enabled)
             }
 
-            if let chapter = roadmap.currentProject { WaveProjectView(project: chapter, repo: roadmap.wave.repo) }
+            if let project = roadmap.currentProject { WaveProjectView(project: project, repo: roadmap.wave.repo) }
             switch roadmap.tasks {
             case .unavailable(let reason):
                 Label(reason, systemImage: "exclamationmark.triangle").foregroundStyle(palette.warning)

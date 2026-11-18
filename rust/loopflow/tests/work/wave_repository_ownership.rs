@@ -69,7 +69,7 @@ fn project(wave: &Wave) -> Project {
 
         summary: String::new(),
         status: loopflow_execution::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-alpha").unwrap()),
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
         description: "Keep identity boring.".to_string(),
@@ -100,7 +100,7 @@ fn task(
         id: id.clone(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
+        tracker_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
         identifier: "LOO-127".to_string(),
         title: "Repository-owned Waves".to_string(),
         description: "Preserve Task history through relocation.".to_string(),

@@ -110,7 +110,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         id: input.id.clone(),
 
         revision: 0,
-        linear_id: None,
+        tracker_id: None,
         identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
         title: input.title.clone(),
         description: input.description.clone(),
@@ -400,12 +400,13 @@ impl SqliteStore {
                 Some((graph, conversation)) => (Some(graph), Some(conversation.id), "admitted"),
                 None => (None, session.map(|s| s.id.clone()), "filed"),
             };
-            let result = serde_json::to_value(crate::sqlite::creation::TaskCreateReceipt {
+            let result = crate::sqlite::creation::TaskCreateReceipt {
                 task: task.clone(),
                 graph,
                 session_id: session_id.clone(),
                 milestone: milestone.into(),
-            })?;
+            }
+            .stored_result()?;
             super::creation::insert_in(
                 &tx,
                 &receipt.identity,
@@ -586,11 +587,11 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub fn task_acquisition(&self, id: &TaskId) -> StoreResult<crate::TaskAcquisition> {
+    pub fn task_tracker_state(&self, id: &TaskId) -> StoreResult<crate::TrackerState> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let result = task_acquisition_in(&tx, &task, true)?;
+        let result = task_tracker_state_in(&tx, &task, true)?;
         tx.commit()?;
         Ok(result)
     }
@@ -1245,7 +1246,7 @@ impl SqliteStore {
                 &[
                     Edit::ProjectWave(project.wave_id.to_string()),
                     Edit::ProjectLinearId(
-                        project.linear_id.as_ref().map(|id| id.as_str().to_owned()),
+                        project.tracker_id.as_ref().map(|id| id.as_str().to_owned()),
                     ),
                     Edit::ProjectSlug(Some(project.slug.clone())),
                     Edit::ProjectName(Some(project.name.clone())),
@@ -1484,7 +1485,7 @@ fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
 /// Planning ownership remains relevant when finishing already completed work.
 pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_not_deleted(conn, task)?;
-    let acquisition = task_acquisition_in(conn, task, false)?;
+    let acquisition = task_tracker_state_in(conn, task, false)?;
     if matches!(
         acquisition.state,
         PlanningState::Invalid | PlanningState::Removed
@@ -1499,26 +1500,26 @@ pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> 
 
 // Read only the retained facts that affect admission. Content belongs to Work;
 // an unrelated malformed provider content field cannot erase membership or age.
-fn task_acquisition_in(
+fn task_tracker_state_in(
     conn: &Connection,
     task: &Task,
     allow_pending_membership: bool,
-) -> StoreResult<crate::TaskAcquisition> {
-    task_acquisitions_in(conn, &[task], allow_pending_membership)?
+) -> StoreResult<crate::TrackerState> {
+    tracker_states_in(conn, &[task], allow_pending_membership)?
         .remove(&task.id)
         .ok_or(StoreError::NotFound)
 }
 
 /// Each Task's planning acquisition, in one statement.
-pub(super) fn task_acquisitions_in(
+pub(super) fn tracker_states_in(
     conn: &Connection,
     tasks: &[&Task],
     allow_pending_membership: bool,
-) -> StoreResult<HashMap<TaskId, crate::TaskAcquisition>> {
+) -> StoreResult<HashMap<TaskId, crate::TrackerState>> {
     let ids = ids_json(tasks.iter().map(|task| task.id.as_str()));
     let linear: std::collections::HashSet<&TaskId> = tasks
         .iter()
-        .filter(|task| task.linear_id.is_some())
+        .filter(|task| task.tracker_id.is_some())
         .map(|task| &task.id)
         .collect();
     let mut statement = conn.prepare(
@@ -1577,7 +1578,13 @@ pub(super) fn task_acquisitions_in(
         } else {
             PlanningState::Unavailable
         };
-        Ok((id, crate::TaskAcquisition { state, observed_at }))
+        Ok((
+            id,
+            crate::TrackerState {
+                state,
+                synced_at: observed_at,
+            },
+        ))
     })
     .collect()
 }
@@ -1601,7 +1608,7 @@ fn task_deleted_on(conn: &Connection, task: &Task) -> StoreResult<bool> {
         params![
             task.id.as_str(),
             task.wave_id.as_ref().map(WaveId::as_str),
-            task.linear_id.as_ref().map(|id| id.as_str())
+            task.tracker_id.as_ref().map(|id| id.as_str())
         ],
         |row| row.get(0),
     )?)
@@ -1620,7 +1627,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
-                Edit::TaskLinearId(task.linear_id.as_ref().map(|id| id.as_str().to_owned())),
+                Edit::TaskLinearId(task.tracker_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
                 Edit::TaskDescription(Some(task.description.clone())),
@@ -2286,7 +2293,7 @@ fn map_task_columns(
         id,
 
         revision: row.get::<_, i64>(12)? as u64,
-        linear_id: row
+        tracker_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
         identifier,
@@ -2489,7 +2496,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
 
         summary: row.get(10)?,
-        linear_id: row
+        tracker_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearProjectId::from_raw),
         slug: row.get(2)?,

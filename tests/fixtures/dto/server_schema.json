@@ -2240,13 +2240,6 @@
           },
           "type": "array"
         },
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "overview": {
           "anyOf": [
             {
@@ -2276,9 +2269,6 @@
         },
         "plan_stale": {
           "type": "boolean"
-        },
-        "plan_state": {
-          "$ref": "#/$defs/PlanningState"
         },
         "project": {
           "anyOf": [
@@ -2319,16 +2309,18 @@
               "type": "null"
             }
           ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
         }
       },
       "required": [
         "sync",
         "task",
         "project",
-        "observed_at",
+        "tracker_state",
         "plan_error",
         "plan_stale",
-        "plan_state",
         "execution",
         "ownership",
         "overview",
@@ -4544,7 +4536,7 @@
         {
           "properties": {
             "kind": {
-              "const": "chapter_unavailable",
+              "const": "project_unavailable",
               "type": "string"
             },
             "reason": {
@@ -6573,13 +6565,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6606,6 +6591,13 @@
         "summary": {
           "type": "string"
         },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "updated_at": {
           "type": "string"
         },
@@ -6623,7 +6615,7 @@
         "krs",
         "metric_targets",
         "status",
-        "linear_id",
+        "tracker_id",
         "pm_snapshot_synced_at",
         "wave_id",
         "created_at",
@@ -6759,12 +6751,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6782,13 +6768,19 @@
         },
         "sync": {
           "$ref": "#/$defs/TrackerSync"
+        },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "sync",
         "current",
         "id",
-        "linear_id",
+        "tracker_id",
         "slug",
         "name",
         "status",
@@ -12132,13 +12124,6 @@
         "identifier": {
           "type": "string"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "parent_pr_id": {
           "type": [
             "string",
@@ -12188,6 +12173,13 @@
         "title": {
           "type": "string"
         },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "updated_at": {
           "type": "string"
         },
@@ -12223,7 +12215,7 @@
         "due_date",
         "state",
         "completed_at",
-        "linear_id",
+        "tracker_id",
         "pm_snapshot_synced_at",
         "pm_writeback",
         "wave_id",
@@ -12236,26 +12228,6 @@
         "parent_pr_id",
         "created_at",
         "updated_at"
-      ],
-      "type": "object"
-    },
-    "TaskAcquisition": {
-      "description": "Acquisition evidence is independent of saved Work and outbound delivery.",
-      "properties": {
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "state": {
-          "$ref": "#/$defs/PlanningState"
-        }
-      },
-      "required": [
-        "state",
-        "observed_at"
       ],
       "type": "object"
     },
@@ -14591,9 +14563,6 @@
     },
     "TaskSummary": {
       "properties": {
-        "acquisition": {
-          "$ref": "#/$defs/TaskAcquisition"
-        },
         "assignee": {
           "type": [
             "string",
@@ -14620,12 +14589,6 @@
         },
         "identifier": {
           "type": "string"
-        },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "name": {
           "type": "string"
@@ -14656,6 +14619,15 @@
         "sync": {
           "$ref": "#/$defs/TrackerSync"
         },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
+        },
         "wave_id": {
           "type": [
             "string",
@@ -14668,10 +14640,10 @@
         "repo",
         "project_id",
         "wave_id",
-        "acquisition",
+        "tracker_state",
         "sync",
         "id",
-        "linear_id",
+        "tracker_id",
         "identifier",
         "name",
         "description",
@@ -14910,6 +14882,26 @@
         "asana"
       ],
       "type": "string"
+    },
+    "TrackerState": {
+      "description": "The tracker's last known state for a Task and when it was synced.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/PlanningState"
+        },
+        "synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "synced_at"
+      ],
+      "type": "object"
     },
     "TrackerStatus": {
       "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
@@ -15366,11 +15358,6 @@
         "already_removed": {
           "type": "boolean"
         },
-        "chapters": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "completed_tasks": {
           "format": "uint",
           "minimum": 0,
@@ -15424,6 +15411,11 @@
         "preview": {
           "type": "boolean"
         },
+        "projects": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "sessions": {
           "format": "uint",
           "minimum": 0,
@@ -15460,7 +15452,7 @@
         "moved",
         "deleted",
         "completed_tasks",
-        "chapters",
+        "projects",
         "sessions",
         "initiatives",
         "has_files",

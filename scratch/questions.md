@@ -11,3 +11,5 @@
 - Served routes follow the CLI: `repo.plan` → `repo.tracker`, `plan.answer` → `repo.tracker.answer` (write-docs; `rust/loopflow/src/server/README.md`, `docs/dev/planning.md`).
 - `lf repo tracker` output keeps today's "Tracker: linear. 3 open · 1 lost." shape in `docs/work.md`; the plan's sketch (`tracker  linear (team …)` columns) was not adopted.
 - Historical journal seeding keeps its original upgrade points through migration-local views. This avoids rescanning every Task when an already-seeded store changes table names.
+- Released and candidate processes must lock the same `chapter-locks` directory before changing a Wave. Keep that path and the ignore/scan exclusions for historical `.lf/chapters` directories. The OAuth experiment in `tests/e2e/linear_oauth.py` seeds the retired `wave_chapters` and `pm_snapshots` model and asserts its old CLI output. Porting that Linux experiment needs a new fixture; a text substitution cannot update it.
+- Task creation retries read serialized Tasks from SQLite. Store their released binding key and translate it on receipt reads so either CLI can retry the other’s request. The public wire uses `tracker_id` throughout.

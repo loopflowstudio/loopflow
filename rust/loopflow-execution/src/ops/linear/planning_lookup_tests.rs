@@ -34,7 +34,7 @@ fn team_response() -> QueuedResponse {
 }
 
 fn project() -> serde_json::Value {
-    json!({"id":"project-1", "name":"Chapter", "status":{"type":"started"}, "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
+    json!({"id":"project-1", "name":"Project", "status":{"type":"started"}, "updatedAt":"2026-09-29T11:00:00Z", "description":"", "content":"",
         "initiatives":{"nodes":[{"id":"initiative-1"}]},
         "teams":{"nodes":[{"id":"team-1"}]}})
 }
@@ -97,7 +97,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
             assert_eq!(resolved.title, record.item.name);
             assert_eq!(resolved.description, record.item.description);
             assert_eq!(
-                resolved.linear_id.as_ref().unwrap().as_str(),
+                resolved.tracker_id.as_ref().unwrap().as_str(),
                 record.item.id
             );
             assert_eq!(
@@ -980,8 +980,8 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
             let project = newer.project.as_mut().unwrap();
             project.revision = Some("2026-09-29T11:00:00.000000001Z".into());
             project.summary = "New Project facts, unchanged issue revision".into();
-            project.name = "Renamed chapter".into();
-            project.slug = "renamed-chapter".into();
+            project.name = "Renamed project".into();
+            project.slug = "renamed-project".into();
             newer.observed_at -= 1;
             fixture
                 .store
@@ -1012,7 +1012,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
                 .await
                 .unwrap()
                 .unwrap();
-            assert_eq!(saved_project.name, "Renamed chapter");
+            assert_eq!(saved_project.name, "Renamed project");
             let mut omitted = list.clone();
             omitted.snapshot.projects.clear();
             omitted.snapshot.items.clear();
@@ -1540,7 +1540,7 @@ async fn inventory_refresh_retains_unmapped_local_projects() {
         "product",
     )
     .unwrap();
-    assert!(local.linear_id.is_none());
+    assert!(local.tracker_id.is_none());
     let (url, _) = spawn(vec![json_response(
         StatusCode::OK,
         json!({

@@ -882,7 +882,7 @@ pub(crate) async fn acquire_task(
         })?;
     let acquisition = store
         .sqlite
-        .task_acquisition(&task.id)
+        .task_tracker_state(&task.id)
         .map_err(|error| OpsError::Message(error.to_string()))?;
     if acquisition.state != PlanningState::Available {
         return Err(OpsError::Message(format!(
@@ -1785,7 +1785,7 @@ pub(super) async fn checked_projects_with_store(
                 OpsError::Message(format!("failed to read retained Projects: {error}"))
             })?
         {
-            let Some(id) = &known.linear_id else {
+            let Some(id) = &known.tracker_id else {
                 // Local Work awaits its own export; it supplies no Linear lookup identity.
                 continue;
             };
@@ -2541,7 +2541,7 @@ mod tests {
                     assert_eq!(projects.len(), 1);
                     let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
                         "SELECT team_ids FROM tracker_projects WHERE id=?1",
-                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 }
@@ -2789,7 +2789,7 @@ mod tests {
                 let projects = resolved.store.list_projects(Some(wave.id())).await.unwrap();
                 let teams: String = rusqlite::Connection::open(&database).unwrap().query_row(
                         "SELECT team_ids FROM tracker_projects WHERE id=?1",
-                        [projects[0].linear_id.as_ref().unwrap().as_str()], |r| r.get(0)
+                        [projects[0].tracker_id.as_ref().unwrap().as_str()], |r| r.get(0)
                     ).unwrap();
                     assert_eq!(serde_json::from_str::<Vec<String>>(&teams).unwrap(), ["team-loo"]);
                 let tasks = resolved.store.list_tasks(Some(wave.id())).await.unwrap();

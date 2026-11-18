@@ -14,7 +14,7 @@ use loopflow_storage::work::task::Task;
 pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wave) {
     let (repo, wave) = fixture.planning_repo().await;
     let project = serde_json::from_value(json!({
-        "id": "project-1", "slug": "Chapter", "name": "Chapter", "summary": "",
+        "id": "project-1", "slug": "Project", "name": "Project", "summary": "",
         "metric_targets": [], "workflow": "feature", "status": "started", "krs": [],
         "initiative_ids": ["initiative-1"], "team_ids": ["team-1"]
     }))
@@ -122,9 +122,9 @@ pub fn mark_issue_updated(issue: &mut serde_json::Value) {
 pub fn planning_project(id: &str, current: &str) -> serde_json::Value {
     let completed = id == "prior-project" || (id == "project-1" && current == "project-2");
     let name = match id {
-        "project-1" => "Chapter",
-        "prior-project" => "Previous chapter",
-        _ => "Next chapter",
+        "project-1" => "Project",
+        "prior-project" => "Previous project",
+        _ => "Next project",
     };
     json!({"id":id, "name":name, "description":"", "content":"workflow: feature",
         "status":{"type":if completed { "completed" } else { "started" }},
@@ -390,7 +390,7 @@ pub async fn planning_response(
             let mut issue = json!({"id":input["id"],"identifier":format!("FIX-{}",state.issues.len()+1),
                 "title":input["title"],"description":input["description"],"url":"https://fixture.invalid/task",
                 "branchName":null,"completedAt":null,"dueDate":input["dueDate"],"trashed":null,"prioritySortOrder":0.0,"sortOrder":0.0,"state":{"type":input["stateId"]},
-                "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local chapter"}});
+                "assignee":null,"team":{"id":input["teamId"]},"project":{"id":input["projectId"],"name":"Local project"}});
             if input["projectId"].is_null() {
                 issue["project"] = json!(null);
             }
@@ -474,7 +474,7 @@ pub async fn planning_response(
                     target["project"] = if value.is_null() {
                         json!(null)
                     } else {
-                        json!({"id":value,"name":"Chapter"})
+                        json!({"id":value,"name":"Project"})
                     }
                 }
                 _ => target[field] = value.clone(),
@@ -717,7 +717,7 @@ pub fn seed_provider_task(
             "title":title,"description":description,"completedAt":null,"dueDate":null,
             "prioritySortOrder":0.0,"sortOrder":index as f64,"assignee":null,"trashed":null,
             "updatedAt":"2026-09-29T12:00:00.123Z","state":{"type":"unstarted"},
-            "team":{"id":"team-1"},"project":{"id":project,"name":"Chapter"}
+            "team":{"id":"team-1"},"project":{"id":project,"name":"Project"}
         }));
         drop(state);
         crate::ops::linear::refresh_wave(repo, "product").await?;

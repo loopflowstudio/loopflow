@@ -232,7 +232,7 @@ esac
                 .block_on(fixture.store.list_projects(Some(wave.id())))
                 .unwrap()
                 .into_iter()
-                .find(|project| project.linear_id.as_ref().unwrap().as_str() == "project-1")
+                .find(|project| project.tracker_id.as_ref().unwrap().as_str() == "project-1")
                 .unwrap();
             let task = Task {
                 repository_id: crate::repository::location::ensure_repository(
@@ -247,7 +247,7 @@ esac
                     .id,
 
                 revision: 0,
-                linear_id: Some(crate::linear::LinearIssueId::new(&item.id).unwrap()),
+                tracker_id: Some(crate::linear::LinearIssueId::new(&item.id).unwrap()),
                 identifier: item.identifier.clone(),
                 title: item.name,
                 description: item.description,
@@ -491,10 +491,10 @@ fn foreign_projects_do_not_block_refresh() {
             let projects = fixture.store.list_projects(Some(wave.id())).await.unwrap();
             assert_eq!(projects.len(), 1);
             assert_eq!(
-                projects[0].linear_id.as_ref().unwrap().as_str(),
+                projects[0].tracker_id.as_ref().unwrap().as_str(),
                 "project-1"
             );
-            assert_eq!(projects[0].name, "Chapter");
+            assert_eq!(projects[0].name, "Project");
         });
     });
     server.abort();
@@ -533,7 +533,7 @@ fn with_export_plan(
     let project = fixture
         .store
         .sqlite
-        .ensure_project(wave.id(), "Local chapter")
+        .ensure_project(wave.id(), "Local project")
         .unwrap();
     let task = fixture
         .store
@@ -579,7 +579,7 @@ fn task_create_in_linear_repository_returns_published_task_without_execution() {
             None,
         )
         .unwrap();
-        assert!(saved.linear_id.is_some());
+        assert!(saved.tracker_id.is_some());
         assert!(saved.identifier.starts_with("FIX-"));
         assert!(saved.worktree.is_none());
     });
@@ -703,13 +703,13 @@ fn using_mine_sends_the_lost_completion_again() {
 #[test]
 fn task_sync_publishes_saved_task_and_reuses_its_identity() {
     with_export_plan(|runtime, fixture, repo, task, state| {
-        assert!(task.linear_id.is_none());
+        assert!(task.tracker_id.is_none());
         let result = crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();
         let saved = runtime
             .block_on(fixture.store.get_task(&task.id))
             .unwrap()
             .unwrap();
-        assert!(saved.linear_id.is_some());
+        assert!(saved.tracker_id.is_some());
         assert!(result.contains(&saved.identifier));
         assert!(!saved.identifier.starts_with("lf-"));
         crate::ops::task::task_sync(repo, task.id.as_str(), None).unwrap();

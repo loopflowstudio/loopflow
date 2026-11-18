@@ -1688,7 +1688,7 @@ mod tests {
             .unwrap(),
             id: TaskId::new(),
             revision: 0,
-            linear_id: None,
+            tracker_id: None,
             identifier: "LAND-1".into(),
             title: "Land it".into(),
             description: String::new(),

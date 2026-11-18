@@ -1,5 +1,5 @@
 // Rename Wave: `lf wave rename <id> <new-name>`. The Wave keeps its id, Tasks and
-// chapters, so selection stays on it. A failure keeps the sheet open with the
+// projects, so selection stays on it. A failure keeps the sheet open with the
 // error; a rename with leftovers (an Initiative that kept its title, prose that
 // still names the old address) keeps it open showing the receipt's lines.
 

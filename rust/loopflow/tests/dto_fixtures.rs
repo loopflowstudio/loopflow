@@ -104,7 +104,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(tasks[0].task.sync.actions[0].change, "create");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
-    assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
+    assert_eq!(tasks[0].task.tracker_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
@@ -395,19 +395,32 @@ fn task_detail_says_each_fact_once() {
 }
 
 #[test]
-fn task_status_preserves_canonical_work_and_acquisition_evidence() {
+fn task_status_preserves_canonical_work_and_tracker_state() {
     use loopflow_execution::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
-    let status: TaskStatus = serde_json::from_str(json).unwrap();
+    let wire: serde_json::Value = serde_json::from_str(json).unwrap();
+    for (record, field) in [
+        ("tracker_state", "synced_at"),
+        ("task", "tracker_id"),
+        ("project", "tracker_id"),
+    ] {
+        let mut missing = wire.clone();
+        missing[record].as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<TaskStatus>(missing).is_err(),
+            "{record}.{field}"
+        );
+    }
+    let status: TaskStatus = serde_json::from_value(wire).unwrap();
     let task = status.task.as_ref().unwrap();
     let project = status.project.as_ref().unwrap();
     assert_eq!(task.title, "Route incoming mail");
     assert_eq!(task.project_id, Some(project.id.clone()));
-    assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
+    assert_ne!(task.id.as_str(), task.tracker_id.as_ref().unwrap().as_str());
     assert_eq!(project.description, "Retained authored prose.");
-    assert_eq!(status.observed_at, Some(1790683200));
+    assert_eq!(status.tracker_state.synced_at, Some(1790683200));
     assert_eq!(
-        status.planning_state,
+        status.tracker_state.state,
         loopflow_execution::store::PlanningState::Available
     );
     assert!(!status.planning_stale);

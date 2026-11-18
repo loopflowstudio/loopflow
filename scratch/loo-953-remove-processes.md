@@ -28,8 +28,39 @@ handoff deletion and the lf-row readers below.
 
 Next, in order: (2) the expand migration's foreign-key rebuild together
 with stopping the journal writer **and the owner liveness pass** (see
-"Concept review after the carrier slices"); (3) slices 4–6. Quotes and the
+"Concept review after the carrier slices"), with no new → old lf-row
+bridge (see "Concept review after the lf-row readers"); (3) slices 4–6. Quotes and the
 OS-scan measurement: `questions.md`.
+
+**Concept review after the lf-row readers (2026-11-18): next implement direction.**
+
+- **No new → old lf-row bridge.** A released Graph runner cannot run past
+  the expand migration whatever rows exist: v0.16.0 `RunningGraph::spawn`
+  calls `validate_current_schema()` after every step, and
+  `pending_migrations` refuses a store holding a migration it does not know
+  ("database migration {version} is unknown to lf …; run `lf install`"). So
+  its next step ends the run with that error, and its own end reaches the
+  Graph run through the old → new `graph_run_end_from_process_*` triggers.
+  A released Task-run loop reads `graph_child_after` only for its retry
+  decision (exit 1) and `registration`'s let-go wait, which the child's exit
+  bounds: a new Graph child it cannot see is not retried, and the launcher
+  is let go at exit. The journal-stop change therefore adds no trigger
+  writing `processes` lf rows for Graph runs or steps; the only new → old
+  half is the existing agent-row one (`process_agent_from_session_*`,
+  `process_terminal_from_session`), which old holders' fences read. Slice 5
+  tests what remains: a released-shape runner end on `processes` ends its
+  Graph run, and a released launcher's endpoint update shows in
+  `lf session list`.
+- **`transport::held_in()` reads `LF_HELD_TERMINAL` alone.** The holder sets
+  it beside `LF_TRANSPORT_HELD` on every start (`registry.rs`), and
+  `Handoff::take` removes only the latter, so the `current()` fallback is
+  never the answer.
+- **With the journal stop:** `record_process_within`'s `transport::current()`
+  argument, `lf_evidence` and the journal's receipt tests go with receipts;
+  `attach_in` stops landing the attaching lf's row once the rebuild drops
+  `agent_sessions`' keys.
+
+No open product choice.
 
 **lf-row readers as built (2026-11-17).** No reader outside the journal,
 the bridge and slice-4 deletion targets (`lf ps`/`top`, history, doctor,
@@ -369,7 +400,9 @@ Settled by the design (no product choice involved):
   `finish_owned_run` runs only after `record_process_within` lands. When the
   journal stops recording (approach 2), the owner end write is the child's
   only write at exit, best-effort with the journal's warn-once gap.
-- **The bridge needs its new → old half before the journal stops.** The
+- **The bridge needs its new → old half before the journal stops.**
+  Superseded for Graph runs and steps (concept review after the lf-row
+  readers: a released runner stops at its next step's schema check). The
   migration today copies old → new only; new children are still visible to
   an old runner because the journal still writes their `processes` row.
   The same change that removes the journal writer adds the owner-insert
@@ -653,7 +686,8 @@ holder's fence fails closed (correct).
   current Session's columns (only while `agent_sessions.agent_process_id`
   matches and the token is the one being replaced) and `lf` rows that an owner
   points at into that owner's result columns.
-- new → old: triggers on owner inserts/updates write the matching
+- new → old (agent rows only; Graph runs and steps need none, see the
+  concept review after the lf-row readers): triggers on owner inserts/updates write the matching
   `processes` row (Graph run with `parent_lf_process_id` = the carrier that
   spawned it, step with parent = Graph run, agent with attachment), so an old
   runner's `child_process_after` and `graph_child_after` find new children.
@@ -724,7 +758,8 @@ two live agents on one Session; a `Legacy*` type.
    operate skills, docs). The liveness pass lands with the journal stop
    (concept review after the carrier slices). Test: `lf graph list --json`
    shows a SIGKILLed run ended.
-5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
+5. **Bridge test** (step discovery dropped: a released runner stops at
+   its next step's schema check). Released-shape writer SQL (copied from the 0.16.0
    statements) drives an old Graph runner's step discovery against a new step
    → found; old launcher's endpoint update → visible in `lf session list`.
 6. **Mark leaving and file the contract Task**: `-- leaving:` marks in

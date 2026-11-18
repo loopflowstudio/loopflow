@@ -5,3 +5,9 @@
 - Auto mode survives taking up another graph (columns stay on the row).
 - Migration NULLs `tasks.shipped_at` so released lf stops relaunching `lf ship` during upgrade skew.
 - Branch stacks on LOO-959 (#1972); rebase onto main if it merges first.
+
+## Concept review (2026-11-18, headless)
+
+- Named the fact Auto-Ship (existing product word), not "auto mode" from the quote. Reverse by renaming; nothing has shipped.
+- One mark `auto_ship` on|stopped instead of on/off pairs. Reverse if someone needs who approved before a stop.
+- Dropped the route approval: a no-interactive-ahead run merges but shows `moving`, not `shipping`/Autonomous. Reverse by restoring the write in the run's start path.

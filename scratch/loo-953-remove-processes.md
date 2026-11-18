@@ -17,7 +17,8 @@ the owner items and carriers below.
 Next, in order: the Session slice (slice 3, with the retirement-by-terminal
 gap and `GraphProcessSummaryState::of_process` at `sessions.rs:428` →
 `of_run(observed_result(..))`); the expand migration's foreign-key rebuild
-together with stopping the journal writer; slices 4–6. Still reading
+together with stopping the journal writer **and the owner liveness pass**
+(see "Concept review after the carrier slices"); slices 4–6. Still reading
 `processes` beside the carriers: `process_starter` (ship "started by"),
 `run_task_graph`'s parent check (`graph.rs:79`, the Graph child's
 `parent_lf_process_id` against the carrier) and `task_state_sql`'s
@@ -77,6 +78,37 @@ Graph run's cause), except
 `task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step`
 failing once at line 2761 after 203 s under load 60 and passing alone in 16 s
 (gate: treat as a flake to fix if it recurs); clippy → clean.
+
+**Concept review after the carrier slices (2026-11-17): next implement direction.**
+
+- **The liveness pass moves into the journal-stop change.** Every owner
+  row that SQL reads as live (`task_graphs.run_pid`, ship events'
+  `pid`, Graph runs and steps, activations, CI repairs) is closed after a
+  SIGKILL only because `retention::prune` → `close_dead_processes` ends its
+  Process row and a bridge trigger copies that end. `task_state_sql` and
+  `task_close_candidates` read `run_pid IS NOT NULL`, so once the journal
+  stops writing rows, a killed carrier leaves its Task "moving" and
+  unretirable until someone runs it again. So the change that stops the
+  journal writer also turns `prune`'s `dead` input from Process entries into
+  owner rows with a pid whose `process_identity_evidence` is Dead, and
+  closes each through `finish_run(owner, id, now, None, None)` (result
+  `unknown`), clearing pid. `close_dead_processes` and `forget_processes`
+  go in that change. Slice 4 keeps `lf ps`/doctor/deletions; its test
+  (SIGKILL a Graph runner → next pass ends it `unknown`) moves with the
+  pass, plus: SIGKILL a Task carrier → next pass, `lf task status` reads
+  idle and the Task can retire.
+- **One liveness function over a pid.** `journal::carrier_evidence(&TaskCarrier)`
+  and `ship.rs`'s private `carrier_evidence(&TaskShipping)` share a name and
+  answer different questions, and `run_evidence` repeats the same
+  `(pid, os_started_at)` match. One `journal::pid_evidence(pid, os_started_at)`
+  serves all three; the ship one becomes `ship_carrier_evidence` or inlines.
+- **Kept as built:** the carrier end keeps `lf_process_id` (the cursor's
+  carrier is how the next run sets out); one `lf task run` writes its pid on
+  both `task_graphs` and, after handoff, its ship event, and its end clears
+  both. These are two records the same lf really owns (a run and a shipping),
+  not a duplicate.
+
+No open product choice.
 
 **Owner slices as built.**
 
@@ -497,9 +529,10 @@ two live agents on one Session; a `Legacy*` type.
 3. **Session attachment.** Fences, reach, stop/reap on `agent_sessions`;
    `prepare_resume` beside path ends. Test: handoff from one lf to another →
    the old holder's next fenced write is refused; steer reaches the new agent.
-4. **Liveness pass, delete `lf ps`, doctor strays, deletions** (CLI, DTOs, Swift,
-   operate skills, docs). Test: kill a fixture Graph runner with SIGKILL →
-   next pass closes the run with unknown result; `lf graph list --json` shows it ended.
+4. **Delete `lf ps`, doctor strays, deletions** (CLI, DTOs, Swift,
+   operate skills, docs). The liveness pass lands with the journal stop
+   (concept review after the carrier slices). Test: `lf graph list --json`
+   shows a SIGKILLed run ended.
 5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
    statements) drives an old Graph runner's step discovery against a new step
    → found; old launcher's endpoint update → visible in `lf session list`.

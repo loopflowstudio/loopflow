@@ -839,7 +839,10 @@ esac
         assert_eq!(recorded_base(&task), expected_base);
         let log = fs::read_to_string(log).unwrap();
         if scenario == "rebased" {
-            assert!(log.contains("pr create") && log.contains("--base main"), "{log}");
+            assert!(
+                log.contains("pr create") && log.contains("--base main"),
+                "{log}"
+            );
         } else {
             // The open PR already targets main: publication leaves its base alone.
             assert!(log.contains("pr edit") && !log.contains("--base"), "{log}");

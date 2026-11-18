@@ -21,7 +21,7 @@ pub(crate) fn run_sync_in(
 ) -> Result<crate::engine::checkout::Sync> {
     use crate::engine::checkout::Sync;
     let crate::engine::checkout::SyncInput {
-        onto,
+        mut onto,
         preview: plan_only,
         manual,
         continue_sync,
@@ -68,6 +68,16 @@ pub(crate) fn run_sync_in(
             });
         }
     }
+    // Another open Task as the target stacks this Task on it; the stacked sync
+    // below then merges the parent the record now names.
+    if let Some(target) =
+        onto.filter(|target| !plan_only && !on_main && *target != default && *target != upstream)
+    {
+        if let Some(parent) = crate::ops::task::open_task_named(repo_root, target)? {
+            progress.status(&crate::ops::task::stack_task(repo_root, &parent)?);
+            onto = None;
+        }
+    }
     // An explicit default branch detaches the child using its recorded fork;
     // ordinary sync continues to follow the live parent.
     let stacked = if on_main {
@@ -79,7 +89,8 @@ pub(crate) fn run_sync_in(
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
     if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "use the default branch to detach this Task, or omit the target to sync its parent"
+            "{} is not an open Task; name a Task to restack this one, the default branch to detach it, or omit the target to sync its parent",
+            onto.unwrap_or_default()
         ));
     }
     let stacked_onto = stacked

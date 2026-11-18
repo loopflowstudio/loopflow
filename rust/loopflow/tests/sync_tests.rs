@@ -886,10 +886,7 @@ fn stacking_retry_replaces_an_abandoned_parent_and_syncs() {
         );
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("pushed INF-123's branch"), "{stderr}");
-        assert!(
-            stderr.contains("This Task's checkout and PR are unchanged"),
-            "{stderr}"
-        );
+        assert!(stderr.contains("Stacked INF-124 on INF-123"), "{stderr}");
         let selected = runtime
             .block_on(parent.store.active_task_pr(&parent.task.id))
             .unwrap()
@@ -2618,4 +2615,173 @@ for line in sys.stdin:
             content
         );
     }
+}
+
+/// A `gh` whose one open PR, #42, keeps its base in `$LF_HOME/pr-base` and
+/// logs every call to `$LF_HOME/gh.log`.
+const GH_PR_42: &str = r#"#!/bin/sh
+test "$1" = "--version" && exit 0
+echo "$@" >> "$LF_HOME/gh.log"
+base=$(cat "$LF_HOME/pr-base" 2>/dev/null || echo main)
+head=$(git rev-parse HEAD)
+case "$1 $2" in
+  'pr list')
+    case "$*" in *merged*) echo '[]' ;; *)
+      printf '[{"number":42,"url":"https://github.com/fixture/repo/pull/42","state":"OPEN","isDraft":false,"headRefOid":"%s","baseRefName":"%s"}]\n' "$head" "$base" ;;
+    esac ;;
+  'pr edit')
+    case "$*" in *--base*) printf '%s' "${5}" > "$LF_HOME/pr-base" ;; esac ;;
+  'pr view') echo 'https://github.com/fixture/repo/pull/42' ;;
+  *) exit 1 ;;
+esac
+"#;
+
+/// Give `child` its own published PR #42 at its current head.
+fn publish_child_pr(parent: &support::RegisteredTask, child: &Task, child_path: &std::path::Path) {
+    let runtime = tokio::runtime::Runtime::new().unwrap();
+    let placed = runtime
+        .block_on(parent.store.get_task(&child.id))
+        .unwrap()
+        .unwrap();
+    let mut pr = parent.pr.clone();
+    pr.id = loopflow_execution::work::task::TaskPrId::new();
+    pr.task_id = child.id.clone();
+    pr.branch = child.branch.clone();
+    pr.slug = child.workspace_slug.clone();
+    pr.base_commit = placed.base_commit;
+    pr.parent_pr_id = placed.parent_pr_id;
+    pr.publication = Some(PrPublication {
+        requested_at: pr.created_at,
+        presentation: None,
+        github: Some(GithubPr {
+            number: 42,
+            url: "https://github.com/fixture/repo/pull/42".into(),
+            head_sha: Some(git(child_path, &["rev-parse", "HEAD"])),
+        }),
+        merge: None,
+    });
+    runtime.block_on(parent.store.insert_task_pr(&pr)).unwrap();
+}
+
+fn gh_log(home: &std::path::Path) -> String {
+    std::fs::read_to_string(home.join("gh.log")).unwrap_or_default()
+}
+
+#[test]
+fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    git(&parent_path, &["push", "-u", "origin", "parent"]);
+    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
+    let child_path = repo.create_named_worktree("child");
+    commit_file(&child_path, "child.txt", "child work\n");
+    git(&child_path, &["push", "-u", "origin", "child"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    publish_child_pr(&parent, &child, &child_path);
+
+    let output = lf(&child_path, &["sync", "INF-123"]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("Stacked INF-124 on INF-123; PR #42 now targets parent"),
+        "{stdout}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(child_path.join("parent.txt")).unwrap(),
+        "parent work\n"
+    );
+    let stacked = task_stack(&child_path)
+        .unwrap()
+        .expect("sync records the stack");
+    assert_eq!(stacked.live_parent_branch(), Some("parent"));
+    assert!(gh_log(home.path()).contains("pr edit 42 --base parent"));
+
+    // The parent moves on; a bare sync follows the record.
+    commit_file(&parent_path, "later.txt", "later parent work\n");
+    git(&parent_path, &["push", "origin", "parent"]);
+    lf(&child_path, &["sync"]);
+    assert!(child_path.join("later.txt").exists());
+
+    lf(&child_path, &["sync", "main"]);
+    assert!(task_stack(&child_path).unwrap().is_none());
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+        "main"
+    );
+}
+
+#[test]
+fn publish_keeps_the_prs_base_and_names_a_disagreement() {
+    let home = tempfile::TempDir::new().unwrap();
+    let repo = TestRepo::new();
+    let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    git(&parent_path, &["push", "-u", "origin", "parent"]);
+    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
+    let child_path = repo.create_named_worktree("child");
+    commit_file(&child_path, "child.txt", "child work\n");
+    git(&child_path, &["push", "-u", "origin", "child"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    publish_child_pr(&parent, &child, &child_path);
+    rusqlite::Connection::open(&parent.database)
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planning_url='https://linear.app/fixture/issue/INF-124' WHERE id=?1",
+            [child.id.as_str()],
+        )
+        .unwrap();
+    lf(
+        &child_path,
+        &["checkout", "INF-124", "--stack-on", "INF-123"],
+    );
+    lf(&child_path, &["sync"]);
+    let publish = || {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .args([
+                "pr",
+                "open",
+                "--title",
+                "Child work",
+                "--body",
+                "Builds on the parent",
+            ])
+            .current_dir(&child_path)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .unwrap()
+    };
+
+    std::fs::remove_file(home.path().join("gh.log")).unwrap();
+    let agreed = publish();
+    assert!(
+        agreed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&agreed.stderr)
+    );
+    let log = gh_log(home.path());
+    assert!(log.contains("pr edit 42 --title"), "{log}");
+    assert!(!log.contains("--base"), "{log}");
+
+    // Someone moves the PR on GitHub; publish leaves it and names both sides.
+    std::fs::write(home.path().join("pr-base"), "main").unwrap();
+    let moved = publish();
+    let stderr = String::from_utf8_lossy(&moved.stderr);
+    assert!(moved.status.success(), "{stderr}");
+    assert!(
+        stderr.contains("PR #42 targets main, but INF-124 is stacked on INF-123 (parent)."),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("Record it: lf sync main. Follow the record: gh pr edit 42 --base parent"),
+        "{stderr}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
+        "main"
+    );
 }

@@ -202,7 +202,9 @@ pub fn create_or_update_pr(
         progress.status("Updating PR...");
         update_pr(repo, info.number, title, body)?;
         let record = PublicationRecord {
-            identifier: task_context.as_ref().map(|context| context.identifier.as_str()),
+            identifier: task_context
+                .as_ref()
+                .map(|context| context.identifier.as_str()),
             parent: stack.as_ref().map(|stack| RecordedParent {
                 identifier: &stack.parent_identifier,
                 branch: &stack.parent_branch,
@@ -2621,14 +2623,20 @@ mod tests {
     #[test]
     fn publication_keeps_a_base_the_record_names_and_one_it_cannot_read() {
         let stacked = record(parent(false), "jack/loo-12");
-        assert_eq!(pr_base_update(Some("jack/loo-12"), &stacked), PrBaseUpdate::Keep);
+        assert_eq!(
+            pr_base_update(Some("jack/loo-12"), &stacked),
+            PrBaseUpdate::Keep
+        );
         assert_eq!(pr_base_update(None, &stacked), PrBaseUpdate::Keep);
     }
 
     #[test]
     fn publication_retargets_only_from_a_merged_parent() {
         let landed = record(parent(true), "main");
-        assert_eq!(pr_base_update(Some("jack/loo-12"), &landed), PrBaseUpdate::Retarget);
+        assert_eq!(
+            pr_base_update(Some("jack/loo-12"), &landed),
+            PrBaseUpdate::Retarget
+        );
         assert_eq!(
             pr_base_update(Some("jack/other"), &landed),
             PrBaseUpdate::Disagree("jack/other")

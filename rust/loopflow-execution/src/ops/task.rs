@@ -476,18 +476,18 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
 
 /// The identifier of another open Task that `target` names, by identifier or
 /// by branch: one neither finished nor abandoned whose PR has not merged.
+/// Outside a Task's checkout there is no other Task to name.
 pub fn open_task_named(worktree: &Path, target: &str) -> OpsResult<Option<String>> {
     block_on_task(async move {
-        let own = match resolve_managed_task(worktree).await? {
-            ManagedTask::Managed { task, .. } => Some(task.id),
-            _ => None,
+        let ManagedTask::Managed { store, task: own } = resolve_managed_task(worktree).await?
+        else {
+            return Ok(None);
         };
-        let store = task_store().await?;
         let named = match store.get_task_by_issue(target).await.map_err(task_error)? {
             Some(task) => Some(task),
             None => store.get_task_by_branch(target).await.map_err(task_error)?,
         };
-        let Some(task) = named.filter(|task| own.as_ref() != Some(&task.id)) else {
+        let Some(task) = named.filter(|task| task.id != own.id) else {
             return Ok(None);
         };
         let state = store.task_state(&task.id).await.map_err(task_error)?;
@@ -1108,7 +1108,11 @@ fn prepare_task(
             task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
-                stack_existing_task(&store, &main, &task, parent).await?;
+                let stacked = stack_existing_task(&store, &main, &task, parent).await?;
+                eprintln!(
+                    "{stacked}\nRun `lf sync` in {} to merge it.",
+                    task.worktree()?.display()
+                );
             }
             restore_task_checkout(&store, &task, recover_from).await?;
             task
@@ -1292,12 +1296,28 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
     Ok(())
 }
 
+/// Stack the Task checked out at `worktree` on the open Task `parent`, moving
+/// its PR's base, and say so. Merging the parent is the caller's sync.
+pub fn stack_task(worktree: &Path, parent: &str) -> OpsResult<String> {
+    block_on_task(async move {
+        let ManagedTask::Managed { store, task } = resolve_managed_task(worktree).await? else {
+            return Err(task_error(
+                "only a Task's checkout can stack on another Task",
+            ));
+        };
+        let main = crate::git::worktrees::main_repo_root(worktree).map_err(task_error)?;
+        stack_existing_task(&store, &main, &task, parent).await
+    })
+}
+
+/// Record `requested` as the Task's parent and retarget its open PR there.
+/// Returns the line that reports both.
 async fn stack_existing_task(
     store: &SharedStore,
     main_repo: &Path,
     task: &Task,
     requested: &str,
-) -> OpsResult<()> {
+) -> OpsResult<String> {
     fetch_task_refs(main_repo)?;
     let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
@@ -1317,14 +1337,28 @@ async fn stack_existing_task(
         .stack_task_placement(task, &parent.id, &base_commit)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    eprintln!(
-        "Task {} stacks on {requested} ({}){}. This Task's checkout and PR are unchanged; run `lf sync` in {} to integrate it.",
-        task.identifier,
-        parent.branch,
-        note.map(|note| format!("; {note}")).unwrap_or_default(),
-        task.worktree()?.display()
-    );
-    Ok(())
+    let mut line = format!("Stacked {} on {requested}", task.identifier);
+    if let Some(note) = note {
+        line.push_str(&format!("; {note}"));
+    }
+    let open_pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .filter(|pr| pr.phase() == PrPhase::Open)
+        .and_then(|pr| pr.github().map(|github| u64::from(github.number)));
+    if let Some(number) = open_pr {
+        crate::ops::pr::retarget_pr(task.worktree()?, number, &parent.branch, &|_| {}).map_err(
+            |error| {
+                task_error(format!(
+                    "{line}, but PR #{number} still targets its old base ({error}); run `gh pr edit {number} --base {}`",
+                    parent.branch
+                ))
+            },
+        )?;
+        line.push_str(&format!("; PR #{number} now targets {}", parent.branch));
+    }
+    Ok(line)
 }
 
 /// The Task a stacked Task names, with the PR record it already has.

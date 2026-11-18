@@ -2276,15 +2276,12 @@ pub fn resolve_task_agent(
     wave: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let resolved = crate::config::resolved(Some(worktree), wave)?;
-    let agent = match skill {
-        Some(skill) => crate::config::settings::resolve(&resolved.config, Some(skill))?
-            .config
-            .agent()?
-            .to_owned(),
-        None => resolved.config.agent()?.to_owned(),
+    let shared = crate::config::resolved(Some(worktree), wave)?;
+    let Some(skill) = skill else {
+        return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
     };
-    Ok(crate::config::Agent::parse(&agent)?)
+    let resolved = crate::config::settings::resolve(&shared.config, Some(skill))?;
+    Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(

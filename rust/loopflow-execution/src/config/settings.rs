@@ -619,9 +619,18 @@ pub struct Outside {
 }
 
 impl Outside {
-    /// A `--setting` override belongs to the command that carries it.
-    pub(crate) fn overridden(&self) -> bool {
-        !self.invocation.is_null()
+    /// `compute`'s result, shared by served readings under `key`. A
+    /// `--setting` override belongs to the command that carries it, so with
+    /// one the value is computed here and never shared.
+    pub(crate) fn shared<T: Clone + Send + Sync + 'static>(
+        &self,
+        key: crate::observe::Derived,
+        compute: impl FnOnce() -> T,
+    ) -> T {
+        if !self.invocation.is_null() {
+            return compute();
+        }
+        (*crate::observe::derived(key, compute)).clone()
     }
 }
 

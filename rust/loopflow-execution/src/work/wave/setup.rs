@@ -46,27 +46,31 @@ pub async fn read_wave_setup(
 ) -> anyhow::Result<WaveSetup> {
     let outside = crate::config::settings::outside()?;
     let resolved = crate::config::resolved_with(Some(checkout), Some(wave.slug()), &outside)?;
-    let skill_agents = if outside.overridden() {
-        skill_agents(checkout, wave.slug(), &outside)?
-    } else {
-        let key = Derived::SkillAgents {
-            checkout: checkout.to_owned(),
-            wave: wave.slug().to_owned(),
-            outside: outside.clone(),
-        };
-        (*crate::observe::derived(key, || skill_agents(checkout, wave.slug(), &outside))).clone()?
-    };
     Ok(WaveSetup {
         graph: effective_setting(&resolved, "graph"),
         agent: effective_setting(&resolved, "agent"),
-        skill_agents,
+        skill_agents: skill_agents(checkout, wave.slug(), &outside)?,
         tasks_machine: machine(store, wave, MachineSetting::Tasks)?,
         session_machine: machine(store, wave, MachineSetting::Session)?,
     })
 }
 
-/// One resolution and one skill load per skill some layer names.
+/// The agent of every skill some layer names, shared by served readings.
 fn skill_agents(
+    checkout: &Path,
+    wave: &str,
+    outside: &Outside,
+) -> Result<BTreeMap<String, SetupValue>, LoadError> {
+    let key = Derived::SkillAgents {
+        checkout: checkout.to_owned(),
+        wave: wave.to_owned(),
+        outside: outside.clone(),
+    };
+    outside.shared(key, || resolve_skill_agents(checkout, wave, outside))
+}
+
+/// One resolution and one skill load per skill.
+fn resolve_skill_agents(
     checkout: &Path,
     wave: &str,
     outside: &Outside,
@@ -157,9 +161,7 @@ mod tests {
         };
         let cache = Arc::new(Cache::default());
         let read = || {
-            let agents = crate::observe::derived(key.clone(), || {
-                skill_agents(repo.path(), "product", &outside).unwrap()
-            });
+            let agents = skill_agents(repo.path(), "product", &outside).unwrap();
             agents["review"].value.clone().unwrap()
         };
         let (first, dependencies) = cache.capture(read);

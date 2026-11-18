@@ -221,8 +221,7 @@ impl Dependencies {
 
 /// One derived value, locked while it is computed so concurrent readings
 /// asking for it compute once.
-#[derive(Debug, Default)]
-struct Slot(Mutex<Option<Computed>>);
+type Slot = Arc<Mutex<Option<Computed>>>;
 
 #[derive(Debug)]
 struct Computed {
@@ -234,7 +233,7 @@ struct Computed {
 #[derive(Debug, Default)]
 pub struct Cache {
     entries: Mutex<HashMap<Fact, SharedEntry>>,
-    derived: Mutex<HashMap<Derived, Arc<Slot>>>,
+    derived: Mutex<HashMap<Derived, Slot>>,
     #[cfg(test)]
     computations: Mutex<Vec<Derived>>,
 }
@@ -263,12 +262,13 @@ impl Cache {
 
     fn refresh(&self, source: Source) {
         // A value leaves like a fact: nothing holds it and nothing asked lately.
+        // A slot only this map holds is unlocked; one a panic emptied goes too.
         self.derived
             .lock()
             .expect("derived values")
             .retain(|_, slot| {
                 Arc::strong_count(slot) > 1
-                    || slot.0.try_lock().map_or(true, |computed| {
+                    || slot.lock().is_ok_and(|computed| {
                         computed.as_ref().is_some_and(|computed| {
                             Arc::strong_count(&computed.dependencies.0) > 1
                                 || computed.used.elapsed().unwrap_or_default()
@@ -469,8 +469,8 @@ pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() ->
         .or_default()
         .clone();
     // A computation that panicked stored nothing; the next caller computes.
-    let mut computed = slot.0.lock().unwrap_or_else(|poisoned| {
-        slot.0.clear_poison();
+    let mut computed = slot.lock().unwrap_or_else(|poisoned| {
+        slot.clear_poison();
         poisoned.into_inner()
     });
     if computed
@@ -666,10 +666,6 @@ mod tests {
     use crate::store::ProcessIdentityEvidence;
     use std::sync::Arc;
 
-    fn refresh(cache: &Cache) {
-        cache.refresh_all();
-    }
-
     #[test]
     fn shared_git_answers_refresh_without_changing_bare_reads_or_writes() {
         let repo = loopflow_test_support::TestRepo::new();
@@ -680,11 +676,11 @@ mod tests {
         std::fs::write(repo.path().join("new.txt"), "text").unwrap();
         assert!(!status().is_empty());
         assert_eq!(cache.capture(status).0, first);
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         let (second, dependencies) = cache.capture(status);
         assert_eq!(second, status());
-        refresh(&cache);
+        cache.refresh_all();
         assert!(!dependencies.changed());
         // A new server starts with no retained observations.
         let replacement = Arc::new(Cache::default());
@@ -702,7 +698,7 @@ mod tests {
         assert_eq!(answer.unwrap_err().kind(), std::io::ErrorKind::NotFound);
         let (_, unrelated) = cache.capture(|| read_to_string(&other).unwrap());
         std::fs::write(&first, "created").unwrap();
-        refresh(&cache);
+        cache.refresh_all();
         assert!(missing.changed());
         assert!(!unrelated.changed());
         assert_eq!(
@@ -712,7 +708,7 @@ mod tests {
         // A new reading replaces its dependencies; it does not retain the first path.
         let (_, replaced) = cache.capture(|| read_to_string(&other).unwrap());
         std::fs::remove_file(&first).unwrap();
-        refresh(&cache);
+        cache.refresh_all();
         assert!(
             missing.changed(),
             "returning to the old answer still advances its revision"
@@ -730,7 +726,7 @@ mod tests {
         assert_eq!(answer, (6, b"abc".to_vec()));
         std::fs::write(&path, "changed").unwrap();
         assert_eq!(cache.capture(|| file_bytes(&path, 3).unwrap()).0, answer);
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         assert_eq!(
             cache.capture(|| file_bytes(&path, 3).unwrap()).0,
@@ -756,7 +752,7 @@ mod tests {
         assert!(failure.is_err());
         std::fs::write(&path, "after").unwrap();
         assert_eq!(read_to_string(&path).unwrap(), "after");
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
     }
 
@@ -788,7 +784,7 @@ mod tests {
         std::fs::write(&report, "passing").unwrap();
         assert_eq!(read(), b"passing");
         assert_eq!(cache.capture(read).0, before);
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         assert_eq!(cache.capture(read).0, b"passing");
     }
@@ -809,7 +805,7 @@ mod tests {
         std::fs::write(root.join("example.yaml"), "[]").unwrap();
         assert!(read().contains_key("example"));
         assert!(cache.capture(read).0.is_empty());
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         assert!(cache.capture(read).0.contains_key("example"));
     }
@@ -828,7 +824,7 @@ mod tests {
         std::fs::rename(&directory, &target).unwrap();
         std::os::unix::fs::symlink(&target, &directory).unwrap();
         assert!(read().is_empty());
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         assert!(cache.capture(read).0.is_empty());
     }
@@ -852,7 +848,7 @@ mod tests {
                 pid as i32
             );
         }
-        refresh(&cache);
+        cache.refresh_all();
         let stopped_changed = dependencies.changed();
         let (stopped, _) = cache.capture(|| super::process(pid).unwrap().unwrap());
         child.kill().unwrap();
@@ -880,7 +876,7 @@ mod tests {
         child.wait().unwrap();
         assert_eq!(before, ProcessIdentityEvidence::Live);
         assert_eq!(process(pid, started), ProcessIdentityEvidence::Dead);
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         assert_eq!(
             cache.capture(|| process(pid, started)).0,
@@ -911,11 +907,11 @@ mod tests {
         // No reading is active: computed inline from the file as it is now.
         assert_eq!(*text(), "after");
         assert_eq!(*cache.capture(text).0, "before");
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed() && unchanged.changed());
         let (third, dependencies) = cache.capture(text);
         assert_eq!(*third, "after");
-        refresh(&cache);
+        cache.refresh_all();
         assert!(!dependencies.changed());
         assert_eq!(cache.computations(|computed| *computed == key), 2);
     }
@@ -936,7 +932,7 @@ mod tests {
         let (_, computed) = cache.capture(text);
         let (_, shared) = cache.capture(text);
         std::fs::write(&path, "after").unwrap();
-        refresh(&cache);
+        cache.refresh_all();
         assert!(computed.changed(), "the reading that computed both");
         assert!(shared.changed(), "a reading that was handed the value");
         assert_eq!(*cache.capture(text).0, "outer after");
@@ -969,7 +965,7 @@ mod tests {
         assert!(values.iter().all(|value| Arc::ptr_eq(value, &values[0])));
         assert_eq!(cache.computations(|computed| *computed == key), 1);
         std::fs::write(&path, "changed").unwrap();
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
     }
 
@@ -1125,7 +1121,7 @@ mod tests {
         assert_eq!(before.1.members.len(), 1);
         child.0.kill().unwrap();
         child.0.wait().unwrap();
-        refresh(&cache);
+        cache.refresh_all();
         assert!(dependencies.changed());
         let (after, _) = cache.capture(read);
         assert!(after.0.is_empty());

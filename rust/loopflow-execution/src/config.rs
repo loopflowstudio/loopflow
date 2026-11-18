@@ -712,7 +712,12 @@ pub(crate) fn resolved_with(
     // A Wave named by ID is found by walking the checkout, which no reading
     // observes: the shared value is kept under the name.
     let wave = selected_wave(repo_root, wave)?;
-    let resolve = || {
+    let key = crate::observe::Derived::Settings {
+        checkout: repo_root.map(Path::to_owned),
+        wave: wave.clone(),
+        outside: outside.clone(),
+    };
+    outside.shared(key, || {
         let layers = file_layers(
             repo_root,
             wave.as_deref(),
@@ -720,16 +725,7 @@ pub(crate) fn resolved_with(
             outside.remote.as_deref(),
         )?;
         settings::resolve_with(&layers, None, outside).map(Arc::new)
-    };
-    if outside.overridden() {
-        return resolve();
-    }
-    let key = crate::observe::Derived::Settings {
-        checkout: repo_root.map(Path::to_owned),
-        wave: wave.clone(),
-        outside: outside.clone(),
-    };
-    (*crate::observe::derived(key, resolve)).clone()
+    })
 }
 
 fn selected_wave(

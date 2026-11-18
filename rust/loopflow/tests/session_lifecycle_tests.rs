@@ -35,7 +35,7 @@ impl Fixture {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", if waits { "True" } else { "False" }),
         )
         .unwrap();
@@ -179,7 +179,7 @@ impl Fixture {
     fn finish_on_resume(&self) {
         std::fs::write(
             self.home.path().join("bin/opencode"),
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", "False"),
         )
         .unwrap();

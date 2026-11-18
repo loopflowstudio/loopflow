@@ -144,7 +144,7 @@ impl Fixture {
         for harness in ["claude", "codex", "opencode"] {
             let script = fixture.home.path().join("bin").join(harness);
             let source = if harness == "opencode" {
-                include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False")
             } else {
                 r#"#!/usr/bin/python3
@@ -368,7 +368,7 @@ fn opencode_diagnostics_stay_off_the_terminal_on_launch_and_resume() {
     let fixture = Fixture::new("opencode");
     fs::write(
         fixture.home.path().join("bin/opencode"),
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py").replace("__WAIT__", "False")
             .replace("    _record_launch()\n    if False:", r#"    _record_launch()
     mode = 'resume' if (HOME / 'opened').exists() else 'launch'
     (HOME / 'opened').touch()
@@ -451,7 +451,7 @@ fn opencode_failure_before_session_creation_keeps_diagnostics() {
 #[test]
 fn opencode_terminal_setup_failure_stops_the_private_server() {
     let fixture = Fixture::new("opencode");
-    let source = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+    let source = include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
         .replace("__WAIT__", "False")
         .replace(
             "        if self.path == \"/api/event\":",
@@ -1304,7 +1304,7 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False");
         fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
         fixture.settings("opencode:opencode/first-model", true, false);

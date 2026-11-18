@@ -1975,7 +1975,7 @@ sys.exit(code)
 
 #[test]
 fn a_task_step_runs_as_a_worker_on_every_harness() {
-    let opencode = include_str!("../../../loopflow-execution/tests/support/opencode_server.py")
+    let opencode = include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
         .replace("__WAIT__", "False")
         .replace(
             "Path(__file__).resolve().parent.parent",

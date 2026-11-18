@@ -21,41 +21,9 @@ pub struct NativeClient {
     pub process: Command,
     pub remote: Option<PathBuf>,
     pub thread: Option<AgentSessionId>,
-    pub companion: Option<Companion>,
     pub(crate) title: Option<crate::terminal_title::TerminalTitle>,
     pub reported_thread: Option<PathBuf>,
     pub stderr: Option<File>,
-}
-
-pub struct Companion {
-    pub closed: Option<tokio::sync::oneshot::Sender<()>>,
-    pub worker: Option<std::thread::JoinHandle<Result<()>>>,
-}
-
-impl std::fmt::Debug for Companion {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Companion").finish_non_exhaustive()
-    }
-}
-impl Companion {
-    pub fn finish(&mut self) -> Result<()> {
-        if let Some(closed) = self.closed.take() {
-            let _ = closed.send(());
-        }
-        if let Some(worker) = self.worker.take() {
-            worker
-                .join()
-                .map_err(|_| anyhow!("provider observer panicked"))??;
-        }
-        Ok(())
-    }
-}
-impl Drop for Companion {
-    fn drop(&mut self) {
-        if let Err(error) = self.finish() {
-            tracing::warn!(%error, "cannot stop provider companion");
-        }
-    }
 }
 
 impl NativeClient {
@@ -88,7 +56,6 @@ impl NativeClient {
             title,
             remote: None,
             thread: launch.thread()?,
-            companion: None,
             reported_thread: None,
             stderr: None,
         })
@@ -547,9 +514,6 @@ pub fn run(
     )?;
     let mut client = harness.open(launch)?;
     let result = run_client(launch, &mut client, launch_lock, capture, &mut progress);
-    if let Some(companion) = &mut client.companion {
-        companion.finish()?;
-    }
     if let Ok(outcome) = &result {
         if let Some(moved) = &outcome.moved {
             eprintln!("{moved}");
@@ -588,7 +552,7 @@ fn run_client(
     let process = &mut client.process;
     let title = &mut client.title;
     // Only an explicit remote connection is a client of a surviving AgentProcess.
-    let owned = (client.remote.is_none() && client.companion.is_none()).then_some(&attachment);
+    let owned = client.remote.is_none().then_some(&attachment);
     // Refused before the provider conversation is recorded, so the next launch
     // starts it fresh instead of resuming one that never ran. A Session's
     // first launch (`lf resume` starting a repository conversation) names no
@@ -609,7 +573,7 @@ fn run_client(
         process.stderr(stderr);
     }
     record_interactive_opened(environment)?;
-    if client.companion.is_none() && crate::transport::current().is_some() {
+    if crate::transport::current().is_some() {
         // Hand the wait to the execution owner and become the provider, or its
         // client: no launcher sits beside the agent holding the heap that built it.
         if let Some(capture) = capture {
@@ -1530,7 +1494,7 @@ mod tests {
         let opencode = bin.join("opencode");
         std::fs::write(
             &opencode,
-            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False"),
+            include_str!("../../tests/support/opencode_cli.py").replace("__WAIT__", "False"),
         )
         .unwrap();
         #[cfg(unix)]

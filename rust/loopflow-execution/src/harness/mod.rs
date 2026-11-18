@@ -443,9 +443,10 @@ impl Launch<'_> {
     pub fn thread(&self) -> Result<Option<AgentSessionId>> {
         let naming = self.harness.capabilities().thread;
         match self.start.thread() {
-            None if naming.for_kind(self.kind) == ThreadName::Assigned => {
-                self.recording.assigned_thread().map(Some)
-            }
+            None if naming.for_kind(self.kind) == ThreadName::Assigned => self
+                .recording
+                .assigned_thread()
+                .map(|thread| Some(self.harness.thread_name(thread))),
             thread => Ok(thread),
         }
     }
@@ -489,6 +490,11 @@ pub trait Harness: Sync + std::fmt::Debug {
         events: mpsc::UnboundedSender<ConversationEvent>,
         approval: ApprovalPolicy,
     ) -> Box<dyn Driver>;
+
+    /// The native name of the conversation lf assigned `assigned` to.
+    fn thread_name(&self, assigned: AgentSessionId) -> AgentSessionId {
+        assigned
+    }
 
     fn validate_agent_process_close(
         &self,

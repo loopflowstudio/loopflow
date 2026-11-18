@@ -311,7 +311,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
                 .replace("__WAIT__", "True"),
         )
         .unwrap();
@@ -1120,7 +1120,7 @@ fn session_names_survive_capture_replacement() {
     let provider = bin.join("opencode");
     std::fs::write(
         &provider,
-        include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "True"),
     )
     .unwrap();
@@ -1355,7 +1355,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     assert!(!first.status.success());
     assert!(String::from_utf8_lossy(&first.stderr).contains("private server failed to start"));
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     let retry = open(&["session", "resume", &id]);
@@ -1369,7 +1369,7 @@ fn terminal_first_launch_and_failed_startup_reopen_the_same_conversation() {
     let failed = open(&["session", "resume", &id]);
     assert!(!failed.status.success());
     write_provider(
-        &include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+        &include_str!("../../loopflow-execution/tests/support/opencode_cli.py")
             .replace("__WAIT__", "False"),
     );
     for _ in 0..2 {

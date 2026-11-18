@@ -178,7 +178,7 @@ for line in sys.stdin:
             ("security", crate::test_support::FAKE_SECURITY.to_string()),
             (
                 "opencode",
-                include_str!("../../../../loopflow-execution/tests/support/opencode_server.py")
+                include_str!("../../../../loopflow-execution/tests/support/opencode_cli.py")
                     .replace("__WAIT__", "False"),
             ),
         ] {

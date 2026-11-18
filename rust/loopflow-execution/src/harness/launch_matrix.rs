@@ -62,7 +62,7 @@ for line in sys.stdin:
         &bin.join("opencode"),
         &format!(
             "#!/usr/bin/python3\n{record}\n{}",
-            include_str!("../../tests/support/opencode_server.py").replace("__WAIT__", "False").replace("if \"serve\" not in sys.argv:\n    _record_launch()", "if \"serve\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
+            include_str!("../../tests/support/opencode_cli.py").replace("__WAIT__", "False").replace("if \"run\" not in sys.argv:\n    _record_launch()", "if \"run\" not in sys.argv:\n    print('native diagnostic', file=sys.stderr)\n    _record_launch()")
         ),
     );
     // Bare Pi's extension uses the launch snapshot; only managed Pi reports
@@ -244,6 +244,20 @@ fn every_harness_runs_all_four_launch_kinds() {
                     anyhow::ensure!(
                         settings["permissions"] == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]),
                         "{row}: OpenCode yolo setting"
+                    );
+                    // A conversation is OpenCode itself; a headless turn is one run.
+                    anyhow::ensure!(
+                        commands.len() == 1 && flag("--standalone") && flag("--session"),
+                        "{row}: one private OpenCode on the named conversation"
+                    );
+                    anyhow::ensure!(
+                        !flag("serve") && !flag("--server"),
+                        "{row}: OpenCode started a server"
+                    );
+                    anyhow::ensure!(
+                        flag("run") == (mode == Mode::Headless)
+                            && flag("--auto") == (mode == Mode::Headless),
+                        "{row}: OpenCode run ownership"
                     );
                 }
                 for command in &commands {

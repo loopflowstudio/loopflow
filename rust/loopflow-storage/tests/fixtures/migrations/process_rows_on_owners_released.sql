@@ -26,3 +26,12 @@ VALUES('repair-done','trace','/repo',60,70,'succeeded',0,NULL,NULL),
 INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,poll_observed_at,created_at,updated_at,repair_lf_process_id,repair_finished_at)
 VALUES('incident-done','/repo',1,'head','[]',1,1,1,'repair-done',71),
       ('incident-live','/repo',1,'head','[]',1,1,1,'repair-live',NULL);
+-- A Task carried by a live released `lf task run`, which also ships it.
+INSERT INTO processes(id,trace_id,cwd,started_at,pid,os_started_at)
+VALUES('carrier-live','trace','/repo/task',100,6001,99),
+      ('carrier-next','trace','/repo/task',110,6002,109);
+INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('task-live','repo_1','RUN-1',1);
+INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
+VALUES('task-live','{}','start','{}','carrier-live',1);
+INSERT INTO task_ship_events(task_id,kind,at,lf_process_id) VALUES('task-live','approved',100,'carrier-live');

@@ -201,10 +201,11 @@ struct ProcessContext {
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
     receipts: Arc<Mutex<ReceiptCost>>,
-    /// The record this process runs as and writes its end on: the step its
-    /// Graph minted it for, or a Graph run or Project activation it recorded.
+    /// The records this process runs as and writes its end on: the step its
+    /// Graph minted it for, and any Graph run, Task run or Project
+    /// activation it recorded.
     #[serde(skip)]
-    run_owner: Arc<Mutex<Option<RunOwner>>>,
+    run_owners: Arc<Mutex<Vec<RunOwner>>>,
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
@@ -848,17 +849,21 @@ fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfPr
     let Some(ended_at) = record.completed_at else {
         return;
     };
-    let Some(owner) = *context.run_owner.lock().expect("run owner mutex poisoned") else {
-        return;
-    };
-    if let Err(error) = store.finish_run(
-        owner,
-        &record.id,
-        ended_at,
-        record.exit_code,
-        record.error.as_deref(),
-    ) {
-        warn!(%error, "could not record this run's end on its owner record");
+    let owners = context
+        .run_owners
+        .lock()
+        .expect("run owner mutex poisoned")
+        .clone();
+    for owner in owners {
+        if let Err(error) = store.finish_run(
+            owner,
+            &record.id,
+            ended_at,
+            record.exit_code,
+            record.error.as_deref(),
+        ) {
+            warn!(%error, ?owner, "could not record this run's end on its owner record");
+        }
     }
 }
 
@@ -866,7 +871,10 @@ fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfPr
 /// end there.
 pub fn mark_run_owner(owner: RunOwner) {
     if let Some(context) = current_context() {
-        *context.run_owner.lock().expect("run owner mutex poisoned") = Some(owner);
+        let mut owners = context.run_owners.lock().expect("run owner mutex poisoned");
+        if !owners.contains(&owner) {
+            owners.push(owner);
+        }
     }
 }
 
@@ -1025,11 +1033,13 @@ fn create_process_context(
     let minted = minted.filter(|_| inherits);
     // A Graph mints its steps' ids; a Task run mints its Graph run's, which
     // that run marks once it records itself.
-    let run_owner = Arc::new(Mutex::new(
+    let run_owners = Arc::new(Mutex::new(
         minted
             .as_ref()
             .filter(|_| graph_step() || std::env::var_os(GRAPH_STEP_ENV).is_some())
-            .map(|_| RunOwner::GraphStep),
+            .map(|_| RunOwner::GraphStep)
+            .into_iter()
+            .collect(),
     ));
     let lf_process_id = minted.unwrap_or_default();
     // Export the identity so prompt logs and child processes carry the same
@@ -1113,7 +1123,7 @@ fn create_process_context(
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
         receipts: Arc::default(),
-        run_owner,
+        run_owners,
     };
     set_context(context.clone());
     // Only an `lf` executable exits on interrupt; library callers settle their
@@ -1308,6 +1318,32 @@ pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> Process
         (Some(_), _, _) => ProcessIdentityEvidence::Dead,
         (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
         (None, _, _) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// Whether the lf carrying a Task's run still runs. A carrier with no OS
+/// process ended, or was moved here from another Machine.
+pub fn carrier_evidence(
+    carrier: &loopflow_storage::graph_process::TaskCarrier,
+) -> ProcessIdentityEvidence {
+    match (carrier.pid, carrier.os_started_at) {
+        (Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
+        (Some(_), None) => ProcessIdentityEvidence::Unknown,
+        (None, _) => ProcessIdentityEvidence::Dead,
+    }
+}
+
+/// A recorded run's result as this Machine sees it: one that never wrote its
+/// end and whose pid is dead ended unseen, so it reads `Unknown`.
+pub fn observed_result(
+    run: &loopflow_storage::graph_process::Execution,
+) -> loopflow_storage::graph_process::ExecutionResult {
+    use loopflow_storage::graph_process::ExecutionResult;
+    match run.result() {
+        ExecutionResult::Running if run_evidence(run) == ProcessIdentityEvidence::Dead => {
+            ExecutionResult::Unknown
+        }
+        result => result,
     }
 }
 

@@ -318,22 +318,7 @@ pub fn readiness(
     store: &loopflow_storage::sqlite::SqliteStore,
     wave: &loopflow_model::id::WaveId,
 ) -> crate::store::StoreResult<loopflow_storage::sqlite::ProjectReadiness> {
-    let mut readiness = store.project_readiness(wave)?;
-    if let Some(activation) = readiness
-        .activation
-        .as_mut()
-        .filter(|activation| activation.completed_at.is_none())
-    {
-        let dead = store.project_activation_run(wave)?.is_some_and(|run| {
-            crate::journal::run_evidence(&run) == crate::journal::ProcessIdentityEvidence::Dead
-        });
-        if dead {
-            activation.outcome = loopflow_storage::graph_process::ExecutionResult::Unknown
-                .outcome()
-                .map(str::to_owned);
-        }
-    }
-    Ok(readiness)
+    store.project_readiness(wave, crate::journal::observed_result)
 }
 
 #[cfg(test)]

@@ -403,18 +403,18 @@ pub(super) fn map_machine_by_id(
 }
 
 /// Completion and abandonment are durable. An open Task's state follows
-/// what it is doing: its Task run, ship process or a Graph in its work has not
-/// exited. Its carrier is the latest Auto-Ship log entry naming one; the
+/// what it is doing: its Task run's carrier or its ship carrier still has an
+/// OS process, or a Graph in its work has not exited. Its carrier is the latest Auto-Ship log entry naming one; the
 /// Auto-Ship approval (`shipped_at`) makes that run shipping.
 /// Approved with nothing running, it is idle until recovery restarts its ship process.
 pub(crate) fn task_state_sql(t: &str) -> String {
     format!(
         "CASE WHEN {t}.abandoned_at IS NOT NULL THEN 'abandoned' \
          WHEN {t}.planning_completed=1 THEN 'done' \
-         WHEN EXISTS(SELECT 1 FROM processes lp WHERE lp.completed_at IS NULL AND (lp.id=(SELECT CASE WHEN e.kind IN ('approved','carried') THEN e.lf_process_id END \
-             FROM task_ship_events e WHERE e.task_id={t}.id \
-             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) \
-             OR lp.id=(SELECT tg.lf_process_id FROM task_graphs tg WHERE tg.task_id={t}.id))) \
+         WHEN EXISTS(SELECT 1 FROM (SELECT e.kind,e.pid FROM task_ship_events e WHERE e.task_id={t}.id \
+             AND e.kind IN ('approved','carried','stopped','withdrawn') ORDER BY e.id DESC LIMIT 1) last \
+             WHERE last.kind IN ('approved','carried') AND last.pid IS NOT NULL) \
+             OR EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id AND tg.run_pid IS NOT NULL) \
              OR EXISTS({open_processes}) \
          THEN CASE WHEN {t}.shipped_at IS NOT NULL THEN 'shipping' ELSE 'moving' END \
          WHEN {t}.shipped_at IS NULL AND EXISTS(SELECT 1 FROM task_graphs tg WHERE tg.task_id={t}.id \

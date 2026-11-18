@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, realigned at `9a369536ae`)
+## Status (2026-11-17, carrier slices built)
 
 Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
 main at `2593c489d7`; that merge touched nothing this plan depends on.
@@ -12,29 +12,71 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them, liveness by
 `run_evidence`); `detached::start_lf` returns `Started { id, pid,
 os_started_at }`, so `engine::launch` waits on its child without the store;
-the three owner items below ("Owner slices as built").
+the owner items and carriers below.
 
-Next, in order: one observed result (`journal::observed_result`, below);
-the Task carrier, then the ship carrier (each adds its `RunOwner` variant
-and `finish_run` arm, read through `observed_result`); the Session slice (slice 3, with
-the retirement-by-terminal gap); the expand migration's foreign-key
-rebuild together with stopping the journal writer; slices 4–6. When
-LOO-936 merges: rebase, rerun `python3 -I scratch/process_sql_scan.py rust`
-and reconcile the inventory. Quotes and the OS-scan measurement:
-`questions.md`.
+Next, in order: the Session slice (slice 3, with the retirement-by-terminal
+gap and `GraphProcessSummaryState::of_process` at `sessions.rs:428` →
+`of_run(observed_result(..))`); the expand migration's foreign-key rebuild
+together with stopping the journal writer; slices 4–6. Still reading
+`processes` beside the carriers: `process_starter` (ship "started by"),
+`run_task_graph`'s parent check (`graph.rs:79`, the Graph child's
+`parent_lf_process_id` against the carrier) and `task_state_sql`'s
+`open_processes` arm. When LOO-936 merges: rebase, rerun
+`python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
+Quotes and the OS-scan measurement: `questions.md`.
 
-**Carriers, as found 2026-11-17.** `task_state_sql` reads "moving/shipping"
-from the carrier's `processes.completed_at`. Plan: `task_graphs.run_pid,
-run_os_started_at` written by `start_run_in` from the caller's
-`ExecutionStart` (the carrier is the current lf), cleared by a `finish_run`
-arm on `task_graphs.lf_process_id`; the carrier calls `mark_run_owner`.
-Ship events: `task_ship_events_append_only` blocks every UPDATE, so the
-migration replaces it with a launch-columns-immutable trigger (as for Graph
-runs), the trigger-coverage test in `revisions.rs` drops its update
-exemption for a `store_revision_task_ship_events_update` trigger, and the
-`finish_run` arm
-writes `ended_at/exit_code/error` by `task_ship_events_process`. The
-`open_processes` arm of `task_state_sql` stays until the Session slice.
+**Carrier slices as built.**
+
+- `journal::observed_result(&Execution)`: `Running` whose `run_evidence`
+  reads Dead → `Unknown`. `SqliteStore::project_readiness(wave, observe)`
+  selects the activation's `Execution` once and builds the wire
+  `ProjectActivation` from `observe(&run)`; `ops::project::readiness` passes
+  `observed_result`, storage-only callers `Execution::result`.
+  `project_activation_run` and the outcome patch are gone. Task updates read
+  a Graph run's outcome through it too.
+- Task carrier: `task_graphs.run_pid, run_os_started_at`, written by
+  `start_run_in` from the carrier's `ExecutionStart`, cleared by arrival,
+  `set_step_in` and `finish_run(TaskCarrier)`. **Deviation from the concept
+  review:** the end keeps `lf_process_id`. `row.run` (cursor + carrier) is
+  how the next `lf task run` sets out from where a stopped run stopped, and
+  how `lf task status` shows it stopped; clearing the id would lose both.
+  `TaskCarrier { id, pid, os_started_at }` replaces the Process row on
+  `SavedTaskGraphRow`; `journal::carrier_evidence` (no pid → Dead) answers
+  "running" for `lf task status` and the double-run refusal.
+  `process_may_run` is deleted. `task_state_sql` and `task_close_candidates`
+  read "moving" as `run_pid IS NOT NULL` — SQL cannot ask the OS; the
+  liveness pass (approach 4) closes a SIGKILLed carrier, as
+  `close_dead_processes` does for its Process row today.
+- Ship carrier: `task_ship_events.{pid,os_started_at,ended_at,exit_code,error}`
+  (`at` is its start); `ShipLog`/`TaskShipping.carrier: Option<Execution>`.
+  `task_ship_events_launch_is_immutable` replaces the append-only trigger,
+  `store_revision_task_ship_events_update` added, the revisions exemption
+  dropped. `finish_run(ShipCarrier)` ends approved/carried rows by
+  `task_ship_events_process`. Restart, "already shipping", stop-kill and the
+  ship snapshot read `run_evidence`/`observed_result`; the failure cause is
+  the Task's latest Graph run's `graph_failure_cause`, else the carrier's
+  own error, so `failure_cause`'s Process walk is deleted. Arrival at `end` hands off
+  with the carrier's pid read from `task_graphs` before it clears.
+- The journal holds `run_owners: Vec<RunOwner>`: `lf task run` marks
+  `TaskCarrier` and `ShipCarrier` (its run may hand the Task off at `end`),
+  `lf ship` marks `ShipCarrier`; a step may also be a carrier.
+- Bridge: released carriers get `run_pid` from their Process row on
+  `lf_process_id` change, released ship events on insert; a Process end
+  clears `run_pid` and ends ship rows. Backfill in the same migration.
+
+Checks (2026-11-17, carriers): storage nextest
+migration_runner/graph_inventory/revisions/project_selection/task_work/
+query_plans/processes/durable/task_retirement/forget → 196 pass; execution
+readiness_tests/task_updates/wave_lifecycle/journal/store::task_work*/
+ops::task::ship/task_execution/pr_landing/store::tests → pass except
+`journal::tests::a_held_write_lock_delays_an_process_by_one_receipt_wait`
+(pre-existing, gate); `nextest -p loopflow --lib` graph_tests,
+task_graph_launch_tests, world_recipes, explain `--test-threads 8` → pass
+after the ship cause fix (`task_ship_restarts_after_a_failure_wait…` needs the
+Graph run's cause), except
+`task_ship_runs_every_remaining_step_standing_in_at_each_interactive_step`
+failing once at line 2761 after 203 s under load 60 and passing alone in 16 s
+(gate: treat as a flake to fix if it recurs); clippy → clean.
 
 **Owner slices as built.**
 
@@ -56,44 +98,6 @@ writes `ended_at/exit_code/error` by `task_ship_events_process`. The
   `graph_tests::a_step_that_dies_before_writing_its_end_ends_as_its_graph_saw_it`
   (a SIGKILLed step reads ended, outcome `unknown`). Still untested:
   `graph_failure_cause` driving the repeated-failure stop.
-
-**Concept review after the owner slices (at `0cfa577ea4`): next implement
-direction.** Settled by the design; no product choice.
-
-- **One observed result.** "Unended and its pid is dead → `unknown`" is
-  written per reader today: `ops::project::readiness` reads readiness, then
-  queries the activation a second time (`project_activation_run`) and
-  patches the `outcome` string. Add `journal::observed_result(&Execution) ->
-  ExecutionResult` (`ExecutionResult::of`, with `Running` + `run_evidence`
-  Dead → `Unknown`) and route every owner reader through it. `readiness_in`
-  selects the activation's `Execution` once and keeps it on
-  `ProjectReadiness`; the wire `ProjectActivation` is built from it, and
-  `project_activation_run` and the patch go. Each carrier and ship arm below
-  reads through the same function.
-- **A Task carrier has no result of its own.** Its result is its Graph
-  run's. So the `TaskCarrier` arm of `finish_run` clears
-  `lf_process_id, run_pid, run_os_started_at` and writes no exit; "moving" is
-  carrier pid live by `process_identity_evidence`. The `ShipCarrier` arm is a
-  full `Execution` (ship events carry the columns). `RunOwner` stays the
-  record kind, not "has an `Execution`".
-- **`GraphProcessSummaryState::of_process`** (`sessions.rs:428`, Session
-  summary's Graph) still reads Process outcome; it goes with the Session
-  slice, replaced by `of_run(observed_result(..))`.
-
-Order for the next pass: observed result (test: the existing
-`an_activation_whose_lf_died_unended_reads_unknown` passes unchanged with
-the second query gone), then the Task carrier, then the ship carrier.
-
-Checks (2026-11-17, owner slices): `nextest -p loopflow-storage --lib`
-graph_inventory/migration_runner/project_selection → 135 pass; execution
-`readiness_tests`/`task_updates`/`wave_lifecycle`/`journal::` → pass except
-`journal::tests::a_held_write_lock_delays_an_process_by_one_receipt_wait`
-(finish receipt waits 4.1–4.3 s against a 3 s bound; fails the same at
-`7c659af9e5` without this diff; gate investigates); `nextest -p loopflow --lib`
-graph_tests + task_graph_launch_tests → pass after repairing
-`task_conversations` (it listed `feedback_summary`, gone from
-`SESSION_SELECT`; now `candidates.*`); clippy → clean. Gate: Swift
-`ProjectActivationTests` for the reordered message.
 
 **Correction: foreign keys come off in the expand, not the contract.** Once
 the journal stops writing rows (approach 2), every column still declaring

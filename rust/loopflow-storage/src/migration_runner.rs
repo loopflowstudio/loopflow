@@ -2177,6 +2177,58 @@ mod tests {
             repairs()[1],
             ("incident-live".into(), Some(90), Some(5002), Some(89))
         );
+
+        // A Task's carrier and its ship carrier record the OS process they
+        // run as; a released carrier's end clears both and ends the ship run.
+        let carrier = || -> (Option<String>, Option<i64>, Option<i64>) {
+            conn.query_row(
+                "SELECT lf_process_id,run_pid,run_os_started_at FROM task_graphs WHERE task_id='task-live'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+        };
+        type ShipRun = (String, Option<i64>, Option<i64>, Option<i64>);
+        let ship = || -> Vec<ShipRun> {
+            conn.prepare(
+                "SELECT lf_process_id,pid,ended_at,exit_code FROM task_ship_events
+                 WHERE task_id='task-live' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            carrier(),
+            (Some("carrier-live".into()), Some(6001), Some(99))
+        );
+        assert_eq!(ship(), [("carrier-live".into(), Some(6001), None, None)]);
+        conn.execute(
+            "UPDATE processes SET completed_at=105,outcome='failed',exit_code=1 WHERE id='carrier-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(carrier(), (Some("carrier-live".into()), None, None));
+        assert_eq!(ship(), [("carrier-live".into(), None, Some(105), Some(1))]);
+        conn.execute_batch(
+            "UPDATE task_graphs SET lf_process_id='carrier-next' WHERE task_id='task-live';
+             INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
+                 VALUES('task-live','carried',110,'carrier-next');",
+        )
+        .unwrap();
+        assert_eq!(
+            carrier(),
+            (Some("carrier-next".into()), Some(6002), Some(109))
+        );
+        assert_eq!(ship()[1], ("carrier-next".into(), Some(6002), None, None));
+        // What an Auto-Ship event says stays as written.
+        assert!(conn
+            .execute("UPDATE task_ship_events SET kind='stopped'", [])
+            .is_err());
         validate_foreign_keys(&conn).unwrap();
     }
 

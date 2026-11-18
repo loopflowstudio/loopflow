@@ -209,10 +209,6 @@ mod tests {
                 if table == "task_ownership" && operation == "delete" {
                     continue;
                 }
-                // Auto-Ship events reject updates; one can never commit.
-                if table == "task_ship_events" && operation == "update" {
-                    continue;
-                }
                 let name = format!("store_revision_{table}_{operation}");
                 let exists: bool = conn
                     .query_row(

@@ -109,3 +109,10 @@ concept review after slice 2a.
 - Checks: `cargo clippy --all-targets -- -D warnings` passed; `loopflow-storage` `run_owners_carry_their_process_lifecycle_after_upgrade` (activation and repair backfill and bridge), `an_activation_reads_pending_until_its_lf_writes_its_end`, `sqlite::graph_inventory::` (5); `loopflow-execution` `ops::pr_landing::`, `os_process::detached::`, `engine::launch::` (37): passed. Gate: `binary(land_tests)` and `binary(release_tests)` reach CI repair; CI runs them.
 - Call: a ci-fix run that dies unsettled reads dead from its pid and leaves no repair window; before, its Process row's `completed_at` closed the window. Settlement on the next landing check writes `repair_finished_at`.
 - Call: `engine::launch`'s registry-recovery test was deleted with what it tested (report wait reading the store); a dead child reading "ended without a result" from its pid replaces it.
+
+## Carrier slices (2026-11-17)
+
+- Call: `finish_run(TaskCarrier)` clears `run_pid, run_os_started_at` and keeps `task_graphs.lf_process_id`, against the concept review's "clears `lf_process_id`": `row.run` needs the id to resume a stopped run from its cursor (`ops::task` `(None, Some((cursor, _)))`) and to show it stopped.
+- Call: `task_state_sql` reads a stored pid (`run_pid` / ship event `pid` not NULL), not OS liveness; SQL cannot call `process_identity_evidence`. A SIGKILLed carrier reads moving until the liveness pass, as its Process row does today.
+- Call: ship failure cause is the Task's latest Graph run's `graph_failure_cause`, else the ship carrier's own error (its own error alone lost the agent's exit in `task_ship_restarts_after_a_failure_wait_instead_of_on_every_read`); `failure_cause`'s child walk is deleted.
+- Call: `lf task run` marks `ShipCarrier` up front, since arrival at `end` may hand the Task off with it as carrier; a no-op end write when it never ships.

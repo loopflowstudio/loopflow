@@ -27,6 +27,11 @@ pub enum RunOwner {
     GraphStep,
     /// `waves`: a Wave's Project activation.
     ProjectActivation,
+    /// `task_graphs`: the lf carrying a Task's run. It records no result of
+    /// its own; its Graph run's is the Task's.
+    TaskCarrier,
+    /// `task_ship_events`: the lf that approved or carries a Task's shipping.
+    ShipCarrier,
 }
 
 /// How a run ended, derived from its end, exit code and error.
@@ -87,6 +92,16 @@ impl Execution {
     pub fn result(&self) -> ExecutionResult {
         ExecutionResult::of(self.ended_at, self.exit_code, self.error.as_deref())
     }
+}
+
+/// The lf carrying a Task's run. `pid` and `os_started_at` name its OS
+/// process while it runs and are cleared at its end; the id stays, naming the
+/// run the next `lf task run` sets out from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskCarrier {
+    pub id: LfProcessId,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
 }
 
 /// One step its Graph run started.

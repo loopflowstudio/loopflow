@@ -108,6 +108,39 @@ UPDATE ci_incidents SET repair_started_at=(
     SELECT started_at FROM processes WHERE id=ci_incidents.repair_lf_process_id)
 WHERE repair_lf_process_id IS NOT NULL AND repair_finished_at IS NOT NULL;
 
+-- A Task's run names the lf carrying it and, while that lf runs, its OS
+-- process. The carrier's end clears the OS process and keeps its id: the next
+-- `lf task run` sets out from where that run stopped.
+ALTER TABLE task_graphs ADD COLUMN run_pid INTEGER;
+ALTER TABLE task_graphs ADD COLUMN run_os_started_at INTEGER;
+UPDATE task_graphs SET (run_pid,run_os_started_at)=(
+    SELECT pid,os_started_at FROM processes WHERE id=task_graphs.lf_process_id AND completed_at IS NULL)
+WHERE lf_process_id IS NOT NULL;
+
+-- A ship carrier's run is on the Auto-Ship event naming it: the OS process
+-- it runs as, then its end, exit code and error. An event's kind, time, lf
+-- and person stay as written; only the carrier's lifecycle changes.
+ALTER TABLE task_ship_events ADD COLUMN pid INTEGER;
+ALTER TABLE task_ship_events ADD COLUMN os_started_at INTEGER;
+ALTER TABLE task_ship_events ADD COLUMN ended_at INTEGER;
+ALTER TABLE task_ship_events ADD COLUMN exit_code INTEGER;
+ALTER TABLE task_ship_events ADD COLUMN error TEXT;
+DROP TRIGGER task_ship_events_append_only;
+UPDATE task_ship_events SET (pid,os_started_at,ended_at,exit_code,error)=(
+    SELECT CASE WHEN completed_at IS NULL THEN pid END,
+        CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
+    FROM processes WHERE id=task_ship_events.lf_process_id)
+WHERE kind IN ('approved','carried') AND lf_process_id IS NOT NULL;
+CREATE TRIGGER task_ship_events_launch_is_immutable BEFORE UPDATE ON task_ship_events
+WHEN NEW.id IS NOT OLD.id OR NEW.task_id IS NOT OLD.task_id OR NEW.kind IS NOT OLD.kind
+    OR NEW.at IS NOT OLD.at OR NEW.lf_process_id IS NOT OLD.lf_process_id
+    OR NEW.person IS NOT OLD.person
+BEGIN
+    SELECT RAISE(ABORT,'Task ship events are append-only');
+END;
+CREATE TRIGGER store_revision_task_ship_events_update AFTER UPDATE ON task_ship_events
+BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
 CREATE INDEX graph_processes_task ON graph_processes(task_id) WHERE task_id IS NOT NULL;
 CREATE INDEX graph_process_steps_graph ON graph_process_steps(graph_lf_process_id, seq);
 
@@ -209,6 +242,11 @@ BEGIN
         project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error,
         project_activation_pid=NULL,project_activation_os_started_at=NULL
     WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
+    UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
+    WHERE lf_process_id=NEW.id AND run_pid IS NOT NULL;
+    UPDATE task_ship_events SET ended_at=NEW.completed_at,exit_code=NEW.exit_code,error=NEW.error,
+        pid=NULL,os_started_at=NULL
+    WHERE lf_process_id=NEW.id AND kind IN ('approved','carried') AND ended_at IS NULL;
 END;
 CREATE TRIGGER graph_run_end_from_process_update AFTER UPDATE OF completed_at ON processes
 WHEN OLD.completed_at IS NULL AND NEW.completed_at IS NOT NULL
@@ -223,6 +261,11 @@ BEGIN
         project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error,
         project_activation_pid=NULL,project_activation_os_started_at=NULL
     WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
+    UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
+    WHERE lf_process_id=NEW.id AND run_pid IS NOT NULL;
+    UPDATE task_ship_events SET ended_at=NEW.completed_at,exit_code=NEW.exit_code,error=NEW.error,
+        pid=NULL,os_started_at=NULL
+    WHERE lf_process_id=NEW.id AND kind IN ('approved','carried') AND ended_at IS NULL;
 END;
 -- A released lf records an activation by id alone, after that id's Process
 -- row; its run's start, OS process and any end come from that row.
@@ -238,6 +281,28 @@ BEGIN
             CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
         FROM processes WHERE id=NEW.project_activation_lf_process_id)
     WHERE id=NEW.id;
+END;
+-- A released lf carries a Task's run by id alone, after that id's Process
+-- row; its OS process comes from that row.
+CREATE TRIGGER task_carrier_start_from_process AFTER UPDATE OF lf_process_id ON task_graphs
+WHEN NEW.lf_process_id IS NOT NULL AND NEW.lf_process_id IS NOT OLD.lf_process_id
+    AND NEW.run_pid IS NULL
+BEGIN
+    UPDATE task_graphs SET (run_pid,run_os_started_at)=(
+        SELECT pid,os_started_at FROM processes WHERE id=NEW.lf_process_id AND completed_at IS NULL)
+    WHERE task_id=NEW.task_id;
+END;
+-- A released lf approves or carries shipping by id alone, after that id's
+-- Process row; its OS process and any end come from that row.
+CREATE TRIGGER ship_carrier_start_from_process AFTER INSERT ON task_ship_events
+WHEN NEW.kind IN ('approved','carried') AND NEW.lf_process_id IS NOT NULL
+    AND NEW.pid IS NULL AND NEW.ended_at IS NULL
+BEGIN
+    UPDATE task_ship_events SET (pid,os_started_at,ended_at,exit_code,error)=(
+        SELECT CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
+        FROM processes WHERE id=NEW.lf_process_id)
+    WHERE id=NEW.id AND EXISTS(SELECT 1 FROM processes WHERE id=NEW.lf_process_id);
 END;
 -- A released lf reserves or hands off a repair by id alone, after that id's
 -- Process row; its run's start and OS process come from that row.

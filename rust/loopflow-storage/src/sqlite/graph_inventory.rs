@@ -476,6 +476,17 @@ impl SqliteStore {
         error: Option<&str>,
     ) -> StoreResult<()> {
         let sql = match owner {
+            // A carrier's result is its Graph run's: its end clears the OS
+            // process and keeps its id, where the next run sets out from.
+            RunOwner::TaskCarrier => {
+                let conn = self.conn.lock().expect("store mutex poisoned");
+                conn.execute(
+                    "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
+                     WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
+                    [id],
+                )?;
+                return Ok(());
+            }
             RunOwner::GraphRun => {
                 "UPDATE graph_processes SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
                  WHERE lf_process_id=?1 AND ended_at IS NULL"
@@ -489,6 +500,10 @@ impl SqliteStore {
                     project_activation_error=?4,project_activation_pid=NULL,
                     project_activation_os_started_at=NULL
                  WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
+            }
+            RunOwner::ShipCarrier => {
+                "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+                 WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
             }
         };
         let conn = self.conn.lock().expect("store mutex poisoned");

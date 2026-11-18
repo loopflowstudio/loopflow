@@ -1,6 +1,7 @@
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 use loopflow_storage::execution::GraphProcessFilter;
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::process::{ProcessFilter, ProcessWorkFilter};
 use loopflow_storage::session::SessionFilter;
 use rusqlite::params;
@@ -15,6 +16,11 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
     let wave = WaveId::new();
     let project = ProjectId::new();
     let by = LfProcessId::new();
+    let carrier = loopflow_storage::graph_process::ExecutionStart {
+        started_at: 1,
+        pid: Some(std::process::id()),
+        os_started_at: None,
+    };
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -100,24 +106,29 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
     );
 
     // No interactive step remains ahead: running it hands the Task off.
-    assert!(
-        crate::store::task_work::start_task_graph_run(&store, &task, &row, &start, &by, true)
-            .unwrap()
-    );
+    assert!(crate::store::task_work::start_task_graph_run(
+        &store,
+        &task,
+        &row,
+        &start,
+        (&by, &carrier),
+        true
+    )
+    .unwrap());
     // A second run reading the same position cannot also set out.
     assert!(!crate::store::task_work::start_task_graph_run(
         &store,
         &task,
         &row,
         &start,
-        &LfProcessId::new(),
+        (&LfProcessId::new(), &carrier),
         true
     )
     .unwrap());
     let state = || store.task_state(&task).unwrap();
     assert_eq!(state(), crate::durable::TaskState::Shipping);
     let shipping = store.task_shipping(&task).unwrap().unwrap();
-    assert_eq!(shipping.process, Some(by.clone()));
+    assert_eq!(shipping.carrier.as_ref().map(|run| &run.id), Some(&by));
     // Only the checkout's Machine restarts its ship process.
     let checkout = |sql: &str| {
         store
@@ -135,7 +146,7 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         [(task.clone(), shipping.clone())]
     );
     // Shipping again keeps when it began.
-    let again = store.ship_task(&task, &by, "again").unwrap();
+    let again = store.ship_task(&task, (&by, &carrier), "again").unwrap();
     assert_eq!(again.shipped_at, shipping.shipped_at);
     // Stop withdraws the approval; the run still going keeps it moving.
     assert_eq!(shipping.approved_by, Some(by.clone()));
@@ -161,7 +172,12 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         .unwrap()
         .unwrap();
     assert!(crate::store::task_work::start_task_graph_run(
-        &store, &task, &relaunch, &start, &by, true
+        &store,
+        &task,
+        &relaunch,
+        &start,
+        (&by, &carrier),
+        true
     )
     .unwrap());
     assert!(store.task_shipping(&task).unwrap().is_none());
@@ -170,17 +186,23 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         store.task_ship_stop(&task).unwrap().unwrap().by,
         Some(stopper)
     );
-    // Approved again with nothing running, it is idle until its ship process
-    // restarts. Only `lf ship` lifts the stop.
-    store.ship_task(&task, &by, "again").unwrap();
+    // Only `lf ship` lifts the stop. Approved again, it ships while its
+    // carrier runs, then is idle until its ship process restarts.
+    store.ship_task(&task, (&by, &carrier), "again").unwrap();
     assert!(store.task_ship_stop(&task).unwrap().is_none());
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&by])
-        .unwrap();
+    assert_eq!(state(), crate::durable::TaskState::Shipping);
+    // The carrier exits: its end clears both the run's and the ship's OS process.
+    for owner in [RunOwner::TaskCarrier, RunOwner::ShipCarrier] {
+        store.finish_run(owner, &by, 2, Some(0), None).unwrap();
+    }
     assert_eq!(state(), crate::durable::TaskState::Idle);
+    let carrier = store
+        .task_shipping(&task)
+        .unwrap()
+        .unwrap()
+        .carrier
+        .unwrap();
+    assert_eq!((carrier.pid, carrier.ended_at), (None, Some(2)));
 }
 
 #[test]
@@ -219,13 +241,19 @@ fn reaching_end_without_remaining_steps_approves_shipping() {
     .unwrap();
     store.set_task_graph_step(&task, "review").unwrap();
     assert!(store.task_shipping(&task).unwrap().is_none());
-    assert!(store.end_task_graph(&task, &by).unwrap());
+    let reserved = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    assert!(store.end_task_graph(&task, (&by, &reserved)).unwrap());
     assert!(store.task_completion_pending(&task).unwrap().is_some());
     assert_eq!(
-        store.task_shipping(&task).unwrap().unwrap().process,
+        store
+            .task_shipping(&task)
+            .unwrap()
+            .unwrap()
+            .carrier
+            .map(|run| run.id),
         Some(by.clone())
     );
-    assert!(!store.end_task_graph(&task, &by).unwrap());
+    assert!(!store.end_task_graph(&task, (&by, &reserved)).unwrap());
 }
 
 #[tokio::test]

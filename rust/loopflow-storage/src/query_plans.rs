@@ -508,11 +508,25 @@ mod tests {
             .unwrap();
         let traced = statements(&store, || {
             store
-                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
+                .ship_task(
+                    &task,
+                    (
+                        &loopflow_model::id::LfProcessId::new(),
+                        &crate::graph_process::ExecutionStart::reserved(1),
+                    ),
+                    "ship",
+                )
                 .unwrap();
             store.count_ship_restart(&task).unwrap();
             store
-                .ship_task(&task, &loopflow_model::id::LfProcessId::new(), "ship")
+                .ship_task(
+                    &task,
+                    (
+                        &loopflow_model::id::LfProcessId::new(),
+                        &crate::graph_process::ExecutionStart::reserved(1),
+                    ),
+                    "ship",
+                )
                 .unwrap();
             store.task_shipping(&task).unwrap();
             store.reset_ship_restarts(&task).unwrap();

@@ -740,10 +740,8 @@ pub fn select_task_run(
         }
     };
     let take_up = row.is_none();
-    if let Some((_, process)) = row.as_ref().and_then(|row| row.run.as_ref()) {
-        if process.completed_at.is_none()
-            && crate::store::task_work::process_may_run(&store.sqlite, process)
-        {
+    if let Some((_, carrier)) = row.as_ref().and_then(|row| row.run.as_ref()) {
+        if crate::store::task_work::carrier_may_run(carrier) {
             return Err(task_error(format!(
                 "Task {issue} is running graph {} from {}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
                 graph.name, row.as_ref().expect("a run belongs to a row").step
@@ -827,8 +825,13 @@ async fn start_task_run(
         start,
     } = selection;
     let issue = task.identifier.clone();
-    let process = crate::journal::current_lf_process_id()
+    let (process, carrier) = crate::journal::current_lf_process_id()
+        .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
+    // This lf carries the run, and the Task's shipping when the run hands it
+    // off at `end`; each ends with this lf.
+    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
+    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::ShipCarrier);
     if take_up {
         crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
             .map_err(task_error)?;
@@ -839,7 +842,7 @@ async fn start_task_run(
     let Some(start) = start else {
         if store
             .sqlite
-            .end_task_graph(&task.id, &process)
+            .end_task_graph(&task.id, (&process, &carrier))
             .map_err(task_error)?
         {
             settle_pending_completion(store, task).await?;
@@ -864,7 +867,7 @@ async fn start_task_run(
         &task.id,
         &row,
         &start.cursor,
-        &process,
+        (&process, &carrier),
         ships,
     )
     .map_err(task_error)?

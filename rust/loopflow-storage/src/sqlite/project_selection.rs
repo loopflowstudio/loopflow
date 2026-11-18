@@ -4,6 +4,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 
 use super::planning_write;
 use super::SqliteStore;
+use crate::graph_process::{Execution, ExecutionResult};
 use crate::work::project::Project;
 use crate::{PlanningLocks, StoreError, StoreResult};
 use loopflow_model::durable::ProjectId;
@@ -110,7 +111,7 @@ impl SqliteStore {
         let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         let project = bind_in(&tx, wave, project)?;
         let candidate = super::children::project_in(&tx, &project)?;
-        match readiness_in(&tx,wave)?.state {
+        match readiness_in(&tx, wave, Execution::result)?.state {
             ProjectReadinessState::Unavailable | ProjectReadinessState::Terminal => return Err(StoreError::InvalidAuthority(
                 "Project is terminal or has unresolved provider evidence; selection is unchanged".into())),
             _ => {}
@@ -143,7 +144,9 @@ impl SqliteStore {
         }
         let now = crate::rows::now_unix();
         let id = if selected.is_some() {
-            if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+            if readiness_in(&tx, wave, Execution::result)?.state
+                == ProjectReadinessState::Unavailable
+            {
                 return Err(StoreError::InvalidAuthority(
                     "selected Project has unresolved provider evidence".into(),
                 ));
@@ -217,7 +220,7 @@ impl SqliteStore {
             ),
         )?;
         write_in(&tx, wave, selected.as_deref(), id.as_str())?;
-        if readiness_in(&tx, wave)?.state == ProjectReadinessState::Unavailable {
+        if readiness_in(&tx, wave, Execution::result)?.state == ProjectReadinessState::Unavailable {
             return Err(StoreError::InvalidAuthority(
                 "Project has unresolved provider evidence; activation is unchanged".into(),
             ));
@@ -253,35 +256,6 @@ impl SqliteStore {
             ],
         )?;
         Ok(())
-    }
-
-    /// The run of `wave`'s latest Project activation, if one was recorded.
-    pub fn project_activation_run(
-        &self,
-        wave: &WaveId,
-    ) -> StoreResult<Option<crate::graph_process::Execution>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT project_activation_lf_process_id,project_activation_started_at,
-                    project_activation_ended_at,project_activation_pid,
-                    project_activation_os_started_at,project_activation_exit_code,
-                    project_activation_error
-                 FROM waves WHERE id=?1 AND project_activation_lf_process_id IS NOT NULL",
-                [wave],
-                |row| {
-                    Ok(crate::graph_process::Execution {
-                        id: row.get(0)?,
-                        started_at: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
-                        ended_at: row.get(2)?,
-                        pid: row.get(3)?,
-                        os_started_at: row.get(4)?,
-                        exit_code: row.get(5)?,
-                        error: row.get(6)?,
-                    })
-                },
-            )
-            .optional()?)
     }
 
     pub fn project_binding_imported(&self, wave: &WaveId) -> StoreResult<bool> {
@@ -348,11 +322,25 @@ pub struct ProjectActivation {
     pub error: Option<String>,
 }
 
+impl ProjectActivation {
+    fn of(run: Execution, result: ExecutionResult) -> Self {
+        Self {
+            lf_process_id: run.id.as_str().to_owned(),
+            completed_at: run.ended_at,
+            outcome: result.outcome().map(str::to_owned),
+            error: run.error,
+        }
+    }
+}
+
+/// How a reader sees a recorded run's result; liveness lives above the store.
+pub type ObserveResult = fn(&Execution) -> ExecutionResult;
+
 impl SqliteStore {
     pub fn selected_project(&self, wave: &WaveId) -> StoreResult<Option<Project>> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let readiness = readiness_in(&tx, wave)?;
+        let readiness = readiness_in(&tx, wave, Execution::result)?;
         match readiness.state {
             ProjectReadinessState::Unconfigured => return Ok(None),
             ProjectReadinessState::Unavailable => {
@@ -372,16 +360,25 @@ impl SqliteStore {
         Ok(Some(project))
     }
 
-    pub fn project_readiness(&self, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+    /// `wave`'s Project readiness, its activation's result read by `observe`.
+    pub fn project_readiness(
+        &self,
+        wave: &WaveId,
+        observe: ObserveResult,
+    ) -> StoreResult<ProjectReadiness> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        readiness_in(&conn, wave)
+        readiness_in(&conn, wave, observe)
     }
 }
 
 // Saved planning supplies values and age; retained provider evidence can invalidate
 // selection, but absent inventory does not erase an owned Project. A peer can
 // supply an accepted entity without claiming a complete provider membership list.
-fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadiness> {
+fn readiness_in(
+    conn: &Connection,
+    wave: &WaveId,
+    observe: ObserveResult,
+) -> StoreResult<ProjectReadiness> {
     Ok(conn.query_row(
             "SELECT p.id, p.pm_snapshot_synced_at,
              CASE WHEN w.current_project_id IS NULL THEN 'unconfigured'
@@ -393,15 +390,17 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                   WHEN p.status IN ('completed','canceled') THEN 'terminal'
                   WHEN p.status='started' THEN 'ready' ELSE 'inactive' END,
              (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
-             w.project_activation_lf_process_id,w.project_activation_ended_at,
-             w.project_activation_exit_code,w.project_activation_error
+             w.project_activation_lf_process_id,w.project_activation_started_at,
+             w.project_activation_ended_at,w.project_activation_pid,
+             w.project_activation_os_started_at,w.project_activation_exit_code,
+             w.project_activation_error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
              LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
              LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
              WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
-                let process: Option<String> = row.get(4)?;
+                let process: Option<loopflow_model::id::LfProcessId> = row.get(4)?;
                 Ok(ProjectReadiness {
                     project_id: row.get(0)?, observed_at: row.get(1)?,
                     state: match state.as_str() {
@@ -412,16 +411,20 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
                         _ => ProjectReadinessState::Inactive,
                     },
                     pending_successor: row.get(3)?,
-                    activation: process.map(|lf_process_id| {
-                        let completed_at: Option<i64> = row.get(5)?;
-                        let error: Option<String> = row.get(7)?;
-                        let result = crate::graph_process::ExecutionResult::of(
-                            completed_at, row.get(6)?, error.as_deref());
-                        Ok::<_,rusqlite::Error>(ProjectActivation {
-                            lf_process_id, completed_at,
-                            outcome: result.outcome().map(str::to_owned), error,
+                    activation: process.map(|id| {
+                        Ok::<_, rusqlite::Error>(Execution {
+                            id,
+                            started_at: row.get::<_, Option<i64>>(5)?.unwrap_or_default(),
+                            ended_at: row.get(6)?,
+                            pid: row.get(7)?,
+                            os_started_at: row.get(8)?,
+                            exit_code: row.get(9)?,
+                            error: row.get(10)?,
                         })
-                    }).transpose()?,
+                    }).transpose()?.map(|run| {
+                        let result = observe(&run);
+                        ProjectActivation::of(run, result)
+                    }),
                 })
             },
         )?)
@@ -501,7 +504,10 @@ mod tests {
         let original = format!("# preserve me\npm:\n  linear_project: {first}\n");
         let before = store.revisions().unwrap();
         assert_eq!(
-            store.project_readiness(wave.id()).unwrap().state,
+            store
+                .project_readiness(wave.id(), crate::graph_process::Execution::result)
+                .unwrap()
+                .state,
             ProjectReadinessState::Unconfigured
         );
         assert_eq!(store.revisions().unwrap(), before);
@@ -531,7 +537,10 @@ mod tests {
         assert_eq!(store.revisions().unwrap(), selected);
         // No accepted provider facts: a selected ID alone cannot prove readiness.
         assert_eq!(
-            store.project_readiness(wave.id()).unwrap().state,
+            store
+                .project_readiness(wave.id(), crate::graph_process::Execution::result)
+                .unwrap()
+                .state,
             ProjectReadinessState::Unavailable
         );
         let saved: String = store
@@ -580,7 +589,7 @@ mod activation_tests {
             )
             .unwrap();
         let pending = store
-            .project_readiness(wave.id())
+            .project_readiness(wave.id(), crate::graph_process::Execution::result)
             .unwrap()
             .activation
             .unwrap();
@@ -597,7 +606,7 @@ mod activation_tests {
             )
             .unwrap();
         let failed = store
-            .project_readiness(wave.id())
+            .project_readiness(wave.id(), crate::graph_process::Execution::result)
             .unwrap()
             .activation
             .unwrap();

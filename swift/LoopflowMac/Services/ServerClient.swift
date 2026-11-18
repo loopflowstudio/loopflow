@@ -98,11 +98,20 @@ struct ServerEventSubscription: Sendable {
 /// One live connection per server location, reopened on demand with bounded
 /// backoff after consecutive failures to open.
 private actor ServerLinks {
+    private struct Owner { weak var location: ServerLocation? }
+    private var owners: [ObjectIdentifier: Owner] = [:]
     private var links: [ObjectIdentifier: Task<ServerLink, any Error>] = [:]
     private var failures: [ObjectIdentifier: Int] = [:]
 
     func link(for location: ServerLocation) async throws -> ServerLink {
         let key = ObjectIdentifier(location)
+        // A freed location's identifier can name a new one at the same
+        // address; that one starts without the old one's connection.
+        if owners[key]?.location !== location {
+            links[key] = nil
+            failures[key] = nil
+            owners[key] = Owner(location: location)
+        }
         while let opening = links[key] {
             // A failed open answers everyone it kept waiting; only a link that
             // opened and later closed is worth another attempt.

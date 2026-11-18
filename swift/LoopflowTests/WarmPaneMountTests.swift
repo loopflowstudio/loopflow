@@ -120,7 +120,7 @@ private func warmSession(id: String, argv: [String]) throws -> SessionRecord {
         "title": "Warm conversation", "detail": "warm",
         "cwd": NSTemporaryDirectory(),
         "workspace": ["machine_id": fixtureMachineId, "worktree": NSTemporaryDirectory(), "task_id": "task-\(id)", "unavailable": NSNull()],
-        "state": "closed", "availability": NSNull(), "ready_summary": NSNull(), "work_path": "warm",
+        "state": "closed", "availability": NSNull(), "work_path": "warm",
         "action": ["label": "Open here", "help": "Open this Session in a terminal"],
         "blocked": false, "title_source": "generated", "task_primary": true, "graph_membership": ["kind": "independent"],
         "task_ids": ["task-\(id)"], "agent_process_id": NSNull(), "turn": NSNull(), "raw": false, "terminal_ids": [String](),

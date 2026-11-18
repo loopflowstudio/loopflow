@@ -69,11 +69,6 @@ pub(crate) enum ProviderFact {
         /// The turn ended; a settled turn that did not yield failed.
         settled: bool,
     },
-    /// The turn's final answer: `{"text": …}` or `{"value": …}`.
-    Output {
-        turn: ProviderTurn,
-        answer: Value,
-    },
     /// A provider turn ended. `turn` is absent when Loopflow cannot tell which
     /// native turn it was; `detail` is the retained completion payload.
     TurnCompleted {
@@ -171,7 +166,6 @@ pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
             } => format!(
                 "AvailabilityReading tools={open_tools} input={pending_input} yielded={yielded} settled={settled}"
             ),
-            ProviderFact::Output { turn: t, answer } => format!("Output {} {answer}", turn(t)),
             ProviderFact::TurnCompleted { turn: t, status, .. } => format!(
                 "TurnCompleted {} {status:?}",
                 t.as_ref().map_or("-".to_owned(), turn)

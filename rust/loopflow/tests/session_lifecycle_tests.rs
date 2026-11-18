@@ -199,8 +199,25 @@ impl Fixture {
         }
     }
 
+    /// The store, with Session history attached as `history` and turns as `usage`.
     fn db(&self) -> rusqlite::Connection {
-        rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+        let store = self.home.path().join("loopflow.db");
+        let db = rusqlite::Connection::open(&store).unwrap();
+        db.execute(
+            "ATTACH ?1 AS history",
+            [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db.execute(
+            "ATTACH ?1 AS usage",
+            [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db
     }
 
     fn count(&self, table: &str) -> i64 {
@@ -257,7 +274,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                             CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
                     END
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
-                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                 LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                  WHERE i.receipt_key=?1",
                 [run_id],
@@ -401,7 +418,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         );
         assert_eq!(fixture.captures(), 1);
         let native: String = db.query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session], |row| row.get(0)).unwrap();
         assert!(
             !native.is_empty(),
@@ -439,7 +456,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let before: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -454,7 +472,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let after: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -642,7 +661,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let native: String = fixture
         .db()
         .query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session],
             |row| row.get(0),
         )
@@ -658,7 +677,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         fixture
             .db()
             .query_row(
-                "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
                 [&session],
                 |row| row.get::<_, String>(0)
             )
@@ -878,12 +897,12 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     assert!(fixture.sessions().is_empty());
     assert!(fixture.session_row(&input).3);
     let history = fixture.json(&["session", "history", &id, "--json"]);
-    assert!(history
+    assert!(history["events"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["payload"]["type"] == "attachment_exit"
-            && event["payload"]["outcome"] == "interrupted"));
+        .any(|event| event["payload"]["source"] == "terminal.json"
+            && event["payload"]["evidence"]["outcome"] == "interrupted"));
 }
 
 #[test]
@@ -935,7 +954,6 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
             ),
             title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };
@@ -1085,17 +1103,16 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         &task.task.id,
     )
     .unwrap();
-    let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
-        "cachedInputTokens":0,"reasoningOutputTokens":0});
-    for (kind, payload) in [
-        ("usage", serde_json::json!({"total":count,"last":count})),
-        ("completed", serde_json::json!({"status":"completed"})),
-    ] {
-        fixture.db().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-             VALUES(?1,'retained-thread','retained-turn',?2,'',strftime('%s','now'),?3)",
-            rusqlite::params![session,kind,payload.to_string()]).unwrap();
-    }
+    store
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,ended_at,status,
+                 usage_at,usage_final,usage_partial,input_tokens,cached_input_tokens,output_tokens,
+                 reasoning_tokens)
+             VALUES(?1,'retained-thread','retained-turn',strftime('%s','now'),
+                 'completed',strftime('%s','now'),0,0,12,0,3,0)",
+            [&session],
+        )
+        .unwrap();
     let captures = fixture.count("agent_sessions");
     {
         let command = vec!["history", "usage", "--days", "0", "--json"];
@@ -2046,7 +2063,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         let starts: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE kind='started'",
+                "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
@@ -2165,10 +2182,12 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
             |row| row.get(0),
         )
         .unwrap();
-    let history = fixture.json(&["session", "history", &session, "--json"]);
+    // The decision that stopped it is the answer its conversation kept.
+    let answer = fixture.run(&["history", "show", &session, "--final"]);
+    assert!(answer.status.success(), "{answer:?}");
     assert!(
-        history.to_string().contains("Release target is missing"),
-        "{history}"
+        String::from_utf8_lossy(&answer.stdout).contains("Release target is missing"),
+        "{answer:?}"
     );
 }
 
@@ -2364,16 +2383,26 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     ]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
-    let rows: (i64, i64) = fixture
+    let starts: i64 = fixture
         .db()
         .query_row(
-            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
-                (SELECT count(*) FROM session_events WHERE kind='completed')",
+            "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(rows, (1, 0));
+    assert_eq!(starts, 1);
+    // The exit read closes the turn OpenCode's store left open; it never
+    // reads as a turn that finished.
+    let endings: Vec<String> = fixture
+        .db()
+        .prepare("SELECT status FROM history.turns WHERE ended_at IS NOT NULL")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(endings, ["interrupted"]);
     // The Graph stopped at its first step and launched nothing after it.
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);
@@ -2438,7 +2467,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
         .unwrap();
     let native = || {
         fixture.db().query_row(
-        "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+        "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
         [&session], |row| row.get::<_, String>(0)).unwrap()
     };
     let before = native();

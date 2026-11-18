@@ -36,7 +36,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -85,7 +84,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [],
     "task_primary": false,
@@ -303,7 +301,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [],
       "task_primary": false,
@@ -352,7 +349,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "unknown",
       "task_ids": [
         "task_ab8d3359dc7053bda4afd24ff7e7a7d7"
@@ -405,7 +401,6 @@
       "program_status": null,
       "provider": "opencode",
       "model": null,
-      "ready_summary": null,
       "state": "closed",
       "task_ids": [],
       "task_primary": false,
@@ -455,7 +450,6 @@
     "program_status": null,
     "provider": "opencode",
     "model": null,
-    "ready_summary": null,
     "state": "unknown",
     "task_ids": [
       "task_ab8d3359dc7053bda4afd24ff7e7a7d7"

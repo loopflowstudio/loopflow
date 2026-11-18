@@ -976,10 +976,12 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     let source_id = source["id"].as_str().unwrap();
     let sql = fixture.sql();
     let input = format!("run_{}", uuid::Uuid::new_v4().simple());
+    let native = uuid::Uuid::new_v4().to_string();
+    // The input resumes the native conversation its captured row names.
     sql.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-         VALUES(?1,'captured',?2,1,json_object('artifact_key',?2))",
-        [source_id, &input],
+        "INSERT INTO session_events(session_id,provider_thread,kind,receipt_key,observed_at,payload)
+         VALUES(?1,?3,'captured',?2,1,json_object('artifact_key',?2))",
+        [source_id, &input, &native],
     )
     .unwrap();
     sql.execute(
@@ -987,17 +989,11 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
         rusqlite::params![source_id, sql.last_insert_rowid()],
     )
     .unwrap();
-    let native = uuid::Uuid::new_v4().to_string();
     sql.execute(
         "UPDATE agent_sessions SET provider_thread=?2 WHERE id=?1",
         [source_id, &native],
     )
     .unwrap();
-    sql.execute(
-        "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-         SELECT id,'observed',?2||':provider-session:fixture',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
-        [source_id, &input, &native],
-    ).unwrap();
     let transcript = if source_provider == "codex" {
         fixture.home.path().join(format!(
             "codex/sessions/2026/11/02/rollout-2026-11-02T00-00-00-{native}.jsonl"

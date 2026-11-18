@@ -721,6 +721,7 @@ pub(crate) fn subscribe_plans(
     transport: Transport,
 ) -> Result<Option<Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let result = store
@@ -747,6 +748,7 @@ pub(crate) fn subscribe_view_plan(
         loopflow_storage::work::selection::Selection::parse(expression, None)?;
     }
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let result = store
@@ -806,6 +808,7 @@ pub(crate) fn subscribe_all_view_plans(
         expression: Option<String>,
     }
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         Arguments { expression },
         |store, args| async move {
             let store = loopflow_execution::read_stream::require_store(store)?;

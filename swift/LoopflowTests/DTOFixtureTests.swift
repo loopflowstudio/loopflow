@@ -583,20 +583,15 @@ struct DTOFixtureTests {
         #expect(report.totals.count == 9)
     }
 
-    @Test("Conversation history retains native evidence and unknown LfProcess")
+    @Test("Session history observations keep unknown LfProcess")
     func sessionHistoryFixture() throws {
+        struct History: Decodable { let events: [SessionEvent] }
         let data = try loadFixtureData("session_history.json")
-        let events = try JSONDecoder().decode([SessionEvent].self, from: data)
-        #expect(events[0].agentSession == AgentSessionId(rawValue: "thread_fixture"))
-        #expect(events[1].kind == .completed)
-        #expect(events[1].lfProcessId == nil)
-        #expect(events[2].kind == .observed)
-        #expect(events[2].agentSession == nil)
-        #expect(events[2].providerTurn == nil)
-        #expect(events[0].payload == .object([
-            "total": .object(["inputTokens": .integer(40), "outputTokens": .integer(10)]),
-            "last": .object(["inputTokens": .integer(20), "outputTokens": .integer(5)]),
-        ]))
+        let events = try JSONDecoder().decode(History.self, from: data).events
+        #expect(events[0].kind == .observed)
+        #expect(events[0].lfProcessId == nil)
+        #expect(events[0].agentSession == nil)
+        #expect(events[0].providerTurn == nil)
         #expect(try JSONDecoder().decode([SessionEvent].self, from: JSONEncoder().encode(events)) == events)
     }
 
@@ -992,7 +987,6 @@ struct DTOFixtureTests {
         #expect(session.titleSource == .generated)
         #expect(session.action?.label == "Open here")
         #expect(session.statusLabel == "Available")
-        #expect(session.readySummary == "The design now reflects Jack's requested changes.")
         #expect(session.openArgv.suffix(3) == [
             "session", "resume", "task_00000000000000000000000000000001:task-design:review_kickoff:0"
         ])

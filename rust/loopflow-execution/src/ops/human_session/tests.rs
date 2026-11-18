@@ -241,7 +241,6 @@ fn summary_fixture() -> crate::session::SessionSummary {
         artifact_key: Some(crate::session_record::new_artifact_key()),
         title: "Retained conversation".into(),
         title_source: crate::session::TitleSource::Human,
-        ready_summary: None,
         completed_at: None,
         interactive: true,
         task_id: Some(task.clone()),
@@ -342,12 +341,9 @@ fn session_metadata_keeps_unknown_position_visible() {
         super::summary_surface(&summary).graph_membership,
         super::SessionGraphMembership::Independent
     );
-    summary.ready_summary = Some("Exact retained feedback".into());
     let row = super::summary_surface(&summary);
     assert_eq!(row.state, super::SessionState::Unknown);
-    assert_eq!(row.ready_summary, summary.ready_summary);
     assert_eq!(row.availability, None);
-    summary.ready_summary = None;
     summary.completed_at = Some(1);
     assert_eq!(
         super::session_state(&summary),
@@ -583,7 +579,6 @@ async fn session_work_labels_follow_stable_ancestry_without_a_roadmap() {
         title: "Conversation".into(),
         title_source: crate::session::TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: 1,
     };
@@ -1165,76 +1160,65 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
     let home = SessionHome::new();
     tokio::runtime::Runtime::new().unwrap().block_on(async {
         let store = home.store().await;
-        for source in ["provider-session:imported", "events.jsonl:1"] {
-            let repo = loopflow_test_support::TestRepo::new();
-            let (record, _) = super::primary::ensure(&store, repo.path(), None)
-                .await
-                .unwrap();
-            let session = store.session(&record.id).await.unwrap().unwrap();
-            let session = super::append_input(&store, session).await.unwrap();
-            let mut observation = crate::session_record::provider_session_observation(
-                &session,
-                session.input_key().unwrap(),
-                &"imported-history".into(),
-                None,
-            );
-            observation.source = source.into();
-            observation.payload["source"] = source.into();
-            if source.starts_with("events") {
-                observation.payload["evidence"] = serde_json::json!({
-                    "schema_version": 1, "seq": 1, "observed_at": "2026-11-04T00:00:00Z",
-                    "type": "provider_session_observed", "attempt_key": "imported",
-                    "provider_session_id": "imported-history"
-                });
-            }
-            store
-                .sqlite
-                .retain_session_observation(&session, &observation)
-                .unwrap();
-            let prepared = super::open(
-                &store,
-                std::path::Path::new("/"),
-                &record.id,
-                None,
-                None,
-                false,
-                false,
-                false,
-                false,
-            )
+        let repo = loopflow_test_support::TestRepo::new();
+        let (record, _) = super::primary::ensure(&store, repo.path(), None)
             .await
-            .unwrap()
-            .prepared()
             .unwrap();
-            let refreshed = listed_session(&store, &record.id);
-            assert_eq!(prepared.action, refreshed.action);
-            assert_eq!(refreshed.action.unwrap().label, "Open here");
-            assert!(store
-                .sqlite
-                .session_attachment(&record.id)
-                .unwrap()
-                .is_none());
-            // A new captured input cannot borrow the older input's resume reference.
-            let next = super::append_input(&store, session).await.unwrap();
-            let prepared = super::open(
-                &store,
-                std::path::Path::new("/"),
-                &next.id,
-                None,
-                None,
-                false,
-                false,
-                false,
-                false,
-            )
-            .await
-            .unwrap()
-            .prepared()
+        let session = store.session(&record.id).await.unwrap().unwrap();
+        let session = super::append_input(&store, session).await.unwrap();
+        let observation = crate::session_record::provider_session_observation(
+            &session,
+            session.input_key().unwrap(),
+            &"imported-history".into(),
+            None,
+        );
+        store
+            .sqlite
+            .retain_session_observation(&session, &observation)
             .unwrap();
-            let refreshed = listed_session(&store, &next.id);
-            assert_eq!(prepared.action, refreshed.action);
-            assert_eq!(refreshed.action.unwrap().label, "Start conversation");
-        }
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &record.id,
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap()
+        .prepared()
+        .unwrap();
+        let refreshed = listed_session(&store, &record.id);
+        assert_eq!(prepared.action, refreshed.action);
+        assert_eq!(refreshed.action.unwrap().label, "Open here");
+        assert!(store
+            .sqlite
+            .session_attachment(&record.id)
+            .unwrap()
+            .is_none());
+        // A new captured input cannot borrow the older input's resume reference.
+        let next = super::append_input(&store, session).await.unwrap();
+        let prepared = super::open(
+            &store,
+            std::path::Path::new("/"),
+            &next.id,
+            None,
+            None,
+            false,
+            false,
+            false,
+            false,
+        )
+        .await
+        .unwrap()
+        .prepared()
+        .unwrap();
+        let refreshed = listed_session(&store, &next.id);
+        assert_eq!(prepared.action, refreshed.action);
+        assert_eq!(refreshed.action.unwrap().label, "Start conversation");
     });
 }
 

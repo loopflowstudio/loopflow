@@ -728,7 +728,6 @@ fn local_planning_prefix_collision_is_explicit() {
 #[test]
 fn local_planning_migration_preserves_released_links() {
     use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
-    use std::sync::{Arc, Mutex};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     apply_before_migration(&conn, "local_planning");
@@ -848,10 +847,7 @@ fn local_planning_migration_preserves_released_links() {
             |row| row.get(0),
         )
         .unwrap();
-    let store = SqliteStore {
-        token_key: crate::store::token_key::encryption_key,
-        conn: Arc::new(Mutex::new(conn)),
-    };
+    let store = SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(
             &store.conn.lock().unwrap(),

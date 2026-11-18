@@ -20,9 +20,34 @@ pub fn run(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         MachineCommand::End { label, force } => return super::rental::end(label, *force),
         MachineCommand::Pool { cmd } => return super::rental::run_pool(cmd),
         MachineCommand::Ondemand { cmd } => return super::rental::run_ondemand(cmd, batch),
+        MachineCommand::Prune { json } => return prune(*json),
         _ => {}
     }
     tokio::runtime::Runtime::new()?.block_on(run_async(cmd, batch))
+}
+
+/// `lf machine prune`: store retention, as the Machine server runs it hourly.
+fn prune(json: bool) -> anyhow::Result<()> {
+    let database = loopflow_execution::store::database_path_from_env()?;
+    if !database.exists() {
+        anyhow::bail!("no store at {}", database.display());
+    }
+    let now = time::OffsetDateTime::now_utc().unix_timestamp();
+    let report = loopflow_execution::store::retention::prune(&database, now)?;
+    if json {
+        println!("{}", serde_json::to_string_pretty(&report)?);
+    } else {
+        println!(
+            "closed {} dead Processes · forgot {} finished · moved {} observations · converted {} turns · forgot {} history rows{}",
+            report.closed_processes,
+            report.forgotten_processes,
+            report.moved_observations,
+            report.converted_turns,
+            report.forgotten_history,
+            if report.vacuumed { " · vacuumed" } else { "" },
+        );
+    }
+    Ok(())
 }
 
 async fn existing_store() -> anyhow::Result<Store> {
@@ -291,6 +316,7 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             )
         }
         MachineCommand::End { .. }
+        | MachineCommand::Prune { .. }
         | MachineCommand::Pool { .. }
         | MachineCommand::Ondemand { .. } => {
             unreachable!("machine end, pool and ondemand dispatch before the store opens")

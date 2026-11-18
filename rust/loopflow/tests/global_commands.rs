@@ -1207,7 +1207,6 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
             title: "Connection proof".into(),
             title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },
@@ -1217,10 +1216,15 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
 }
 
 fn connection_history(db: &rusqlite::Connection, session: &loopflow_execution::session::LfSession) {
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-        SELECT id,'observed',?2,1,?3,current_capture FROM agent_sessions WHERE id=?1",
-        rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key.as_ref().unwrap()),
-        serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();
+    // The input resumes the native conversation its captured row names.
+    let named = db
+        .execute(
+            "UPDATE session_events SET provider_thread='native-proof',provider_account=NULL
+             WHERE session_id=?1 AND kind='captured' AND receipt_key=?2",
+            rusqlite::params![session.id, session.artifact_key.as_ref().unwrap()],
+        )
+        .unwrap();
+    assert_eq!(named, 1);
 }
 
 #[test]

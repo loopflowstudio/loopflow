@@ -351,6 +351,7 @@ pub fn project_history_input(
         &saved.session,
         saved.artifact_key.as_deref(),
         &saved.events,
+        &saved.turns,
         saved.names,
     )
     .map_err(|error| super::StoreError::InvalidData(error.to_string()))
@@ -383,7 +384,6 @@ mod tests {
             title: "Conversation".into(),
             title_source: TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         }

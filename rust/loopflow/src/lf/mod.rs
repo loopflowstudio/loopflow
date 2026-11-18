@@ -1434,7 +1434,8 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
-            Self::Connect { .. }
+            Self::Prune { .. }
+            | Self::Connect { .. }
             | Self::Public { .. }
             | Self::Add { .. }
             | Self::Rename { .. }
@@ -3006,6 +3007,17 @@ pub enum MachineCommand {
         #[arg(long = "plan")]
         planning: bool,
         /// Emit the audit as JSON
+        #[arg(long)]
+        json: bool,
+    },
+    /// Apply store retention: close dead Processes, forget finished ones,
+    /// expire Session history past 90 days and reclaim the space
+    #[command(
+        after_help = "The Machine server runs this every hour. Turns are kept; history an earlier \
+                      lf wrote into loopflow.db moves to history.db."
+    )]
+    Prune {
+        /// Emit the retention report as JSON
         #[arg(long)]
         json: bool,
     },

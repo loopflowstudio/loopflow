@@ -291,6 +291,7 @@ pub fn subscribe_wait(
     transport: Transport,
 ) -> anyhow::Result<Option<Subscription>> {
     crate::read_stream::start(
+        crate::read_stream::Watch::State,
         (issue, until),
         |store, (issue, until): (String, TaskWaitUntil)| async move {
             let store = crate::read_stream::require_store(store)?;

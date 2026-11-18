@@ -38,7 +38,6 @@ pub fn conversation(
         title,
         title_source: TitleSource::Generated,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: loopflow_storage::rows::now_unix(),
     })

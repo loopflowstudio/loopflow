@@ -477,7 +477,7 @@ mod tests {
         assert!(yielded);
         let gaps: i64 = conn
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id='session'
+                "SELECT count(*) FROM history.session_history WHERE session_id='session'
                  AND json_extract(payload,'$.source')='store-gap'
                  AND json_extract(payload,'$.first_miss')=1794358000",
                 [],
@@ -574,16 +574,16 @@ mod tests {
         answer(&store, &stop).unwrap();
         answer(&store, &stop).unwrap();
         let usage = store
-            .session_history("session", 0, 0)
+            .session_turns("session")
             .unwrap()
             .into_iter()
-            .filter(|event| event.kind == loopflow_execution::session::SessionEventKind::Usage)
+            .filter_map(|turn| Some((turn.turn, turn.usage?.usage)))
             .collect::<Vec<_>>();
         assert_eq!(usage.len(), 1);
-        assert_eq!(usage[0].provider_turn.as_deref(), Some("u1"));
-        assert_eq!(usage[0].payload["usage"]["total_input_tokens"], 100);
-        assert_eq!(usage[0].payload["usage"]["output_tokens"], 5);
-        assert_eq!(usage[0].payload["usage"]["cost_usd"], 0.25);
+        assert_eq!(usage[0].0, "u1");
+        assert_eq!(usage[0].1.total_input_tokens, Some(100));
+        assert_eq!(usage[0].1.output_tokens, Some(5));
+        assert_eq!(usage[0].1.cost_usd, Some(0.25));
     }
 
     /// OpenCode reports a managed turn end with no callback body.

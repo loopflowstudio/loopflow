@@ -44,6 +44,14 @@ def _message(text):
     }
 
 
+def _append(entry_id, parent, message):
+    # Pi appends each message to its session file, where lf reads usage and answers.
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
+    with file.open("a") as transcript:
+        transcript.write(json.dumps(entry | {"message": message}) + "\n")
+
+
 def _record(text):
     if not os.environ.get("PI_FIXTURE_RECORD"):
         return
@@ -104,13 +112,6 @@ if "--mode" not in args:
             "client": {"kind": "plugin", "platform": "fixture", "name": "pi", "version": "0"},
         }
     )
-
-    def _append(entry_id, parent, message):
-        # Pi appends each message to its session file, the usage source.
-        stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        entry = dict(type="message", id=entry_id, parentId=parent, timestamp=stamp)
-        with file.open("a") as transcript:
-            transcript.write(json.dumps(entry | {"message": message}) + "\n")
 
     def _callback(event):
         event = (
@@ -244,10 +245,13 @@ for line in sys.stdin:
                 "isError": False,
             }
         )
-    with file.open("a") as saved:
-        saved.write(json.dumps({"prompt": text}) + "\n")
-    count = len(file.read_text().splitlines()) - 1
+    entries = [json.loads(line) for line in file.read_text().splitlines()]
+    count = sum(entry.get("message", {}).get("role") == "user" for entry in entries) + 1
     answer = '{"path":"alpha"}' if "PI_ROUTE_SENTINEL" in text else f"answer {count}: {text}"
+    parent = entries[-1].get("id") if entries[-1]["type"] == "message" else None
+    user = {"role": "user", "content": [{"type": "text", "text": text}]}
+    _append(f"rpc-user-{count}", parent, user)
+    _append(f"rpc-answer-{count}", f"rpc-user-{count}", _message(answer)["message"])
     _emit(_message(answer))
     _emit({"type": "agent_end", "messages": [], "willRetry": False})
     _emit({"type": "agent_settled", "aborted": False})

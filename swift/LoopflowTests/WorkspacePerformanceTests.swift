@@ -41,7 +41,7 @@ struct WorkspacePerformanceTests {
                     "id": "session-\(index)", "run_id": "run-\(index)", "interactive": true,
                     "work": ["kind": "task", "id": "task-\(index)"],
                     "title": "Session \(index)", "detail": "fixture", "cwd": "/src/loopflow",
-                    "wave_id": "wave-1", "state": "active", "ready_summary": NSNull(),
+                    "wave_id": "wave-1", "state": "active",
                     "work_path": NSNull(), "blocked": false, "title_source": "generated", "task_primary": false,
                     "action": sessionActionFixture(state: "active"),
                     "graph_membership": ["kind": "independent"],

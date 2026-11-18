@@ -33,7 +33,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -88,7 +87,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -143,7 +141,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -196,7 +193,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -251,7 +247,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -712,7 +707,6 @@
         },
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "active",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -767,7 +761,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -822,7 +815,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -875,7 +867,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -930,7 +921,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -1400,7 +1390,6 @@
         },
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "active",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -1455,7 +1444,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -1510,7 +1498,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -1563,7 +1550,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -1618,7 +1604,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -2079,7 +2064,6 @@
         },
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "active",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2134,7 +2118,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2189,7 +2172,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -2242,7 +2224,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2297,7 +2278,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -2769,7 +2749,6 @@
         },
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "active",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2824,7 +2803,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2879,7 +2857,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,
@@ -2932,7 +2909,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [
           "task_22222222222222222222222222222222"
@@ -2987,7 +2963,6 @@
         "program_status": null,
         "provider": null,
         "raw": false,
-        "ready_summary": null,
         "state": "unknown",
         "task_ids": [],
         "task_primary": false,

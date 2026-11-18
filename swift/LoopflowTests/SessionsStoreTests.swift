@@ -373,14 +373,13 @@ struct SessionsStoreTests {
     }
 
 
-    @Test("Retained review feedback stays visible")
-    func retainedFeedbackDoesNotDisappear() throws {
+    @Test("An available Session stays listed")
+    func availableSessionStaysListed() throws {
         let store = SessionsStore(repoPath: "/tmp/repo")
         store.reconcile(try records([session(id: "review", state: "available")]))
 
         #expect(store.sessions.map(\.id) == ["review"])
         #expect(store.sessions.first?.record.availability == .available)
-        #expect(store.sessions.first?.record.readySummary == "Ready for review")
     }
 
 
@@ -657,7 +656,6 @@ private func session(id: String, state: String, primary: Bool = false) -> String
       "cwd": "/tmp/repo.\(id)",
       "workspace": {"machine_id": "\(fixtureMachineId)", "worktree": "/tmp/repo.\(id)", "task_id": null, "unavailable": null},
       "state": "\(wire)", "availability": \(state == "available" ? "\"available\"" : "null"),
-      "ready_summary": \(state == "available" ? "\"Ready for review\"" : "null"),
       "work_path": "product / Desktop / LOO-291",
       "action": \(sessionActionFixtureJSON(state: wire)),
       "blocked": false, "title_source": "generated", "task_primary": \(primary), "graph_membership": {"kind": "independent"}, "task_ids": ["task-\(id)"], "agent_process_id": "44444444-4444-4444-8444-444444444444", "turn":null,"raw":false,"terminal_ids": [],

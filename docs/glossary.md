@@ -66,7 +66,7 @@ execution owner in the accepted model.
 | **Test** | A small program that checks another program does what it should. |
 | **Lint** | An automatic check for mistakes and style, without running the code. |
 | **GitHub** | A website that stores repositories and hosts pull requests. |
-| **Planning provider** | Where your Tasks and Wave planning are shared: a Git ref by default, or Linear, Asana or Notion. |
+| **Planning provider** | Where your Tasks and Wave planning are shared: a Git ref by default, or Linear or Asana. |
 | **Linear** | A planning tool. Loopflow can keep Tasks and Wave planning there instead of in Git. |
 | **Token** | The unit AI tools count text in, and charge by. Roughly three quarters of a word. |
 | **YAML**, **Markdown** | Two plain text formats. Graphs are written in YAML; skills and docs in Markdown. |

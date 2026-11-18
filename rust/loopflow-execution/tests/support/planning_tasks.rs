@@ -25,6 +25,7 @@ pub async fn planning_repo(fixture: &Fixture) -> (PathBuf, crate::work::wave::Wa
         "initiative-1",
         &project,
         now(),
+        loopflow_storage::planning_sync::TrackerKind::Linear,
     )
     .unwrap();
     loopflow_storage::sqlite::project_selection::write_project_binding(
@@ -618,8 +619,7 @@ pub async fn planning_response(
             mark_issue_updated(&mut state.issues[0]);
         }
         json!({"issue":{"attachments":page(state.attachments.iter().map(|url| json!({"url":url})).collect::<Vec<_>>())}})
-    } else if query.contains("query LinearIssueObservation")
-        || query.contains("query IssueObservation")
+    } else if query.contains("query TrackerObservation") || query.contains("query IssueObservation")
     {
         let mut issue = state
             .issues
@@ -702,7 +702,7 @@ pub fn seed_provider_task(
     repo: &Path,
     title: &str,
     description: &str,
-) -> crate::ops::OpsResult<crate::linear::LinearIssue> {
+) -> crate::ops::OpsResult<loopflow_storage::planning::TrackerItem> {
     runtime.block_on(async {
         let mut state = state.lock().await;
         let project = state

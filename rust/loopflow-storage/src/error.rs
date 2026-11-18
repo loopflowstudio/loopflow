@@ -5,7 +5,7 @@ pub enum StoreError {
     #[error(transparent)]
     Selection(#[from] crate::work::selection::SelectionError),
     #[error(transparent)]
-    Planning(#[from] crate::linear_records::LinearBindingError),
+    Planning(#[from] crate::planning::LinearBindingError),
     #[error(transparent)]
     TaskData(#[from] crate::work::task::TaskDataError),
     #[error("sqlite error: {0}")]

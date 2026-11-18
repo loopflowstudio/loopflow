@@ -55,7 +55,6 @@ const LINEAR_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "LINEAR_CLIENT_SECRET",
     authorize_params: &[("scope", "read,write")],
     redirect_port: 19222,
-    basic_auth: false,
     rotates_refresh_token: true,
     refresh_requires_secret: false,
 };
@@ -67,20 +66,6 @@ const ASANA_OAUTH: PmOAuthSpec = PmOAuthSpec {
     client_secret_env: "ASANA_CLIENT_SECRET",
     authorize_params: &[("scope", "default")],
     redirect_port: 19222,
-    basic_auth: false,
-    rotates_refresh_token: false,
-    refresh_requires_secret: true,
-};
-/// The Notion integration's registered redirect is port 19223 (1c925c0c18).
-const NOTION_OAUTH: PmOAuthSpec = PmOAuthSpec {
-    provider: Provider::Notion,
-    authorize_url: "https://api.notion.com/v1/oauth/authorize",
-    token_url: "https://api.notion.com/v1/oauth/token",
-    client_id_env: "NOTION_CLIENT_ID",
-    client_secret_env: "NOTION_CLIENT_SECRET",
-    authorize_params: &[("owner", "user")],
-    redirect_port: 19223,
-    basic_auth: true,
     rotates_refresh_token: false,
     refresh_requires_secret: true,
 };
@@ -383,12 +368,10 @@ pub(crate) struct PmOAuthSpec {
     token_url: &'static str,
     client_id_env: &'static str,
     client_secret_env: &'static str,
-    /// Provider-specific authorization parameters: scope, or Notion's `owner`.
+    /// Provider-specific authorization parameters, such as scope.
     authorize_params: &'static [(&'static str, &'static str)],
     /// The loopback port registered as the application's redirect.
     redirect_port: u16,
-    /// Notion takes client credentials as HTTP Basic and a JSON body.
-    basic_auth: bool,
     /// Linear rotates refresh grants; Asana keeps one long-lived grant.
     rotates_refresh_token: bool,
     /// PKCE public clients refresh by client ID alone; Asana requires its secret.
@@ -399,7 +382,6 @@ fn pm_oauth(provider: Provider) -> Option<&'static PmOAuthSpec> {
     match provider {
         Provider::Linear => Some(&LINEAR_OAUTH),
         Provider::Asana => Some(&ASANA_OAUTH),
-        Provider::Notion => Some(&NOTION_OAUTH),
         _ => None,
     }
 }
@@ -409,8 +391,7 @@ impl PmOAuthSpec {
         format!("http://localhost:{}/oauth/callback", self.redirect_port)
     }
 
-    /// A token request: form fields with the client credentials, or for Basic
-    /// authentication the same grant as JSON.
+    /// A token request: form fields with the client credentials and the grant.
     fn token_request(
         &self,
         url: &str,
@@ -419,13 +400,6 @@ impl PmOAuthSpec {
         grant: &[(&str, &str)],
     ) -> reqwest::RequestBuilder {
         let client = reqwest::Client::new().post(url);
-        if self.basic_auth {
-            let body: serde_json::Map<String, serde_json::Value> = grant
-                .iter()
-                .map(|(key, value)| (key.to_string(), serde_json::json!(value)))
-                .collect();
-            return client.basic_auth(client_id, client_secret).json(&body);
-        }
         let mut form = vec![("client_id", client_id)];
         if let Some(secret) = client_secret {
             form.push(("client_secret", secret));
@@ -1040,11 +1014,10 @@ fn default_brokers(client: Option<Arc<CredentialSocketClient>>) -> Vec<Arc<dyn A
     brokers
 }
 
-fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 3] {
+fn pm_auth_brokers() -> [Arc<dyn AuthBroker>; 2] {
     [
         Arc::new(PmOAuthBroker::new(Provider::Linear)) as Arc<dyn AuthBroker>,
         Arc::new(PmOAuthBroker::new(Provider::Asana)) as Arc<dyn AuthBroker>,
-        Arc::new(PmOAuthBroker::new(Provider::Notion)) as Arc<dyn AuthBroker>,
     ]
 }
 
@@ -2016,7 +1989,7 @@ pub async fn refresh_stored_provider_token(
     current_token: &ProviderToken,
 ) -> Result<ProviderToken, TokenRefreshError> {
     let mut refreshed = match provider {
-        Provider::Linear | Provider::Asana | Provider::Notion => {
+        Provider::Linear | Provider::Asana => {
             let refresh_token = current_token
                 .refresh_token
                 .as_deref()
@@ -3064,7 +3037,7 @@ mod tests {
 
     #[test]
     fn planning_brokers_registered_in_default_brokers() {
-        for provider in [Provider::Linear, Provider::Asana, Provider::Notion] {
+        for provider in [Provider::Linear, Provider::Asana] {
             assert!(
                 default_brokers(None)
                     .iter()
@@ -3235,27 +3208,6 @@ mod tests {
             Some("refresh-token")
         );
         assert!(!params.contains_key("client_secret"));
-    }
-
-    #[test]
-    fn notion_token_requests_use_basic_auth_and_json() {
-        let (request, body) = token_request_body(NOTION_OAUTH.token_request(
-            NOTION_OAUTH.token_url,
-            "notion-client",
-            Some("notion-secret"),
-            &[("grant_type", "authorization_code"), ("code", "abc")],
-        ));
-        let authorization = request.headers()["authorization"].to_str().unwrap();
-        assert!(authorization.starts_with("Basic "));
-        let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(
-            body,
-            serde_json::json!({"grant_type": "authorization_code", "code": "abc"})
-        );
-        assert_eq!(
-            NOTION_OAUTH.redirect_uri(),
-            "http://localhost:19223/oauth/callback"
-        );
     }
 
     #[test]

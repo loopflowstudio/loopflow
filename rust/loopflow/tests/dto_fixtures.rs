@@ -97,11 +97,11 @@ fn wave_detail_preserves_graph_and_machine() {
     else {
         panic!("missing Projects")
     };
-    assert_eq!(projects[0].sync.changes[1].field, "task_order");
+    assert_eq!(projects[0].sync.actions[1].change, "order");
     let Evidence::Ok { items: tasks, .. } = &snapshot.tasks else {
         panic!("missing Tasks")
     };
-    assert_eq!(tasks[0].task.sync.changes[0].field, "creation");
+    assert_eq!(tasks[0].task.sync.actions[0].change, "create");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
     assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
@@ -635,7 +635,7 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "peer_planning" => {
                 read::<Vec<loopflow_execution::store::PeerPlanningStatus>>(&body["destinations"]);
-                assert_eq!(body["transport"], "git");
+                assert_eq!(body["tracker"], "git");
             }
             other => panic!("unknown subscription {other}"),
         }
@@ -713,27 +713,41 @@ fn composed_lifecycle_preserves_completion_before_graph_arrival() {
 }
 
 #[test]
-fn planning_sync_preserves_delivery_and_losing_values() {
+fn tracker_sync_preserves_sent_actions_and_losing_values() {
+    use loopflow_execution::store::planning_sync::{ActionOwnerKind, TrackerKind};
+    use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
     let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/planning_sync.json"
+        "../../../tests/fixtures/dto/tracker_sync.json"
     ))
     .unwrap();
-    let sync: loopflow_execution::store::planning_sync::PlanningSyncStatus =
+    let sync: loopflow_execution::store::planning_sync::TrackerSync =
         serde_json::from_value(value.clone()).unwrap();
-    assert!(sync.connected);
+    assert_eq!(sync.actions[1].phase, ActionPhase::Sent);
+    assert_eq!(sync.actions[2].change, "title");
+    assert_eq!(sync.actions[2].local_value, "Local title");
     assert_eq!(
-        sync.changes[1].state,
-        loopflow_execution::store::planning_sync::PlanningSyncState::Uncertain
-    );
-    assert_eq!(sync.changes[2].field, "task_title");
-    assert_eq!(sync.changes[3].field, "task_assignee");
-    assert_eq!(sync.changes[2].local_value, "Local title");
-    assert_eq!(
-        sync.changes[2].linear_value,
+        sync.actions[2].tracker_value,
         Some(serde_json::json!("Linear title"))
     );
     assert_eq!(serde_json::to_value(&sync).unwrap(), value);
-    assert!(sync.lines()[3].contains("provider: null"));
+    assert_eq!(
+        sync.lines()[2],
+        r#"title · conflicted · lost: "Local title" · linear: "Linear title""#
+    );
+    assert!(sync.lines()[3].contains("linear: null"));
+    assert_eq!(sync.actions[1].owner_kind, ActionOwnerKind::Project);
+    assert_eq!(sync.actions[5].seq, None);
+    assert_eq!(sync.actions[5].tracker, TrackerKind::Git);
+    assert_eq!(
+        sync.lines()[5],
+        r#"title · conflicted · lost: "Mine" · git: "Peer title""#
+    );
+    let mut unknown = value;
+    unknown["actions"][0]["tracker"] = serde_json::json!("notion");
+    assert!(
+        serde_json::from_value::<loopflow_execution::store::planning_sync::TrackerSync>(unknown)
+            .is_err()
+    );
 }
 
 #[test]

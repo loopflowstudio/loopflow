@@ -377,10 +377,10 @@ mod tests {
     use loopflow_storage::work::project::ProjectKR;
 
     use super::*;
-    use crate::linear::LinearProject;
+    use loopflow_storage::planning::TrackerProject;
 
-    fn project(id: &str, slug: &str) -> LinearProject {
-        LinearProject {
+    fn project(id: &str, slug: &str) -> TrackerProject {
+        TrackerProject {
             description: None,
             revision: None,
             id: id.to_string(),

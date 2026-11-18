@@ -18,7 +18,6 @@ use loopflow_model::chat::types::{ConversationItem, Lifecycle};
 use loopflow_storage::sqlite::SqliteStore;
 
 const SNIPPET_CHARS: usize = 80;
-const ANSWER_CHARS: usize = 160;
 
 fn now() -> i64 {
     time::OffsetDateTime::now_utc().unix_timestamp()
@@ -128,12 +127,7 @@ fn render_facts(out: &mut String, conversation: &Conversation) {
             .map(minute)
             .unwrap_or_else(|| "unknown time".into());
         let status = turn.status.as_deref().unwrap_or("unsettled");
-        let answer = turn
-            .final_answer
-            .as_deref()
-            .map(|answer| format!(" · final answer: \"{}\"", clip(answer, ANSWER_CHARS)))
-            .unwrap_or_default();
-        out.push_str(&format!("    {at} {status}{answer}\n"));
+        out.push_str(&format!("    {at} {status}\n"));
     }
 }
 

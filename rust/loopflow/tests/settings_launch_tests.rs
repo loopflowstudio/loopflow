@@ -370,6 +370,7 @@ if '--json-schema' in sys.argv:
         decision = 'advance' if marker.exists() else 'iterate'
         marker.touch()
         result['structured_output'] = {'decision': decision, 'summary': 'One repeat proves selection', 'reason': None}
+keep_claude_turn(message, result['result'], result.get('structured_output'))
 print(json.dumps(result), flush=True)
 for line in sys.stdin:
     pass
@@ -453,7 +454,10 @@ fn exercise_live_occurrence_preferences(overrides: bool) {
     let _server =
         loopflow_test_support::MachineServer::start(env!("CARGO_BIN_EXE_lf"), home.path());
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
     let store = tokio::runtime::Runtime::new()
@@ -693,7 +697,10 @@ fn choices_and_fallbacks_agree_in_inspection_runtime_and_exported_recipes() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
     support::seed_store(home.path());
@@ -1011,7 +1018,10 @@ fn explicit_graph_agent_reaches_composed_routers_and_repeated_steps() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let _env = support::EnvGuard::with_home(
-        &[("claude", CLAUDE_SETTINGS), ("gh", "#!/bin/sh\nexit 1\n")],
+        &[
+            ("claude", support::claude_stand_in(CLAUDE_SETTINGS).as_str()),
+            ("gh", "#!/bin/sh\nexit 1\n"),
+        ],
         Some(home.path()),
     );
     support::seed_store(home.path());

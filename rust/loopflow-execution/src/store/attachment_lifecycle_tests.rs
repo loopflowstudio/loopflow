@@ -399,16 +399,6 @@ fn invocation_retry_retains_history_and_refuses_failed_close_or_stale_authority(
         || panic!("stale retry must never close the replacement")
     )
     .is_err());
-    let conn = store.conn.lock().unwrap();
-    let retained: String = conn
-        .query_row(
-            "SELECT json_extract(payload,'$.provider_thread') FROM session_events
-         WHERE json_extract(payload,'$.type')='agent_process_replaced'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(retained, "original-thread");
 }
 
 #[test]

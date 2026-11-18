@@ -82,11 +82,6 @@ impl ClaudeDecoder {
                 value["session_id"] == turn.thread.as_str(),
                 "Claude result changed conversation"
             );
-            if let Some(output) = value.get("structured_output").filter(|v| !v.is_null()) {
-                out.push(output_fact(turn, json!({"value": output})));
-            } else if let Some(text) = value["result"].as_str() {
-                out.push(output_fact(turn, json!({"text": text})));
-            }
         }
         if deferred {
             self.state = ReaderState::default();
@@ -174,14 +169,6 @@ fn signals(line: &Value) -> Vec<Signal> {
         }
         _ => Vec::new(),
     }
-}
-
-fn output_fact(turn: &ProviderTurn, answer: Value) -> Decoded {
-    ProviderFact::Output {
-        turn: turn.clone(),
-        answer,
-    }
-    .into()
 }
 
 /// Reader-local state for tracking in-flight content blocks.
@@ -897,7 +884,6 @@ mod tests {
                 "SessionObserved sess_claude_normal",
                 "Activity Working",
                 "Activity Yielded(true)",
-                r#"Output sess_claude_normal/request {"text":"done"}"#,
                 "TurnCompleted sess_claude_normal/request Completed",
             ]
         );
@@ -948,7 +934,6 @@ mod tests {
                 r#"Activity ToolStarted("tool_multi_2")"#,
                 r#"Activity ToolResolved("tool_multi_2")"#,
                 "Activity Yielded(true)",
-                r#"Output sess_trace/request {"text":"done"}"#,
                 "TurnCompleted sess_trace/request Completed",
             ]
         );
@@ -1347,10 +1332,6 @@ mod tests {
             facts,
             vec![
                 ProviderFact::Activity(Signal::Yielded(true)),
-                ProviderFact::Output {
-                    turn: turn("request"),
-                    answer: json!({"value": value})
-                },
                 ProviderFact::TurnCompleted {
                     turn: Some(turn("request")),
                     status: Lifecycle::Completed,

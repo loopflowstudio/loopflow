@@ -206,14 +206,7 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     fixture
         .store
         .sqlite
-        .record_session_event(
-            &session.id,
-            &"thread".into(),
-            "turn",
-            crate::session::SessionEventKind::Started,
-            &serde_json::json!({}),
-        )
-        .unwrap();
+        .record_turn_start(&session.id, &"thread".into(), "turn", 1);
     let before = fixture.store.sqlite.session(&session.id).unwrap();
     // A reserved input and an unanswered turn are history; only the
     // Process with unknown evidence blocks.
@@ -692,9 +685,12 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         ],
     )
     .unwrap();
-    conn.execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-             VALUES(?1,'thread','turn','started','turn',?2,'{}')",
+    fixture
+        .store
+        .sqlite
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,started_at)
+             VALUES(?1,'thread','turn',?2)",
             rusqlite::params![session.id, now - 100],
         )
         .unwrap();

@@ -476,10 +476,8 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
             .as_ref()
             .and_then(|session| session.input_key().ok())
         {
-            Some(input) => store
-                .sqlite
-                .input_final_answer(input)
-                .map_err(repair_error)?,
+            Some(input) => crate::transcript::answer::input_final_answer(&store.sqlite, input)
+                .map_err(|error| repair_error(format!("{error:#}")))?,
             None => None,
         };
         let (conclusion, error) = match (&session, answer) {

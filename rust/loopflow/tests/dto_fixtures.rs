@@ -281,29 +281,29 @@ fn metric_portfolio_fixture_locks_every_tagged_payload() {
 }
 
 #[test]
-fn session_history_retains_receipts_and_unknown_lf_process() {
+fn session_history_lists_turns_beside_observations() {
     let input = include_str!("../../../tests/fixtures/dto/session_history.json");
+    let history: serde_json::Value = serde_json::from_str(input).unwrap();
+    let turns: Vec<loopflow_execution::session::Turn> =
+        serde_json::from_value(history["turns"].clone()).unwrap();
     let events: Vec<loopflow_execution::session::SessionEvent> =
-        serde_json::from_str(input).unwrap();
+        serde_json::from_value(history["events"].clone()).unwrap();
+    assert_eq!(turns[0].thread.as_str(), "thread_fixture");
+    assert_eq!(turns[0].status.as_deref(), Some("completed"));
+    assert!(turns[0].lf_process_id.is_none());
     assert_eq!(
-        events[1].kind,
-        loopflow_execution::session::SessionEventKind::Completed
+        turns[0].usage.as_ref().unwrap().usage.total_input_tokens,
+        Some(20)
     );
     assert_eq!(
-        events[0].agent_session.as_ref().unwrap().as_str(),
-        "thread_fixture"
-    );
-    assert!(events[1].lf_process_id.is_none());
-    assert_eq!(events[0].payload["total"]["inputTokens"], 40);
-    assert_eq!(
-        events[2].kind,
+        events[0].kind,
         loopflow_execution::session::SessionEventKind::Observed
     );
-    assert!(events[2].provider_turn.is_none());
-    assert!(events[2].agent_session.is_none());
+    assert!(events[0].provider_turn.is_none());
     assert_eq!(
-        serde_json::to_value(events).unwrap(),
-        serde_json::from_str::<serde_json::Value>(input).unwrap()
+        serde_json::to_value(&turns).unwrap(),
+        history["turns"],
+        "a turn round-trips"
     );
 }
 

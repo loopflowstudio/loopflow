@@ -65,7 +65,7 @@ provider names, and replace each hand-written loop with the function:
 | `configure_agent_env` (`harness/mod.rs`) | loops over the lf list | calls the function; covers Claude, Codex app-server, OpenCode, Pi headless and their probes |
 | Codex app-server (`harness/codex.rs:780`) | loops over the lf list | calls the function |
 | `NativeClient::new` (`harness/native_session.rs`) | removes nothing of either list | calls the function; every native chat and work session, all four harnesses (LOO-959's path) |
-| `transport.rs:384` `start_held` caller | `&\|_\| {}` | passes the function as `inherit`, so the held `lf` and its terminal start clean |
+| `transport.rs:384` `start_held` caller | `&\|_\| {}` | unchanged (see Slices: the held `lf` is the caller's own invocation) |
 | `agent/mod.rs:960` | strips the lf list from `launch.env` | same loop over the renamed list (a map, not a `Command`) |
 
 Order: the function runs on the inherited environment, before
@@ -136,6 +136,26 @@ records a thread with no transcript.
   not.
 
 ## Slices
+
+Slice 1 built (2026-11-17): the list is `CALLER_SESSION_ENV` (32 names) with
+`remove_caller_session_env`; `configure_agent_env`, the Codex app-server and
+`NativeClient::new` call it; `agent/mod.rs` strips the map. The matrix plants
+every provider marker as `caller` plus `CLAUDE_CONFIG_DIR` and passes all 16
+cells; removing the `NativeClient::new` call fails `Claude Chat` at once. No
+cell reached a provider another way, so slice 2 has nothing to do.
+
+What it taught:
+- `start_held` stays `&|_| {}`. The held `lf` is the delegating invocation
+  continued in a terminal; it joins its parent's trace through
+  `LF_TRACE_ID`/`LF_PROCESS_ID` (`journal/mod.rs` parent resolution), so
+  removing lf's markers there would orphan it. The provider it starts goes
+  through `NativeClient::new`.
+- The matrix can't plant lf's own markers: the test process is lf and reads
+  them (`LF_CAPTURE_KEY=caller` fails with "invalid capture key"). It plants
+  the provider names; lf's names keep their coverage from the `managed` hook
+  assertions.
+
+Remaining: the Demo, run by hand.
 
 1. Rename and extend the list, the function, the five sites, and the
    launch-matrix assertion.

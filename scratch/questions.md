@@ -4,3 +4,4 @@
 - AI_AGENT is removed although a person could set it; only Claude Code and Codex were seen setting it.
 - Removing markers instead of setting CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: removal also stops the child joining the parent's messaging socket and notes dir.
 - One list for lf's and the providers' caller markers (`CALLER_SESSION_ENV`, renamed from `EXECUTION_IDENTITY_ENV`) instead of a second `PROVIDER_SESSION_ENV`. Passed over: two lists, which keeps lf's names apart from vendor names but leaves four sites choosing which lists to apply.
+- `start_held` keeps passing the caller's environment to the held `lf` unchanged, against the plan's table: that `lf` reads `LF_TRACE_ID`/`LF_PROCESS_ID` to join its parent's trace, and the provider it starts is cleaned in `NativeClient::new`. Passed over: removing only provider markers there, which would need a second list.

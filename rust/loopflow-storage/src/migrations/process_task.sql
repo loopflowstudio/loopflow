@@ -48,4 +48,9 @@ FROM (SELECT s.id, (WITH RECURSIVE up(path) AS (
 JOIN tasks t ON t.id=inside.task_id LEFT JOIN projects p ON p.id=t.project_id
 WHERE inside.id=agent_sessions.id;
 
+-- A Task's Auto-Ship carrier is a `task_ship_events` row since
+-- task_machine_local copied it there. The leaving column's reference would
+-- otherwise keep the carrier's Process from ever being forgotten.
+UPDATE tasks SET ship_lf_process_id=NULL WHERE ship_lf_process_id IS NOT NULL;
+
 -- leaving: relocated_task_processes LOO-877

@@ -345,8 +345,7 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)";
+    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)";
 
 /// The row's `kind` column is the only place an id becomes either type.
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessEntry> {
@@ -2772,6 +2771,10 @@ mod forget_tests {
             .into_iter()
             // Agent rows are never forgotten.
             .filter(|(_, column)| column != "agent_process_id")
+            // Nothing writes a leaving column.
+            .filter(|(table, column)| {
+                !crate::leaving_guard::is_leaving(&format!("{table}.{column}"))
+            })
             .filter(|(table, column)| {
                 !super::FORGETTABLE.contains(&format!("FROM {table} WHERE {column}=p.id"))
             })

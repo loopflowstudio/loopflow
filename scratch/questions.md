@@ -42,3 +42,14 @@
   until... nothing assigns them. Chosen: accept it (helpers are PR-title and
   commit-message runs; Task Graphs name their Task). Passed over: a second
   cursor in `assign_process_tasks` for `agent_sessions`.
+- **Guard reach.** Chosen: only `loopflow-storage`'s `cfg(test)` stores.
+  Passed over: `test-support` stores too, which would catch execution and
+  application SQL but put the authorizer behind a feature Cargo unifies into
+  the CLI build.
+- **Leaving list from embedded migrations**, not a `build.rs` emission: the
+  binary already carries every migration's SQL; parsing it once in tests
+  needs no generated file.
+- **FK columns exempt.** SQLite reports its key checks as plain reads, so a
+  direct read of a leaving FK column passes. Passed over: tracking the
+  statement's write target to tell them apart (no statement boundary in the
+  authorizer; subselects arrive between the write and the key check).

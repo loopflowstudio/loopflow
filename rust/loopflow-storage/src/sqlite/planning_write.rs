@@ -1037,8 +1037,9 @@ mod tests {
             )
             .unwrap();
         }
+        // Every column, leaving ones included, on a connection of its own.
         let execution = || {
-            let conn = b.conn.lock().unwrap();
+            let conn = rusqlite::Connection::open(right.path().join("db")).unwrap();
             [
                 "processes",
                 "agent_sessions",

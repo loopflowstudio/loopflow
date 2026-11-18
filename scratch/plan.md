@@ -214,19 +214,23 @@ Reconciliation rule for the 3 primary Sessions whose `task_id` disagrees:
 
 ## A duplicate can't come back
 
-`open_ephemeral` under `cfg(test)` installs an SQLite authorizer
-(rusqlite `hooks` feature) that denies `SQLITE_READ`/`SQLITE_UPDATE` on every
-leaving column and any access to a leaving table. `build.rs` already orders
-migrations; it also emits the leaving list from `-- leaving:` marks. Every
-store test then fails with the member's name if production SQL touches it.
-It is installed after migrations apply, and it allows any access whose
-accessor is a trigger: `store_revision_tasks_update`,
-`task_update_tasks_update` and `cancel_task_retirement` still name leaving
-columns, and denying them would fail every Task update rather than catch a
-reader. Migration-replay and old-release fixture tests open through a path
-without the authorizer. The leaving list is read from the `-- leaving:` marks
-`scripts/due_removals.py` already parses, emitted by `build.rs`. Break it in your head: re-add `t.planning_url` to `TASK_COLUMNS`
-and every Task read test fails.
+The storage crate's test stores (`open_ephemeral_prepared` under
+`cfg(test)`) install an SQLite authorizer (`leaving_guard.rs`) after
+migrations apply. It denies reads and updates of every leaving column, and
+any access to a leaving table, printing `store SQL names leaving member
+<member>`. The list comes from the `-- leaving:` marks in the migrations the
+binary already embeds; no `build.rs` step. It lets through what SQLite does
+on its own, which reaches the authorizer looking like top-level SQL: trigger
+bodies (accessor set), reads of foreign-key columns (key checks when a parent
+row changes) and deletes from tables a parent cascades into. So a direct read
+of a leaving FK column (`tasks.ship_lf_process_id`, `tasks.parent_pr_id`,
+`tasks.checkout_machine_id`, `tasks.primary_session_id`, `machines.pool`)
+or of an all-FK table (`relocated_task_processes`) is not caught.
+`STILL_READ` lists marks whose own comment says production still reads them:
+`agent_sessions.work_source` (LOO-836) and `tasks.regressed_in` (LOO-730).
+Migration-replay and old-release fixtures open their own connections.
+Checked: putting `t.worktree` back in `TASK_COLUMNS` fails 5 of 11
+`task_work::` tests with `tasks.worktree`.
 
 ## Acceptance check at gate
 
@@ -338,9 +342,22 @@ every Process/Session association, conflict answers.
    `session_cli_tests::` and the `loopflow` crate's fixtures, which insert
    `agent_sessions` rows by SQL; any that relied on a path match need a
    `task_id`.
-2. **The guard.** Authorizer in test stores, leaving list from `build.rs`.
-   Fix the reads it catches (the `ship_lf_process_id` prune clause, the
-   registry fallback). Every later slice lands under it.
+2. **The guard.** *Built (`leaving_guard.rs`). `cargo nextest run -p
+   loopflow-storage --lib`: 390 passed under it.* The first run failed 140
+   tests; nearly all were SQLite's foreign-key checks and cascades (exempted,
+   see above), the rest `work_source`/`regressed_in` (still read by design,
+   `STILL_READ`) and three test-side readers. Production SQL it caught: none
+   beyond the two planned. The `ship_lf_process_id` prune clause is gone;
+   `process_task.sql` nulls that column (190 live rows, every one already a
+   `task_ship_events` row since task_machine_local; v0.16.0 writes it only in
+   a test), so no Process stays pinned by it. The pre-`task_checkouts`
+   registry fallback is gone from `read_task_branches` and
+   `read_task_worktree_ownership`, with the two old-schema fixtures; one test
+   seeds a released registry with `task_checkouts`. Guard only covers the
+   storage crate's own tests: `test-support` stores in other crates stay
+   unguarded so feature unification can't change the CLI. Every later slice
+   lands under it: slice 3 marks its columns leaving and the Task tests say
+   what still reads them.
 3. **Observation bookkeeping lives in `pm_items`.** Provider revision,
    synced-at, `planning_completed` leave `tasks`; same check for `projects`.
    The observation steer compares against `pm_items`; intents' title copy

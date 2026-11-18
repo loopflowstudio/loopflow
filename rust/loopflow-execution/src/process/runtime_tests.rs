@@ -45,9 +45,10 @@ fn history_times_provider_work_from_its_first_recorded_attempt() {
             )
         })
         .collect::<Vec<_>>();
-    assert_eq!(attempts.len(), 2);
+    // The completed retry says nothing its turn rows would not, so only the
+    // failed attempt is kept.
+    assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].outcome.as_deref(), Some("failed"));
-    assert_eq!(attempts[1].outcome.as_deref(), Some("completed"));
     assert!(attempts[0].started_at.is_some());
     assert_eq!(history.first_provider_attempt_at, attempts[0].started_at);
 }

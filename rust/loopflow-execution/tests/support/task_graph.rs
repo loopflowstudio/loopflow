@@ -1,5 +1,11 @@
 //! Held provider fixtures shared by Graph and Task lifecycle checks.
-pub const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
+/// A Claude stand-in that announces `ready` in LF_HOME, then waits there for
+/// `release` before it answers.
+pub fn holding_claude() -> String {
+    super::claude_stand_in(HOLDING_CLAUDE)
+}
+
+const HOLDING_CLAUDE: &str = r#"#!/usr/bin/python3
 import json, os, sys, time
 if '--version' in sys.argv:
     print('fixture')
@@ -17,6 +23,7 @@ while not os.path.exists(os.path.join(home, 'release')):
 if not streamed:
     sys.exit(0)
 message['session_id'] = 'stand-in'
+keep_claude_turn(message, 'Held.')
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
 print(json.dumps({'type': 'assistant', 'message': {'content': [{'type': 'text', 'text': 'Held.'}]}}), flush=True)

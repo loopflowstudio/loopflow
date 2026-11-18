@@ -2857,19 +2857,21 @@ read -r initialize
 echo '{{"jsonrpc":"2.0","id":1,"result":{{}}}}'
 read -r initialized
 read -r thread_start
-echo '{{"jsonrpc":"2.0","id":2,"result":{{"thread":{{"id":"thread-test"}}}}}}'
+echo '{{"jsonrpc":"2.0","id":2,"result":{{"thread":{{"id":"019a0000-0000-7000-8000-000000000001"}}}}}}'
 read -r turn_start
 printf '%s\n' "$turn_start" > '{prompt}'
 touch '{repaired}'
-echo '{{"jsonrpc":"2.0","id":3,"result":{{"turn":{{"id":"turn-test"}}}}}}'
-echo '{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"inProgress"}}}}}}'
-printf '%s\n' '{{"jsonrpc":"2.0","method":"item/completed","params":{{"threadId":"thread-test","turnId":"turn-test","item":{{"type":"agentMessage","id":"message-test","text":"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}","phase":"final_answer"}}}}}}'
-echo '{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"thread-test","turn":{{"id":"turn-test","status":"completed"}}}}}}'
+echo '{{"jsonrpc":"2.0","id":3,"result":{{"turn":{{"id":"019a0000-0000-7000-8000-000000000002"}}}}}}'
+echo '{{"jsonrpc":"2.0","method":"turn/started","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turn":{{"id":"019a0000-0000-7000-8000-000000000002","status":"inProgress"}}}}}}'
+printf '%s\n' '{{"jsonrpc":"2.0","method":"item/completed","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turnId":"019a0000-0000-7000-8000-000000000002","item":{{"type":"agentMessage","id":"message-test","text":"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}","phase":"final_answer"}}}}}}'
+python3 '{rollout}' 019a0000-0000-7000-8000-000000000001 019a0000-0000-7000-8000-000000000002 '"{{\"status\":\"published\",\"summary\":\"Merge group rerun green; re-armed.\"}}"' || exit 1
+echo '{{"jsonrpc":"2.0","method":"turn/completed","params":{{"threadId":"019a0000-0000-7000-8000-000000000001","turn":{{"id":"019a0000-0000-7000-8000-000000000002","status":"completed"}}}}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#,
         prompt = prompt.display(),
         repaired = repaired.display(),
+        rollout = support::codex_rollout_script(),
     ));
     let lf = format!("#!/bin/sh\nexec '{}' \"$@\"\n", env!("CARGO_BIN_EXE_lf"));
     let _env = EnvGuard::new(&[("gh", &gh), ("codex", &codex), ("lf", &lf)]);

@@ -57,7 +57,6 @@ async fn codex_live_one_turn_smoke() {
             title: "Codex live smoke".into(),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },

@@ -10875,12 +10875,6 @@
           "description": "A conversation open here that Loopflow never launched; `id` is the\nprovider's conversation ID and no Session records it.",
           "type": "boolean"
         },
-        "ready_summary": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "state": {
           "$ref": "#/$defs/SessionState"
         },
@@ -10989,7 +10983,6 @@
         "model",
         "cwd",
         "state",
-        "ready_summary",
         "open_argv",
         "terminal_ids",
         "turn",
@@ -17094,7 +17087,6 @@
             "program_status": null,
             "provider": "codex",
             "raw": false,
-            "ready_summary": "The design now reflects Jack's requested changes.",
             "state": "unknown",
             "task_ids": [
               "task_00000000000000000000000000000001"

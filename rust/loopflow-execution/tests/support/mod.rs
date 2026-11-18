@@ -132,6 +132,20 @@ else:
     run(sys.argv[1], sys.argv[2:])
 "#;
 
+/// A Python Claude stand-in that can call
+/// `keep_claude_turn(request, answer, structured=None)` to keep each turn in
+/// Claude's transcript, where lf reads final answers.
+#[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
+pub fn claude_stand_in(script: &str) -> String {
+    let (shebang, body) = script
+        .split_once('\n')
+        .expect("a stand-in script starts with its shebang line");
+    format!(
+        "{shebang}\n{}\n{body}",
+        include_str!("claude_transcript.py")
+    )
+}
+
 #[cfg(unix)]
 #[allow(dead_code)] // Shared native provider fixture compiled into multiple test crates.
 pub fn install_native_codex(bin: &Path) {
@@ -233,24 +247,42 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
+    let rollout = codex_rollout_script();
+    // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
 __SETUP__
 read -r initialize
 echo '{"jsonrpc":"2.0","id":1,"result":{}}'
 read -r initialized
 read -r thread_start
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thread-test"}}}'
+thread=$(printf '%s' "$thread_start" | python3 -c 'import json, sys, uuid; print(json.load(sys.stdin).get("params", {}).get("threadId") or uuid.uuid4())')
+turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
 read -r turn_start
-echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn-test"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"inProgress"}}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"thread-test","turnId":"turn-test","itemId":"message-test","delta":__OUTPUT__}}'
-printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thread-test","turnId":"turn-test","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thread-test","turn":{"id":"turn-test","status":"completed"}}}'
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/agentMessage/delta","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","itemId":"message-test","delta":__OUTPUT__}}'
+printf '%s\n' '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","item":{"type":"agentMessage","id":"message-test","text":__OUTPUT__,"phase":"final_answer"}}}'
+python3 '__ROLLOUT__' "$thread" "$turn" '__OUTPUT__' || exit 1
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"completed"}}}'
 if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
 while read -r line; do :; done
 "#
     .replace("__SETUP__", setup)
+    .replace("__ROLLOUT__", &rollout)
     .replace("__OUTPUT__", &output))
+}
+
+/// The script that appends a completed turn to the rollout Codex keeps,
+/// where lf reads final answers, quoted for a single-quoted shell word:
+/// `python3 '<script>' THREAD TURN ANSWER_JSON`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_rollout_script() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/codex_rollout.py"
+    )
+    .replace('\'', r#"'"'"'"#)
 }
 
 #[allow(dead_code)] // Shared provider transport compiled into multiple test crates.

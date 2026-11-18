@@ -23,7 +23,7 @@ public struct AgentProcessId: RawRepresentable, Codable, Sendable, Hashable {
     }
 }
 
-/// Native receipts retain missing attribution and provider-specific evidence.
+/// Session history: an observation, or an input. Provider turns are separate.
 public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public let seq: Int64
     public let sessionID: String
@@ -40,7 +40,7 @@ public struct SessionEvent: Codable, Sendable, Equatable, Identifiable {
     public var id: Int64 { seq }
 
     public enum Kind: String, Codable, Sendable {
-        case captured, started, usage, completed, output, observed
+        case captured, observed
     }
 
     enum CodingKeys: String, CodingKey {

@@ -2,12 +2,12 @@
 mod answers;
 pub(crate) mod boundary;
 pub mod connect;
+mod maintenance;
 pub mod mobile;
 mod outbox;
 mod remote;
 pub mod schema;
 mod service;
-mod statistics;
 mod subscriptions;
 mod ticket;
 mod wake;

@@ -156,7 +156,7 @@ struct WorkSurfaceView: View {
                                         repository: model.repoPath, liveSessions: model.liveSessionCount,
                                         owner: model.navigation.performanceOwner) { onOpenSession(session) }
                     } label: {
-                        Label(session.readySummary ?? "Input needed in \(session.title)", systemImage: "bubble.left")
+                        Label("Input needed in \(session.title)", systemImage: "bubble.left")
                     }
                     .buttonStyle(WorkPlainButtonStyle())
                     .accessibilityIdentifier("task-available-\(session.id)")

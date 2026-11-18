@@ -570,8 +570,10 @@ Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
 main-Machine opens never initialize or advance its schema.
 
-`LF_HOME` explicitly selects a private, disposable Home. Its database is
-always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable
+`LF_HOME` explicitly selects a private, disposable Home. Its store is
+always `$LF_HOME/loopflow.db`, with history and turns in `$LF_HOME/history.db`;
+no other
+variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
 migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into

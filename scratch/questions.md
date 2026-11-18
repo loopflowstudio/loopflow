@@ -14,5 +14,17 @@
   added beside it. A trace captured the next time Codex refuses would settle
   whether the text match can go.
 
-- **`lf replay` on a bare harness now tries that harness's other models on a
-  limit**, like every pinned bare launch. Left as is.
+- **`lf replay` runs the recorded agent and nothing else.** The bare-harness
+  model expansion lives only in `Config::resolve_agents`; replay builds its
+  launch by hand, so it never moves. Same as today.
+
+- **A Codex-to-Codex move resumes a thread whose first turn was refused.** It
+  sends `LIMIT_FAILOVER_PROMPT` to that thread. No Codex refusal has ever
+  classified, so this path has never run against the provider; whether the
+  thread still holds the task is unknown. If it does not, a move within a
+  provider with no reply yet should also restart from the original prompt.
+
+- **A turn refused before any reply restarts from the original prompt on the
+  next provider**, instead of importing the transcript. Chosen because a PR
+  prompt's diff is longer than the import's excerpt. Passed over: a flag on
+  the launch marking it one-shot.

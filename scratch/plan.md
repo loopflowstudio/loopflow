@@ -53,14 +53,28 @@ classifier or gets the same fold.
 
 ## Design
 
-**The loop.** `_fallthrough_rungs` loses `if !process.wait_for_capacity
-{ return first }` and its `process` parameter. Rungs are the launch's agent,
-then `fallback_agents`; a bare harness with no fallbacks tries its other
-models, as now. `wait_for_capacity` gates only the 5/15/30/60-minute wait,
-which `_run_with_retries` already checks on its own (`agent/mod.rs:1110`).
-`lf -b <skill>` and sync conflicts (`ops/sync_execution.rs`) already fill
-`fallback_agents` through `prompt/process.rs:98`, so they move with no further
-change.
+**One rule.** A headless launch follows its agent order when a provider
+refuses it. Only a Graph step also waits for capacity. Three things carry that
+rule today (the shared loop behind a flag named for waiting, a second loop in
+`ops/commit.rs`, nothing in `ops/pr.rs`) and two places work out the order.
+After this change there is one of each.
+
+**The order is resolved once, in `Config::resolve_agents`.** It already
+returns the launch agent and its fallbacks, and already gives a bare harness
+with no order its other models (`config.rs:522`). `_fallthrough_rungs`
+repeats that expansion (`agent/mod.rs:1183`) and disagrees with it: it tests
+`model.is_none()` after `with_configured_model`, `resolve_agents` before. So
+`_fallthrough_rungs` goes whole. The loop walks `launch.agent`, then
+`launch.fallback_agents`, deduplicated, and nothing else. Every caller that
+wants moves gets them by resolving: `prompt/process.rs:98` already does
+(`lf -b <skill>`, Graph steps, sync conflicts), PR copy and commit messages
+start to. A caller that builds `AgentConfig::new(agent)` by hand runs that
+agent only.
+
+**`wait_for_capacity` means what it says.** It gates only the
+5/15/30/60-minute wait, which `_run_with_retries` already checks on its own
+(`agent/mod.rs:1110`). Its doc comment (`agent/mod.rs:451`) loses the half
+about moving.
 
 **PR copy** (`ops/pr.rs` `generate_pr_copy`, line 543). Resolve the
 `pr-message` skill's settings with `config::settings::resolve(&config,
@@ -83,10 +97,29 @@ outer loop, which would run each agent's whole fallback order once per outer
 agent. A step commit that gets no message still commits as
 `lf <step>: checkpoint`.
 
-**Moving provider with no Session.** `_climb` gives the next provider
-`AGENT_FAILOVER_PROMPT` followed by the original task when there is no Session
-to import (`agent/mod.rs:1221`). PR and commit prompts are whole in the task
-prompt, so the next agent gets everything it needs.
+**Moving provider when nothing has been said.** Every command has a Session:
+`run_admitted_agent` begins one when the caller passes no runtime
+(`agent/mod.rs:992`) and claims its attachment, so `_history_import` runs for
+PR copy and commit messages too. What it returns for a turn refused before any
+reply is the wrong first turn for a one-shot prompt: either the transcript is
+missing and the next agent is told to "finish any interrupted work", or it is
+found and `conversation_log::continuation` sends `Pick up where it left off`
+with the log's first 6,000 and last 14,000 characters. A PR prompt carries up
+to 20,000 characters of diff, so the middle of the diff is cut and the agent is
+pointed at a file under `~/.lf`.
+
+The rule: a conversation with no agent reply has nothing to continue, so the
+next provider gets the launch's own `task_prompt` and `skill_invocation`,
+unchanged. `continuation` reports "no reply yet" as its own answer
+(`Ok(None)`), read from the rendered turns; `_climb` then copies the original
+launch's prompt. A transcript with replies imports as now; one that cannot be
+read keeps `AGENT_FAILOVER_PROMPT` plus the original task. This holds for a
+Graph step refused on its first turn as well, which is the same situation.
+
+Unobserved: a move inside Codex (`codex:a → codex:b`) resumes the refused
+thread with `LIMIT_FAILOVER_PROMPT`. No Codex move has ever run, because no
+Codex refusal classified. Whether a thread whose first turn was refused holds
+the task is unknown; noted in `scratch/questions.md`.
 
 **Recording.** `record_agent_limit_recovery` inserts only for a Graph step's
 Process (`rust/loopflow-storage/src/sqlite/graph_inventory.rs:325`). A
@@ -102,7 +135,7 @@ command's move is the stderr line and nothing in the store.
 | `lf commit`, step commits | own loop over the order | shared loop |
 | `lf sync` conflict resolution | stops | moves |
 | `-a` or `agent:` | pinned; bare harness tries its models only in a Graph step | pinned; bare harness tries its models everywhere |
-| `lf replay` (`commands/replay.rs`) | the recorded agent | the recorded agent; a bare harness tries its models |
+| `lf replay` (`commands/replay.rs`) | the recorded agent | the recorded agent, nothing else: it builds its launch by hand |
 | Interactive Sessions | refusal stays visible | unchanged, never reach `run_agent` |
 
 Pi and OpenCode do not classify failures (`classifies_failures: false`), so a
@@ -127,7 +160,9 @@ refusal there still stops. An order that leads with one of them never moves.
 
 ## What goes
 
-- The early return and `process` parameter in `_fallthrough_rungs`.
+- `_fallthrough_rungs`, whole. Unit tests in `agent/mod.rs` that leaned on
+  its bare-harness expansion (the `pinned` cases near line 2466) pass the
+  fallbacks `resolve_agents` would give, or move beside `resolve_agents`.
 - The `for agent in agents` loop, `configured` closure and `failure` string in
   `ops/commit.rs`.
 - `headless_work_outside_a_graph_stops_at_a_usage_limit_without_moving_or_waiting`
@@ -151,16 +186,18 @@ Survives: the Graph step's waits and recorded recoveries, pinning by `-a` and
    return. Test in `agent_tests.rs` beside the model-unavailable one: a Codex
    stand-in whose turn fails with the message exactly as Codex sends it
    (`You’ve`), `fallback_agents: [claude]`, `wait_for_capacity: false`; the
-   result is Claude's answer. This is the slice that could prove the plan
+   result is Claude's answer, and the prompt the Claude stand-in received is
+   the launch's `task_prompt` byte for byte. This is the slice that could prove the plan
    wrong: if the stand-in's refusal does not classify through the real decode
    path, nothing after it matters. Change the `'` in existing fixtures to `’`
    so they match the provider.
 2. **PR copy.** Skill settings and fallbacks in `generate_pr_copy`. Two tests
    in `tests/work/pr_tests.rs` through `create_or_update_pr` with `agent:
    None`: `agents: [codex, claude]` with Codex refused publishes Claude's
-   title; `skill.pr-message.default_agent` picks the stand-in that answers
+   title, and the Claude stand-in saw the whole diff; `skill.pr-message.default_agent` picks the stand-in that answers
    while the other would fail the test if launched.
-3. **Commit fold.** One launch in `generate_commit_message`; a focused test
+3. **Commit fold.** One launch in `generate_commit_message`, resolved the way
+   PR copy is (`Chosen(Some)` sets the resolved config's `agent`); a focused test
    that a refused first agent yields the second's message.
 4. **Docs and comments** listed under What goes.
 

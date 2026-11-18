@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-983 concept review: what happens when a provider refuses</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1c1b19; --mute: #6b6861; --line: #dcd8cf;
+    --card: #ffffff; --yes: #1f7a4a; --no: #b3261e; --new: #1d5fbf; --newbg: #e9f0fc;
+    --code: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #ebe8e1; --mute: #9d998f; --line: #36342f;
+      --card: #1e1d1b; --yes: #6fcf97; --no: #f2867e; --new: #8db8ff; --newbg: #1c2940;
+      --code: #26241f;
+    }
+  }
+  body { background: var(--bg); color: var(--fg); font: 16px/1.55 -apple-system, "Segoe UI", sans-serif;
+         max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 8px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; }
+  .lede { color: var(--mute); margin-bottom: 24px; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; font: 13px/1.4 ui-monospace, Menlo, monospace; }
+  pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto;
+        font: 13px/1.5 ui-monospace, Menlo, monospace; margin: 0 0 12px; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 12px; font-size: 14.5px; }
+  th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--line); }
+  th { color: var(--mute); font-weight: 600; }
+  .yes { color: var(--yes); font-weight: 700; white-space: nowrap; }
+  .no { color: var(--no); font-weight: 700; white-space: nowrap; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .proposed { border: 1.5px dashed var(--new); background: var(--newbg); }
+  .tag { display: inline-block; font-size: 12.5px; font-weight: 600; padding: 1px 8px; border-radius: 10px;
+         border: 1px solid var(--line); color: var(--mute); margin-bottom: 8px; }
+  .proposed .tag { border-color: var(--new); color: var(--new); }
+  .flow { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 6px 0 12px; font-size: 14px; }
+  .box { border: 1px solid var(--line); border-radius: 6px; padding: 4px 9px; background: var(--card); }
+  .box.bad { border-color: var(--no); color: var(--no); }
+  .box.ok { border-color: var(--yes); color: var(--yes); }
+  .box.new { border: 1.5px dashed var(--new); color: var(--new); }
+  .arrow { color: var(--mute); }
+  ol.q > li { margin-bottom: 14px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
+  .small { font-size: 14px; color: var(--mute); }
+</style>
+</head>
+<body>
+
+<h1>What happens when a provider refuses a launch</h1>
+<p class="lede">Concept review for LOO-983, before anything is built. Area taken: every headless
+launch through <code>run_agent</code> and what it does on a usage limit, an unavailable model or a
+revoked login, because the Task changes that rule for commands and the rule is one idea spread
+over several pieces of code. Dashed blue marks what is proposed; everything else exists today.</p>
+
+<h2>One interaction, walked</h2>
+<p><code>agents: [codex:gpt-6.2-sol, codex:gpt-6.2-astra, claude:fable, claude:opus]</code>, Codex out of quota, a person runs <code>lf pr open</code>.</p>
+
+<div class="grid">
+  <div class="card">
+    <span class="tag">Today</span>
+    <div class="flow">
+      <span class="box">pr.rs picks <code>config.agent()</code></span><span class="arrow">→</span>
+      <span class="box">Codex: “You’ve hit your usage limit”</span><span class="arrow">→</span>
+      <span class="box bad">text match wants <code>you've</code>; no match</span><span class="arrow">→</span>
+      <span class="box bad">exit 1, raw provider error</span>
+    </div>
+    <p class="small">Two things stop it, either one enough: the refusal is never recognised, and
+    even when one is (Claude's), a command outside a Graph returns before looking at the order.
+    <code>skill.pr-message.*</code> is not read at all.</p>
+  </div>
+  <div class="card proposed">
+    <span class="tag">Proposed</span>
+    <pre>codex:gpt-6.2-sol: provider usage limit; continuing on codex:gpt-6.2-astra
+codex:gpt-6.2-astra: provider usage limit; continuing on claude:fable
+https://github.com/…/pull/1234</pre>
+    <p class="small">Failure: every agent refuses. Exit non-zero with the provider's reason and
+    <code>Nothing is left in its order after …</code>. Recovery: run it again later, or add an
+    agent. Nothing outside a Graph step waits.</p>
+  </div>
+</div>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+  <tr><th>What a person knows</th><th>What the code has</th><th>Lines up?</th><th>What is wrong</th></tr>
+  <tr>
+    <td><b>Agent order</b>: <code>agents</code>, led by <code>default_agent</code></td>
+    <td><code>Config::resolve_agents</code> → <code>AgentConfig.agent</code> + <code>fallback_agents</code>; also <code>_fallthrough_rungs</code></td>
+    <td class="no">no</td>
+    <td>One idea worked out twice. Both add a bare harness's other models, and they disagree: one tests <code>model.is_none()</code> before the configured model is applied, the other after. PR copy and commit messages use neither.</td>
+  </tr>
+  <tr>
+    <td><b>A refusal</b>: out of usage, model unavailable, login revoked</td>
+    <td><code>AgentFailure</code>, from Claude's structured event; from text for Codex; a second copy of the phrases in <code>ops/release.rs</code></td>
+    <td class="no">no</td>
+    <td>Codex's refusal has never been recognised: it writes <code>You’ve</code> (U+2019) and the match wants <code>'</code>. 81 occurrences in <code>~/.lf/logs</code>, none with <code>'</code>. Codex also states the cause in <code>codexErrorInfo</code>, which the decoder does not read.</td>
+  </tr>
+  <tr>
+    <td><b>Moving on</b>: the next agent takes the work</td>
+    <td>The shared loop in <code>_run_with_retries</code>; a second loop in <code>ops/commit.rs</code>; nothing in <code>ops/pr.rs</code></td>
+    <td class="no">no</td>
+    <td>An action with no single owner. The commit loop moves on any failure, the shared loop on three kinds, PR copy never.</td>
+  </tr>
+  <tr>
+    <td><b>Waiting for capacity</b>: only a Graph step, 5/15/30/60 minutes</td>
+    <td><code>ProcessConfig.wait_for_capacity</code></td>
+    <td class="no">no</td>
+    <td>One name for two ideas. The flag also decides whether the launch may move at all.</td>
+  </tr>
+  <tr>
+    <td><b>Picking up where it left off</b> on another provider</td>
+    <td><code>_climb</code> + <code>_history_import</code> + <code>conversation_log::continuation</code></td>
+    <td class="no">no, for a first-turn refusal</td>
+    <td>The code has a conversation the person never had. A command refused before any reply still has a Session, so the next agent is sent an excerpt of a transcript (first 6,000 and last 14,000 characters) and told to pick up where it left off. A PR prompt holds up to 20,000 characters of diff.</td>
+  </tr>
+  <tr>
+    <td><b>A pin</b>: <code>-a</code> or <code>agent:</code></td>
+    <td><code>Config.agent</code> → empty <code>fallback_agents()</code></td>
+    <td class="yes">yes</td>
+    <td>PR copy takes <code>-a</code> down its own branch today; the plan sends it through the same resolution.</td>
+  </tr>
+  <tr>
+    <td><b>A per-skill agent</b>: <code>skill.pr-message.default_agent</code></td>
+    <td><code>config::settings::resolve(&amp;config, Some(&amp;skill))</code></td>
+    <td class="no">no, for PR copy</td>
+    <td><code>commit-message</code> honours it, <code>pr-message</code> ignores it.</td>
+  </tr>
+  <tr>
+    <td><b>Seeing that it moved</b></td>
+    <td>stderr line everywhere; a recorded recovery for a Graph step's Process only</td>
+    <td class="yes">yes</td>
+    <td>A command has no Task status to show it in. The terminal line is the record.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch</h2>
+<p>A person holds one rule: <b>when the provider says no, the next agent in my order takes it.</b>
+The code holds that rule in three loops and two order calculations, behind a flag named for
+something else, and recognises the refusal by an apostrophe. Each piece was reasonable alone. Together
+they mean the rule a person configured has only ever applied to Claude refusals inside a Graph step.</p>
+
+<div class="grid">
+  <div class="card">
+    <span class="tag">Before</span>
+    <table>
+      <tr><td>Order</td><td><code>resolve_agents</code> and <code>_fallthrough_rungs</code></td></tr>
+      <tr><td>Move</td><td>shared loop if <code>wait_for_capacity</code>; commit's own loop; PR none</td></tr>
+      <tr><td>Wait</td><td><code>wait_for_capacity</code></td></tr>
+      <tr><td>Refusal</td><td>Claude event; text with <code>'</code>; release's copy</td></tr>
+      <tr><td>Next agent's first turn</td><td>transcript excerpt, or “finish any interrupted work”</td></tr>
+    </table>
+  </div>
+  <div class="card proposed">
+    <span class="tag">After (proposed)</span>
+    <table>
+      <tr><td>Order</td><td><code>resolve_agents</code>. <code>_fallthrough_rungs</code> is deleted.</td></tr>
+      <tr><td>Move</td><td>the shared loop, always, over <code>agent</code> then <code>fallback_agents</code></td></tr>
+      <tr><td>Wait</td><td><code>wait_for_capacity</code>, and only that</td></tr>
+      <tr><td>Refusal</td><td><code>codexErrorInfo</code> read; one text classifier that folds <code>’</code></td></tr>
+      <tr><td>Next agent's first turn</td><td>no reply yet: the original prompt, unchanged. Otherwise the import, as now.</td></tr>
+    </table>
+  </div>
+</div>
+
+<h2>What this review changed in the plan</h2>
+<table>
+  <tr><th></th><th>Kickoff plan</th><th>Now</th></tr>
+  <tr>
+    <td><b>The order</b></td>
+    <td><code>_fallthrough_rungs</code> loses its early return and keeps its own model expansion</td>
+    <td><code>_fallthrough_rungs</code> goes whole; <code>resolve_agents</code> is the one place. A caller that builds its launch by hand (<code>lf replay</code>) runs that agent only.</td>
+  </tr>
+  <tr>
+    <td><b>Moving provider</b></td>
+    <td>“there is no Session to import”, so the next agent gets a preamble plus the task</td>
+    <td>False: <code>run_admitted_agent</code> begins a Session for every caller (<code>agent/mod.rs:992</code>). A conversation with no reply restarts from the launch's own prompt. Tests assert the second agent saw the whole prompt.</td>
+  </tr>
+  <tr>
+    <td><b>Codex → Codex</b></td>
+    <td>not mentioned</td>
+    <td>Written down as unobserved: it resumes a thread whose first turn was refused, and no Codex move has ever run.</td>
+  </tr>
+</table>
+<p>Kept from kickoff unchanged: both classifier fixes, PR copy reading skill settings, the commit loop
+folding into the shared one, no waiting and no store record outside a Graph step, the slice order.</p>
+
+<h2>Counterexamples kept</h2>
+<table>
+  <tr><th>Case</th><th>What happens after</th><th>Holds?</th></tr>
+  <tr><td>Commit message agent hangs for 300s</td><td>The old loop tried the next agent. The shared loop does not move on a timeout: <code>lf commit</code> fails, a step commit is <code>lf &lt;step&gt;: checkpoint</code>.</td><td class="no">a loss, chosen</td></tr>
+  <tr><td>Graph step an hour in, then a limit</td><td>Has replies, so the conversation imports as today.</td><td class="yes">yes</td></tr>
+  <tr><td>Graph step refused on its first turn</td><td>Restarts from its own prompt on the next provider, same as a command.</td><td class="yes">yes</td></tr>
+  <tr><td>Transcript unreadable after real work</td><td>Keeps the “re-read the workspace” preamble plus the task.</td><td class="yes">yes</td></tr>
+  <tr><td><code>-a claude</code>, Claude out of usage</td><td>Tries Claude's other models, then stops. No other provider.</td><td class="yes">yes</td></tr>
+  <tr><td>Order leads with Pi or OpenCode</td><td>Their failures are not classified; the command stops there.</td><td class="no">unchanged gap</td></tr>
+  <tr><td><code>codex:a → codex:b</code>, account-wide limit</td><td>One wasted refused launch before Claude.</td><td class="yes">accepted</td></tr>
+</table>
+
+<h2>Larger than this work</h2>
+<ul>
+  <li><b>The stop advice reads a pin from an empty <code>fallback_agents</code></b> (<code>_limit_stop_advice</code>). A bare pinned harness gets its models as fallbacks from <code>resolve_agents</code>, so <code>-a claude</code> spent may be told to “add another agent to <code>agents</code>”, which the pin would ignore. Not run; read from the code. It would take the launch knowing whether its agent was chosen.</li>
+  <li><b>Moving only on three failures is a rule people have to learn.</b> “My order is tried in order” would also cover a timeout or a missing CLI. Changing it belongs in the shared loop for every caller and changes Graph steps too.</li>
+  <li><b>Pi and OpenCode never move.</b> Classifying their failures is its own Task.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>A commit-message agent that times out or returns no message:
+    <ol><li>stop there, as the plan now has it (step commits fall back to <code>checkpoint</code>);</li>
+        <li>move to the next agent, for every caller of the shared loop;</li>
+        <li>move to the next agent for one-shot copy only.</li></ol></li>
+  <li>A turn refused before any reply, moving to another provider:
+    <ol><li>restart from the original prompt (chosen);</li>
+        <li>import the transcript as a Graph step does today.</li></ol></li>
+  <li>On a usage limit, the same provider's other models:
+    <ol><li>try them, as now (Claude's limits can be per model);</li>
+        <li>skip to the next provider for Codex, whose limit is account-wide.</li></ol></li>
+  <li><code>lf replay</code> when its recorded agent is refused:
+    <ol><li>stop (chosen; it replays one recorded launch);</li>
+        <li>follow the current order.</li></ol></li>
+</ol>
+
+</body>
+</html>

@@ -33,11 +33,16 @@ fn tasks(selector: &str) -> String {
     format!("SELECT id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
 
+/// Whether a Session counts toward its `task_id`: Repository and Wave
+/// primaries keep their own scope; a Task's primary is one of its own.
+pub(super) fn counts_for_task(session: &str) -> String {
+    format!("coalesce({session}.primary_scope,'task')='task'")
+}
+
 /// A Session belongs to the Task it recorded when it was created
-/// ([`super::sessions`] infers the checkout's Task then). Repository and Wave
-/// primaries keep their own scope.
+/// ([`super::sessions`] infers the checkout's Task then).
 pub(super) fn session_membership(session: &str) -> String {
-    format!("{session}.primary_scope IS NULL AND {session}.task_id=tw.id")
+    format!("{} AND {session}.task_id=tw.id", counts_for_task(session))
 }
 
 pub(super) fn session_ids(selector: &str) -> String {
@@ -51,7 +56,8 @@ pub(super) fn session_ids(selector: &str) -> String {
 /// The Task a Session belongs to, as a subquery of at most one row.
 pub(super) fn session_tasks(session: &str) -> String {
     format!(
-        "SELECT {session}.task_id AS id WHERE {session}.task_id IS NOT NULL AND {session}.primary_scope IS NULL"
+        "SELECT {session}.task_id AS id WHERE {session}.task_id IS NOT NULL AND {}",
+        counts_for_task(session)
     )
 }
 
@@ -89,9 +95,11 @@ pub(super) fn process_task(parent: &str, cwd: &str, session: &str, agent: &str) 
 }
 
 /// The Task a Session's agent Process belongs to: the Session's own.
-/// Primary conversations keep their scope.
 pub(super) fn agent_task(session: &str) -> String {
-    format!("CASE WHEN {session}.primary_scope IS NULL THEN {session}.task_id END")
+    format!(
+        "CASE WHEN {} THEN {session}.task_id END",
+        counts_for_task(session)
+    )
 }
 
 /// A Task's Processes: those recorded for it, and the agents (with the lf
@@ -1578,7 +1586,7 @@ mod tests {
         )
         .unwrap();
         // The upgrade moves the released checkouts into `task_checkouts` and the
-        // primary Session into `task_primary_sessions`, then records each
+        // primary Session's mark onto its row, then records each
         // Session's Task.
         apply_pending_migrations(
             &crate::test_fixture::observers(),

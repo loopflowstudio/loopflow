@@ -81,3 +81,17 @@
   and `project_members` used `created_at`, so a drag among rank-0 Tasks (73
   standalone loopflow Tasks on the live store) landed elsewhere. Passed over:
   `created_at` in `TaskOrder::key`, which needs it on the `TaskSummary` wire DTO.
+
+- **A Task's primary is `agent_sessions.primary_scope='task'`** (Mismatch A,
+  fixed in this PR at human review). `task_primary_sessions` is marked leaving;
+  two triggers keep it and the mark in step for released lf until LOO-877
+  drops both. Index `agent_sessions_primary_task(task_id) WHERE
+  primary_scope='task'`, no `completed_at` filter: a Task has one primary, as
+  the table's primary key said. `check_migrations.py` refuses a new unique
+  index while older writers run, so it is plain now and every write clears the
+  old mark first; LOO-877 makes it unique. Cost in the window: a released lf process
+  still running after the migration fails `primary_scope()` ("unsupported
+  primary scope") on a Task primary until it exits.
+- **Wire `task_primary` stays** for now, beside `primary_scope`, which now says
+  `"task"` too. Dropping it means touching ~80 Swift and fixture sites; it is a
+  projection, not a stored copy.

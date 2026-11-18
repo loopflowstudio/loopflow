@@ -751,8 +751,7 @@ fn available_target(
     if let Some(id) = store.sqlite.repository_id(&repo)? {
         context.repository = ContextFact::bound(id, "selected_plan");
     }
-    let primary = record.task_primary
-        || matches!(record.primary_scope.as_deref(), Some("repository" | "wave"));
+    let primary = record.primary_scope.is_some();
     match (&session.task_id, &session.wave_id) {
         (Some(task), _) => context.task = ContextFact::bound(task, "session"),
         (None, Some(wave)) if record.primary_scope.as_deref() == Some("wave") => {

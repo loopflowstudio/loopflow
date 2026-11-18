@@ -763,7 +763,12 @@ fn screen_reads_are_compact_passive_and_match_cli() {
     )
     .unwrap();
     conn.execute(
-        "INSERT OR REPLACE INTO task_primary_sessions(session_id,task_id) VALUES(?1,?2)",
+        "UPDATE agent_sessions SET primary_scope=NULL WHERE primary_scope='task' AND task_id=?2 AND id!=?1",
+        rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE agent_sessions SET primary_scope='task',task_id=?2,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?2) WHERE id=?1",
         rusqlite::params![session.id.as_str(), registered.task.id.as_str()],
     )
     .unwrap();

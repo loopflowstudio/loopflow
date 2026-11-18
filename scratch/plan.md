@@ -411,6 +411,13 @@ migration (`scripts/schema_page.py`) once slice 1 writes it.
 
 Chosen (questions.md): Tasks with no Project sit after every Project.
 
+Mismatch A (human review): a Task's primary is now
+`agent_sessions.primary_scope='task'`; `task_primary_sessions` leaves with
+LOO-877, mirrored by triggers until then. See questions.md. LOO-877 also
+drops `task_primary_sessions_mark_insert`, `task_primary_sessions_mark_update`
+and `agent_sessions_task_primary_row`, and makes `agent_sessions_primary_task`
+unique.
+
 Next: gate. Every slice is built; the acceptance check above and the gate
 list in slice 1 remain.
 

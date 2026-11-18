@@ -1042,7 +1042,7 @@ mod tests {
                 ))
                 .replace(
                     "UPDATE tasks SET primary_session_id='session-proof' WHERE id='task-proof';",
-                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task-proof','session-proof');",
+                    "UPDATE agent_sessions SET primary_scope='task' WHERE id='session-proof';",
                 )
                 .replace("task-proof", task.as_str())
                 .replace("wave-proof", local_wave.as_ref().unwrap().as_str()),

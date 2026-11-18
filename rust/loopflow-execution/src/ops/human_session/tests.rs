@@ -1639,7 +1639,7 @@ impl ListFilters {
         )
         .unwrap();
         db.execute(
-            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,'task-primary')",
+            "UPDATE agent_sessions SET primary_scope='task' WHERE id='task-primary' AND task_id=?1",
             [task.as_str()],
         )
         .unwrap();

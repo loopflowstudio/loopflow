@@ -79,3 +79,205 @@ BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WH
 -- leaving: task_orders LOO-877
 -- leaving: tracker_projects.task_order_json LOO-877
 -- leaving: pm_projects.task_order_json LOO-877
+
+-- A Task's primary conversation is marked on its own row, as a repository's
+-- and a Wave's are: `primary_scope='task'`, and the row's `task_id` names the
+-- Task, so "which Task" is written once. SQLite cannot alter a CHECK, so the
+-- table is rebuilt with its column order, indexes and triggers.
+PRAGMA legacy_alter_table = ON;
+CREATE TABLE agent_sessions_task_primary (
+    id TEXT PRIMARY KEY NOT NULL,
+    current_capture INTEGER UNIQUE REFERENCES session_events(seq),
+    title TEXT NOT NULL,
+    title_source TEXT NOT NULL CHECK (title_source IN ('generated', 'human')),
+    completed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    request TEXT,
+    interactive INTEGER NOT NULL DEFAULT 1 CHECK (interactive IN (0, 1)),
+    repo TEXT,
+    provider_thread TEXT,
+    task_id TEXT REFERENCES tasks(id),
+    wave_id TEXT REFERENCES waves(id),
+    work_source TEXT CHECK (work_source IN ('declared', 'checkout', 'inherited', 'bound')),
+    bound_at INTEGER,
+    input_published INTEGER NOT NULL CHECK(input_published IN (0,1)),
+    cwd TEXT NOT NULL,
+    skill TEXT,
+    provider TEXT,
+    model TEXT,
+    primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave', 'task')),
+    agent_process_id TEXT REFERENCES processes(id),
+    transport_lf_process_id TEXT REFERENCES processes(id),
+    fence_locator TEXT,
+    moved_to_machine_id TEXT,
+    held_terminal_id TEXT REFERENCES held_terminals(id),
+    skill_version TEXT,
+    opened_at INTEGER,
+    transition TEXT,
+    departed_attachment TEXT,
+    departure TEXT,
+    CHECK (primary_scope IS NOT 'task' OR task_id IS NOT NULL)
+);
+INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure)
+SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,s.work_source,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,
+    CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
+        WHERE tps.session_id=s.id AND tps.task_id IS s.task_id) THEN 'task' ELSE s.primary_scope END,
+    s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure
+FROM agent_sessions s;
+DROP TABLE agent_sessions;
+ALTER TABLE agent_sessions_task_primary RENAME TO agent_sessions;
+PRAGMA legacy_alter_table = OFF;
+CREATE INDEX agent_sessions_agent_process ON agent_sessions(agent_process_id)
+    WHERE agent_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_held_terminal ON agent_sessions(held_terminal_id)
+    WHERE held_terminal_id IS NOT NULL;
+CREATE UNIQUE INDEX agent_sessions_primary_repository ON agent_sessions(repo)
+    WHERE primary_scope = 'repository' AND completed_at IS NULL;
+CREATE UNIQUE INDEX agent_sessions_primary_wave ON agent_sessions(wave_id)
+    WHERE primary_scope = 'wave' AND completed_at IS NULL;
+-- A Task has one primary, finished or not: choosing another moves the mark,
+-- clearing the old one first. The index becomes unique in LOO-877, with the
+-- drop of `task_primary_sessions`, once no older writer can race it.
+CREATE INDEX agent_sessions_primary_task ON agent_sessions(task_id)
+    WHERE primary_scope = 'task';
+CREATE INDEX agent_sessions_provider_thread ON agent_sessions(provider_thread)
+    WHERE provider_thread IS NOT NULL;
+CREATE INDEX agent_sessions_transport ON agent_sessions(transport_lf_process_id)
+    WHERE transport_lf_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_wave ON agent_sessions(wave_id)
+    WHERE wave_id IS NOT NULL;
+CREATE INDEX conversation_task_inventory ON agent_sessions(task_id,title,id);
+CREATE INDEX open_sessions ON agent_sessions(created_at, id) WHERE completed_at IS NULL;
+CREATE INDEX session_inventory ON agent_sessions(interactive, completed_at, title, id);
+CREATE INDEX session_repo_inventory ON agent_sessions(repo, interactive, completed_at, title, id);
+CREATE TRIGGER canonical_agent_sessions_insert BEFORE INSERT ON agent_sessions
+BEGIN
+ SELECT RAISE(ABORT,'canonical identity required: agent_sessions') FROM (
+ WITH incoming AS (
+SELECT 'uuid' AS domain,NEW.wave_id AS original
+UNION ALL
+SELECT 'uuid' AS domain,NEW.agent_process_id AS original
+UNION ALL
+SELECT 'uuid' AS domain,NEW.transport_lf_process_id AS original
+UNION ALL
+SELECT 'task_' AS domain,NEW.task_id AS original
+UNION ALL
+SELECT 'session' AS domain,NEW.id AS original
+),decoded AS MATERIALIZED (
+ SELECT domain,original,CASE
+ WHEN domain IN ('uuid','label','session') THEN original
+ WHEN domain='task_or_uuid' AND lower(substr(original,1,5))='task_' THEN substr(original,6)
+ WHEN domain='project_or_uuid' AND lower(substr(original,1,5))='proj_' THEN substr(original,6)
+ WHEN domain IN ('task_or_uuid','project_or_uuid') THEN original
+ WHEN lower(substr(original,1,length(domain)))=domain THEN substr(original,length(domain)+1)
+ END AS suffix FROM incoming
+), uuids AS MATERIALIZED (
+ SELECT *,CASE WHEN length(suffix)=38 AND substr(suffix,1,1)='{' AND substr(suffix,-1)='}' THEN substr(suffix,2,36)
+ WHEN length(suffix)=45 AND lower(substr(suffix,1,9))='urn:uuid:' THEN substr(suffix,10) ELSE suffix END AS uuid FROM decoded
+)
+ SELECT original,CASE
+ WHEN domain='session' THEN CASE WHEN (length(original)=32 AND original NOT GLOB '*[^0-9a-fA-F]*') OR
+ (length(original)=40 AND lower(substr(original,1,8))='session_' AND substr(original,9) NOT GLOB '*[^0-9a-fA-F]*') THEN lower(original) ELSE original END
+ WHEN domain='label' THEN CASE WHEN lower(substr(original,1,3))='lf-' AND length(original)>3 AND substr(original,4) NOT GLOB '*[^0-9a-fA-F]*' THEN lower(original)
+ WHEN instr(original,'-')>1 AND substr(original,1,instr(original,'-')-1) NOT GLOB '*[^a-zA-Z0-9]*' AND length(substr(original,instr(original,'-')+1))>0 AND substr(original,instr(original,'-')+1) NOT GLOB '*[^0-9]*' THEN upper(original) ELSE original END
+ WHEN (length(suffix)=32 AND suffix NOT GLOB '*[^0-9a-fA-F]*') OR (length(uuid)=36 AND substr(uuid,9,1)='-' AND substr(uuid,14,1)='-' AND substr(uuid,19,1)='-' AND substr(uuid,24,1)='-' AND length(replace(uuid,'-',''))=32 AND replace(uuid,'-','') NOT GLOB '*[^0-9a-fA-F]*') THEN lower(original)
+ ELSE original END AS canonical FROM uuids WHERE domain IS NOT NULL
+ ) WHERE original IS NOT canonical;
+END;
+CREATE TRIGGER session_fence_locator_immutable BEFORE UPDATE OF fence_locator ON agent_sessions
+WHEN OLD.fence_locator IS NOT NULL AND NEW.fence_locator IS NOT OLD.fence_locator
+BEGIN
+    SELECT RAISE(ABORT, 'Session fence locator is immutable');
+END;
+CREATE TRIGGER session_fence_locator_insert AFTER INSERT ON agent_sessions
+WHEN NEW.fence_locator IS NULL
+BEGIN
+    UPDATE agent_sessions SET fence_locator=NEW.id WHERE id=NEW.id;
+END;
+CREATE TRIGGER session_preview_agent_session_update
+AFTER UPDATE OF provider_thread,agent_process_id ON agent_sessions
+WHEN NEW.provider_thread IS NOT OLD.provider_thread OR NEW.agent_process_id IS NOT OLD.agent_process_id
+BEGIN
+    UPDATE session_activity SET preview=NULL WHERE session_id=NEW.id;
+END;
+CREATE TRIGGER store_revision_agent_sessions_delete AFTER DELETE ON agent_sessions
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+CREATE TRIGGER store_revision_agent_sessions_insert AFTER INSERT ON agent_sessions
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+CREATE TRIGGER store_revision_agent_sessions_update AFTER UPDATE ON agent_sessions
+WHEN OLD.fence_locator IS NOT NULL
+BEGIN
+    UPDATE store_revisions SET revision = revision + 1 WHERE domain = 'sessions';
+END;
+CREATE TRIGGER task_update_agent_sessions_delete AFTER DELETE ON agent_sessions
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
+END;
+CREATE TRIGGER task_update_agent_sessions_insert AFTER INSERT ON agent_sessions
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
+END;
+CREATE TRIGGER task_update_agent_sessions_update AFTER UPDATE OF task_id,primary_scope,cwd,interactive,completed_at ON agent_sessions
+WHEN NEW.task_id IS NOT OLD.task_id OR NEW.primary_scope IS NOT OLD.primary_scope OR NEW.cwd IS NOT OLD.cwd OR NEW.interactive IS NOT OLD.interactive OR NEW.completed_at IS NOT OLD.completed_at
+BEGIN
+    UPDATE store_revisions SET revision=revision+1 WHERE domain='task_updates';
+END;
+CREATE TRIGGER validate_conversation_ancestry_insert BEFORE INSERT ON agent_sessions BEGIN
+    SELECT CASE WHEN NEW.task_id IS NOT NULL AND NOT EXISTS(
+        SELECT 1 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+        WHERE t.id=NEW.task_id AND p.wave_id IS NEW.wave_id
+    ) THEN RAISE(ABORT,'Session Task and Wave disagree') END;
+END;
+CREATE TRIGGER validate_conversation_ancestry_update BEFORE UPDATE OF task_id,wave_id ON agent_sessions BEGIN
+    SELECT CASE WHEN NEW.task_id IS NOT NULL AND NOT EXISTS(
+        SELECT 1 FROM tasks t LEFT JOIN projects p ON p.id=t.project_id
+        WHERE t.id=NEW.task_id AND p.wave_id IS NEW.wave_id
+    ) THEN RAISE(ABORT,'Session Task and Wave disagree') END;
+    SELECT CASE WHEN OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id
+        THEN RAISE(ABORT,'Session Task binding is permanent') END;
+    SELECT CASE WHEN OLD.task_id IS NULL AND OLD.wave_id IS NOT NULL AND NEW.wave_id IS NOT OLD.wave_id
+        AND NOT (OLD.primary_scope IS 'wave' AND NEW.primary_scope IS NULL AND NEW.wave_id IS NULL)
+        THEN RAISE(ABORT,'Wave Session binding is permanent') END;
+END;
+CREATE TRIGGER validate_session_capture BEFORE UPDATE OF current_capture ON agent_sessions
+WHEN NEW.current_capture IS NOT NULL AND NOT EXISTS(SELECT 1 FROM session_events WHERE seq=NEW.current_capture AND session_id=NEW.id AND kind='captured')
+BEGIN SELECT RAISE(ABORT,'Captured event belongs to another Session'); END;
+CREATE TRIGGER validate_session_capture_insert BEFORE INSERT ON agent_sessions
+WHEN NEW.current_capture IS NOT NULL AND NOT EXISTS(SELECT 1 FROM session_events WHERE seq=NEW.current_capture AND session_id=NEW.id AND kind='captured')
+BEGIN SELECT RAISE(ABORT,'Captured event belongs to another Session'); END;
+-- Released lf still reads and writes `task_primary_sessions`. Until the
+-- contract drops it, a primary it chooses takes the mark (and the Task, when
+-- its Session had none), and a mark this lf moves updates its row.
+CREATE TRIGGER task_primary_sessions_mark_insert AFTER INSERT ON task_primary_sessions
+BEGIN
+    UPDATE agent_sessions SET primary_scope=NULL
+    WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
+    UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
+        wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id IS NULL;
+    UPDATE agent_sessions SET primary_scope='task'
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id=NEW.task_id;
+END;
+CREATE TRIGGER task_primary_sessions_mark_update AFTER UPDATE ON task_primary_sessions
+BEGIN
+    UPDATE agent_sessions SET primary_scope=NULL
+    WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
+    UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
+        wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id IS NULL;
+    UPDATE agent_sessions SET primary_scope='task'
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id=NEW.task_id;
+END;
+CREATE TRIGGER agent_sessions_task_primary_row AFTER UPDATE OF primary_scope ON agent_sessions
+WHEN NEW.primary_scope IS NOT OLD.primary_scope AND (NEW.primary_scope IS 'task' OR OLD.primary_scope IS 'task')
+BEGIN
+    DELETE FROM task_primary_sessions WHERE session_id=OLD.id
+        OR (NEW.primary_scope IS 'task' AND task_id=NEW.task_id);
+    INSERT INTO task_primary_sessions(task_id,session_id)
+    SELECT NEW.task_id, NEW.id WHERE NEW.primary_scope IS 'task';
+END;
+-- leaving: task_primary_sessions LOO-877

@@ -1086,7 +1086,12 @@ impl GraphTask {
         )
         .unwrap();
         db.execute(
-            "INSERT OR REPLACE INTO task_primary_sessions(task_id,session_id) VALUES(?1,'opening-primary')",
+            "UPDATE agent_sessions SET primary_scope=NULL WHERE primary_scope='task' AND task_id=?1 AND id!='opening-primary'",
+            [self.registered.task.id.as_str()],
+        )
+        .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET primary_scope='task',task_id=?1,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?1) WHERE id='opening-primary'",
             [self.registered.task.id.as_str()],
         )
         .unwrap();
@@ -1564,7 +1569,7 @@ fn task_create_run_starts_the_graph_and_admits_the_request_as_first_turn() {
     assert_eq!(first_turn, request);
     let primary: String = db
         .query_row(
-            "SELECT session_id FROM task_primary_sessions WHERE task_id=?1",
+            "SELECT id FROM agent_sessions WHERE task_id=?1 AND primary_scope='task'",
             [receipt["task"]["id"].as_str().unwrap()],
             |row| row.get(0),
         )

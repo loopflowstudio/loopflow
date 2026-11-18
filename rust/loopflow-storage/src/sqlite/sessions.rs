@@ -314,14 +314,11 @@ fn inventory_query(
     }
     if let Some(primary) = filter.primary {
         use crate::session::SessionPrimary;
-        let task = "EXISTS (SELECT 1 FROM task_primary_sessions t WHERE t.session_id=s.id)";
-        sql.push_str(&match primary {
-            SessionPrimary::All => {
-                format!(" AND (s.primary_scope IN ('wave','repository') OR {task})")
-            }
-            SessionPrimary::Task => format!(" AND {task}"),
-            SessionPrimary::Wave => " AND s.primary_scope='wave'".into(),
-            SessionPrimary::Repository => " AND s.primary_scope='repository'".into(),
+        sql.push_str(match primary {
+            SessionPrimary::All => " AND s.primary_scope IS NOT NULL",
+            SessionPrimary::Task => " AND s.primary_scope='task'",
+            SessionPrimary::Wave => " AND s.primary_scope='wave'",
+            SessionPrimary::Repository => " AND s.primary_scope='repository'",
         });
     }
     if filter.orphan {
@@ -379,7 +376,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        s.id IN (SELECT session_id FROM task_primary_sessions),
+        a.primary_scope IS 'task',
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -511,19 +508,6 @@ fn read_summary(
     })())
 }
 
-fn task_primary_in(conn: &Connection, task: &TaskId) -> StoreResult<Option<LfSession>> {
-    conn.query_row(
-        &format!(
-            "{SESSION_SELECT} WHERE s.id=(SELECT session_id FROM task_primary_sessions WHERE task_id=?1)
-             AND s.completed_at IS NULL"
-        ),
-        [task.as_str()],
-        read_session,
-    )
-    .optional()?
-    .transpose()
-}
-
 pub(super) fn primary_session_in(
     conn: &rusqlite::Connection,
     scope: &PrimaryScope,
@@ -543,7 +527,7 @@ pub(super) fn primary_session_in(
     match scope {
         PrimaryScope::Repository(repo) => marked("repository", "repo", repo.to_string()),
         PrimaryScope::Wave(wave) => marked("wave", "wave_id", wave.to_string()),
-        PrimaryScope::Task(task) => task_primary_in(conn, task),
+        PrimaryScope::Task(task) => marked("task", "task_id", task.to_string()),
     }
 }
 
@@ -631,9 +615,7 @@ fn ensure_primary_session_in(
         return Ok(current);
     }
     let session = reserve_session_in(conn, session, caller_process)?;
-    // A Task's primary stays an ordinary member conversation; its Task
-    // names it. A repository's or Wave's is marked on its own row.
-    match scope {
+    let marked = match scope {
         PrimaryScope::Repository(_) => conn.execute(
             "UPDATE agent_sessions SET primary_scope='repository' WHERE id=?1",
             [&session.id],
@@ -642,12 +624,14 @@ fn ensure_primary_session_in(
             "UPDATE agent_sessions SET primary_scope='wave' WHERE id=?1",
             [&session.id],
         )?,
-        PrimaryScope::Task(task) => conn.execute(
-            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES(?1,?2)
-             ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
-            params![task.as_str(), session.id],
-        )?,
+        PrimaryScope::Task(task) => mark_task_primary_in(conn, task, &session.id, "")?,
     };
+    if marked != 1 {
+        return Err(StoreError::InvalidData(format!(
+            "Session {} did not become its scope's primary",
+            session.id
+        )));
+    }
     Ok(session)
 }
 
@@ -737,15 +721,11 @@ pub(super) fn choose_task_primary_in(
     task: &TaskId,
     session: &str,
 ) -> StoreResult<()> {
-    let chosen = conn.execute(
-        &format!(
-            "INSERT INTO task_primary_sessions(task_id,session_id) SELECT ?1,?2 WHERE ?2 IN (
-                    SELECT s.id FROM agent_sessions s WHERE s.interactive=1
-                    AND s.completed_at IS NULL AND s.id IN ({}))
-                 ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id",
-            super::task_work::session_ids("?1")
-        ),
-        params![task.as_str(), session],
+    let chosen = mark_task_primary_in(
+        conn,
+        task,
+        session,
+        "AND interactive=1 AND completed_at IS NULL",
     )?;
     if chosen != 1 {
         return Err(StoreError::InvalidAuthority(format!(
@@ -753,6 +733,35 @@ pub(super) fn choose_task_primary_in(
         )));
     }
     Ok(())
+}
+
+/// Move the Task's primary mark to `session`, one of its conversations that
+/// meets `condition`. Answers how many Sessions took the mark.
+fn mark_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &str,
+    condition: &str,
+) -> StoreResult<usize> {
+    let eligible = format!(
+        "id=?2 AND task_id=?1 AND {} {condition}",
+        super::task_work::counts_for_task("agent_sessions")
+    );
+    if conn.query_row(
+        &format!("SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE {eligible})"),
+        params![task.as_str(), session],
+        |row| row.get::<_, bool>(0),
+    )? {
+        conn.execute(
+            "UPDATE agent_sessions SET primary_scope=NULL
+             WHERE task_id=?1 AND primary_scope='task' AND id!=?2",
+            params![task.as_str(), session],
+        )?;
+    }
+    Ok(conn.execute(
+        &format!("UPDATE agent_sessions SET primary_scope='task' WHERE {eligible}"),
+        params![task.as_str(), session],
+    )?)
 }
 
 impl SqliteStore {
@@ -940,10 +949,10 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The conversation a Task's primary pointer names, while it is unfinished.
+    /// The Task's primary conversation, while it is unfinished.
     pub fn task_primary(&self, task: &TaskId) -> StoreResult<Option<LfSession>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        task_primary_in(&conn, task)
+        primary_session_in(&conn, &PrimaryScope::Task(task.clone()))
     }
 
     /// Name one of the Task's own unfinished interactive conversations its
@@ -951,7 +960,7 @@ impl SqliteStore {
     pub fn choose_task_primary(&self, task: &TaskId, session: &str) -> StoreResult<LfSession> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         choose_task_primary_in(&conn, task, session)?;
-        task_primary_in(&conn, task)?
+        primary_session_in(&conn, &PrimaryScope::Task(task.clone()))?
             .ok_or_else(|| invalid(format!("Session {session} disappeared while being chosen")))
     }
 
@@ -1477,7 +1486,7 @@ impl SqliteStore {
         // Binding may have selected a directory while an opening prepared the
         // old scope's workspace. Its explicit choice wins over that preparation.
         let updated = tx.execute(
-            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND (primary_scope IS NOT NULL OR EXISTS(SELECT 1 FROM task_primary_sessions WHERE session_id=agent_sessions.id))",
+            "UPDATE agent_sessions SET cwd=CASE WHEN work_source='bound' THEN cwd ELSE ?3 END WHERE id=?1 AND current_capture IS ?2 AND completed_at IS NULL AND primary_scope IS NOT NULL",
             params![session.id, session.captured, cwd.to_string_lossy()],
         )?;
         if updated != 1 {
@@ -1490,43 +1499,34 @@ impl SqliteStore {
         Ok(admitted)
     }
 
-    /// The Task a Session is primary for, else the repository or Wave it is or
-    /// was primary for.
+    /// The repository, Wave or Task a Session is or was primary for.
     pub fn primary_scope(&self, id: &str) -> StoreResult<Option<PrimaryScope>> {
-        let mut connection = self.conn.lock().expect("store mutex poisoned");
-        let conn = connection.savepoint()?;
-        let task: Option<String> = conn
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let row: Option<(Option<String>, Option<String>)> = conn
             .query_row(
-                "SELECT task_id FROM task_primary_sessions WHERE session_id=?1",
+                "SELECT primary_scope, CASE primary_scope WHEN 'task' THEN task_id
+                     WHEN 'wave' THEN wave_id WHEN 'repository' THEN repo END
+                 FROM agent_sessions WHERE id=?1",
                 [id],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()?;
-        if let Some(task) = task {
-            return Ok(Some(PrimaryScope::Task(
+        let Some((Some(kind), scope)) = row else {
+            return Ok(None);
+        };
+        match (kind.as_str(), scope) {
+            ("task", Some(task)) => Ok(Some(PrimaryScope::Task(
                 TaskId::parse(&task).map_err(invalid)?,
-            )));
-        }
-        let row: Option<(Option<String>, Option<String>, Option<String>)> = conn
-            .query_row(
-                "SELECT primary_scope,wave_id,repo FROM agent_sessions WHERE id=?1",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?;
-        match row {
-            Some((Some(kind), Some(wave), _)) if kind == "wave" => Ok(Some(PrimaryScope::Wave(
+            ))),
+            ("wave", Some(wave)) => Ok(Some(PrimaryScope::Wave(
                 loopflow_model::id::WaveId::parse(&wave).map_err(invalid)?,
             ))),
-            Some((Some(kind), _, Some(repo))) if kind == "repository" => {
-                Ok(Some(PrimaryScope::Repository(
-                    crate::address::CanonicalRepo::from_canonical_path(repo.into()),
-                )))
-            }
-            Some((Some(kind), _, _)) => Err(invalid(format!(
+            ("repository", Some(repo)) => Ok(Some(PrimaryScope::Repository(
+                crate::address::CanonicalRepo::from_canonical_path(repo.into()),
+            ))),
+            _ => Err(invalid(format!(
                 "Session {id} has unsupported primary scope {kind:?}"
             ))),
-            _ => Ok(None),
         }
     }
 
@@ -2338,6 +2338,69 @@ mod metadata_tests {
         assert_eq!(legacy.from_provider_session.as_deref(), Some("earlier"));
         assert_eq!(legacy.seed.as_deref(), Some("native"));
         assert_eq!(legacy.observed_at, 7);
+    }
+
+    #[test]
+    fn a_tasks_primary_is_marked_on_its_row_and_released_lf_still_agrees() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "process_task",
+        );
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
+             VALUES('task_1','repo_1','FIX-1',1);
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
+             VALUES('chosen','Chosen','human',1,0,'/elsewhere');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('other','Other','human',1,0,'/elsewhere','task_1');
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_1','chosen');",
+        )
+        .unwrap();
+        conn.execute_batch(&migration_section_sql("process_task"))
+            .unwrap();
+        let marks = || {
+            conn.prepare(
+                "SELECT id,task_id FROM agent_sessions WHERE primary_scope='task' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<Vec<(String, String)>>>()
+            .unwrap()
+        };
+        let row = || -> Vec<(String, String)> {
+            conn.prepare("SELECT task_id,session_id FROM task_primary_sessions")
+                .unwrap()
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let pair = |session: &str| vec![(session.to_owned(), "task_1".to_owned())];
+        assert_eq!(marks(), pair("chosen"));
+
+        // Released lf chooses another primary through its table.
+        conn.execute_batch(
+            "INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_1','other')
+             ON CONFLICT(task_id) DO UPDATE SET session_id=excluded.session_id;",
+        )
+        .unwrap();
+        assert_eq!(marks(), pair("other"));
+
+        // This lf moves the mark back; released lf reads the same choice.
+        conn.execute_batch(
+            "UPDATE agent_sessions SET primary_scope=NULL WHERE id='other';
+             UPDATE agent_sessions SET primary_scope='task' WHERE id='chosen';",
+        )
+        .unwrap();
+        assert_eq!(marks(), pair("chosen"));
+        assert_eq!(row(), [("task_1".to_owned(), "chosen".to_owned())]);
     }
 
     #[test]

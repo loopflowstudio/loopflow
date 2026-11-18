@@ -327,10 +327,11 @@ fn assign_process_tasks(conn: &Connection) -> StoreResult<u64> {
                 (SELECT a.task_id FROM session_events se INDEXED BY session_events_process
                     JOIN agent_sessions a ON a.id=se.session_id
                     WHERE se.lf_process_id=p.id AND se.kind IN ('captured','started')
-                    AND a.primary_scope IS NULL AND a.task_id IS NOT NULL LIMIT 1),
+                    AND {member} AND a.task_id IS NOT NULL LIMIT 1),
                 {lf}) END AS task_id
          FROM processes p WHERE p.rowid=?1 AND p.task_id IS NULL",
-        super::task_work::agent_task("s")
+        super::task_work::agent_task("s"),
+        member = super::task_work::counts_for_task("a"),
     );
     let mut assigned = 0;
     loop {

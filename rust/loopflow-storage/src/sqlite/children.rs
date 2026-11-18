@@ -393,7 +393,7 @@ impl SqliteStore {
             tx.execute(
                 "UPDATE agent_sessions SET primary_scope=NULL,
                  wave_id=CASE WHEN task_id IS NULL THEN NULL ELSE wave_id END
-                 WHERE id=?1 AND primary_scope IS NOT NULL",
+                 WHERE id=?1 AND primary_scope IN ('repository','wave')",
                 [session.id.as_str()],
             )?;
             // Re-read the capture under the transaction: promotion changes only

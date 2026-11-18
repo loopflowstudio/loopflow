@@ -36,26 +36,52 @@ const BRANCH_TASK_IDS: &str = "SELECT task_id FROM task_checkouts WHERE branch=?
     UNION SELECT task_id FROM task_prs WHERE branch=?1";
 
 /// Record the checkout this Machine has for a Task, or that it has none.
+/// Work still running in an adopted checkout without a Task becomes the
+/// Task's, as if it had started there: Processes and Sessions record their
+/// Task once, and nothing matches paths later.
 fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
-    match &task.worktree {
-        Some(worktree) => conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
-             VALUES(?1,?2,?3,?4,?5) ON CONFLICT(task_id) DO UPDATE SET
-             worktree=excluded.worktree,branch=excluded.branch,
-             base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
-            params![
-                task.id.as_str(),
-                worktree.display().to_string(),
-                task.branch,
-                task.base_commit,
-                task.parent_pr_id.as_ref().map(TaskPrId::as_str)
-            ],
-        )?,
-        None => conn.execute(
+    let Some(worktree) = &task.worktree else {
+        conn.execute(
             "DELETE FROM task_checkouts WHERE task_id=?1",
             [task.id.as_str()],
-        )?,
+        )?;
+        return Ok(());
     };
+    conn.execute(
+        "INSERT INTO task_checkouts(task_id,worktree,branch,base_commit,parent_pr_id)
+         VALUES(?1,?2,?3,?4,?5) ON CONFLICT(task_id) DO UPDATE SET
+         worktree=excluded.worktree,branch=excluded.branch,
+         base_commit=excluded.base_commit,parent_pr_id=excluded.parent_pr_id",
+        params![
+            task.id.as_str(),
+            worktree.display().to_string(),
+            task.branch,
+            task.base_commit,
+            task.parent_pr_id.as_ref().map(TaskPrId::as_str)
+        ],
+    )?;
+    // Whole path components: `/repo.task` does not hold `/repo.task-other`.
+    let inside = |cwd: &str| format!("({cwd}=rtrim(?2,'/') OR instr({cwd},rtrim(?2,'/')||'/')=1)");
+    let root = worktree.display().to_string();
+    conn.execute(
+        &format!(
+            "UPDATE processes SET task_id=?1 WHERE id IN (SELECT id FROM processes
+                INDEXED BY processes_unfinished WHERE completed_at IS NULL)
+             AND task_id IS NULL AND {}",
+            inside("cwd")
+        ),
+        params![task.id.as_str(), root],
+    )?;
+    conn.execute(
+        &format!(
+            "UPDATE agent_sessions SET task_id=?1,work_source=coalesce(work_source,'checkout'),
+                wave_id=(SELECT p.wave_id FROM tasks t JOIN projects p ON p.id=t.project_id WHERE t.id=?1)
+             WHERE id IN (SELECT id FROM agent_sessions INDEXED BY open_sessions WHERE completed_at IS NULL)
+             AND task_id IS NULL AND wave_id IS NULL AND primary_scope IS NULL AND {}",
+            inside("cwd")
+        ),
+        params![task.id.as_str(), root],
+    )?;
     Ok(())
 }
 

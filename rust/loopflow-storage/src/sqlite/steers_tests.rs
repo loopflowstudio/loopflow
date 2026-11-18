@@ -410,7 +410,10 @@ fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
         session.work_source = None;
         session.cwd = cwd.into();
         let session = store.create_session_prepared(session, None).unwrap();
-        store.session_steers(session.id.as_str(), 0, 32).unwrap().pending
+        store
+            .session_steers(session.id.as_str(), 0, 32)
+            .unwrap()
+            .pending
     };
     assert_eq!(pending("/work/task/rust/src/"), 1);
     assert_eq!(pending("/work/task"), 1);

@@ -351,7 +351,8 @@ mod tests {
         let conn = rusqlite::Connection::open(dir.path().join("db")).unwrap();
         // Graph membership follows the Task checkout on the local Machine.
         conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
-        let old = store.test_graph(
+        // A Graph finished before the first reading is not reported.
+        store.test_graph(
             "code",
             "/repo/task",
             &[("old", Some("succeeded"))],

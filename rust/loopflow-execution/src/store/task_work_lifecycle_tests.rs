@@ -333,9 +333,10 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
             params![task.as_str()],
         )
         .unwrap();
+        // Sessions opened in the checkout recorded its Task when they began.
         for (id, cwd, bound, complete) in [
-            ("manual", "/missing/task%_/src", false, false),
-            ("conversation", "/missing/task%_", false, false),
+            ("manual", "/missing/task%_/src", true, false),
+            ("conversation", "/missing/task%_", true, false),
             ("history", "/elsewhere", true, true),
             ("sibling", "/missing/task%_-other", false, false),
             ("wildcard", "/missing/taskAB", false, false),
@@ -532,8 +533,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         .unwrap();
         conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id) VALUES('child-session','Child','human',1,0,'/missing/task%_/child',?1,?2)", params![child.as_str(), wave]).unwrap();
     }
-    // A Graph in a nested checkout started for the deepest Task, as its
-    // launch binds it; the enclosing Task keeps the nested Session.
+    // Work in a nested checkout belongs to the deepest Task only.
     let child_graph = store.test_graph(
         "child",
         "/missing/task%_/child",
@@ -552,12 +552,11 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     assert!(!enclosing.contains(&child_graph.to_string()));
     assert_eq!(graph_ids(&child), [child_graph.to_string()]);
     let work = crate::store::task_work::task_work(&store, &task).unwrap();
-    assert!(work
+    assert!(!work
         .sessions
         .iter()
         .any(|session| session.id == "child-session"));
-    let memberships = store.session_task_ids("child-session").unwrap();
-    assert!(memberships.contains(&task) && memberships.contains(&child));
+    assert_eq!(store.session_task_ids("child-session").unwrap(), [child]);
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -566,14 +565,14 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         )
         .unwrap();
     }
-    // Without its checkout the Task keeps the Graphs started for it.
+    // Without its checkout the Task keeps the Sessions and Graphs started for it.
     let work = crate::store::task_work::task_work(&store, &task).unwrap();
     assert_eq!(
         work.sessions
             .iter()
             .map(|session| session.id.as_str())
             .collect::<Vec<_>>(),
-        ["history"]
+        ["conversation", "history", "manual"]
     );
     assert_eq!(graph_ids(&task), enclosing);
 

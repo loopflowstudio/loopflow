@@ -692,7 +692,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     )
     .unwrap();
     assert_eq!(request(), Some(false));
-    // Work in another conversation holds the Task even through checkout membership.
+    // Work in another conversation of the Task holds it.
     let other = store.test_lf_process();
     let other_terminal = held_terminal(&conn);
     conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
@@ -702,7 +702,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     )
     .unwrap();
     store.test_session("other", &crate::session_record::new_artifact_key());
-    conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',interactive=1,held_terminal_id=?1,agent_process_id=?2 WHERE id='other'", params![other_terminal, other]).unwrap();
+    conn.execute("UPDATE agent_sessions SET cwd='/repo.task/nested',task_id=?3,wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?3),interactive=1,held_terminal_id=?1,agent_process_id=?2 WHERE id='other'", params![other_terminal, other, task.as_str()]).unwrap();
     assert_eq!(request(), Some(false));
     conn.execute("INSERT INTO session_activity(session_id,agent_process_id,observed_at,open_tools,pending_input,yielded)
         VALUES('other',?1,1,0,1,1)", [&other]).unwrap();

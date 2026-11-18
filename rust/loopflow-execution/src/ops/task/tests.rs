@@ -505,13 +505,26 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         &[("implement", None)],
         None,
     );
-    fixture.task.worktree = Some(adopted.path().into());
+    // The Task, with no checkout here, takes the one the Graph is running in.
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-        "UPDATE task_checkouts SET worktree=?1 WHERE task_id=?2",
-        rusqlite::params![adopted.path().to_str().unwrap(), fixture.task.id.as_str()],
+        "DELETE FROM task_checkouts WHERE task_id=?1",
+        [fixture.task.id.as_str()],
     )
     .unwrap();
+    let pr = runtime
+        .block_on(fixture.store.active_task_pr(&fixture.task.id))
+        .unwrap()
+        .unwrap();
+    fixture.task = runtime
+        .block_on(fixture.store.place_task(
+            &fixture.task.id,
+            adopted.path(),
+            &fixture.task.workspace_slug,
+            &pr,
+            None,
+        ))
+        .unwrap();
 
     // Use this process's identity without launching a provider or a watcher.
     conn.execute(
@@ -678,10 +691,13 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         .sqlite
         .test_session("stalled", &crate::session_record::new_artifact_key());
     conn.execute(
-        "UPDATE agent_sessions SET cwd=?1 WHERE id=?2",
+        "UPDATE agent_sessions SET cwd=?1,task_id=?3,
+            wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?3)
+         WHERE id=?2",
         rusqlite::params![
             fixture.task.worktree.as_ref().unwrap().to_str().unwrap(),
-            session.id
+            session.id,
+            fixture.task.id.as_str()
         ],
     )
     .unwrap();
@@ -857,9 +873,13 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
     let connection = rusqlite::Connection::open(&fixture.database_path).unwrap();
     connection
         .execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd)
-             VALUES('checkout-session','Retained','human',1,0,?1)",
-            [repo.path().to_str().unwrap()],
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
+             VALUES('checkout-session','Retained','human',1,0,?1,?2,?3)",
+            rusqlite::params![
+                repo.path().to_str().unwrap(),
+                fixture.task.id.as_str(),
+                fixture.task.wave_id.as_ref().map(|wave| wave.as_str())
+            ],
         )
         .unwrap();
     assert_eq!(

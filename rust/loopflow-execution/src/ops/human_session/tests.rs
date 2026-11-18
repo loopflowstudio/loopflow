@@ -1648,6 +1648,11 @@ impl ListFilters {
             [repo.path().to_str().unwrap()],
         )
         .unwrap();
+        db.execute(
+            "UPDATE agent_sessions SET task_id=?1,wave_id=?2 WHERE id='bare'",
+            rusqlite::params![task.as_str(), wave],
+        )
+        .unwrap();
         Self {
             home,
             store,

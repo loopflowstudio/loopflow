@@ -1271,7 +1271,10 @@ mod tests {
             session.work_source = None;
             session.cwd = cwd.into();
             let session = store.create_session_prepared(session, None).unwrap();
-            assert_eq!(session.work_source, Some(crate::session::WorkSource::Checkout));
+            assert_eq!(
+                session.work_source,
+                Some(crate::session::WorkSource::Checkout)
+            );
             session.id.to_string()
         };
         let conversation = session("/repo.task/src");
@@ -1294,7 +1297,10 @@ mod tests {
         };
         assert_eq!(sessions(&first), [conversation.clone()]);
         assert_eq!(sessions(&second), [later_conversation.clone()]);
-        assert_eq!(store.session_task_ids(&conversation).unwrap(), [first.clone()]);
+        assert_eq!(
+            store.session_task_ids(&conversation).unwrap(),
+            [first.clone()]
+        );
         let processes = |task: &TaskId| {
             let mut ids: Vec<String> = store
                 .task_work_records(task)

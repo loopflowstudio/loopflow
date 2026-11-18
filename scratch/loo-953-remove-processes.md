@@ -60,6 +60,12 @@ rename was waiting for was slice 4 itself; nothing else will carry it.
   `process.history` (= `lf session history show`) → `session.history`.
   Rust `Read`, Swift `RegistryQuery.swift`, `server/README.md`,
   `server_schema.json` in one change; Desktop and lf ship together.
+- The user-visible "Process" wording that remains: the admission notice
+  `Process history unavailable: no compatible process ledger for this
+  process` (`journal::admit_process`, asserted in
+  `process_ownership_tests.rs:173,216`) and test comments saying a read
+  "records no Process" (`served_reads.rs`, `process_ownership_tests.rs`,
+  `retirement_tests.rs`). Production comments were corrected at realign.
 - Stays for a follow-up Task (file it at gate): the type and DTO rename
   `GraphProcess*` → `GraphExecution*`/`GraphRun*`, `work.graph_processes`,
   `graph_process.rs` (42 files, Rust and Swift). Internal names; nobody
@@ -383,6 +389,8 @@ Disk, Stray agent processes, Many lf processes), `docs/getting-started.md`,
 builtin skills `repo_operate.md`, `task_operate.md`, `wave_operate.md`.
 Slice 4 moved every `lf ps`/`lf process` command reference to `lf session
 list`, `lf graph list --processes` and `lf graph show`, and rewrote the
-LfProcess and AgentProcess rows of `docs/dev/reference.md`. Still describing
-Process rows in prose: `docs/dev/reference-models.md` (LfProcess model,
-causal ancestry), `docs/dev/reference-processes.md`; realign owns them.
+LfProcess and AgentProcess rows of `docs/dev/reference.md`. Realign after
+slice 4 rewrote `docs/dev/reference-models.md`' vocabulary, `processes` owner
+row and "lf invocations" / Graph sections for owner rows;
+`docs/dev/reference-processes.md` uses LfProcess only as the attached lf's
+identity, which still holds.

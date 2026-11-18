@@ -1476,7 +1476,7 @@ fn print_thread(result: &loopflow_model::comment::TaskComments, json: bool) -> a
 fn main() -> std::process::ExitCode {
     loopflow::build_info::initialize();
     loopflow_execution::transport::initialize();
-    // The holder outlives servers and installs. It records no Process itself
+    // The holder outlives servers and installs. It writes no journal trace
     // and opens no store, so it runs before any of that is set up.
     if std::env::args().skip(1).eq(["holder", "run"]) {
         return match loopflow_execution::terminal_holder::run() {
@@ -1840,8 +1840,8 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow_execution::process::CommandExit(code).into());
         }
     };
-    // Only a command that changes Work records a Process, and a Graph step
-    // always does: the Graph reads its result from it.
+    // Only a command that changes Work writes a journal trace, and a Graph
+    // step always does.
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }

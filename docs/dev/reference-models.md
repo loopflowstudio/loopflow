@@ -51,7 +51,7 @@ boundary executors remain domain-specific because their settlement rules differ.
   branches and follow backward edges. `interactive:` marks the steps where a
   person takes part; Task runs stop there for their conversation.
 - **Durable planning:** preserve Wave and Task intent across crashes;
-  each Task Graph is a fresh Graph process and the steps it starts.
+  each Task Graph is a fresh Graph run and the steps it starts.
 - **Task delivery:** attach one active remote branch, worktree, and PR to concrete Work.
 - **Task ownership:** a Task is owned by a person on a Machine, or unowned;
   commands that change it run on the writer Machine through `lf --machine`.
@@ -80,7 +80,7 @@ user / automation -> lf -------- domain APIs ----+
 exact local races use OS locks; remote execution uses lf --machine
 ```
 
-- **Tracked Work** records purpose, input and convergence; each Graph process
+- **Tracked Work** records purpose, input and convergence; each Graph run
   holds its position and advances it.
 - **Execution evidence** keeps command outcomes, provider turns and Graph results distinct.
 - **Delivery** coordinates worktrees, commits, PRs, CI, and merge.
@@ -120,23 +120,21 @@ These are the accepted product owners; see [cutover status](reference-cutover.md
 for the current implementation boundary.
 
 ```text
-Wave --< Task --< Graph (LfProcess)      a Wave's planning binds one Linear Project
+Wave --< Task --< Graph run       a Wave's planning binds one Linear Project
 
-LfProcess --< LfProcess             causal ancestry, not control authority
-LfProcess --< AgentProcess          immutable launching lf
 LfSession --- AgentProcess         one current provider, recorded on the Session
-LfSession --> LfProcess             nullable current attachment, fenced by token
+LfSession --> attached lf          nullable current attachment, fenced by token
 LfSession --< history              immutable provider outcomes and usage
-Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's exit
+Graph run --< step                 graph_process_steps; result is the step's exit
 ```
 
 | Concept | Owns |
 | --- | --- |
 | Repository | Wave membership |
 | Wave | Enduring objective, memory, cadence, budget and metric instruments; its planning holds status, Tasks, KRs and targets (one Linear Project when connected) |
-| Task | Worktree, optional PR, captured graph and position, and every associated Session, Graph and Process; independent Graphs do not move that position |
-| Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph process and its step processes |
-| LfProcess | One actual lf process: durable `id` (`LfProcessId`), optional Unix `pid`, immutable causal ancestry (`parent_lf_process_id`) and command completion |
+| Task | Worktree, optional PR, captured graph and position, and every associated Session and Graph run; independent Graphs do not move that position |
+| Graph | Reusable authored graph of agent/mechanical/router nodes; a running one is a Graph run and its steps |
+| LfProcess | One lf invocation's opaque id (`LfProcessId`, `LF_PROCESS_ID`); no table holds it. The record that owns the work (Session attachment, Graph run, step, Task carrier, ship event, CI repair, project activation) carries its pid, OS start and result |
 | AgentProcess | The provider OS process Loopflow started: durable `id` (`AgentProcessId`) with its launching lf, pid, OS start, spawn state, exit, endpoint and inbox, recorded on its Session's row; the Session also holds the attached lf, that lf's pid, OS start and terminal, and the attachment token. A Session runs one agent at a time; a replaced one has exited |
 | LfSession | Loopflow conversation identity, title, feedback, current AgentSession and provider history |
 | AgentSession | Provider-owned conversation, identified by opaque AgentSessionId for resume, turn matching and account attribution; no separate table |
@@ -144,10 +142,11 @@ Graph LfProcess --< step LfProcess   GraphProcess graph; result is the step's ex
 | Task ownership | (person, Machine) or unowned, read from the Task's append-only ownership log; no authority over merely observed processes |
 | Steer publication | Immutable authored direction with independent Session delivery |
 
-The LOO-441 names are integrated. Process inventory readers return
-`ProcessEntry`, tagged by `kind`: `lf` rows are `LfProcess`, `agent` rows are
-`AgentProcess`. Both IDs are UUID text in the one `processes.id` column; only
-the row's `kind` decides which type it reads as.
+Alive is one OS lookup against the owner's pid and OS start:
+`process::os_process::RecordedProcess::evidence` is the rule, and
+`step_evidence`, `carrier_evidence` and `session_agent_evidence` are its owner
+cases. The `processes` table is leaving (LOO-965); only a released lf writes it,
+and the expand migration's triggers copy those rows onto their owners.
 
 A skill invocation keeps one `LfProcess` identity while retries replace its
 `AgentProcess`. `process::LfProcessRuntime` is the shared in-memory resource
@@ -194,7 +193,7 @@ provider generation in caller provenance, turn origin and Program Status.
 
 | Owner | Authoritative fields and operations |
 | --- | --- |
-| `processes` | Durable `id`, lf/agent kind, nullable Unix PID/birth, immutable parent, command, cwd and terminal evidence. Lf rows retain incoming agent provenance; agent rows are copied from their Sessions for a released lf until the contract migration drops them. Admit, finish, filter/page. |
+| `processes` | Leaving (LOO-965). Written only by a released lf during the upgrade window; triggers copy its rows onto the owning Session, Graph run or step, and agent rows are copied back for a released holder's fence. No reader in this lf except the released-lf skew inventory. |
 | `agent_sessions` | Stable ID, purpose and independent interactive flag; title/provenance, request/feedback, typed Task/Wave ancestry, native identity, the current AgentProcess and its attachment; reserve, attach, resume, bind and rename; historical feedback/completion retained |
 | `tasks` | Shared planning row: identity, repository, project, title, description, state, rank and tracker revision; no Machine-local column |
 | `task_checkouts` | This Machine's checkout of a Task (worktree path, branch, base commit, parent PR); absent on every other Machine |
@@ -288,7 +287,7 @@ Rust uses `agent_session` and Swift uses `agentSession` with the same string
 encoding. This preserves existing native evidence and DTO fixtures without
 a naming-only migration. Provider protocol names remain vendor-owned.
 
-An LfSession can have many historical attached Processes and at most one current
+An LfSession can have many historical attachments and at most one current
 attachment. Compare-and-set issues a fresh opaque token on every claim and release,
 including A → B → A. The token has no independent lifecycle. Every claim starts
 a new AgentProcess, so a claim replaces the agent only after it exited or never
@@ -310,10 +309,8 @@ Lock acquisition has an OS-clock deadline independent of the provider reactor.
 Lock files retain their inode across process exit; deleting a live lock file
 would let two processes own different locks for the same Session. The Session's
 immutable `fence_locator` retains that address independently of its ID spelling.
-Process rows a released lf wrote likewise retain receipt basenames and trace
-journal directory names in `receipt_locator` and `journal_trace_locator`; an
-identity conversion never renames those files. This lf writes no Process row
-or receipt, and names a trace's journal directory by its trace id.
+This lf writes no Process row or receipt, and names a trace's journal
+directory by its trace id.
 
 Identity migration tries affected Session fences without blocking and holds them
 through SQLite commit or rollback. Busy dispatch, live affected owners and unknown
@@ -360,45 +357,42 @@ Terminal Tasks cannot acquire current review obligations;
 independent unresolved Asks remain discoverable.
 
 LfSession history records provider starts, successful/failed/interrupted
-outcomes, retries, durations and usage, correlated with driving Process and native
+outcomes, retries, durations and usage, correlated with driving lf and native
 turn/receipt. Repeated receipts are idempotent. Missing measurements differ from
 zero; cumulative samples are not added together. Later continuation never rewrites
 an earlier completion a Graph already read. Provider completion and Process
 completion are distinct: subsequent command work may fail after the agent succeeds.
 
-### Process lifetime and causality
+### lf invocations
 
-One actual lf process that changes Work (Tasks, Waves, Sessions,
-Graphs, PRs, planning) gets one LfProcess, including nested direct and
-agent-issued commands. A read (status, list, show, diff, file, every `--subscribe`
-reader), Desktop navigation and pane or Dashboard arrangement record none, so
-they never wake a Work reader or join a Task's work; arrangement saves still
-persist. Input to a Session or shell is Work. `Commands::changes_work` classifies every command once, exhaustively. In-process wrappers reuse it and cannot settle it early; each Graph
-step is a child process with its own Process.
-The incoming `via_agent` bit describes the caller, not whether the command later
-launches an agent. Agent-issued children resolve stable Session/AgentProcess
-provenance to the current attached LfProcess once, at admission. Delayed children
-of a replaced provider retain their historical origin; existing parents never change.
+An lf invocation that changes Work (Tasks, Waves, Sessions, Graphs, PRs,
+planning) gets an `LfProcessId` and a journal trace
+(`.lf/journal/traces/<trace_id>/`, plus `logs/lf.log`); no table records it. A
+read (status, list, show, diff, file, every `--subscribe` reader), Desktop
+navigation and pane or Dashboard arrangement get no trace, never wake a Work
+reader and never join a Task's work; arrangement saves still persist. Input to a
+Session or shell is Work. `Commands::changes_work` classifies every command
+once, exhaustively. Agent-issued commands are tool calls in the provider
+transcript; `LF_PROCESS_ID` names the lf they run under and `LF_EXECUTION_ID`
+hands a spawned child the id its owner row already holds.
 
-LfProcess outcomes are succeeded, failed or interrupted when observed; an
-AgentProcess records no outcome, only its completion, exit code and signal. Unobserved
-completion, exit code and signal stay unknown. The outer command owns terminal
-settlement, including interruption. Bootstrap/installation logging must not open
-or migrate an incompatible installed store before its authority preflight.
-Parser errors, `--version` and installation entry paths append process evidence
-only to an existing compatible ledger, without creating a Machine, seeding branch
-data or applying migrations. An attached ledger stays pinned through command
-completion. Missing or incompatible storage leaves an explicit recording gap;
-inspection and installation recovery still work. Agent admission requires its Process
-and conversation rows before provider launch, even when earlier observation failed.
+A spawner (the Task-run loop, the Graph runner, `lf ship`, the CI repair
+launcher) mints its child's id and writes the owner row with pid and OS start
+at spawn. The child writes its own end, exit and error; the spawner writes them
+if the child died first. One result rule covers every owner
+(`ExecutionResult::of`): no end is running, exit 0 succeeded, 130 with no error
+interrupted, another exit failed, an end with no exit unknown. An AgentProcess
+records no outcome, only its end and exit code. Missing or incompatible storage
+leaves a recording gap; inspection and installation recovery still work. Agent
+admission requires its Session row before provider launch.
 
 ### Graph outcomes and authority
 
-A Graph is one lf process, the `lf graph <graph>`, `lf <graph>` or
-`lf task run ISSUE [GRAPH]` process, and the step processes it starts as child
-processes. Its ID is the Graph process's. Task and taskless execution share the
-Graph runner. A Task observes every LfSession, Graph and Process associated with its
-checkout, plus explicitly bound work.
+A Graph run is one `lf graph <graph>`, `lf <graph>` or
+`lf task run ISSUE [GRAPH]` invocation and the steps it starts as child
+processes; `graph_processes` holds the run, `graph_process_steps` its steps.
+Task and taskless execution share the Graph runner. A Task observes every
+LfSession and Graph run associated with its checkout, plus explicitly bound work.
 The shared Rust association reader includes checkout descendants at path component
 boundaries and retained paths after removal. It neither follows causal ancestry
 nor rewrites recorded work or usage. Session inventory exposes `task_ids` so
@@ -407,7 +401,7 @@ Desktop navigation uses the same membership as Task status.
 No Graph is privileged: every one started for the Task, by naming it or in its
 checkout, is equally its work. The Graph records that Task when it starts, so
 reading a Task's Graphs costs the same however many other Graphs ran.
-`task status`'s `work` contains all Sessions, Graphs and Processes, including
+`task status`'s `work` contains all Sessions and Graph runs, including
 headless and closed history. Its Task Graph record observes the most recently
 launched Graph: `none`, `latest` or `finished`. Execution also reports an open
 Graph in the Task's work, including one started before checkout adoption. The
@@ -416,17 +410,17 @@ Graph exists.
 
 Cleanup, abandon, restore and landing repair treat all Task Graphs alike and ask
 one question of one gate: does OS process evidence show any of the work's
-unfinished Processes live or unknown? A stopped Graph is history and blocks
+unfinished owner records (Graph runs, steps, Session agents) live or unknown? A stopped Graph is history and blocks
 nothing. A Session's turns, reserved inputs and retirement are conversation
 history and never block. A process is never blocked by its own caller lineage.
-A Process that began before the machine’s last boot has exited; live or unknown
+A pid recorded before the machine’s last boot has exited; live or unknown
 execution since then still blocks. Passive membership grants no control.
-Template composition compiles into the graph, which the Graph process holds in memory
+Template composition compiles into the graph, which the Graph runner holds in memory
 with its cursor. Loop passes are node/iteration positions and lenses over the
 step processes. They have no separate lifecycle. A past Graph keeps the graph it
 launched with, whatever its YAML says now.
 
-Each step is the command a person would type, started as a child of the Graph process:
+Each step is the command a person would type, started as a child of the Graph runner:
 
 ```text
 lf --batch [options] skill <name> [message]       # agent step
@@ -439,21 +433,22 @@ in one SQLite transaction after provider-custody checks. A rejected attachment c
 leaves the previous capture unchanged. Publication failure retains the reservation
 and releases its attachment without reporting a provider turn.
 
-A step is told nothing about its Graph and writes nothing about it. The Graph process
-writes GraphProcess, and only by appending: `graph_processes` holds one row per Graph process
-(Graph process, Graph name, graph as compiled at launch, the Task it started for
-or none) and `graph_process_steps` one row per step it started (child Process, graph node key, per-edge iterations). The
-Graph process finds a step's Process as its own newest child. Running, finished and each
-step's result are read from the Processes. Nothing reads the record back to resume,
-and no command changes a running Graph; the control is ending its Graph process.
+A step learns only its own id and that it is a step (`LF_EXECUTION_ID`,
+`GRAPH_STEP_ENV`). The Graph runner writes `graph_processes` (Graph name, graph
+as compiled at launch, the Task it started for or none, pid, OS start, end,
+exit, error) and one `graph_process_steps` row per step it started (step id,
+graph node key, per-edge iterations, pid, OS start, end, exit, error). A run's
+failure cause is its last failed step's error, else its own. Nothing reads the
+record back to resume, and no command changes a running Graph; the control is
+ending its runner.
 
 A step's result is how its process exited. A deciding or routing step gets its
-answer contract in its message, and the Graph process reads the final answer of the
-Session turn that step Process captured, following transport delegation
+answer contract in its message, and the Graph runner reads the final answer of the
+Session turn that step captured, following transport delegation
 to the served command without including commands the agent ran. It accepts a JSON
 value wrapped in prose or a code fence. An invalid answer is corrected by resuming the same
 conversation: at most two corrective turns, then the Graph fails. After an
-operation step the Graph process looks for a landing of its checkout that is still
+operation step the Graph runner looks for a landing of its checkout that is still
 being watched; the Graph stops there, and neither failed. Mechanical steps create
 no LfSession.
 A conversation attachment grants no Graph authority.
@@ -469,8 +464,8 @@ normally the Task conversation, inspects `lf graph show ID --json` or
 
 Task requires a repository and may belong to a Wave through its planning row.
 Session constructors use the Task’s current membership and reject explicit disagreements.
-A Session links to its Graph through the Process that captured its input, whose
-parent is the Graph process, and shares that Graph's nullable Task. `work_source`
+A Session links to its Graph run through the step that captured its input
+(`graph_lf_process_id`), and shares that Graph's nullable Task. `work_source`
 is declared, checkout, inherited or bound when known. Historical unknown membership
 stays Unknown; absence of evidence does not become Independent.
 

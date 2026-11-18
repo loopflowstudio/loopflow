@@ -132,7 +132,7 @@ pub enum HistoryCommand {
 }
 
 impl HistoryCommand {
-    /// Whether this command changes state, and so records a Process.
+    /// Whether this command changes state, and so writes a journal trace.
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Show { .. } | Self::Search { .. } | Self::Linear { .. } | Self::Export { .. } => {

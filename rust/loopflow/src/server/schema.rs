@@ -108,6 +108,7 @@ const REQUESTS: &[&str] = &[
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/skill_run.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_from_session.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_hold.json"),
+    include_str!("../../../loopflow-execution/tests/fixtures/dto/server/machine_request.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_interrupt.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_report.json"),
     include_str!("../../../loopflow-execution/tests/fixtures/dto/server/task_run.json"),

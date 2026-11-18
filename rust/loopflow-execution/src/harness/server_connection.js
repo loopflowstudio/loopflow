@@ -64,7 +64,7 @@ function machineServer(delivery, log) {
         try { message = JSON.parse(buffer.slice(0, end)); } catch (error) { return finish(error); }
         buffer = buffer.slice(end + 1);
         if (message.type === "welcome") {
-          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, request_id: null })}\n`);
+          socket.write(`${JSON.stringify({ type: "request", id: "boundary", operation, select: null, sender: null, request_id: null })}\n`);
         } else if (message.type === "response") {
           finish(undefined, message.result);
         } else if (message.type === "error") {

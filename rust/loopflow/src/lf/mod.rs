@@ -1399,6 +1399,9 @@ pub enum ServerCommand {
     },
     /// Serve the private socket in the foreground (for the OS supervisor).
     Run,
+    /// Pipe stdin and stdout to this Machine's server, starting it first if
+    /// needed; another Machine runs it over SSH to reach the server.
+    Connect,
     /// Report local readiness without registering or starting anything.
     Status,
     /// Configure private mobile access using this host's signed-in Tailscale installation.

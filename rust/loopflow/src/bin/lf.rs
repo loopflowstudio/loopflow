@@ -1173,6 +1173,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             ..
         } => {
             let status = loopflow_execution::ops::task::task_status(repo, issue.as_deref())?;
+            // A Task another Machine runs is read where it runs.
+            if let Some(task) = &status.task {
+                if loopflow::lf::commands::waves::print_remote_task_status(
+                    repo,
+                    &task.identifier,
+                    *json,
+                    *subscribe,
+                )? {
+                    return Ok(());
+                }
+            }
             if *subscribe {
                 let task = status
                     .task

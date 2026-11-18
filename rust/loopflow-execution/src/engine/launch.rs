@@ -140,7 +140,17 @@ fn write(
 /// the result it reports. Wait while that process is live, but bound the wait when
 /// its liveness cannot be determined. Giving up never stops or retries the work.
 pub fn start<T: DeserializeOwned>(directory: &Path, args: &[String]) -> Result<T> {
-    start_reported(directory, args, None)
+    start_reported(directory, args, &[], None)
+}
+
+/// [`start`], the process running with `environment` too: what a launch
+/// another Machine sent carries.
+pub fn start_with<T: DeserializeOwned>(
+    directory: &Path,
+    args: &[String],
+    environment: &[(String, String)],
+) -> Result<T> {
+    start_reported(directory, args, environment, None)
 }
 
 pub(crate) fn start_creation<T: DeserializeOwned>(
@@ -148,12 +158,13 @@ pub(crate) fn start_creation<T: DeserializeOwned>(
     args: &[String],
     request: &str,
 ) -> Result<T> {
-    start_reported(directory, args, Some(request))
+    start_reported(directory, args, &[], Some(request))
 }
 
 fn start_reported<T: DeserializeOwned>(
     directory: &Path,
     args: &[String],
+    sent: &[(String, String)],
     creation: Option<&str>,
 ) -> Result<T> {
     let launched = (|| -> anyhow::Result<_> {
@@ -165,7 +176,11 @@ fn start_reported<T: DeserializeOwned>(
             .into_owned()];
         argv.extend(args.iter().cloned());
         let report = path.to_string_lossy().into_owned();
-        let mut environment = vec![(REPORT_ENV, report.as_str())];
+        let mut environment: Vec<_> = sent
+            .iter()
+            .map(|(name, value)| (name.as_str(), value.as_str()))
+            .collect();
+        environment.push((REPORT_ENV, report.as_str()));
         if let Some(id) = creation {
             environment.push((CREATION_ENV, id));
         }

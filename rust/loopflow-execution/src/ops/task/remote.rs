@@ -13,7 +13,7 @@ use loopflow_storage::work::task::Task;
 
 use super::{fetch_task_refs, task_error};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TaskSource {
     pub branch: String,
     pub commit: String,

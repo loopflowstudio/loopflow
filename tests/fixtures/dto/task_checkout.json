@@ -55,5 +55,10 @@
       "kind": "person",
       "name": "Maya"
     }
+  },
+  "stack_parent": {
+    "identifier": "LOO-290",
+    "branch": "maya/loo-290-parent",
+    "pr_number": null
   }
 }

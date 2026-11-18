@@ -2698,6 +2698,9 @@ fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
         .expect("sync records the stack");
     assert_eq!(stacked.live_parent_branch(), Some("parent"));
     assert!(gh_log(home.path()).contains("pr edit 42 --base parent"));
+    let status = lf(&child_path, &["task", "status", "INF-124"]);
+    let status = String::from_utf8_lossy(&status.stdout);
+    assert!(status.contains("stacked on INF-123 (parent)"), "{status}");
 
     // The parent moves on; a bare sync follows the record.
     commit_file(&parent_path, "later.txt", "later parent work\n");

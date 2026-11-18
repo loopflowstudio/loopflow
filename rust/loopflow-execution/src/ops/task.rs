@@ -207,6 +207,21 @@ pub struct TaskSnapshot {
     pub ship_approval: Option<ShipMark>,
     /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
     pub ship_stop: Option<ShipMark>,
+    /// The Task this one is stacked on.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub stack_parent: Option<TaskStackParent>,
+}
+
+/// The Task a stacked Task builds on, as people name it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskStackParent {
+    pub identifier: String,
+    pub branch: String,
+    /// `None` until the parent opens its PR.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub pr_number: Option<u64>,
 }
 
 /// When someone approved or stopped Auto-Ship, and who.

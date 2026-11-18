@@ -272,9 +272,8 @@ Slice 5 (implement):
 
 ## Publish (2026-11-18)
 
-- `lf pr publish` has no base option and set PR #1972's base to `main` on
-  create and again on update; `gh pr edit --base` put it back on LOO-953's
-  branch both times. A later `lf pr publish` will move it again.
+- While stacked, `lf pr publish` had no base option and set PR #1972's base
+  to `main` on create and on update. LOO-953 has merged; `main` is now right.
 
 ## Journal stop (2026-11-18)
 
@@ -318,10 +317,11 @@ Slice 5 (implement):
 - `Watch::open` registers its kqueue after opening the log; a log unlinked
   between the two is never reported, and a timeout keeps that watch. Seen
   only by reading the code; not fixed.
-- For LOO-953: `loopflow_test_support::end_recorded_processes` and
-  `transport_tests`' `Fixture::drop` find holders in `processes`, which
-  nothing writes now, so fixtures leave `lf holder run` behind (four from
-  this checkout's runs today, stopped by hand). `/private/tmp` holds 2,406
+- Fixtures left `lf holder run` behind (four from this checkout's runs on
+  2026-11-18, stopped by hand) while `end_recorded_processes` read only
+  `processes`. As merged it reads owner pids (`RUNNING_OWNERS`: agents,
+  carriers, Graph runs) but no holder pid; whether a holder still outlives
+  its fixture was not re-checked. `/private/tmp` holds 2,406
   `lf-501-*` socket directories from fixtures.
 - `PtyUsage.in_use` on macOS counts `/dev/ttysNNN` nodes; "none left" is
   `in_use >= max`. Not checked against a real exhaustion (which errno

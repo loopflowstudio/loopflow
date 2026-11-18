@@ -38,8 +38,6 @@ measured or read from the code, not assumed.
 
 ## Base
 
-Stacked on LOO-953 ("Remove Process rows: liveness on Sessions and Graph
-runs"), branch `jack/loo-953-remove-process-rows-liveness-on-sessions-and`,
-no PR yet. Its design is `scratch/base-loo-953-design.md`. Read liveness
-from the Session and Graph-run rows it adds; add no Process table or
-registry. The PR targets that branch until it merges.
+Began stacked on LOO-953 ("Remove Process rows: liveness on Sessions and Graph
+runs"). That merged as #1974; the PR is on `main`. Read liveness from the
+Session and Graph-run rows it added; add no Process table or registry.

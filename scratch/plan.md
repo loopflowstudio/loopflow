@@ -1,10 +1,11 @@
 # LOO-959: Task conversations and Graph runs come back after a kill, a reboot or a server restart
 
-Stacked on LOO-953 (`jack/loo-953-remove-process-rows-liveness-on-sessions-and`).
-The PR targets that branch until it merges. Direction and the four questions
-come from `scratch/direction.md`. LOO-953's design is in `scratch/base-loo-953-design.md`.
-Paths below are under `rust/` unless they say otherwise. Everything was measured
-or read on 2026-11-17.
+PR #1972, on `main`. LOO-953 (liveness on Sessions and Graph runs) merged as
+#1974 and is in this branch through `df387d1d95`. Direction and the four
+questions come from `scratch/direction.md`. Paths below are under `rust/`
+unless they say otherwise. Sections 1–4 were measured or read on 2026-11-17,
+before LOO-953 landed: where they name `processes` rows, read the owner
+columns (`agent_sessions.agent_pid`/`agent_exit_code`, `task_graphs.run_pid`).
 
 ## Outcome
 
@@ -156,15 +157,17 @@ No new registry. The pass reads three things:
   with liveness from LOO-953's Session identity columns (pid and OS start time,
   read by `ops::recovery::due_task_conversations`).
 - **Task run:** the carrier that makes the Task `moving` or `shipping`:
-  `task_graphs.lf_process_id` (with LOO-953's `run_pid`/`run_os_started_at`)
-  or the ship event's carrier. The Graph run under it (`graph_processes`, with
-  its own `pid`/`ended_at` from LOO-953 slice 2a) names the step reached.
+  `task_graphs.run_pid`/`run_os_started_at`, or the ship event's carrier. A
+  carrier that exits on its own clears `run_pid`; one that died leaves it
+  (`ship::died_run`). The Graph run under it (`graph_processes`) names the
+  step reached.
 - **Task:** open and claimed on this Machine (`task_claimed_here`), and started
   (it has taken up a Graph).
 
 ### Killed vs quit
 
-A Session's agent ended **by the person** when its launcher's exit code is 0
+A Session's agent ended **by the person** when its exit code
+(`agent_sessions.agent_exit_code`, written by `native_exit::settle`) is 0
 or 130 (`/exit`, ctrl-D, ctrl-C at the prompt). Everything else counts as
 **died**: exit 137 or any other non-zero code, an end with no exit (the holder
 died, a reboot), or an unfinished agent row whose recorded process is gone.
@@ -177,13 +180,15 @@ added. The exit code needs no new writer, so a released lf that settles an end
 during upgrade skew still records a quit correctly. If a stop command is ever
 added, it writes a per-agent-generation marker then.
 
-Open counterexample (acceptance check 5, not yet run): at logout or shutdown,
-launchd sends SIGTERM to every process. A provider that catches SIGTERM and
-exits 0 before its holder goes would read as a quit, and the conversation
-would stay down after a reboot. Send SIGTERM to a stand-in holder's process
-group and read what `exit.json` records. If an exit 0 can land, the holder
-records that it was itself told to stop (`exit.json` `holder_stopping`), and an
-exit after that counts as died.
+Acceptance check 5, run in qa with a stand-in (`questions.md`, "From qa"):
+SIGTERM to the server, the holder and a provider that traps TERM and exits 0,
+in one `kill`, recorded died (137) and started again. The holder dies before
+writing `exit.json`, and an unknown end reads as a kill. SIGTERM to that
+provider alone, holder alive, recorded exit 0 and stayed down. So a shutdown
+reads as a quit only if the provider exits 0 and its holder records it before
+TERM reaches the holder. Not checked: whether real Claude exits 0 on SIGTERM.
+If it does, the holder records that it was itself told to stop (`exit.json`
+`holder_stopping`) and an exit after that counts as died. Unbuilt until then.
 
 ### The recovery pass
 
@@ -277,13 +282,12 @@ line.
 
 The facts go on the records they describe, not into a new Task-level state.
 
-- **Session.** `SessionState` (`unknown · active · detached · closed`,
-  `ops/human_session.rs:241`) stays the one answer to "is it running". A
-  closed Session gains `ended: {at, by: person | died, exit_code}` and
-  `start: {attempts, last_started_at, next_at, gave_up, failure}`, null when
-  nothing is pending. `failure` carries a launch failure's reason ("no PTY left: 511 in
-  use (kern.tty.ptmx_max)"). A Session being started again reads `closed`
-  with `start.next_at` due, until its agent is live.
+- **Session.** `SessionState` (`unknown · active · detached · closed`) stays
+  the one answer to "is it running". A Session that is not running says once
+  whether it comes back: `outlook {kind, at, reason, command}` with kinds
+  `coming_back`, `waiting_for_you`, `quit` and `could_not_start` (slice 7).
+  `ended {at, by, exit_code}` is how the last agent ended; `start {attempts,
+  last_started_at}` is what the pass has done since the last finished turn.
 - **Task run.** The Task's run line, already derived by
   `execution_of_latest_graph`, shows a dead carrier as `died at <step> {at}`
   with `restarts` and `next_at`, or the `lf task run` command after giving up.
@@ -328,7 +332,7 @@ A headless fixture with a `MachineServer` and a stand-in provider:
    `start.attempts` 1 (the earlier end is not on the Session while the new
    agent runs; see slice 4).
 2. The stand-in exits 0. After a pass, no new terminal starts; the Session is
-   `closed` with `ended.by` `person` and `recovery` null.
+   `closed` with `outlook.kind` `quit`, `ended.by` `person` and `start` null.
 3. Stop the server, kill the holder, then start the server. The conversation
    starts once; repeating the pass starts nothing.
 4. Record a moving Task whose `task_graphs` carrier pid is dead, at step
@@ -339,6 +343,10 @@ A headless fixture with a `MachineServer` and a stand-in provider:
    pass launches again.
 5. A SIGTERM to a stand-in holder's process group (shutdown) leaves the
    conversation counted as died, and it starts again with the next server.
+   Seen in qa by hand; no fixture.
+
+Checks 1–3 are `context_launch_tests::a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit`;
+check 4 is `task_graph_launch_tests::a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five`.
 
 ## Exclusions
 
@@ -530,14 +538,10 @@ Must survive:
    readable; `start.attempts` 1 and `last_started_at` say it came back. The
    earlier agent's end is in provider transitions if anyone needs it.
 
-   **Delivery waits on LOO-953's Session columns** (`agent_sessions.agent_pid`,
-   `agent_os_started_at`, `agent_ended_at`, `agent_exit_code`). When they land
-   on its branch, sync onto it and rewrite both reads that join `processes`
-   for the agent's end: `conversations_to_start` (storage
-   `sqlite/session_recovery.rs`) and `summary_query`'s `agent_end` columns
-   (`sqlite/sessions.rs`). Not added here (steer acfa763f).
-
-   Left: acceptance check 5 (SIGTERM to a holder's group), the real reboot (qa).
+   Superseded since: `start` lost `next_at`, `gave_up` and `failure` to
+   `outlook` (slice 7), and both reads of the agent's end use
+   `agent_sessions.agent_ended_at`/`agent_exit_code` with no `processes` join
+   (Publish, under Checks).
 
 5. **What the count and the lines promise** (concept review after qa,
    `scratch/concept-review.html`; choices 1a/2a/3a made for review,
@@ -547,7 +551,8 @@ Must survive:
      calls `ops::recovery::record_start`, which sets `starts_since_turn` to 0
      and clears `start_failure` (`reset_conversation_starts`) unless
      `LF_RECOVERING_SESSION` (`RECOVERING_ENV`, set on the pass's own start)
-     names this Session. It is not in the attach write: the pass and a person
+     names this Session (slice 7 replaced the variable with the `recover:`
+     request id on argv). It is not in the attach write: the pass and a person
      both start through `lf session resume`, and only the launcher knows who
      asked. A `--prepare` counts as a person's. `docs/sessions.md` says so.
    - One waker for one schedule. `restart_runs` returns the soonest ship or
@@ -557,7 +562,8 @@ Must survive:
      still wake on the minute tick.
    - A promise only when someone keeps it. `conversation_line` takes
      `server_runs` (a connect to `machine.sock`) and reads `· starts again
-     when the server runs` without one. The DTO is unchanged.
+     when the server runs` without one. Slice 7 moved this into the outlook:
+     with no server the Session is `waiting_for_you`.
    - Tests: `server::recovery::tests::a_persons_start_counts_the_passs_starts_from_zero`,
      `…::a_runs_backoff_wakes_the_watcher_and_settles` (Watcher-level, not a
      live carrier), `lf::commands::session::tests::with_no_server_a_died_conversation_waits_for_one`.
@@ -690,10 +696,34 @@ restart rule go.
 
 ## Remaining
 
-Left for later steps:
-- gate: the named checks under Checks, and CI's full matrix;
-- a person: acceptance check 5 against real Claude (does a SIGTERM'd provider
-  exit 0?), and the real reboot with three Tasks;
+Every slice is built and the code backs each one; nothing is left for
+implement. Left for later steps:
+
+- gate: the named checks under Checks, and CI's full matrix. No test ran
+  after the conflict-free merge of main `a0548bfe28` (`df387d1d95`), which
+  changed how Session reads find running agents (#1977) under this branch's
+  `summary_query` additions; `ops::human_session::tests::` and
+  `context_launch_tests::a_killed_task_conversation` are the ones that would
+  show a break.
+- a person: whether real Claude exits 0 on SIGTERM (decides `holder_stopping`),
+  and the real reboot with three Tasks.
+
+Shape, from one reviewer's read (not built; each is a wire or behavior change
+for someone to choose):
+
+- `ended.by` is read only by the fold that produces `outlook.kind`
+  (`human_session::session_ending`); no printer reads it. With `outlook`
+  on the wire, `ended` could be `{at, exit_code}`.
+- The conversation sentence is assembled twice, in
+  `SessionFacts::conversation_line` (`lf/commands/session.rs`) and Swift's
+  `conversationLine(now:)`, from the same three objects. `outlook.reason` is
+  already printable text; the rest of the line is not.
+- `task_graphs.restarts` carries two rules (a run waits after 5, a ship keeps
+  restarting). LOO-968 ("Ship is shorthand for auto mode on the Task's
+  Graph") removes the ship rule.
+
+Unfiled follow-ups are in `questions.md` under "Follow-up to file" (Machine
+retention; fixture servers and holders left running).
 
 ## Checks
 

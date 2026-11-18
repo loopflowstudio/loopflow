@@ -195,9 +195,11 @@ ended agent in every summary.
 
 ## Slices
 
-All three statements, Dead from the row and both tests are built. Left:
+All three statements, Dead from the row and both tests are built. The two
+commands under "Acceptance check at gate" ran here on 94fdc3f612: 14 and 5
+tests, all passing. Left:
 
-- Gate runs the suites; the PR body carries the plans and times below.
+- Gate runs the suites and clippy; the PR body carries the plans and times below.
 - `binary(session_cli_tests)` and `test(performance_tests::)` were not run
   here; they read `agent_process_evidence` through the CLI.
 

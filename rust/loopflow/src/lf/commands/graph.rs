@@ -25,6 +25,7 @@ use loopflow_execution::process::launch_log::{release_launcher, PendingLog};
 use loopflow_execution::store::SharedStore;
 use loopflow_model::durable::WorkRef;
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::Task;
 use std::path::Path;
@@ -237,12 +238,7 @@ pub fn run_task_graph_for(
             Ok(())
         })?;
         // A child that died before writing its end leaves what this process saw.
-        store.finish_run(
-            &graph_run,
-            loopflow_storage::rows::now_unix(),
-            status.code(),
-            None,
-        )?;
+        record_spawner_end(store, RunOwner::GraphRun, &graph_run, status.code(), None);
         if status.success() {
             return Ok(());
         }
@@ -374,6 +370,28 @@ pub fn carry_task_run(
 fn exit_of(status: std::process::ExitStatus) -> loopflow_execution::process::CommandExit {
     let code = status.code().and_then(|code| u8::try_from(code).ok());
     loopflow_execution::process::CommandExit(code.unwrap_or(130))
+}
+
+/// What a spawner saw of a run that may have died before writing its end.
+/// Best-effort: a busy store must not fail a run whose child succeeded or
+/// replace the error that stopped it; the child's own write and the liveness
+/// read cover a missed one.
+fn record_spawner_end(
+    store: &SqliteStore,
+    owner: RunOwner,
+    run: &LfProcessId,
+    exit_code: Option<i32>,
+    error: Option<&str>,
+) {
+    if let Err(store_error) = store.finish_run(
+        owner,
+        run,
+        loopflow_storage::rows::now_unix(),
+        exit_code,
+        error,
+    ) {
+        tracing::warn!(error = %store_error, %run, "could not record the end of a run this process spawned");
+    }
 }
 
 /// Start `lf <args>` in `checkout` and wait for it, writing to `log` when given
@@ -521,7 +539,7 @@ fn execute(
                 Some(&running.cwd.display().to_string()),
             )
             .context("could not record the Graph; no steps launched")?;
-        journal::mark_run_owner();
+        journal::mark_run_owner(RunOwner::GraphRun);
         drop(admission);
         let outcome = drive(&running, start, stop_at_interactive).await?;
         // A Task run's Graph writes where it left the Task. Blocked at an
@@ -896,12 +914,13 @@ impl RunningGraph<'_> {
             Ok(spawned) => spawned,
             Err(error) => {
                 if let Some(step) = &step {
-                    self.store.sqlite.finish_run(
+                    record_spawner_end(
+                        &self.store.sqlite,
+                        RunOwner::GraphStep,
                         step,
-                        loopflow_storage::rows::now_unix(),
                         None,
                         Some(&format!("{error:#}")),
-                    )?;
+                    );
                 }
                 return Err(error);
             }
@@ -937,12 +956,13 @@ impl RunningGraph<'_> {
                     Some(format!("could not wait for Graph step: {error}")),
                 ),
             };
-            self.store.sqlite.finish_run(
+            record_spawner_end(
+                &self.store.sqlite,
+                RunOwner::GraphStep,
                 step,
-                loopflow_storage::rows::now_unix(),
                 code,
                 error.as_deref(),
-            )?;
+            );
         }
         // A new installation can select a newer child. Never read its result
         // through an older schema.

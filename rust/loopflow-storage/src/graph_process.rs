@@ -16,6 +16,19 @@ pub struct Execution {
     pub error: Option<String>,
 }
 
+/// The record a run is written on. Each run has one, and only that table
+/// records its start and end.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum RunOwner {
+    /// `graph_processes`: a Graph run.
+    GraphRun,
+    /// `graph_process_steps`: one step a Graph run spawned.
+    GraphStep,
+    /// `waves`: a Wave's Project activation.
+    ProjectActivation,
+}
+
 /// How a run ended, derived from its end, exit code and error.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExecutionResult {

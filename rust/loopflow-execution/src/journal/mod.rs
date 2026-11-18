@@ -21,6 +21,7 @@ use tracing::{debug, warn};
 use crate::git::worktrees::main_repo_root;
 use crate::process::{AgentCaller, LfProcess, AGENT_CALLER_ENV};
 use loopflow_model::id::{LfProcessId, TraceId};
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::sqlite::SqliteStore;
 
 const JOURNAL_ROOT: &str = ".lf/journal/traces";
@@ -200,10 +201,10 @@ struct ProcessContext {
     /// the export is removed again when the Process ends.
     minted_trace_id: bool,
     receipts: Arc<Mutex<ReceiptCost>>,
-    /// It runs under an id its spawner minted for a Graph run or step, or it
-    /// recorded a Graph run of its own.
+    /// The record this process runs as and writes its end on: the step its
+    /// Graph minted it for, or a Graph run or Project activation it recorded.
     #[serde(skip)]
-    owns_run: Arc<AtomicBool>,
+    run_owner: Arc<Mutex<Option<RunOwner>>>,
 }
 
 /// What a process's ledger receipts cost, and how many did not land.
@@ -838,19 +839,20 @@ fn ledger_insert(context: &ProcessContext, event: &LfEvent, exit_code: Option<i3
     }
 }
 
-/// A Graph run or step writes its own end on its Graph record. Only a process
-/// that owns one tries, and only once its Process receipt landed, so a held
-/// write lock delays it once. When the journal stops recording Process rows
-/// (LOO-953 approach 2), this becomes the run's only write at exit, best-effort
-/// with the journal's warn-once gap.
+/// A run writes its own end on the record it owns. Only a process that owns
+/// one tries, and only once its Process receipt landed, so a held write lock
+/// delays it once. When the journal stops recording Process rows (LOO-953
+/// approach 2), this becomes the run's only write at exit, best-effort with
+/// the journal's warn-once gap.
 fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfProcess) {
     let Some(ended_at) = record.completed_at else {
         return;
     };
-    if !context.owns_run.load(Ordering::Acquire) {
+    let Some(owner) = *context.run_owner.lock().expect("run owner mutex poisoned") else {
         return;
-    }
+    };
     if let Err(error) = store.finish_run(
+        owner,
         &record.id,
         ended_at,
         record.exit_code,
@@ -860,11 +862,11 @@ fn finish_owned_run(context: &ProcessContext, store: &SqliteStore, record: &LfPr
     }
 }
 
-/// This process recorded itself as a Graph run or a Project activation under
-/// its own id and writes its end there.
-pub fn mark_run_owner() {
+/// This process recorded itself on `owner` under its own id and writes its
+/// end there.
+pub fn mark_run_owner(owner: RunOwner) {
     if let Some(context) = current_context() {
-        context.owns_run.store(true, Ordering::Release);
+        *context.run_owner.lock().expect("run owner mutex poisoned") = Some(owner);
     }
 }
 
@@ -1021,7 +1023,14 @@ fn create_process_context(
         .and_then(|value| LfProcessId::parse(&value).ok());
     std::env::remove_var(LF_EXECUTION_ID_ENV);
     let minted = minted.filter(|_| inherits);
-    let owns_run = Arc::new(AtomicBool::new(minted.is_some()));
+    // A Graph mints its steps' ids; a Task run mints its Graph run's, which
+    // that run marks once it records itself.
+    let run_owner = Arc::new(Mutex::new(
+        minted
+            .as_ref()
+            .filter(|_| graph_step() || std::env::var_os(GRAPH_STEP_ENV).is_some())
+            .map(|_| RunOwner::GraphStep),
+    ));
     let lf_process_id = minted.unwrap_or_default();
     // Export the identity so prompt logs and child processes carry the same
     // trace and parent as the ledger rows. The export is removed when the
@@ -1104,7 +1113,7 @@ fn create_process_context(
         finished: Arc::new(AtomicBool::new(false)),
         minted_trace_id,
         receipts: Arc::default(),
-        owns_run,
+        run_owner,
     };
     set_context(context.clone());
     // Only an `lf` executable exits on interrupt; library callers settle their

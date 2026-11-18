@@ -122,11 +122,18 @@ pub fn render_added(added: &WaveAdded) -> String {
 }
 
 async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> OpsResult<Project> {
-    store
-        .sqlite
-        .record_project_activation(wave.id(), crate::journal::current_lf_process_id().as_ref())
-        .map_err(lifecycle_error)?;
-    crate::journal::mark_run_owner();
+    if let (Some(process), Some(start)) = (
+        crate::journal::current_lf_process_id(),
+        crate::journal::current_execution_start(),
+    ) {
+        store
+            .sqlite
+            .record_project_activation(wave.id(), &process, &start)
+            .map_err(lifecycle_error)?;
+        crate::journal::mark_run_owner(
+            loopflow_storage::graph_process::RunOwner::ProjectActivation,
+        );
+    }
     let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
     super::project::import_binding(store, wave, &acquisition)?;
     let id = store

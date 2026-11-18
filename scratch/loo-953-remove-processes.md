@@ -8,15 +8,14 @@ main at `2593c489d7`; that merge touched nothing this plan depends on.
 Built: slice 2a ("Slice 2a as built", QA in `scratch/qa.html`); the
 renames to `Execution`, `ExecutionResult`, `ExecutionStart`,
 `GraphExecution`, `LF_EXECUTION_ID` ("Direction from neighbouring Tasks");
-Project activation's end on `waves.project_activation_{ended_at,exit_code,error}`
-(`finish_run`, `graph_inventory.rs:473`, falls through to `waves` after
-`RUN_OWNERS`); CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
+CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them, liveness by
 `run_evidence`); `detached::start_lf` returns `Started { id, pid,
-os_started_at }`, so `engine::launch` waits on its child without the store.
+os_started_at }`, so `engine::launch` waits on its child without the store;
+the three owner items below ("Owner slices as built").
 
-Next, in order: the three items of "Concept review after the owner
-slices"; the Task-run and ship carriers; the Session slice (slice 3, with
+Next, in order: the Task-run and ship carriers (each adds its `RunOwner`
+variant and `finish_run` arm); the Session slice (slice 3, with
 the retirement-by-terminal gap); the expand migration's foreign-key
 rebuild together with stopping the journal writer; slices 4–6. When
 LOO-936 merges: rebase, rerun `python3 -I scratch/process_sql_scan.py rust`
@@ -36,38 +35,37 @@ exemption for a `store_revision_task_ship_events_update` trigger, and the
 writes `ended_at/exit_code/error` by `task_ship_events_process`. The
 `open_processes` arm of `task_state_sql` stays until the Session slice.
 
-**Concept review after the owner slices (`05d35042b5`): next implement
-direction.** Settled by the design; build before the carriers.
+**Owner slices as built.**
 
-- **A Project activation records its pid.** `waves` has
-  `project_activation_{ended_at,exit_code,error}` but no start, pid or OS
-  start, so an activating lf killed after the journal stops writing reads
-  pending forever: no read can check the OS and the liveness pass (approach
-  4, "every owner row with a pid") cannot close it. Today the bridge hides it
-  (`close_dead_processes` closes the Process row, the trigger copies the
-  end). Add `project_activation_{started_at,pid,os_started_at}`, written by
-  `record_project_activation` from `current_execution_start()` and cleared
-  by its end, and read readiness through `run_evidence` as CI repairs do: a
-  dead pid with no end reads `unknown`, not pending. Backfill from
-  `processes` like the repair columns. Target records row for `waves` gains
-  the three columns. Test: an activation whose pid is dead reads `unknown`.
-- **A run says which record it owns; `finish_run` stops probing.** The
-  spawner knows it is ending a Graph run or a step, and the child knows what
-  it recorded, yet `finish_run(id)` tries `graph_processes`, then
-  `graph_process_steps`, then `waves`, and the carrier and ship arms would
-  make five UPDATEs on every owning lf's exit. Replace the bool `owns_run` /
-  `mark_run_owner()` with `mark_run_owner(RunOwner)` where `RunOwner` is the
-  record (`GraphRun`, `GraphStep`, `ProjectActivation`, `TaskCarrier`,
-  `ShipCarrier`), and `finish_run(owner, id, …)` writes that one table. One
-  writer per owner table, as the 2a review said, now spelled in the type.
-- **The spawner's end write is best-effort.** `finish_run(...)?` at
-  `lf/commands/graph.rs:240` and `:940` still fails a Graph whose child
-  succeeded when the store is busy (`:899`, a step that never started,
-  replaces the start error with the store's). All three become warn-and-continue (the
-  journal's warn-once gap); the child's own end write and the liveness pass
-  cover a missed one. Closes the 2a review's open item. Still untested
-  from that review: the spawner-written end for a child that died without
-  writing one, and `graph_failure_cause` driving the repeated-failure stop.
+- A Project activation is a run on its Wave:
+  `waves.project_activation_{started_at,pid,os_started_at,ended_at,exit_code,error}`.
+  `record_project_activation(wave, id, ExecutionStart)` writes the start and
+  clears the last end; `ops::project::readiness` (served by `lf wave status`
+  and the roadmap) reads an unended activation whose pid is dead as outcome
+  `unknown`, and Desktop shows that outcome before "no recorded outcome yet".
+  The migration backfills from `processes`; `project_activation_start_from_process`
+  bridges a released lf that records the id alone.
+- `RunOwner { GraphRun, GraphStep, ProjectActivation }`
+  (`graph_process.rs`); `finish_run(owner, id, …)` writes that one table. The
+  journal holds `run_owner`: a minted id under `LF_GRAPH_STEP` starts as
+  `GraphStep`; a Task run's Graph child marks `GraphRun` once it records
+  itself; activation marks `ProjectActivation`.
+- The three spawner end writes in `lf/commands/graph.rs` go through
+  `record_spawner_end`: warn and continue. Test
+  `graph_tests::a_step_that_dies_before_writing_its_end_ends_as_its_graph_saw_it`
+  (a SIGKILLed step reads ended, outcome `unknown`). Still untested:
+  `graph_failure_cause` driving the repeated-failure stop.
+
+Checks (2026-11-17, owner slices): `nextest -p loopflow-storage --lib`
+graph_inventory/migration_runner/project_selection → 135 pass; execution
+`readiness_tests`/`task_updates`/`wave_lifecycle`/`journal::` → pass except
+`journal::tests::a_held_write_lock_delays_an_process_by_one_receipt_wait`
+(finish receipt waits 4.1–4.3 s against a 3 s bound; fails the same at
+`7c659af9e5` without this diff; gate investigates); `nextest -p loopflow --lib`
+graph_tests + task_graph_launch_tests → pass after repairing
+`task_conversations` (it listed `feedback_summary`, gone from
+`SESSION_SELECT`; now `candidates.*`); clippy → clean. Gate: Swift
+`ProjectActivationTests` for the reordered message.
 
 **Correction: foreign keys come off in the expand, not the contract.** Once
 the journal stops writing rows (approach 2), every column still declaring

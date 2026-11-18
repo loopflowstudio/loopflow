@@ -311,3 +311,91 @@ fn read_saved(
     let sync = store.project_planning_sync(id).map_err(project_error)?;
     Ok((project, sync))
 }
+
+/// `wave`'s Project readiness. An activation whose lf died without writing
+/// its end reads `unknown`, not pending.
+pub fn readiness(
+    store: &loopflow_storage::sqlite::SqliteStore,
+    wave: &loopflow_model::id::WaveId,
+) -> crate::store::StoreResult<loopflow_storage::sqlite::ProjectReadiness> {
+    let mut readiness = store.project_readiness(wave)?;
+    if let Some(activation) = readiness
+        .activation
+        .as_mut()
+        .filter(|activation| activation.completed_at.is_none())
+    {
+        let dead = store.project_activation_run(wave)?.is_some_and(|run| {
+            crate::journal::run_evidence(&run) == crate::journal::ProcessIdentityEvidence::Dead
+        });
+        if dead {
+            activation.outcome = loopflow_storage::graph_process::ExecutionResult::Unknown
+                .outcome()
+                .map(str::to_owned);
+        }
+    }
+    Ok(readiness)
+}
+
+#[cfg(test)]
+mod readiness_tests {
+    use crate::work::wave::Wave;
+    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
+    use loopflow_storage::graph_process::ExecutionStart;
+
+    #[test]
+    fn an_activation_whose_lf_died_unended_reads_unknown() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = loopflow_storage::test_fixture::open(&dir.path().join("loopflow.db")).unwrap();
+        let wave = Wave::new(WaveId::new(), "a".into(), "/repo".into());
+        loopflow_storage::test_fixture::wave(&store, &wave);
+        // The journal's row for the activating lf, which `waves` still
+        // references until its rebuild drops the foreign key.
+        let process = LfProcessId::new();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/repo',1)",
+                rusqlite::params![process, TraceId::new()],
+            )
+            .unwrap();
+        let activate = |pid: u32| {
+            let start = ExecutionStart {
+                started_at: 1,
+                pid: Some(pid),
+                os_started_at: crate::journal::process_started_at(pid).unwrap(),
+            };
+            store
+                .record_project_activation(wave.id(), &process, &start)
+                .unwrap();
+            super::readiness(&store, wave.id())
+                .unwrap()
+                .activation
+                .unwrap()
+        };
+        assert_eq!(activate(std::process::id()).outcome, None);
+
+        let mut child = std::process::Command::new("sleep")
+            .arg("5")
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let start = ExecutionStart {
+            started_at: 1,
+            pid: Some(pid),
+            os_started_at: crate::journal::process_started_at(pid).unwrap(),
+        };
+        child.kill().unwrap();
+        child.wait().unwrap();
+        store
+            .record_project_activation(wave.id(), &process, &start)
+            .unwrap();
+        let unknown = super::readiness(&store, wave.id())
+            .unwrap()
+            .activation
+            .unwrap();
+        assert_eq!(unknown.completed_at, None);
+        assert_eq!(unknown.outcome.as_deref(), Some("unknown"));
+    }
+}

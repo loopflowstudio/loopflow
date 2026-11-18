@@ -76,13 +76,21 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; E
 CREATE TRIGGER store_revision_agent_limit_recoveries_delete AFTER DELETE ON agent_limit_recoveries
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='processes'; END;
 
--- A Wave's Project activation ends on the Wave: the activating lf writes its
--- own end, exit code and error there.
+-- A Wave's Project activation is on the Wave: the activating lf records when
+-- it started and the OS process it runs as, then writes its own end, exit
+-- code and error there. An activating lf that died unended reads dead from
+-- its pid.
+ALTER TABLE waves ADD COLUMN project_activation_started_at INTEGER;
+ALTER TABLE waves ADD COLUMN project_activation_pid INTEGER;
+ALTER TABLE waves ADD COLUMN project_activation_os_started_at INTEGER;
 ALTER TABLE waves ADD COLUMN project_activation_ended_at INTEGER;
 ALTER TABLE waves ADD COLUMN project_activation_exit_code INTEGER;
 ALTER TABLE waves ADD COLUMN project_activation_error TEXT;
-UPDATE waves SET (project_activation_ended_at,project_activation_exit_code,project_activation_error)=(
-    SELECT completed_at,exit_code,error FROM processes WHERE id=waves.project_activation_lf_process_id)
+UPDATE waves SET (project_activation_started_at,project_activation_pid,project_activation_os_started_at,
+        project_activation_ended_at,project_activation_exit_code,project_activation_error)=(
+    SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+        CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
+    FROM processes WHERE id=waves.project_activation_lf_process_id)
 WHERE project_activation_lf_process_id IS NOT NULL;
 
 -- A CI repair's run is on its incident: when it started and the OS process
@@ -198,7 +206,8 @@ BEGIN
         pid=NULL,os_started_at=NULL
     WHERE lf_process_id=NEW.id AND ended_at IS NULL;
     UPDATE waves SET project_activation_ended_at=NEW.completed_at,
-        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error
+        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error,
+        project_activation_pid=NULL,project_activation_os_started_at=NULL
     WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
 END;
 CREATE TRIGGER graph_run_end_from_process_update AFTER UPDATE OF completed_at ON processes
@@ -211,8 +220,24 @@ BEGIN
         pid=NULL,os_started_at=NULL
     WHERE lf_process_id=NEW.id AND ended_at IS NULL;
     UPDATE waves SET project_activation_ended_at=NEW.completed_at,
-        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error
+        project_activation_exit_code=NEW.exit_code,project_activation_error=NEW.error,
+        project_activation_pid=NULL,project_activation_os_started_at=NULL
     WHERE project_activation_lf_process_id=NEW.id AND project_activation_ended_at IS NULL;
+END;
+-- A released lf records an activation by id alone, after that id's Process
+-- row; its run's start, OS process and any end come from that row.
+CREATE TRIGGER project_activation_start_from_process AFTER UPDATE OF project_activation_lf_process_id ON waves
+WHEN NEW.project_activation_lf_process_id IS NOT NULL
+    AND NEW.project_activation_lf_process_id IS NOT OLD.project_activation_lf_process_id
+    AND NEW.project_activation_started_at IS OLD.project_activation_started_at
+    AND NEW.project_activation_pid IS OLD.project_activation_pid
+BEGIN
+    UPDATE waves SET (project_activation_started_at,project_activation_pid,project_activation_os_started_at,
+            project_activation_ended_at,project_activation_exit_code,project_activation_error)=(
+        SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
+        FROM processes WHERE id=NEW.project_activation_lf_process_id)
+    WHERE id=NEW.id;
 END;
 -- A released lf reserves or hands off a repair by id alone, after that id's
 -- Process row; its run's start and OS process come from that row.

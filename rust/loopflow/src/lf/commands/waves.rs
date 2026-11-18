@@ -667,7 +667,7 @@ pub(crate) async fn wave_detail(store: &SharedStore, wave: &Wave) -> Result<Wave
     let metric_portfolio =
         loopflow_execution::ops::metrics::wave_metric_portfolio(store, wave, now()).await?;
     Ok(WaveDetailSnapshot {
-        project_readiness: store.sqlite.project_readiness(wave.id())?,
+        project_readiness: loopflow_execution::ops::project::readiness(&store.sqlite, wave.id())?,
         history: Evidence::from_result(
             crate::lf::commands::session_history::collect_recent_history(
                 &store.sqlite,
@@ -1327,7 +1327,10 @@ async fn roadmap_snapshot(
         }
         roadmaps.push(WaveRoadmap {
             graph: loopflow_execution::work::wave::config::wave_graph(&checkout, wave.slug())?,
-            project_readiness: store.sqlite.project_readiness(wave.id())?,
+            project_readiness: loopflow_execution::ops::project::readiness(
+                &store.sqlite,
+                wave.id(),
+            )?,
             wave: snapshot,
             projects: project_planning(store, wave).await,
             unavailable_tasks: Vec::new(),

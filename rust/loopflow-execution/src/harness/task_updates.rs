@@ -278,7 +278,13 @@ mod tests {
         );
         assert!(quiet(&store), "between-step commits are silent");
         store
-            .finish_run(&graph, 20, Some(1), Some("it failed"))
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                &graph,
+                20,
+                Some(1),
+                Some("it failed"),
+            )
             .unwrap();
         let text = deliver(&store);
         assert!(text.contains(&format!("Run feature ({graph}) · failed")));
@@ -411,14 +417,28 @@ mod tests {
             _ => (1, Some("it failed")),
         };
         finish_step(store, run, exit, error);
-        store.finish_run(run, 20, Some(exit), error).unwrap();
+        store
+            .finish_run(
+                loopflow_storage::graph_process::RunOwner::GraphRun,
+                run,
+                20,
+                Some(exit),
+                error,
+            )
+            .unwrap();
     }
 
     fn finish_step(store: &SqliteStore, run: &LfProcessId, exit: i32, error: Option<&str>) {
         let graph = store.graph_process(run.as_str()).unwrap().unwrap().0;
         for step in graph.steps {
             store
-                .finish_run(&step.run.id, 20, Some(exit), error)
+                .finish_run(
+                    loopflow_storage::graph_process::RunOwner::GraphStep,
+                    &step.run.id,
+                    20,
+                    Some(exit),
+                    error,
+                )
                 .unwrap();
         }
     }

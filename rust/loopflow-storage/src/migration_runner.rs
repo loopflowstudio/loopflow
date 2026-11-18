@@ -2050,37 +2050,99 @@ mod tests {
             .execute("UPDATE graph_processes SET task_id=NULL,graph='other'", [])
             .is_err());
 
-        // A Project activation's end is on its Wave, backfilled and bridged
+        // A Project activation's run is on its Wave, backfilled and bridged
         // from a released activating lf.
+        type Activation = (
+            String,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let activations = || -> Vec<Activation> {
+            conn.prepare(
+                "SELECT id,project_activation_started_at,project_activation_pid,
+                    project_activation_os_started_at,project_activation_ended_at,
+                    project_activation_exit_code,project_activation_error
+                 FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        let failed: Activation = (
+            "wave-done".into(),
+            Some(20),
+            None,
+            None,
+            Some(25),
+            Some(1),
+            Some("provider unavailable".into()),
+        );
+        assert_eq!(
+            activations(),
+            [
+                failed.clone(),
+                (
+                    "wave-live".into(),
+                    Some(42),
+                    Some(4003),
+                    Some(41),
+                    None,
+                    None,
+                    None
+                ),
+            ]
+        );
         conn.execute(
             "UPDATE processes SET completed_at=45,outcome='succeeded',exit_code=0 WHERE id='activation-live'",
             [],
         )
         .unwrap();
-        type Ending = (String, Option<i64>, Option<i64>, Option<String>);
-        let activations: Vec<Ending> = conn
-            .prepare(
-                "SELECT id,project_activation_ended_at,project_activation_exit_code,
-                    project_activation_error FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
-            )
-            .unwrap()
-            .query_map([], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
         assert_eq!(
-            activations,
-            [
-                (
-                    "wave-done".into(),
-                    Some(25),
-                    Some(1),
-                    Some("provider unavailable".into())
-                ),
-                ("wave-live".into(), Some(45), Some(0), None),
-            ]
+            activations()[1],
+            (
+                "wave-live".into(),
+                Some(42),
+                None,
+                None,
+                Some(45),
+                Some(0),
+                None
+            )
+        );
+        // A released lf activating again brings the new run's start, not the
+        // last one's end.
+        conn.execute(
+            "UPDATE waves SET project_activation_lf_process_id='activation-next' WHERE id='wave-done'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            activations()[0],
+            (
+                "wave-done".into(),
+                Some(46),
+                Some(4004),
+                Some(45),
+                None,
+                None,
+                None
+            )
         );
 
         // A repair's run is on its incident; a released launcher's handoff

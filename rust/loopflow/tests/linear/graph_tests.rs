@@ -269,6 +269,51 @@ fn a_step_that_finishes_before_the_graph_looks_keeps_its_result() {
     assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
 }
 
+#[test]
+fn a_step_that_dies_before_writing_its_end_ends_as_its_graph_saw_it() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    write_graph(
+        repo.path(),
+        "dying-step",
+        "- cmd: sync --plan\n- cmd: die-unrecorded\n",
+    );
+    // The step's lf is killed before it can record anything of itself.
+    let bin = home.path().join("lf-or-die");
+    write_executable(
+        &bin,
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *die-unrecorded*) kill -9 $$;; esac\nexec '{}' \"$@\"\n",
+            loopflow_test_support::lf_binary()
+        ),
+    );
+    let output = lf_command(
+        repo.path(),
+        home.path(),
+        &["graph", "dying-step", "--batch"],
+        None,
+    )
+    .env("LF_BIN", &bin)
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    let graphs = graph_details(repo.path(), home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(
+        step_fields(&graphs[0], "label"),
+        ["sync --plan", "die-unrecorded"]
+    );
+    // Killed by a signal, its Graph saw no exit code: it ended, outcome unknown.
+    assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "unknown"]);
+    assert!(step_fields(&graphs[0], "completed_at")
+        .iter()
+        .all(serde_json::Value::is_i64));
+    assert_eq!(
+        step_fields(&graphs[0], "exit_code")[1],
+        serde_json::Value::Null
+    );
+}
+
 fn expand_named_graph(repo: &Path, name: &str) -> Vec<ConcreteStep> {
     let graph = load_graph(name, repo).unwrap();
     compile_graph(&graph, repo).unwrap()

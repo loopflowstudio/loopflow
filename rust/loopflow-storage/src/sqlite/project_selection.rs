@@ -229,20 +229,59 @@ impl SqliteStore {
         Ok(id)
     }
 
+    /// The lf activating `wave`'s Project, as it starts: a new activation
+    /// replaces the last one's end.
     pub fn record_project_activation(
         &self,
         wave: &WaveId,
-        process: Option<&loopflow_model::id::LfProcessId>,
+        process: &loopflow_model::id::LfProcessId,
+        start: &crate::graph_process::ExecutionStart,
     ) -> StoreResult<()> {
-        let Some(process) = process else {
-            return Ok(());
-        };
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE waves SET project_activation_lf_process_id=?2 WHERE id=?1",
-            params![wave, process],
+            "UPDATE waves SET project_activation_lf_process_id=?2,project_activation_started_at=?3,
+                project_activation_pid=?4,project_activation_os_started_at=?5,
+                project_activation_ended_at=NULL,project_activation_exit_code=NULL,
+                project_activation_error=NULL
+             WHERE id=?1",
+            params![
+                wave,
+                process,
+                start.started_at,
+                start.pid,
+                start.os_started_at
+            ],
         )?;
         Ok(())
+    }
+
+    /// The run of `wave`'s latest Project activation, if one was recorded.
+    pub fn project_activation_run(
+        &self,
+        wave: &WaveId,
+    ) -> StoreResult<Option<crate::graph_process::Execution>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        Ok(conn
+            .query_row(
+                "SELECT project_activation_lf_process_id,project_activation_started_at,
+                    project_activation_ended_at,project_activation_pid,
+                    project_activation_os_started_at,project_activation_exit_code,
+                    project_activation_error
+                 FROM waves WHERE id=?1 AND project_activation_lf_process_id IS NOT NULL",
+                [wave],
+                |row| {
+                    Ok(crate::graph_process::Execution {
+                        id: row.get(0)?,
+                        started_at: row.get::<_, Option<i64>>(1)?.unwrap_or_default(),
+                        ended_at: row.get(2)?,
+                        pid: row.get(3)?,
+                        os_started_at: row.get(4)?,
+                        exit_code: row.get(5)?,
+                        error: row.get(6)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     pub fn project_binding_imported(&self, wave: &WaveId) -> StoreResult<bool> {
@@ -534,7 +573,11 @@ mod activation_tests {
             )
             .unwrap();
         store
-            .record_project_activation(wave.id(), Some(&process))
+            .record_project_activation(
+                wave.id(),
+                &process,
+                &crate::graph_process::ExecutionStart::reserved(1),
+            )
             .unwrap();
         let pending = store
             .project_readiness(wave.id())
@@ -545,7 +588,13 @@ mod activation_tests {
         assert!(pending.completed_at.is_none());
         assert!(pending.outcome.is_none());
         store
-            .finish_run(&process, 2, Some(1), Some("provider unavailable"))
+            .finish_run(
+                crate::graph_process::RunOwner::ProjectActivation,
+                &process,
+                2,
+                Some(1),
+                Some("provider unavailable"),
+            )
             .unwrap();
         let failed = store
             .project_readiness(wave.id())

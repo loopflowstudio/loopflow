@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-955 concept review: one tracker vocabulary, as built</title>
+<title>LOO-955 concept review: one tracker vocabulary, second pass after build</title>
 <style>
 :root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1c1b19;--mute:#6a665e;--line:#dcd8cf;--card:#fff;--yes:#1f7a45;--no:#b3261e;--part:#9a6200;--prop:#2456c4;--code:#f1eee7}
 @media(prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ebe8e1;--mute:#a09b90;--line:#35332e;--card:#1e1d1b;--yes:#6fcf97;--no:#ff8a80;--part:#f0b455;--prop:#8fb0ff;--code:#262522}}
@@ -25,91 +25,83 @@ ol.q>li{margin:10px 0}ol.q ol{list-style:lower-alpha}
 </style>
 <main>
 <h1>One tracker vocabulary, as built: do the words line up?</h1>
-<p class="mute">LOO-955, reviewed after implementation (12 commits, 208 files against <code>fb14b674</code>). Area taken: the whole planning surface a person touches, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store, Desktop and the docs. A vocabulary is right only if it holds everywhere at once, so the review reads the area as a newcomer would, not the last commit.</p>
+<p class="mute">LOO-955, second review after implementation (HEAD <code>993e518a</code>, 225 files against <code>fb14b674</code>). Area taken: the whole planning surface a person touches, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store, Desktop and the docs. Read against the base as a newcomer would, not against the last pass.</p>
 
 <h2>Product concepts against code concepts</h2>
 <p class="mute"><span class="tag yes">yes</span> lines up as built. <span class="tag part">partly</span> lines up where people look, not underneath. <span class="tag no">no</span> a mismatch still in the tree. <span class="tag prop">proposed</span> marks what this review adds to the plan.</p>
 <table>
 <tr><th style="width:21%">What a person knows</th><th style="width:33%">Code behind it, as built</th><th style="width:8%"></th><th>What is wrong</th></tr>
 <tr><td><b>the plan</b>: Waves, Projects, Tasks</td><td><code>lf wave plan</code>, <code>planning_write</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>a Wave's current Project</b></td><td><code>lf wave edit-project</code>, <code>update-project --file</code>, <code>WaveProjectTarget</code>; glossary and AGENTS.md say Project</td><td><span class="tag yes">yes</span></td><td>The first review's biggest mismatch. Gone: no <code>edit-plan</code>, <code>update-plan</code> or "chapter" outside shipped records and the shared <code>chapter-locks</code> directory.</td></tr>
+<tr><td><b>a Wave's current Project</b></td><td><code>lf wave edit-project</code>, <code>update-project --file</code>, <code>WaveProjectTarget</code></td><td><span class="tag yes">yes</span></td><td>"chapter" remains only in shipped migrations, their upgrade tests and the <code>chapter-locks</code> directory both lf versions lock.</td></tr>
 <tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>lf repo tracker</code>, <code>TrackerConfig</code>, <code>tracker:</code> read spelling, <code>tracker_*</code> tables with mirrors</td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>destination</b>: one Git ref the plan is exchanged with</td><td><code>GitDestination</code>, <code>GitDestinationConflict</code>, <code>git_tracker.rs</code> in three crates, wire <code>fetch_error</code>, Swift <code>GitDestinationsView</code>; glossary row</td><td><span class="tag yes">yes</span></td><td>Last pass's biggest mismatch. Gone: "peer" now means only another Machine. One leftover a person never sees: the lock directory <code>locks/planning-peers</code>, shared with the released lf like <code>chapter-locks</code>.</td></tr>
 <tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code>, <code>TrackerActionStatus</code>, <code>lf repo tracker answer</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code>, <code>LinearIssueState</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>Git as a tracker</b>: the refs the plan is exchanged with ("Git destinations" in <code>lf repo tracker</code>)</td><td>tables <code>git_tracker_*</code>, column <code>fetch_error</code>; Rust <code>PeerPlanningStatus</code>, <code>PeerProjectionConflict</code>, <code>peer_records.rs</code>, <code>planning_peers.rs</code>, <code>peer_status()</code>, <code>acquire_repository()</code>; wire <code>acquisition_error</code>; Swift <code>PeerPlanning.swift</code>, <code>PeerPlanningView</code></td><td><span class="tag no">no</span></td><td><b>One idea under three names.</b> The table says Git tracker, the code says planning peer, the CLI says destination. The store reads a column named <code>fetch_error</code> into a field named <code>acquisition_error</code>, a word the glossary retires. "Peer" appears nowhere a person reads.</td></tr>
-<tr><td><b>when a Task last synced, and whether its change is still going out</b></td><td>Task JSON carries <code>tracker_id</code> and <code>tracker_state.synced_at</code> beside <code>pm_snapshot_synced_at</code> and <code>pm_writeback</code>; <code>lf task status</code> prints <code>PM writeback: current</code></td><td><span class="tag no">no</span></td><td><b>Old and new prefix on one record.</b> A reader of <code>lf task show --json</code> sees <code>tracker_</code> and <code>pm_</code> side by side and has to guess they are the same system. The column stays (hot-table rebuild); the JSON key and the printed line don't have to.</td></tr>
-<tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code>, <code>LINEAR_SOFT_STALE_SECS</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type that holds an Asana gid is still named for Linear. Larger than this work, below.</td></tr>
-<tr><td><b>sync</b> (verb)</td><td><code>lf wave sync</code>, <code>planning_sync</code>, <code>tracker_state {state, synced_at}</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>provider</b>: claude, codex</td><td>agent code; kept: columns <code>provider</code> / <code>planning_provider_revision</code>, config tag <code>planning.provider</code></td><td><span class="tag part">partly</span></td><td>Deliberate and written down: the columns cost a rebuild each and the released lf reads the tag. LOO-784 flips the config writer.</td></tr>
+<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code>, <code>LinearIssueState</code>, <code>fetch_issue</code></td><td><span class="tag part">partly</span></td><td>Types, tables, modules and the wire say event. Two fetches kept the old verb: <code>ops::linear::acquire_task</code> and <code>ops::task::acquire_from_planning</code>, beside <code>fetch_issue</code> and <code>fetch_repository</code> which the plan renamed for the same reason.</td></tr>
+<tr><td><b>when a Task last synced</b></td><td>Task JSON <code>tracker_synced_at</code>, <code>tracker_state.synced_at</code>, <code>tracker_writeback</code>; explain JSON <code>planning_observed_at</code>; explain text <code>Planning observed: …</code></td><td><span class="tag no">no</span></td><td><b>One fact under two names on the wire.</b> <code>ops/context.rs:261</code> copies <code>task.tracker_synced_at</code> into <code>planning_observed_at</code>. The plan's own wire rule (<code>observed_at</code> → <code>synced_at</code>) missed this DTO.</td></tr>
+<tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type holding an Asana gid is named for Linear. Larger than this work, below.</td></tr>
+<tr><td><b>sync</b> (verb)</td><td><code>lf wave sync</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
+<tr><td><b>provider</b>: claude, codex</td><td>every <code>provider</code> key in the server schema is the agent's; kept: columns <code>provider</code> / <code>planning_provider_revision</code>, config tag <code>planning.provider</code></td><td><span class="tag part">partly</span></td><td>Deliberate and written down. LOO-784 flips the config writer.</td></tr>
 </table>
 
-<h2>Biggest mismatch: Git is a tracker in the tables and a "peer" in the code</h2>
-<div class="big">Walk it. Someone on a Git tracker runs <code>lf repo tracker</code>, sees a destination with a fetch failure, and opens the code to find out why.</div>
+<h2>Biggest mismatch: the sync time has a second name where people ask "why"</h2>
+<div class="big">Walk it. A Task looks stale. Someone runs <code>lf task show --json</code>, then <code>lf --explain</code> on the same command to see what it resolved.</div>
 <div class="pair">
 <div class="box"><h3>existing</h3>
-<pre>$ lf repo tracker
-Tracker: git. …
-  origin  refs/lf/plan/main  fetch failed: …
+<pre>$ lf task show LOO-1 --json
+  "tracker_synced_at": 1794962032,
+  "tracker_state": {"state":"available","synced_at":1794962032}
 
-store      git_tracker_destinations.fetch_error
-record     PeerPlanningStatus.acquisition_error
-module     sqlite/planning_peers.rs, peer_records.rs
-call       planning_sync::peer_status(), acquire_repository()
-wire       "acquisition_error": "…"
-Desktop    PeerPlanningView, PeerPlanning.swift</pre>
-<p>Four words for one fact between the table and the screen: fetch, acquisition, peer, destination. The Task's own outcome line retires "acquisition".</p></div>
+$ lf --explain task …
+  Task: LOO-1 (…)
+  Planning observed: 1794962032
+
+$ lf --explain --json task …
+  "planning_observed_at": 1794962032
+
+Swift  ContextExplanation.planningObservedAt</pre>
+<p>Same number, same source. "Observed" is the word the glossary retires for incoming changes, and it is printed.</p></div>
 <div class="box proposed"><h3>proposed</h3>
-<pre>store      git_tracker_destinations.fetch_error
-record     GitDestination.fetch_error
-           GitDestinationConflict
-module     sqlite/git_tracker.rs, store/git_tracker.rs,
-           git_tracker.rs (was peer_records.rs)
-call       planning_sync::git_destinations(), fetch_repository()
-wire       "fetch_error": "…"
-Desktop    GitDestinationsView, GitDestination.swift</pre>
-<p>Two words, each meaning one thing: the <b>Git tracker</b> is the mechanism, a <b>destination</b> is one ref it exchanges with. The glossary gains a "destination" row.</p></div>
+<pre>$ lf --explain task …
+  Task: LOO-1 (…)
+  Tracker synced: 1794962032
+
+$ lf --explain --json task …
+  "tracker_synced_at": 1794962032
+
+Swift  ContextExplanation.trackerSyncedAt
+Rust   ContextExplanation.tracker_synced_at
+
+ops::linear::fetch_task
+ops::task::fetch_from_tracker</pre>
+<p>One name from the Task row to the explanation. The two fetch functions follow <code>fetch_issue</code>.</p></div>
 </div>
-<p><b>Failure and recovery.</b> A fetch fails: <code>fetch_error</code> is set and shown; the next sync clears it. Nothing about the behavior changes, only that the name in the error path is the name in the table. <b>What must survive:</b> a released lf still writes <code>planning_destinations.acquisition_error</code>; the mirror triggers already translate it, so the rename touches no SQL. <b>Counterexample checked:</b> the plan's Modules section named the Swift files <code>TrackerSync*</code>, but <code>TrackerSync.swift</code> already exists and holds actions. Git destinations are a different thing on screen and keep their own type.</p>
-
-<h2>Task JSON: one prefix</h2>
-<div class="pair">
-<div class="box"><h3>existing</h3>
-<pre>"tracker_id": "…",
-"tracker_state": {"state":"available","synced_at":…},
-"pm_snapshot_synced_at": …,
-"pm_writeback": "current"
-
-  PM writeback: current</pre></div>
-<div class="box proposed"><h3>proposed</h3>
-<pre>"tracker_id": "…",
-"tracker_state": {"state":"available","synced_at":…},
-"tracker_synced_at": …,
-"tracker_writeback": "current"
-
-  tracker writeback: current</pre></div>
-</div>
-<p>Struct fields and JSON keys rename on Task and Project; the SQL column names stay. Swift decodes neither key. Passed over: a serde rename alone, which leaves the Rust field and the wire disagreeing.</p>
+<p><b>Failure and recovery.</b> A Task never synced, or a Wave with no Task selected: the value is <code>null</code> and the line prints <code>unknown</code>, as today. A later sync fills it. <b>What must survive:</b> the key stays required and nullable on the wire (Swift <code>decode(Int64?.self, forKey:)</code>); nothing stored carries this key, so no released reader is affected. <b>Counterexample checked:</b> if the explanation's time could differ from the Task's (a separate read of the tracker), a second name would be right. It can't: there is one assignment, from the Task row.</p>
+<p><b>Size.</b> One Rust field and its printed line, one Swift property and its test, the key in five DTO fixtures, two function names with 13 references. No schema file change beyond regeneration, no SQL.</p>
 
 <h2>Larger than this work</h2>
 <ul>
-<li><b>Two sync times on one Task.</b> <code>tracker_state.synced_at</code> comes from the issue's last state; <code>pm_snapshot_synced_at</code> comes from the Task row. If they always agree, one of them is a field that could be nothing. Settling it means reading every writer of both; not done here.</li>
-<li><b><code>LinearIssueId</code> holds Asana gids</b>, and <code>LinearWritebackState</code> describes any tracker. A neutral <code>TrackerRecordId</code> touches every planning signature; it is its own Task.</li>
-<li><b>Git has no actions.</b> The glossary says so ("Git exchanges the journal instead"), which means "action" and "lost" on <code>lf repo tracker</code> describe two of three trackers, and Git conflicts are a third thing. One model for "a change of mine that has not landed" across all three would be a design, not a rename.</li>
-<li><b>Columns</b> <code>provider</code>, <code>planning_provider_revision</code>, <code>observed_at</code>, <code>pm_snapshot_synced_at</code> on hot tables: each is a staged rebuild. LOO-960 could carry them with the contract migration.</li>
+<li><b>"action" also names what a command would do.</b> <code>TaskPlanningAction</code> and the <code>"action"</code> key in <code>lf --explain --json task …</code> (create, edit, move, save, comment) predate this change. The glossary already sets Desktop's buttons apart from tracker actions; this is a third sense. Renaming it (<code>change</code>? <code>request</code>?) is a choice about the explain surface, not a leftover.</li>
+<li><b>Applying an event is still "accept".</b> <code>accept_linear_issue_in</code>, <code>accept_linear_project_in</code>, <code>project_accepted_planning</code>: about 60 call sites. As a verb for what the store does with an event it reads fine; as the retired noun it doesn't appear. Noted in <code>scratch/questions.md</code> for a follow-up.</li>
+<li><b>Two sync times on one Task.</b> <code>tracker_state.synced_at</code> and <code>tracker_synced_at</code> may be one fact. Settling it means reading every writer of both.</li>
+<li><b><code>LinearIssueId</code> holds Asana gids</b>, <code>LinearWritebackState</code> describes any tracker, and Asana's tests live under <code>ops/linear/</code>. A neutral record ID touches every planning signature.</li>
+<li><b>Git has no actions.</b> "action" and "lost" on <code>lf repo tracker</code> describe two of three trackers; Git conflicts are a third thing.</li>
+<li><b>Columns</b> <code>provider</code>, <code>planning_provider_revision</code>, <code>observed_at</code>, <code>pm_snapshot_synced_at</code>, <code>pm_writeback_json</code>: each a staged rebuild. LOO-960 could carry them with the contract migration.</li>
 </ul>
 
-<h2>What held</h2>
+<h2>What held since the last pass</h2>
 <ul>
-<li>Mirror triggers: installed and candidate lf exchanged Task edits both ways through old and new table names.</li>
-<li><code>tracker:</code> folds to the released <code>planning:</code> layout; a different tracker name replaces the block.</li>
-<li><code>lf help wave</code>, <code>lf help repo tracker</code> read in the glossary's words on the candidate build.</li>
+<li>Both "no" rows from the first after-build review are "yes": Git destinations and the Task JSON prefix.</li>
+<li>The plan's Done-when grep finds old table names only in upgrade fixtures and released-writer tests.</li>
+<li>The server schema has no tracker-meaning <code>provider</code>, <code>peer</code>, <code>acquisition</code>, <code>pm_</code> or <code>chapter</code> key.</li>
+<li>Swift has no <code>Peer*</code>, <code>Chapter</code>, <code>linearId</code> or <code>pmWriteback</code> outside a test's sample title.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Git tracker names: <ol><li><code>GitDestination</code> / <code>git_tracker</code> modules / wire <code>fetch_error</code>, as written into the plan;</li><li>keep "peer" in code and only rename the wire key;</li><li>leave it for a later Task.</li></ol></li>
-<li>Task JSON <code>pm_</code> keys: <ol><li><code>tracker_synced_at</code> and <code>tracker_writeback</code>, as written into the plan;</li><li>drop <code>pm_snapshot_synced_at</code> from JSON in favor of <code>tracker_state.synced_at</code>;</li><li>leave both until the columns move.</li></ol></li>
-<li>"destination" in the glossary: <ol><li>add the row, as written;</li><li>keep it an unglossed CLI word.</li></ol></li>
+<li>The explanation's sync time: <ol><li><code>tracker_synced_at</code> / <code>Tracker synced:</code>, as written into the plan (slice 6);</li><li>drop the field from the explanation, since <code>lf task show</code> has it;</li><li>leave <code>planning_observed_at</code>.</li></ol></li>
+<li><code>acquire_task</code> / <code>acquire_from_planning</code>: <ol><li><code>fetch_task</code> / <code>fetch_from_tracker</code>, as written into the plan;</li><li>leave with the other internal names for the follow-up.</li></ol></li>
+<li>"action" in <code>--explain</code> output: <ol><li>leave it, the glossary's action is the tracker's;</li><li>file a Task to rename the explain key;</li><li>add a line to the glossary's action row, as it has for Desktop.</li></ol></li>
+<li><code>accept_*</code> function names: <ol><li>leave them, "accept an event" is the verb;</li><li>file the follow-up rename.</li></ol></li>
 <li><code>LinearIssueId</code> for every tracker's record ID: <ol><li>file a Task for a neutral type;</li><li>leave it.</li></ol></li>
 </ol>
 </main>

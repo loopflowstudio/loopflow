@@ -20,3 +20,6 @@
 - Seen in QA, outside this change: `lf config set` prints `saved; DomainAction` (a Debug-formatted lifecycle); a rejected tracker value says `invalid graph: planning: …`.
 - Compress pass: inbound function names outside the plan still say accept/acquire (`accept_linear_issue_in`, `project_accepted_planning`, `ops::linear::acquire_task`, `import_binding(&acquisition)`); left for a follow-up rename rather than growing this change.
 - QA second pass, pre-existing: Git fetch/publication errors are stored as fixed strings and never logged; a second checkout of one repo under the same LF_HOME fails import with "planning record belongs to another repository", shown only as "Git fetch failed".
+- Concept review, second pass after build: the explanation's `planning_observed_at` / `Planning observed:` becomes `tracker_synced_at` / `Tracker synced:`, and `acquire_task` / `acquire_from_planning` become `fetch_task` / `fetch_from_tracker` (slice 6). Passed over: dropping the field from the explanation.
+- Kept under their released names: lock directory `locks/planning-peers`, shared with the released lf like `chapter-locks`.
+- Larger than this change, on `scratch/concept-review.html`: `TaskPlanningAction` and the `action` key in `lf --explain --json` use "action" for what a command would do, a third sense beside the tracker's and Desktop's.

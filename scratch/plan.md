@@ -213,6 +213,21 @@ over: a serde rename alone (field and wire would disagree), and dropping
 `pm_snapshot_synced_at` for `tracker_state.synced_at` (needs every writer of
 both read first).
 
+### The explanation's sync time is `tracker_synced_at` (made for review)
+
+`lf --explain task …` prints `Planning observed: <time>` and its JSON carries
+`planning_observed_at`; `ops/context.rs` fills both from
+`task.tracker_synced_at`. One fact, one name: Rust field and JSON key
+`tracker_synced_at`, printed `Tracker synced:`, Swift
+`ContextExplanation.trackerSyncedAt` (still `decode(Int64?.self, forKey:)`).
+Nothing stored carries the key. The two fetches that kept the old verb follow
+`fetch_issue`: `ops::linear::acquire_task` → `fetch_task`,
+`ops::task::acquire_from_planning` → `fetch_from_tracker`. Passed over:
+dropping the field from the explanation (`lf task show` has it; the
+explanation is where someone asks why a Task looks stale), and renaming
+`accept_linear_*_in` (the store accepting an event is a verb, about 60 call
+sites; follow-up in `scratch/questions.md`).
+
 `planning_write`, `planning_order`, `planning_reads`, `planning_sync` stay:
 they are the plan writer and sync.
 
@@ -238,10 +253,22 @@ they are the plan writer and sync.
    migration references, SQL columns and mirror tests. The glossary defines
    destination.
 
+6. **Explanation sync time and fetch verbs (next).** `ContextExplanation`
+   in `rust/loopflow-execution/src/ops/context.rs` (field, the printed line,
+   line 325 of `ops/task/planning_explain.rs`),
+   `swift/Loopflow/Models/ContextExplanation.swift`,
+   `swift/LoopflowTests/DTOFixtureTests.swift:246`, the key in
+   `tests/fixtures/dto/{context_explanation,session_resume_explanations,task_checkout_explanations,task_planning_explanations,task_run_explanations}.json`,
+   regenerated `server_schema.json`; `acquire_task` and
+   `acquire_from_planning` with their 13 references. Check:
+   `git grep -nE 'planning_observed_at|planningObservedAt|Planning observed|acquire_task|acquire_from_planning'`
+   is empty, the Rust DTO fixtures and all-target clippy pass, and
+   `scripts/test_desktop.sh --filter DTOFixtureTests` passes.
+
 ## What goes
 
 `lf repo plan` and `RepoPlanCommand`; `lf wave edit-plan`, `update-plan`, `WavePlanTarget`; `repo.plan` in docs and help; the "Older code still says…" paragraph;
-`TrackerObservation`, `TaskAcquisition`, `PeerPlanningStatus`, `PeerProjectionConflict`; DTO keys `linear_id`, `acquisition`, `acquisition_error`, `pm_snapshot_synced_at`, `pm_writeback`,
+`TrackerObservation`, `TaskAcquisition`, `PeerPlanningStatus`, `PeerProjectionConflict`; DTO keys `linear_id`, `acquisition`, `acquisition_error`, `pm_snapshot_synced_at`, `pm_writeback`, `planning_observed_at`,
 `chapter_unavailable`, `chapters`; every runtime reference to the old table
 names. Released migrations, release notes and released-schema fixtures under
 `tests/fixtures/` keep old names (shipped records).

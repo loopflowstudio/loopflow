@@ -3118,6 +3118,82 @@ mod tests {
     }
 
     #[test]
+    fn planning_tracker_keeps_git_journals_and_drops_what_no_destination_publishes() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(&observers(), &build(), &conn, "planning_tracker");
+        let wave = |repo: &str| {
+            let id = loopflow_model::id::WaveId::new().to_string();
+            conn.execute(
+                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'w',?2,1)",
+                rusqlite::params![id, repo],
+            )
+            .unwrap();
+            id
+        };
+        let change = |target: &str| {
+            let id = uuid::Uuid::new_v4().to_string();
+            let mutation = format!(
+                r#"{{"edit":{{"target":"{target}","change":{{"field":"wave_name","value":"w"}}}},"clock":1,"parents":[]}}"#
+            );
+            conn.execute(
+                "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'waves',?2)",
+                rusqlite::params![id, mutation],
+            )
+            .unwrap();
+            conn.execute("INSERT INTO planning_peer_observed(id) VALUES(?1)", [&id])
+                .unwrap();
+            id
+        };
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES
+                ('repo_11111111111111111111111111111111','/git',1),
+                ('repo_22222222222222222222222222222222','/linear',1);
+             INSERT INTO planning_destinations(repo,id,endpoint,reference)
+                VALUES('/git','plan','/remote.git','refs/loopflow/planning/shared/plan');",
+        )
+        .unwrap();
+        let git = change(&wave("/git"));
+        let linear = change(&wave("/linear"));
+        let orphan = change(&loopflow_model::id::WaveId::new().to_string());
+        let held = change(&loopflow_model::id::WaveId::new().to_string());
+        conn.execute(
+            "INSERT INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,'/git','plan')",
+            [&held],
+        )
+        .unwrap();
+
+        apply_through(&conn, "planning_tracker");
+
+        let kept = |table: &str| -> Vec<String> {
+            conn.prepare(&format!("SELECT id FROM {table} ORDER BY id"))
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let mut expected = vec![git, held];
+        expected.sort();
+        assert_eq!(kept("planning_peer_changes"), expected);
+        assert_eq!(kept("planning_peer_observed"), expected);
+        assert!(![linear, orphan].iter().any(|id| expected.contains(id)));
+        let trackers: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT repo,planning_tracker FROM repository_plans ORDER BY repo")
+            .unwrap()
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap();
+        assert_eq!(
+            trackers,
+            [
+                ("/git".into(), Some("git".into())),
+                ("/linear".into(), None)
+            ]
+        );
+    }
+
+    #[test]
     fn conversation_admission_preserves_started_history_and_starts_only_on_input() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(&observers(), &build(), &conn, "session_admission");

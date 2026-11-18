@@ -77,7 +77,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `planning_peer_observed`: id
 - `planning_peer_routes`: mutation_id, repo, destination
 - `planning_user`: singleton, user_key
-- `repository_plans`: id, repo, selected
+- `repository_plans`: id, repo, selected, planning_tracker
 
 ## Steer
 

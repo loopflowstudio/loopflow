@@ -5,6 +5,7 @@ use super::{
 };
 use crate::planning_destination::PlanningDestination;
 use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
+use crate::planning_sync::TrackerKind;
 use crate::work::edit::WorkValue;
 use crate::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal, StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
@@ -147,8 +148,29 @@ impl SqliteStore {
             ON CONFLICT(repo,id) DO NOTHING",
             params![repo, id, destination.endpoint(), destination.reference()],
         )?;
+        record_tracker(&tx, repo, TrackerKind::Git)?;
         tx.commit()?;
         Ok(id)
+    }
+    /// Record the tracker `repo`'s configuration names, read by a drain.
+    /// Restating the stored value writes nothing.
+    pub fn record_planning_tracker(&self, repo: &str, tracker: TrackerKind) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let stored: Option<String> = conn
+            .query_row(
+                "SELECT planning_tracker FROM repository_plans WHERE repo=?1 AND selected=1",
+                [repo],
+                |row| row.get(0),
+            )
+            .optional()?
+            .flatten();
+        if stored.as_deref() == Some(tracker.as_str()) {
+            return Ok(());
+        }
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        record_tracker(&tx, repo, tracker)?;
+        tx.commit()?;
+        Ok(())
     }
     pub fn peer_planning_destination(
         &self,
@@ -191,6 +213,24 @@ impl SqliteStore {
             rows
         };
         decode_snapshot(rows)
+    }
+    /// Git's outbox for `destination`: an owned change it has not exported, or
+    /// a publication it has not confirmed. Neither means only acquisition is due.
+    pub fn peer_planning_unpublished(&self, repo: &str, destination: &str) -> StoreResult<bool> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let unpublished = conn
+            .prepare_cached(&format!(
+                "{OWNED_CHANGES}
+                SELECT EXISTS(SELECT 1 FROM planning_destinations WHERE repo=?1 AND id=?2
+                    AND (publication_state IN ('pending','unconfirmed') OR publication_error IS NOT NULL))
+                OR EXISTS(SELECT 1 FROM owned o
+                    CROSS JOIN planning_peer_changes c
+                        ON c.object_id=o.object_id AND c.record_table=o.record_table
+                    WHERE NOT EXISTS(SELECT 1 FROM planning_peer_routes r
+                        WHERE r.mutation_id=c.id AND r.repo=?1 AND r.destination=?2))"
+            ))?
+            .query_row(params![repo, destination], |row| row.get(0))?;
+        Ok(unpublished)
     }
     pub fn peer_import_current(
         &self,
@@ -614,7 +654,32 @@ fn require_repository(conn: &Connection, repo: &str, table: &str, target: &str) 
     }
     Ok(())
 }
-fn owner_query(table: &str) -> StoreResult<&'static str> {
+/// Switching to Git journals every record `repo` owns in the same transaction,
+/// so its first publication carries the whole plan. Kept observed heads from an
+/// earlier Git era are the parents, so values saved since then win causally.
+fn record_tracker(conn: &Connection, repo: &str, tracker: TrackerKind) -> StoreResult<()> {
+    let switched = conn.execute(
+        "UPDATE repository_plans SET planning_tracker=?2
+         WHERE repo=?1 AND selected=1 AND planning_tracker IS NOT ?2",
+        params![repo, tracker.as_str()],
+    )?;
+    if switched == 0 || tracker != TrackerKind::Git {
+        return Ok(());
+    }
+    let records = conn
+        .prepare(&format!(
+            "{OWNED_CHANGES} SELECT record_table,object_id FROM owned"
+        ))?
+        .query_map([repo], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (table, id) in records {
+        planning_write::capture(conn, &table, &id)?;
+    }
+    Ok(())
+}
+pub(super) fn owner_query(table: &str) -> StoreResult<&'static str> {
     Ok(match table {
         "waves" => "SELECT repo FROM waves WHERE id=?1",
         "projects" => "SELECT w.repo FROM projects p JOIN waves w ON w.id=p.wave_id WHERE p.id=?1",

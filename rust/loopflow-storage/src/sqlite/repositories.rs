@@ -80,6 +80,16 @@ pub(super) fn register_in(
                 bound.expect("conflicting path is present")
             )));
     }
+    // A new identity keeps the tracker recorded for this path. A clone binds
+    // its Git destination before the first import registers the repository.
+    let tracker: Option<String> = conn.query_row(
+        "SELECT COALESCE(
+            (SELECT planning_tracker FROM repository_plans WHERE repo=?1
+                AND planning_tracker IS NOT NULL ORDER BY selected DESC LIMIT 1),
+            (SELECT 'git' FROM planning_destinations WHERE repo=?1 LIMIT 1))",
+        [repo],
+        |row| row.get(0),
+    )?;
     if bind {
         conn.execute(
             "UPDATE repository_plans SET selected=0 WHERE repo=?1 AND selected=1 AND id!=?2",
@@ -87,9 +97,9 @@ pub(super) fn register_in(
         )?;
     }
     conn.execute(
-        "INSERT INTO repository_plans(repo,id,selected) VALUES(?1,?2,1)
+        "INSERT INTO repository_plans(repo,id,selected,planning_tracker) VALUES(?1,?2,1,?3)
              ON CONFLICT(id) DO UPDATE SET selected=1 WHERE selected=0",
-        params![repo, id.as_str()],
+        params![repo, id.as_str(), tracker],
     )?;
     Ok(true)
 }

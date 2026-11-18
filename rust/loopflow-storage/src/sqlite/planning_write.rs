@@ -1,6 +1,7 @@
 //! The planning write boundary shared by local operations, tracker
 //! observations and Git imports. Callers own their transaction; this writer
-//! changes planning columns, journals local and tracker writes for Git peers,
+//! changes planning columns, journals local and tracker writes for Git peers
+//! when the record's repository plans through Git,
 //! and queues a tracker action for each value a local write changed.
 use crate::planning_exchange::PlanningMutation;
 use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
@@ -305,11 +306,22 @@ fn write_record(
             super::tracker_actions::enqueue_local(conn, table, id, change)?;
         }
     }
-    if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) {
+    if matches!(origin, WriteOrigin::Local | WriteOrigin::Tracker) && journaled(conn, table, id)? {
         // Initial rows and every subsequent write use this same typed snapshot.
         capture(conn, table, id)?;
     }
     Ok(changed)
+}
+
+/// Only a repository that plans through Git keeps a journal for its peers.
+fn journaled(conn: &Connection, table: &str, id: &str) -> StoreResult<bool> {
+    let owner = super::planning_peers::owner_query(table)?;
+    Ok(conn
+        .prepare_cached(&format!(
+            "SELECT EXISTS(SELECT 1 FROM repository_plans
+             WHERE repo=({owner}) AND selected=1 AND planning_tracker='git')"
+        ))?
+        .query_row([id], |row| row.get(0))?)
 }
 
 pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResult<()> {
@@ -756,6 +768,76 @@ mod tests {
                 && change.edit.change == Edit::TaskDueDate(Some("2026-10-15".into()))));
     }
 
+    fn journal_rows(store: &SqliteStore, target: &str) -> i64 {
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT count(*) FROM planning_peer_changes WHERE object_id=?1",
+                [target],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn retitle(store: &SqliteStore, id: &TaskId, title: &str, origin: super::WriteOrigin) {
+        let mut conn = store.conn.lock().unwrap();
+        let tx = conn.transaction().unwrap();
+        super::write(
+            &tx,
+            &crate::work::edit::WorkEdit::for_target(
+                id.as_str(),
+                &[Edit::TaskTitle(Some(title.into()))],
+            ),
+            origin,
+        )
+        .unwrap();
+        tx.commit().unwrap();
+    }
+
+    #[test]
+    fn only_a_repository_planning_through_git_journals_and_switching_publishes_its_plan() {
+        let (_home, store, id) = crate::test_fixture::store_with_task();
+        let linear = crate::planning_sync::TrackerKind::Linear;
+        store.record_planning_tracker("/repo", linear).unwrap();
+        retitle(&store, &id, "Saved in Linear", super::WriteOrigin::Local);
+        retitle(
+            &store,
+            &id,
+            "Linear renamed it",
+            super::WriteOrigin::Tracker,
+        );
+        assert_eq!(journal_rows(&store, id.as_str()), 0);
+
+        let destination =
+            PlanningDestination::new("/fixture.git", "refs/loopflow/planning/shared/switch")
+                .unwrap();
+        let route = store.bind_peer_planning("/repo", &destination).unwrap();
+        let titles = |store: &SqliteStore| -> Vec<WorkValue> {
+            store
+                .export_peer_planning("/repo", &route)
+                .unwrap()
+                .winners()
+                .filter(|(_, change)| {
+                    change.edit.target == id.as_str()
+                        && matches!(change.edit.change, Edit::TaskTitle(_))
+                })
+                .map(|(_, change)| change.edit.change.clone())
+                .collect()
+        };
+        assert_eq!(
+            titles(&store),
+            [Edit::TaskTitle(Some("Linear renamed it".into()))]
+        );
+
+        retitle(&store, &id, "Saved in Git", super::WriteOrigin::Local);
+        assert_eq!(
+            titles(&store),
+            [Edit::TaskTitle(Some("Saved in Git".into()))]
+        );
+    }
+
     #[test]
     fn local_identifier_repair_uses_saved_titles_and_attachments() {
         let (_home, store, task) = crate::test_fixture::store_with_task();
@@ -831,9 +913,9 @@ mod tests {
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
+        let task = plan(&a);
         a.bind_peer_planning("/repo", &route).unwrap();
         b.bind_peer_planning("/repo", &route).unwrap();
-        let task = plan(&a);
         let exchanged = |store: &SqliteStore| {
             store
                 .export_peer_planning("/repo", &route.id())
@@ -871,6 +953,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let task = plan(&store);
+        let route =
+            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
+                .unwrap();
+        store.bind_peer_planning("/repo", &route).unwrap();
         // The bytes every lf since v0.15.1 stores for a new Task.
         let stored = format!(
             r#"{{"edit":{{"target":"{task}","change":{{"field":"task_regressed_in","value":null}}}},"clock":1793827427857,"parents":[]}}"#
@@ -884,10 +970,6 @@ mod tests {
                 [&stored],
             )
             .unwrap();
-        let route =
-            PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
-                .unwrap();
-        store.bind_peer_planning("/repo", &route).unwrap();
 
         let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
 

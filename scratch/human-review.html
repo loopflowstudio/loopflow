@@ -1,0 +1,69 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-963 human review</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1d1d1b;--mute:#6b6a65;--line:#dedbd2;--yes:#2f7d4a;--no:#b23a2a;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--fg:#ecebe6;--mute:#9a988f;--line:#34332f;--yes:#6cc28a;--no:#f08a7a;--card:#1c1c1a}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,system-ui,sans-serif;max-width:940px;margin:2.5rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{margin-top:2.2rem;font-size:1.2rem}
+.lede{color:var(--mute);margin-top:0}
+code{font:.88em ui-monospace,SFMono-Regular,monospace}
+pre{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.75rem;overflow:auto;font-size:.88em}
+table{border-collapse:collapse;width:100%}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+ol li{margin:.5rem 0}
+</style>
+
+<h1>LOO-963: provider launches drop the caller's session markers</h1>
+<p class="lede">Branch <code>jack/loo-963-provider-launches-drop-the-callers-claude-code</code> at <code>0e1b0a81</code> · PR <a href="https://github.com/loopflowstudio/loopflow/pull/1970">#1970</a> · 2026-11-17. Nobody was present for this review; the questions below are still Jack's.</p>
+
+<h2>1. What changes</h2>
+<p>An interactive <code>lf -a claude …</code> started from an agent's shell used to show this and save nothing:</p>
+<pre>⚠ Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker</pre>
+<p>…and <code>lf resume</code> later failed with <code>No conversation found with session ID: 1daa55fc-…</code>. Now the chat saves its transcript and resumes. A nested Codex no longer takes its caller's sandbox. <code>CLAUDE_CONFIG_DIR</code>, <code>CODEX_HOME</code>, tokens and API keys still pass through.</p>
+
+<h2>2. Concepts</h2>
+<table>
+<tr><th>Product</th><th>Code</th><th></th></tr>
+<tr><td>A Session lf starts is a new conversation, never the caller's child</td><td><code>CALLER_SESSION_ENV</code> (lf's 12 markers + 20 Claude/Codex ones), <code>remove_caller_session_env</code></td><td class="yes">yes</td></tr>
+<tr><td>Every launch kind starts clean</td><td>One call each in <code>configure_agent_env</code>, Codex app-server, <code>NativeClient::new</code>; the map strip in <code>agent/mod.rs</code></td><td class="yes">yes</td></tr>
+<tr><td>My settings pass through</td><td>Removal by name, not prefix; matrix asserts <code>CLAUDE_CONFIG_DIR</code> survives</td><td class="yes">yes</td></tr>
+<tr><td>The held <code>lf</code> in a terminal is the caller continuing</td><td><code>start_held</code> unchanged, keeps <code>LF_TRACE_ID</code>/<code>LF_PROCESS_ID</code></td><td class="yes">yes</td></tr>
+<tr><td>A pane a person types in (Desktop)</td><td><code>ProcessEnvironment.swift</code> strips <code>CLAUDE_CODE_*</code>/<code>CODEX_*</code> by prefix</td><td class="no">no</td></tr>
+</table>
+<p><b>Biggest mismatch:</b> Desktop's pane scrub is a second, prefix-based answer to the same question, and it also drops <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code> a person set. Fixing it means exposing the list (e.g. through <code>lf --json</code> or a generated Swift file) and removing by name there. Left out of scope: it serves a different surface.</p>
+
+<h2>3. Try it</h2>
+<pre>cd /Users/jack/src/loopflow.loo-963-provider-launches-drop
+cargo build -p loopflow
+# from inside a Claude Code agent shell:
+target/debug/lf -a claude : 'Reply with exactly: branch-chat'
+# quit, then
+target/debug/lf session resume &lt;session&gt;</pre>
+
+<h2>4. What was checked</h2>
+<table>
+<tr><th>Check</th><th>Result</th></tr>
+<tr><td>Launch matrix: 4 harnesses × chat/batch/work session/worker, every provider marker planted as <code>caller</code></td><td>16/16 pass; removing the <code>NativeClient::new</code> call fails <code>Claude Chat</code></td></tr>
+<tr><td>QA in a PTY, installed lf 0.16.0 vs branch (<code>scratch/qa.html</code>)</td><td>main: warning, no <code>.jsonl</code>, resume fails. Branch: no warning, 419 KB transcript, resume answers <code>resumed-branch-chat</code></td></tr>
+<tr><td>Live <code>claude</code>'s env via <code>ps eww</code> with Codex markers planted</td><td>Branch: only <code>CODEX_HOME</code>, <code>NO_COLOR</code>. Main: all 16 markers</td></tr>
+<tr><td>Concept review (<code>scratch/concept-review.html</code>)</td><td>Built code matches the one-list proposal</td></tr>
+</table>
+<p><b>Not checked:</b> CI. Every check on #1970 shows SKIPPED at this head; gate runs the suites. Codex/OpenCode/Pi were covered by stand-ins in the matrix, not real binaries. Headless batches never showed the bug (Claude gates the drop on interactive mode), so there's no before/after for them.</p>
+
+<h2>5. Choices made for you</h2>
+<ul>
+<li>One list for lf's and providers' markers, renamed from <code>EXECUTION_IDENTITY_ENV</code>. Passed over: a separate <code>PROVIDER_SESSION_ENV</code>.</li>
+<li>Remove markers rather than set <code>CLAUDE_CODE_FORCE_SESSION_PERSISTENCE</code>; removal also cuts the messaging socket and notes dir.</li>
+<li><code>NO_COLOR</code>, <code>PAGER</code>, <code>LC_ALL</code> etc. from Codex shells pass through. Cost: colorless, unpaged <code>claude</code> when lf runs from Codex.</li>
+<li><code>AI_AGENT</code> removed although a person could set it.</li>
+<li><code>start_held</code> left unchanged, against the original plan table.</li>
+</ul>
+
+<h2>6. Questions</h2>
+<ol>
+<li>Codex's <code>NO_COLOR</code>/<code>PAGER</code>/<code>LC_*</code>: (a) pass through, as built; (b) remove when <code>CODEX_THREAD_ID</code> is present.</li>
+<li><code>AI_AGENT</code>: (a) remove, as built; (b) pass through.</li>
+<li>Desktop's prefix scrub: (a) leave it; (b) file a Task to move it onto the same name list.</li>
+<li>A person's bare <code>claude</code> in a Rex pane autostarted from an agent shell still inherits markers: (a) out of scope; (b) file a Task for Rex's pane environment.</li>
+</ol>

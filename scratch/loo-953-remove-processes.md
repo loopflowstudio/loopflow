@@ -758,10 +758,11 @@ two live agents on one Session; a `Legacy*` type.
    operate skills, docs). The liveness pass lands with the journal stop
    (concept review after the carrier slices). Test: `lf graph list --json`
    shows a SIGKILLed run ended.
-5. **Bridge test** (step discovery dropped: a released runner stops at
-   its next step's schema check). Released-shape writer SQL (copied from the 0.16.0
-   statements) drives an old Graph runner's step discovery against a new step
-   → found; old launcher's endpoint update → visible in `lf session list`.
+5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
+   statements): an old Graph runner's end on `processes` → its Graph run
+   ended; an old launcher's endpoint update → visible in `lf session list`.
+   No step-discovery test: a released runner stops at its next step's
+   schema check.
 6. **Mark leaving and file the contract Task**: `-- leaving:` marks in
    `process_rows_on_owners.sql` name it; after `STAGING_DAYS` (30), export `processes`
    to JSON lines (`-- exports:`), drop it, the bridge triggers,

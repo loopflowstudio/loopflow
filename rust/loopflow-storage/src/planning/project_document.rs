@@ -236,8 +236,8 @@ pub fn parse_project_document(source: &str) -> ProjectDocumentResult<ProjectDocu
 #[cfg(test)]
 mod tests {
     use super::parse_project_document;
-    use crate::linear_records::render_project_content;
     use crate::metric::MetricTarget;
+    use crate::planning::render_project_content;
     use crate::work::project::ProjectKR;
 
     #[test]

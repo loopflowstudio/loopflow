@@ -151,8 +151,7 @@
               "slug": "task-pr-tests",
               "status": "started",
               "sync": {
-                "changes": [],
-                "connected": false
+                "actions": []
               }
             }
           ],
@@ -273,8 +272,7 @@
             "rank": 0,
             "state": null,
             "sync": {
-              "changes": [],
-              "connected": false
+              "actions": []
             },
             "repo_id": "repo_00000000000040008000000000000001",
             "repo": "/private/tmp/.tmpRKKNhK",

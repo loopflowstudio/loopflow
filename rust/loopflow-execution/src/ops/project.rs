@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::ops::{OpsError, OpsResult};
 use crate::store::{PlanningLocks, Store};
 use crate::work::wave::Wave;
-use loopflow_storage::planning_sync::PlanningSyncStatus;
+use loopflow_storage::planning_sync::TrackerSync;
 use loopflow_storage::work::project::Project;
 use loopflow_storage::work::project::ProjectStatus;
 
@@ -53,7 +53,7 @@ pub async fn update_plan(
     wave: Option<&str>,
     krs: &[loopflow_storage::work::project::ProjectKR],
     metric_targets: &[crate::work::wave::metrics::MetricTarget],
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     let store = super::planning_sync::planning_store().await?;
     let ambient = std::env::var(crate::work::wave::context::WAVE_ID_ENV).ok();
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -72,7 +72,12 @@ pub async fn update_plan(
         .update_project_content(&project.id, krs, metric_targets)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
 }
 
@@ -235,7 +240,7 @@ pub async fn edit(
     name: Option<&str>,
     summary: Option<&str>,
     description: Option<&str>,
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     if name.is_none() && summary.is_none() && description.is_none() {
         return Err(project_error(
             "wave edit-plan requires --name, --summary or --description",
@@ -254,7 +259,12 @@ pub async fn edit(
         .edit_project(&project.id, name, summary, description)
         .map_err(project_error)?;
     drop(_acquisition);
-    super::planning_sync::sync_after_save(&store, wave.repo()).await;
+    super::planning_sync::sync_after_save(
+        &store,
+        wave.repo(),
+        &loopflow_storage::sqlite::tracker_actions::ActionOwner::Project(project.id.clone()),
+    )
+    .await;
     read_saved(&store, &project.id)
 }
 
@@ -302,13 +312,13 @@ pub async fn wave_graph(
 fn read_saved(
     store: &Store,
     id: &loopflow_model::durable::ProjectId,
-) -> OpsResult<(Project, PlanningSyncStatus)> {
+) -> OpsResult<(Project, TrackerSync)> {
     let project = store
         .sqlite
         .project(id)
         .map_err(project_error)?
         .ok_or_else(|| project_error("Project is unavailable"))?;
-    let sync = store.project_planning_sync(id).map_err(project_error)?;
+    let sync = store.project_tracker_sync(id).map_err(project_error)?;
     Ok((project, sync))
 }
 

@@ -1,33 +1,11 @@
 use std::collections::HashSet;
 
-use rusqlite::params;
-
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::WaveId;
 
 use super::SqliteStore;
 
 impl SqliteStore {
-    pub fn projects_pending_adoption(&self, wave: &WaveId) -> StoreResult<Vec<(String, i64)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(
-            "SELECT external_project_id, legacy_current FROM projects
-             WHERE wave_id=?1 AND legacy_current IS NOT NULL ORDER BY external_project_id",
-        )?;
-        let rows = query.query_map([wave.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(Into::into)
-    }
-
-    pub fn finish_project_adoption(&self, wave: &WaveId, project: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "UPDATE projects SET legacy_current=NULL WHERE wave_id=?1 AND external_project_id=?2",
-            params![wave.as_str(), project],
-        )?;
-        Ok(())
-    }
-
     pub fn task_started_or_published(&self, task: &TaskId) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let snapshot = conn.savepoint()?;

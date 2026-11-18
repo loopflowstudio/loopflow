@@ -531,7 +531,11 @@ pub fn remove(
             .sqlite
             .retire_waves(&ids, "removed")
             .map_err(lifecycle_error)?;
-        runtime.block_on(super::planning_sync::sync_after_save(&store, &repo_key));
+        runtime.block_on(super::planning_sync::sync_after_save(
+            &store,
+            &repo_key,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(ids[0].clone()),
+        ));
     }
 
     operation.planning_done = true;

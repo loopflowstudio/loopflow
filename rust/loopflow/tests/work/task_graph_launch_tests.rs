@@ -36,6 +36,35 @@ const LAUNCHES: [&[&str]; 3] = [
     &["-b", "graph", "proof"],
 ];
 
+/// Linear received lf's state writes before someone changed the Task there; an
+/// unsent one would otherwise outrank what Linear reports next.
+fn deliver_state_writes(
+    store: &loopflow_execution::store::Store,
+    task: &loopflow_model::durable::TaskId,
+) {
+    use loopflow_storage::sqlite::tracker_actions::{
+        ActionKind, ActionOwner, ActionPhase, Resolution,
+    };
+    let delivered = Resolution::Confirmed {
+        revision: None,
+        remote_id: None,
+    };
+    for action in store
+        .sqlite
+        .tracker_actions_for(&ActionOwner::Task(task.clone()))
+        .unwrap()
+    {
+        if action.kind == ActionKind::State
+            && matches!(action.phase, ActionPhase::Queued | ActionPhase::Sent)
+        {
+            store
+                .sqlite
+                .resolve_tracker_action(&action.id, &delivered)
+                .unwrap();
+        }
+    }
+}
+
 #[test]
 fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
     for condition in [
@@ -90,6 +119,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
             record.project.as_mut().unwrap().id = "another-project".into();
             record.item.project_id = Some("another-project".into());
         }
+        deliver_state_writes(&registered.store, &registered.task.id);
         runtime
             .block_on(
                 registered
@@ -1241,6 +1271,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             .display()
             .to_string();
         let store = &self.registered.store;
+        deliver_state_writes(store, &self.registered.task.id);
         let mut record: crate::test_linear_input::IssueFixture =
             loopflow_test_support::retained_task_input(
                 &self.registered.database,

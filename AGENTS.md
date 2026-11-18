@@ -320,7 +320,7 @@ them.
   Isolate a Rex server, never a second Rex app: a separate HOME does not isolate
   `com.superlogical.rex` defaults, and the app overwrites the person's cached route.
 - `unwrap()` is fine. Unit tests live in the same file; integration tests in `tests/`.
-- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/linear/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
+- Register standalone test binaries in `rust/loopflow/Cargo.toml` (`autotests = false`); ordinary suites join `tests/integration.rs`. `tests/work/` compiles into the library's test binary: `cargo test -p loopflow --lib task_graph_launch_tests::`.
 - Mock through closures or `#[cfg(test)]`, not factory traits.
 - After moving fixtures between crates, run one application launch/resume test and
   one moved fixture. Compilation misses runtime script paths and child initializer

@@ -492,6 +492,26 @@ mod tests {
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
 
+    // Every save runs a pass: its creation check and queue read plan by index,
+    // and a check that finds nothing takes no write lock.
+    #[test]
+    fn a_tracker_pass_reads_its_queue_by_index() {
+        let (_home, store, _task, _viewer) = fixture();
+        let traced = assert_no_empty_writes(&store, || {
+            statements(&store, || {
+                store
+                    .enqueue_tracker_creations(
+                        "/elsewhere",
+                        crate::planning_sync::TrackerKind::Linear,
+                    )
+                    .unwrap();
+                store.unconfirmed_tracker_actions("/elsewhere").unwrap();
+            })
+        });
+        let scans = growing_scans(&store, &traced);
+        assert!(scans.is_empty(), "{}", scans.join("\n"));
+    }
+
     #[test]
     fn auto_ship_log_reads_and_writes_plan_by_index() {
         let (_home, store, _task, _viewer) = fixture();

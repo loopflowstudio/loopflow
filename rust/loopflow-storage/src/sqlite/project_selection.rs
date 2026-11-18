@@ -185,6 +185,7 @@ impl SqliteStore {
                             Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
                         ],
                     ),
+                    crate::sqlite::planning_write::WriteOrigin::Local,
                 )?;
                 if pending.is_none() {
                     tx.execute("INSERT INTO project_transitions(wave_id,successor_id,created_at,local_plan_json)
@@ -205,11 +206,6 @@ impl SqliteStore {
                 "terminal or paused Project history cannot be activated".into(),
             ));
         }
-        super::planning_changes::PlanningChanges::Project(&id).record(
-            &tx,
-            &Edit::ProjectStatus(project.status),
-            &Edit::ProjectStatus(crate::work::project::ProjectStatus::Started),
-        )?;
         planning_write::local(
             &tx,
             &crate::work::edit::WorkEdit::for_target(

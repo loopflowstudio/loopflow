@@ -10,8 +10,7 @@
     "completed_at": null,
     "due_date": null,
     "sync": {
-      "connected": false,
-      "changes": []
+      "actions": []
     },
     "linear_id": null,
     "acquisition": {

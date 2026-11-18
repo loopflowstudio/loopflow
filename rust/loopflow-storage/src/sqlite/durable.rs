@@ -119,16 +119,9 @@ impl SqliteStore {
                 [task_id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)),
             ).optional()?;
             if let Some((at, saved_reason)) = retained {
-                // Migrated cancellations can predate delivery receipts. An explicit
-                // repeat repairs that missing intention without replacing uncertainty.
-                let has_delivery: bool = tx.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM task_state_deliveries WHERE task_id=?1)",
-                    [task_id.as_str()],
-                    |row| row.get(0),
-                )?;
-                if !has_delivery {
-                    super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
-                }
+                // Migrated cancellations can predate their state. An explicit
+                // repeat repairs it; one already saved changes nothing.
+                super::task_state::decide_in(&tx, task_id, "canceled")?;
                 tx.commit()?;
                 return Ok(AbandonReceipt {
                     work: work.clone(),
@@ -160,7 +153,7 @@ impl SqliteStore {
                 "UPDATE tasks SET abandon_reason=?2 WHERE id=?1",
                 params![task_id.as_str(), reason],
             )?;
-            super::task_state_delivery::queue_in(&tx, task_id, "canceled")?;
+            super::task_state::decide_in(&tx, task_id, "canceled")?;
             super::task_summaries::write_in(
                 &tx,
                 task_id,

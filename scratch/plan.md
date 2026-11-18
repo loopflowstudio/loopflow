@@ -110,10 +110,13 @@ env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
 
 ## Demo
 
-From an agent shell (which carries `CLAUDE_CODE_CHILD_SESSION`), run a branch
-`lf` batch with Claude; the thread it records has a transcript under
-`~/.claude/projects/` and `lf resume` reopens it. On main the same command
-records a thread with no transcript.
+From an agent shell (which carries `CLAUDE_CODE_CHILD_SESSION`), open a
+branch `lf -a claude : '<prompt>'` chat in a terminal; it saves a transcript
+under `~/.claude/projects/` and `lf resume` reopens it. On main the same chat
+shows "Transcript saving is off — inherited CLAUDE_CODE_CHILD_SESSION marker"
+and resume says "No conversation found". A batch doesn't show it: Claude
+only drops transcripts when interactive (`-p` keeps them). Run 2026-11-17 in
+QA; `scratch/qa.html`.
 
 ## What goes
 
@@ -155,8 +158,7 @@ What it taught:
   the provider names; lf's names keep their coverage from the `managed` hook
   assertions.
 
-Remaining: the Demo, run by hand (demo or gate step; a headless run
-here can't show a person the transcript). Nothing remains to build.
+Remaining: nothing to build. QA ran the Demo in a PTY (2026-11-17).
 
 ## Docs
 

@@ -307,19 +307,24 @@ every Process/Session association, conflict answers.
    above being absent (now 0 by construction), 5,047 newly reached by
    inheritance. Insert-time probe is index seeks
    (`recording_and_reading_a_process_task_probe_indexes`).
-   Remaining in this slice: Sessions. Writing a cwd-inferred
-   `agent_sessions.task_id` at creation also changes what a bound Session
-   means to its other readers (`bound_at`/`work_source`, prompt context, Wave
-   attribution in `capture_in`); check those reads before writing it, then
-   backfill the 2,659, reconcile the 3 primaries, and make
-   `session_membership`/`session_tasks` read `task_id` only. Until then
-   Sessions keep binding-or-path membership (paths already move with
-   `relocate_repository`).
-   Demo for the whole slice: `relocate_repository` test, then reuse the old
-   path for a new clone, and `lf task status` still lists only the original
-   Processes and Sessions. Session cwd-matching (`checkout()` in
-   `task_work.rs`, `session_membership`, the checkout half of
-   `session_tasks`) is the last path match left; it goes with this half.
+   Session half built: `reserve_session_in` records the deepest checkout's
+   Task on a Session that names no Task or Wave (`work_source='checkout'`,
+   the Wave follows the Task), the same rule `lf <skill>` already used via
+   `select_work`. Readers checked first: `session_task_ids` (prompt context,
+   task updates, agent launch, moves) already counted checkout membership, so
+   they see the same Task; LaunchKind keys on `bound`/primary, so a checkout
+   Session stays a chat; `capture_in` now stamps the Task's Wave on the
+   captured event, which `session list --wave` already counted by path. What
+   the live store gains is helpers (1,563 "Generate PR title", ~145 commit
+   messages, 715 `sync-conflicts`) recording the Task whose checkout they ran
+   in, which path matching already gave them. `process_task.sql` backfills:
+   the 3 primaries from `task_primary_sessions`, then the deepest checkout for
+   every Session naming nothing; on a copy of the live 22,342 Sessions that is
+   0.19 s and leaves 0 path-only members. `session_membership`,
+   `session_tasks` and `agent_task` read `task_id` only; `checkout()` and
+   `TASK_CHECKOUTS` are gone. No path matching is left in membership.
+   Demo: `work_keeps_its_task_when_a_checkout_path_is_reused` (Processes and
+   Sessions stay with the first Task when a second clone takes the path).
 2. **The guard.** Authorizer in test stores, leaving list from `build.rs`.
    Fix the reads it catches (the `ship_lf_process_id` prune clause, the
    registry fallback). Every later slice lands under it.

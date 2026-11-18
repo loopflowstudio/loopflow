@@ -1,6 +1,6 @@
 //! One association rule for CLI and Desktop. A Process records its Task once,
 //! when it is written ([`process_task`]); reads follow that column and never
-//! rewrite event attribution. Sessions belong by binding or checkout path.
+//! rewrite event attribution. A Session records its Task when it is created.
 
 use std::collections::{HashMap, HashSet};
 
@@ -29,28 +29,15 @@ pub struct TaskWorkRecords {
     pub graph: Option<SavedTaskGraphRow>,
 }
 
-/// Each Task with this Machine's checkout of it: `worktree` is NULL for a Task
-/// not checked out here.
-const TASK_CHECKOUTS: &str =
-    "SELECT t.id,c.worktree FROM tasks t LEFT JOIN task_checkouts c ON c.task_id=t.id";
-
 fn tasks(selector: &str) -> String {
-    format!("{TASK_CHECKOUTS} WHERE t.id={selector} OR t.issue_identifier={selector} OR t.external_issue_id={selector}")
+    format!("SELECT id FROM tasks WHERE id={selector} OR issue_identifier={selector} OR external_issue_id={selector}")
 }
 
-fn checkout(cwd: &str) -> String {
-    // Component boundaries avoid /repo.task matching /repo.task-other. Paths
-    // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
-    // `tw` is any relation with the Task's `id`; the checkout is looked up here.
-    format!("EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id AND ({cwd}=rtrim(c.worktree,'/') OR instr({cwd},rtrim(c.worktree,'/')||'/')=1))")
-}
-
+/// A Session belongs to the Task it recorded when it was created
+/// ([`super::sessions`] infers the checkout's Task then). Repository and Wave
+/// primaries keep their own scope.
 pub(super) fn session_membership(session: &str) -> String {
-    format!(
-        "{session}.primary_scope IS NULL
-         AND ({session}.task_id=tw.id OR ({}))",
-        checkout(&format!("{session}.cwd")),
-    )
+    format!("{session}.primary_scope IS NULL AND {session}.task_id=tw.id")
 }
 
 pub(super) fn session_ids(selector: &str) -> String {
@@ -61,24 +48,10 @@ pub(super) fn session_ids(selector: &str) -> String {
     )
 }
 
-/// The Tasks a Session belongs to. A checkout holding the Session's cwd has
-/// that cwd or one of its ancestors as its worktree, so candidates come from
-/// `task_checkouts_root` rather than every Task. Explicit binding also counts.
+/// The Task a Session belongs to, as a subquery of at most one row.
 pub(super) fn session_tasks(session: &str) -> String {
-    // Probe checkout roots from the cwd outward. Keep paths lexical: repeated
-    // slashes and relative paths have the same meaning as in `checkout`. CROSS
-    // JOIN keeps ancestors outside the index probe instead of scanning Tasks.
     format!(
-        "WITH RECURSIVE up(path) AS (
-            SELECT rtrim({session}.cwd,'/') WHERE {session}.primary_scope IS NULL
-            UNION ALL
-            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
-         SELECT id FROM tasks WHERE id={session}.task_id AND {session}.primary_scope IS NULL
-         UNION
-         SELECT c.task_id FROM up CROSS JOIN task_checkouts c
-            ON rtrim(c.worktree,'/')=up.path
-         WHERE up.path!='' OR substr({session}.cwd,1,1)='/' OR {session}.cwd=''
-         ORDER BY id"
+        "SELECT {session}.task_id AS id WHERE {session}.task_id IS NOT NULL AND {session}.primary_scope IS NULL"
     )
 }
 
@@ -114,13 +87,10 @@ pub(super) fn process_task(parent: &str, cwd: &str, session: &str, agent: &str) 
     )
 }
 
-/// The Task a Session's agent Process belongs to: the Session's own, else the
-/// deepest checkout holding its cwd. Primary conversations keep their scope.
+/// The Task a Session's agent Process belongs to: the Session's own.
+/// Primary conversations keep their scope.
 pub(super) fn agent_task(session: &str) -> String {
-    format!(
-        "CASE WHEN {session}.primary_scope IS NULL THEN coalesce({session}.task_id,{}) END",
-        deepest_checkout(&format!("{session}.cwd"))
-    )
+    format!("CASE WHEN {session}.primary_scope IS NULL THEN {session}.task_id END")
 }
 
 /// A Task's Processes: those recorded for it, and the agents (with the lf
@@ -1221,12 +1191,6 @@ mod tests {
             Some("/repo/AB/x"),
             Some("/repo//task/sub"),
         ];
-        // What a path-matching reader would say: the checkout holds the cwd
-        // itself or a descendant by whole components.
-        let contained = format!(
-            "SELECT EXISTS(SELECT 1 FROM tasks tw WHERE tw.id='task_11111111111111111111111111111111' AND {})",
-            super::checkout("?1")
-        );
         for root in [
             "/repo/task",
             "/repo/task/",
@@ -1245,9 +1209,13 @@ mod tests {
                 [root],
             )
             .unwrap();
+            // The checkout holds the cwd itself or a descendant by whole components.
+            let root_path = root.trim_end_matches('/');
             for cwd in cwds {
                 let process = crate::test_fixture::start_process(&conn, cwd, None);
-                let expected: bool = conn.query_row(&contained, [cwd], |row| row.get(0)).unwrap();
+                let expected = cwd.is_some_and(|cwd| {
+                    cwd == root_path || cwd.starts_with(&format!("{root_path}/"))
+                });
                 assert_eq!(
                     recorded_task(&conn, &process).as_deref()
                         == Some("task_11111111111111111111111111111111"),
@@ -1259,7 +1227,7 @@ mod tests {
     }
 
     #[test]
-    fn a_process_keeps_its_task_when_a_checkout_path_is_reused() {
+    fn work_keeps_its_task_when_a_checkout_path_is_reused() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let repository = crate::test_fixture::repository(&store, "/repo");
@@ -1297,6 +1265,16 @@ mod tests {
                 crate::test_fixture::start_process(&conn, Some("/tmp"), Some(&worker)),
             )
         };
+        // A conversation that names nothing belongs to the checkout it opened in.
+        let session = |cwd: &str| {
+            let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
+            session.work_source = None;
+            session.cwd = cwd.into();
+            let session = store.create_session_prepared(session, None).unwrap();
+            assert_eq!(session.work_source, Some(crate::session::WorkSource::Checkout));
+            session.id.to_string()
+        };
+        let conversation = session("/repo.task/src");
         // The first checkout goes and another Task's clone takes its path.
         checkout(&second);
         let later = crate::test_fixture::start_process(
@@ -1304,6 +1282,19 @@ mod tests {
             Some("/repo.task"),
             None,
         );
+        let later_conversation = session("/repo.task");
+        let sessions = |task: &TaskId| {
+            store
+                .task_work_records(task)
+                .unwrap()
+                .sessions
+                .into_iter()
+                .map(|session| session.id.to_string())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sessions(&first), [conversation.clone()]);
+        assert_eq!(sessions(&second), [later_conversation.clone()]);
+        assert_eq!(store.session_task_ids(&conversation).unwrap(), [first.clone()]);
         let processes = |task: &TaskId| {
             let mut ids: Vec<String> = store
                 .task_work_records(task)
@@ -1552,7 +1543,7 @@ mod tests {
     }
 
     #[test]
-    fn session_membership_upgrade_probes_task_indexes() {
+    fn upgrade_records_the_task_each_session_belonged_to_by_path() {
         use crate::migration_runner::{apply_before_migration, apply_pending_migrations};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(
@@ -1569,49 +1560,41 @@ mod tests {
              SELECT printf('task_%032x',i),'repo_11111111111111111111111111111111','FIX-'||i,'Task','/repo/'||i,
                 (SELECT id FROM machines WHERE is_local=1),1 FROM n;
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
-             VALUES('probe','Probe','human',1,0,'/repo/999/sub','task_00000000000000000000000000000001');
-             UPDATE tasks SET primary_session_id='probe' WHERE worktree='/repo/999';"
-        ).unwrap();
-        let sql = format!(
-            "SELECT (SELECT json_group_array(id) FROM ({})),
-                EXISTS(SELECT 1 FROM task_primary_sessions p WHERE p.session_id=a.id)
-             FROM agent_sessions a WHERE id=?1",
-            super::session_tasks("a")
-        );
-        let read = || {
-            let mut query = conn.prepare(&sql).unwrap();
-            let result: (String, bool) = query
-                .query_row(["probe"], |row| Ok((row.get(0)?, row.get(1)?)))
-                .unwrap();
-            (result, query.get_status(rusqlite::StatementStatus::VmStep))
-        };
+             VALUES('bound','Bound','human',1,0,'/repo/999','task_00000000000000000000000000000001');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES
+                ('helper','Helper','human',1,0,'/repo/99/sub'),
+                ('nested','Nested','human',1,0,'/repo/1/x'),
+                ('outside','Outside','human',1,0,'/tmp'),
+                ('primary','Primary','human',1,0,'/elsewhere');
+             UPDATE tasks SET primary_session_id='primary' WHERE worktree='/repo/5';",
+        )
+        .unwrap();
         // The upgrade moves the released checkouts into `task_checkouts` and the
-        // primary Session into `task_primary_sessions`.
+        // primary Session into `task_primary_sessions`, then records each
+        // Session's Task.
         apply_pending_migrations(
             &crate::test_fixture::observers(),
             &crate::test_fixture::build(),
             &conn,
         );
-        let (after, _) = read();
-        assert_eq!(after, (r#"["task_00000000000000000000000000000001","task_000000000000000000000000000003e7"]"#.into(), true));
-        let plans: Vec<String> = conn
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
+        let sessions: Vec<(String, Option<String>, Option<String>)> = conn
+            .prepare("SELECT id,task_id,work_source FROM agent_sessions ORDER BY id")
             .unwrap()
-            .query_map(["probe"], |row| row.get(3))
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert!(
-            plans
-                .iter()
-                .any(|line| line.contains("task_checkouts_root") && line.contains("<expr>=?")),
-            "{plans:?}"
-        );
-        assert!(
-            plans
-                .iter()
-                .any(|line| line.contains("task_primary_sessions") && line.contains("INDEX")),
-            "{plans:?}"
+        let task = |i: u32| Some(format!("task_{i:032x}"));
+        let checkout = Some("checkout".to_owned());
+        assert_eq!(
+            sessions,
+            [
+                ("bound".into(), task(1), None),
+                ("helper".into(), task(99), checkout.clone()),
+                ("nested".into(), task(1), checkout),
+                ("outside".into(), None, None),
+                ("primary".into(), task(5), None),
+            ]
         );
         assert_eq!(
             conn.query_row("PRAGMA integrity_check", [], |row| row.get::<_, String>(0))

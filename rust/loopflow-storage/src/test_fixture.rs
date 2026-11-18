@@ -521,9 +521,9 @@ pub fn retirement() -> (
         )
         .unwrap();
         conn.execute(
-            "UPDATE agent_sessions SET cwd='/repo.task/src',interactive=1,held_terminal_id=?1
+            "UPDATE agent_sessions SET cwd='/repo.task/src',task_id=?2,interactive=1,held_terminal_id=?1
              WHERE id='viewed'",
-            [&viewer],
+            rusqlite::params![viewer, task.as_str()],
         )
         .unwrap();
         conn.execute(

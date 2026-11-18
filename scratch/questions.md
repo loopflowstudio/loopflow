@@ -37,3 +37,8 @@
   work. Passed over: a backfill clause for them.
 - **`process_task_backfill` cursor table** so a Process with no Task is
   examined once per store rather than every hourly pass. Drops with LOO-877.
+- **No maintenance pass for Sessions.** Released `lf` still creates helper
+  Sessions without a Task during the window; they miss their Task's list
+  until... nothing assigns them. Chosen: accept it (helpers are PR-title and
+  commit-message runs; Task Graphs name their Task). Passed over: a second
+  cursor in `assign_process_tasks` for `agent_sessions`.

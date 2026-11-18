@@ -1,6 +1,6 @@
 -- A Process records the Task it belongs to once, when it is written: the Task
--- its launch names, else its caller's, else its parent's, else the deepest
--- checkout holding its directory. Membership then reads this column instead of
+-- its launch names, else the deepest checkout holding its directory, else its
+-- caller's, else its parent's. Membership then reads this column instead of
 -- matching paths, so a moved repository or a reused checkout path changes no
 -- Task's Processes.
 ALTER TABLE processes ADD COLUMN task_id TEXT;
@@ -20,5 +20,32 @@ CREATE TABLE process_task_backfill (
     after_rowid INTEGER NOT NULL
 );
 INSERT INTO process_task_backfill(id, after_rowid) VALUES(1, 0);
+
+-- A Session records its Task the same way, at creation: the Task it names,
+-- else the deepest checkout holding its directory. A Task's primary
+-- conversation names its Task even when it was chosen by path.
+UPDATE agent_sessions SET task_id=chosen.task_id, wave_id=chosen.wave_id
+FROM (SELECT tps.session_id, tps.task_id, p.wave_id FROM task_primary_sessions tps
+    JOIN tasks t ON t.id=tps.task_id LEFT JOIN projects p ON p.id=t.project_id) chosen
+WHERE chosen.session_id=agent_sessions.id AND agent_sessions.task_id IS NULL
+    AND (agent_sessions.wave_id IS NULL OR agent_sessions.wave_id IS chosen.wave_id);
+
+-- Every other Session that named nothing takes the deepest checkout holding
+-- its directory, as membership read it by path until now. Each ancestor of
+-- the directory is one index seek.
+UPDATE agent_sessions SET task_id=inside.task_id, wave_id=p.wave_id,
+    work_source=coalesce(agent_sessions.work_source,'checkout')
+FROM (SELECT s.id, (WITH RECURSIVE up(path) AS (
+            SELECT rtrim(s.cwd,'/')
+            UNION ALL
+            SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+         SELECT c.task_id FROM up CROSS JOIN task_checkouts c INDEXED BY task_checkouts_root
+            ON rtrim(c.worktree,'/')=up.path
+         WHERE up.path!='' OR substr(s.cwd,1,1)='/' OR s.cwd=''
+         ORDER BY length(up.path) DESC, c.task_id LIMIT 1) AS task_id
+    FROM agent_sessions s
+    WHERE s.task_id IS NULL AND s.wave_id IS NULL AND s.primary_scope IS NULL) inside
+JOIN tasks t ON t.id=inside.task_id LEFT JOIN projects p ON p.id=t.project_id
+WHERE inside.id=agent_sessions.id;
 
 -- leaving: relocated_task_processes LOO-877

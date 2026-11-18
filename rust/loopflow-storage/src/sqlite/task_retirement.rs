@@ -163,12 +163,12 @@ impl SqliteStore {
 
     pub fn pending_retirements(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // Start from the few live held terminals, then probe their checkouts by index:
+        // Start from the few live held terminals, then probe their Tasks by key:
         // joining every Task to every Session took half a second at 1,200
         // Tasks and 16,000 Sessions.
         let mut query = conn.prepare(&format!(
             "WITH hosted AS MATERIALIZED (
-                 SELECT s.cwd,s.task_id,s.primary_scope FROM held_terminals t
+                 SELECT s.task_id,s.primary_scope FROM held_terminals t
                      CROSS JOIN agent_sessions s ON s.held_terminal_id=t.id
                      WHERE t.ended_at IS NULL AND s.completed_at IS NULL AND s.interactive=1)
              SELECT task_id FROM task_retirements WHERE phase!='retired'

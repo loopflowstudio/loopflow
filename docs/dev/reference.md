@@ -269,8 +269,9 @@ Drift workflow retains the JSON result as time-based evidence. A new owner,
 projection, shim, or API either maps to an existing concept or updates this page
 in the same change.
 
-A Task Session is an LfSession associated with a Task checkout. A Task can have
-any number; repo and Wave Sessions retain their explicit scopes. This term does
-not restore the retired Task Session controller or a second conversation store.
-`session list --orphan` selects Sessions without Task association; it cannot opt
-a Session out of checkout membership.
+A Task Session is an LfSession whose `task_id` names the Task: the Task its
+launch declared, else the deepest Task checkout holding its directory when it
+was created. A Task can have any number; repo and Wave Sessions retain their
+explicit scopes. This term does not restore the retired Task Session controller
+or a second conversation store. `session list --orphan` selects Sessions without
+a Task.

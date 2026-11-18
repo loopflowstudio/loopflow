@@ -18,8 +18,8 @@ impl SqliteStore {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
         let begun: bool = conn.query_row(
-            // Checkout membership is preservation evidence even when a
-            // conversation has no explicit Task binding or ownership entry.
+            // A conversation opened in the checkout is preservation evidence
+            // even when the Task has no ownership entry.
             &format!(
                 "SELECT EXISTS(SELECT 1 FROM task_ownership WHERE task_id=?1)
                  OR EXISTS(SELECT 1 FROM task_events WHERE task_id=?1

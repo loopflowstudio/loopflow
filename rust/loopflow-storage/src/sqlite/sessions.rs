@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::session::{LfSession, PrimaryScope, TitleSource};
+use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 
@@ -1911,7 +1911,25 @@ pub(super) fn reserve_session_in(
     Ok(session)
 }
 
+/// A Session that names no Task or Wave belongs to the deepest Task checkout
+/// holding its directory, recorded now so a later move or a reused path
+/// changes nothing. A primary for a repository or Wave declares its scope.
 fn resolve_ancestry_in(conn: &Connection, session: &mut LfSession) -> StoreResult<()> {
+    if session.task_id.is_none()
+        && session.wave_id.is_none()
+        && matches!(session.work_source, None | Some(WorkSource::Checkout))
+    {
+        session.task_id = conn
+            .query_row(
+                &format!("SELECT {}", super::task_work::deepest_checkout("?1")),
+                [session.cwd.to_string_lossy()],
+                |row| row.get::<_, Option<String>>(0),
+            )?
+            .map(TaskId::from_raw);
+        if session.task_id.is_some() {
+            session.work_source = Some(WorkSource::Checkout);
+        }
+    }
     if let Some(task) = &session.task_id {
         let wave = super::durable::task_wave_in(conn, task)?;
         if session

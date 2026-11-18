@@ -315,9 +315,13 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
             INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
             VALUES('repo_00000000000040008000000000000001','task','project','T-1',1),('repo_00000000000040008000000000000001','sibling-task','project','T-2',1);
             INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task'),('sibling-task','/sibling');
-            UPDATE agent_sessions SET repo='/repo',cwd='/' ;
-            UPDATE agent_sessions SET cwd='/task' WHERE id IN ('session','peer');
-            UPDATE agent_sessions SET cwd='/sibling' WHERE id='sibling';",
+            UPDATE agent_sessions SET repo='/repo',cwd='/';",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_sessions SET task_id=CASE id WHEN 'sibling' THEN 'sibling-task' ELSE 'task' END,
+                wave_id=?1 WHERE id IN ('session','peer','sibling')",
+            [&child],
         )
         .unwrap();
         conn.execute(
@@ -366,23 +370,14 @@ fn scopes_graph_downward_and_each_session_reads_for_itself() {
         assert_eq!(store.session_steers(session, 0, 32).unwrap().pending, count);
     }
     assert_eq!(read(&store, &adapter, "native").len(), 4);
+    // Its directory changing later moves no Session to another Task.
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute_batch("UPDATE agent_sessions SET cwd='/sibling' WHERE id='peer'")
+        .unwrap();
     assert_eq!(store.session_steers("peer", 0, 32).unwrap().pending, 3);
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute_batch("UPDATE agent_sessions SET cwd='/' WHERE id='peer'")
-        .unwrap();
-    assert_eq!(store.session_steers("peer", 0, 32).unwrap().pending, 1);
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute_batch(
-            "UPDATE agent_sessions SET cwd='/' WHERE id='session';
-        UPDATE agent_sessions SET cwd='/task' WHERE id='session';",
-        )
-        .unwrap();
     assert_eq!(store.session_steers("session", 0, 32).unwrap().pending, 0);
 }
 
@@ -409,30 +404,18 @@ fn a_session_anywhere_inside_a_task_checkout_gets_its_steers() {
         "Task direction",
     )
     .unwrap();
+    // A Session that names no Task opens in the checkout holding its directory.
     let pending = |cwd: &str| {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute("UPDATE agent_sessions SET cwd=?1 WHERE id='session'", [cwd])
-            .unwrap();
-        store.session_steers("session", 0, 32).unwrap().pending
+        let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
+        session.work_source = None;
+        session.cwd = cwd.into();
+        let session = store.create_session_prepared(session, None).unwrap();
+        store.session_steers(session.id.as_str(), 0, 32).unwrap().pending
     };
-    for source in ["declared", "checkout", "inherited", "bound"] {
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET work_source=?1 WHERE id='session'",
-                [source],
-            )
-            .unwrap();
-        assert_eq!(pending("/work/task/rust/src/"), 1, "{source}");
-        assert_eq!(pending("/work/task"), 1, "{source}");
-        assert_eq!(pending("/work/task-other"), 0, "{source}");
-        assert_eq!(pending("/work"), 0, "{source}");
-    }
+    assert_eq!(pending("/work/task/rust/src/"), 1);
+    assert_eq!(pending("/work/task"), 1);
+    assert_eq!(pending("/work/task-other"), 0);
+    assert_eq!(pending("/work"), 0);
 }
 
 #[test]
@@ -459,7 +442,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
             INSERT INTO tasks(repository_id,id,issue_identifier,created_at)
             VALUES('repo_00000000000040008000000000000001','task','T-1',1);
             INSERT INTO task_checkouts(task_id,worktree) VALUES('task','/task');
-            UPDATE agent_sessions SET cwd='/task';",
+            UPDATE agent_sessions SET task_id='task';",
         )
         .unwrap();
     save("read", "Already read");
@@ -473,7 +456,7 @@ fn a_new_task_session_skips_steers_an_earlier_session_read() {
         .unwrap()
         .execute_batch(
             "UPDATE steers SET created_at=unixepoch()-10;
-            UPDATE agent_sessions SET cwd='/task',created_at=unixepoch()-5 WHERE id='next';",
+            UPDATE agent_sessions SET task_id='task',created_at=unixepoch()-5 WHERE id='next';",
         )
         .unwrap();
     let texts = |page: crate::steer::SessionSteerPage| {

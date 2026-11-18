@@ -402,7 +402,7 @@ async fn send_from(
 
 /// Before anything is committed, pushed, stopped or handed off, `target`
 /// answers that it can receive the move and, for a Task, takes it in from
-/// planning, cloning the repository first when it has none.
+/// its plan, cloning the repository first when it has none.
 async fn ready(
     store: &SharedStore,
     target: &Machine,
@@ -436,15 +436,27 @@ async fn ready(
             ]);
         }
     }
-    crate::machine::ssh::request(target, &args, None)
-        .await
-        .map(drop)
-        .map_err(|error| {
-            anyhow!(
-                "{what} did not move: {} cannot receive it; nothing was sent\n{error:#}",
-                target.name()
-            )
-        })
+    let mut checked = crate::machine::ssh::request(target, &args, None).await;
+    // A hub without the repository holds none of its plan; the check has just
+    // cloned it there, so the plan can go now and the Task is found.
+    if let (Err(_), Some((_, repository, _))) = (&checked, task) {
+        let hub = crate::ops::plan_hub::hub(&store.sqlite)?;
+        if let (Some(hub), Some(path)) = (hub, store.sqlite.repository_path(repository)?) {
+            if hub.id == target.id
+                && crate::ops::plan_hub::sync(store, &path, false)
+                    .await
+                    .is_ok()
+            {
+                checked = crate::machine::ssh::request(target, &args, None).await;
+            }
+        }
+    }
+    checked.map(drop).map_err(|error| {
+        anyhow!(
+            "{what} did not move: {} cannot receive it; nothing was sent\n{error:#}",
+            target.name()
+        )
+    })
 }
 
 /// Receive on `target`, over SSH unless it is this Machine (`None`). Either

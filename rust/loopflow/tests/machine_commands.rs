@@ -1411,6 +1411,146 @@ impl SharedPlan {
     }
 }
 
+/// Replace the fixture's `ssh` with a relay to mini's `lf server connect`
+/// that `flags/down` makes unreachable and `flags/drop-apply` makes lose the
+/// answer to one `plan.apply` after mini has written it.
+fn hub_ssh(fixture: &Machines, flags: &Path) {
+    fs::create_dir_all(flags).unwrap();
+    let remote = fixture.root.path().join("remote");
+    executable(
+        &fixture.root.path().join("bin/ssh"),
+        &format!(
+            r#"#!/usr/bin/python3
+import os, subprocess, sys, threading
+flags, remote = {flags:?}, {remote:?}
+if os.path.exists(os.path.join(flags, "down")):
+    sys.stderr.write("ssh: connect to host mini port 22: Operation timed out\n")
+    sys.exit(255)
+child = subprocess.Popen(["bash", "-c", sys.argv[-1]], cwd=remote,
+    env={{"HOME": remote, "PATH": "/usr/bin:/bin"}},
+    stdin=subprocess.PIPE, stdout=subprocess.PIPE)
+drop = os.path.join(flags, "drop-apply")
+applying = threading.Event()
+def up():
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            break
+        if os.path.exists(drop) and b'"plan.apply"' in line:
+            applying.set()
+        child.stdin.write(line)
+        child.stdin.flush()
+    child.stdin.close()
+threading.Thread(target=up, daemon=True).start()
+while True:
+    line = child.stdout.readline()
+    if not line:
+        break
+    if applying.is_set():
+        os.remove(drop)
+        child.kill()
+        os._exit(255)
+    sys.stdout.buffer.write(line)
+    sys.stdout.buffer.flush()
+sys.exit(child.wait())
+"#,
+            flags = flags.to_str().unwrap(),
+            remote = remote.to_str().unwrap(),
+        ),
+    );
+}
+
+/// LOO-938's acceptance over the real carrier: the laptop keeps its plan on
+/// mini and reaches it with `ssh mini lf server connect`.
+#[test]
+fn the_plan_on_the_hub_shows_the_change_sent_last_on_both_machines() {
+    let fixture = preview_machines();
+    let plan = SharedPlan::cloned(&fixture);
+    let flags = fixture.root.path().join("ssh-flags");
+    hub_ssh(&fixture, &flags);
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
+    let laptop = |args: &[&str]| {
+        fixture
+            .command(args)
+            .current_dir(&plan.local_path)
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    };
+    let ok = |args: &[&str]| {
+        let output = laptop(args);
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    };
+    let created: Value =
+        serde_json::from_str(&ok(&["task", "create", "hub smoke", "--json"])).unwrap();
+    let task = loopflow_execution::durable::TaskId::parse(created["task"]["id"].as_str().unwrap())
+        .unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_owned();
+    let title = |store: &loopflow_execution::store::sqlite::SqliteStore| {
+        store.task(&task).unwrap().map(|task| task.title)
+    };
+    // The save went at once.
+    assert_eq!(title(&plan.remote).as_deref(), Some("hub smoke"));
+    assert_eq!(
+        ok(&["repo", "tracker"]).trim(),
+        "Plan: hub mini. Nothing open."
+    );
+
+    // mini changes the title, then stops answering; the laptop changes it too.
+    let revision = plan.remote.task(&task).unwrap().unwrap().revision;
+    plan.remote
+        .edit_task(
+            &task,
+            revision,
+            &loopflow_execution::work::task::TaskUpdate {
+                title: Some("one".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    fs::write(flags.join("down"), "").unwrap();
+    ok(&["task", "update", &identifier, "--title", "two"]);
+    let offline = ok(&["repo", "tracker"]);
+    assert!(
+        offline.starts_with("Plan: hub mini, unreachable since "),
+        "{offline}"
+    );
+    assert!(offline.contains(" 1 open."), "{offline}");
+    assert!(offline.contains("title · queued · "), "{offline}");
+    assert!(offline.contains("Operation timed out"), "{offline}");
+
+    // mini answers again, but its answer to the send is lost after it wrote it.
+    fs::remove_file(flags.join("down")).unwrap();
+    fs::write(flags.join("drop-apply"), "").unwrap();
+    assert!(!laptop(&["task", "sync", &identifier]).status.success());
+    assert_eq!(title(&plan.remote).as_deref(), Some("two"));
+    let remote_path = plan.remote_path.to_str().unwrap();
+    let written = plan
+        .remote
+        .plan_changes_since(remote_path, None, usize::MAX)
+        .unwrap()
+        .seq;
+    // The send goes again and changes nothing more on mini.
+    assert_eq!(
+        ok(&["task", "sync", &identifier]).trim(),
+        format!("{identifier}: nothing open")
+    );
+    assert_eq!(
+        plan.remote
+            .plan_changes_since(remote_path, None, usize::MAX)
+            .unwrap()
+            .seq,
+        written
+    );
+    assert_eq!(title(&plan.local).as_deref(), Some("two"));
+    assert_eq!(title(&plan.remote).as_deref(), Some("two"));
+    assert_eq!(
+        ok(&["repo", "tracker"]).trim(),
+        "Plan: hub mini. Nothing open."
+    );
+}
+
 #[test]
 fn task_ownership_follows_claim_handoff_and_unassign_through_the_writer() {
     use loopflow_execution::durable::{OwnershipKind, TaskExecutionSource};
@@ -2912,8 +3052,8 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
         assert!(stderr.contains(expected), "{stderr}");
     };
 
-    // Mini answers, but its planning has never heard of the Task.
-    refused("not found in the Git tracker");
+    // Mini answers, but its plan has never heard of the Task.
+    refused("not found");
     unchanged();
 
     // Mini does not answer at all.
@@ -2988,10 +3128,10 @@ fn task_move_hands_the_task_back_when_its_checkpoint_cannot_be_pushed() {
         .is_none_or(|task| task.worktree.is_none()));
 }
 
-/// A repository that plans through a personal Git plan on its origin, the
-/// same person on both Machines, and a Task the laptop created in it. Mini
-/// has neither the repository nor a planning key yet.
-fn personal_plan_task(
+/// A laptop whose plan is on mini, its hub, the same person on both
+/// Machines, and a Task the laptop created. Mini has no checkout of the
+/// repository yet, so the Task waits on the laptop to be sent.
+fn hub_plan_task(
     fixture: &Machines,
 ) -> (
     loopflow_test_support::TestRepo,
@@ -3004,15 +3144,7 @@ fn personal_plan_task(
     )
     .unwrap();
     let repo = loopflow_test_support::TestRepo::new();
-    fs::create_dir_all(repo.path().join(".lf")).unwrap();
-    fs::write(
-        repo.path().join(".lf/config.yaml"),
-        "planning:\n  provider: git\n  personal: true\n",
-    )
-    .unwrap();
-    git(repo.path(), &["add", ".lf/config.yaml"]);
-    git(repo.path(), &["commit", "-qm", "plan personally"]);
-    git(repo.path(), &["push", "-q", "origin", "main"]);
+    assert_success(&fixture.run(&["machine", "hub", "mini"]));
     let created = fixture
         .command(&["task", "create", "--title", "Cold move", "--json"])
         .current_dir(repo.path())
@@ -3027,8 +3159,8 @@ fn personal_plan_task(
     (repo, task, identifier)
 }
 
-/// The check clones the repository, takes the laptop's planning key and the
-/// Task, and the move lands. Only planning and origin are shared.
+/// The check clones the repository, the laptop sends the Task's plan to mini,
+/// its hub, and the move lands. Only planning and origin are shared.
 #[test]
 fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     let fixture = preview_machines();
@@ -3038,7 +3170,7 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
     let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
-    let (repo, task, identifier) = personal_plan_task(&fixture);
+    let (repo, task, identifier) = hub_plan_task(&fixture);
 
     let moved = fixture
         .command(&["task", "move", &identifier, "--machine", "mini"])
@@ -3096,7 +3228,7 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let _laptop = loopflow_test_support::MachineServer::start(lf, &local_home);
     let _mini = loopflow_test_support::MachineServer::start(lf, &remote_home);
     let _ended = EndRecorded(vec![local_home.clone(), remote_home.clone()]);
-    let (repo, task, identifier) = personal_plan_task(&fixture);
+    let (repo, task, identifier) = hub_plan_task(&fixture);
     fs::create_dir_all(repo.path().join(".lf/graphs")).unwrap();
     fs::write(
         repo.path().join(".lf/graphs/hold.yaml"),

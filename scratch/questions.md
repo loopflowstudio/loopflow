@@ -113,3 +113,12 @@
   a board shows older Projects' Tasks, and refusing a drop into one would read
   as "ensure the Wave before starting new work". Passed over: keeping the check
   for `lf task move` alone, which gives one action two rules.
+
+## Review against main after #1974 (2026-11-18)
+
+On "This PR's Process half": "1) what is the best longterm solution? dont care
+about this PR growing". Recommended and taken: drop it for Sessions and Graph
+runs each naming their Task at start, by one shared rule (plan, "Next").
+"2) i dont understand it", "3) dont understand": both follow from 1 (lf
+commands in a checkout are not listed as Task work; LOO-965 owns
+`relocated_task_processes`). "4) (b)": a fresh run from `implement`.

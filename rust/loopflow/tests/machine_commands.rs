@@ -2904,7 +2904,7 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     };
 
     // Mini answers, but its planning has never heard of the Task.
-    refused("not found in selected Git planning");
+    refused("not found in the Git tracker");
     unchanged();
 
     // Mini does not answer at all.

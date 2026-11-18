@@ -1586,9 +1586,7 @@ async fn missing_git_task_never_falls_through_to_linear() {
                 .err()
                 .unwrap();
             assert!(
-                error
-                    .to_string()
-                    .contains("not found in selected Git planning"),
+                error.to_string().contains("not found in the Git tracker"),
                 "{error}"
             );
             assert!(fixture.store.list_tasks(None).await.unwrap().is_empty());

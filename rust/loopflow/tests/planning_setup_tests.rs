@@ -207,10 +207,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
     let output = invoke_lf(repo.path(), home.path(), &["checkout", "MISSING-1"]);
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        error.contains("not found in selected Git planning"),
-        "{error}"
-    );
+    assert!(error.contains("not found in the Git tracker"), "{error}");
     let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     assert_eq!(
         conn.query_row("SELECT count(*) FROM tasks", [], |row| row.get::<_, i64>(0))

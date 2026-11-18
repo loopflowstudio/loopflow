@@ -973,10 +973,10 @@ pub(crate) async fn fetch_from_tracker(
             super::linear::fetch_task(repo, issue, refresh).await
         }
         crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in selected Git planning"
+            "Task {issue:?} not found in the Git tracker"
         ))),
         crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in Loopflow planning; Asana Tasks are not fetched yet"
+            "Task {issue:?} not saved on this Machine; Asana Tasks are not fetched yet"
         ))),
     }
 }

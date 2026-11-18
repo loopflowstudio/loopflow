@@ -61,6 +61,22 @@ cargo clippy -p loopflow -p loopflow-execution --all-targets -D warnings  clean<
 <pre>scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests'   1 failure → fixed
 scripts/test_desktop.sh --filter 'ServerProtocolTests|DesktopHeadlessTests'                     39 passed</pre>
 
+<h2>Third pass: explanation sync time and one fetch dispatch (slice 6 + compress, 8740958038)</h2>
+<p>Fresh private Machine (<code>/tmp/lfq955</code>) and an upgrade home (<code>/tmp/lfq955b</code>) shared by the installed <code>lf 0.16.0</code> and the branch build.</p>
+<table><tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>Explain a new Task</td><td><code>lf task run f9a26d --explain</code> and <code>--json</code></td><td class="ok">Prints <code>Tracker synced: unknown</code>; JSON has <code>"tracker_synced_at": null</code>.</td></tr>
+<tr><td>Unknown Task, Git tracker</td><td><code>lf task run ZZZ-9</code>, <code>lf checkout ZZZ-9</code></td><td class="fix">Said “not found in selected Git planning”. Now “Task "ZZZ-9" not found in the Git tracker”.</td></tr>
+<tr><td>Unknown Task, Asana</td><td><code>tracker: {asana: {team: '1209'}}</code> in local config, <code>task run ZZZ-9</code></td><td class="fix">Said “not found in Loopflow planning; Asana Tasks are not fetched yet”. Now “not saved on this Machine; Asana Tasks are not fetched yet”.</td></tr>
+<tr><td>Unknown Task, Linear</td><td>Linear team in shared config: first without origin, then with a bare origin</td><td class="ok">No origin: names the missing origin. With origin, no token: “No Linear credential found. Run `doppler run -- lf account connect linear`.” A team set only in <code>lf.config.local.yaml</code> is ignored (“.lf/config.yaml has no `repo.tracker.linear.team`”): the team is repository identity, same on main.</td></tr>
+<tr><td>Wave Project edit offline</td><td><code>lf wave create qa</code>, <code>lf wave edit-project qa --name …</code></td><td class="ok">Queued: “create · queued · No Linear credential found…”.</td></tr>
+<tr><td>Returning user</td><td>Installed lf created a Task (JSON keys <code>linear_id</code>, <code>pm_*</code>); branch listed it and created another; installed lf listed both</td><td class="ok">Both Tasks visible to both binaries.</td></tr>
+</table>
+<h2>Checks (third pass)</h2>
+<pre>cargo test -p loopflow-execution --lib missing_git_task_never_falls_through_to_linear     1 passed
+cargo test -p loopflow --test integration git_checkout_miss_does_not_fall_back             1 passed
+cargo test -p loopflow --test integration task_move_hands_nothing_off_when_mini_cannot_receive_it   1 passed</pre>
+<p>Not reached: a real Linear fetch (no Linear login in the isolated home; Machine's real team not touched). The 21 planning lookup tests from compress cover the fetch against a stand-in.</p>
+
 <h2>Not reached</h2>
 <ul><li>Desktop live window: headless view tests only; <code>GitDestinationsView</code> showing <code>fetchError</code> was read in source, not seen on screen.</li>
 <li>Live Linear/Asana exchange: no stand-in in a shipped binary, and the Machine's real store wasn't touched.</li></ul>

@@ -42,3 +42,9 @@ the destination's `fetch_error` and `publication_error` both fill in. Restore
 the URL afterwards.
 
 `lf server status` already prints compact JSON; it has no `--json` flag.
+
+A Task the Machine hasn't saved goes through `ops/task.rs::fetch_from_tracker`:
+Git refuses ("not found in the Git tracker"), Asana isn't fetched yet, and
+Linear needs the team in the shared `.lf/config.yaml` (local config is
+ignored there), an `origin`, then a Linear login. `lf task run <id> --explain`
+reaches none of that; it says "is not registered".

@@ -28,3 +28,9 @@ Jack Heart, 2026-11-18:
 - "ok. Write a new design doc and then a guiding HTML for it, and let me know
   what major tradeoffs it makes" → `scratch/plan-design.md`,
   `scratch/plan-design.html`. Not yet chosen.
+- Backlog order on Linear being workspace-wide: "i think backlog reorders
+  still make sense probably, and i think we can accept both linear and
+  asana's view of it"
+- Teams and Initiatives: "i think we also should just need a default
+  initaitive or team for creating NEW waves, but we shouldnt need to care
+  about the team/initative in any other way"

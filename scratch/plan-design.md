@@ -141,12 +141,23 @@ carry sources there and are not all re-checked):
 - Linear's manual order (`Issue.sortOrder`) belongs to the issue, not the
   Project. Writing it moves the issue in every manually sorted view in the
   workspace. Asana's order is per Project (`addProject` with
-  `insert_before` / `insert_after`). Whether Linear backlog reorders are still
-  wanted at that reach is open.
+  `insert_before` / `insert_after`). Jack Heart: "i think backlog reorders
+  still make sense probably, and i think we can accept both linear and
+  asana's view of it". So a backlog reorder is written to each tracker in the
+  tracker's own terms: workspace-wide in Linear, per Project in Asana.
 - `linear/actions.rs` writes `prioritySortOrder` with `sortOrder` today, which
   moves Priority-sorted views; Asana order is retired as unsupported.
 - A Wave links to a Project on both: a Linear Initiative and an Asana
   Portfolio hold Projects, never Tasks, and Portfolios need a paid tier.
+- **Teams and Initiatives matter only when a new Wave is made.** Jack Heart:
+  "i think we also should just need a default initaitive or team for creating
+  NEW waves, but we shouldnt need to care about the team/initative in any
+  other way". A repository names one default container for new Waves' Projects
+  (Linear: a Team, optionally an Initiative; Asana: a Team, which in an
+  organization every Project must be created in). Linking a Wave to an
+  existing Project asks about neither. The research missed Asana Teams: they
+  hold Projects, never tasks, and are not behind the paid tier (from general
+  knowledge, not re-checked).
 - Four things on `main` disturb a shared workspace and block "your slice":
   the repository marker written into a Linear Team's description; refusing
   Projects with several Teams or not exactly one Initiative; ingesting every
@@ -231,7 +242,6 @@ not see new changes, so the first exchange says which Machines still run it.
 - Whether a teammate needs anything beyond network reach to use someone's hub.
 - A non-user reassigns or closes an issue while its Graph runs: stop and keep
   the work, or keep running and say so on the issue.
-- Linear backlog order moves every manual view in the workspace: still write it?
 
 ## Slices
 

@@ -872,8 +872,8 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     }
     // `lf planning` is the plans namespace; its old repository spellings move.
     for (old, path) in [
-        (vec!["planning", "key"], vec!["repo", "plan", "key"]),
-        (vec!["planning"], vec!["repo", "plan"]),
+        (vec!["planning", "key"], vec!["repo", "tracker", "key"]),
+        (vec!["planning"], vec!["repo", "tracker"]),
         (vec!["monitor", "ps"], vec!["process", "list"]),
         (vec!["ship", "--stop"], vec!["task", "hold"]),
         (vec!["desktop", "task"], vec!["task", "show"]),

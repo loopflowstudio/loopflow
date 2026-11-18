@@ -284,11 +284,11 @@ pub enum Read {
         task: Option<String>,
         all: bool,
     },
-    /// `lf --cwd <directory> repo plan`: where the repository's
+    /// `lf --cwd <directory> repo tracker`: where the repository's
     /// planning is exchanged. Its subscription exchanges it while it runs.
-    #[serde(rename = "repo.plan")]
-    #[schemars(extend("x-result" = generator.subschema_for::<super::plan::PlanStatus>()))]
-    RepoPlan { directory: PathBuf },
+    #[serde(rename = "repo.tracker")]
+    #[schemars(extend("x-result" = generator.subschema_for::<super::tracker::TrackerStatus>()))]
+    RepoTracker { directory: PathBuf },
     /// `lf --cwd <directory> open <url> --link`: what a Work address opens.
     #[serde(rename = "work.resolve")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<crate::lf::commands::open::WorkLink>>()))]
@@ -540,7 +540,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::RepoPlan { directory } => at(directory, &["repo", "plan", "--json"]),
+            Self::RepoTracker { directory } => at(directory, &["repo", "tracker", "--json"]),
             Self::WorkResolve { directory, url } => {
                 at(directory, &["open", url, "--link", "--json"])
             }
@@ -810,7 +810,7 @@ impl Read {
                 *all,
                 false,
             )?),
-            Self::RepoPlan { directory } => value(&super::plan::read_status(directory)?),
+            Self::RepoTracker { directory } => value(&super::tracker::read_status(directory)?),
             Self::WorkResolve { directory, url } => value(&super::open::url_links(directory, url)?),
             // The command prints the path alone.
             Self::RepoPath { id } => {
@@ -928,8 +928,8 @@ impl Read {
                 task,
                 all,
             } => super::waves::subscribe_show(directory, wave, task, all, transport),
-            Self::RepoPlan { directory } => super::plan::subscribe_status(
-                &super::plan::status_repository(&directory)?,
+            Self::RepoTracker { directory } => super::tracker::subscribe_status(
+                &super::tracker::status_repository(&directory)?,
                 transport,
             ),
             Self::TaskWait { issue, until } => {

@@ -16,7 +16,7 @@ use loopflow_execution::context_block::ContextMoment;
 use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
-use loopflow_execution::ops::project::update_plan;
+use loopflow_execution::ops::project::update_project;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
@@ -864,13 +864,13 @@ fn print_task_control(
 fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyhow::Result<()> {
     use loopflow::lf::RepoCommand;
     match cmd {
-        RepoCommand::Plan {
+        RepoCommand::Tracker {
             cmd,
             json,
             subscribe,
             ..
         } => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *subscribe)
+            loopflow::lf::commands::tracker::run(cmd.as_ref(), *json, *subscribe)
         }),
         RepoCommand::Path => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, true, false)
@@ -893,7 +893,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     use loopflow_execution::ops::project;
 
     match command {
-        WaveCommand::EditPlan {
+        WaveCommand::EditProject {
             target,
             name,
             summary,
@@ -901,7 +901,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
                 repo,
-                target.as_plan_target(),
+                target.as_project_target(),
                 name.as_deref(),
                 summary.as_deref(),
                 description.as_deref(),
@@ -1032,15 +1032,15 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WaveCommand::UpdatePlan { wave, plan } => {
+        WaveCommand::UpdateProject { wave, file } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
                 krs: Vec<loopflow_execution::work::project::ProjectKR>,
                 metric_targets: Vec<loopflow_execution::work::wave::metrics::MetricTarget>,
             }
-            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
-            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            let input: Input = serde_json::from_slice(&std::fs::read(file)?)?;
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_project(
                 repo,
                 wave.as_deref(),
                 &input.krs,
@@ -1935,7 +1935,7 @@ fn run() -> anyhow::Result<()> {
                         cmd: Some(
                             loopflow::lf::RepoCommand::Release { .. }
                                 | loopflow::lf::RepoCommand::Ci { .. }
-                                | loopflow::lf::RepoCommand::Plan { .. }
+                                | loopflow::lf::RepoCommand::Tracker { .. }
                         ),
                         ..
                     }

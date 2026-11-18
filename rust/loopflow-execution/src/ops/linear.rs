@@ -161,7 +161,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
         .unwrap_or_default()
         .planning_transport();
     Ok(match transport {
-        crate::config::PlanningConfig::Linear { team } => {
+        crate::config::TrackerConfig::Linear { team } => {
             team.filter(|team| !team.trim().is_empty())
         }
         _ => None,
@@ -171,7 +171,7 @@ pub fn selected_linear_team(repo: &Path) -> OpsResult<Option<String>> {
 pub(crate) fn repository_team_id(repo: &Path) -> OpsResult<String> {
     selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repo.plan.team`. \
+            ".lf/config.yaml has no `repo.tracker.linear.team`. \
              Run `lf wave plan connect <wave> --team-key <KEY>` before creating or mutating work."
                 .to_string(),
         )
@@ -954,7 +954,7 @@ fn reteam_comment_body(old_identifier: &str, team_key: &str) -> String {
 async fn resolve_reteam_context(repo: &Path) -> OpsResult<ResolvedReteamContext> {
     let team_id = selected_linear_team(repo)?.ok_or_else(|| {
         OpsError::Message(
-            ".lf/config.yaml has no `repo.plan.team`. \
+            ".lf/config.yaml has no `repo.tracker.linear.team`. \
              Run `lf wave plan connect <wave> --team-key <KEY>` to establish the migration target."
                 .to_string(),
         )
@@ -1417,7 +1417,7 @@ async fn refresh_async(
     }
 
     if team_id.is_none() {
-        let message = ".lf/config.yaml has no `repo.plan.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
+        let message = ".lf/config.yaml has no `repo.tracker.linear.team`; run `lf wave plan connect <wave> --team-key <KEY>`".to_string();
         diagnostics.push(message);
     }
 
@@ -1661,11 +1661,10 @@ fn write_initiative_to_wave(repo: &Path, wave: &str, initiative_id: &str) -> Ops
     .map_err(OpsError::Message)
 }
 
-/// Declare `repo.plan` as Linear with `team_id`, at its canonical
-/// spelling; other keys keep their text and comments.
+/// Declare the Linear tracker in the released layout, retaining unrelated settings and comments.
 fn write_repository_linear_config(repo: &Path, team_id: &str) -> OpsResult<bool> {
     let path = repo.join(".lf/config.yaml");
-    let planning = serde_yaml_ng::to_value(crate::config::PlanningConfig::Linear {
+    let planning = serde_yaml_ng::to_value(crate::config::TrackerConfig::Linear {
         team: Some(team_id.to_string()),
     })
     .map_err(|error| OpsError::Message(error.to_string()))?;
@@ -2118,7 +2117,7 @@ mod tests {
                         let config = crate::config::load_config(Some(&repo)).unwrap().unwrap();
                         assert_eq!(
                             config.planning_transport(),
-                            crate::config::PlanningConfig::Git {
+                            crate::config::TrackerConfig::Git {
                                 remote: "personal".into(),
                                 plan: crate::config::GitPlan::Shared("private".into()),
                             }
@@ -2264,7 +2263,7 @@ mod tests {
                 .unwrap();
             assert_eq!(
                 config.planning_transport(),
-                crate::config::PlanningConfig::Linear {
+                crate::config::TrackerConfig::Linear {
                     team: Some("team-product".into())
                 }
             );

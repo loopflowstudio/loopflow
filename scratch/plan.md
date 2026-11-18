@@ -196,11 +196,11 @@ rebuild each and are noted in `scratch/questions.md`.
    reads the new (and back), `check_migrations.py` green, `EXPLAIN QUERY PLAN`
    on the renamed hot reads (`query_plans.rs`). Shows whether mirror triggers
    coexist with the canonical-identity and revision triggers.
-2. **CLI + config (next).** `lf repo tracker`, `lf wave edit-project` /
-   `update-project`, `TrackerConfig`, `tracker:` / `repo.tracker` fold and
-   dotted-key rule with tests for each spelling, Desktop caller, docs,
-   glossary; steer LOO-784.
-3. **Wire + Chapter.** `tracker_id`, `tracker_state`, `ProjectUnavailable`,
+2. **CLI + config (implemented).** CLI and Desktop use `repo tracker` and its
+   served routes. Wave Project edits use `edit-project` and `update-project --file`.
+   Config reads both tracker spellings, writes the released layout and
+   replaces the selected tracker on a dotted edit. LOO-784 carries the writer cutover.
+3. **Wire + Chapter (next).** `tracker_id`, `tracker_state`, `ProjectUnavailable`,
    `projects` with Swift and fixtures; remaining chapter prose in
    `waves.rs`, `lf/mod.rs` help, `wave_lifecycle.rs`, builtins, Swift views.
 4. **Events + provider prose.** Type/module renames for inbound, `provider`
@@ -221,6 +221,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - Installed lf created a Task, candidate edited its title, installed lf read and edited it again, and candidate read that edit. Both journals held 18 mutations.
 - In-memory SQLite with 10,000 existing items: expand took 21.8 ms. 1,000 identifier lookups took 1.0 ms through `tracker_items_identifier`. Disk and lock wait are outside these timings.
 - Historical upgrades seed at their original migration, through temporary views for the two journal tables. Upgrading an existing journal copies its rows once. Mirror comparisons use binary collation for case-only identifier edits.
+- Slice 2: six config-key tests and four documented-command checks passed. A temporary Git repository exercised tracker status, journal, key creation and lookup, and the switch from Linear to Git. Installed lf read the Linear team written by the candidate. Offline Project edits passed in both connection modes, the server schema matched the candidate CLI, and clippy passed for all targets.
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
 
@@ -231,7 +232,6 @@ Changed in place: `docs/work.md`, `docs/config.md`, `docs/surfaces.md`,
 `docs/dev/reference-models.md`, `docs/dev/reference-runtime.md`,
 `docs/dev/reference-cutover.md`, `AGENTS.md`, `swift/README.md`,
 `rust/loopflow/src/server/README.md`, `rust/loopflow-execution/src/ops/README.md`,
-builtin `wave/skill/split-wave.md`. `documented_commands` fails until slice 2
-adds `lf repo tracker` and `lf wave edit-project` / `update-project --file`.
+builtin `wave/skill/split-wave.md`.
 Dev-doc prose still saying provider/observation/delivery for the tracker
 (`docs/dev/planning.md` beyond § Words) is slice 4.

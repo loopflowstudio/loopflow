@@ -226,7 +226,7 @@ impl TrackerAction {
         self.value["value"]["body"].as_str()
     }
 
-    /// The action as a person reads it in `lf repo plan` and on its Task.
+    /// The action as a person reads it in `lf repo tracker` and on its Task.
     pub fn status(&self) -> TrackerActionStatus {
         // A field or state action holds a `WorkValue` (`{field, value}`); a
         // conflict holds `{revision, value}` around one.

@@ -126,9 +126,9 @@ struct RegistryQueryTests {
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
         #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#))
-        let keep = ServedWrite.planAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
-        #expect(try object(keep) == object(#"{"kind":"plan.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
-        #expect(keep.argv == ["repo", "plan", "answer", "a1", "--keep-theirs", "--json"])
+        let keep = ServedWrite.trackerAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
+        #expect(try object(keep) == object(#"{"kind":"repo.tracker.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
+        #expect(keep.argv == ["repo", "tracker", "answer", "a1", "--keep-theirs", "--json"])
         #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(

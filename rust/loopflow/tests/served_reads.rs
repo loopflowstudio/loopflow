@@ -950,7 +950,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::MachineList
         | Read::SessionHistory(_)
         | Read::PlanList { .. }
-        | Read::RepoPlan { .. }
+        | Read::RepoTracker { .. }
         | Read::WorkResolve { .. }
         | Read::RepoPath { .. }
         | Read::WaveGraph { .. }
@@ -1079,7 +1079,7 @@ fn server_operations_match_their_lf_commands() {
                     task: Some("INF-123".into()),
                     all: false,
                 },
-                Read::RepoPlan {
+                Read::RepoTracker {
                     directory: repo.path().to_owned(),
                 },
                 Read::WorkResolve {
@@ -1146,7 +1146,7 @@ fn server_operations_match_their_lf_commands() {
                 plans(),
                 sessions(false),
                 sessions(true),
-                Read::RepoPlan {
+                Read::RepoTracker {
                     directory: work_folder,
                 },
                 task_pane(),
@@ -1305,7 +1305,7 @@ fn server_operations_match_their_lf_commands() {
         // Syncing and answering exchange with the tracker; their spellings
         // are below and planning_sync_tests answers a lost line through them.
         | Write::TaskSync { .. }
-        | Write::PlanAnswer { .. }
+        | Write::TrackerAnswer { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
@@ -2110,7 +2110,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             }
             (path(directory), args)
         }
-        Write::PlanAnswer {
+        Write::TrackerAnswer {
             directory,
             action,
             answer,
@@ -2121,7 +2121,7 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             };
             (
                 path(directory),
-                words(&["repo", "plan", "answer", action, flag, "--json"]),
+                words(&["repo", "tracker", "answer", action, flag, "--json"]),
             )
         }
         Write::TaskRun {

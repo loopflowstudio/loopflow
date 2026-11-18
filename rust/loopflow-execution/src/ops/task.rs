@@ -963,10 +963,10 @@ pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult
         .unwrap_or_default()
         .planning_transport()
     {
-        crate::config::PlanningConfig::Linear { .. } => {
+        crate::config::TrackerConfig::Linear { .. } => {
             super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
         }
-        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
+        crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
             "Task {issue:?} not found in selected Git planning"
         ))),
         remote => Err(task_error(format!(
@@ -2555,7 +2555,7 @@ pub fn start_conversation_beside(task: &Task) {
 /// look for every sent action and resend what the tracker lacks; Git
 /// exchanges the repository's planning ref, so a peer's Task this Machine
 /// has not fetched yet is found in `repo`'s planning. An `answer` first
-/// settles every value the Task lost; `lf repo plan answer` settles one.
+/// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2767,7 +2767,7 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
                 None
             }
             Some(action) => Some(action.error.unwrap_or_else(|| {
-                "PR link is waiting to be sent; `lf repo plan` lists it".into()
+                "PR link is waiting to be sent; `lf repo tracker` lists it".into()
             })),
             None => None,
         })
@@ -3289,11 +3289,11 @@ pub async fn resolve_saved_task(
                 .unwrap_or_default()
                 .planning_transport()
             {
-                crate::config::PlanningConfig::Linear { .. } => {
+                crate::config::TrackerConfig::Linear { .. } => {
                     super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
                         .await?
                 }
-                crate::config::PlanningConfig::Git { .. } => {
+                crate::config::TrackerConfig::Git { .. } => {
                     return Err(task_error(format!(
                         "Task {issue:?} not found in selected Git planning"
                     )))

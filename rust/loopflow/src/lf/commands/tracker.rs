@@ -4,17 +4,17 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 
-use crate::lf::RepoPlanCommand as PlanCommand;
+use crate::lf::RepoTrackerCommand;
 use loopflow_execution::store::planning_sync::{
     ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
 };
 use loopflow_execution::store::sqlite::tracker_actions::ActionPhase;
 use loopflow_execution::store::Store;
 
-/// `lf repo plan [key|journal]`; bare, the planning status.
-pub fn run(cmd: Option<&PlanCommand>, json: bool, subscribe: bool) -> Result<()> {
+/// `lf repo tracker [key|journal]`; bare, the planning status.
+pub fn run(cmd: Option<&RepoTrackerCommand>, json: bool, subscribe: bool) -> Result<()> {
     let directory = std::env::current_dir()?;
-    if let Some(PlanCommand::Answer {
+    if let Some(RepoTrackerCommand::Answer {
         id,
         keep_theirs,
         json,
@@ -52,7 +52,7 @@ pub fn plans_through_git(checkout: &Path) -> Result<bool> {
     let config = loopflow_execution::config::load_config(Some(&repo))?.unwrap_or_default();
     Ok(matches!(
         config.planning_transport(),
-        loopflow_execution::config::PlanningConfig::Git { .. }
+        loopflow_execution::config::TrackerConfig::Git { .. }
     ))
 }
 
@@ -74,7 +74,7 @@ pub fn refresh(checkout: &Path) -> Result<()> {
             loopflow_execution::ops::planning_sync::peer_status(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
             return Err(anyhow!(
-                "no Git planning destination is configured; see `lf config planning status`"
+                "no Git planning destination is configured; see `lf repo tracker`"
             ));
         };
         if let Some(error) = active.acquisition_error {
@@ -96,18 +96,18 @@ async fn open_store() -> Result<Store> {
         })
 }
 
-async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) -> Result<()> {
+async fn run_async(repo: &Path, cmd: Option<&RepoTrackerCommand>, status_json: bool) -> Result<()> {
     let store = open_store().await?;
     let repo_key = repo.to_string_lossy();
     match cmd {
-        Some(PlanCommand::Key { new, recover }) => {
+        Some(RepoTrackerCommand::Key { new, recover }) => {
             let saved = store.planning_user_key().await?;
             let key = match (recover, saved, new) {
                 (Some(key), _, _) => key.clone(),
                 (None, Some(key), _) => key,
                 (None, None, true) => uuid::Uuid::new_v4().to_string(),
                 _ => return Err(anyhow!(
-                    "No planning user key. Use `lf repo plan key --new` once, then recover that key on other machines with `--recover <UUID>`."
+                    "No planning user key. Use `lf repo tracker key --new` once, then recover that key on other machines with `--recover <UUID>`."
                 )),
             };
             if *new || recover.is_some() {
@@ -116,13 +116,17 @@ async fn run_async(repo: &Path, cmd: Option<&PlanCommand>, status_json: bool) ->
             println!("{key}");
         }
         None => print_status(&store, &repo_key, status_json).await?,
-        Some(PlanCommand::Journal { json }) => print_journal(&store, &repo_key, *json).await?,
-        Some(PlanCommand::Answer { .. }) => unreachable!("answering runs before the status read"),
+        Some(RepoTrackerCommand::Journal { json }) => {
+            print_journal(&store, &repo_key, *json).await?
+        }
+        Some(RepoTrackerCommand::Answer { .. }) => {
+            unreachable!("answering runs before the status read")
+        }
     }
     Ok(())
 }
 
-/// `lf repo plan answer <id> --keep-theirs | --use-mine`.
+/// `lf repo tracker answer <id> --keep-theirs | --use-mine`.
 fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<()> {
     let answer = if keep_theirs {
         LostAnswer::KeepTheirs
@@ -140,7 +144,7 @@ fn answer(directory: &Path, id: &str, keep_theirs: bool, json: bool) -> Result<(
     Ok(())
 }
 
-/// `lf repo plan --subscribe`: `lf repo plan --json` now and each time
+/// `lf repo tracker --subscribe`: `lf repo tracker --json` now and each time
 /// it changes. The subscription reads stored status; `lf wave status --sync` and
 /// foreground providers exchange planning.
 pub(crate) fn subscribe_status(
@@ -158,11 +162,11 @@ pub(crate) fn subscribe_status(
     )
 }
 
-/// What `repo.plan` answers: the tracker, for Git its destinations with
+/// What `repo.tracker` answers: the tracker, for Git its destinations with
 /// their import and publication evidence, and every open and lost tracker
 /// action.
 #[derive(Debug, serde::Serialize, schemars::JsonSchema)]
-pub(crate) struct PlanStatus {
+pub(crate) struct TrackerStatus {
     /// `git`, `linear` or `asana`.
     tracker: String,
     destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
@@ -184,15 +188,15 @@ enum Status {
 }
 
 impl Status {
-    /// What `lf repo plan --json` prints.
-    fn report(self) -> PlanStatus {
+    /// What `lf repo tracker --json` prints.
+    fn report(self) -> TrackerStatus {
         match self {
-            Self::Remote(tracker, actions) => PlanStatus {
+            Self::Remote(tracker, actions) => TrackerStatus {
                 tracker: tracker.as_str().to_owned(),
                 destinations: Vec::new(),
                 actions,
             },
-            Self::Git(destinations, actions) => PlanStatus {
+            Self::Git(destinations, actions) => TrackerStatus {
                 tracker: TrackerKind::Git.as_str().to_owned(),
                 destinations,
                 actions,
@@ -228,8 +232,8 @@ fn remote_transport(repo: &str) -> Result<Option<TrackerKind>> {
         .transpose()?)
 }
 
-/// What `lf --cwd <directory> config planning status --json` prints.
-pub(crate) fn read_status(directory: &Path) -> Result<PlanStatus> {
+/// What `lf --cwd <directory> repo tracker --json` prints.
+pub(crate) fn read_status(directory: &Path) -> Result<TrackerStatus> {
     let repo = status_repository(directory)?;
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_store().await?;
@@ -343,7 +347,9 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
             println!("  Held {}: {}", conflict.target, conflict.reason);
         }
     }
-    println!("Import retention is not publication; `lf planning journal` lists retained values.");
+    println!(
+        "Import retention is not publication; `lf repo tracker journal` lists retained values."
+    );
     if !lost.is_empty() {
         println!("Tracker: git. {} lost.", lost.len());
         print_actions(store, &lost)?;
@@ -369,12 +375,12 @@ fn print_actions(store: &Store, actions: &[TrackerActionStatus]) -> Result<()> {
         .iter()
         .any(|action| action.phase == ActionPhase::Conflicted)
     {
-        println!("Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.");
+        println!("Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.");
     }
     Ok(())
 }
 
-/// The prefix `lf repo plan answer` accepts for a line.
+/// The prefix `lf repo tracker answer` accepts for a line.
 fn short_id(id: &str) -> &str {
     id.get(..8).unwrap_or(id)
 }

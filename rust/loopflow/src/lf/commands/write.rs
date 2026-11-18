@@ -204,11 +204,11 @@ writes! {
         *answer,
     )?,
 
-    /// `lf repo plan answer <action> --keep-theirs | --use-mine`: answer one
+    /// `lf repo tracker answer <action> --keep-theirs | --use-mine`: answer one
     /// lost line of the directory's repository, whoever owns it. Answers the
     /// line as it stood.
-    #[serde(rename = "plan.answer")]
-    PlanAnswer {
+    #[serde(rename = "repo.tracker.answer")]
+    TrackerAnswer {
         directory: PathBuf,
         action: String,
         answer: loopflow_execution::store::planning_sync::LostAnswer,
@@ -1170,7 +1170,7 @@ impl Write {
             | Self::TaskShip { directory, .. }
             | Self::TaskHold { directory, .. }
             | Self::TaskSync { directory, .. }
-            | Self::PlanAnswer { directory, .. }
+            | Self::TrackerAnswer { directory, .. }
             | Self::TaskSteer { directory, .. }
             | Self::TaskReport { directory, .. }
             | Self::TaskInterrupt { directory, .. }

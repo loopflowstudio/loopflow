@@ -438,7 +438,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             "--project",
             project,
             "--name",
@@ -761,10 +761,10 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "wave",
-            "update-plan",
+            "update-project",
             "-w",
             "inbox",
-            "--plan",
+            "--file",
             plan_file.to_str().unwrap(),
         ],
     );
@@ -1072,7 +1072,7 @@ fn project_creation_binding_and_activation_save_offline() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1313,7 +1313,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     home.path(),
                     &[
                         "wave",
-                        "edit-plan",
+                        "edit-project",
                         "--project",
                         projects[1].id.as_str(),
                         "--name",
@@ -1476,7 +1476,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1527,7 +1527,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1603,10 +1603,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         std::fs::write(&plan_file, serde_json::to_vec(&content).unwrap()).unwrap();
         let args = [
             "wave",
-            "update-plan",
+            "update-project",
             "--wave",
             "product",
-            "--plan",
+            "--file",
             plan_file.to_str().unwrap(),
         ];
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -2824,7 +2824,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             wave.slug(),
             "--name",
             "Current chapter",
@@ -2835,7 +2835,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             "--project",
             historical.id.as_str(),
             "--summary",

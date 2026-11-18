@@ -27,7 +27,7 @@ pub struct PeerPlanningStatus {
     pub conflicts: Vec<PeerProjectionConflict>,
 }
 
-/// `lf planning journal`: one destination's retained journal. It grows with
+/// `lf repo tracker journal`: one destination's retained journal. It grows with
 /// every edit, so it is a one-shot read, not part of the status.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlanningJournal {

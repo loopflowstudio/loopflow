@@ -55,7 +55,7 @@ impl SqliteStore {
         Ok(TrackerActions { repo, actions })
     }
 
-    /// What `lf repo plan` lists: on Linear and Asana every open and lost
+    /// What `lf repo tracker` lists: on Linear and Asana every open and lost
     /// action in send order; on Git each value its journal lost.
     pub fn repository_tracker_actions(
         &self,

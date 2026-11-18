@@ -169,6 +169,15 @@ impl Cli {
             let (key, text) = setting
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parts: Vec<_> = key.split('.').collect();
+            if let Some(fields) = loopflow_execution::config::keys::tracker_path(&parts) {
+                loopflow_execution::config::keys::edit_tracker(
+                    &mut value,
+                    fields,
+                    Some(serde_yaml_ng::from_str(text)?),
+                )?;
+                continue;
+            }
             let parsed = loopflow_execution::config::settings::parse_value(key, text)?;
             let typed = loopflow_execution::config::keys::typed_key(key);
             loopflow_execution::config::settings::insert(
@@ -672,12 +681,11 @@ pub enum Commands {
 /// size and checkout.
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Where this repository exchanges planning: selection, retained imports and
-    /// held records, without contacting Git
+    /// Show the repository tracker, its open and lost actions, and Git destinations
     #[command(args_conflicts_with_subcommands = true)]
-    Plan {
+    Tracker {
         #[command(subcommand)]
-        cmd: Option<RepoPlanCommand>,
+        cmd: Option<RepoTrackerCommand>,
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
@@ -1216,11 +1224,11 @@ impl WaveCommand {
             }
             Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
-            Self::EditPlan { .. }
+            Self::EditProject { .. }
             | Self::Create { .. }
             | Self::Sync { .. }
             | Self::Rename { .. }
-            | Self::UpdatePlan { .. } => true,
+            | Self::UpdateProject { .. } => true,
         }
     }
 }
@@ -1329,10 +1337,10 @@ impl DesktopCommand {
 impl RepoCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Plan { cmd, .. } => match cmd {
-                Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
-                Some(RepoPlanCommand::Answer { .. }) => true,
-                Some(RepoPlanCommand::Journal { .. }) | None => false,
+            Self::Tracker { cmd, .. } => match cmd {
+                Some(RepoTrackerCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoTrackerCommand::Answer { .. }) => true,
+                Some(RepoTrackerCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1530,22 +1538,22 @@ pub enum SkillCommand {
     External(Vec<String>),
 }
 
-/// Select a Wave's current chapter, or an exact retained historical Project.
+/// Select a Wave's current Project, or an exact retained historical Project.
 #[derive(Args, Debug)]
-pub struct WavePlanTarget {
+pub struct WaveProjectTarget {
     /// Wave name or ID (default: the ambient Wave)
     #[arg(conflicts_with = "project")]
     pub wave: Option<String>,
-    /// Exact retained Project ID, provider ID or unique name instead of current selection
+    /// Exact retained Project ID, tracker ID or unique name instead of current selection
     #[arg(long)]
     pub project: Option<String>,
 }
 
-impl WavePlanTarget {
-    pub fn as_plan_target(&self) -> loopflow_execution::ops::project::PlanTarget<'_> {
+impl WaveProjectTarget {
+    pub fn as_project_target(&self) -> loopflow_execution::ops::project::ProjectTarget<'_> {
         match self.project.as_deref() {
-            Some(project) => loopflow_execution::ops::project::PlanTarget::Project(project),
-            None => loopflow_execution::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+            Some(project) => loopflow_execution::ops::project::ProjectTarget::Project(project),
+            None => loopflow_execution::ops::project::ProjectTarget::Wave(self.wave.as_deref()),
         }
     }
 }
@@ -1952,15 +1960,15 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
     },
-    /// Edit the selected chapter's name or summary
-    EditPlan {
+    /// Edit the selected Project's name or summary
+    EditProject {
         #[command(flatten)]
-        target: WavePlanTarget,
+        target: WaveProjectTarget,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
-        /// Authored chapter prose
+        /// Authored Project prose
         #[arg(long)]
         description: Option<String>,
     },
@@ -2046,13 +2054,13 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs and targets
-    UpdatePlan {
+    /// Replace the current Project's KRs and targets
+    UpdateProject {
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// The complete plan as JSON
+        /// The Project KRs and metric targets as JSON
         #[arg(long)]
-        plan: std::path::PathBuf,
+        file: std::path::PathBuf,
     },
 }
 
@@ -2174,7 +2182,7 @@ pub enum TaskCommand {
     /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
     #[command(after_help = "A lost line is a value the tracker kept over yours. \
 --keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
-`lf repo plan answer <id>` answers one.")]
+`lf repo tracker answer <id>` answers one.")]
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
@@ -2846,7 +2854,7 @@ pub enum PlanCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RepoPlanCommand {
+pub enum RepoTrackerCommand {
     /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
@@ -2862,7 +2870,7 @@ pub enum RepoPlanCommand {
     /// Answer a lost line: keep the tracker's value, or save yours again and send it
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
     Answer {
-        /// The line's id, as `lf repo plan` prints it
+        /// The line's id, as `lf repo tracker` prints it
         id: String,
         /// Keep the tracker's value; the line closes
         #[arg(long)]

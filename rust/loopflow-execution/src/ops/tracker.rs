@@ -10,7 +10,7 @@ pub mod drain;
 use std::path::Path;
 
 use crate::asana::AsanaClient;
-use crate::config::PlanningConfig;
+use crate::config::TrackerConfig;
 use crate::linear::LinearClient;
 use crate::store::Store;
 use loopflow_storage::planning::rules::Observed;
@@ -78,7 +78,7 @@ impl From<crate::linear::LinearError> for TrackerError {
 
 /// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
-fn transport(repo: &Path) -> Option<PlanningConfig> {
+fn transport(repo: &Path) -> Option<TrackerConfig> {
     crate::config::load_planning_transport(repo).ok()
 }
 
@@ -86,8 +86,8 @@ fn transport(repo: &Path) -> Option<PlanningConfig> {
 /// exchanges its journal instead, so it answers none.
 pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
     match transport(repo)? {
-        PlanningConfig::Linear { .. } => Some(TrackerKind::Linear),
-        PlanningConfig::Asana { .. } => Some(TrackerKind::Asana),
+        TrackerConfig::Linear { .. } => Some(TrackerKind::Linear),
+        TrackerConfig::Asana { .. } => Some(TrackerKind::Asana),
         _ => None,
     }
 }
@@ -106,7 +106,7 @@ pub fn repository_scope(repo: &Path) -> OpsResult<String> {
     #[cfg(any(test, feature = "test-support"))]
     SCOPE_READS.with_borrow_mut(|reads| *reads.entry(repo.to_path_buf()).or_default() += 1);
     match transport(repo) {
-        Some(PlanningConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
+        Some(TrackerConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
         _ => super::linear::repository_team_id(repo),
     }
 }
@@ -138,7 +138,7 @@ impl Tracker {
     /// Repository-scoped access; Linear validates the repository's Team claim.
     pub(crate) async fn for_repository(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(TrackerConfig::Asana { team }) => asana(repo, &team).await,
             _ => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
         }
     }
@@ -146,7 +146,7 @@ impl Tracker {
     /// Exact-item access for a Task that already names its planning identity.
     pub(crate) async fn for_items(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(TrackerConfig::Asana { team }) => asana(repo, &team).await,
             _ => Ok(Self::Linear(
                 super::linear::issue_client().await?.for_repository(repo),
             )),

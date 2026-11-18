@@ -22,7 +22,6 @@ pub mod mutation;
 pub mod open;
 pub mod ops;
 pub mod people;
-pub mod plan;
 pub mod process;
 pub mod read;
 pub mod rental;
@@ -35,6 +34,7 @@ pub mod session_history;
 pub mod setting;
 pub mod ship;
 pub mod ssh;
+pub mod tracker;
 
 pub mod task_create;
 pub mod task_diff;

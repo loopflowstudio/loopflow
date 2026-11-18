@@ -84,7 +84,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
-        case .peerPlanning: return scope.repo.map { .repoPlan(directory: $0) }
+        case .peerPlanning: return scope.repo.map { .repoTracker(directory: $0) }
         case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:
             // Without a repository the Task resolves Machine-wide, from no checkout.

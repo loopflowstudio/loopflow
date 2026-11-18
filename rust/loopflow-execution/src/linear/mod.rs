@@ -758,7 +758,7 @@ impl LinearClient {
     fn require_team_id(&self) -> LinearResult<String> {
         self.team_id.clone().ok_or_else(|| {
             LinearError::Message(
-                "Linear write requires `repo.plan.team` in .lf/config.yaml; \
+                "Linear write requires `repo.tracker.linear.team` in .lf/config.yaml; \
                  run `lf wave plan connect <wave> --team-key <KEY>`"
                     .to_string(),
             )

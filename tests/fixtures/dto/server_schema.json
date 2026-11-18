@@ -5914,34 +5914,6 @@
       ],
       "type": "object"
     },
-    "PlanStatus": {
-      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
-      "properties": {
-        "actions": {
-          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
-          "items": {
-            "$ref": "#/$defs/TrackerActionStatus"
-          },
-          "type": "array"
-        },
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/PeerPlanningStatus"
-          },
-          "type": "array"
-        },
-        "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "tracker",
-        "destinations",
-        "actions"
-      ],
-      "type": "object"
-    },
     "PlanningState": {
       "description": "Availability of retained planning facts, independent of execution permission.",
       "enum": [
@@ -8036,13 +8008,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
+          "description": "`lf --cwd <directory> repo tracker`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repo.plan",
+              "const": "repo.tracker",
               "type": "string"
             }
           },
@@ -8052,7 +8024,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/PlanStatus"
+            "$ref": "#/$defs/TrackerStatus"
           }
         },
         {
@@ -14939,8 +14911,36 @@
       ],
       "type": "string"
     },
+    "TrackerStatus": {
+      "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
+      "properties": {
+        "actions": {
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        },
+        "destinations": {
+          "items": {
+            "$ref": "#/$defs/PeerPlanningStatus"
+          },
+          "type": "array"
+        },
+        "tracker": {
+          "description": "`git`, `linear` or `asana`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tracker",
+        "destinations",
+        "actions"
+      ],
+      "type": "object"
+    },
     "TrackerSync": {
-      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
+      "description": "A Task's or Project's slice of `lf repo tracker`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
       "properties": {
         "actions": {
           "items": {
@@ -16609,7 +16609,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf repo plan answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
+          "description": "`lf repo tracker answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
           "properties": {
             "action": {
               "type": "string"
@@ -16621,7 +16621,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "plan.answer",
+              "const": "repo.tracker.answer",
               "type": "string"
             }
           },

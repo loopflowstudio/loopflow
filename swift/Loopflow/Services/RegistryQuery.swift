@@ -80,7 +80,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineList
     case sessionHistory(since: String, limit: Int, wave: String?, project: String?, task: String?)
     case planList(directory: String, wave: String?, task: String?, all: Bool)
-    case repoPlan(directory: String)
+    case repoTracker(directory: String)
     case workResolve(directory: String, url: String)
     case repoPath(id: String)
     case waveGraph(directory: String, wave: String?)
@@ -178,8 +178,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .planList(_, let wave, let task, let all):
             return ["plan", "list"] + (wave.map { [$0] } ?? []) + (task.map { ["--task", $0] } ?? [])
                 + (all ? ["--all"] : []) + ["--json"]
-        case .repoPlan:
-            return ["repo", "plan", "--json"]
+        case .repoTracker:
+            return ["repo", "tracker", "--json"]
         case .workResolve(_, let url):
             return ["open", url, "--link", "--json"]
         case .repoPath(let id):
@@ -272,7 +272,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("session.history", ["since": since, "limit": limit, "wave": wave, "project": project, "task": task])
         case .planList(let directory, let wave, let task, let all):
             TaggedFields("plan.list", ["directory": directory, "wave": wave, "task": task, "all": all])
-        case .repoPlan(let directory): TaggedFields("repo.plan", ["directory": directory])
+        case .repoTracker(let directory): TaggedFields("repo.tracker", ["directory": directory])
         case .workResolve(let directory, let url):
             TaggedFields("work.resolve", ["directory": directory, "url": url])
         case .repoPath(let id): TaggedFields("repo.path", ["id": id])
@@ -316,7 +316,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case taskShip(directory: String, issue: String)
     case taskHold(directory: String, issue: String)
     /// Answer one lost line of the directory's repository, whoever owns it.
-    case planAnswer(directory: String, action: String, answer: LostAnswer)
+    case trackerAnswer(directory: String, action: String, answer: LostAnswer)
     case taskSteer(directory: String, issue: String, message: String)
     case taskReport(directory: String, issue: String, message: String)
     case taskInterrupt(directory: String, issue: String)
@@ -420,8 +420,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                 + [graph].compactMap { $0 } + argument("--from", from) + ["--json"]
         case .taskShip(_, let issue): return ["--task", issue, "ship", "--json"]
         case .taskHold(_, let issue): return ["task", "hold", issue, "--json"]
-        case .planAnswer(_, let action, let answer):
-            return ["repo", "plan", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
+        case .trackerAnswer(_, let action, let answer):
+            return ["repo", "tracker", "answer", action, answer == .keepTheirs ? "--keep-theirs" : "--use-mine", "--json"]
         case .taskSteer(_, let issue, let message): return ["steer", issue, message, "--json"]
         case .taskReport(_, let issue, let message): return ["task", "report", issue, message, "--json"]
         case .taskInterrupt(_, let issue): return ["task", "interrupt", issue, "--json"]
@@ -604,8 +604,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                       "approve": approve])
         case .taskShip(let directory, let issue):
             TaggedFields("task.ship", ["directory": directory, "issue": issue])
-        case .planAnswer(let directory, let action, let answer):
-            TaggedFields("plan.answer", ["directory": directory, "action": action, "answer": answer])
+        case .trackerAnswer(let directory, let action, let answer):
+            TaggedFields("repo.tracker.answer", ["directory": directory, "action": action, "answer": answer])
         case .taskHold(let directory, let issue):
             TaggedFields("task.hold", ["directory": directory, "issue": issue])
         case .taskSteer(let directory, let issue, let message):
@@ -1077,7 +1077,7 @@ public struct RegistryQuery: Sendable {
 
     public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
         struct Status: Decodable { let destinations: [PeerPlanningStatus] }
-        return try Self.decode(Status.self, from: await serve(.repoPlan(directory: cwd))).destinations
+        return try Self.decode(Status.self, from: await serve(.repoTracker(directory: cwd))).destinations
     }
 
     public func localMachineId() async throws -> String {

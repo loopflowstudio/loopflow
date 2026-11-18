@@ -118,9 +118,9 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
             .map_err(message)?
             .unwrap_or_default();
         match config.planning_transport() {
-            crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
-            crate::config::PlanningConfig::Linear { .. }
-            | crate::config::PlanningConfig::Asana { .. } => {
+            crate::config::TrackerConfig::Git { .. } => publish_repository(store, repo).await,
+            crate::config::TrackerConfig::Linear { .. }
+            | crate::config::TrackerConfig::Asana { .. } => {
                 super::tracker::drain::drain_repository(
                     store,
                     repo,
@@ -135,14 +135,14 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
         crate::journal::request::diagnostic(format_args!(
-            "Saved locally; planning synchronization pending. See `lf repo plan`."
+            "Saved locally; planning synchronization pending. See `lf repo tracker`."
         ));
     }
 }
 
-/// `lf repo plan answer <id>`: answer one lost line of `repo`, whoever owns
+/// `lf repo tracker answer <id>`: answer one lost line of `repo`, whoever owns
 /// it, then make one exchange attempt for that owner. `id` is the line's
-/// action id or the short prefix `lf repo plan` prints.
+/// action id or the short prefix `lf repo tracker` prints.
 pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
     tokio::runtime::Runtime::new()
         .map_err(message)?
@@ -162,7 +162,7 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
                 [line] => line.clone(),
                 [] => {
                     return Err(message(format!(
-                        "{id} is not a lost line in {repo}; `lf repo plan` lists them"
+                        "{id} is not a lost line in {repo}; `lf repo tracker` lists them"
                     )))
                 }
                 _ => return Err(message(format!("{id} names more than one lost line"))),
@@ -190,11 +190,11 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
 /// Resolve the repository configuration before touching a planning remote.
 /// A Linear outage cannot select Git: routing is configuration, not availability.
 pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
     let key = match plan {
@@ -218,13 +218,13 @@ pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Opti
 /// planning key, so a personal Git plan reads the same journal on both. A
 /// Machine that already plans under another key refuses: keys never change.
 pub async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(repo))
         .map_err(message)?
         .unwrap_or_default();
     if !matches!(
         config.planning_transport(),
-        PlanningConfig::Git {
+        TrackerConfig::Git {
             plan: GitPlan::Personal,
             ..
         }
@@ -272,7 +272,7 @@ pub async fn peer_status(
         .map_err(message)
 }
 
-/// `lf planning journal`: each destination's retained changes.
+/// `lf repo tracker journal`: each destination's retained changes.
 pub async fn peer_journal(
     store: &Store,
     repo: &str,
@@ -289,11 +289,11 @@ pub async fn peer_journal(
 /// The Git destination this repository plans through: `None` when it does not
 /// plan through Git, `Some(None)` outside a checkout.
 async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Option<String>>> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
     let key = match plan {

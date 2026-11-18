@@ -1208,7 +1208,7 @@ mod tests {
             let skill = builtins::get_builtin_skill(name).unwrap();
             for planning in [
                 "lf task create",
-                "update-plan",
+                "update-project",
                 "new-chapter",
                 "lf task claim",
                 "KR",
@@ -1219,7 +1219,7 @@ mod tests {
         }
         for name in ["s1", "s2", "s3", "s4", "s5"] {
             let skill = builtins::get_builtin_skill(name).unwrap();
-            for planning in ["lf task create", "update-plan", "new-chapter"] {
+            for planning in ["lf task create", "update-project", "new-chapter"] {
                 assert!(!skill.contains(planning), "{name} names {planning:?}");
             }
         }

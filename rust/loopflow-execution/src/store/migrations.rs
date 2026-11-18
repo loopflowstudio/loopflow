@@ -23,38 +23,19 @@ fn export_contract(conn: &rusqlite::Connection, guards: &mut Vec<File>) -> Store
         .map_err(|error| StoreError::InvalidData(error.to_string()))
 }
 
+/// A released Process row's liveness by the OS process it recorded. An lf row
+/// with none ended once this Machine restarted.
 pub(crate) fn process_evidence(
-    database: Option<&Path>,
+    _database: Option<&Path>,
     process: &MigrationProcess,
 ) -> ProcessIdentityEvidence {
-    if process.kind == "agent" {
-        return crate::journal::agent_process_evidence(
-            process.completed_at,
-            process.pid,
-            process.os_started_at,
-            None,
-            crate::journal::process_identity_evidence,
-        );
+    crate::process::RecordedProcess {
+        ended: process.completed_at.is_some(),
+        pid: process.pid,
+        os_started_at: process.os_started_at,
+        started_at: (process.kind != "agent").then_some(process.started_at),
     }
-    let receipt = database.and_then(Path::parent).map(|home| {
-        crate::journal::read_process_receipt(&crate::journal::process_receipt_path(
-            home,
-            &process.id,
-        ))
-    });
-    match receipt {
-        Some(Ok(Some(receipt))) if receipt.matches_process(&process.id, &process.trace) => {
-            receipt.process_evidence()
-        }
-        Some(Ok(None))
-            if process.completed_at.is_some()
-                || crate::journal::began_before_boot(process.started_at) =>
-        {
-            ProcessIdentityEvidence::Dead
-        }
-        // A malformed or mismatched receipt is not absence, even for an old row.
-        _ => ProcessIdentityEvidence::Unknown,
-    }
+    .evidence()
 }
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {

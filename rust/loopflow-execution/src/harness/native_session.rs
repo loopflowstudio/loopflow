@@ -207,7 +207,7 @@ pub fn resume_session_with_env(
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_processes_read_only(
+    let store = SqliteStore::open_read_only(
         &crate::store::database_path_from_env()?,
         crate::store::token_key::encryption_key,
     )?;
@@ -355,7 +355,7 @@ fn validate_launch(launch: &Launch<'_>) -> Result<()> {
     let process = crate::journal::current_lf_process_id()
         .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     if attachment.lf_process_id.as_ref() != Some(&process)
-        || attachment.caller(session.clone().into()) != caller
+        || attachment.caller(session.clone().into(), crate::journal::current_trace_id()) != caller
     {
         bail!("Session attachment differs from native launch provenance");
     }
@@ -372,8 +372,6 @@ fn native_provider_attachment(
         session,
         attachment,
     } = launch.recording;
-    let process = crate::journal::current_lf_process_id()
-        .ok_or_else(|| anyhow!("Native launch has no admitted invocation"))?;
     store.with_session_attachment(session, attachment, || {
         if let Some(remote) = remote {
             let endpoint = store
@@ -388,10 +386,6 @@ fn native_provider_attachment(
                     "Remote client endpoint differs from its AgentProcess".into(),
                 ));
             }
-        } else if attachment.provider_lf_process_id != process {
-            return Err(crate::store::StoreError::InvalidAuthority(
-                "Native provider launch does not own the admitted AgentProcess".into(),
-            ));
         }
         Ok(())
     })?;
@@ -443,7 +437,9 @@ pub fn admit(
     }
     environment.insert(
         crate::process::AGENT_CALLER_ENV.into(),
-        serde_json::to_string(&attachment.caller(session.id.clone()))?,
+        serde_json::to_string(
+            &attachment.caller(session.id.clone(), crate::journal::current_trace_id()),
+        )?,
     );
     crate::process::register_session_attachment_interrupt(
         &store,
@@ -1114,20 +1110,8 @@ mod tests {
                 .iter()
                 .all(|agent| agent.agent_session_id.as_deref() == Some(&saved.id)
                     && agent.completed_at.is_some()));
-            assert_eq!(
-                rows.iter()
-                    .filter_map(crate::process::ProcessEntry::as_lf)
-                    .count(),
-                index + 1
-            );
             let attachment = store.session_attachment(&saved.id).unwrap().unwrap();
             assert!(attachment.lf_process_id.is_none());
-            assert!(rows
-                .iter()
-                .filter_map(crate::process::ProcessEntry::as_lf)
-                .any(|row| row.id == attachment.provider_lf_process_id
-                    && row.pid == Some(std::process::id())
-                    && row.completed_at.is_some()));
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
             let arguments = received.split('\0').collect::<Vec<_>>();
             assert_eq!(arguments[0], expected.unwrap_or_default());
@@ -1219,11 +1203,11 @@ mod tests {
                     .agent_processes()
                     .unwrap()
                     .into_iter()
-                    .find(|agent| agent.process.pid.is_some())
+                    .find(|agent| agent.pid.is_some())
                 {
                     return crate::harness::agent_process::stop_session_agent(
                         &store,
-                        agent.process.agent_session_id.as_deref().unwrap(),
+                        agent.session_id.as_str(),
                         crate::process::Departure::Terminal { to: None },
                     );
                 }
@@ -1295,18 +1279,13 @@ mod tests {
             .unwrap();
         assert_eq!(failed, 1);
         for agent in agents {
-            let parent = store
-                .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
-                .unwrap()
-                .unwrap();
-            assert_eq!(parent.pid, Some(std::process::id()));
-            assert!(parent.completed_at.is_some());
+            assert!(agent.parent_lf_process_id.is_some());
             assert!(agent.agent_session_id.is_some());
         }
     }
 
     #[test]
-    fn native_remote_client_preserves_the_provider_and_requires_explicit_endpoint() {
+    fn native_remote_client_joins_the_provider_and_requires_explicit_endpoint() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let home = ledger.home();
@@ -1317,8 +1296,7 @@ mod tests {
                 &store,
                 &session.id,
                 None,
-                &store.test_lf_process(),
-                true,
+                &crate::journal::current_lf_process_id().unwrap(),
             )?;
             let mut command = Command::new("/bin/sleep");
             command.env_clear().arg("60");
@@ -1338,16 +1316,13 @@ mod tests {
                 endpoint.to_str().unwrap(),
                 &"thread".into(),
             )?;
-            let attached = attachment::claim_session_attachment(
-                &store,
-                &session.id,
-                Some(&original),
-                &crate::journal::current_lf_process_id().unwrap(),
-                false,
-            )?;
+            // The client joins with the provider's own attachment.
+            let attached = original;
             let environment = BTreeMap::from([(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attached.caller(session.id.clone()))?,
+                serde_json::to_string(
+                    &attached.caller(session.id.clone(), crate::journal::current_trace_id()),
+                )?,
             )]);
             let before = store.agent_process(&attached.agent_process_id)?.unwrap();
             let recording = Recording {
@@ -1382,14 +1357,6 @@ mod tests {
             );
             let alive = provider.try_wait()?.is_none();
             let unchanged = store.agent_process(&attached.agent_process_id)? == Some(before);
-            command.remote = None;
-            let local = super::run_client(
-                &launch,
-                &mut command,
-                None,
-                None,
-                &mut crate::startup::Startup::new("fixture"),
-            );
             command.remote = Some(home.join("other.sock"));
             let wrong_endpoint = super::run_client(
                 &launch,
@@ -1408,7 +1375,6 @@ mod tests {
             )?;
             assert!(result?.status.success());
             assert!(alive && unchanged);
-            assert!(local.unwrap_err().to_string().contains("does not own"));
             assert!(wrong_endpoint
                 .unwrap_err()
                 .to_string()

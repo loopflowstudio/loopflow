@@ -19,7 +19,6 @@ struct WorkObservationRetry {
         case .sessions(let body): hasReading = body != nil
         case .task(let body): hasReading = body != nil
         case .workActivity(let body): hasReading = body != nil
-        case .activity(let body): hasReading = body != nil
         case .checkpoint: return
         }
         if hasReading && frame.unavailable == nil {

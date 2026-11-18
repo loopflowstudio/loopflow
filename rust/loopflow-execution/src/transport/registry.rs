@@ -27,7 +27,9 @@ use loopflow_model::program_status::Records;
 
 use super::held::Source;
 use super::hosted::{Hosted, Pass, Watchers};
-use super::{dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV};
+use super::{
+    dimensions, drain, wait_for_activity, CONTROL_ENV, HELD_ENV, PARENT_ENV, STREAM_ENV, WITHIN_ENV,
+};
 
 /// How long a connection has to name its terminal.
 const ARRIVAL: Duration = Duration::from_secs(5);
@@ -452,7 +454,6 @@ impl Registry {
         crate::journal::process_ledger()?.create_terminal(&terminal, &self.build)?;
         let mut client = Client::ensure(&self.place)?;
         let holder = client.hello()?;
-        crate::terminal_holder::client::record(holder.pid);
         let (rows, cols) = dimensions(start.rows, start.cols);
         let mut env: Vec<(String, String)> = start
             .env
@@ -462,6 +463,7 @@ impl Registry {
             .filter(|(name, _)| {
                 ![
                     HELD_ENV,
+                    WITHIN_ENV,
                     PARENT_ENV,
                     CONTROL_ENV,
                     STREAM_ENV,
@@ -474,6 +476,7 @@ impl Registry {
             })
             .collect();
         env.push((HELD_ENV.into(), terminal.to_string()));
+        env.push((WITHIN_ENV.into(), terminal.to_string()));
         env.push((PARENT_ENV.into(), holder.pid.to_string()));
         env.push((CONTROL_ENV.into(), meta.control_key.clone()));
         // An unanswered start may have started the child. The holder's
@@ -598,15 +601,13 @@ impl Registry {
             }
             unsettled.push(Unsettled::recorded(&place, terminal));
         }
-        crate::terminal_holder::client::settle_departed();
         (entries, pending)
     }
 
     /// Take up what the holder at `place` lists.
     fn take_up(&self, place: &Place, mut client: Client) -> Result<TakenUp> {
-        let holder = client.hello()?;
+        client.hello()?;
         let listed = client.list()?;
-        crate::terminal_holder::client::adopt(place, holder.pid);
         let mut taken = TakenUp {
             entries: Vec::new(),
             unsettled: Vec::new(),
@@ -654,7 +655,6 @@ impl Registry {
                         .iter()
                         .map(|terminal| Unsettled::recorded(&holder.place, terminal.clone()))
                         .collect();
-                    crate::terminal_holder::client::settle_departed();
                     (Vec::new(), unsettled)
                 }
                 Ok(client) => match self.take_up(&holder.place, client) {

@@ -8,7 +8,7 @@
 use std::path::PathBuf;
 use std::process::ExitStatus;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::harness::Recording;
@@ -145,24 +145,20 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         store, attachment, ..
     }) = &owner
     {
-        let recorded = (|| -> Result<()> {
-            let mut process = store
-                .lf_process(&attachment.provider_lf_process_id)?
-                .context("handed-off launcher is not recorded")?;
-            process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
-            process.outcome = Some(
-                match settled.code {
-                    0 => "succeeded",
-                    130 => "interrupted",
-                    _ => "failed",
-                }
-                .into(),
-            );
-            process.exit_code = Some(i32::from(settled.code));
-            process.error = settled.lines.first().filter(|_| settled.code != 0).cloned();
-            store.record_process(&process)?;
-            Ok(())
-        })();
+        // The launcher became the provider, so its end is written here: as
+        // a Graph's step, its step ends with the provider's exit.
+        // A plain interrupt is no error: it reads as interrupted.
+        let error = settled
+            .lines
+            .first()
+            .filter(|_| !matches!(settled.code, 0 | 130));
+        let recorded = store.finish_run(
+            loopflow_storage::graph_process::RunOwner::GraphStep,
+            &attachment.launcher_lf_process_id,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            Some(i32::from(settled.code)),
+            error.map(String::as_str),
+        );
         if let Err(error) = recorded {
             tracing::warn!(%error, session = %exit.session, "cannot record the launcher's exit");
         }
@@ -236,6 +232,56 @@ mod tests {
     use crate::session_record::{SessionCaptureSpec, SessionGraphMembership};
 
     use super::{settle, NativeExit};
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::graph_process::ExecutionStart;
+
+    /// Make `launcher` a Graph's step, whose end the provider's exit writes.
+    fn launcher_as_step(store: &crate::store::sqlite::SqliteStore, launcher: &LfProcessId) {
+        let graph = LfProcessId::new();
+        let compiled = loopflow_storage::graph::CompiledGraph {
+            name: "fixture".into(),
+            steps: vec![],
+        };
+        let start = ExecutionStart::reserved(1);
+        store
+            .record_graph(&graph, &compiled, None, &start, None, None, None)
+            .unwrap();
+        store
+            .record_graph_step(&graph, launcher, 0, &[vec![]], &start)
+            .unwrap();
+    }
+
+    /// The step's exit code and outcome as it recorded its end.
+    fn step_end(
+        store: &crate::store::sqlite::SqliteStore,
+        launcher: &LfProcessId,
+    ) -> (Option<i32>, Option<&'static str>) {
+        let (ended_at, exit_code, error) = store
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT ended_at,exit_code,error FROM graph_process_steps WHERE lf_process_id=?1",
+                [launcher],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i32>>(1)?,
+                        row.get::<_, Option<String>>(2)?,
+                    ))
+                },
+            )
+            .unwrap();
+        (
+            exit_code,
+            loopflow_storage::graph_process::ExecutionResult::of(
+                ended_at,
+                exit_code,
+                error.as_deref(),
+            )
+            .outcome(),
+        )
+    }
 
     #[test]
     fn settlement_without_a_store_keeps_the_providers_own_exit() {
@@ -265,8 +311,7 @@ mod tests {
                 .unwrap();
             let launcher = store.test_lf_process();
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment,
@@ -295,8 +340,8 @@ mod tests {
         }
     }
 
-    /// A failed provider's own code reaches the person, the launcher record and
-    /// the capture, whether it exited or a signal ended it.
+    /// A failed provider's own code reaches the person, the launcher's Graph
+    /// step and the capture, whether it exited or a signal ended it.
     #[test]
     fn a_failed_provider_exit_carries_its_own_code_and_says_so() {
         for (status, code, outcome) in [
@@ -331,12 +376,12 @@ mod tests {
                     .unwrap()
                     .unwrap();
                 let launcher = journal::current_lf_process_id().unwrap();
+                launcher_as_step(&store, &launcher);
                 let attachment = attachment::claim_session_attachment(
                     &store,
                     &session.id,
                     None,
                     &launcher,
-                    true,
                 )
                 .unwrap();
                 let exit = NativeExit {
@@ -352,9 +397,11 @@ mod tests {
                 let settled = settle(&exit, ExitStatus::from_raw(status));
                 assert_eq!(settled.code, code, "{status}");
                 assert_eq!(settled.lines, [format!("claude exited with {code}.")]);
-                let launcher = store.lf_process(&launcher).unwrap().unwrap();
-                assert_eq!(launcher.exit_code, Some(i32::from(code)), "{status}");
-                assert_eq!(launcher.outcome.as_deref(), Some(outcome), "{status}");
+                assert_eq!(
+                    step_end(&store, &launcher),
+                    (Some(i32::from(code)), Some(outcome)),
+                    "{status}"
+                );
                 let captured: String = store
                     .conn
                     .lock()
@@ -400,9 +447,9 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let launcher = journal::current_lf_process_id().unwrap();
+            launcher_as_step(&store, &launcher);
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -430,7 +477,6 @@ mod tests {
                 &session.id,
                 current.as_ref(),
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let before = store
@@ -453,9 +499,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(after.completed_at, before.completed_at);
-            let launcher = store.lf_process(&launcher).unwrap().unwrap();
-            assert_eq!(launcher.exit_code, Some(0));
-            assert_eq!(launcher.outcome.as_deref(), Some("succeeded"));
+            assert_eq!(step_end(&store, &launcher), (Some(0), Some("succeeded")));
             let terminal: serde_json::Value = serde_json::from_slice(
                 &std::fs::read(capture.artifact_dir().join("terminal.json")).unwrap(),
             )

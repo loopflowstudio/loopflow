@@ -295,7 +295,7 @@ fn listing(sqlite: &SqliteStore, rental: Rental) -> anyhow::Result<RentalListing
             loopflow_execution::store::machines::machine_by_id(sqlite, id)?
                 .and_then(|machine| machine.label),
             held_ids(sqlite, id)?,
-            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions + counts.processes > 0),
+            Some(sqlite.copy_counts(id)?).filter(|counts| counts.sessions > 0),
         ),
         None => (None, Vec::new(), None),
     };

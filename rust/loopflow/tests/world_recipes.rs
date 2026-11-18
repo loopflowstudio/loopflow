@@ -91,14 +91,7 @@ impl Built {
 
     /// The steps of the Task's latest Graph `name`.
     fn graph_steps(&self, issue: &str, name: &str) -> Vec<Value> {
-        let graphs = self.lf(&[
-            "graph",
-            "list",
-            "--processes",
-            "--for-task",
-            issue,
-            "--json",
-        ]);
+        let graphs = self.lf(&["graph", "list", "--runs", "--for-task", issue, "--json"]);
         let id = graphs["entries"]
             .as_array()
             .unwrap()
@@ -109,7 +102,7 @@ impl Built {
             .as_str()
             .unwrap()
             .to_string();
-        self.lf(&["graph", "show", "--processes", &id, "--json"])["steps"]
+        self.lf(&["graph", "show", &id, "--json"])["steps"]
             .as_array()
             .unwrap()
             .clone()
@@ -325,13 +318,12 @@ fn task_list_subscribe_sends_a_frame_only_when_the_list_changes() {
 }
 
 #[test]
-fn session_list_task_status_and_top_subscribe_answer_requests() {
+fn session_list_and_task_status_subscribe_answer_requests() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     for args in [
         vec!["session", "list", "--all", "--subscribe"],
         vec!["task", "status", issue.as_str(), "--subscribe"],
-        vec!["monitor", "ps", "--json", "--subscribe"],
     ] {
         let mut subscription = built
             .command(&args)
@@ -395,8 +387,16 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
     keys.sort();
     assert_eq!(
         keys,
-        ["comments", "graph_processes", "sessions", "summary", "task"]
+        [
+            "comments",
+            "graph_processes",
+            "sessions",
+            "stack_parent",
+            "summary",
+            "task"
+        ]
     );
+    assert!(status["stack_parent"].is_null(), "{status}");
     assert_eq!(status["task"]["state"], "active");
     assert_eq!(
         status["task"]["graph"],

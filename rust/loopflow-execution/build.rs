@@ -9,9 +9,9 @@ fn main() {
         println!("cargo:rustc-link-lib=framework=ServiceManagement");
         println!("cargo:rustc-link-lib=framework=Foundation");
 
-        println!("cargo:rerun-if-changed=src/journal/os_process/macos.c");
+        println!("cargo:rerun-if-changed=src/process/os_process/macos.c");
         cc::Build::new()
-            .file("src/journal/os_process/macos.c")
+            .file("src/process/os_process/macos.c")
             .compile("loopflow_process_info");
     }
 }

@@ -15,7 +15,7 @@ lf resume                       # return to this scope’s conversation
 |---|---|---|
 | Conversations, interactive and headless | `~/.lf/loopflow.db`, `~/.lf/history.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
-| A stopped Graph | Its step Processes, as history | `lf task runs <ID>` |
+| A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
@@ -27,11 +27,12 @@ stopped on; the steps before it stay done.
 Read before you relaunch anything.
 
 ```bash
-lf doctor                                    # installation, store and process health
+lf doctor                                    # installation, store and stray processes
 lf task status <ID>                          # the Task's execution and the reason for it
-lf process show <GRAPH_ID>         # each step, its Process and how it exited
+lf graph show <RUN_ID>                       # each step, when it ran and how it exited
 lf session history show <SESSION_ID> --final # the agent's last word in that conversation
-lf process list                                        # what is running right now
+lf session list                              # the conversations running right now
+lf graph list --runs --state current    # the Graph runs running right now
 ```
 
 `lf task status` reports execution separately from the Task's own status:
@@ -54,9 +55,9 @@ liveness stays unknown; lf never guesses a process is dead.
 lf doctor --json
 ```
 
-Doctor checks installation selection, store compatibility and Process integrity
+Doctor checks installation selection, store compatibility and stray processes
 separately. It reads storage without initializing it or applying migrations, so
-an incompatible store still reports readable Process evidence.
+an incompatible store still reports which Sessions and runs it can read.
 
 Binary freshness compares against locally cached `origin/main`, without
 fetching. That reference may be stale, and merged source may be newer than the
@@ -235,11 +236,10 @@ recover during that wait.
 This error does not stop or repeat the launched work. Leave a running Graph
 alone. If status is unavailable, use `lf doctor` and check again once reads work.
 Retry only after inspecting the affected work; for launches other than Tasks,
-inspect the operation's result and `lf process list` first.
+inspect the operation's result and `lf session list` first.
 
-For a Graph launched directly, `lf graph list --processes` also finds finished
-runs. Inspect one with `lf process show <ID>`; a finished run no longer appears
-in the live process list.
+For a Graph launched directly, `lf graph list --runs` finds it, running or
+finished. Inspect one with `lf graph show <RUN_ID>`.
 
 ## A Task stopped advancing
 
@@ -341,7 +341,7 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
-lf machine prune                   # only lf's records: dead Process rows, expired history, then vacuum
+lf machine prune                   # only lf's records: expired history, then vacuum
 ls -la ~/.lf/loopflow.db ~/.lf/history.db   # state stays small
 ```
 
@@ -395,36 +395,29 @@ A branch behind `main`:
 lf sync                            # refresh main, keeping its unpublished commits, then merge it in
 ```
 
-## Orphaned agent processes
+## Stray agent processes
 
 ```bash
-lf process prune --dry-run --json  # each candidate and why
-lf process prune --json            # recheck, then reap
+lf machine doctor --json           # the strays check: each process, its pid and what it carries
 ```
 
-Pruning reports each agent process it settles or keeps, with the reason; a
-dry run changes none of it. `lf machine prune` then closes Process rows whose
-exit is proven, forgets finished ones nothing current references, and
-compacts the files. A
-missing PID, a completed Task or an old Session does not prove the agent
-exited: unresolved records keep protecting their checkouts.
+A stray is an OS process carrying an lf Session or run (`LF_STEER_SESSION`,
+`LF_PROCESS_ID`) that no live Session or Graph run claims: an agent left behind
+when its terminal or holder was killed, or a child an agent started that
+outlived it. Its children are listed under it. Doctor stops nothing; `kill <pid>`
+one once you know what it is.
 
-When `lf machine doctor` fails `lineage` and says `lf process prune` repairs the
-parents, an AgentProcess points at an lf process that was never recorded:
-
-```bash
-lf process prune --dry-run         # lists the ancestry it would release
-lf process prune                   # releases it; the Session can resume
-```
-
-The release is kept as a Session fact in `lf session history show <session>`.
+A run whose process died is not a stray. The Machine server checks each
+recorded pid against the OS on its regular pass, marks the dead ones ended with
+an unknown result and releases their Sessions, so `lf resume` and
+`lf task run` work without any cleanup.
 
 ## Many `lf` processes running
 
 ```bash
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
 lf session list --all --interactive all      # the conversations they serve
-lf process list                              # live call trees lf recorded
+lf graph list --runs --state current    # the Graph runs lf knows are alive
 ```
 
 A Machine runs one `lf server run`, one `lf holder run` per build with open

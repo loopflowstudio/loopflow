@@ -4,7 +4,7 @@ use std::collections::BTreeSet;
 use std::process::{Command, Stdio};
 use std::time::Duration;
 
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 use anyhow::{bail, Context, Result};
 use serde_json::Value;
 

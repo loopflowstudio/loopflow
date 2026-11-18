@@ -403,7 +403,7 @@ pub struct SessionFacts {
     /// Ready for a person's input.
     pub available: bool,
     pub cwd: String,
-    /// The provider's current AgentProcess, as `lf ps` lists it.
+    /// The provider's current AgentProcess generation.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
 }
 

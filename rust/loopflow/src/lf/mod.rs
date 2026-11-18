@@ -532,11 +532,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran and pruning
-    Process {
-        #[command(subcommand)]
-        cmd: commands::process::ProcessCommand,
-    },
     /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
     Plan {
         #[command(subcommand)]
@@ -950,7 +945,7 @@ lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show the Task's Graph processes in the browser
+    /// Show the Task's Graph runs in the browser
     GraphLog {
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -1133,13 +1128,13 @@ impl DashboardCommand {
 }
 
 // ── Which commands change state ─────────────────────────────────────────────
-// Only a command that changes state records a Process. A read (status, list,
-// show, diff, file, every `--subscribe` reader) records none, so it never wakes a
+// Only a command that changes state writes a journal trace. A read (status, list,
+// show, diff, file, every `--subscribe` reader) writes none, and it never wakes a
 // Work reader or joins a Task's work. Every match below is exhaustive: a new
 // command chooses here.
 
 impl Commands {
-    /// Whether running this command changes state, and so records a Process.
+    /// Whether running this command changes state, and so writes a journal trace.
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Task { cmd } => cmd.changes_work(),
@@ -1148,7 +1143,6 @@ impl Commands {
             Self::Graph { cmd } => cmd.changes_work(),
             Self::Skill { cmd } => cmd.changes_work(),
             Self::Desktop { cmd } => cmd.changes_work(),
-            Self::Process { cmd } => cmd.changes_work(),
             Self::Plan { cmd } => cmd.changes_work(),
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),
@@ -1585,7 +1579,7 @@ pub enum GraphCommand {
         #[command(flatten)]
         inventory: commands::graph_inventory::GraphProcessInventoryArgs,
     },
-    /// Inspect an authored graph
+    /// Inspect an authored graph, or a Graph run by its id
     Show {
         name: String,
         #[arg(long)]
@@ -2082,7 +2076,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto; naming the default branch detaches a stacked Task
+    /// Branch or Task to sync onto; another open Task stacks this one on it, the default branch detaches
     pub onto: Option<String>,
     /// Print the plan, or what the sync did
     #[arg(long)]
@@ -2986,7 +2980,7 @@ pub enum MachineCommand {
     /// Name this Machine for teammates, or `off` to make it private again.
     /// A private Machine's ownership entries carry only its id.
     Public { name: String },
-    /// Diagnose installation, storage and Process integrity
+    /// Diagnose installation, storage and stray lf processes
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long = "plan")]
@@ -2995,8 +2989,8 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Apply store retention: close dead Processes, forget finished ones,
-    /// expire Session history past 90 days and reclaim the space
+    /// Apply store retention: end runs and agents nobody saw exit, expire
+    /// Session history past 90 days and reclaim the space
     #[command(
         after_help = "The Machine server runs this every hour. Turns are kept; history an earlier \
                       lf wrote into loopflow.db moves to history.db."

@@ -96,15 +96,16 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
         capture_key: None,
     };
     let first = store
-        .attach_session("editor", None, &process, true, None, &absent)
+        .attach_session("editor", None, &process, None, &absent)
         .unwrap();
     store
-        .attach_session("editor", Some(&first), &process, true, None, &absent)
+        .attach_session("editor", Some(&first), &process, None, &absent)
         .unwrap();
     let caller = AgentCaller {
         session_id: "editor".into(),
         agent_process_id: Some(first.agent_process_id),
         origin_lf_process_id: process,
+        trace_id: None,
     };
     std::env::set_var(AGENT_CALLER_ENV, serde_json::to_string(&caller).unwrap());
     crate::journal::with_runtime(
@@ -219,7 +220,7 @@ fn task_labels_and_generated_names_follow_local_identity_and_linear_mapping() {
             "INSERT INTO processes(id,trace_id,started_at,command,cwd) VALUES(?1,'trace',1,'lf session resume','/fixture')",
             [&process],
         ).unwrap();
-    attachment::claim_session_attachment(&store, "generated", None, &process, false).unwrap();
+    attachment::claim_session_attachment(&store, "generated", None, &process).unwrap();
     assert_eq!(
         store.session("generated").unwrap().unwrap().title,
         "abcdef Fix login"

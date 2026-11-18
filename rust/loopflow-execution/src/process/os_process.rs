@@ -1,5 +1,6 @@
-//! One OS identity reader for process gates, activity and orphan settlement.
-//! Invalid observations are errors, never evidence that a process disappeared.
+//! One OS identity reader, and the one rule that reads an owner record's
+//! liveness from it. Invalid observations are errors, never evidence that a
+//! process disappeared.
 
 use std::io;
 use std::path::PathBuf;
@@ -9,7 +10,12 @@ use std::process::Command;
 #[cfg(target_os = "macos")]
 mod macos;
 
-use super::ProcessIdentityEvidence;
+use std::sync::OnceLock;
+
+use crate::store::ProcessIdentityEvidence;
+use loopflow_storage::graph_process::{Execution, ExecutionResult, TaskCarrier};
+use loopflow_storage::process::AttachmentHolder;
+use loopflow_storage::sqlite::SqliteStore;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OsProcess {
@@ -40,6 +46,36 @@ impl OsProcess {
                         .collect(),
                 )),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
+                Err(error) => Err(error),
+            }
+        }
+    }
+
+    /// The values of `names` in `pid`'s environment, and nothing else from
+    /// it: an environment holds secrets that never reach output. `None` when
+    /// the process is gone or not readable.
+    pub fn environment(pid: u32, names: &[&str]) -> io::Result<Option<Vec<(String, String)>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::environment(pid, names)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            match std::fs::read(format!("/proc/{pid}/environ")) {
+                Ok(bytes) => Ok(Some(select_environment(
+                    bytes
+                        .split(|byte| *byte == 0)
+                        .filter(|entry| !entry.is_empty()),
+                    names,
+                ))),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    Ok(None)
+                }
                 Err(error) => Err(error),
             }
         }
@@ -296,12 +332,286 @@ pub(crate) fn elapsed_seconds(value: &str) -> Option<u64> {
     days.checked_mul(86_400)?.checked_add(clock)
 }
 
+/// `NAME=value` entries whose name is one of `names`.
+fn select_environment<'a>(
+    entries: impl Iterator<Item = &'a [u8]>,
+    names: &[&str],
+) -> Vec<(String, String)> {
+    entries
+        .filter_map(|entry| {
+            let entry = String::from_utf8_lossy(entry);
+            let (name, value) = entry.split_once('=')?;
+            names
+                .contains(&name)
+                .then(|| (name.to_owned(), value.to_owned()))
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Owner liveness
+
+/// What an owner record (a Graph run or step, a carrier, a Session's agent or
+/// attachment holder) says about the OS process it runs as.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RecordedProcess {
+    pub ended: bool,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    /// When the record began; a record with no pid that began before this
+    /// Machine booted has exited.
+    pub started_at: Option<i64>,
+}
+
+impl RecordedProcess {
+    /// Ended is dead; a pid with its OS start is one OS lookup; a pid without
+    /// it cannot be told from a reused one; no pid is dead only across a boot.
+    pub fn evidence(&self) -> ProcessIdentityEvidence {
+        self.evidence_by(process_identity_evidence)
+    }
+
+    pub fn evidence_by(
+        &self,
+        mut observe: impl FnMut(u32, i64) -> ProcessIdentityEvidence,
+    ) -> ProcessIdentityEvidence {
+        if self.ended {
+            return ProcessIdentityEvidence::Dead;
+        }
+        match (self.pid, self.os_started_at) {
+            (Some(pid), Some(started_at)) => observe(pid, started_at),
+            (Some(_), None) => ProcessIdentityEvidence::Unknown,
+            (None, _) if self.started_at.is_some_and(began_before_boot) => {
+                ProcessIdentityEvidence::Dead
+            }
+            (None, _) => ProcessIdentityEvidence::Unknown,
+        }
+    }
+}
+
+impl From<&Execution> for RecordedProcess {
+    fn from(run: &Execution) -> Self {
+        Self {
+            ended: run.ended_at.is_some(),
+            pid: run.pid,
+            os_started_at: run.os_started_at,
+            started_at: Some(run.started_at),
+        }
+    }
+}
+
+impl From<&AttachmentHolder> for RecordedProcess {
+    fn from(holder: &AttachmentHolder) -> Self {
+        Self {
+            ended: false,
+            pid: holder.pid,
+            os_started_at: holder.os_started_at,
+            started_at: None,
+        }
+    }
+}
+
+/// One OS lookup: whether `pid` is still the process that started at `started_at`.
+pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIdentityEvidence {
+    match OsProcess::read(pid) {
+        Ok(Some(process)) => process.evidence(started_at),
+        Ok(None) => ProcessIdentityEvidence::Dead,
+        Err(_) => ProcessIdentityEvidence::Unknown,
+    }
+}
+
+/// A Graph step its Graph reserved but has not started yet has no pid; it
+/// stands or falls with the Graph run that would start it.
+pub fn step_evidence(step: &Execution, graph: &Execution) -> ProcessIdentityEvidence {
+    if step.ended_at.is_none() && step.pid.is_none() {
+        return RecordedProcess::from(graph).evidence();
+    }
+    RecordedProcess::from(step).evidence()
+}
+
+/// A Task carrier with no OS process ended, or was moved here from another
+/// Machine.
+pub fn carrier_evidence(carrier: &TaskCarrier) -> ProcessIdentityEvidence {
+    match carrier.pid {
+        Some(_) => RecordedProcess {
+            ended: false,
+            pid: carrier.pid,
+            os_started_at: carrier.os_started_at,
+            started_at: None,
+        }
+        .evidence(),
+        None => ProcessIdentityEvidence::Dead,
+    }
+}
+
+/// Only the lf holding a reserved Session agent starts it, so a reservation
+/// stands or falls with its holder; with none, nothing will start it.
+pub fn session_agent_evidence(
+    agent: RecordedProcess,
+    holder: Option<&AttachmentHolder>,
+) -> ProcessIdentityEvidence {
+    if !agent.ended && agent.pid.is_none() {
+        let holder = holder.map_or(ProcessIdentityEvidence::Dead, |holder| {
+            RecordedProcess::from(holder).evidence()
+        });
+        if holder == ProcessIdentityEvidence::Dead {
+            return ProcessIdentityEvidence::Dead;
+        }
+    }
+    agent.evidence()
+}
+
+/// The liveness of agent `process` while it is its Session's current one.
+pub(crate) fn agent_evidence(
+    store: &SqliteStore,
+    process: &loopflow_model::id::AgentProcessId,
+) -> ProcessIdentityEvidence {
+    let Ok(Some(agent)) = store.agent_state(process) else {
+        return ProcessIdentityEvidence::Unknown;
+    };
+    session_agent_evidence(
+        RecordedProcess {
+            ended: agent.ended_at.is_some(),
+            pid: agent.pid,
+            os_started_at: agent.os_started_at,
+            started_at: agent.started_at,
+        },
+        agent.holder.as_ref(),
+    )
+}
+
+/// A recorded run's result as this Machine sees it: one that never wrote its
+/// end and whose pid is dead ended unseen, so it reads `Unknown`.
+pub fn observed_result(run: &Execution) -> ExecutionResult {
+    match run.result() {
+        ExecutionResult::Running
+            if RecordedProcess::from(run).evidence() == ProcessIdentityEvidence::Dead =>
+        {
+            ExecutionResult::Unknown
+        }
+        result => result,
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+thread_local! {
+    static TEST_MACHINE_BOOTED_AT: std::cell::Cell<Option<i64>> = const { std::cell::Cell::new(None) };
+}
+
+/// Pretend this machine booted at `at` for the rest of the test thread.
+#[cfg(any(test, feature = "test-support"))]
+pub fn set_test_machine_booted_at(at: Option<i64>) {
+    TEST_MACHINE_BOOTED_AT.with(|cell| cell.set(at));
+}
+
+/// When this machine last booted. No local process survives that boundary, so
+/// work that began earlier and never settled has exited.
+pub(crate) fn machine_booted_at() -> Option<i64> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Some(at) = TEST_MACHINE_BOOTED_AT.with(std::cell::Cell::get) {
+        return Some(at);
+    }
+    static BOOTED_AT: OnceLock<Option<i64>> = OnceLock::new();
+    *BOOTED_AT.get_or_init(read_machine_booted_at)
+}
+
+pub(crate) fn began_before_boot(started_at: i64) -> bool {
+    machine_booted_at().is_some_and(|booted_at| started_at < booted_at)
+}
+
+fn read_machine_booted_at() -> Option<i64> {
+    if let Ok(stat) = std::fs::read_to_string("/proc/stat") {
+        return stat
+            .lines()
+            .find_map(|line| line.strip_prefix("btime "))
+            .and_then(|value| value.trim().parse().ok());
+    }
+    let output = std::process::Command::new("sysctl")
+        .args(["-n", "kern.boottime"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())?;
+    parse_sysctl_boottime(&String::from_utf8_lossy(&output.stdout))
+}
+
+/// `{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026`
+fn parse_sysctl_boottime(value: &str) -> Option<i64> {
+    let seconds = value.split_once("sec = ")?.1;
+    seconds.split([',', ' ']).next()?.parse().ok()
+}
+
+pub fn process_started_at(pid: u32) -> Result<Option<i64>, std::io::Error> {
+    Ok(OsProcess::read(pid)?.map(|process| process.started_at))
+}
+
 #[cfg(test)]
 mod tests {
     use std::os::unix::process::CommandExt;
 
+    #[test]
+    fn a_record_without_os_identity_is_dead_only_after_a_restart() {
+        let unobserved = |_: u32, _: i64| -> ProcessIdentityEvidence { unreachable!() };
+        let began = |started_at| super::RecordedProcess {
+            ended: false,
+            pid: None,
+            os_started_at: None,
+            started_at,
+        };
+        super::set_test_machine_booted_at(Some(1_000));
+        let before = began(Some(999)).evidence_by(unobserved);
+        let since = began(Some(1_001)).evidence_by(unobserved);
+        let unrecorded = began(None).evidence_by(unobserved);
+        super::set_test_machine_booted_at(None);
+        assert_eq!(before, ProcessIdentityEvidence::Dead);
+        assert_eq!(since, ProcessIdentityEvidence::Unknown);
+        assert_eq!(unrecorded, ProcessIdentityEvidence::Unknown);
+    }
+
+    #[test]
+    fn a_reserved_step_ends_with_the_graph_that_would_start_it() {
+        use loopflow_model::id::LfProcessId;
+        let run = |ended_at: Option<i64>| loopflow_storage::graph_process::Execution {
+            id: LfProcessId::default(),
+            started_at: 1,
+            ended_at,
+            pid: None,
+            os_started_at: None,
+            exit_code: None,
+            error: None,
+        };
+        let reserved = run(None);
+        let live_graph = loopflow_storage::graph_process::Execution {
+            pid: Some(std::process::id()),
+            os_started_at: super::process_started_at(std::process::id()).unwrap(),
+            ..run(None)
+        };
+        assert_eq!(
+            super::step_evidence(&reserved, &run(Some(2))),
+            ProcessIdentityEvidence::Dead
+        );
+        assert_eq!(
+            super::step_evidence(&reserved, &live_graph),
+            ProcessIdentityEvidence::Live
+        );
+    }
+
+    #[test]
+    fn boot_time_parses_and_bounds_what_can_still_run() {
+        assert_eq!(
+            super::parse_sysctl_boottime(
+                "{ sec = 1791140551, usec = 157377 } Sun Oct  4 12:02:31 2026"
+            ),
+            Some(1_791_140_551)
+        );
+        assert_eq!(super::parse_sysctl_boottime("unavailable"), None);
+        // This test began after the machine that runs it booted.
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        assert!(super::machine_booted_at().is_some_and(|booted_at| booted_at <= now));
+        assert!(!super::began_before_boot(now));
+        assert!(super::began_before_boot(1));
+    }
+
     use super::{parse, OsProcess};
-    use crate::journal::ProcessIdentityEvidence;
+    use crate::store::ProcessIdentityEvidence;
 
     #[test]
     fn a_child_reads_with_its_kernel_name_and_directory() {
@@ -394,14 +704,14 @@ mod tests {
             .iter()
             .find(|process| process.pid == child.id())
             .unwrap();
-        let evidence = crate::journal::process_identity_evidence(child.id(), observed.started_at);
+        let evidence = super::process_identity_evidence(child.id(), observed.started_at);
         child.kill().unwrap();
         child.wait().unwrap();
         assert!(sample.matches_start(observed.pid, observed.started_at));
         assert_eq!(sample.pgid, observed.pgid);
         assert_eq!(evidence, ProcessIdentityEvidence::Live);
         assert_eq!(
-            crate::journal::process_identity_evidence(child.id(), observed.started_at),
+            super::process_identity_evidence(child.id(), observed.started_at),
             ProcessIdentityEvidence::Dead
         );
     }
@@ -466,7 +776,7 @@ mod tests {
         assert_eq!(observed.pgid, child.id());
         assert!(OsProcess::group(observed.pgid).unwrap().is_empty());
         assert_eq!(
-            crate::journal::process_identity_evidence(child.id(), observed.started_at),
+            super::process_identity_evidence(child.id(), observed.started_at),
             ProcessIdentityEvidence::Dead
         );
         let sampled = OsProcess::sample(time::OffsetDateTime::now_utc().unix_timestamp()).unwrap();

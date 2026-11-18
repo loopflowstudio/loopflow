@@ -175,7 +175,6 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             "session",
             None,
             &process,
-            false,
             None,
             &crate::sqlite::SessionCaller {
                 agent: None,
@@ -220,7 +219,7 @@ pub fn native_steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter, Terminal
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
             [&adapter.agent_process_id],
         )
         .unwrap();
@@ -472,7 +471,6 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
                     session,
                     None,
                     &process,
-                    false,
                     None,
                     &crate::sqlite::SessionCaller {
                         agent: None,

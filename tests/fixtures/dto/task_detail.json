@@ -55,5 +55,10 @@
     "refresh_error": null,
     "conflicts": {}
   },
-  "summary": null
+  "summary": null,
+  "stack_parent": {
+    "identifier": "LOO-1",
+    "branch": "jack/loo-1-parse-mail",
+    "pr_number": 1718
+  }
 }

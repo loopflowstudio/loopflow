@@ -150,7 +150,12 @@ impl Store {
         let filter = filter.clone();
         let after = after.map(str::to_owned);
         run_sqlite(&self.sqlite, move |store| {
-            store.graph_inventory(&filter, after.as_deref(), limit)
+            store.graph_inventory(
+                &filter,
+                after.as_deref(),
+                limit,
+                crate::process::os_process::observed_result,
+            )
         })
         .await
     }

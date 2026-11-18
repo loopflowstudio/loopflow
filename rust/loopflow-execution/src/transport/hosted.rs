@@ -560,12 +560,10 @@ impl Hosted {
             if !self.execution_directory_reported {
                 if let Some(record) = &self.exit_record {
                     let connected = crate::journal::process_ledger()
-                        .and_then(|store| store.agent_process(&record.attachment.agent_process_id))
+                        .and_then(|store| store.agent_state(&record.attachment.agent_process_id))
                         .ok()
                         .flatten()
-                        .is_some_and(|process| {
-                            process.pid.is_some() && process.completed_at.is_none()
-                        });
+                        .is_some_and(|agent| agent.pid.is_some() && agent.ended_at.is_none());
                     if connected {
                         self.output.directory(&record.cwd);
                         self.execution_directory_reported = true;

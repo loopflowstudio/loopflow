@@ -216,7 +216,7 @@ fi
         let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         let completions: i64 = db.query_row("SELECT count(*) FROM task_events WHERE json_extract(kind_json,'$.kind')='completed'", [], |row| row.get(0)).unwrap();
         assert_eq!(completions, 1);
-        let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id WHERE p.outcome='succeeded'", [], |row| row.get(0)).unwrap();
+        let graphs: i64 = db.query_row("SELECT count(*) FROM graph_processes WHERE ended_at IS NOT NULL AND exit_code=0", [], |row| row.get(0)).unwrap();
         assert_eq!(graphs, 1);
         assert!(child.worktree.is_none());
         assert!(child.tracker_id.is_none());

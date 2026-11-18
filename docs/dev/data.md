@@ -3,8 +3,8 @@
 ```bash
 lf session list --headless --json
 lf session history SESSION --json
-lf process show GRAPH_PROCESS --json
-lf process list --json
+lf graph show GRAPH_RUN --json
+lf graph list --runs --state current --json
 ```
 
 A conversation, a Graph and an operating-system process answer different

@@ -88,9 +88,19 @@ pub async fn find_machine(store: &Store, selector: &str) -> anyhow::Result<Machi
         .find(|machine| {
             machine.label.as_deref() == Some(selector) || machine.id.as_str() == selector
         })
-        .ok_or_else(|| {
-            anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
-        })
+        .ok_or_else(|| not_added(selector))
+}
+
+/// `selector` in this Machine's registry; a home with no registry has added none.
+pub async fn find_registered_machine(selector: &str) -> anyhow::Result<Machine> {
+    match crate::store::read_existing_registry()? {
+        Some(store) => find_machine(&store, selector).await,
+        None => Err(not_added(selector)),
+    }
+}
+
+fn not_added(selector: &str) -> anyhow::Error {
+    anyhow!("machine {selector:?} is not added; run `lf machine add {selector}` first")
 }
 
 #[derive(Debug)]

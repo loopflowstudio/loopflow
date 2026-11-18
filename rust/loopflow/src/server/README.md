@@ -259,8 +259,8 @@ Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own.
 
-Rust variants use the kind's PascalCase spelling (`ProcessList`); Swift cases
-use lowerCamelCase (`processList`). Dots and underscores separate words. Each
+Rust variants use the kind's PascalCase spelling (`SessionList`); Swift cases
+use lowerCamelCase (`sessionList`). Dots and underscores separate words. Each
 case names one operation, including distinct claim/unassign and pin/unpin writes.
 
 | API kind | CLI | Engine |
@@ -311,10 +311,9 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `repo.ci` | `lf repo ci [--since <since>] [--wave <wave>] [--repo <repo>]` | read; `engine::repo::ci` |
 | `graph.list`, `graph.customize` | `lf graph list`, `lf graph customize` | read, write |
 | `graph.run` | `lf graph <name>` (`lf -b`, detached; `task.run` keeps the Task spelling) | write; `engine::graph::run` (the Process carrying the Graph) |
-| `process.get` | `lf process show <id>` | read |
-| `process.history` | `lf history show <process-id>` | read; rendered history |
+| `graph.run.get` | `lf graph show <id>` | read |
+| `session.history.get` | `lf session history show <session-id>` | read; rendered history |
 | `machine.self`, `.list`, `.doctor` | `lf machine self`, `lf machine list`, `lf machine doctor` (`lf doctor`) | read |
-| `process.list` | `lf process list` | read |
 | `work.resolve` | `lf open <url> --link`; a `work` noun would shadow the builtin `work` skill | read |
 | `config.catalog`, `.settings`, `.get`, `.explain` | `lf config catalog`, `lf config settings`, `lf config get`, `lf config explain` | `engine::config` |
 | `config.set`, `.unset` | `lf config set`, `lf config unset` (`lf set`, `lf unset`) | `engine::config` |
@@ -378,7 +377,7 @@ the phone's `view.select` Task list and its creation destinations all read it.
   a smaller payload only through a read with its own DTO.
 - `subscribe` takes a read with a subscription: `desktop.view.list`, `view.select`,
   `session.list` without `limit`, `task.get`, `task.wait`, `session.history`,
-  `plan.list`, `repo.tracker` and `process.list`. It answers
+  `plan.list` and `repo.tracker`. It answers
   a null `response`, then `reading {id,checkpoint,frame}` messages wrapping
   the existing complete `answers/unavailable/body` subscription frame. Typed
   [events](#events-alongside-readings) can arrive on the same subscription. `checkpoint

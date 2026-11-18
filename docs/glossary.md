@@ -26,8 +26,8 @@ first, then the engineering words it borrows.
 | **Chat** | A conversation in your terminal, started with `lf <skill>` or plain `lf`, that ends with it. A bare, interactive launch. |
 | **Batch** | One headless answer, started with `lf -b <skill>`, returned to its caller. A bare, headless launch. |
 | **Available** | A conversation you can work with now: it asked a question, handed its turn back, or went quiet with no tool call outstanding. Availability needs no pending question or review, and owes nothing; a Task's checks or dependencies neither add nor remove it. |
-| **LfProcess**, **Process** | One actual lf process: durable `id`, optional Unix `pid`, causal parent and observed command outcome. |
-| **AgentProcess** | The provider's OS process Loopflow started for a Session: a chat uses its terminal, a batch follows its caller, a work session uses a holder, and a worker runs without a terminal. |
+| **LfProcess**, **Process** | One actual lf process, named by an opaque `LF_PROCESS_ID`. No table holds it: the Session or Graph run it serves records its pid, OS start time and result. |
+| **AgentProcess** | The provider's OS process Loopflow started for a Session, recorded on the Session as its agent pid: a chat uses its terminal, a batch follows its caller, a work session uses a holder, and a worker runs without a terminal. |
 | **Machine** | One OS user’s Loopflow authority in one data directory, used as an execution destination; two users on one host have separate identities. |
 | **Server** | The client access process on a Machine; it connects Desktop to Work and existing Sessions, starts work sessions in a holder, and records work session and worker turns. |
 | **Holder** | The process beside the server that keeps work session terminals and agents, plus Desktop shells; one per build, and an install never restarts it. |

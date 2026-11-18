@@ -60,20 +60,32 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
     let work_set =
         crate::store::task_work::task_work(&store.sqlite, &task.id).map_err(task_error)?;
     let status = store.task_state(&task.id).await.map_err(task_error)?;
+    let parent_pr = match task.parent_pr_id.as_ref() {
+        Some(parent_id) => store
+            .get_task_pr(parent_id)
+            .await
+            .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?,
+        None => None,
+    };
+    let stack_parent = match parent_pr.as_ref() {
+        Some(parent) => store
+            .get_task(&parent.task_id)
+            .await
+            .map_err(task_error)?
+            .map(|parent_task| super::TaskStackParent {
+                identifier: parent_task.identifier,
+                branch: parent.branch.clone(),
+                pr_number: parent.github().map(|github| u64::from(github.number)),
+            }),
+        None => None,
+    };
     let actions = if store.sqlite.task_deleted(&task).map_err(task_error)? {
         TaskActionModel {
             recommended: Some(crate::ops::task_actions::TaskAction::NoAction),
             reason: "Task was deleted; retained history is read-only".into(),
         }
     } else {
-        let predecessor_phase = match task.parent_pr_id.as_ref() {
-            Some(parent_id) => store
-                .get_task_pr(parent_id)
-                .await
-                .map_err(|error| task_error(format!("failed to read parent PR: {error}")))?
-                .map(|pr| pr.phase()),
-            None => None,
-        };
+        let predecessor_phase = parent_pr.as_ref().map(TaskPr::phase);
         let completion_refusal = completion_refusal(pr.as_ref(), &task.identifier);
         let worktree_blocker = task_worktree_blocker(store, &task).await?;
         let run_refusal = worktree_blocker
@@ -119,27 +131,26 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             .unwrap_or_else(|| path.clone())
     });
     let completion_pending = completion_pending(store, &task)?;
-    let starter = |process: Option<&loopflow_model::id::LfProcessId>| {
-        super::ship::starter(&store.sqlite, &repo, process).map_err(task_error)
-    };
-    let mark = |at, by: Option<&loopflow_model::id::LfProcessId>| {
-        Ok::<_, OpsError>(super::ShipMark {
-            at,
-            by: starter(by)?,
-        })
+    let starter = |session: Option<&loopflow_model::id::LfSessionId>| {
+        super::ship::starter(&store.sqlite, &repo, session).map_err(task_error)
     };
     let started_by = store
         .sqlite
         .latest_task_graphs(&[&task.id])
         .map_err(task_error)?
         .get(&task.id)
-        .map(|graph| starter(Some(graph.id())))
+        .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
     let ship_approval = store
         .sqlite
         .task_shipping(&task.id)
         .map_err(task_error)?
-        .map(|shipping| mark(shipping.shipped_at, shipping.approved_by.as_ref()))
+        .map(|shipping| {
+            Ok::<_, OpsError>(super::ShipMark {
+                at: shipping.shipped_at,
+                by: starter(shipping.approving_session.as_ref())?,
+            })
+        })
         .transpose()?;
     let ship_stop = store
         .sqlite
@@ -148,7 +159,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .map(|stop| {
             Ok::<_, OpsError>(super::ShipMark {
                 at: stop.at,
-                by: super::ship::stopper(&store.sqlite, &repo, &stop).map_err(task_error)?,
+                by: super::ship::stopper(&store.sqlite, &stop).map_err(task_error)?,
             })
         })
         .transpose()?;
@@ -185,6 +196,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         started_by,
         ship_approval,
         ship_stop,
+        stack_parent,
     })
 }
 

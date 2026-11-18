@@ -82,6 +82,7 @@
           {
             "completed_at": 1793156345,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -94,6 +95,7 @@
           {
             "completed_at": 1793156346,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -444,135 +446,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
-              "kind": "lf",
-              "os_started_at": 1793156345,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 77966,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156345,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": 1793156345,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -629,6 +510,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -641,6 +523,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -801,6 +684,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -813,6 +697,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1175,6 +1060,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -1528,115 +1414,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": null,
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -1690,6 +1475,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1850,6 +1636,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2212,6 +1999,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -2527,115 +2315,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": null,
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -2689,6 +2376,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2849,6 +2537,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],

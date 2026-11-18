@@ -467,13 +467,10 @@ mod tests {
                 !deleted(&log),
                 "the sandbox was deleted before its records were copied"
             );
-            Ok(CopyCounts {
-                sessions: 3,
-                processes: 14,
-            })
+            Ok(CopyCounts { sessions: 3 })
         })
         .unwrap();
-        assert!(matches!(ended, Ended::Copied(counts) if counts.processes == 14));
+        assert!(matches!(ended, Ended::Copied(counts) if counts.sessions == 3));
         assert!(deleted(&log));
         assert_eq!(store.rental(&rental.id).unwrap().state, RentalState::Ended);
     }

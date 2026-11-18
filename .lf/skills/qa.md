@@ -21,9 +21,9 @@ To reopen a conversation after killing its stand-in provider, write a line to
 `$CLAUDE_CONFIG_DIR/projects/<cwd with / and . as ->/<thread>.jsonl` for both
 the `/tmp/…` and `/private/tmp/…` spellings of the checkout.
 
-A served request needs the whole envelope, `"select": null, "request_id": null`
-included: without the top-level `request_id` the server answers "this server
-has no operation `task.create`". To stop setup on purpose, `chmod a-w` the
+A served request needs the whole envelope, `"select": null, "sender": null,
+"request_id": null` included: without any one of them the server answers "this
+server has no operation `<kind>`". To stop setup on purpose, `chmod a-w` the
 directory holding the checkouts before Start (the answer stays `admitted`;
 `lf task status` shows "Setup stopped: …"), restore it, and reopen from a PTY
 running `sh -c 'tty; exec lf session resume <id>'`: the printed tty tells your

@@ -55,14 +55,9 @@ impl LiveSessionFixture {
                 [&parent],
             )
             .unwrap();
-        let attachment = attachment::claim_session_attachment(
-            &self.store.sqlite,
-            &session.id,
-            None,
-            &parent,
-            true,
-        )
-        .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&self.store.sqlite, &session.id, None, &parent)
+                .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60");
         RunningAgent(
@@ -123,7 +118,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 "INSERT INTO processes(id,trace_id,started_at) SELECT ?1,trace_id,started_at FROM processes WHERE id=?2",
                 rusqlite::params![launcher, crate::journal::current_lf_process_id().unwrap()],
             )?;
-            let first = attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)?;
+            let first = attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher)?;
             let mut command = tokio::process::Command::new("/bin/sleep");
             command.env_clear().arg("60");
             let mut provider = crate::harness::agent_process::spawn(
@@ -228,7 +223,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         program_status: None,
         agent_process_id: None,
         primary_scope: None,
-        agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
+        agent_process_evidence: crate::store::ProcessIdentityEvidence::Unknown,
         available: false,
         terminal_id: None,
         unviewed: false,
@@ -271,7 +266,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
 /// A summary whose projected state is `state`: a running one has an agent
 /// process, a detached one is held and unviewed.
 fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
-    use crate::journal::ProcessIdentityEvidence::*;
+    use crate::store::ProcessIdentityEvidence::*;
     let mut summary = summary_fixture();
     summary.interactive = interactive;
     summary.agent_process_evidence = match state {
@@ -353,15 +348,15 @@ fn session_metadata_keeps_unknown_position_visible() {
     // Session completion does not override its recorded provider's life.
     for (evidence, expected) in [
         (
-            crate::journal::ProcessIdentityEvidence::Live,
+            crate::store::ProcessIdentityEvidence::Live,
             super::SessionState::Active,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Dead,
+            crate::store::ProcessIdentityEvidence::Dead,
             super::SessionState::Closed,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Unknown,
+            crate::store::ProcessIdentityEvidence::Unknown,
             super::SessionState::Unknown,
         ),
     ] {
@@ -832,12 +827,12 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
             )
             .unwrap();
         let holder =
-            attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher, true)
+            attachment::claim_session_attachment(&store.sqlite, &session.id, None, &launcher)
                 .unwrap();
         let summary = super::current_summary(&store, &session.id).unwrap();
         assert_eq!(
             summary.agent_process_evidence,
-            crate::journal::ProcessIdentityEvidence::Unknown
+            crate::store::ProcessIdentityEvidence::Unknown
         );
         assert_eq!(
             listed_session(&store, &session.id).action.unwrap().label,
@@ -1090,9 +1085,8 @@ fn recovery_refresh_follows_current_holder_and_history() {
                 [&launcher],
             )
             .unwrap();
-        let run =
-            attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher, true)
-                .unwrap();
+        let run = attachment::claim_session_attachment(&store.sqlite, &record.id, None, &launcher)
+            .unwrap();
         store
             .sqlite
             .record_agent_process_launch(

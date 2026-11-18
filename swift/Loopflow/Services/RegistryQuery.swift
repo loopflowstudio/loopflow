@@ -35,9 +35,8 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 /// `argv` prints in `cwd`, given `input` on stdin. A read whose command takes
 /// `--subscribe` is also served as that subscription.
 public enum ServedRead: Equatable, Sendable, Encodable {
-    case processHistory(id: String)
+    case sessionHistoryGet(id: String)
     case creationGet(requestID: String)
-    case processList
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
@@ -56,7 +55,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
     case taskRuns(directory: String, task: String, after: String?)
-    case processGet(id: String)
+    case graphRunGet(id: String)
     case sessionUsage(days: Int, wave: String?, project: String?, task: String?)
     case taskContext(task: String)
     case wavePlan(directory: String, wave: String)
@@ -92,10 +91,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     /// The equivalent `lf` command, `--json` included.
     public var argv: [String] {
         switch self {
-        case .processHistory(let id): return ["session", "history", "show", id]
+        case .sessionHistoryGet(let id): return ["session", "history", "show", id]
         case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
-        case .processList:
-            return ["process", "list", "--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit, let task):
@@ -142,8 +139,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["desktop", "view", "show"] + (expression.map { [$0] } ?? []) + ["--json"]
         case .taskRuns(_, let task, let after):
             return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
-        case .processGet(let id):
-            return ["process", "show", id, "--json"]
+        case .graphRunGet(let id):
+            return ["graph", "show", id, "--json"]
         case .sessionUsage(let days, let wave, let project, let task):
             return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
@@ -206,9 +203,8 @@ public enum ServedRead: Equatable, Sendable, Encodable {
 
     private var tagged: TaggedFields {
         switch self {
-        case .processHistory(let id): TaggedFields("process.history", ["id": id])
+        case .sessionHistoryGet(let id): TaggedFields("session.history.get", ["id": id])
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
-        case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit, let task):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])
@@ -239,7 +235,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             TaggedFields("desktop.view.get", ["directory": directory, "expression": expression])
         case .taskRuns(let directory, let task, let after):
             TaggedFields("task.runs", ["directory": directory, "task": task, "after": after])
-        case .processGet(let id): TaggedFields("process.get", ["id": id])
+        case .graphRunGet(let id): TaggedFields("graph.run.get", ["id": id])
         case .sessionUsage(let days, let wave, let project, let task):
             TaggedFields("session.usage", ["days": days, "wave": wave, "project": project, "task": task])
         case .taskContext(let task): TaggedFields("task.context", ["task": task])
@@ -765,7 +761,7 @@ public struct RegistryQuery: Sendable {
             if let input = query.input { return try await runWithInput(query.argv, query.cwd, input) }
             let output = try await run(query.argv, query.cwd)
             // This CLI spelling renders text; the shared read carries a JSON string.
-            if case .processHistory = query {
+            if case .sessionHistoryGet = query {
                 return String(decoding: try JSONEncoder().encode(output), as: UTF8.self)
             }
             return output
@@ -1083,8 +1079,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(TaskChangesSnapshot.self, from: stdout)
     }
 
-    public func processHistory(id: String) async throws -> String {
-        try Self.decode(String.self, from: await serve(.processHistory(id: id)))
+    public func sessionHistoryText(id: String) async throws -> String {
+        try Self.decode(String.self, from: await serve(.sessionHistoryGet(id: id)))
     }
 
     /// One store-driven reading keeps position, readiness and run history together.
@@ -1891,7 +1887,6 @@ public struct HomeRetention: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct DoctorReport: Decodable, Sendable {
-    public let rows: Int
     public let checks: [DoctorCheck]
 }
 

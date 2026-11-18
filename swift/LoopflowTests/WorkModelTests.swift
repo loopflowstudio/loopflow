@@ -628,7 +628,7 @@ struct WorkModelStreamTests {
 
         // Sequence 2 was read before sequence 3; another Machine's frame names nothing here.
         await feed.send(try fixture.planningFrame(sequence: 2, answers: nil))
-        await feed.send(try fixture.activityFrame(sequence: 4))
+        await feed.send(try fixture.unrelatedFrame(sequence: 4))
         try await Task.sleep(for: .milliseconds(50))
         #expect(model.task(id: "issue-now")?.task.task.name == "Renamed elsewhere")
         #expect(!model.roadmap.isLoading)
@@ -752,7 +752,7 @@ struct WorkModelStreamTests {
         try await eventually { model.workflowCatalog.value?.isEmpty == false }
         let baseline = await catalog.reads
         await catalog.update("[]")
-        await feed.send(try fixture.activityFrame(sequence: 2))
+        await feed.send(try fixture.unrelatedFrame(sequence: 2))
         try await Task.sleep(for: .milliseconds(50))
         #expect(await catalog.reads == baseline)
         #expect(model.workflowCatalog.value?.isEmpty == false)
@@ -888,7 +888,7 @@ struct WorkModelStreamTests {
         let confirming = Task { try await model.confirmWorkUpdate(); await finished.set() }
         let request = try await feed.request(2)
         await feed.send(try fixture.frame("checkpoint", sequence: 2, answers: request.id - 1, body: "null"))
-        await feed.send(try fixture.activityFrame(sequence: 3))
+        await feed.send(try fixture.unrelatedFrame(sequence: 3))
         await feed.send(try fixture.planningFrame(sequence: 4, answers: request.id))
         try await eventually { model.planningSequence == 4 }
         #expect(await finished.value == false)
@@ -1198,10 +1198,10 @@ private struct WorkTestFixture {
                   scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil), body: entries)
     }
 
-    /// A live-process reading: a frame that confirms and changes no Work.
-    func activityFrame(sequence: Int) throws -> WorkFrame {
-        try frame("activity", sequence: sequence, answers: nil,
-                  body: #"{"nodes":[]}"#)
+    /// A repository-destinations reading: a frame that confirms and changes no Work.
+    func unrelatedFrame(sequence: Int) throws -> WorkFrame {
+        try frame("git_destinations", sequence: sequence, answers: nil,
+                  body: #"{"destinations":[]}"#)
     }
 
     func sessionEntries(sourceFile: String = #filePath) throws -> (json: String, ids: [String]) {

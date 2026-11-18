@@ -1,5 +1,5 @@
 use crate::harness::LaunchKind;
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 use crate::transcript::is_user_input;
 use crate::transcript::json_lines;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -160,7 +160,9 @@ impl Driver {
             *attachment = runtime.prepare_agent_process(session, attachment)?;
             config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone().into()))?,
+                serde_json::to_string(
+                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
+                )?,
             );
         }
         let resume_id = self
@@ -670,7 +672,7 @@ mod tests {
 
     #[tokio::test]
     #[allow(clippy::await_holding_lock)] // Isolate provider and database selection.
-    async fn claude_stop_fences_takeover_and_ends_the_recorded_groups() {
+    async fn claude_stop_ends_each_recorded_group() {
         let _lock = crate::journal::test_env_lock();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let original_path = std::env::var_os("PATH").unwrap_or_default();
@@ -704,7 +706,7 @@ mod tests {
             )
             .unwrap();
             let attachment =
-                attachment::claim_session_attachment(&store, id, None, &process, true).unwrap();
+                attachment::claim_session_attachment(&store, id, None, &process).unwrap();
             let (tx, _rx) = mpsc::unbounded_channel();
 
             let config = live_config();
@@ -735,22 +737,12 @@ mod tests {
             // Retain the first process while the same Process starts the next step.
             harnesses.push(harness);
         }
-        let original = harnesses[0].owner.attachment.clone();
-        let replacement =
-            attachment::claim_session_attachment(&store, "first", Some(&original), &process, false)
-                .unwrap();
-        assert!(harnesses[0].stop().await.is_err());
-        assert_eq!(
-            crate::journal::process_identity_evidence(recorded[0].0, recorded[0].1),
-            crate::journal::ProcessIdentityEvidence::Live
-        );
-        harnesses[0].owner.attachment = replacement;
         for harness in &mut harnesses {
             harness.stop().await.unwrap();
         }
         assert_ne!(recorded[0].0, recorded[1].0);
         for (pid, _) in recorded {
-            assert!(crate::journal::OsProcess::group(pid).unwrap().is_empty());
+            assert!(crate::process::OsProcess::group(pid).unwrap().is_empty());
         }
     }
 
@@ -1074,8 +1066,7 @@ mod tests {
                 )
                 .unwrap();
             let attachment =
-                attachment::claim_session_attachment(&self.store, id, None, &self.process, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&self.store, id, None, &self.process).unwrap();
             let mut config = live_config();
             config.cwd = Some(self.home.path().to_path_buf());
             (
@@ -1471,7 +1462,7 @@ impl super::Harness for Claude {
         };
     }
 
-    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+    fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         if process.command == "claude" {
             return true;
         }
@@ -1479,7 +1470,7 @@ impl super::Harness for Claude {
         if !name.contains('.') || !name.chars().all(|c| c.is_ascii_digit() || c == '.') {
             return false;
         }
-        let Some(executable) = crate::journal::OsProcess::executable(process.pid) else {
+        let Some(executable) = crate::process::OsProcess::executable(process.pid) else {
             return false;
         };
         executable.parent().is_some_and(|versions| {

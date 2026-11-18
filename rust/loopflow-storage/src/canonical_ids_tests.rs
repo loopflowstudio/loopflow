@@ -90,12 +90,20 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
     let waiter = caller.unwrap().join().unwrap();
-    let store = SqliteStore::open_processes_read_only(
-        &home.path().join("loopflow.db"),
-        crate::test_fixture::key,
-    )
-    .unwrap();
-    assert!(store.session_attachment(SESSION).unwrap().is_none());
+    let store =
+        SqliteStore::open_read_only(&home.path().join("loopflow.db"), crate::test_fixture::key)
+            .unwrap();
+    // The store is still at the conversion release's schema, which kept the
+    // attachment on the agent's Process row.
+    let token: Option<String> = conn
+        .query_row(
+            "SELECT p.attachment_token FROM agent_sessions s
+             LEFT JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1",
+            [SESSION.to_ascii_lowercase()],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(token.is_none());
     let stale_insert = conn.execute(
         "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd) VALUES(?1,'stale','human',1,0,'/repo')", [SESSION]
     ).unwrap_err();
@@ -384,11 +392,9 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         serde_json::from_str::<serde_json::Value>(&event).unwrap()["steer_id"],
         "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     );
-    let store = SqliteStore::open_processes_read_only(
-        &home.path().join("loopflow.db"),
-        crate::test_fixture::key,
-    )
-    .unwrap();
+    let store =
+        SqliteStore::open_read_only(&home.path().join("loopflow.db"), crate::test_fixture::key)
+            .unwrap();
     for selector in [
         "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "lOo-506",
@@ -409,7 +415,12 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id(),
+        conn.query_row(
+            "SELECT id FROM processes WHERE id=?1",
+            [PROCESS.to_ascii_lowercase()],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn

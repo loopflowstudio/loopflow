@@ -8,7 +8,7 @@
 //! instead: `--cwd <directory>` in its argv, and an explicit path in the server,
 //! where concurrent subscriptions cannot change the working directory.
 //!
-//! Reads only read: they record no Process and change no Work. The app's
+//! Reads only read: they change no Work and leave no journal trace. The app's
 //! writes are [`super::write::Write`]s.
 
 use std::path::{Path, PathBuf};
@@ -80,18 +80,14 @@ fn at(directory: &Path, command: &[&str]) -> Vec<String> {
 #[serde(tag = "kind", deny_unknown_fields)]
 // Exhaustive on purpose: the equivalence test matches every variant.
 pub enum Read {
-    /// The CLI's retained process or Session history, as display text.
-    #[serde(rename = "process.history")]
+    /// `lf session history show <id>`: one Session's history, as display text.
+    #[serde(rename = "session.history.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<String>()))]
-    ProcessHistory { id: String },
+    SessionHistoryGet { id: String },
     /// Look up a creation without starting or retrying it. Null confirms absence.
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
-    /// `lf process list`: live Loopflow call trees.
-    #[serde(rename = "process.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
-    ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
@@ -235,10 +231,10 @@ pub enum Read {
         task: String,
         after: Option<String>,
     },
-    /// `lf process show <id>`: one Graph that ran, with its steps.
-    #[serde(rename = "process.get")]
+    /// `lf graph show <id>`: one Graph that ran, with its steps.
+    #[serde(rename = "graph.run.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::durable::GraphProcessDetail>()))]
-    ProcessGet { id: String },
+    GraphRunGet { id: String },
     /// `lf usage --days <days> [--wave|--project|--task …]`: the Session
     /// inputs recorded in that window, by Work.
     #[serde(rename = "session.usage")]
@@ -376,9 +372,8 @@ impl Read {
     /// command takes it. Its subscription is this argv with `--subscribe`.
     pub fn argv(&self) -> Vec<String> {
         match self {
-            Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
+            Self::SessionHistoryGet { id } => words(&["session", "history", "show", id]),
             Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
-            Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
@@ -498,7 +493,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::ProcessGet { id } => words(&["process", "show", id, "--json"]),
+            Self::GraphRunGet { id } => words(&["graph", "show", id, "--json"]),
             Self::SessionUsage {
                 days,
                 wave,
@@ -650,7 +645,7 @@ impl Read {
     /// string.
     pub fn read_here(&self) -> anyhow::Result<serde_json::Value> {
         match self {
-            Self::ProcessHistory { id } => value(&super::history::render(
+            Self::SessionHistoryGet { id } => value(&super::history::render(
                 id,
                 false,
                 None,
@@ -674,7 +669,6 @@ impl Read {
                 value(&super::screens::task_detail(directory, issue)?)
             }
             Self::SessionCard { id } => value(&super::screens::session_card(id)?),
-            Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
             }
@@ -774,13 +768,13 @@ impl Read {
             } => value(&graph_inventory::page(
                 directory,
                 &graph_inventory::GraphProcessInventoryArgs {
-                    processes: true,
+                    runs: true,
                     for_task: Some(task.clone()),
                     after: after.clone(),
                     ..Default::default()
                 },
             )?),
-            Self::ProcessGet { id } => value(&graph_inventory::detail(id)?),
+            Self::GraphRunGet { id } => value(&graph_inventory::detail(id)?),
             Self::SessionUsage {
                 days,
                 wave,
@@ -923,9 +917,8 @@ impl Read {
             | Self::SkillList { directory, .. }
             | Self::PrChecks { directory, .. }
             | Self::PrReviews { directory, .. } => Some(directory),
-            Self::ProcessHistory { .. }
+            Self::SessionHistoryGet { .. }
             | Self::CreationGet { .. }
-            | Self::ProcessList
             | Self::ViewSelect { .. }
             | Self::SessionCard { .. }
             | Self::TaskChanges { .. }
@@ -937,7 +930,7 @@ impl Read {
             | Self::ConfigCatalog
             | Self::ConfigGet { .. }
             | Self::ConfigExplain { .. }
-            | Self::ProcessGet { .. }
+            | Self::GraphRunGet { .. }
             | Self::SessionUsage { .. }
             | Self::TaskContext { .. }
             | Self::MachineList
@@ -979,7 +972,6 @@ impl Read {
             events,
         };
         let subscription = match self {
-            Self::ProcessList => super::top::subscribe_ps(transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }

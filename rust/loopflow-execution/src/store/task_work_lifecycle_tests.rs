@@ -1,7 +1,7 @@
 use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 use loopflow_storage::execution::GraphProcessFilter;
-use loopflow_storage::process::{ProcessFilter, ProcessWorkFilter};
+use loopflow_storage::graph_process::RunOwner;
 use loopflow_storage::session::SessionFilter;
 use rusqlite::params;
 use std::num::NonZeroU32;
@@ -15,6 +15,12 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
     let wave = WaveId::new();
     let project = ProjectId::new();
     let by = LfProcessId::new();
+    let carrier = loopflow_storage::graph_process::ExecutionStart {
+        started_at: 1,
+        pid: Some(std::process::id()),
+        os_started_at: None,
+        caller_session: None,
+    };
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -100,24 +106,29 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
     );
 
     // No interactive step remains ahead: running it hands the Task off.
-    assert!(
-        crate::store::task_work::start_task_graph_run(&store, &task, &row, &start, &by, true)
-            .unwrap()
-    );
+    assert!(crate::store::task_work::start_task_graph_run(
+        &store,
+        &task,
+        &row,
+        &start,
+        (&by, &carrier),
+        true
+    )
+    .unwrap());
     // A second run reading the same position cannot also set out.
     assert!(!crate::store::task_work::start_task_graph_run(
         &store,
         &task,
         &row,
         &start,
-        &LfProcessId::new(),
+        (&LfProcessId::new(), &carrier),
         true
     )
     .unwrap());
     let state = || store.task_state(&task).unwrap();
     assert_eq!(state(), crate::durable::TaskState::Shipping);
     let shipping = store.task_shipping(&task).unwrap().unwrap();
-    assert_eq!(shipping.process, Some(by.clone()));
+    assert_eq!(shipping.carrier.as_ref().map(|run| &run.id), Some(&by));
     // Only the checkout's Machine restarts its ship process.
     let checkout = |sql: &str| {
         store
@@ -135,7 +146,7 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         [(task.clone(), shipping.clone())]
     );
     // Shipping again keeps when it began.
-    let again = store.ship_task(&task, &by, "again").unwrap();
+    let again = store.ship_task(&task, (&by, &carrier), "again").unwrap();
     assert_eq!(again.shipped_at, shipping.shipped_at);
     // Stop withdraws the approval; the run still going keeps it moving.
     assert_eq!(shipping.approved_by, Some(by.clone()));
@@ -148,7 +159,8 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
                 Some(loopflow_storage::sqlite::task_work::ShipStop {
                     at: loopflow_storage::rows::now_unix(),
                     by: Some(stopper.clone()),
-                    person: None
+                    person: None,
+                    session: None,
                 })
             )
             .unwrap(),
@@ -161,7 +173,12 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         .unwrap()
         .unwrap();
     assert!(crate::store::task_work::start_task_graph_run(
-        &store, &task, &relaunch, &start, &by, true
+        &store,
+        &task,
+        &relaunch,
+        &start,
+        (&by, &carrier),
+        true
     )
     .unwrap());
     assert!(store.task_shipping(&task).unwrap().is_none());
@@ -170,17 +187,23 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         store.task_ship_stop(&task).unwrap().unwrap().by,
         Some(stopper)
     );
-    // Approved again with nothing running, it is idle until its ship process
-    // restarts. Only `lf ship` lifts the stop.
-    store.ship_task(&task, &by, "again").unwrap();
+    // Only `lf ship` lifts the stop. Approved again, it ships while its
+    // carrier runs, then is idle until its ship process restarts.
+    store.ship_task(&task, (&by, &carrier), "again").unwrap();
     assert!(store.task_ship_stop(&task).unwrap().is_none());
-    store
-        .conn
-        .lock()
-        .unwrap()
-        .execute("UPDATE processes SET completed_at=2 WHERE id=?1", [&by])
-        .unwrap();
+    assert_eq!(state(), crate::durable::TaskState::Shipping);
+    // The carrier exits: its end clears both the run's and the ship's OS process.
+    for owner in [RunOwner::TaskCarrier, RunOwner::ShipCarrier] {
+        store.finish_run(owner, &by, 2, Some(0), None).unwrap();
+    }
     assert_eq!(state(), crate::durable::TaskState::Idle);
+    let carrier = store
+        .task_shipping(&task)
+        .unwrap()
+        .unwrap()
+        .carrier
+        .unwrap();
+    assert_eq!((carrier.pid, carrier.ended_at), (None, Some(2)));
 }
 
 #[test]
@@ -219,13 +242,19 @@ fn reaching_end_without_remaining_steps_approves_shipping() {
     .unwrap();
     store.set_task_graph_step(&task, "review").unwrap();
     assert!(store.task_shipping(&task).unwrap().is_none());
-    assert!(store.end_task_graph(&task, &by).unwrap());
+    let reserved = loopflow_storage::graph_process::ExecutionStart::reserved(1);
+    assert!(store.end_task_graph(&task, (&by, &reserved)).unwrap());
     assert!(store.task_completion_pending(&task).unwrap().is_some());
     assert_eq!(
-        store.task_shipping(&task).unwrap().unwrap().process,
+        store
+            .task_shipping(&task)
+            .unwrap()
+            .unwrap()
+            .carrier
+            .map(|run| run.id),
         Some(by.clone())
     );
-    assert!(!store.end_task_graph(&task, &by).unwrap());
+    assert!(!store.end_task_graph(&task, (&by, &reserved)).unwrap());
 }
 
 #[tokio::test]
@@ -309,15 +338,12 @@ async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
 }
 
 #[test]
-fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership() {
+fn task_work_includes_checkout_binding_without_granting_ownership() {
     let dir = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
     let task = TaskId::new();
     let wave = WaveId::new();
     let project = ProjectId::new();
-    let mechanical = LfProcessId::new();
-    let bound_process = LfProcessId::new();
-    let sibling = LfProcessId::new();
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -350,24 +376,8 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
                 &loopflow_storage::session_record::new_artifact_key(),
             );
         }
-        for (id, cwd) in [
-            (&mechanical, "/missing/task%_"),
-            (&bound_process, "/elsewhere"),
-            (&sibling, "/missing/task%_-other"),
-        ] {
-            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
-        }
-        // Binding includes earlier Processes in the inventory without assigning
-        // their earlier performed work or usage to this Task.
-        store.execute_history(
-"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
-            params![mechanical, sibling],
-        )
-        .unwrap();
     }
-    // A Graph is the Task's work when its Processes ran in the checkout.
+    // A Graph is the Task's work when it ran in the checkout.
     let independent = store.test_graph(
         "independent",
         "/missing/task%_/sub",
@@ -394,79 +404,15 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         work.graph_processes[0].summary.task_id.as_ref(),
         Some(&task)
     );
-    assert_eq!(work.processes.len(), 4);
-    // The open reading agrees with the full one about unfinished Processes.
-    let initial_open = store.task_open_processes(&task).unwrap();
-    assert_eq!(initial_open.len(), 2);
-    assert!(initial_open
-        .iter()
-        .all(|process| process.completed_at().is_none()));
-    let unfinished = LfProcessId::new();
-    {
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/elsewhere',1)",
-            params![unfinished, TraceId::new()],
-        )
-        .unwrap();
-        store.execute_history(
-"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','open',?1,1,'{}')", [&unfinished]).unwrap();
-    }
-    // Task state reads only `loopflow.db`: a Process history alone names is
-    // not one of its open Processes.
-    let open = store.task_open_processes(&task).unwrap();
-    assert_eq!(open.len(), 2);
-    assert!(!open
-        .iter()
-        .any(|process| process.id() == unfinished.as_str()));
-    // With every Process unfinished, each membership path in state agrees:
-    // checkout, Session event and attachment.
-    store
-        .conn
-        .lock()
+    // Open work is the Task's unended Graph runs and live agents, never a
+    // Process row: the Graph still runs, no Session's agent started.
+    let open: Vec<_> = store
+        .task_open_work(&task)
         .unwrap()
-        .execute_batch(
-            "CREATE TEMP TABLE finished AS SELECT id,completed_at FROM processes;
-         UPDATE processes SET completed_at=NULL;",
-        )
-        .unwrap();
-    let ids = |processes: Vec<loopflow_storage::process::ProcessEntry>| {
-        processes
-            .iter()
-            .map(|process| process.id().to_owned())
-            .collect::<Vec<_>>()
-    };
-    let all = ids(crate::store::task_work::task_work(&store, &task)
-        .unwrap()
-        .processes);
-    assert_eq!(all.len(), 5);
-    let in_state: Vec<_> = all
         .iter()
-        .filter(|id| ![unfinished.as_str(), bound_process.as_str()].contains(&id.as_str()))
-        .cloned()
+        .map(|work| work.label())
         .collect();
-    assert_eq!(ids(store.task_open_processes(&task).unwrap()), in_state);
-    store.conn.lock().unwrap().execute_batch(
-        "UPDATE processes SET completed_at=(SELECT completed_at FROM finished WHERE finished.id=processes.id);
-         DROP TABLE finished;",
-    )
-    .unwrap();
-    {
-        let conn = store.conn.lock().unwrap();
-        store
-            .execute_history("DELETE FROM session_history WHERE receipt_key='open'", [])
-            .unwrap();
-        conn.execute("DELETE FROM processes WHERE id=?1", [&unfinished])
-            .unwrap();
-    }
-    assert!(work
-        .processes
-        .iter()
-        .any(|process| process.id() == mechanical.as_str()));
-    assert!(work
-        .processes
-        .iter()
-        .any(|process| process.id() == bound_process.as_str()));
+    assert_eq!(open, [format!("Graph run {independent}")]);
     assert_eq!(
         store.session_task_ids("manual").unwrap(),
         std::slice::from_ref(&task)
@@ -500,29 +446,10 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
             },
             None,
             NonZeroU32::new(100).unwrap(),
+            loopflow_storage::graph_process::Execution::result,
         )
         .unwrap();
     assert_eq!(graphs.entries, work.graph_processes);
-    // The Graph's step is the only work performed in the checkout.
-    let performed = store
-        .processes(
-            &ProcessFilter {
-                performed_work: Some(ProcessWorkFilter::Task(task.clone())),
-                ..Default::default()
-            },
-            None,
-            NonZeroU32::new(100).unwrap(),
-        )
-        .unwrap();
-    let (graph, _) = store.graph_process(independent.as_str()).unwrap().unwrap();
-    assert_eq!(
-        performed
-            .entries
-            .iter()
-            .map(loopflow_storage::process::ProcessEntry::id)
-            .collect::<Vec<_>>(),
-        [graph.steps[0].process.id.as_str()]
-    );
 
     let child = TaskId::new();
     {

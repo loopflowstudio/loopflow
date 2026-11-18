@@ -209,7 +209,7 @@ private struct RecoveredCreationInspector: View {
                     }
                     detail = .success(lines.filter { !$0.isEmpty }.joined(separator: "\n\n"))
                 } else if let session = resource.session {
-                    detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.processHistory(id: session)).utf8)))
+                    detail = .success(try JSONDecoder().decode(String.self, from: Data(try await ServerClient.read(.sessionHistoryGet(id: session)).utf8)))
                 }
             } catch { detail = .failure(error) }
         }

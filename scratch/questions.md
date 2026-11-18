@@ -269,3 +269,9 @@ Slice 5 (implement):
 - The merged `open` checks for a lost transcript beside main's `NewThread` intent (`lost_thread`);
   main's `resuming_an_ended_conversation…` fixture now writes the thread's Claude transcript so it
   resumes instead of starting fresh.
+
+## Publish (2026-11-18)
+
+- `lf pr publish` has no base option and set PR #1972's base to `main` on
+  create and again on update; `gh pr edit --base` put it back on LOO-953's
+  branch both times. A later `lf pr publish` will move it again.

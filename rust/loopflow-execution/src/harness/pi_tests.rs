@@ -622,7 +622,9 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
 #[test]
 fn bare_pi_names_its_thread_and_resumes_it_by_that_id() {
     let _lock = crate::journal::test_env_lock();
-    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR"]);
+    let _env = crate::test_ambient::EnvGuard::clear(&["PI_CODING_AGENT_DIR", "LF_BIN"]);
+    // Pi's context extension calls back into this checkout's lf.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let agent_dir = tempfile::tempdir().unwrap();
     std::env::set_var("PI_CODING_AGENT_DIR", agent_dir.path());
     let config = AgentConfig {

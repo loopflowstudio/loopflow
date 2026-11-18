@@ -16,13 +16,20 @@ files so steers and server changes can happen between them. Run `lf` commands
 from the disposable repository: from inside this checkout they resolve
 loopflow's Linear planning.
 
-Managed is decided by the command: `--task` or `--wave` gets turn hooks and
-the server check, on a launch or a resume (`lf -i --task <id> resume`,
-`lf session resume <session> --task <id>`, and the `open_argv` that
-`lf session resume --prepare --json --task <id>` returns for Desktop). Plain
-`lf -b <skill>` gets the start and compact hooks only; plain `lf -i` and
-`lf -i resume <session>` keep turn hooks without the check, so they never
-start a stopped server. Driver scripts that delete their marker directory
+Managed means the launch reports turns, and transport decides it. A Task's
+primary conversation (started by `lf checkout <task>`, reopened by
+`lf resume --task <id>` or a bound Session's `lf resume`) is a work session
+held by `lf holder run`; a Task Graph's headless step is a worker. Both get
+`Stop` and `crossSessionInbound: accept` in Claude's `--settings`, and
+`LF_PROVIDER_CONTEXT`. Direct `lf -i` and `lf -b` launches are chats and
+batches even with `--task`: start, compact, prompt and tool hooks only,
+`LF_BARE_STEER`, and Task steers through `LF_STEER_TASK`; a chat's resume
+stays in the calling terminal, and a Graph's commit message is a batch. A
+stand-in must honor each hook group's `matcher`, or it runs the compact
+`SessionStart` hook at startup too. `lf-world`'s seeded primary Session has no
+saved launch (`exec: null` in its manifest) and resumes without `--settings`;
+create a Task and `lf checkout` it for a real work session.
+Driver scripts that delete their marker directory
 must do it before waiting on it, or a stale `provider.jsonl` releases a turn
 too early. A managed launch
 with the server down registers it before the agent starts: check

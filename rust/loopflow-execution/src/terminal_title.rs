@@ -231,7 +231,7 @@ pub(crate) struct TerminalTitle {
 impl TerminalTitle {
     pub fn prepare(
         environment: &BTreeMap<String, String>,
-        harness: &str,
+        harness: crate::harness::HarnessKind,
         command: &mut Command,
     ) -> Option<Self> {
         if !std::io::stderr().is_terminal() {
@@ -253,18 +253,7 @@ impl TerminalTitle {
             }
         };
         // Called before adding any subcommand, positional input or `--` boundary.
-        match harness {
-            "claude" => {
-                // The provider keeps its name; where the Task stands changes.
-                command.args(["--name", &title.provider_name]);
-                // Claude's title-disable flag also suppresses OSC 7501 reports.
-                // Keep its native activity reporting enabled.
-            }
-            "codex" => {
-                command.args(["-c", "tui.terminal_title=[]"]);
-            }
-            _ => {}
-        }
+        command.args(harness.harness().title_args(&title.provider_name));
         if let Err(error) = write!(
             std::io::stderr().lock(),
             "\x1b]0;{}\x07",

@@ -19,26 +19,21 @@ use loopflow_storage::work::task::{
 use crate::test_support::planning_tasks::*;
 
 #[test]
-fn native_runner_is_quiet_until_its_turn_ends_codex_foreground() {
-    assert_native_runner_is_quiet_until_its_turn_ends("codex", false, true);
-}
-
-#[test]
-fn native_runner_is_quiet_until_its_turn_ends_claude_foreground() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", false, true);
+fn native_runner_is_quiet_until_its_turn_ends_codex_task_headless() {
+    assert_native_runner_is_quiet_until_its_turn_ends("codex", true);
 }
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_claude_task_headless() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, true);
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", true);
 }
 
 #[test]
 fn native_runner_is_quiet_until_its_turn_ends_claude_taskless_headless() {
-    assert_native_runner_is_quiet_until_its_turn_ends("claude", true, false);
+    assert_native_runner_is_quiet_until_its_turn_ends("claude", false);
 }
 
-fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, task_bound: bool) {
+fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bool) {
     with_planning_task(|runtime, fixture, repo, task, state| {
         let _environment = crate::test_ambient::EnvGuard::clear(&[
             "HOME",
@@ -75,7 +70,6 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             state.lock().await.requests = 0;
         });
         let process = crate::agent::ProcessConfig {
-            auto,
             task_input: task_bound.then(|| {
                 crate::ops::task_input::TaskInput::new(
                     fixture.store.clone(),
@@ -88,36 +82,29 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, auto: bool, ta
             }),
             ..Default::default()
         };
-        // A bare Codex runs as plain `codex` with no turn observer; the
-        // app-server and its turn boundaries belong to Work, beside the server.
-        let _server = (agent == "codex").then(|| {
-            loopflow_test_support::MachineServer::start(
-                loopflow_test_support::lf_binary(),
-                fixture.directory.path(),
-            )
-        });
         let launch = crate::agent::AgentConfig {
-            agent: Some(agent.into()),
+            agent: crate::config::Agent::parse(agent).unwrap(),
             cwd: Some(repo.to_path_buf()),
-            holder: if agent == "codex" {
-                crate::session::Holder::Server
-            } else {
-                crate::session::Holder::Caller
-            },
+            task_prompt: "Hold the turn open".into(),
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
                 ("FIXTURE_STOP".into(), stop.display().to_string()),
             ]),
-            ..Default::default()
+            ..crate::agent::AgentConfig::default()
         };
         let context = LINEAR_TEST_CONTEXT.with(Clone::clone);
         let database = fixture.database.clone();
         runtime.block_on(async {
             let running = tokio::task::spawn_blocking(move || {
                 crate::journal::with_test_ledger(database, || {
-                    LINEAR_TEST_CONTEXT
-                        .sync_scope(context, || crate::agent::run_agent(&launch, &process))
+                    LINEAR_TEST_CONTEXT.sync_scope(context, || {
+                        crate::agent::run_agent(
+                            &launch,
+                            &process,
+                            crate::harness::LaunchKind::Batch,
+                        )
+                    })
                 })
             });
             let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {

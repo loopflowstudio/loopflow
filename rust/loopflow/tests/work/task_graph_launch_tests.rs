@@ -1022,8 +1022,7 @@ fn a_task_run_takes_its_waves_agent_without_flags() {
         2,
         "the Task conversation and Graph both launch"
     );
-    // A Task run's steps are managed, unlike a bare `lf` in the checkout, so
-    // each gets the turn hooks steers arrive by.
+    // Task workers and the managed conversation both report turn boundaries.
     for launch in launches {
         let args = launch["args"].as_array().unwrap();
         let settings = args

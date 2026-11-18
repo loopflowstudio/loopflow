@@ -291,7 +291,6 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         }
     };
     let process = ProcessConfig {
-        auto: true,
         stream: false,
         timeout: Some(COMMIT_MESSAGE_TIMEOUT),
         ..Default::default()
@@ -301,14 +300,12 @@ fn generate_commit_message(repo: &Path, agent: MessageAgent<'_>) -> OpsResult<Co
         let launch = AgentConfig {
             chrome: config.chrome,
             codex_service_tier: config.codex.service_tier,
-            claude_model: config.claude.model.clone(),
             task_prompt: prompt.clone(),
-            agent: Some(agent.clone()),
             cwd: Some(repo.to_path_buf()),
             skip_permissions: true,
-            ..Default::default()
+            ..AgentConfig::new(crate::config::Agent::parse(&agent)?.with_configured_model(&config))
         };
-        match run_agent(&launch, &process) {
+        match run_agent(&launch, &process, crate::harness::LaunchKind::Batch) {
             Ok(result) if result.exit_code == 0 => {
                 let combined = format!("{}\n{}", result.stdout, result.stderr);
                 if let Some(message) = parse_commit_message(&combined) {

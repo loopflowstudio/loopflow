@@ -244,3 +244,15 @@ Left on `scratch/concept-review.html`, not built here:
   pay that on every invocation and nothing here changes it.
 - A warning about a bad setting, found by a served read, goes to the server's
   stderr. The person editing the file in front of Desktop sees nothing.
+
+## Docs written ahead of the code
+
+- `rust/loopflow/src/server/README.md`, after "external observations do not
+  share that transaction": what a subscriber sees when a settings or skill
+  file changes, then `observe::derived` and the rule for what a computation
+  may read. The code must match it: about a second to a new reading, one
+  warning per edit, an override never enters the shared value.
+- `AGENTS.md`, the `observe` line under `*.rs`: derived values. Written now,
+  so slice 3 no longer adds it.
+
+No page under `docs/` changes: nothing a read returns changes.

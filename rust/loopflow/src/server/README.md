@@ -255,6 +255,32 @@ itself, without a separate clock, checkout or probe policy for each operation.
 Database-derived joins retain their transactional snapshot; external
 observations do not share that transaction.
 
+Resolved settings and the skill catalog are worked out once per change to the
+files they came from, not once per reading. Save `.lf/config.yaml`, a personal
+or global settings file, a Wave's files or a skill under `.lf/skills`,
+`.claude`, `.agents` or `.codex`, and every subscription that read it gets a
+new reading within about a second:
+
+```bash
+lf wave show mac --subscribe --json &
+lf set default_agent codex    # a new line: Tasks with no agent of their own name codex
+```
+
+An edit that changes nothing in the selected answer sends no line. Until a
+file changes, readings share one resolved value per checkout and Wave, and one
+catalog per set of skill directories. A file that fails to load gives every
+reading the same error it gives `lf config settings`, and the server warns
+about it once per edit. Environment and `--setting` overrides belong to the
+command that carries them: a read with an override resolves for itself and
+leaves the shared value alone.
+
+In code this is `observe::derived`: a value computed from observed facts,
+kept with the facts its computation read and computed again when one changes.
+`observe::Derived` lists every such value and what identifies it. A
+computation reads observed facts and its key, nothing else; an input from the
+environment, a thread-local or the store goes in the key. With no reading
+active (any bare `lf` command) `derived` computes inline and keeps nothing.
+
 Every operation names its `kind` as a dotted resource and verb, beside its
 fields. `lf/commands/read.rs` (`Read`) and `lf/commands/write.rs` (`Write`) own
 the shared kinds; `wire::ServerOperation` owns the server's own.

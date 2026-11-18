@@ -39,48 +39,69 @@ Read from real provider shells, names only:
 
 ## Design
 
-One list and one function, in `rust/loopflow-execution/src/harness/mod.rs`
-beside `configure_agent_env`:
+The concept is the caller's session: the markers a conversation sets in its
+own shells, whether lf set them (`LF_CAPTURE_KEY`, `LF_STEER_TASK`, ...) or
+its provider did (`CLAUDE_CODE_CHILD_SESSION`, `CODEX_THREAD_ID`, ...). A
+conversation lf starts is a new session, never that one's child. lf already
+has this list for its own markers, `EXECUTION_IDENTITY_ENV` in
+`agent/mod.rs`; Claude's and Codex's markers are more of the same, so they
+join it rather than getting a second list (chosen in concept review; see
+`concept-review.html`).
 
 ```rust
-/// What a Claude Code or Codex conversation sets in its own shells. A
-/// provider lf starts is a new conversation, not that one's child.
-pub(crate) const PROVIDER_SESSION_ENV: [&str; 20] = [...];
+/// What a conversation sets in its own shells, lf's markers and its
+/// provider's. A conversation lf starts sets its own; it never inherits
+/// the caller's.
+pub(crate) const CALLER_SESSION_ENV: [&str; 32] = [...];
 
-pub(crate) fn remove_provider_session_env(command: &mut std::process::Command)
+pub(crate) fn remove_caller_session_env(command: &mut std::process::Command)
 ```
 
-Applied last, after `config.env` is merged, so a captured environment can't
-put a marker back:
+Rename `EXECUTION_IDENTITY_ENV` to `CALLER_SESSION_ENV` in place, add the 20
+provider names, and replace each hand-written loop with the function:
 
-| Path | Where | Covers |
+| Site | Today | After |
 |---|---|---|
-| `configure_agent_env` | `harness/mod.rs` | Claude, Codex app-server, OpenCode, Pi headless and their version probes |
-| `NativeClient::new` | `harness/native_session.rs` | every native session (chat, work session) for all four harnesses; this is the path LOO-959's thread came through |
-| `start_held` | `transport.rs` | the environment a held terminal starts with, so the held `lf` and anything run in that terminal start clean |
+| `configure_agent_env` (`harness/mod.rs`) | loops over the lf list | calls the function; covers Claude, Codex app-server, OpenCode, Pi headless and their probes |
+| Codex app-server (`harness/codex.rs:780`) | loops over the lf list | calls the function |
+| `NativeClient::new` (`harness/native_session.rs`) | removes nothing of either list | calls the function; every native chat and work session, all four harnesses (LOO-959's path) |
+| `transport.rs:384` `start_held` caller | `&\|_\| {}` | passes the function as `inherit`, so the held `lf` and its terminal start clean |
+| `agent/mod.rs:960` | strips the lf list from `launch.env` | same loop over the renamed list (a map, not a `Command`) |
+
+Order: the function runs on the inherited environment, before
+`.envs(&config.env)`, as `configure_agent_env` already does. lf's new
+markers for the new conversation arrive in `config.env`; removing after it
+would delete them. Provider markers can't come back through `config.env`:
+the map is stripped at `agent/mod.rs:960`, and `conversation_environment`
+records only `config.env` keys plus `PATH`/`LF_BIN`/`LF_HOME`.
+
+Risk for slice 1: `NativeClient::new` starts removing lf's own markers it
+used to inherit. A native work session that read one from the held `lf`'s
+environment rather than `config.env` loses it; the matrix's turn-hook
+assertions show it.
 
 The server needs no change of its own. Supervised, it runs under launchd
 (`server.plist` sets only `LF_HOME`, `LF_BIN`, `LF_SUPERVISED`) or systemd,
 neither of which inherits the installing shell. Run by hand from an agent
-shell, its own environment keeps the markers, but every conversation its
-recovery pass starts goes through `NativeClient::new` or
-`configure_agent_env`, which remove them. Detached `lf` children
-(`os_process/detached.rs`) are the same: they are `lf`, and their providers go
-through the two functions.
+shell, every conversation it starts goes through the function. Detached `lf`
+children (`os_process/detached.rs`) are `lf`; their providers go through the
+same sites.
 
 `lf`'s own hooks keep reading `CLAUDE_CODE_MESSAGING_SOCKET`
 (`lf/commands/context.rs` `claude_inbox`): they run inside the new provider,
-which sets its own. That is why the scrub is at the spawn sites, not at `lf`
+which sets its own. That is why the scrub is at spawn sites, not at `lf`
 startup.
 
 ## Acceptance check
 
 `harness/launch_matrix.rs` `every_harness_runs_all_four_launch_kinds` sets
-every name in `PROVIDER_SESSION_ENV` in the test process, each stand-in
-provider records which of them it sees, and every row (4 harnesses x chat,
-batch, work session, worker) asserts none. Removing the call from either
-function fails rows. A passthrough name (`CLAUDE_CONFIG_DIR`) is set too and
-asserted present, so a later prefix scrub fails.
+every name in `CALLER_SESSION_ENV` to the value `caller` in the test process;
+each stand-in provider records those names' values, and every row (4
+harnesses x chat, batch, work session, worker) asserts none equals `caller`.
+lf's markers that the new conversation sets fresh pass; inherited ones of
+either kind fail. Removing the call from any site fails rows. A passthrough
+name (`CLAUDE_CONFIG_DIR`) is set too and asserted present, so a later prefix
+scrub fails.
 
 ```bash
 env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') \
@@ -96,7 +117,8 @@ records a thread with no transcript.
 
 ## What goes
 
-- Nothing to delete: no earlier attempt at this scrub exists in Rust.
+- `EXECUTION_IDENTITY_ENV` and its three hand-written removal loops become
+  `CALLER_SESSION_ENV` and one function; no second list.
 - `swift/LoopflowMac/Services/ProcessEnvironment.swift` strips
   `CLAUDE_CODE_*` / `CODEX_*` by prefix for Desktop panes. Left as is: it
   serves terminal panes a person types in, not lf's provider launches.
@@ -104,6 +126,9 @@ records a thread with no transcript.
 ## Exclusions
 
 - Repairing Sessions whose recorded thread has no transcript (LOO-959).
+- The `LF_`-prefix filters in `server/service.rs` (session resume) and
+  `installation/server.rs` (server refresh) choose which `lf` home a child
+  uses, then set `LF_HOME`/`LF_BIN`; a different job, left as is.
 - Provider auth probes (`provider_auth`, `claude_trust`, `codex.rs` probe):
   they start no conversation.
 - A Rex server autostarted from an agent shell gives its panes the markers;
@@ -112,7 +137,8 @@ records a thread with no transcript.
 
 ## Slices
 
-1. List, function, the three call sites, and the launch-matrix assertion.
+1. Rename and extend the list, the function, the five sites, and the
+   launch-matrix assertion.
    This is the whole change; the matrix run shows whether any of the 16 cells
    reaches a provider some other way.
 2. If a cell still sees a marker, follow that path to its spawn and route it

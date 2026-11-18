@@ -292,8 +292,9 @@ every Process/Session association, conflict answers.
 
 ## Slices
 
-1. **Process and Session record their Task.** *Process half built
-   (`process_task.sql`); Session half next.* Built: `processes.task_id` +
+1. **Process and Session record their Task.** *Built
+   (`process_task.sql`). `cargo test -p loopflow-storage --lib task_work::`:
+   11 passed (realign, 2026-11-17).* Built: `processes.task_id` +
    `processes_task`, relocation receipts copied in and the table marked
    leaving, the freeze in `relocate_repository` and `has_relocations` gone,
    `lf_process_ids`/`task_open_process_pairs`/`task_of_process`/performed-work

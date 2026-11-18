@@ -112,11 +112,17 @@ pub(crate) async fn drain_repository(
     drain(store, repo, &tracker, actions, scope, bound).await
 }
 
-/// The repository's unconfirmed actions for `tracker`, after queueing a
+/// The repository's unconfirmed actions for `tracker`, after recording its
+/// tracker and queueing a
 /// creation for each owner made before the tracker was connected. An action
 /// queued for another tracker retires here, before any tracker is built, so a
 /// switched repository that is offline or signed out does not keep it.
 fn queued(store: &Store, repo: &str, tracker: TrackerKind) -> OpsResult<Vec<TrackerAction>> {
+    // The planning writer reads this to stop journaling for Git peers.
+    store
+        .sqlite
+        .record_planning_tracker(repo, tracker)
+        .map_err(message)?;
     store
         .sqlite
         .enqueue_tracker_creations(repo, tracker)

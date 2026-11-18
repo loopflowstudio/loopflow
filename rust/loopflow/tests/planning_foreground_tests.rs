@@ -1083,3 +1083,91 @@ fn personal_plan_moves_to_shared_default_with_identity() {
         .starts_with("refs/loopflow/planning/users/"));
     assert!(personal.selected_records > 0);
 }
+
+/// The title Git's remote document holds for `task`, as a second store would import it.
+fn published_title(repo: &Path, binding: &PlanningDestination, task: &str) -> Option<String> {
+    let document = PlanningGit::new(repo, binding).unwrap().fetch().unwrap()?;
+    let snapshot =
+        loopflow_execution::planning_exchange::PlanningSnapshot::from_bytes(&document.bytes)
+            .unwrap();
+    let title = snapshot
+        .winners()
+        .find(|(_, change)| {
+            change.edit.target == task && change.edit.change.field() == "task_title"
+        })
+        .map(|(_, change)| serde_json::to_value(&change.edit.change).unwrap()["value"].clone())?;
+    title.as_str().map(Into::into)
+}
+
+#[test]
+fn only_git_repositories_journal_and_a_switch_to_git_publishes_the_whole_plan() {
+    let home = tempfile::tempdir().unwrap();
+    let linear = TestRepo::new();
+    let git = TestRepo::new();
+    let linear_path = linear.path().canonicalize().unwrap();
+    let git_path = git.path().canonicalize().unwrap();
+    fs::create_dir_all(linear_path.join(".lf")).unwrap();
+    fs::write(
+        linear_path.join(".lf/config.yaml"),
+        "planning:\n  provider: linear\n  team: offline-fixture\n",
+    )
+    .unwrap();
+    let binding = loopflow_execution::planning_git::resolve_destination(
+        &git_path,
+        "origin",
+        "refs/loopflow/planning/shared/accept",
+    )
+    .unwrap();
+    configure(&git_path, &binding);
+
+    let in_linear = create(&linear_path, home.path(), "");
+    let in_git = create(&git_path, home.path(), "");
+    run(
+        &linear_path,
+        home.path(),
+        &["task", "edit", &in_linear, "--title", "Linear title"],
+    );
+    run(
+        &git_path,
+        home.path(),
+        &["task", "edit", &in_git, "--title", "Git title"],
+    );
+    run(&git_path, home.path(), &["task", "sync", &in_git]);
+
+    let db = Connection::open(home.path().join("loopflow.db")).unwrap();
+    let journal = |task: &str| -> i64 {
+        db.query_row(
+            "SELECT count(*) FROM planning_peer_changes WHERE object_id=?1",
+            [task],
+            |row| row.get(0),
+        )
+        .unwrap()
+    };
+    assert_eq!(journal(&in_linear), 0);
+    let queued: i64 = db
+        .query_row(
+            "SELECT count(*) FROM tracker_actions WHERE task_id=?1 AND phase IN ('queued','sent')",
+            [&in_linear],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(queued > 0, "the Linear save waits in the tracker queue");
+    assert!(journal(&in_git) > 0);
+    assert_eq!(
+        published_title(&git_path, &binding, &in_git).as_deref(),
+        Some("Git title")
+    );
+
+    let switched = loopflow_execution::planning_git::resolve_destination(
+        &linear_path,
+        "origin",
+        "refs/loopflow/planning/shared/switched",
+    )
+    .unwrap();
+    configure(&linear_path, &switched);
+    run(&linear_path, home.path(), &["task", "sync", &in_linear]);
+    assert_eq!(
+        published_title(&linear_path, &switched, &in_linear).as_deref(),
+        Some("Linear title")
+    );
+}

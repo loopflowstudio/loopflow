@@ -308,7 +308,9 @@ Journal read failures fail the status read; Desktop keeps its last reading with 
 error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections in a Git repository own
 its exchange for their lifetimes: one loop every 5 s acquires (one fetch), and
 publishes only when Git's outbox is not empty, meaning an owned journal change has
-no route to the active destination or the last publication is not confirmed.
+no route to the active destination, the last publication is not confirmed, or the
+last imported revision is not the one it published (publishing over an import
+confirms without a push when the remote already holds everything).
 Other repositories' saves never wake it. Connections in a Linear or Asana
 repository start no Git exchange; Linear checks run at the boundaries described
 below. A save publishes after the command answers, so the loop is the retry path. No resident,

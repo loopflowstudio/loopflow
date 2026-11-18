@@ -214,15 +214,21 @@ impl SqliteStore {
         };
         decode_snapshot(rows)
     }
-    /// Git's outbox for `destination`: an owned change it has not exported, or
-    /// a publication it has not confirmed. Neither means only acquisition is due.
+    /// Git's outbox for `destination`: an owned change it has not exported, a
+    /// publication it has not confirmed, or an imported revision it has not
+    /// published over (the export moved, so status would read pending). None
+    /// means only acquisition is due.
     pub fn peer_planning_unpublished(&self, repo: &str, destination: &str) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let unpublished = conn
             .prepare_cached(&format!(
                 "{OWNED_CHANGES}
-                SELECT EXISTS(SELECT 1 FROM planning_destinations WHERE repo=?1 AND id=?2
-                    AND (publication_state IN ('pending','unconfirmed') OR publication_error IS NOT NULL))
+                SELECT EXISTS(SELECT 1 FROM planning_destinations d
+                    LEFT JOIN planning_peer_imports i ON i.repo=d.repo AND i.destination=d.id
+                    WHERE d.repo=?1 AND d.id=?2
+                    AND (d.publication_state IN ('pending','unconfirmed')
+                        OR d.publication_error IS NOT NULL
+                        OR i.revision IS NOT d.publication_revision))
                 OR EXISTS(SELECT 1 FROM owned o
                     CROSS JOIN planning_peer_changes c
                         ON c.object_id=o.object_id AND c.record_table=o.record_table
@@ -1165,6 +1171,57 @@ mod tests {
             "local"
         );
         assert_eq!(winners(&between, &route), winners(&first, &first_route));
+    }
+
+    #[test]
+    fn the_outbox_holds_unexported_saves_and_unconfirmed_pushes_of_its_repository_only() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("db")).unwrap();
+        let git = Wave::new(WaveId::new(), "git".into(), "/git".into());
+        let linear = Wave::new(WaveId::new(), "linear".into(), "/linear".into());
+        crate::test_fixture::wave(&store, &git);
+        crate::test_fixture::wave(&store, &linear);
+        store
+            .record_planning_tracker("/linear", crate::planning_sync::TrackerKind::Linear)
+            .unwrap();
+        let route = destination(&store, "/git", "outbox");
+        let unpublished = || store.peer_planning_unpublished("/git", &route).unwrap();
+        // A push the next acquisition reads back, as `publish_destination` does.
+        let publish = |revision: &str, state: &str| {
+            let exported = store.export_peer_planning("/git", &route).unwrap();
+            store
+                .record_peer_publication("/git", &route, revision, state, &exported)
+                .unwrap();
+            crate::test_fixture::import_saved(&store, "/git", &route, revision, &exported).unwrap();
+        };
+        // Binding seeded the plan: the first tick publishes it.
+        assert!(unpublished());
+        publish("one", "confirmed");
+        assert!(!unpublished());
+
+        rename_locally(&store, &linear, "elsewhere");
+        assert!(!unpublished(), "another repository's save");
+
+        rename_locally(&store, &git, "renamed");
+        assert!(unpublished());
+        publish("two", "unconfirmed");
+        assert!(unpublished(), "a push nobody confirmed");
+        publish("two", "confirmed");
+        assert!(!unpublished());
+
+        let exported = store.export_peer_planning("/git", &route).unwrap();
+        crate::test_fixture::import_saved(&store, "/git", &route, "peer", &exported).unwrap();
+        assert!(
+            unpublished(),
+            "a peer's revision this Machine has not published over"
+        );
+        publish("peer", "confirmed");
+        assert!(!unpublished());
+
+        store
+            .record_peer_error("/git", &route, false, Some("Git publication pending"))
+            .unwrap();
+        assert!(unpublished(), "a publication that failed after export");
     }
 
     #[test]

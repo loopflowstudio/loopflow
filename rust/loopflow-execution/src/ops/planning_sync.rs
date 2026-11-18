@@ -1,5 +1,6 @@
 //! Foreground Git exchange and local-save delivery for the selected transport.
-//! Acquisition and delivery run independently; the common writer alone changes Work.
+//! One tick acquires, and publishes when Git's outbox holds something; the
+//! common writer alone changes Work.
 //! Blocking workers retain their locks through cancellation, commit and readback.
 
 use crate::work::wave::Wave;
@@ -66,10 +67,19 @@ pub async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> 
     exchange_repository(store, repo, Exchange::Publish { wait: true }).await
 }
 
+/// One connection tick publishes only when Git's outbox holds something.
+async fn tick_repository(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Tick).await
+}
+
 #[derive(Debug, Clone, Copy)]
 enum Exchange {
     Acquire,
-    Publish { wait: bool },
+    Publish {
+        wait: bool,
+    },
+    /// Publish when the outbox holds an export or an unconfirmed push; otherwise acquire.
+    Tick,
 }
 
 /// A short command saves first, then makes one exchange attempt with the owner
@@ -349,10 +359,21 @@ fn exchange_destination(
     id: &str,
     exchange: Exchange,
 ) -> OpsResult<()> {
-    let publish = matches!(exchange, Exchange::Publish { .. });
+    if !matches!(exchange, Exchange::Acquire) {
+        store.recover_task_filings(repo).map_err(message)?;
+    }
+    let wait = match exchange {
+        Exchange::Acquire => None,
+        Exchange::Publish { wait } => Some(wait),
+        Exchange::Tick => store
+            .peer_planning_unpublished(repo, id)
+            .map_err(message)?
+            .then_some(false),
+    };
+    let publish = wait.is_some();
     // The blocking worker retains effect ownership through status writes, even
     // if its async waiter is canceled. Acquisition never takes this lock.
-    let _lock = if let Exchange::Publish { wait } = exchange {
+    let _lock = if let Some(wait) = wait {
         let path = store
             .home_dir()
             .map_err(message)?
@@ -377,7 +398,6 @@ fn exchange_destination(
             .ok_or_else(|| message("planning destination is missing"))?;
         let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
         if publish {
-            store.recover_task_filings(repo).map_err(message)?;
             publish_destination(store, repo, id, &git)
         } else {
             acquire_destination(store, repo, id, &git).map(|_| ())
@@ -596,12 +616,7 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
-                            acquire_repository(&store, &repo)
-                        }) => {},
-                        _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
-                            publish_repository(&store, &repo)
-                        }) => {},
+                        _ = repeat_sync(EXCHANGE_TICK, || tick_repository(&store, &repo)) => {},
                     }
                 };
                 #[cfg(any(test, feature = "test-support"))]
@@ -620,16 +635,19 @@ impl PlanningSync {
     }
 }
 
-// Each branch has its own delay after an attempt. A slow delivery cannot
-// postpone acquisition or cause missed ticks to burst when the request returns.
+/// Saves publish right after their command answers; the tick acquires peers'
+/// changes and retries a publication that failed.
+const EXCHANGE_TICK: Duration = Duration::from_secs(5);
+
+// The delay follows each attempt, so a slow exchange cannot make missed ticks
+// burst when it returns.
 async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
-    operation: &str,
     delay: Duration,
     mut attempt: impl FnMut() -> F,
 ) {
     loop {
         if let Err(error) = attempt().await {
-            tracing::debug!(%error, operation, "planning synchronization pending");
+            tracing::debug!(%error, "Git planning exchange pending");
         }
         tokio::time::sleep(delay).await;
     }

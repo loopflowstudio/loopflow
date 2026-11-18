@@ -114,6 +114,38 @@ This is a stored copy of one config fact. The rule in `docs/dev/planning.md`
 destination is still derived from config. The doc line gets updated to say
 what is stored and why.
 
+## Status (implement, 2026-11-17)
+
+All three slices are built; what remains is gate.
+
+- Slice 1: `planning_tracker` migration; `bind_peer_planning` records `git`
+  and seeds owned records in its transaction; the drain's `queued` records
+  `linear`/`asana`; `write_record` captures only when `journaled`. Learned:
+  a clone binds before its first import registers the repository, so
+  `repositories::register_in` inherits the tracker (the path's recorded value,
+  else `git` when a destination is bound). Per-write lookup is three primary
+  key/index searches (`EXPLAIN QUERY PLAN` on the live copy).
+- Slice 2: `Exchange::Tick` on one 5 s loop; publishes when
+  `peer_planning_unpublished` (unrouted owned change, publication `pending`/
+  `unconfirmed`, a publication error, or an imported revision other than the
+  published one), else acquires. Learned: without the last condition a tick that
+  imports a peer's change never republishes, the export digest moves, and
+  `lf repo plan` reads pending forever (`taskless_terminal_and_headless_sessions_keep_planning_live`
+  caught it). Cost: one export after each import or own push. The 1 s loop is gone.
+  `start_for_directory` already started no thread for Linear/Asana. Task-filing
+  recovery now runs on every tick and publication, before the outbox check.
+  Outbox read at loopflow's size, fully routed: ~40 ms CPU, read-only.
+- Slice 3: same migration deletes unrouted changes (and their observed rows)
+  whose record is gone or whose repository has no destination. Live copy:
+  changes 44,094 → 17,472, observed 32,819 → 12,885, routes 6,665 kept, 1.2 s.
+  `planning_write::seed` stays: released migration hooks call it.
+- Tests: `planning_write` (Linear writes leave no journal; bind seeds),
+  `planning_peers` (outbox), `migration_runner` (deletion rule),
+  `planning_foreground_tests::only_git_repositories_journal_and_a_switch_to_git_publishes_the_whole_plan`
+  (acceptance check; in `planning_foreground_tests`, which holds the Git fixtures,
+  not `local_planning.rs`).
+- Not measured: the seed's duration at loopflow's size (3k Tasks, 12k comments).
+
 ## Slices
 
 1. **Journal only Git repositories** (teaches the most: proves the writer

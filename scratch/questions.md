@@ -25,3 +25,7 @@
   publication retries within 5 s instead of 1 s.
 - **One 5 s tick per foreground Session**, not shared across processes.
   Excluded here.
+- **Tick decision is invisible from outside.** Publication writes are
+  conditional, so an unchanged tick that publishes and one that only acquires
+  leave the same store. The outbox read is tested in storage; the loop's use
+  of it is not. A fetch counter would make it observable; not added.

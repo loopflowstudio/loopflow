@@ -95,7 +95,7 @@ fn a_git_title_that_lost_shows_as_conflicted_until_saved_again() {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
+                "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
                 rusqlite::params![id, mutation.to_string()],
             )
             .unwrap();
@@ -108,7 +108,7 @@ fn a_git_title_that_lost_shows_as_conflicted_until_saved_again() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT id,clock FROM planning_peer_changes WHERE object_id=?1 AND field='task_title'",
+            "SELECT id,clock FROM git_tracker_changes WHERE object_id=?1 AND field='task_title'",
             [task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -165,7 +165,7 @@ fn git_rename_conflict(store: &Store, task: &Task) {
     let conn = store.sqlite.conn.lock().unwrap();
     let (created, clock): (String, i64) = conn
         .query_row(
-            "SELECT id,clock FROM planning_peer_changes WHERE object_id=?1 AND field='task_title'",
+            "SELECT id,clock FROM git_tracker_changes WHERE object_id=?1 AND field='task_title'",
             [task.id.as_str()],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -180,7 +180,7 @@ fn git_rename_conflict(store: &Store, task: &Task) {
             "parents": [created],
         });
         conn.execute(
-            "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
+            "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'tasks',?2)",
             rusqlite::params![id, mutation.to_string()],
         )
         .unwrap();
@@ -288,7 +288,7 @@ fn a_project_name_linear_won_is_answered_from_its_line() {
         let project = ProjectId::from_raw(project(&store.sqlite, "/repo-answer"));
         // Bound to a Linear Project, so a saved name queues for Linear.
         store.sqlite.conn.lock().unwrap().execute_batch(
-            "INSERT INTO pm_projects(repo,provider,id,observed_at) VALUES('/repo-answer','linear','linear-answer',1);
+            "INSERT INTO tracker_projects(repo,tracker,id,observed_at) VALUES('/repo-answer','linear','linear-answer',1);
              UPDATE projects SET external_project_id='linear-answer' WHERE id='project-answer';",
         )
         .unwrap();
@@ -363,7 +363,7 @@ fn a_git_project_head_that_lost_is_answered_with_a_merge() {
                 "parents": parents,
             });
             conn.execute(
-                "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,'projects',?2)",
+                "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,'projects',?2)",
                 rusqlite::params![id, mutation.to_string()],
             )
             .unwrap();
@@ -395,7 +395,7 @@ fn a_git_project_head_that_lost_is_answered_with_a_merge() {
         .lock()
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM planning_peer_changes WHERE object_id=?1 AND json_array_length(mutation,'$.parents')=2",
+            "SELECT count(*) FROM git_tracker_changes WHERE object_id=?1 AND json_array_length(mutation,'$.parents')=2",
             [project.as_str()],
             |row| row.get(0),
         )

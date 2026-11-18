@@ -14,7 +14,7 @@ use crate::store::SharedStore;
 
 /// Find or admit the primary conversation of a Wave, or of the repository
 /// itself, and prepare its workspace; `true` when it was admitted now. The
-/// repository's needs no Wave, Task or planning provider.
+/// repository's needs no Wave, Task or tracker.
 pub async fn ensure(
     store: &SharedStore,
     repo: &Path,

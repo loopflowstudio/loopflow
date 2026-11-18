@@ -875,7 +875,7 @@ The repository-wide gate is `uv run python scripts/test.py --all`.
 lf plan list --all --json --subscribe       # every Wave's plan and open Tasks as Desktop shows them
 lf task show LOO-1 --json --subscribe       # the shown Task: work, Graphs, thread
 lf session list --json --subscribe         # the repository's Sessions as Desktop lists them
-lf repo plan --json --subscribe          # stored sync receipts
+lf repo tracker --json --subscribe       # stored sync receipts
 ```
 
 A window observes these reads through `RegistryQuery.subscribeWork()`, one server

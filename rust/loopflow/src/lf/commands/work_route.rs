@@ -62,10 +62,10 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
     Ok(path.into())
 }
 
-/// Routing observes existing records; initialization and schema upgrades belong
-/// to the operation that takes up Work, not destination lookup.
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
-/// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
+/// Routing reads existing records only: initialization and schema upgrades
+/// belong to the operation that takes up Work, and that command fetches
+/// unknown Tasks from the repository's tracker.
 pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,
@@ -229,7 +229,7 @@ impl Forward {
 }
 
 /// Return whether dispatch completed remotely. No Task Graph or checkout is
-/// mutated before routing. Unknown provider aliases retain ordinary acquisition.
+/// mutated before routing. Unknown tracker aliases are still fetched as usual.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(forward) = forward(cli, args, &std::env::current_dir()?)? else {
         return Ok(false);
@@ -559,7 +559,7 @@ fn context_scope(
     })
 }
 
-/// Inspect known Work only. Provider acquisition and plan exchange have their
+/// Inspect known Work only. Tracker fetches and plan exchange have their
 /// own owners; neither is run merely to choose a launch destination.
 pub(super) fn resolve(cli: &Cli) -> Result<Option<TaskExecutionRoute>> {
     let Some(selector) = launch_task(cli) else {

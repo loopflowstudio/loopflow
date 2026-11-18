@@ -45,7 +45,7 @@ struct ProjectHistoryView: View {
                 let status = try await RegistryQueryLocal.shared.status(wave: wave, cwd: repo)
                 projects = status.projects.items
                 error = status.projects.unavailableReason
-                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.linearId == sourceReference) })?.id
+                selected = projects.first(where: { $0.id == sourceReference || $0.slug == sourceReference || (sourceReference != nil && $0.trackerId == sourceReference) })?.id
                     ?? status.currentProject?.id ?? projects.first?.id
             } catch { self.error = error.localizedDescription }
             loaded = true

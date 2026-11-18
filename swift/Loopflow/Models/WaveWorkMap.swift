@@ -21,7 +21,7 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
     public let sync: TrackerSync
     public let current: Bool
     public let id: String
-    public let linearId: String?
+    public let trackerId: String?
     public let slug: String
     public let name: String
     public let status: ProjectStatus
@@ -30,8 +30,21 @@ public struct ProjectPlanningSnapshot: Decodable, Sendable, Identifiable, Hashab
 
     enum CodingKeys: String, CodingKey {
         case id, slug, name, status, krs, current, sync
-        case linearId = "linear_id"
+        case trackerId = "tracker_id"
         case metricTargets = "metric_targets"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        sync = try values.decode(TrackerSync.self, forKey: .sync)
+        current = try values.decode(Bool.self, forKey: .current)
+        id = try values.decode(String.self, forKey: .id)
+        trackerId = try values.decode(String?.self, forKey: .trackerId)
+        slug = try values.decode(String.self, forKey: .slug)
+        name = try values.decode(String.self, forKey: .name)
+        status = try values.decode(ProjectStatus.self, forKey: .status)
+        metricTargets = try values.decode([MetricTarget].self, forKey: .metricTargets)
+        krs = try values.decode([PlanningKeyResult].self, forKey: .krs)
     }
 }
 
@@ -49,9 +62,9 @@ public struct PlanningKeyResult: Decodable, Sendable, Identifiable, Hashable {
     public let holds: Bool
 }
 
-public struct TaskAcquisition: Decodable, Sendable, Hashable {
+public struct TrackerState: Decodable, Sendable, Hashable {
     public let state: State
-    public let observedAt: Int64?
+    public let syncedAt: Int64?
 
     public enum State: String, Decodable, Sendable {
         case available, invalid, removed, absent, unavailable
@@ -59,19 +72,25 @@ public struct TaskAcquisition: Decodable, Sendable, Hashable {
 
     enum CodingKeys: String, CodingKey {
         case state
-        case observedAt = "observed_at"
+        case syncedAt = "synced_at"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        state = try values.decode(State.self, forKey: .state)
+        syncedAt = try values.decode(Int64?.self, forKey: .syncedAt)
     }
 }
 
 public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable {
-    public let acquisition: TaskAcquisition
+    public let trackerState: TrackerState
     public let sync: TrackerSync
     public let id: String
     public let repositoryId: String
     public let repo: String
     public let projectId: String?
     public internal(set) var waveId: String?
-    public let linearId: String?
+    public let trackerId: String?
     public let identifier: String
     public let name: String
     public let description: String
@@ -84,10 +103,31 @@ public struct TaskPlanningSnapshot: Decodable, Sendable, Identifiable, Hashable 
     enum CodingKeys: String, CodingKey {
         case repositoryId = "repo_id", projectId = "project_id", waveId = "wave_id"
         case repo
-        case id, identifier, name, description, rank, state, assignee, sync, acquisition
-        case linearId = "linear_id"
+        case id, identifier, name, description, rank, state, assignee, sync
+        case trackerState = "tracker_state"
+        case trackerId = "tracker_id"
         case completedAt = "completed_at"
         case dueDate = "due_date"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        trackerState = try values.decode(TrackerState.self, forKey: .trackerState)
+        sync = try values.decode(TrackerSync.self, forKey: .sync)
+        id = try values.decode(String.self, forKey: .id)
+        repositoryId = try values.decode(String.self, forKey: .repositoryId)
+        repo = try values.decode(String.self, forKey: .repo)
+        projectId = try values.decode(String?.self, forKey: .projectId)
+        waveId = try values.decode(String?.self, forKey: .waveId)
+        trackerId = try values.decode(String?.self, forKey: .trackerId)
+        identifier = try values.decode(String.self, forKey: .identifier)
+        name = try values.decode(String.self, forKey: .name)
+        description = try values.decode(String.self, forKey: .description)
+        rank = try values.decode(UInt32.self, forKey: .rank)
+        state = try values.decode(String?.self, forKey: .state)
+        completedAt = try values.decode(String?.self, forKey: .completedAt)
+        dueDate = try values.decode(String?.self, forKey: .dueDate)
+        assignee = try values.decode(String?.self, forKey: .assignee)
     }
 
     public var terminalLabel: String? {

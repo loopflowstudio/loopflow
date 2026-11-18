@@ -144,7 +144,7 @@ lf task unassign LOO-523
 
 A Task is owned by (person, Machine) or unowned. Its `task_ownership` log holds
 `claim` and `unclaim` entries that are never updated or deleted; the later entry
-wins in provider order (Linear comment time, or the Git planning journal order,
+wins in tracker order (Linear comment time, or the Git planning journal order,
 where each entry sorts after every entry its writing Machine had seen). Each
 entry names the Machine that wrote it, so every Machine stores the same rows. A
 move is a claim by the same person naming another Machine; it needs only the

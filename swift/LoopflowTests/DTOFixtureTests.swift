@@ -87,6 +87,7 @@ struct DTOFixtureTests {
             WaveRemoval.self, from: String(decoding: loadFixtureData("wave_removal.json"), as: UTF8.self))
         #expect(removal.name == "desktop")
         #expect(removal.destination == nil)
+        #expect(removal.projects == 1)
         #expect(removal.moved.filter(\.started).count == 1)
         #expect(removal.files == nil)
         #expect(removal.summary.first?.hasPrefix("2 open Tasks move to the repository") == true)
@@ -237,10 +238,14 @@ struct DTOFixtureTests {
         let report = try JSONDecoder().decode(ContextExplanation.self, from: data)
         #expect(report.checkout == .unbound)
         #expect(report.executionMachine == .unavailable(reason: "No local execution location; peer execution has not been observed"))
-        #expect(report.planningObservedAt == nil)
+        #expect(report.trackerSyncedAt == 1_791_499_900)
         #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(report)) == report)
         var wire = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        wire.removeValue(forKey: "task")
+        wire["tracker_synced_at"] = NSNull()
+        let unsynced = try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
+        #expect(unsynced.trackerSyncedAt == nil)
+        #expect(try JSONDecoder().decode(ContextExplanation.self, from: JSONEncoder().encode(unsynced)) == unsynced)
+        wire.removeValue(forKey: "tracker_synced_at")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(ContextExplanation.self, from: JSONSerialization.data(withJSONObject: wire))
         }
@@ -720,7 +725,7 @@ struct DTOFixtureTests {
         #expect(detail.tasks.items[0].runtime?.provider == nil)
         #expect(detail.tasks.items[0].task.sync.actions[0].kind == "create")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
-        #expect(detail.tasks.items[0].task.linearId == "issue-1")
+        #expect(detail.tasks.items[0].task.trackerId == "issue-1")
         #expect(detail.tasks.items[0].task.completedAt == nil)
         #expect(detail.tasks.items[0].pr?.publication?.github?.number == 912)
         #expect(detail.tasks.items[0].pr?.id == "pr_33333333333333333333333333333333")
@@ -805,6 +810,7 @@ struct DTOFixtureTests {
             if case .unknown(.targetUnavailable(value: 1.0, sourceWindowStart: _, sourceWindowEnd: _)) = $0.evidence { true } else { false }
         })
         #expect(portfolio.contractIssues.count == 5)
+        #expect(portfolio.contractIssues.contains(.projectUnavailable(waveId: "wave-other", reason: "PM snapshot unavailable")))
         #expect(
             portfolio.metrics[0].description
                 == "Fraction of qualifying events that settled successfully."
@@ -1018,10 +1024,11 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Peer planning keeps independent receipts")
-    func peerPlanningStatus() throws {
-        let data = try loadFixtureData("peer_planning_status.json")
-        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
+    @Test("Git destinations track fetch and publication independently")
+    func gitDestinations() throws {
+        let data = try loadFixtureData("git_destinations.json")
+        let statuses = try JSONDecoder().decode([GitDestination].self, from: data)
+        #expect(statuses[0].fetchError == "remote unavailable")
         #expect(statuses[0].pendingLocal)
         #expect(statuses[0].publicationState == "unconfirmed")
         #expect(statuses[0].importedRevision == "retained-import")
@@ -1029,11 +1036,11 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        for field in ["conflicts", "pending_local"] {
+        for field in ["conflicts", "pending_local", "fetch_error"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)
             #expect(throws: (any Error).self) {
-                try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+                try JSONDecoder().decode(GitDestination.self, from: JSONSerialization.data(withJSONObject: object))
             }
         }
     }
@@ -1050,14 +1057,14 @@ struct DTOFixtureTests {
             try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
         }
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
-                                                "activity", "task", "peer_planning"])
+                                                "activity", "task", "git_destinations"])
         #expect(frames[0].answers == nil)
         #expect(frames[2].answers == 7)
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
               case .workActivity(let activity?) = frames[4].content,
-              case .peerPlanning(let peers?) = frames[7].content else {
+              case .gitDestinations(let reading?) = frames[7].content else {
             Issue.record("fixture parts changed shape")
             return
         }
@@ -1066,8 +1073,8 @@ struct DTOFixtureTests {
         #expect(sessions.repo == "/src/loopflow")
         #expect(!sessions.includesHeadless)
         #expect(activity.scope.task == "LOO-1")
-        #expect(peers.repo == "/src/loopflow")
-        #expect(peers.destinations.isEmpty)
+        #expect(reading.repo == "/src/loopflow")
+        #expect(reading.destinations.isEmpty)
         guard case .task(nil) = frames[3].content else {
             Issue.record("a failed reading has no body")
             return
@@ -1112,20 +1119,25 @@ struct DTOFixtureTests {
         #expect(decoded == statuses)
     }
 
-    @Test("Task acquisition evidence is required independently of delivery")
-    func taskAcquisitionEvidence() throws {
+    @Test("Task tracker state is required independently of delivery")
+    func taskTrackerState() throws {
         let root = try loadFixture("local_task.json")
         let detail = try #require(root["task"] as? [String: Any])
         var task = try #require(detail["task"] as? [String: Any])
-        for state in ["available", "invalid", "removed", "unavailable"] {
-            task["acquisition"] = ["state": state, "observed_at": 17]
+        for state in ["available", "absent", "invalid", "removed", "unavailable"] {
+            task["tracker_state"] = ["state": state, "synced_at": 17]
             let decoded = try JSONDecoder().decode(TaskPlanningSnapshot.self,
                 from: JSONSerialization.data(withJSONObject: task))
-            #expect(decoded.acquisition.state.rawValue == state)
-            #expect(decoded.acquisition.observedAt == 17)
+            #expect(decoded.trackerState.state.rawValue == state)
+            #expect(decoded.trackerState.syncedAt == 17)
             #expect(decoded.id == task["id"] as? String)
         }
-        task.removeValue(forKey: "acquisition")
+        task["tracker_state"] = ["state": "available"]
+        #expect(throws: (any Error).self) {
+            try JSONDecoder().decode(TaskPlanningSnapshot.self,
+                from: JSONSerialization.data(withJSONObject: task))
+        }
+        task.removeValue(forKey: "tracker_state")
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(TaskPlanningSnapshot.self,
                 from: JSONSerialization.data(withJSONObject: task))

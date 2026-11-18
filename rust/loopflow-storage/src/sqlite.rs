@@ -25,17 +25,17 @@ pub mod desktop_shells;
 pub mod durable;
 mod github_people;
 mod graph_inventory;
-pub mod linear_acceptance;
-mod linear_observations;
+pub mod linear_events;
+mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 
+mod git_tracker;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
 pub mod planning_order;
-mod planning_peers;
-pub use planning_peers::PeerImport;
+pub use git_tracker::GitPlanImport;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;
@@ -273,7 +273,7 @@ fn home_dir_in(conn: &Connection) -> StoreResult<PathBuf> {
         .ok_or_else(|| StoreError::InvalidData("store has no owning Machine path".into()))
 }
 
-/// A Task's checkout on this Machine, usable without chapter metadata.
+/// A Task's checkout on this Machine, usable without project metadata.
 #[derive(Debug, Clone)]
 pub struct TaskCheckout {
     pub task_id: TaskId,

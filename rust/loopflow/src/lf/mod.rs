@@ -169,6 +169,15 @@ impl Cli {
             let (key, text) = setting
                 .split_once('=')
                 .ok_or_else(|| anyhow::anyhow!("--setting expects KEY=YAML"))?;
+            let parts: Vec<_> = key.split('.').collect();
+            if let Some(fields) = loopflow_execution::config::keys::tracker_path(&parts) {
+                loopflow_execution::config::keys::edit_tracker(
+                    &mut value,
+                    fields,
+                    Some(serde_yaml_ng::from_str(text)?),
+                )?;
+                continue;
+            }
             let parsed = loopflow_execution::config::settings::parse_value(key, text)?;
             let typed = loopflow_execution::config::keys::typed_key(key);
             loopflow_execution::config::settings::insert(
@@ -594,8 +603,8 @@ pub enum Commands {
         json: bool,
     },
 
-    /// This repository: its identity and checkout, where it exchanges planning,
-    /// its releases, CI, people and size
+    /// This repository: its identity and checkout, its tracker, releases, CI,
+    /// people and size
     #[command(args_conflicts_with_subcommands = true)]
     Repo {
         /// Print the identity as JSON
@@ -652,7 +661,7 @@ pub enum Commands {
         cmd: DiscordCommand,
     },
     /// Internal provider turn-boundary hook: context at startup and compaction,
-    /// steers at tool and prompt boundaries, Linear acquisition at turn end.
+    /// steers at tool and prompt boundaries, Linear fetch at turn end.
     // Running providers retain this older Stop spelling across lf upgrades.
     #[command(name = "__context-block", alias = "__planning-check", hide = true)]
     ContextBlock {
@@ -670,12 +679,11 @@ pub enum Commands {
 /// size and checkout.
 #[derive(Subcommand, Debug)]
 pub enum RepoCommand {
-    /// Where this repository exchanges planning: selection, retained imports and
-    /// held records, without contacting Git
+    /// Show the repository tracker, its open and lost actions, and Git destinations
     #[command(args_conflicts_with_subcommands = true)]
-    Plan {
+    Tracker {
         #[command(subcommand)]
-        cmd: Option<RepoPlanCommand>,
+        cmd: Option<RepoTrackerCommand>,
         #[arg(long)]
         json: bool,
         /// Print a JSON line now and each time the status changes, until stdin closes
@@ -1207,11 +1215,11 @@ impl WaveCommand {
             }
             Self::Plan { cmd, .. } => cmd.is_some(),
             Self::Remove { preview, .. } => !preview,
-            Self::EditPlan { .. }
+            Self::EditProject { .. }
             | Self::Create { .. }
             | Self::Sync { .. }
             | Self::Rename { .. }
-            | Self::UpdatePlan { .. } => true,
+            | Self::UpdateProject { .. } => true,
         }
     }
 }
@@ -1320,10 +1328,10 @@ impl DesktopCommand {
 impl RepoCommand {
     pub fn changes_work(&self) -> bool {
         match self {
-            Self::Plan { cmd, .. } => match cmd {
-                Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
-                Some(RepoPlanCommand::Answer { .. }) => true,
-                Some(RepoPlanCommand::Journal { .. }) | None => false,
+            Self::Tracker { cmd, .. } => match cmd {
+                Some(RepoTrackerCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoTrackerCommand::Answer { .. }) => true,
+                Some(RepoTrackerCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
             Self::Path | Self::Ci { .. } | Self::People { .. } | Self::Tokens { .. } => false,
@@ -1525,22 +1533,22 @@ pub enum SkillCommand {
     External(Vec<String>),
 }
 
-/// Select a Wave's current chapter, or an exact retained historical Project.
+/// Select a Wave's current Project, or an exact retained historical Project.
 #[derive(Args, Debug)]
-pub struct WavePlanTarget {
+pub struct WaveProjectTarget {
     /// Wave name or ID (default: the ambient Wave)
     #[arg(conflicts_with = "project")]
     pub wave: Option<String>,
-    /// Exact retained Project ID, provider ID or unique name instead of current selection
+    /// Exact retained Project ID, tracker ID or unique name instead of current selection
     #[arg(long)]
     pub project: Option<String>,
 }
 
-impl WavePlanTarget {
-    pub fn as_plan_target(&self) -> loopflow_execution::ops::project::PlanTarget<'_> {
+impl WaveProjectTarget {
+    pub fn as_project_target(&self) -> loopflow_execution::ops::project::ProjectTarget<'_> {
         match self.project.as_deref() {
-            Some(project) => loopflow_execution::ops::project::PlanTarget::Project(project),
-            None => loopflow_execution::ops::project::PlanTarget::Wave(self.wave.as_deref()),
+            Some(project) => loopflow_execution::ops::project::ProjectTarget::Project(project),
+            None => loopflow_execution::ops::project::ProjectTarget::Wave(self.wave.as_deref()),
         }
     }
 }
@@ -1898,7 +1906,7 @@ pub enum SessionCommand {
 
 #[derive(Subcommand, Debug)]
 pub enum WaveCommand {
-    /// Read chapter plans and Tasks without starting work; an explicit Wave includes history
+    /// Read Projects and Tasks without starting work; an explicit Wave includes history
     Show {
         wave: Option<String>,
         /// Find an exact Task, including historical planning
@@ -1920,21 +1928,21 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: WaveGraphCommand,
     },
-    /// Edit the selected chapter's name or summary
-    EditPlan {
+    /// Edit the selected Project's name or summary
+    EditProject {
         #[command(flatten)]
-        target: WavePlanTarget,
+        target: WaveProjectTarget,
         #[arg(long)]
         name: Option<String>,
         #[arg(long)]
         summary: Option<String>,
-        /// Authored chapter prose
+        /// Authored Project prose
         #[arg(long)]
         description: Option<String>,
     },
 
     /// Create a Wave: register it, seed and commit .lf/wave/<name>/ on the main checkout,
-    /// and start its first chapter. Creating an existing Wave changes nothing.
+    /// and start its first Project. Creating an existing Wave changes nothing.
     Create {
         wave: String,
         /// Objective text for the new Wave's GOAL.md
@@ -1944,7 +1952,7 @@ pub enum WaveCommand {
         json: bool,
     },
     /// Remove a Wave and its child Waves. Open Tasks move to the parent Wave, or the
-    /// repository; chapters, completed Tasks and Sessions stay readable in history.
+    /// repository; Projects, completed Tasks and Sessions stay readable in history.
     #[command(after_help = "Run again to finish an interrupted removal.")]
     Remove {
         wave: String,
@@ -1967,7 +1975,7 @@ pub enum WaveCommand {
         #[command(subcommand)]
         cmd: Option<WavePlanCommand>,
     },
-    /// Refresh one Wave's planning from its provider (Git or Linear), then show its status;
+    /// Refresh one Wave's planning from its tracker, then show its status;
     /// a Wave with no Linear Initiative shows its local planning
     Sync {
         /// Wave name (default: the ambient wave)
@@ -1986,7 +1994,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's current plan, Task details, and execution evidence.
+    /// Show one Wave's current Project, Task details, and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,
@@ -2000,7 +2008,7 @@ pub enum WaveCommand {
         selection: crate::lf::Selection,
     },
     /// Rename a Wave, moving .lf/wave/<name>/ on the main checkout; its Tasks,
-    /// chapters and Sessions keep their identity
+    /// Projects and Sessions keep their identity
     Rename {
         wave: String,
         /// The new name; omit to keep it while changing --repo or --title
@@ -2014,13 +2022,13 @@ pub enum WaveCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Replace the current chapter's KRs and targets
-    UpdatePlan {
+    /// Replace the current Project's KRs and targets
+    UpdateProject {
         #[arg(short = 'w', long)]
         wave: Option<String>,
-        /// The complete plan as JSON
+        /// The Project KRs and metric targets as JSON
         #[arg(long)]
-        plan: std::path::PathBuf,
+        file: std::path::PathBuf,
     },
 }
 
@@ -2142,7 +2150,7 @@ pub enum TaskCommand {
     /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
     #[command(after_help = "A lost line is a value the tracker kept over yours. \
 --keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
-`lf repo plan answer <id>` answers one.")]
+`lf repo tracker answer <id>` answers one.")]
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
@@ -2418,7 +2426,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         /// Zero-based position in the Project's Task order
         #[arg(long)]
         rank: Option<u32>,
-        /// Assignee identity; provider user ID in connected plans
+        /// Assignee identity; tracker user ID in connected plans
         #[arg(long)]
         assignee: Option<String>,
         #[arg(short = 'w', long)]
@@ -2805,7 +2813,7 @@ pub enum PlanCommand {
 }
 
 #[derive(Subcommand, Debug)]
-pub enum RepoPlanCommand {
+pub enum RepoTrackerCommand {
     /// Show, create, or recover the planning user key that names a `personal: true` ref
     Key {
         #[arg(long, conflicts_with = "recover")]
@@ -2821,7 +2829,7 @@ pub enum RepoPlanCommand {
     /// Answer a lost line: keep the tracker's value, or save yours again and send it
     #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
     Answer {
-        /// The line's id, as `lf repo plan` prints it
+        /// The line's id, as `lf repo tracker` prints it
         id: String,
         /// Keep the tracker's value; the line closes
         #[arg(long)]
@@ -3598,10 +3606,6 @@ mod tests {
         for removed in ["start", "stop", "pause", "resume", "chat", "reply"] {
             assert!(command.find_subcommand(removed).is_none());
         }
-        assert!(
-            Cli::try_parse_from(["lf", "wave", "new-chapter", "October", "--plan", "p.json"])
-                .is_err()
-        );
         assert!(Cli::try_parse_from(["lf", "steer", "session_1", "m", "--repo"]).is_err());
         assert!(Cli::try_parse_from(["lf", "session", "steer", "session_1", "m"]).is_err());
         assert!(Cli::try_parse_from(["lf", "task", "steer", "LOO-1", "m"]).is_err());

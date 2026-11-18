@@ -15,7 +15,7 @@ use super::SqliteStore;
 
 impl SqliteStore {
     /// A Task may launch a Graph while it is ready, not being abandoned, and
-    /// planned in its Wave's current chapter.
+    /// planned in its Wave's current project.
     pub fn require_task_launch(&self, task_id: &TaskId) -> StoreResult<()> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
@@ -687,7 +687,7 @@ mod durable_store_tests {
     }
 
     #[test]
-    fn chapter_evidence_marks_taskless_graphs_started_in_their_checkout() {
+    fn project_evidence_marks_taskless_graphs_started_in_their_checkout() {
         let (dir, store, existing) = store_with_task();
         // A checkout recorded without an ownership entry, so only the Graph is evidence.
         let (task, _) = unregistered_task(&store, &existing, dir.path().join("unclaimed"));

@@ -46,7 +46,7 @@ pub(crate) fn resume_session_attachment(
     resume.claim_attachment(process, previous, start.as_ref(), &caller)
 }
 
-/// Input replacement and attachment admission commit together. Acquisition
+/// Input replacement and attachment admission commit together. The caller
 /// retains both checkout admission and attachment fences without holding SQL.
 pub(crate) fn claim_session_input(
     store: &SqliteStore,

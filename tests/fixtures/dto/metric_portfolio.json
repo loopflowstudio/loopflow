@@ -363,7 +363,7 @@
       "metric_id": "deleted"
     },
     {
-      "kind": "chapter_unavailable",
+      "kind": "project_unavailable",
       "wave_id": "wave-other",
       "reason": "PM snapshot unavailable"
     }

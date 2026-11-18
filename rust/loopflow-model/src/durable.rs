@@ -175,7 +175,7 @@ pub struct TaskOwnershipEntry {
     pub person: Option<String>,
     /// The person's stable key; names are display only.
     pub person_key: Option<String>,
-    /// The person's `people` id, their planning provider's identity for them.
+    /// The person's `people` id, their tracker's identity for them.
     /// Absent from entries released lf wrote and where the writer knew none.
     pub person_id: Option<String>,
     pub machine_id: Option<MachineId>,

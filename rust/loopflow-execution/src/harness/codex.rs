@@ -777,9 +777,7 @@ impl Driver {
         // values as configuration.
         let tool_environment = super::conversation_environment(command.as_std(), launch);
         // Caller/capture provenance reaches tools only through that policy.
-        for name in crate::agent::EXECUTION_IDENTITY_ENV {
-            command.env_remove(name);
-        }
+        crate::agent::remove_caller_session_env(command.as_std_mut());
         let native = self.approval == ApprovalPolicy::NativeClient;
         let (thread_method, mut thread_params) =
             build_thread_request(launch, self.resume_agent_session.as_ref(), !native);

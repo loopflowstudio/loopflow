@@ -510,8 +510,8 @@ impl PlanningRefresh {
 /// Linear, or the repository's Git planning ref, whose exchange is per repository.
 pub fn refresh_status(directory: &std::path::Path, wave: Option<&str>) -> Result<PlanningRefresh> {
     let repo = loopflow_execution::repo::working_directory_in(directory)?;
-    if crate::lf::commands::plan::plans_through_git(&repo)? {
-        crate::lf::commands::plan::refresh(&repo)?;
+    if crate::lf::commands::tracker::plans_through_git(&repo)? {
+        crate::lf::commands::tracker::refresh(&repo)?;
         return Ok(PlanningRefresh::Repository);
     }
     let wave =

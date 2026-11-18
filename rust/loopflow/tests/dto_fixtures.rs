@@ -104,7 +104,7 @@ fn wave_detail_preserves_graph_and_machine() {
     assert_eq!(tasks[0].task.sync.actions[0].change, "create");
     assert_eq!(tasks[0].task.id, tasks[0].runtime.as_ref().unwrap().work_id);
     assert!(tasks[0].runtime.as_ref().unwrap().provider.is_none());
-    assert_eq!(tasks[0].task.linear_id.as_deref(), Some("issue-1"));
+    assert_eq!(tasks[0].task.tracker_id.as_deref(), Some("issue-1"));
     let Evidence::Ok { items: runs, .. } = &snapshot.history else {
         panic!("fixture contains recorded Runs");
     };
@@ -420,19 +420,32 @@ fn task_detail_says_each_fact_once() {
 }
 
 #[test]
-fn task_status_preserves_canonical_work_and_acquisition_evidence() {
+fn task_status_preserves_canonical_work_and_tracker_state() {
     use loopflow_execution::ops::task::TaskStatus;
     let json = include_str!("../../../tests/fixtures/dto/task_status.json");
-    let status: TaskStatus = serde_json::from_str(json).unwrap();
+    let wire: serde_json::Value = serde_json::from_str(json).unwrap();
+    for (record, field) in [
+        ("tracker_state", "synced_at"),
+        ("task", "tracker_id"),
+        ("project", "tracker_id"),
+    ] {
+        let mut missing = wire.clone();
+        missing[record].as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<TaskStatus>(missing).is_err(),
+            "{record}.{field}"
+        );
+    }
+    let status: TaskStatus = serde_json::from_value(wire).unwrap();
     let task = status.task.as_ref().unwrap();
     let project = status.project.as_ref().unwrap();
     assert_eq!(task.title, "Route incoming mail");
     assert_eq!(task.project_id, Some(project.id.clone()));
-    assert_ne!(task.id.as_str(), task.linear_id.as_ref().unwrap().as_str());
+    assert_ne!(task.id.as_str(), task.tracker_id.as_ref().unwrap().as_str());
     assert_eq!(project.description, "Retained authored prose.");
-    assert_eq!(status.observed_at, Some(1790683200));
+    assert_eq!(status.tracker_state.synced_at, Some(1790683200));
     assert_eq!(
-        status.planning_state,
+        status.tracker_state.state,
         loopflow_execution::store::PlanningState::Available
     );
     assert!(!status.planning_stale);
@@ -658,8 +671,8 @@ fn subscribe_frames_carry_each_reads_json_result() {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
-            "peer_planning" => {
-                read::<Vec<loopflow_execution::store::PeerPlanningStatus>>(&body["destinations"]);
+            "git_destinations" => {
+                read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
                 assert_eq!(body["tracker"], "git");
             }
             other => panic!("unknown subscription {other}"),
@@ -885,6 +898,30 @@ fn desktop_opening_distinguishes_launch_acceptance_from_usable_and_failed() {
 }
 
 #[test]
+fn context_explanation_reports_the_tracker_sync_time() {
+    use loopflow_execution::ops::context::ContextExplanation;
+
+    let json = include_str!("../../../tests/fixtures/dto/context_explanation.json");
+    let mut wire: serde_json::Value = serde_json::from_str(json).unwrap();
+    let report: ContextExplanation = serde_json::from_value(wire.clone()).unwrap();
+    assert_eq!(report.tracker_synced_at, Some(1_791_499_900));
+    assert!(report
+        .render()
+        .lines()
+        .any(|line| line == "Tracker synced: 1791499900"));
+    assert_eq!(serde_json::to_value(report).unwrap(), wire);
+
+    wire["tracker_synced_at"] = serde_json::Value::Null;
+    let report: ContextExplanation = serde_json::from_value(wire.clone()).unwrap();
+    assert!(report
+        .render()
+        .lines()
+        .any(|line| line == "Tracker synced: unknown"));
+    wire.as_object_mut().unwrap().remove("tracker_synced_at");
+    assert!(serde_json::from_value::<ContextExplanation>(wire).is_err());
+}
+
+#[test]
 fn task_run_explanations_preserve_actions_and_missing_evidence() {
     use loopflow_execution::ops::task::{TaskRunAction, TaskRunExplanation};
     let json = include_str!("../../../tests/fixtures/dto/task_run_explanations.json");
@@ -1005,13 +1042,17 @@ fn session_steers_say_when_each_was_read() {
 }
 
 #[test]
-fn peer_planning_status_keeps_independent_receipts() {
+fn git_destinations_keeps_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/peer_planning_status.json"
+        "../../../tests/fixtures/dto/git_destinations.json"
     ))
     .unwrap();
-    let statuses: Vec<loopflow_execution::store::PeerPlanningStatus> =
+    let statuses: Vec<loopflow_execution::store::GitDestination> =
         serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        statuses[0].fetch_error.as_deref(),
+        Some("remote unavailable")
+    );
     assert!(statuses[0].pending_local);
     assert_eq!(
         statuses[0].publication_state.as_deref(),
@@ -1020,12 +1061,11 @@ fn peer_planning_status_keeps_independent_receipts() {
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
     assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "pending_local"] {
+    for field in ["conflicts", "pending_local", "fetch_error"] {
         let mut missing = value[1].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
-            serde_json::from_value::<loopflow_execution::store::PeerPlanningStatus>(missing)
-                .is_err()
+            serde_json::from_value::<loopflow_execution::store::GitDestination>(missing).is_err()
         );
     }
 }

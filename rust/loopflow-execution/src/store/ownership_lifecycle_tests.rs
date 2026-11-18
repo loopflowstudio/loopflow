@@ -207,7 +207,7 @@ impl Pair {
             let path = repo.path().canonicalize().unwrap();
             let path = path.to_str().unwrap().to_owned();
             crate::repository::location::bind_repository(&store, &path, &repository).unwrap();
-            store.bind_peer_planning(&path, &destination).unwrap();
+            store.bind_git_destination(&path, &destination).unwrap();
             Side { store, repo, path }
         };
         let (laptop, mini) = (side("laptop.db"), side("mini.db"));
@@ -243,9 +243,9 @@ impl Pair {
         let destination = self.destination.id();
         let journal = from
             .store
-            .export_peer_planning(&from.path, &destination)
+            .export_git_plan(&from.path, &destination)
             .unwrap();
-        crate::store::planning_peers::import_peer_planning(
+        crate::store::git_tracker::import_git_plan(
             &to.store,
             &to.path,
             &destination,

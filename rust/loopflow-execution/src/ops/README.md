@@ -12,7 +12,7 @@ them, through the repository's tracker in `tracker.rs`.
 
 ```text
 any save                  queue the action → one pass, the saved owner first
-lf repo plan              list unconfirmed actions: owner, kind, phase, error
+lf repo tracker           list unconfirmed actions: owner, kind, phase, error
 lf task sync ISSUE        drain that owner now, looking for lost replies at once
 ```
 

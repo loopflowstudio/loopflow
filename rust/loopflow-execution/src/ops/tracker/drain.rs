@@ -72,7 +72,7 @@ pub enum Scope<'a> {
 }
 
 /// One bounded pass for `repo` when it has a tracker. With nothing unconfirmed
-/// it asks the provider nothing, not even to build the tracker.
+/// it asks the tracker nothing, not even to build the tracker.
 pub(crate) async fn drain_repository(
     store: &Store,
     repo: &str,
@@ -248,19 +248,19 @@ fn bound(store: &Store, owner: &ActionOwner) -> OpsResult<Option<String>> {
             .sqlite
             .task(id)
             .map_err(message)?
-            .and_then(|task| task.linear_id)
+            .and_then(|task| task.tracker_id)
             .map(|id| id.as_str().to_owned()),
         ActionOwner::Project(id) => store
             .sqlite
             .project(id)
             .map_err(message)?
-            .and_then(|project| project.linear_id)
+            .and_then(|project| project.tracker_id)
             .map(|id| id.as_str().to_owned()),
         ActionOwner::Wave(_) => None,
     })
 }
 
-/// Serialize provider actions only; saves and acquisition never take this lock.
+/// Serialize tracker actions only; saves and acquisition never take this lock.
 /// The file stays in place so another connection always locks the same inode.
 pub(crate) fn lock_delivery(path: &Path) -> std::io::Result<Option<File>> {
     std::fs::create_dir_all(path.parent().expect("delivery lock has a parent directory"))?;
@@ -344,7 +344,7 @@ impl Drain<'_> {
             .project(&loopflow_model::durable::ProjectId::from_raw(project))
             .ok()
             .flatten()
-            .is_none_or(|project| project.linear_id.is_none())
+            .is_none_or(|project| project.tracker_id.is_none())
     }
 
     /// Whether this action relates its Task to one with no tracker object yet.
@@ -428,7 +428,7 @@ impl Drain<'_> {
                 }
             }
             _ if parent => return Ok(Step::Wait),
-            // Moving Tasks needs the provider's complete list first.
+            // Moving Tasks needs the tracker's complete list first.
             _ if action.kind == ActionKind::Order => Some(self.look(&action).await?),
             _ => None,
         };

@@ -412,7 +412,7 @@ impl World {
         Ok(())
     }
 
-    /// Set the current Project's KRs and metric targets, as `lf wave edit-plan`
+    /// Set the current Project's KRs and metric targets, as `lf wave edit-project`
     /// does. Targets name metrics already authored with [`Self::metric`].
     pub fn plan(
         &self,
@@ -435,7 +435,7 @@ impl World {
             })
             .collect();
         self.runtime
-            .block_on(loopflow_execution::ops::project::update_plan(
+            .block_on(loopflow_execution::ops::project::update_project(
                 &self.repo,
                 Some(wave),
                 &krs,

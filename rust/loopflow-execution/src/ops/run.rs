@@ -36,7 +36,7 @@ pub fn render_task_context(
     );
     if let Some(project) = project {
         context.push_str(&format!(
-            "\n\nChapter plan: {} (source {})\n{}",
+            "\n\nProject: {} (source {})\n{}",
             project.name,
             project.id,
             render_project_context(project)
@@ -47,7 +47,7 @@ pub fn render_task_context(
     }
     context.push_str(&format!(
         "\nTask directive snapshot synced at: {}\nWorktree: {}\nBranch: {}\nBase commit: {}",
-        task.pm_snapshot_synced_at
+        task.tracker_synced_at
             .map(|at| at.to_string())
             .unwrap_or_else(|| "not observed".into()),
         task.worktree
@@ -378,13 +378,13 @@ mod tests {
 
             summary: String::new(),
             status: loopflow_storage::work::project::ProjectStatus::Started,
-            linear_id: Some(LinearProjectId::new(planning_id).unwrap()),
+            tracker_id: Some(LinearProjectId::new(planning_id).unwrap()),
             slug: slug.to_string(),
             name: slug.to_string(),
             description: "Ship the requested behavior.".to_string(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
             created_at: now,
@@ -403,13 +403,13 @@ mod tests {
             id: TaskId::new(),
 
             revision: 0,
-            linear_id: Some(LinearIssueId::new("runtime-research").unwrap()),
+            tracker_id: Some(LinearIssueId::new("runtime-research").unwrap()),
             identifier: "LOO-267".to_string(),
             title: "Research the runtime".to_string(),
             description: "Compare independent findings.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(wave.id().clone()),
             project_id: Some(project.id.clone()),
             worktree: Some(worktree),
@@ -449,7 +449,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -473,7 +473,7 @@ mod tests {
             &store.sqlite,
             wave.id(),
             None,
-            project.linear_id.as_ref().unwrap().as_str(),
+            project.tracker_id.as_ref().unwrap().as_str(),
             &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
         )
         .unwrap();
@@ -930,7 +930,7 @@ mod tests {
 
         let error = resolve_work_binding(&store, directory.path(), "project:shared")
             .await
-            .expect_err("chapters are not independent operators");
+            .expect_err("projects are not independent operators");
 
         assert!(error.to_string().contains("expected task or wave"));
     }
@@ -1016,7 +1016,7 @@ mod tests {
 
         for selector in [
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
             &task.identifier,
         ] {
             let binding = resolve_work_binding(&store, repo.path(), &format!("task:{selector}"))
@@ -1182,7 +1182,7 @@ mod tests {
         for selector in [
             task.identifier.as_str(),
             task.id.as_str(),
-            task.linear_id.as_ref().unwrap().as_str(),
+            task.tracker_id.as_ref().unwrap().as_str(),
         ] {
             let rows = crate::store::sessions::conversation_history(
                 &store.sqlite,
@@ -1349,7 +1349,6 @@ mod tests {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".to_string(),
                     initiative: "initiative-1".to_string(),
                     synced_at: OffsetDateTime::now_utc().unix_timestamp(),
                     snapshot,

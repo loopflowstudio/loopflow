@@ -309,10 +309,10 @@ pub enum MergeMethod {
 
 /// One synchronization destination for the repository's local planning.
 /// Repository configuration overrides the personal default as one value.
-/// Every remote provider names the team that owns the repository's Tasks.
+/// Every remote tracker names the team that owns the repository's Tasks.
 #[derive(schemars::JsonSchema, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(try_from = "RawPlanningConfig", into = "RawPlanningConfig")]
-pub enum PlanningConfig {
+#[serde(try_from = "RawTrackerConfig", into = "RawTrackerConfig")]
+pub enum TrackerConfig {
     Git {
         remote: String,
         plan: GitPlan,
@@ -354,8 +354,10 @@ impl GitPlan {
 }
 
 #[derive(schemars::JsonSchema, Clone, Serialize, Deserialize)]
+// Released shape until LOO-784 writes canonical spellings.
 #[serde(tag = "provider", rename_all = "snake_case", deny_unknown_fields)]
-enum RawPlanningConfig {
+#[schemars(!tag)]
+enum RawTrackerConfig {
     Git {
         #[serde(default = "default_planning_remote")]
         remote: String,
@@ -377,18 +379,18 @@ enum RawPlanningConfig {
     Asana { team: String },
 }
 
-impl TryFrom<RawPlanningConfig> for PlanningConfig {
+impl TryFrom<RawTrackerConfig> for TrackerConfig {
     type Error = String;
 
-    fn try_from(raw: RawPlanningConfig) -> Result<Self, Self::Error> {
+    fn try_from(raw: RawTrackerConfig) -> Result<Self, Self::Error> {
         let (remote, shared, personal) = match raw {
-            RawPlanningConfig::Git {
+            RawTrackerConfig::Git {
                 remote,
                 shared,
                 personal,
             } => (remote, shared, personal),
-            RawPlanningConfig::Linear { team } => return Ok(Self::Linear { team }),
-            RawPlanningConfig::Asana { team } => return Ok(Self::Asana { team }),
+            RawTrackerConfig::Linear { team } => return Ok(Self::Linear { team }),
+            RawTrackerConfig::Asana { team } => return Ok(Self::Asana { team }),
         };
         let plan = match (shared, personal) {
             (Some(name), true) => {
@@ -404,10 +406,10 @@ impl TryFrom<RawPlanningConfig> for PlanningConfig {
     }
 }
 
-impl From<PlanningConfig> for RawPlanningConfig {
-    fn from(config: PlanningConfig) -> Self {
+impl From<TrackerConfig> for RawTrackerConfig {
+    fn from(config: TrackerConfig) -> Self {
         match config {
-            PlanningConfig::Git { remote, plan } => {
+            TrackerConfig::Git { remote, plan } => {
                 let (shared, personal) = match plan {
                     GitPlan::Shared(name) => (Some(name), false),
                     GitPlan::Personal => (None, true),
@@ -418,8 +420,8 @@ impl From<PlanningConfig> for RawPlanningConfig {
                     personal,
                 }
             }
-            PlanningConfig::Linear { team } => Self::Linear { team },
-            PlanningConfig::Asana { team } => Self::Asana { team },
+            TrackerConfig::Linear { team } => Self::Linear { team },
+            TrackerConfig::Asana { team } => Self::Asana { team },
         }
     }
 }
@@ -428,8 +430,8 @@ fn default_planning_remote() -> String {
     "origin".into()
 }
 
-impl PlanningConfig {
-    /// The remote planning provider's product name; Git planning has none.
+impl TrackerConfig {
+    /// The remote tracker's product name; Git planning has none.
     pub fn remote_name(&self) -> Option<&'static str> {
         match self {
             Self::Git { .. } => None,
@@ -439,7 +441,7 @@ impl PlanningConfig {
     }
 }
 
-impl Default for PlanningConfig {
+impl Default for TrackerConfig {
     fn default() -> Self {
         Self::Git {
             remote: default_planning_remote(),
@@ -449,7 +451,7 @@ impl Default for PlanningConfig {
 }
 
 impl Config {
-    pub fn planning_transport(&self) -> PlanningConfig {
+    pub fn planning_transport(&self) -> TrackerConfig {
         self.planning.clone().unwrap_or_default()
     }
 }
@@ -703,7 +705,7 @@ pub fn load_wave_config_with(
 }
 
 /// The effective planning transport, resolved once per bounded planning hook.
-pub fn load_planning_transport(repo_root: &Path) -> Result<PlanningConfig, LoadError> {
+pub fn load_planning_transport(repo_root: &Path) -> Result<TrackerConfig, LoadError> {
     Ok(load_config(Some(repo_root))?
         .unwrap_or_default()
         .planning_transport())
@@ -1078,7 +1080,7 @@ mod tests {
         let config = load_repo_config(temp.path()).unwrap().unwrap();
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Linear {
+            TrackerConfig::Linear {
                 team: Some(team.to_string())
             }
         );
@@ -1090,7 +1092,7 @@ mod tests {
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Asana {
+            TrackerConfig::Asana {
                 team: "9876543210".to_string(),
             }
         );
@@ -1469,7 +1471,7 @@ release:
 
 #[cfg(test)]
 mod planning_config_tests {
-    use super::{Config, GitPlan, PlanningConfig};
+    use super::{Config, GitPlan, TrackerConfig};
 
     #[test]
     fn planning_variants_keep_their_typed_defaults() {
@@ -1477,13 +1479,13 @@ mod planning_config_tests {
             serde_yaml_ng::from_str("planning: {provider: linear, team: team}").unwrap();
         assert_eq!(
             config.planning_transport(),
-            PlanningConfig::Linear {
+            TrackerConfig::Linear {
                 team: Some("team".into())
             }
         );
         assert_eq!(
             Config::default().planning_transport(),
-            PlanningConfig::Git {
+            TrackerConfig::Git {
                 remote: "origin".into(),
                 plan: GitPlan::Shared("main".into())
             }
@@ -1492,7 +1494,7 @@ mod planning_config_tests {
             serde_yaml_ng::from_str("planning:\n  provider: git\n  personal: true\n").unwrap();
         assert_eq!(
             personal.planning_transport(),
-            PlanningConfig::Git {
+            TrackerConfig::Git {
                 remote: "origin".into(),
                 plan: GitPlan::Personal
             }

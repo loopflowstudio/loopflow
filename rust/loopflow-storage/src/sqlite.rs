@@ -34,6 +34,7 @@ mod git_tracker;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
+pub mod plan_hub;
 pub mod planning_order;
 pub use git_tracker::GitPlanImport;
 mod planning_sync;

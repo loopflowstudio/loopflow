@@ -1,7 +1,9 @@
 //! The planning write boundary shared by local operations, tracker
-//! observations and Git imports. Callers own their transaction; this writer
-//! changes planning columns, journals local and tracker writes for Git peers,
-//! and queues a tracker action for each value a local write changed.
+//! observations and imports from Git or the hub. Callers own their
+//! transaction; this writer changes planning columns, journals local and
+//! tracker writes for Git peers, records each owner's newest change for a hub
+//! to answer from, and queues each value a local write changed for the
+//! tracker or the hub.
 use crate::planning_exchange::PlanningMutation;
 use crate::work::edit::{CommentContent, Disposition, WorkEdit, WorkValue};
 use crate::{StoreError, StoreResult};
@@ -15,7 +17,8 @@ pub enum WriteOrigin {
     Local,
     /// A fact the tracker reported: journaled, never echoed back to it.
     Tracker,
-    /// A Git peer's change: already in the journal it came from.
+    /// A Git peer's change, already in the journal it came from, or the
+    /// hub's value, which the hub already holds.
     Import,
 }
 
@@ -299,6 +302,20 @@ fn write_record(
             &loopflow_model::durable::TaskId::from_raw(id),
             previous_identifier.as_deref(),
         )?;
+    }
+    if changed || !queue {
+        // A hub learns a record created here from all of its values.
+        let created = if queue {
+            Vec::new()
+        } else {
+            read(conn, table, id)?
+        };
+        let sent = match (origin, queue) {
+            (WriteOrigin::Local, true) => changes.clone(),
+            (WriteOrigin::Local, false) => created.iter().collect(),
+            _ => Vec::new(),
+        };
+        super::plan_hub::saved(conn, table, id, &sent)?;
     }
     if origin == WriteOrigin::Local && queue {
         for change in changes {

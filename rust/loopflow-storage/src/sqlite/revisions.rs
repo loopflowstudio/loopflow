@@ -635,6 +635,8 @@ mod tests {
             "task_changes",
             "task_state_deliveries",
             "tracker_actions",
+            "hub_sends",
+            "hub_plans",
         ] {
             let trigger: String = conn
                 .query_row(

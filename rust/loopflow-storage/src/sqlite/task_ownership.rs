@@ -446,7 +446,7 @@ pub fn marker(entry: &TaskOwnershipEntry) -> StoreResult<String> {
 }
 
 /// Append a local entry and deliver it as a marked Task comment. The comment
-/// travels through the existing Linear delivery and the Git planning journal.
+/// travels through the existing Linear delivery or to the hub.
 fn append_in(
     conn: &Connection,
     task: &TaskId,
@@ -584,9 +584,8 @@ pub(super) fn claim_in(
     .map(Some)
 }
 
-/// Without a remote tracker, the planning journal is the tracker and an
-/// entry this Machine takes in is ordered when it does: after every entry it
-/// has seen, whatever their clocks said.
+/// Without a remote tracker, an entry this Machine takes in is ordered when
+/// it does: after every entry it has seen, whatever their clocks said.
 fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResult<Option<i64>> {
     if remote {
         return Ok(None);
@@ -958,7 +957,7 @@ impl SqliteStore {
     }
 
     /// Take in an entry another Machine wrote, before planning delivers its
-    /// comment. In the planning journal it follows every entry seen here, so
+    /// comment. Without a tracker it follows every entry seen here, so
     /// the claim that arrives with a move outranks this Machine's earlier ones.
     pub fn ingest_ownership_marker_prepared(
         &self,

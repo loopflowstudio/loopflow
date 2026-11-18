@@ -489,7 +489,7 @@ pub fn sync_planning(
 /// What `lf wave sync` refreshed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PlanningRefresh {
-    /// Git planning: the repository's whole plan.
+    /// No tracker: the repository's whole plan, from the hub.
     Repository,
     /// One Wave, from its Linear Initiative.
     Wave(String),

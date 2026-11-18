@@ -992,8 +992,8 @@ public struct RegistryQuery: Sendable {
         return try Self.decode(WaveDetailSnapshot.self, from: stdout)
     }
 
-    /// Refresh one Wave's planning from its provider (Linear, or the
-    /// repository's Git planning ref), retrying pending deliveries.
+    /// Refresh one Wave's planning from its tracker, or the repository's plan
+    /// from its hub, retrying pending deliveries.
     public func syncPlanning(wave: String, cwd: String) async throws {
         _ = try await write(.waveSync(directory: cwd, wave: wave))
     }

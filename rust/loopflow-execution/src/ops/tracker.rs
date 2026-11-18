@@ -122,8 +122,7 @@ fn repository_name(repo: &Path) -> String {
         .unwrap_or_else(|| "loopflow".into())
 }
 
-/// The configured Linear or Asana tracker for one repository; Git planning
-/// exchanges the journal and has none.
+/// The configured Linear or Asana tracker for one repository.
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum Tracker {

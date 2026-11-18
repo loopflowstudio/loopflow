@@ -151,7 +151,7 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
     task_on(conn, &input.id)?.ok_or(StoreError::NotFound)
 }
 
-/// Git planning carries the Task's branch, so whoever runs it next checks out
+/// The plan carries the Task's branch, so whoever runs it next checks out
 /// the same branch and finds the same PR. Remote trackers supply their branch
 /// when the Task is fetched. An already-recorded branch writes nothing.
 fn record_task_branch_in(

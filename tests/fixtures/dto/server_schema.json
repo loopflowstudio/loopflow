@@ -12059,7 +12059,7 @@
       "type": "object"
     },
     "TaskCommentAuthor": {
-      "description": "Who wrote a comment. Person attribution survives local saves and provider acquisition;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
+      "description": "Who wrote a comment. Person attribution survives local saves and tracker fetches;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
       "oneOf": [
         {
           "properties": {

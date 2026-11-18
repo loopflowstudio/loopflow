@@ -236,10 +236,11 @@ conflict state between Loopflow Machines and no Machine owns the plan.
 Comments, ownership entries and created records only append. Deletion is a
 field. Arriving comments carry ownership entries into the Task's log and steer
 the Task with a person's direction comment, as a local comment would, whichever
-carrier brought them. A claim is first-wins: an ownership entry names the last
-entry its writer had seen, entries order by their comment's stamp, and a claim
-that names a stale entry loses to the one already there. The losing Machine
-stops its run and keeps the work. `lf task claim` and `lf task run` on an
+carrier brought them. A claim is first-wins: an ownership entry names the
+entry in effect when it was written and carries its order from its writer's
+plan clock, and a claim whose writer had not seen the claim holding the Task
+loses to it ([ownership](machines.md)). The losing Machine stops its run and
+keeps the work. `lf task claim` and `lf task run` on an
 unowned Task exchange first, briefly, and go ahead if that fails.
 
 **Git.** `refs/loopflow/plan/<machine id>` on the repository's remote holds that

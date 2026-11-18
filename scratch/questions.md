@@ -54,6 +54,28 @@ Made for review in `scratch/plan.md`; each is reversible before release.
   - A deleted record's file is never removed from a ref: deletion is a field.
   - `lf repo tracker` runs `git remote` on each read to name the Git line.
 
+- Slice 3 (implement, 2026-11-18), each reversible before release:
+  - An ownership entry carries its own `order`, drawn from the plan clock and
+    past every entry its writer held for the Task. The plan said the order is
+    its comment's stamp. A move hands the entry to its target before the
+    comment arrives, and the entry has to sort the same there.
+  - "Saw nothing" is written as the entry naming itself in `seen`, so an
+    absent `seen` can mean "written before first-wins" and never lose.
+  - First-wins applies without Linear or Asana only. Entries there carry
+    neither `order` nor `seen`, as on main.
+  - "Stops its run" is the Task interrupt `lf task interrupt` writes, plus a
+    steer naming who claimed first. The import kills no process: a live Graph
+    stops before its next step and ends its agent's turn.
+  - After the exchange shows a teammate's claim, `lf task run` and
+    `lf task claim` still take the Task over, as on main (their Sessions are
+    told). Should `lf task run` refuse a Task someone else holds instead?
+  - The wait before a claim is five seconds, no setting. Past it the exchange
+    keeps running and the claim goes ahead.
+  - Only `lf task claim` and placing a Task (`lf task run`, checkout) exchange
+    first. `lf ship` and adopting a checkout claim without looking.
+  - `lf task status` does not mark a claim that lost; it is in the log like
+    any entry and names no owner.
+
 Still open from before:
 
 - Should one Machine run the Linear/Asana drain for all of a person's

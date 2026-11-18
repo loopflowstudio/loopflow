@@ -54,6 +54,31 @@ pub async fn sync_carriers(store: &crate::store::Store, repo: &str) -> Result<()
     sync(store, repo).await.and(by_hub)
 }
 
+/// How long a claim waits to see the claims other Machines have made.
+const BEFORE_CLAIM: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Before this Machine claims `task`, which nobody owns as far as it has
+/// seen: one exchange by each carrier, so a claim already made elsewhere is
+/// read first. A carrier that fails or outlasts [`BEFORE_CLAIM`] leaves the
+/// claim to go ahead; whichever claim was first holds once they meet.
+pub(crate) async fn before_claim(
+    store: &crate::store::Store,
+    repo: &Path,
+    task: &loopflow_model::durable::TaskId,
+) {
+    if !matches!(store.sqlite.task_owned(task), Ok(false)) {
+        return;
+    }
+    let repo = repo.to_string_lossy();
+    match tokio::time::timeout(BEFORE_CLAIM, sync_carriers(store, &repo)).await {
+        Ok(Ok(())) => {}
+        Ok(Err(error)) => {
+            tracing::debug!(%task, error = %format!("{error:#}"), "claiming without the plan exchange");
+        }
+        Err(_) => tracing::debug!(%task, "claiming before the plan exchange finished"),
+    }
+}
+
 /// One Git exchange for every repository this Machine plans without Linear
 /// or Asana. The Machine server runs this on its timer.
 pub fn exchange_all(store: &SqliteStore) -> Result<()> {

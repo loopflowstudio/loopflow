@@ -46,8 +46,10 @@ pub fn resolve_machine(store: &SqliteStore, target: &str) -> OpsResult<MachineId
 pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<TaskOwnership> {
     super::task::block_on_task(async move {
         let (store, task) = super::task::resolve_saved_task(repo, None, issue).await?;
+        let repository = super::task::repository_for_task(&store, &task)?;
         match &change {
             OwnershipChange::Claim => {
+                super::plan_git::before_claim(&store, &repository, &task.id).await;
                 crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(message)?;
             }
             OwnershipChange::Move(target) => {
@@ -63,7 +65,6 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
                     .map_err(message)?;
             }
         }
-        let repository = super::task::repository_for_task(&store, &task)?;
         // The assignee and its sync run after a served answer, as one job.
         let (repo, id) = (repository.clone(), task.id.clone());
         let now = crate::journal::request::after_reply(move || {

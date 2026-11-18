@@ -1843,6 +1843,12 @@ async fn place_prepared_task(
     prepared: TaskPlacement,
     options: &TaskProcessOptions,
 ) -> OpsResult<Task> {
+    // Placing an unowned Task claims it: read what other Machines claimed first.
+    if let Some(task) = store.get_task(task_id).await.map_err(task_error)? {
+        if let Ok(repository) = repository_for_task(store, &task) {
+            super::plan_git::before_claim(store, &repository, task_id).await;
+        }
+    }
     let (mut task, acquisition) = loop {
         let task = store
             .get_task(task_id)

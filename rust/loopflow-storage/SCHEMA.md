@@ -160,7 +160,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Task ownership
 
 - `people`: id, name
-- `task_ownership`: id, task_id, kind, person, machine_id, at, ordered_at, ~~written_here~~ (leaving → LOO-954, unused_store_members), person_key, machine_label, writer_machine_id, person_id
+- `task_ownership`: id, task_id, kind, person, machine_id, at, ordered_at, ~~written_here~~ (leaving → LOO-954, unused_store_members), person_key, machine_label, writer_machine_id, person_id, seen
 
 ## Desktop workspace
 

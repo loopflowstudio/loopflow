@@ -98,7 +98,8 @@ lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim` and `unclaim` entries; the later entry wins in tracker order, and
+holds `claim` and `unclaim` entries; the later entry wins, in the tracker's
+order or, without a tracker, the order each entry's writer gave it, and
 no current owner is stored beside it. Each entry names its person, the Machine
 it puts the Task on and the Machine that wrote it, so every Machine stores the
 same rows. Moving a Task is a claim by the same person naming another Machine;
@@ -256,6 +257,20 @@ later claim, while the earlier claimant still owns it locally, reports
 steers its live Sessions. Nothing is cancelled. If the log stops showing this
 Machine as owner for any other reason, such as a stale Machine's unclaim, the
 owner claims again.
+
+Without Linear or Asana a claim is first-wins. Each entry carries its `order`,
+taken from its writer's plan clock and past every entry that Machine held for
+the Task, and `seen`, the entry in effect when it was written (itself when
+there was none). Every Machine sorts the log by `order`, then by the writing
+Machine's id. A claim whose `seen` is not the entry in effect just before it
+loses to the claim holding the Task: it stays in the log and names no owner on
+any Machine. When the claim that lost was this Machine's, its Sessions are told
+who claimed first and the Task is interrupted, which stops its Graph and
+changes nothing in its checkout. `lf task claim` then takes the Task over, as a
+claim that has seen the other. `lf task claim` and `lf task run` on a Task
+nobody owns exchange by each carrier first, for at most five seconds, and go
+ahead when that fails. Entries written before `order` and `seen`, and every
+entry with Linear or Asana, never lose.
 
 With Linear, a claim sets the assignee to that Machine's Linear viewer and moves
 backlog, triage or `unstarted` to `started`; unclaim clears the assignee; a move

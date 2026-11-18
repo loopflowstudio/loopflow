@@ -1436,6 +1436,66 @@ sys.exit(child.wait())
     );
 }
 
+/// Another person's Machine: its own home, identity, store and clone of a
+/// bare remote. It shares the fixture's stand-in `ssh`.
+struct Home {
+    dir: std::path::PathBuf,
+    bin: std::path::PathBuf,
+}
+
+impl Home {
+    fn cloned(fixture: &Machines, name: &str, email: &str, person: &str, bare: &Path) -> Self {
+        let dir = fixture.root.path().join(name);
+        support::seed_store(&dir);
+        fs::write(
+            dir.join(".gitconfig"),
+            format!("[user]\n\temail = {email}\n\tname = {person}\n"),
+        )
+        .unwrap();
+        git(
+            fixture.root.path(),
+            &[
+                "clone",
+                "-q",
+                bare.to_str().unwrap(),
+                dir.join("checkout").to_str().unwrap(),
+            ],
+        );
+        Self {
+            dir,
+            bin: fixture.root.path().join("bin"),
+        }
+    }
+
+    fn checkout(&self) -> std::path::PathBuf {
+        self.dir.join("checkout")
+    }
+
+    fn run(&self, args: &[&str]) -> Output {
+        Command::new(env!("CARGO_BIN_EXE_lf"))
+            .env_clear()
+            .env("HOME", &self.dir)
+            .env("LF_HOME", &self.dir)
+            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
+            .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
+            .current_dir(self.checkout())
+            .stdin(Stdio::null())
+            .args(args)
+            .output()
+            .unwrap()
+    }
+
+    fn ok(&self, args: &[&str]) -> String {
+        let output = self.run(args);
+        assert_success(&output);
+        String::from_utf8(output.stdout).unwrap()
+    }
+
+    fn store(&self) -> loopflow_execution::store::sqlite::SqliteStore {
+        loopflow_execution::store::open_sqlite(&self.dir.join("loopflow.db")).unwrap()
+    }
+}
+
 /// LOO-938's acceptance over the real carriers: three homes clone one bare
 /// remote and meet through its plan refs; the laptop then names mini its hub
 /// and reaches it with `ssh mini lf server connect`.
@@ -1458,46 +1518,10 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
         assert_success(&output);
         String::from_utf8(output.stdout).unwrap()
     };
-    // A teammate: another home, another identity, their own clone.
-    let third = fixture.root.path().join("third");
-    support::seed_store(&third);
-    fs::write(
-        third.join(".gitconfig"),
-        "[user]\n\temail = teammate@test.com\n\tname = Ada\n",
-    )
-    .unwrap();
-    git(
-        fixture.root.path(),
-        &[
-            "clone",
-            "-q",
-            plan._repos[0].bare_path().to_str().unwrap(),
-            third.join("checkout").to_str().unwrap(),
-        ],
-    );
-    let teammate = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_lf"))
-            .env_clear()
-            .env("HOME", &third)
-            .env("LF_HOME", &third)
-            .env("LF_BIN", env!("CARGO_BIN_EXE_lf"))
-            .env(
-                "PATH",
-                format!(
-                    "{}:/usr/bin:/bin",
-                    fixture.root.path().join("bin").display()
-                ),
-            )
-            .current_dir(third.join("checkout"))
-            .stdin(Stdio::null())
-            .args(args)
-            .output()
-            .unwrap();
-        assert_success(&output);
-        String::from_utf8(output.stdout).unwrap()
-    };
-    let teammate_store =
-        || loopflow_execution::store::open_sqlite(&third.join("loopflow.db")).unwrap();
+    let bare = plan._repos[0].bare_path();
+    let third = Home::cloned(&fixture, "third", "teammate@test.com", "Ada", bare);
+    let teammate = |args: &[&str]| third.ok(args);
+    let teammate_store = || third.store();
     let remote_path = plan.remote_path.to_str().unwrap();
 
     // No hub is named: the remote carries the plan.
@@ -1604,6 +1628,88 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
         ok(&["repo", "tracker"]).trim(),
         "Plan: Git origin.\nHub mini."
     );
+
+    // The teammate may fetch but not push, and names mini their hub: their
+    // change reaches the remote in the laptop's ref, which holds its whole plan.
+    git(
+        &third.checkout(),
+        &["remote", "set-url", "--push", "origin", "/refused/plan.git"],
+    );
+    teammate(&["machine", "add", "mini"]);
+    teammate(&["machine", "hub", "mini"]);
+    teammate(&["task", "update", &identifier, "--title", "three"]);
+    assert_eq!(title(&plan.remote).as_deref(), Some("three"));
+    let refused = teammate(&["repo", "tracker"]);
+    assert!(
+        refused.starts_with("Plan: Git origin, unreachable since "),
+        "{refused}"
+    );
+    ok(&["task", "sync", &identifier]);
+    // A fourth home has no hub and never met the teammate.
+    let fourth = Home::cloned(&fixture, "fourth", "fourth@test.com", "Grace", bare);
+    fourth.ok(&["task", "sync", &identifier]);
+    assert_eq!(title(&fourth.store()).as_deref(), Some("three"));
+}
+
+/// Two people claim one Task before either Machine has seen the other's
+/// claim. The first claim holds on both; the other Machine's run is stopped.
+#[test]
+fn of_two_claims_made_apart_the_first_holds_on_both_machines() {
+    use loopflow_execution::work::task::TaskEventKind;
+    let fixture = Machines::new();
+    let repo = loopflow_test_support::TestRepo::new();
+    let ada = Home::cloned(&fixture, "ada", "ada@test.com", "Ada", repo.bare_path());
+    let grace = Home::cloned(
+        &fixture,
+        "grace",
+        "grace@test.com",
+        "Grace",
+        repo.bare_path(),
+    );
+    let created: Value =
+        serde_json::from_str(&ada.ok(&["task", "create", "claimed twice", "--json"])).unwrap();
+    let task = loopflow_execution::durable::TaskId::parse(created["task"]["id"].as_str().unwrap())
+        .unwrap();
+    let identifier = created["task"]["identifier"].as_str().unwrap().to_owned();
+    ada.ok(&["task", "sync", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+
+    // Each claim looks at the remote first; neither claim is there yet.
+    ada.ok(&["task", "claim", &identifier]);
+    grace.ok(&["task", "claim", &identifier]);
+    let owner = |home: &Home| {
+        loopflow_execution::store::ownership::task_ownership(&home.store(), &task)
+            .unwrap()
+            .owner
+            .and_then(|owner| owner.person_key)
+    };
+    assert_eq!(owner(&grace).as_deref(), Some("grace@test.com"));
+
+    ada.ok(&["task", "sync", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+    ada.ok(&["task", "sync", &identifier]);
+    assert_eq!(owner(&ada).as_deref(), Some("ada@test.com"));
+    assert_eq!(owner(&grace).as_deref(), Some("ada@test.com"));
+    let interrupted = |home: &Home| {
+        home.store()
+            .task_events_after(&task, 0)
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event.kind, TaskEventKind::Interrupt))
+    };
+    assert!(interrupted(&grace));
+    assert!(!interrupted(&ada));
+
+    // Grace has seen Ada's claim now: claiming again takes the Task over.
+    grace.ok(&["task", "claim", &identifier]);
+    grace.ok(&["task", "sync", &identifier]);
+    ada.ok(&["task", "sync", &identifier]);
+    assert_eq!(owner(&grace).as_deref(), Some("grace@test.com"));
+    let superseded = loopflow_execution::store::ownership::task_ownership(&ada.store(), &task)
+        .unwrap()
+        .superseded_by
+        .and_then(|owner| owner.person_key);
+    assert_eq!(superseded.as_deref(), Some("grace@test.com"));
 }
 
 #[test]

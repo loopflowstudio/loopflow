@@ -78,6 +78,8 @@ pub struct ConversationLaunch {
     /// The input's prepared capture, which the launch publishes rather than a new one.
     pub prepared_capture: Option<String>,
     pub lock: LaunchLock,
+    /// The kind delegation chose: a detached Work launch stays a work session.
+    pub kind: crate::harness::LaunchKind,
 }
 
 /// A Session launch lock, held until the provider is recorded. Clones share
@@ -868,6 +870,7 @@ async fn fresh_launch(
     store: &SharedStore,
     session: &LfSession,
     launch_lock: File,
+    kind: crate::harness::LaunchKind,
 ) -> Result<ConversationLaunch> {
     let config =
         crate::agent::resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
@@ -887,6 +890,7 @@ async fn fresh_launch(
         first_turn: first_turn(session.request.as_deref()).to_owned(),
         prepared_capture: capture_is_prepared(input)?.then(|| input.clone()),
         lock: LaunchLock::new(launch_lock),
+        kind,
     })
 }
 
@@ -1403,6 +1407,7 @@ async fn open_waiting_locked(
         store,
         &session,
         launch_lock.expect("an unresumed Session retains its launch lock"),
+        kind,
     )
     .await
     .map(Some)

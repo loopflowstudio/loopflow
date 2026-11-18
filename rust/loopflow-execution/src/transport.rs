@@ -28,6 +28,7 @@ use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, LazyLock, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -1071,6 +1072,16 @@ struct ViewerState {
 }
 
 impl ViewerState {
+    /// The held terminal's output stream `stream` here: stdout's goes to
+    /// stderr while stdout holds a JSON record.
+    fn screen(&mut self, stream: u8) -> &mut std::fs::File {
+        if stream == 2 || STDOUT_HOLDS_RECORD.load(Ordering::Relaxed) {
+            &mut self.output.stderr
+        } else {
+            &mut self.output.stdout
+        }
+    }
+
     fn reset_display(&mut self) -> io::Result<()> {
         // Kitty keyboard state belongs to each screen; reset both when leaving.
         self.output.stdout.write_all(terminal::RESET_MODES)?;
@@ -1175,18 +1186,14 @@ impl ViewerTerminal {
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.reset_display()?;
         // The live terminal is authoritative even when its first screen is blank.
-        state.output.stdout.write_all(b"\x1b[H\x1b[2J")
+        state.screen(1).write_all(b"\x1b[H\x1b[2J")
     }
 
     fn write(&mut self, stream: u8, bytes: &[u8]) -> io::Result<()> {
         // An interrupt cannot restore the terminal midway through an output write.
         let mut state = self.state.lock().expect("viewer terminal lock poisoned");
         state.alternate.observe(bytes);
-        if stream == 2 {
-            state.output.stderr.write_all(bytes)
-        } else {
-            state.output.stdout.write_all(bytes)
-        }
+        state.screen(stream).write_all(bytes)
     }
 }
 impl Drop for ViewerTerminal {
@@ -1368,10 +1375,22 @@ pub(crate) fn shell_history(terminal: &TerminalId) -> Result<()> {
     Ok(())
 }
 
+/// A `--json` relay whose stdout is no terminal keeps stdout for the Session
+/// record printed after relaying; the held terminal's bytes go to stderr.
+static STDOUT_HOLDS_RECORD: AtomicBool = AtomicBool::new(false);
+
 /// Relay this terminal to a held terminal: socket in, terminal out.
-pub fn relay(id: &TerminalId, session: Option<&LfSessionId>, moved: Option<String>) -> Result<()> {
+pub fn relay(
+    id: &TerminalId,
+    session: Option<&LfSessionId>,
+    moved: Option<String>,
+    json: bool,
+) -> Result<()> {
     if std::env::var_os(STREAM_ENV).is_some() {
         return stream::bridge(id);
+    }
+    if json && !io::stdout().is_terminal() {
+        STDOUT_HOLDS_RECORD.store(true, Ordering::Relaxed);
     }
     let preview = std::env::var(RELAY_PREVIEW_ENV).ok();
     std::env::remove_var(RELAY_PREVIEW_ENV);
@@ -2352,7 +2371,7 @@ fn record_relay_terminal(held: &TerminalId) -> Result<()> {
 fn write_output(terminal: &mut Option<ViewerTerminal>, stream: u8, bytes: &[u8]) -> io::Result<()> {
     if let Some(terminal) = terminal {
         terminal.write(stream, bytes)
-    } else if stream == 2 {
+    } else if stream == 2 || STDOUT_HOLDS_RECORD.load(Ordering::Relaxed) {
         io::stderr().write_all(bytes)?;
         io::stderr().flush()
     } else {

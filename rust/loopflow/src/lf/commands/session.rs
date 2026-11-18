@@ -1024,6 +1024,17 @@ async fn restarted(
 }
 
 /// Finish a successful Session connection after its thin relay has returned.
+/// Whether opening a conversation answers with its Session record once the
+/// conversation returns, including one launched in this process.
+pub fn returns_record(command: &SessionCommand, cli: &crate::lf::Cli) -> bool {
+    match command {
+        SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } => {
+            connection.json || cli.json
+        }
+        _ => false,
+    }
+}
+
 pub fn print_returned(id: &str) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;

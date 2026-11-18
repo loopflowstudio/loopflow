@@ -561,6 +561,7 @@ fn launch_conversation(
         first_turn,
         prepared_capture,
         lock,
+        kind,
         ..
     } = launch;
     let mut cli = Cli {
@@ -604,12 +605,6 @@ fn launch_conversation(
         }
         None => (None, None),
     };
-    let kind = loopflow_execution::transport::LaunchInput {
-        batch: false,
-        interactive: true,
-        has_prompt: true,
-    }
-    .kind();
     finish_command(dispatch_launch(kind, &mut cli, args, binding.as_ref()))
 }
 
@@ -1603,7 +1598,12 @@ fn run() -> anyhow::Result<()> {
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
+        loopflow_execution::transport::relay(
+            &relay.terminal,
+            relay.session.as_ref(),
+            relay.moved,
+            relay.json_session.is_some(),
+        )?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
@@ -2921,7 +2921,14 @@ fn dispatch_here(
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
         return match loopflow::lf::commands::session::run(cmd, &cli)? {
-            Some(launch) => launch_conversation(launch, args),
+            Some(launch) => {
+                let session = launch.session_id.clone();
+                launch_conversation(launch, args)?;
+                if loopflow::lf::commands::session::returns_record(cmd, &cli) {
+                    loopflow::lf::commands::session::print_returned(&session)?;
+                }
+                Ok(())
+            }
             None => Ok(()),
         };
     }

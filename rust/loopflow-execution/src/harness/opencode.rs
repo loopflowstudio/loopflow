@@ -6,7 +6,7 @@ use std::time::Duration;
 use base64::Engine;
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
 use tokio::process::{Child, Command};
@@ -1502,7 +1502,11 @@ fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::Nati
             use std::os::unix::fs::OpenOptionsExt;
             options.mode(0o600);
         }
-        client.stderr = Some(options.open(path)?);
+        client.stderr = Some(
+            options
+                .open(&path)
+                .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?,
+        );
     }
     client.thread = Some(id);
     client.companion = Some(companion);

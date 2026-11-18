@@ -299,6 +299,8 @@ token is revoked and that terminal says where the conversation went.
 `lf resume SESSION --json` prints the Session record after a successful
 return, including detaching or moving to another view. Terminal traffic does
 not wait for store reads; the final record is read after relaying ends.
+When stdout is no terminal it holds only that record, and the terminal's
+output goes to stderr.
 `lf resume SESSION --prepare --json` returns the one command Desktop runs,
 without opening a socket or starting a provider. Desktop decides from the
 record's actions whether showing a pane reattaches: a held Session offers

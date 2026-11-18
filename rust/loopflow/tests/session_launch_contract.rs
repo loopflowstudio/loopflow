@@ -1282,10 +1282,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
         if managed {
             fixture.create_wave();
         }
-        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py").replace("__WAIT__", "False").replace(
-        "            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):",
-        "            (HOME / 'received.json').write_text(json.dumps({'session':self.path.split('/')[3], 'request':body, 'config':json.loads(os.environ['OPENCODE_CONFIG_CONTENT'])}))\n            if evidence := os.environ.get(\"LF_TEST_REPLAY_EVIDENCE\"):"
-    );
+        let script = include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+            .replace("__WAIT__", "False");
         fs::write(fixture.home.path().join("bin/opencode"), script).unwrap();
         fixture.settings("opencode:opencode/first-model", true, false);
         let first = fixture.run(if managed {
@@ -1300,8 +1298,8 @@ fn opencode_headless_start_selects_the_model_and_permissions() {
             .unwrap()["id"],
             "first-model"
         );
-        assert_eq!(first["config"]["permissions"][0]["effect"], "allow");
-        let plugin = first["config"]["plugins"][0]
+        assert_eq!(first["server"]["permissions"][0]["effect"], "allow");
+        let plugin = first["server"]["plugins"][0]
             .as_str()
             .unwrap()
             .strip_prefix("file://")

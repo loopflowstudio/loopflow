@@ -89,7 +89,7 @@ pub(crate) fn run_sync_in(
         stacked.is_some() && onto.is_some_and(|target| target == default || target == upstream);
     if stacked.is_some() && onto.is_some() && !detach {
         return Err(anyhow!(
-            "{} is not an open Task; name a Task to restack this one, the default branch to detach it, or omit the target to sync its parent",
+            "{} names no other open Task; name one to restack this Task on it, the default branch to detach it, or omit the target to sync its parent",
             onto.unwrap_or_default()
         ));
     }

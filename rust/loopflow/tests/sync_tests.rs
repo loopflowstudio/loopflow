@@ -2725,10 +2725,17 @@ fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
 
     lf(&child_path, &["sync", "main"]);
     assert!(task_stack(&child_path).unwrap().is_none());
+    assert!(!child_path.join("parent.txt").exists());
     assert_eq!(
         std::fs::read_to_string(home.path().join("pr-base")).unwrap(),
         "main"
     );
+
+    // Restacking after a detach brings back the parent's work, though its
+    // commits never left the child's history.
+    lf(&child_path, &["sync", "INF-123"]);
+    assert!(child_path.join("parent.txt").exists());
+    assert!(child_path.join("later.txt").exists());
 }
 
 #[test]

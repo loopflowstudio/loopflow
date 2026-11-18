@@ -136,7 +136,7 @@ pub fn plan_sync(
     // Stacked children retain their history when integrating the parent.
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let replay_stack = match &fork_base {
-        Some(base) => !crate::git::is_ancestor(repo, base, &base_ref)?,
+        Some(base) => crate::git::stack_needs_fork_comparison(repo, base, &base_ref)?,
         None => false,
     };
     let strategy = if fork_base.is_some() || persistent {

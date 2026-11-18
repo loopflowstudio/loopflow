@@ -225,6 +225,13 @@ and `< /dev/null`.
   needs it. Checks: `scripts/test_desktop.sh --filter 'DTOFixtureTests|taskWorkFollowsTheStream'`
   passed (57 tests); `dto_fixtures::composed_lifecycle_preserves_completion_before_graph_arrival` passed.
 
+- QA (2026-11-18, `scratch/qa.html`): restacking after `lf sync main` silently
+  skipped the parent's work; a stacked merge now compares from the fork when the
+  parent's commits are in HEAD but their changes are not
+  (`git::stack_needs_fork_comparison`, fixture step added). `stack_parent` was
+  missing from `lf task status --json`; added to `TaskDetail` and
+  `task_detail.json`.
+
 Remaining: nothing in scope. All four slices are built; gate runs the suites.
 `lf sync <Task> --plan` still plans the literal ref (open question, not this Task).
 

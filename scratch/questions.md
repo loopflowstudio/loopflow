@@ -18,3 +18,13 @@
   merge a plain branch; building "merge without recording" is open.
 - `lf sync <Task> --plan` plans against the literal argument and records
   nothing; resolving the Task's branch for the preview is not built.
+- QA found that `lf sync main` (detach) keeps the old parent's commits and
+  reverts their changes. Restacking now replays from the fork
+  (`git::stack_needs_fork_comparison`). But if that parent lands with a merge
+  commit and the detached child syncs main without restacking, Git's merge base
+  is the parent's tip, and the child's PR deletes the parent's work. Detaching by
+  rewriting the child's commits onto main, or by recording a fork that the main
+  merge compares from, is open; squash and rebase landings are unaffected.
+- A parent landed and deleted within 60 s of lf's last PR read: the child's sync
+  and publish fail on `git fetch` of the deleted branch until the cache expires.
+  Treating a missing parent ref as "go read GitHub fresh" would close it.

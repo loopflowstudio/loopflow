@@ -27,7 +27,7 @@ ol.q li{margin:.5rem 0}ol.q ol{list-style:lower-alpha}
 </head>
 <body>
 <h1>Planning changes leaving the Machine</h1>
-<p class="lede">LOO-938 concept review, before implementation. Area taken: everything a planning save does after it is written: Linear/Asana's <code>tracker_actions</code> queue, Git's journal and exchange, and the status a person reads. LOO-925 already shipped the Linear half; the plan scopes this Task to the Git half, and this review checks that half against the whole.</p>
+<p class="lede">LOO-938 concept review. First pass before implementation; the section "After the build" reviews the branch against <code>origin/main</code> with all three slices in it. Area taken: everything a planning save does after it is written: Linear/Asana's <code>tracker_actions</code> queue, Git's journal and exchange, and the status a person reads. LOO-925 already shipped the Linear half; the plan scopes this Task to the Git half, and this review checks that half against the whole.</p>
 
 <h2>One interaction, walked</h2>
 <p>A person in <code>~/src/loopflow</code> (Linear) runs <code>lf task edit LOO-12 --title X</code>, while a Session in <code>~/src/etude</code> (Git) sits idle.</p>
@@ -87,6 +87,18 @@ That's one loop instead of two, at most one fetch per 5 s per Session, and no gl
 
 <h2>The name</h2>
 <p>The Task promises "one queue". The plan decides that Git stays a replica, and a person still sees one status view (<code>lf repo plan</code>). The concepts agree. The title describes LOO-925's half. The PR title should say what this half does: journal only Git repositories, and publish only when there's something to publish.</p>
+
+<h2>After the build (2026-11-17, branch at 981704fa92)</h2>
+<p>Read against its base: <code>planning_write::journaled</code>, <code>planning_peers::record_tracker</code> and <code>peer_planning_unpublished</code>, <code>repositories::register_in</code>, <code>drain::queued</code>, <code>planning_sync::exchange_every_tick</code>, migration <code>planning_tracker.sql</code>.</p>
+<table>
+<tr><th>Concept</th><th>As built</th><th></th><th>Note</th></tr>
+<tr><td>A repository plans through Git</td><td><code>repository_plans.planning_tracker</code>, written by bind (<code>git</code>) and the drain (<code>linear</code>/<code>asana</code>), conditionally; read by the writer alone</td><td class="y">yes</td><td>One writer per value, one reader. <code>PlanningConfig</code> has no "none" (default is Git), so there is no repository whose tracker can never be recorded.</td></tr>
+<tr><td>Switching to Git publishes the plan</td><td>seed inside the bind transaction; a clone binding before its first import inherits the tracker in <code>register_in</code></td><td class="y">yes</td><td>The inheritance is the one place the fact is copied rather than learned; it is a copy across identities of one path, not a second source.</td></tr>
+<tr><td>A change is waiting to go out</td><td><code>peer_planning_unpublished</code>: unrouted owned change, publication not confirmed or errored, or imported revision ≠ published revision</td><td class="y">yes</td><td>The third condition is new since the first pass. Counterexample tried: two Machines importing each other's push. <code>publish_destination</code> records <code>confirmed</code> without pushing when the merge equals the remote, so each import costs one export and no push; no ping-pong. Docs say "outbox", the function says "unpublished": one idea, two words, cosmetic.</td></tr>
+<tr><td>"Did my change go out?"</td><td>after-reply publish, then one 5 s <code>Exchange::Tick</code>; the 1 s loop and <code>repeat_sync</code> are gone</td><td class="y">yes</td><td>The biggest mismatch from the first pass is closed: one action, one retry owner.</td></tr>
+<tr><td>(nothing)</td><td>journal rows of repositories with no destination</td><td class="y">yes</td><td>Deleted by the migration (live copy: 44,094 → 17,472 changes). Routed rows and switched repositories' rows stay, as decided.</td></tr>
+</table>
+<p><b>Outcome: nothing to change.</b> The concepts and the code line up; what is left open is already in <code>scratch/questions.md</code> (Linear-only fields in the Git document, switched repositories' journals, per-process tick). The seed's duration at loopflow's size is still unmeasured; that belongs to gate.</p>
 
 <h2>Questions</h2>
 <ol class="q">

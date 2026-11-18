@@ -670,7 +670,7 @@ impl Driver {
             "features.shell_snapshot": false,
         });
         let native = self.approval == ApprovalPolicy::NativeClient;
-        let roots = if native && launch.write_scope == crate::agent::AgentWriteScope::Configured {
+        let roots = if native {
             launch
                 .cwd
                 .as_deref()
@@ -1787,7 +1787,6 @@ impl super::Harness for Codex {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: true,
-            supports_execution_boundary: true,
             classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
             turn_limit: false,

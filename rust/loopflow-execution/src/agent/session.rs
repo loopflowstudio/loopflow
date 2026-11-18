@@ -98,7 +98,6 @@ pub fn resolve_session_config(
     if importing || selected.is_some_and(|agent| agent == "claude") {
         config.agent = config.agent.with_configured_model(current);
     }
-    let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing
             && config
@@ -112,28 +111,16 @@ pub fn resolve_session_config(
         }
         config.system_prompt = request.system_prompt;
         config.conversation_context = request.conversation_context;
-        config.write_scope = request.write_scope;
-        needs_execution_boundary = request.execution_boundary.is_some();
     }
     if batch {
-        if let Some(task) = session
+        let task = session
             .task_id
             .as_ref()
             .map(|id| store.task_by_issue(id.as_str()))
             .transpose()?
-            .flatten()
-        {
-            if task.worktree()?.canonicalize()? == session.cwd.canonicalize()? {
-                config.write_scope = super::AgentWriteScope::Worktree;
-                needs_execution_boundary = true;
-            }
-        }
-    }
-    if needs_execution_boundary {
-        config.execution_boundary = Some(super::checkout_execution_boundary(
-            &session.cwd,
-            &config.agent,
-        )?);
+            .flatten();
+        config.skip_permissions |=
+            super::headless_task_checkout(true, task.as_ref(), &session.cwd)?;
     }
     if resumes_native {
         if let Some(native) = session

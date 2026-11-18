@@ -450,13 +450,6 @@ fn build_bound_prompt_at(
     Ok(built)
 }
 
-// Keep the existing unattended Task confinement while applying it equally to
-// direct skills and Graphs. The broader checkout-only versus unattended-only
-// policy remains Jack's choice; neither is selected by this intersection.
-fn confine_checkout_agent(task_checkout: bool, interactive: bool) -> bool {
-    task_checkout && !interactive
-}
-
 fn prepare_task_input(
     cli: &Cli,
 ) -> Result<
@@ -514,13 +507,11 @@ fn build_prompt_at(
     let subject = cli.task.as_deref().unwrap_or_default();
     loopflow_execution::agent_input_timing::record("prompt_begin", subject);
     let task_input = prepare_task_input(cli)?;
-    let task_checkout = match &task_input {
-        Some((_, seed)) => {
-            std::fs::canonicalize(seed.task.worktree()?)? == std::fs::canonicalize(&repo_root)?
-        }
-        None => false,
-    };
-    let confine = confine_checkout_agent(task_checkout, is_interactive);
+    let checkout_yolo = loopflow_execution::agent::headless_task_checkout(
+        !is_interactive && !cli.context,
+        task_input.as_ref().map(|(_, seed)| &seed.task),
+        &repo_root,
+    )?;
     let task_message = task_input.as_ref().map(|(_, seed)| seed.message.clone());
     let wave = cli.wave.clone().or_else(|| {
         cli.resume
@@ -632,15 +623,7 @@ fn build_prompt_at(
     };
     let mut agent_config = prepared.config;
     agent_config.output_schema = cli.output_schema.clone();
-    if confine && !cli.context {
-        agent_config.write_scope = loopflow_execution::agent::AgentWriteScope::Worktree;
-        agent_config.execution_boundary =
-            Some(loopflow_execution::agent::checkout_execution_boundary(
-                &repo_root,
-                &agent_config.agent,
-            )?);
-        agent_config.skip_permissions = true;
-    }
+    agent_config.skip_permissions |= checkout_yolo;
 
     let mut components = prepared.components;
     components.message_context = message_context.or_else(|| {

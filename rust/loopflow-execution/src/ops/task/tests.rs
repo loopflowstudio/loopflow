@@ -1,8 +1,5 @@
 use super::delivery::apply_merged_task_landing;
-use super::{
-    checkout_execution_boundary, lock_task_pr_mutation, resolve_task_create_input,
-    task_event_process_refusal,
-};
+use super::{lock_task_pr_mutation, resolve_task_create_input, task_event_process_refusal};
 use crate::durable::TaskState;
 use crate::linear::{LinearIssueId, LinearProjectId};
 use crate::ops::pr_landing::{reconcile_pr_landing, wait_with_io, LandingIo, LandingObservation};
@@ -2784,65 +2781,6 @@ async fn task_preparation_stacks_on_origin_when_the_parent_branch_diverged() {
         .output()
         .unwrap();
     assert_eq!(String::from_utf8_lossy(&remote.stdout).trim(), origin_tip);
-}
-
-#[test]
-fn execution_boundary_resolves_linked_git_and_control_roots() {
-    let _env_lock = crate::journal::test_env_lock();
-    let _restore = EnvRestore::capture(&["LF_BIN", "LF_HOME"]);
-    let directory = tempfile::tempdir().unwrap();
-    let main = directory.path().join("repo");
-    let worktree = directory.path().join("repo.task");
-    std::fs::create_dir(&main).unwrap();
-    for args in [
-        vec!["init", "-b", "main"],
-        vec!["config", "user.email", "test@example.com"],
-        vec!["config", "user.name", "Loopflow Test"],
-    ] {
-        assert!(std::process::Command::new("git")
-            .current_dir(&main)
-            .args(args)
-            .status()
-            .unwrap()
-            .success());
-    }
-    std::fs::write(main.join("README.md"), "proof\n").unwrap();
-    for args in [vec!["add", "."], vec!["commit", "-m", "proof"]] {
-        assert!(std::process::Command::new("git")
-            .current_dir(&main)
-            .args(args)
-            .status()
-            .unwrap()
-            .success());
-    }
-    assert!(std::process::Command::new("git")
-        .current_dir(&main)
-        .args(["worktree", "add", "-b", "task", worktree.to_str().unwrap()])
-        .status()
-        .unwrap()
-        .success());
-    let control = directory.path().join("control");
-    std::fs::create_dir(&control).unwrap();
-    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
-    std::env::set_var("LF_HOME", &control);
-
-    let boundary =
-        checkout_execution_boundary(&worktree, &crate::config::Agent::parse("codex").unwrap())
-            .unwrap();
-
-    assert_eq!(boundary.writable_roots.len(), 2);
-    assert!(boundary
-        .writable_roots
-        .contains(&main.join(".git").canonicalize().unwrap()));
-    assert!(boundary.writable_roots.contains(&control));
-    assert_eq!(
-        checkout_execution_boundary(
-            &worktree,
-            &crate::config::Agent::parse("pi:fixture/model").unwrap()
-        )
-        .unwrap(),
-        boundary
-    );
 }
 
 #[tokio::test]

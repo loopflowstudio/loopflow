@@ -85,48 +85,16 @@ pub struct AgentProcessResult {
     pub failure: Option<AgentFailure>,
 }
 
-/// Filesystem write boundary for a provider launch.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentWriteScope {
-    /// Respect the provider's configured permissions and Loopflow's ordinary floor.
-    #[default]
-    Configured,
-    /// Permit writes only inside the assigned working directory.
-    Worktree,
-}
-
-/// Additional writable roots required by a confined agent command.
-#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AgentExecutionBoundary {
-    pub writable_roots: Vec<PathBuf>,
-}
-
-pub fn checkout_execution_boundary(
-    repo: &Path,
-    agent: &Agent,
-) -> anyhow::Result<AgentExecutionBoundary> {
-    let harness = agent.harness;
-    if !harness.harness().capabilities().supports_execution_boundary {
-        return Err(anyhow::anyhow!(format!(
-            "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
-        )));
+/// A headless run in its own Task checkout uses the harness's yolo settings.
+pub fn headless_task_checkout(
+    headless: bool,
+    task: Option<&crate::work::task::Task>,
+    cwd: &Path,
+) -> anyhow::Result<bool> {
+    match task {
+        Some(task) if headless => Ok(task.worktree()?.canonicalize()? == cwd.canonicalize()?),
+        _ => Ok(false),
     }
-    let common_dir = crate::git::worktrees::git_common_dir(repo).map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: failed to resolve linked Git metadata from {}: {error}",
-            repo.display()
-        ))
-    })?;
-    let control = crate::os_process::execution_context().map_err(|error| {
-        anyhow::anyhow!(format!(
-            "Agent execution unavailable: Loopflow control-plane authority is unavailable: {error}"
-        ))
-    })?;
-    let mut writable_roots = vec![common_dir, control.lf_home];
-    writable_roots.sort();
-    writable_roots.dedup();
-    Ok(AgentExecutionBoundary { writable_roots })
 }
 
 /// What a conversation sets in its own shells, lf's markers and its
@@ -210,10 +178,6 @@ pub struct AgentConfig {
     pub resume_token: Option<AgentSessionId>,
     /// Working directory.
     pub cwd: Option<std::path::PathBuf>,
-    /// Maximum filesystem write scope granted to the provider.
-    pub write_scope: AgentWriteScope,
-    /// Exact roots and network access needed beyond `cwd`.
-    pub execution_boundary: Option<AgentExecutionBoundary>,
     /// Skip permission prompts
     pub skip_permissions: bool,
     /// Graph-runner-injected structured replies (rendered via harness prompt guidance).
@@ -245,8 +209,6 @@ impl AgentConfig {
             max_turns: None,
             resume_token: None,
             cwd: None,
-            write_scope: AgentWriteScope::Configured,
-            execution_boundary: None,
             skip_permissions: false,
             structured_replies: Vec::new(),
             directive_relay: None,
@@ -290,8 +252,6 @@ impl std::fmt::Debug for AgentConfig {
             .field("fallback_agents", &self.fallback_agents)
             .field("max_turns", &self.max_turns)
             .field("resume_token", &self.resume_token)
-            .field("write_scope", &self.write_scope)
-            .field("execution_boundary", &self.execution_boundary)
             .field("cwd", &self.cwd)
             .field("skip_permissions", &self.skip_permissions)
             .field("structured_replies", &self.structured_replies)
@@ -602,19 +562,13 @@ fn merge_codex_permission_config(
 /// App-server overrides. `None` preserves vendor policy. A headless run must
 /// write to the workspace and has nobody to answer an approval, so it gets at
 /// least `workspace-write` and `never`; an attended Session keeps Codex's own
-/// sandbox and approval configuration unless `yolo` or a managed boundary applies.
+/// sandbox and approval configuration unless `yolo` applies.
 fn codex_permission_policy(
     config: CodexPermissionConfig,
     launch: &AgentConfig,
     headless: bool,
 ) -> CodexPermissionConfig {
-    if launch.write_scope == AgentWriteScope::Worktree && launch.execution_boundary.is_none() {
-        return CodexPermissionConfig {
-            sandbox: Some(CodexSandboxMode::WorkspaceWrite),
-            approval: Some(CodexApprovalPolicy::Never),
-        };
-    }
-    if launch.skip_permissions || launch.execution_boundary.is_some() {
+    if launch.skip_permissions {
         return CodexPermissionConfig {
             sandbox: Some(CodexSandboxMode::DangerFullAccess),
             approval: Some(CodexApprovalPolicy::Never),
@@ -726,28 +680,8 @@ pub(crate) fn claude_options(
         args.push("--add-dir".into());
         args.extend(add_dirs.iter().map(|dir| dir.display().to_string()));
     }
-    if config.execution_boundary.is_some()
-        || (config.write_scope == AgentWriteScope::Configured
-            && claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions))
-    {
+    if claude_skip_permissions(config.cwd.as_deref(), stream, config.skip_permissions) {
         args.push("--dangerously-skip-permissions".into());
-    }
-    if config.write_scope == AgentWriteScope::Worktree && config.execution_boundary.is_none() {
-        args.extend([
-            "--permission-mode".into(),
-            "acceptEdits".into(),
-            "--setting-sources".into(),
-            String::new(),
-            "--settings".into(),
-            serde_json::json!({
-                "sandbox": {
-                    "enabled": true,
-                    "failIfUnavailable": true,
-                    "allowUnsandboxedCommands": false
-                }
-            })
-            .to_string(),
-        ]);
     }
     if stream {
         if let Some(max_turns) = config.max_turns {
@@ -906,9 +840,6 @@ pub fn workspace_add_dirs(cwd: &Path) -> Vec<PathBuf> {
 }
 
 fn provider_writable_roots(launch: &AgentConfig) -> Vec<PathBuf> {
-    if launch.execution_boundary.is_some() || launch.write_scope != AgentWriteScope::Configured {
-        return Vec::new();
-    }
     launch
         .cwd
         .as_deref()
@@ -1663,34 +1594,6 @@ trust_level = "trusted"
         assert!(validate_terminal_turn(&"x".repeat(122_879)).is_ok());
         assert!(validate_terminal_turn(&"x".repeat(122_880)).is_err());
         assert!(validate_terminal_turn("").is_ok());
-    }
-
-    #[test]
-    fn managed_task_scope_carries_exact_delivery_capabilities() {
-        let (_tmp, main, worktree) = git_worktree_fixture();
-        let git_control = main.join(".git");
-        let control_store = worktree.parent().unwrap().join("control-store");
-        let launch = AgentConfig {
-            agent: crate::config::Agent::parse("codex").unwrap(),
-            cwd: Some(worktree),
-            write_scope: AgentWriteScope::Worktree,
-            execution_boundary: Some(AgentExecutionBoundary {
-                writable_roots: vec![git_control.clone(), control_store.clone()],
-            }),
-            skip_permissions: true,
-            ..default_launch()
-        };
-        let thread = build_codex_thread_start_params(&launch, false);
-        assert_eq!(thread["sandbox"], "danger-full-access");
-        assert_eq!(thread["approvalPolicy"], "never");
-        assert!(thread.get("config").is_none());
-
-        let claude = terminal_args(&AgentConfig {
-            agent: crate::config::Agent::parse("claude").unwrap(),
-            ..launch
-        });
-        assert!(claude.contains(&"--dangerously-skip-permissions".to_string()));
-        assert!(!claude.contains(&"--add-dir".to_string()));
     }
 
     #[test]

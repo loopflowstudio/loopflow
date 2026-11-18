@@ -1566,7 +1566,6 @@ impl super::Harness for Claude {
                 managed: super::ThreadName::Assigned,
             },
             initial_prompt_on_resume: false,
-            supports_execution_boundary: true,
             classifies_failures: true,
             native_skills: Some(crate::skills::catalog::SkillDialect::Claude),
             turn_limit: true,

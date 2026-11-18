@@ -156,11 +156,6 @@ fn every_harness_runs_all_four_launch_kinds() {
                     system_prompt: "fixed instructions".into(),
                     chrome: Some(true),
                     skip_permissions: true,
-                    write_scope: if harness == HarnessKind::Pi {
-                        crate::agent::AgentWriteScope::Configured
-                    } else {
-                        crate::agent::AgentWriteScope::Worktree
-                    },
                     task_prompt: "say hi".into(),
                     conversation_context: Some(crate::context_block::ContextDelivery {
                         identity: None,
@@ -237,9 +232,8 @@ fn every_harness_runs_all_four_launch_kinds() {
                     "{row}: Chrome flag ownership"
                 );
                 anyhow::ensure!(
-                    !flag("--dangerously-skip-permissions")
-                        && !flag("--dangerously-bypass-approvals-and-sandbox"),
-                    "{row}: yolo escaped worktree policy"
+                    flag("--dangerously-skip-permissions") == (harness == HarnessKind::Claude),
+                    "{row}: Claude yolo setting"
                 );
                 if harness == HarnessKind::OpenCode {
                     let settings = commands
@@ -248,9 +242,8 @@ fn every_harness_runs_all_four_launch_kinds() {
                         .ok_or_else(|| anyhow::anyhow!("{row}: no server settings"))?;
                     let settings: serde_json::Value = serde_json::from_str(settings)?;
                     anyhow::ensure!(
-                        settings["permissions"][1]["action"] == "external_directory"
-                            && settings["permissions"][1]["effect"] == "deny",
-                        "{row}: worktree permissions lost"
+                        settings["permissions"] == serde_json::json!([{"action":"*", "resource":"*", "effect":"allow"}]),
+                        "{row}: OpenCode yolo setting"
                     );
                 }
                 for command in &commands {

@@ -1974,6 +1974,76 @@ sys.exit(code)
 }
 
 #[test]
+fn a_task_step_runs_as_a_worker_on_every_harness() {
+    let opencode = include_str!("../../../loopflow-execution/tests/support/opencode_server.py")
+        .replace("__WAIT__", "False")
+        .replace(
+            "Path(__file__).resolve().parent.parent",
+            "Path(os.environ['LF_HOME'])",
+        );
+    let pi = format!(
+        "#!/usr/bin/python3 -I\n{}",
+        include_str!("../../../loopflow-execution/src/harness/testdata/pi_rpc.py").replace(
+            "Path.cwd() / \"pi-conversation.jsonl\"",
+            "Path(os.environ['LF_HOME']) / (os.environ['LF_CAPTURE_KEY'] + '.jsonl')"
+        )
+    );
+    for (provider, agent, script, answer) in [
+        (
+            "opencode",
+            "opencode:opencode/fixture",
+            opencode,
+            "Fixture completed.",
+        ),
+        ("pi", "pi:fixture/model", pi, "answer 1:"),
+        ("claude", "claude", holding_claude(), "Held."),
+        (
+            "codex",
+            "codex",
+            support::codex_app_server_script("Worker finished.", ""),
+            "Worker finished.",
+        ),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        task.repo.create_file(
+            ".lf/graphs/worker.yaml",
+            "- implement\n- interactive: {name: demo, id: review}\n",
+        );
+        task.repo.stage_all();
+        task.repo.commit("Define a worker followed by a review");
+        fs::write(task.home.path().join("release"), "").unwrap();
+
+        task.task_run_ok(&["task", "run", "INF-123", "worker", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let graphs = support::recorded_graphs(task.home.path());
+        assert_eq!(graphs.len(), 1, "{provider}");
+        assert_eq!(graphs[0].1.len(), 1, "{provider}");
+
+        let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
+        let (session, thread): (String, String) = db
+            .query_row(
+                "SELECT id, provider_thread FROM agent_sessions
+                 WHERE task_id=?1 AND provider=?2 AND skill='implement'
+                   AND interactive=0 AND completed_at IS NOT NULL",
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert!(!thread.is_empty(), "{provider}");
+        let history = task.run(&["history", "show", &session, "--final"]);
+        assert!(
+            history.status.success(),
+            "{provider}: {}",
+            String::from_utf8_lossy(&history.stderr)
+        );
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+    }
+}
+
+#[test]
 fn a_failed_run_starts_again_at_the_step_that_failed() {
     let task = GraphTask::new();
     let failed = task.task_run(&["task", "run", "INF-123", "held-review"]);

@@ -128,6 +128,7 @@ impl Driver {
         let mut headers = reqwest::header::HeaderMap::new();
         headers.insert(reqwest::header::AUTHORIZATION, self.authorization.clone());
         self.client = reqwest::Client::builder()
+            .no_proxy()
             .default_headers(headers)
             .connect_timeout(Duration::from_secs(10))
             .build()?;
@@ -759,31 +760,33 @@ async fn post(
     url: String,
     payload: Value,
 ) -> Result<bool> {
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<bool> {
         let Recording {
             store,
             session,
             attachment,
         } = owner;
-        store.with_session_dispatch(&session, &attachment, || {
-            reqwest::blocking::Client::new()
-                .post(url)
-                .header(reqwest::header::AUTHORIZATION, authorization)
-                .timeout(std::time::Duration::from_secs(10))
-                .json(&payload)
-                .send()
-                .and_then(reqwest::blocking::Response::error_for_status)
-                .map(|_| ())
-                .map_err(|error| {
-                    crate::store::StoreError::InvalidData(format!(
-                        "OpenCode native request: {error}"
-                    ))
-                })?;
-            Ok(true)
-        })
+        let client = reqwest::blocking::Client::builder().no_proxy().build()?;
+        store
+            .with_session_dispatch(&session, &attachment, || {
+                client
+                    .post(url)
+                    .header(reqwest::header::AUTHORIZATION, authorization)
+                    .timeout(std::time::Duration::from_secs(10))
+                    .json(&payload)
+                    .send()
+                    .and_then(reqwest::blocking::Response::error_for_status)
+                    .map(|_| ())
+                    .map_err(|error| {
+                        crate::store::StoreError::InvalidData(format!(
+                            "OpenCode native request: {error}"
+                        ))
+                    })?;
+                Ok(true)
+            })
+            .map_err(Into::into)
     })
     .await?
-    .map_err(Into::into)
 }
 
 /// Build disconnect evidence for the harness's own `/api/event` SSE stream dropping.
@@ -1269,12 +1272,7 @@ fn environment(
         if !settings.is_object() {
             bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
         }
-        if config.write_scope == crate::agent::AgentWriteScope::Worktree {
-            settings["permissions"] = serde_json::json!([
-                {"action":"*","resource":"*","effect":"allow"},
-                {"action":"external_directory","resource":"*","effect":"deny"}
-            ]);
-        } else if config.skip_permissions {
+        if config.skip_permissions {
             settings["permissions"] =
                 serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
         }
@@ -1390,7 +1388,6 @@ impl super::Harness for OpenCode {
                 managed: super::ThreadName::Reported,
             },
             initial_prompt_on_resume: false,
-            supports_execution_boundary: false,
             classifies_failures: false,
             native_skills: None,
             turn_limit: false,

@@ -402,7 +402,6 @@ impl ThreadNaming {
 pub struct Capabilities {
     pub thread: ThreadNaming,
     pub initial_prompt_on_resume: bool,
-    pub supports_execution_boundary: bool,
     pub classifies_failures: bool,
     pub native_skills: Option<crate::skills::catalog::SkillDialect>,
     pub turn_limit: bool,

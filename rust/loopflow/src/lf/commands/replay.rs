@@ -45,8 +45,6 @@ fn replay_at(home: &std::path::Path, selector: &str) -> Result<String> {
         output_schema: request.output_schema.clone(),
         max_turns: request.max_turns,
         cwd: Some(source.cwd.clone()),
-        write_scope: request.write_scope,
-        execution_boundary: request.execution_boundary.clone(),
         skip_permissions: request.skip_permissions,
         chrome: request.chrome,
         codex_service_tier: request.codex_service_tier,
@@ -229,8 +227,6 @@ for line in sys.stdin:
             account_id,
             max_turns: Some(3),
             codex_service_tier: None,
-            write_scope: loopflow_execution::agent::AgentWriteScope::Worktree,
-            execution_boundary: None,
             skip_permissions: true,
             chrome: None,
         };

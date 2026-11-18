@@ -286,10 +286,31 @@ The docs commit the implementation to three things the plan had left open:
 3. **A worker's question ends the turn** on OpenCode, matching Pi.
 4. **Cancel and resume, on both.** Interrupt a running worker and resume a
    stopped Task Session per harness; OpenCode's interrupt has no test today.
+5. **Align OpenCode launches with Claude and Codex (`opencode --standalone` and
+   `opencode run`).** Today `rust/loopflow-execution/src/harness/opencode.rs`
+   (~1,500 lines) boots `opencode serve --stdio --hostname 127.0.0.1 --port 0`
+   with Basic auth, `reqwest` HTTP calls, an SSE `/event` loop, and a companion
+   Rust thread in `open_native` across all four launch kinds. Split it the way
+   PR #1895 split Codex:
+   - **Chats (`!launch.kind.is_managed()` interactive):** exec
+     `opencode --standalone` directly as the terminal's foreground program (with
+     `OPENCODE_CONFIG_CONTENT` loading `context_opencode.js`), with no companion
+     thread or server wrapper.
+   - **Headless batches and workers (`Driver`):** run
+     `opencode run --standalone --format json --auto` (with `--session` on
+     resume and `--model`), reading NDJSON from stdout until exit like
+     `claude -p --output-format stream-json`, while `context_opencode.js`
+     continues supplying instructions, `__context-block`, compaction refreshes,
+     `server.boundary` turn reports, and between-tool `ownNews` steers.
+   - **Work sessions:** keep `opencode serve` + `--server` only if retained for
+     waking idle OpenCode TUI sessions; delete every unused `opencode serve`
+     HTTP/SSE path.
 
 ## Done when
 
 `lf task run` on a Task pinned to OpenCode Gemini 4 Carbon, and on one pinned to
-a Pi model, settles `implement` and moves to the next step; pinning a harness
-that is not installed prints the install hint after one attempt; the README
-table has a test or a named gap in every cell.
+a Pi model, settles `implement` and moves to the next step; OpenCode chats run
+`opencode --standalone` directly and headless batches/workers run `opencode run
+--standalone --format json --auto` with obsolete `opencode serve` client/SSE
+code deleted; pinning a harness that is not installed prints the install hint
+after one attempt; the README table has a test or a named gap in every cell.

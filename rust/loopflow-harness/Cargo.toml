@@ -6,7 +6,8 @@ edition.workspace = true
 license.workspace = true
 
 [features]
-# Lets execution's fixtures replay the recorded traces under `src/testdata/`.
+# Lets execution's fixtures replay the recorded streams under `src/testdata/`
+# and read the saved conversations under `src/transcript/testdata/`.
 test-support = []
 
 [dependencies]

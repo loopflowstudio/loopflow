@@ -40,3 +40,8 @@ Realign after slice 3, 2026-11-18:
 
 - The measurement landed on the outcome the plan named in advance: an ops edit moved -0.8 s and a storage edit -0.2 s, inside their ranges. Assumed: the crate still ships, for the decoder test build (35.6 s to 1.2 s, 4.76 GiB to 0.32 GiB) and because the Task asks for one representative extraction with its measurement. Ship it, or drop the boundary and file `ops` as the next Task with nothing merged?
 - `origin/main` moved to `a0548bfe28` after the comparison ran; the merge touched storage and `store/session_projection.rs` only and had no conflict. Assumed: the committed results stand without a rerun, since neither revision in the comparison includes #1977.
+
+QA, 2026-11-18 (`scratch/qa.html`):
+
+- A successful Codex turn was not reached: the account was over its usage limit until 3:36 PM. Rerun `lf -b -a codex : '<prompt>'` with the branch `lf` before merge?
+- Seen on the installed build too, not changed: `lf session usage` shows `-` for Pi Sessions whose `turns` row holds tokens and cost. Its own Task?

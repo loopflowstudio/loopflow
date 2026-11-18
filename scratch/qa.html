@@ -1,0 +1,151 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-923 QA: loopflow-harness beside storage</title>
+<style>
+  body { font: 15px/1.5 -apple-system, system-ui, sans-serif; max-width: 920px; margin: 2rem auto; padding: 0 1rem; color: #1b1b1b; }
+  h1 { font-size: 1.5rem; } h2 { font-size: 1.15rem; margin-top: 2.2rem; }
+  pre { background: #f5f5f3; padding: .7rem .9rem; overflow-x: auto; font-size: 12.5px; line-height: 1.4; }
+  table { border-collapse: collapse; width: 100%; } td, th { border-bottom: 1px solid #ddd; padding: .35rem .5rem; text-align: left; vertical-align: top; }
+  .ok { color: #1a7f37; } .no { color: #b3261e; } .na { color: #8a6d00; }
+</style>
+
+<h1>LOO-923 QA: <code>loopflow-harness</code> beside storage</h1>
+<p>2026-11-18, branch <code>60c2f1878d</code> built as <code>target/debug/lf</code>, compared with the installed
+<code>lf 0.16.0+7bb879aff</code> (the comparison's base revision). One private <code>LF_HOME</code>
+(<code>/tmp/lf-qa-923/home</code>), the real <code>HOME</code> so the ambient provider logins answer, a fresh Git repository.
+The change claims no behavior change, so each scenario runs both builds on the same data.</p>
+
+<table>
+<tr><th>Scenario</th><th>Result</th></tr>
+<tr><td>1. Build twice with nothing changed</td><td class="ok">second build fresh, 0.17 s</td></tr>
+<tr><td>2. Moved paths named outside Rust sources</td><td class="ok">none stale</td></tr>
+<tr><td>3. Returning user: data recorded by installed <code>lf</code>, read by both builds</td><td class="ok">23 reads identical</td></tr>
+<tr><td>4. Fresh launches with the branch: Claude, Pi, OpenCode, Codex</td><td class="ok">Claude, Pi, OpenCode answer with a tool call</td></tr>
+<tr><td></td><td class="na">Codex: over its usage limit on both builds; only the failed turn was checked</td></tr>
+<tr><td>5. Interactive Claude chat started by installed <code>lf</code>, resumed by the branch in a PTY</td><td class="ok">same thread, live turn read, four turns rendered</td></tr>
+<tr><td>6. Developer loop: break a decoder, run its tests, restore</td><td class="ok">fails in 2.5 s, passes in 1.7 s</td></tr>
+<tr><td>7. The results page</td><td class="ok">reads as the plan describes</td></tr>
+</table>
+
+<h2>1. Build twice</h2>
+<pre>$ cargo build -p loopflow --bin lf      # Finished in 46.75s
+$ cargo build -p loopflow --bin lf      # Finished in 0.17s, no Compiling line</pre>
+
+<h2>2. Moved paths</h2>
+<p>19 files renamed into <code>rust/loopflow-harness/</code>. <code>git grep</code> for each old path outside
+<code>*.rs</code>, and for <code>harness/testdata</code> and <code>transcript/testdata</code> in Rust, Swift, Python, YAML and shell:
+the only hits are two <code>include_str!</code> of <code>pi_rpc.py</code>, which stayed in execution on purpose.
+Docs name no moved module by its old path.</p>
+
+<h2>3. Returning user</h2>
+<p>The installed <code>lf</code> recorded one headless turn per harness
+(<code>lf -b -a &lt;harness&gt; : 'Reply with exactly the word pong…'</code>): Claude and Pi answered <code>pong</code>,
+Codex failed with its usage limit, OpenCode failed with "Model is unavailable". Then each build ran the same reads
+into its own directory:</p>
+<pre>session history            session history --json     session history search pong
+session usage [--json]     session retention          session list
+per Session ×4: session history &lt;id&gt; [--json], session history show &lt;id&gt; [--json], session card &lt;id&gt;
+
+$ diff -r out-installed out-branch
+4 files differ: card-1..4, each only in the LF_BIN path inside open_argv</pre>
+<p><code>session history show</code> on the branch, reading the conversation the installed build recorded:</p>
+<pre>claude 80b3f311-f4ca-447f-a108-0b80cd4598dc
+  /Users/jack/.claude/projects/-private-tmp-lf-qa-923-repo/80b3f311-….jsonl
+  Kept by claude until after 2027-02-16 · Claude removes conversations idle 90 days; …
+
+── 2026-11-18 22:25 UTC · ended 2026-11-18 22:25 UTC · claude-fable-5-2 · 30.0k in (0 cached) · 4 out
+
+injected:
+Reply with exactly the word pong and nothing else.
+
+pong</pre>
+<p><code>session retention</code> counted the account's real homes the same on both
+(<code>claude … 11279 transcripts</code>, <code>codex … 13569 transcripts</code>), and <code>search pong</code> found the same
+six lines after scanning 0.5 MB.</p>
+
+<h2>4. Fresh launches with the branch</h2>
+<pre>$ lf -b -a claude : 'Run the shell command `echo qa-923` and then reply with its output only.'
+qa-923
+$ lf -b -a opencode:opencode/big-pickle : '…'
+qa-923
+$ lf -b -a pi:gemini-3.8-flash : '…'
+qa-923
+$ lf -b -a codex : '…'
+Error: agent exited with code 1: codex_error: You’ve hit your usage limit. … try again at 3:36 PM.</pre>
+<p>What they left in <code>history.db</code> <code>turns</code>: Claude <code>completed</code>, 1 tool result, final message
+<code>qa-923</code>; OpenCode <code>completed</code>, model <code>big-pickle</code>, 1 tool result, 16 reasoning tokens; Pi
+<code>completed</code>, 1 tool result, <code>cost_usd</code> 0.01495; Codex <code>failed</code> with the provider's error JSON.
+The same columns the installed build wrote for its turns. The rendered conversations show the tool call:</p>
+<pre>injected:
+Run the shell command `echo qa-923` and then reply with its output only.
+  thinking: The user wants me to run a shell command and reply with its output only.
+  · shell {"command":"echo qa-923"}
+
+qa-923</pre>
+<p>Three upstream failures were the same on both builds, word for word: Codex's usage limit, OpenCode's default model
+("Model is unavailable"), and Pi's default model on a tool prompt (403 "requires billing to be enabled").
+<code>-a pi:claude-haiku-5-5</code> gives "Pi exited before responding" on both.</p>
+
+<h2>5. Interactive chat across the two builds</h2>
+<p>The installed <code>lf -a claude : 'Reply with exactly the word banana…'</code> ran in a PTY (trust dialog: Down, Enter),
+answered <code>banana</code> and exited. The branch then ran <code>lf session resume &lt;id&gt;</code> in a PTY twice, each with
+a new message. Claude resumed thread <code>39f4d1df…</code> both times. While the second was open, both builds read
+the same card:</p>
+<pre>liveness: live   state: active
+turn: {id: 8ab33c43…, state: ended, model: claude-fable-5-2,
+       usage: {input_tokens: 106296, cached_input_tokens: 105928, output_tokens: 307}}</pre>
+<p>After exit, <code>session history show</code> rendered four turns from the one transcript: the injected first prompt,
+two typed ones (<code>you:</code>) with their Bash calls and the tool error text, and the interrupted turn between
+them. No holder, server or provider process for the private home was left running.</p>
+
+<h2>6. Developer loop</h2>
+<pre>$ cargo tree -p loopflow-harness -e normal,dev | grep -cE 'loopflow-(storage|execution)'
+0
+$ cargo test -p loopflow-harness                 # 82 passed
+$ sed … 's/== "success"/== "succes"/' rust/loopflow-harness/src/claude_decode.rs
+$ cargo test -p loopflow-harness claude_decode   # 2.5 s wall
+   Compiling loopflow-harness v0.16.0
+test claude_decode::tests::echoed_requests_correlate_results_without_borrowing_another_request ... FAILED
+test result: FAILED. 29 passed; 1 failed
+$ git checkout -- rust/loopflow-harness/src/claude_decode.rs
+$ cargo test -p loopflow-harness claude_decode   # 1.7 s wall, 30 passed</pre>
+<p>Only <code>loopflow-harness</code> compiled. One-minute load was 66–86 on 16 CPUs from other checkouts throughout.</p>
+
+<h2>7. The results page</h2>
+<p><code>scripts/benchmarks/crate-rebuild/results/loo-923.html</code> states both revisions, the load range, what each
+edit compiled in each revision and the three tables. It shows the result plainly: execution and storage edits
+unchanged (−0.79 s, −0.17 s), a decoder edit through <code>lf</code> +1.97 s, the decoder's own test build 35.56 s to
+1.17 s. The Execution-edit row carries no "inside baseline range" note because the candidate median (39.74) is just
+below the baseline minimum (40.10), while the candidate's own range reaches 41.95.</p>
+
+<h2>Fixed</h2>
+<ul>
+<li><code>rust/loopflow-harness/Cargo.toml</code>: the <code>test-support</code> comment named only the recorded streams;
+the feature also exposes the saved conversations.</li>
+<li><code>.lf/qa/builds.md</code>: how to compare a no-behavior-change crate move against the installed <code>lf</code>.</li>
+</ul>
+
+<h2>What works now</h2>
+<p>Every read the installed build gives, the branch gives byte for byte on the same home. Claude, Pi and OpenCode launch,
+call a tool, record a turn and render it. A chat started by the installed build resumes under the branch. The crate's
+own test loop takes about two seconds and notices a broken decoder.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li><strong>A successful Codex turn.</strong> The account is over its usage limit until 3:36 PM local. The Codex decoder's
+error path and the transcript count ran; its normal-turn path and rollout reader ran only in the crate's tests.</li>
+<li><strong>Desktop and iOS.</strong> No wire file moved and <code>session card</code>/<code>history --json</code> are identical,
+so neither app was launched.</li>
+<li><strong>Task Graph workers and hooks' turn reports.</strong> Launches here were batches and one chat; a worker under a
+Task was not started. The launch matrix covers those cells in tests.</li>
+<li><strong>Raw conversations listing</strong> (a plain <code>claude</code> with launchd as parent) was not run.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>Not from this change, same on the installed build: <code>lf session usage</code> shows <code>-</code> for every Pi
+Session, though its <code>turns</code> row holds tokens and <code>cost_usd</code> (0.031). Pi writes two
+<code>turns</code> rows per turn, one with the status and one with the usage.</li>
+<li>Not from this change: a chat with no Task appears in no <code>lf session list</code> while it is live; only
+<code>session card &lt;id&gt;</code> shows it.</li>
+</ol>

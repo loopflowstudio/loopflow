@@ -262,9 +262,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         let cli = || {
             let args = spelled(&change);
             let args: Vec<_> = args.iter().map(String::as_str).collect();
-            let before = processes(&database);
             let output = read(repo.path(), home.path(), &args, None);
-            assert!(processes(&database) > before, "CLI lost its real Process");
             serde_json::from_str::<Value>(&output).unwrap()
         };
         let served = |change| {
@@ -445,34 +443,31 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null, "sender": null}),
+        serde_json::json!({"type": "subscribe", "id": "history", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "resume": null, "sender": null}),
         true,
     );
     let mut subscribed = false;
     let mut answered = false;
     while !(subscribed && answered) {
         let message = receive().unwrap();
-        assert_eq!(message["id"], "processes", "{message}");
+        assert_eq!(message["id"], "history", "{message}");
         match message["type"].as_str().unwrap() {
             "response" => {
                 assert!(message["result"].is_null());
                 subscribed = true;
                 write(
-                    serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
+                    serde_json::json!({"type": "checkpoint", "id": "history", "checkpoint": 1}),
                     true,
                 );
             }
             "reading" => {
-                conforms(&declared("process.list"), &message["frame"]["body"]);
+                conforms(&declared("session.history"), &message["frame"]["body"]);
                 answered |= message["frame"]["answers"] == 1;
             }
             other => panic!("unexpected {other}: {message}"),
         }
     }
-    write(
-        serde_json::json!({"type": "cancel", "id": "processes"}),
-        true,
-    );
+    write(serde_json::json!({"type": "cancel", "id": "history"}), true);
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
@@ -485,7 +480,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
             break message;
         }
         assert_eq!(
-            message["id"], "processes",
+            message["id"], "history",
             "only the cancelled subscription may still speak"
         );
     };
@@ -495,7 +490,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null, "request_id": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let after = loop {
@@ -505,7 +500,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
         }
     };
     assert_eq!(after["type"], "response", "{after}");
-    conforms(&declared("process.list"), &after["result"]);
+    conforms(&declared("session.history"), &after["result"]);
 }
 
 #[test]
@@ -747,11 +742,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             loopflow_execution::engine::ErrorCode::NotFound
         );
     }
-    assert_eq!(
-        changes(&database),
-        before,
-        "screen reads changed Work or started a Process"
-    );
+    assert_eq!(changes(&database), before, "screen reads changed Work");
 
     // The detail names the recorded primary and observed PR checks.
     let conn = rusqlite::Connection::open(&database).unwrap();
@@ -846,6 +837,12 @@ fn server_operations_match_their_lf_commands() {
         None,
     ))
     .unwrap();
+    // One recorded capture, so its history reads the same both ways.
+    loopflow_storage::sqlite::sessions::test_capture(
+        &rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap(),
+        session["id"].as_str().unwrap(),
+        &loopflow_storage::session_record::new_artifact_key(),
+    );
     // Unpublished, so it can complete: `lf task complete` waits on a PR's merge.
     let unpublished: Value = serde_json::from_str::<serde_json::Value>(&read(
         repo.path(),
@@ -916,9 +913,8 @@ fn server_operations_match_their_lf_commands() {
     };
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
-        Read::ProcessHistory { .. }
+        Read::SessionHistoryGet { .. }
         | Read::CreationGet { .. }
-        | Read::ProcessList
         | Read::DesktopViewList { .. }
         | Read::ViewSelect { .. }
         | Read::SessionList { .. }
@@ -942,7 +938,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::GraphList { .. }
         | Read::DesktopViewGet { .. }
         | Read::TaskRuns { .. }
-        | Read::ProcessGet { .. }
+        | Read::GraphRunGet { .. }
         | Read::SessionUsage { .. }
         | Read::TaskContext { .. }
         | Read::WavePlan { .. }
@@ -964,7 +960,6 @@ fn server_operations_match_their_lf_commands() {
         | Read::PrReviews { .. }
         | Read::TaskWait { .. } => (
             [
-                Read::ProcessList,
                 plans(),
                 sessions(true),
                 task_pane(),
@@ -1040,11 +1035,13 @@ fn server_operations_match_their_lf_commands() {
                     task: "INF-123".into(),
                     after: None,
                 },
-                Read::ProcessHistory { id: graph.clone() },
+                Read::SessionHistoryGet {
+                    id: session["id"].as_str().unwrap().into(),
+                },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
                 },
-                Read::ProcessGet { id: graph },
+                Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
                     days: 0,
                     wave: None,
@@ -1138,7 +1135,6 @@ fn server_operations_match_their_lf_commands() {
             ],
             [
                 history(),
-                Read::ProcessList,
                 all_plans(),
                 Read::ViewSelect {
                     expression: Some("kind:task state:open".into()),
@@ -1159,7 +1155,7 @@ fn server_operations_match_their_lf_commands() {
     };
     let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
-    // A server read changes no Work and records no Process.
+    // A server read changes no Work.
     let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
         let before = changes(&database);
         serve();
@@ -1174,7 +1170,7 @@ fn server_operations_match_their_lf_commands() {
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
             // History is rendered text, including its final newline. A path's
             // CLI newline is only its output delimiter.
-            let text = if matches!(query, Read::ProcessHistory { .. }) {
+            let text = if matches!(query, Read::SessionHistoryGet { .. }) {
                 printed
             } else {
                 printed.trim().into()
@@ -1455,8 +1451,8 @@ fn server_operations_match_their_lf_commands() {
         ),
     };
     // The same write through the server, then through `lf`: each prints the same,
-    // leaves the same Work. Only the CLI is another OS Process; requests do
-    // not manufacture Process rows or borrow the server launcher's attribution.
+    // leaves the same Work. Requests do not manufacture Process rows or borrow
+    // the server launcher's attribution.
     let compare = |served: Write, again: &dyn Fn() -> Write, effect: &dyn Fn() -> Value| {
         let argv = spelled(&served);
         let before = processes(&database);
@@ -1472,9 +1468,7 @@ fn server_operations_match_their_lf_commands() {
         let again = again();
         let args = spelled(&again);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let before = processes(&database);
         let printed = read(repo.path(), home.path(), &args, again.input());
-        let recorded = processes(&database) - before;
         assert_eq!(effect(), effected, "{argv:?}");
         // The CLI prints with `--json` exactly what the server returned.
         let printed: Value = serde_json::from_str(&printed)
@@ -1484,7 +1478,6 @@ fn server_operations_match_their_lf_commands() {
             without_times(without_save_time(without_clock(printed))),
             "{argv:?}"
         );
-        recorded
     };
     for write in writes {
         let issue = match &write {
@@ -1493,16 +1486,14 @@ fn server_operations_match_their_lf_commands() {
             | Write::TaskAbandon { issue, .. } => issue.clone(),
             _ => "INF-123".to_owned(),
         };
-        let recorded = compare(write.clone(), &|| write.clone(), &|| effect(&issue));
-        assert!(recorded > 0, "{:?} recorded no Process", spelled(&write));
+        compare(write.clone(), &|| write.clone(), &|| effect(&issue));
     }
     // A save names the revision it replaces, which the first save changed.
     compare(save(file_revision()), &|| save(file_revision()), &|| {
         effect("INF-123")
     });
     // Claiming and unassigning leave the same owner, which each prints from the
-    // store. Only the CLI records a Process. Every claim appends to the ownership
-    // log, so the log itself differs.
+    // store. Every claim appends to the ownership log, so the log itself differs.
     for claimed in [true, false] {
         let (directory, issue) = (directory.clone(), "INF-123".to_owned());
         let ownership = if claimed {
@@ -1519,11 +1510,8 @@ fn server_operations_match_their_lf_commands() {
         );
         let args = spelled(&ownership);
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
-        let before = processes(&database);
         let printed: Value =
             serde_json::from_str(&read(repo.path(), home.path(), &args, None)).unwrap();
-        let recorded = processes(&database) - before;
-        assert!(recorded > 0, "{args:?} recorded no Process");
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
@@ -1603,7 +1591,7 @@ fn server_operations_match_their_lf_commands() {
         .unwrap()["execution"]["ship_stop"]["by"]
             .clone()
     };
-    assert!(compare(stop.clone(), &|| stop.clone(), &stopped) > 0);
+    compare(stop.clone(), &|| stop.clone(), &stopped);
     assert_eq!(stopped()["kind"], "person", "no stop saved");
 
     // Which repositories the app shows, as the app reads them.
@@ -1611,7 +1599,7 @@ fn server_operations_match_their_lf_commands() {
     let manual = Write::DesktopPortfolioSet {
         change: loopflow_execution::portfolio::PortfolioCommand::Manual,
     };
-    assert!(compare(manual.clone(), &|| manual.clone(), &portfolio) > 0);
+    compare(manual.clone(), &|| manual.clone(), &portfolio);
     // A customized Graph is the builtin's copy in the repository.
     let customized = || {
         Value::from(
@@ -1627,7 +1615,7 @@ fn server_operations_match_their_lf_commands() {
         fs::remove_file(repo.path().join(".lf/graphs/code.yaml")).unwrap();
         customize.clone()
     };
-    assert_eq!(compare(customize.clone(), &recustomize, &customized), 0);
+    compare(customize.clone(), &recustomize, &customized);
     // A bind preview names the Task a bind would assign and assigns nothing.
     let bind_preview = Write::SessionBind {
         directory: directory.clone(),
@@ -1635,12 +1623,9 @@ fn server_operations_match_their_lf_commands() {
         task: "INF-123".into(),
         preview: true,
     };
-    assert_eq!(
-        compare(bind_preview.clone(), &|| bind_preview.clone(), &|| effect(
-            "INF-123"
-        )),
-        0
-    );
+    compare(bind_preview.clone(), &|| bind_preview.clone(), &|| {
+        effect("INF-123")
+    });
     // Arrangement persists without a Process, in the app as through `lf`.
     let create = Write::DesktopDashboardQuery {
         directory: directory.clone(),
@@ -1651,8 +1636,7 @@ fn server_operations_match_their_lf_commands() {
     let created = server_write(create);
     assert_eq!(layout("query:served")["id"], "served", "{created}");
     for write in arrangement {
-        let recorded = compare(write(), &*write, &dashboard);
-        assert_eq!(recorded, 0, "{:?} recorded a Process", spelled(&write()));
+        compare(write(), &*write, &dashboard);
     }
     // A refused write names its code and changes nothing; the CLI refuses
     // the same spelling. The default diagnostic log includes the request
@@ -1873,19 +1857,15 @@ fn without_revision(mut value: Value) -> Value {
 }
 
 /// Each Work domain's revision and the Processes recorded.
-fn changes(database: &Path) -> (Vec<(String, i64)>, i64) {
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let revisions = conn
+fn changes(database: &Path) -> Vec<(String, i64)> {
+    rusqlite::Connection::open(database)
+        .unwrap()
         .prepare("SELECT domain, revision FROM store_revisions ORDER BY domain")
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
-        .unwrap();
-    let processes = conn
-        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
-        .unwrap();
-    (revisions, processes)
+        .unwrap()
 }
 
 /// A save without its recoveries' directories, which each save names by its time.

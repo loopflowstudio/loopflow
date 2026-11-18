@@ -1,6 +1,6 @@
 //! Coordinate provider lifetime above saved process state and SQL transactions.
 
-use crate::process::{AgentProcessState, Departure, LfProcessStart, SessionAttachment};
+use crate::process::{AgentProcessState, AttachingLf, Departure, SessionAttachment};
 use crate::session::LfSession;
 use crate::store::{StoreError, StoreResult};
 use loopflow_model::id::{AgentSessionId, LfProcessId};
@@ -13,16 +13,16 @@ pub fn session_connection(
     let Some(saved) = store.saved_session_connection(session)? else {
         return Ok(None);
     };
-    match crate::journal::agent_process_evidence(
-        saved.completed_at,
-        saved.pid,
-        saved.os_started_at,
-        None,
-        crate::journal::process_identity_evidence,
-    ) {
-        crate::journal::ProcessIdentityEvidence::Live => Ok(Some((saved.endpoint, saved.thread))),
-        crate::journal::ProcessIdentityEvidence::Dead => Ok(None),
-        crate::journal::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
+    let agent = crate::process::RecordedProcess {
+        ended: saved.completed_at.is_some(),
+        pid: saved.pid,
+        os_started_at: saved.os_started_at,
+        started_at: None,
+    };
+    match agent.evidence() {
+        crate::store::ProcessIdentityEvidence::Live => Ok(Some((saved.endpoint, saved.thread))),
+        crate::store::ProcessIdentityEvidence::Dead => Ok(None),
+        crate::store::ProcessIdentityEvidence::Unknown => Err(StoreError::InvalidAuthority(
             "AgentProcess OS identity is unavailable; cannot reconnect or replace it".into(),
         )),
     }
@@ -115,15 +115,6 @@ pub fn finish_session_attachment(
     transfer.finish(outcome, departure, closed)
 }
 
-pub(crate) fn process_receipt_path(
-    store: &SqliteStore,
-    id: &LfProcessId,
-) -> StoreResult<Option<std::path::PathBuf>> {
-    Ok(store
-        .process_receipt_locator(id)?
-        .map(|(home, locator)| crate::journal::process_receipt_path(&home, &locator)))
-}
-
 /// A stale process cannot authorize termination. Retain the Session fence
 /// from the saved-image comparison through termination and settlement.
 pub(crate) fn settle_agent_process(
@@ -152,8 +143,8 @@ fn prepare_resume(
             .agent_state(&attachment.agent_process_id)?
             .and_then(|agent| agent.holder);
         if let Some(holder) = holder {
-            if crate::journal::holder_evidence(&holder)
-                != crate::journal::ProcessIdentityEvidence::Dead
+            if crate::process::RecordedProcess::from(&holder).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
             {
                 return Err(StoreError::InvalidAuthority(
                     "Conversation already has an attached LfProcess; connect to it".into(),
@@ -173,9 +164,11 @@ fn prepare_resume(
     Ok(PreviousAgentDisposition::Closed)
 }
 
-fn current_start(process: &LfProcessId) -> Option<LfProcessStart> {
-    crate::journal::current_start_record(process).map(|record| LfProcessStart {
-        process: record,
+/// This lf, when `process` is this lf: the holder its attachment records.
+fn current_start(process: &LfProcessId) -> Option<AttachingLf> {
+    crate::journal::current_holder(process).map(|holder| AttachingLf {
+        lf_process_id: process.clone(),
+        holder,
         terminal: crate::transport::current().cloned(),
     })
 }

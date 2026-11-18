@@ -98,20 +98,17 @@ fn library_launch_records_each_provider_under_its_invocation() {
             .unwrap();
         assert!(agent.os_started_at.is_some());
         assert!(agent.completed_at.is_some());
-        let parent = store
-            .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
-            .unwrap()
-            .unwrap();
-        assert_eq!(parent.pid, Some(std::process::id()));
-        assert!(parent.completed_at.is_some());
+        assert!(agent.parent_lf_process_id.is_some());
         assert!(agent.agent_session_id.is_some());
     }
     let store = loopflow_execution::store::open_sqlite(
         &loopflow_execution::store::database_path_from_env().unwrap(),
     )
     .unwrap();
+    // Each provider's row is the one a released reader joins; lf records
+    // no row of its own.
     let rows = store.processes_since(0).unwrap();
-    assert_eq!(rows.len(), 4);
+    assert_eq!(rows.len(), 2);
     assert_eq!(
         rows.iter()
             .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
@@ -137,19 +134,14 @@ fn library_launch_reuses_the_enclosing_invocation() {
             &loopflow_execution::store::database_path_from_env()?,
         )?;
         let rows = store.processes_since(0)?;
-        let parents = rows
-            .iter()
-            .filter_map(loopflow_execution::process::ProcessEntry::as_lf)
-            .collect::<Vec<_>>();
-        assert_eq!(parents.len(), 1);
-        assert!(parents[0].completed_at.is_none());
+        let invocation = loopflow_execution::journal::current_lf_process_id().unwrap();
         let agents = rows
             .iter()
             .filter_map(loopflow_execution::process::ProcessEntry::as_agent)
             .collect::<Vec<_>>();
         assert_eq!(agents.len(), 2);
         for agent in agents {
-            assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&parents[0].id));
+            assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&invocation));
             assert!(agent.completed_at.is_some());
         }
         Ok(())

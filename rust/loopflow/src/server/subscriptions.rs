@@ -604,6 +604,17 @@ mod tests {
     use loopflow_execution::performance::subscription_measurement as meter;
     use loopflow_storage::sqlite::SqliteStore;
 
+    /// A subscription that needs no directory and reads an empty home.
+    fn history() -> Read {
+        Read::SessionHistory(crate::lf::commands::activity::HistoryWindow {
+            since: "7d".into(),
+            limit: 50,
+            wave: None,
+            project: None,
+            task: None,
+        })
+    }
+
     async fn receive(messages: &mut mpsc::Receiver<crate::server::outbox::Frame>) -> ServerMessage {
         let frame = messages.recv().await.unwrap();
         let message = serde_json::from_str(&frame.payload.into_line(&mut 0).unwrap()).unwrap();
@@ -1038,10 +1049,10 @@ mod tests {
                 let registry = Arc::new(Subscriptions::default());
                 let setup = pause("first", "setup");
                 let before = meter::snapshot();
-                let mut first = Consumer::new(&registry, "first", Read::ProcessList, None);
+                let mut first = Consumer::new(&registry, "first", history(), None);
                 setup.entered.await.unwrap();
-                let mut second = Consumer::new(&registry, "second", Read::ProcessList, None);
-                let mut quiet = Consumer::new(&registry, "quiet", Read::ProcessList, None);
+                let mut second = Consumer::new(&registry, "second", history(), None);
+                let mut quiet = Consumer::new(&registry, "quiet", history(), None);
                 setup.release.send(()).unwrap();
                 first.initial().await;
                 second.initial().await;

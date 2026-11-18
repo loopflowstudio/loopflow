@@ -379,11 +379,14 @@ impl SqliteStore {
     }
 
     /// Graphs in Graph-process-id order after `after`, at most `limit`.
+    /// `observe` reads each run's result as the caller sees it: a run whose
+    /// pid has died reads as ended before the liveness pass records it.
     pub fn graph_inventory(
         &self,
         filter: &GraphProcessFilter,
         after: Option<&str>,
         limit: NonZeroU32,
+        observe: impl Fn(&Execution) -> crate::graph_process::ExecutionResult,
     ) -> StoreResult<GraphProcessPage> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let graphs = match &filter.task_id {
@@ -393,7 +396,10 @@ impl SqliteStore {
         let search = filter.search.as_deref().map(str::to_lowercase);
         let mut entries = Vec::new();
         for graph in &graphs {
-            let entry = entry_in(&conn, graph)?;
+            let mut entry = entry_in(&conn, graph)?;
+            if entry.summary.state == GraphProcessSummaryState::Current {
+                entry.summary.state = GraphProcessSummaryState::of_run(observe(&graph.run));
+            }
             let summary = &entry.summary;
             if filter
                 .repo
@@ -521,40 +527,8 @@ impl SqliteStore {
         exit_code: Option<i32>,
         error: Option<&str>,
     ) -> StoreResult<()> {
-        let sql = match owner {
-            // A carrier's result is its Graph run's: its end clears the OS
-            // process and keeps its id, where the next run sets out from.
-            RunOwner::TaskCarrier => {
-                let conn = self.conn.lock().expect("store mutex poisoned");
-                conn.execute(
-                    "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
-                     WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
-                    [id],
-                )?;
-                return Ok(());
-            }
-            RunOwner::GraphRun => {
-                "UPDATE graph_processes SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-                 WHERE lf_process_id=?1 AND ended_at IS NULL"
-            }
-            RunOwner::GraphStep => {
-                "UPDATE graph_process_steps SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-                 WHERE lf_process_id=?1 AND ended_at IS NULL"
-            }
-            RunOwner::ProjectActivation => {
-                "UPDATE waves SET project_activation_ended_at=?2,project_activation_exit_code=?3,
-                    project_activation_error=?4,project_activation_pid=NULL,
-                    project_activation_os_started_at=NULL
-                 WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
-            }
-            RunOwner::ShipCarrier => {
-                "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
-                 WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
-            }
-        };
         let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(sql, params![id, ended_at, exit_code, error])?;
-        Ok(())
+        finish_run_in(&conn, owner, id.as_str(), ended_at, exit_code, error)
     }
 
     /// The OS process a reserved step now runs as, unless it already ended.
@@ -751,12 +725,55 @@ impl SqliteStore {
     }
 }
 
+/// Write a run's end on the one record `owner` names.
+pub(super) fn finish_run_in(
+    conn: &rusqlite::Connection,
+    owner: RunOwner,
+    id: &str,
+    ended_at: i64,
+    exit_code: Option<i32>,
+    error: Option<&str>,
+) -> StoreResult<()> {
+    let sql = match owner {
+        // A carrier's result is its Graph run's: its end clears the OS
+        // process and keeps its id, where the next run sets out from.
+        RunOwner::TaskCarrier => {
+            conn.execute(
+                "UPDATE task_graphs SET run_pid=NULL,run_os_started_at=NULL
+                 WHERE lf_process_id=?1 AND run_pid IS NOT NULL",
+                [id],
+            )?;
+            return Ok(());
+        }
+        RunOwner::GraphRun => {
+            "UPDATE graph_processes SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+             WHERE lf_process_id=?1 AND ended_at IS NULL"
+        }
+        RunOwner::GraphStep => {
+            "UPDATE graph_process_steps SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+             WHERE lf_process_id=?1 AND ended_at IS NULL"
+        }
+        RunOwner::ProjectActivation => {
+            "UPDATE waves SET project_activation_ended_at=?2,project_activation_exit_code=?3,
+                project_activation_error=?4,project_activation_pid=NULL,
+                project_activation_os_started_at=NULL
+             WHERE project_activation_lf_process_id=?1 AND project_activation_ended_at IS NULL"
+        }
+        RunOwner::ShipCarrier => {
+            "UPDATE task_ship_events SET ended_at=?2,exit_code=?3,error=?4,pid=NULL,os_started_at=NULL
+             WHERE lf_process_id=?1 AND kind IN ('approved','carried') AND ended_at IS NULL"
+        }
+    };
+    conn.execute(sql, params![id, ended_at, exit_code, error])?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::num::NonZeroU32;
 
     use crate::execution::GraphProcessFilter;
-    use crate::graph_process::RunOwner;
+    use crate::graph_process::{Execution, RunOwner};
     use crate::session::GraphProcessSummaryState;
 
     /// Two waits on one Task's step and a later wait still running its time.
@@ -955,7 +972,7 @@ mod tests {
 
         let all = NonZeroU32::new(10).unwrap();
         let page = store
-            .graph_inventory(&GraphProcessFilter::default(), None, all)
+            .graph_inventory(&GraphProcessFilter::default(), None, all, Execution::result)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
         let state = |id: &loopflow_model::id::LfProcessId| {
@@ -997,6 +1014,7 @@ mod tests {
                 },
                 None,
                 all,
+                Execution::result,
             )
             .unwrap();
         assert_eq!(repo.entries.len(), 1);
@@ -1006,10 +1024,16 @@ mod tests {
                 &GraphProcessFilter::default(),
                 None,
                 NonZeroU32::new(2).unwrap(),
+                Execution::result,
             )
             .unwrap();
         let rest = store
-            .graph_inventory(&GraphProcessFilter::default(), first.next.as_deref(), all)
+            .graph_inventory(
+                &GraphProcessFilter::default(),
+                first.next.as_deref(),
+                all,
+                Execution::result,
+            )
             .unwrap();
         assert_eq!((first.entries.len(), rest.entries.len()), (2, 1));
     }

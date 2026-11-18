@@ -52,9 +52,9 @@ An unreadable owner makes the Task unknown: report it and leave it.
 "Ready" and "needs reconciliation" are not dispositions. Take the first row
 that fits:
 
-- **Look for a live Graph first.** Check every Graph in
-  `lf task status <issue> --json` against `lf ps --json`. A live run
-  makes the Task moving, whoever launched it.
+- **Look for a live Graph first.** In `lf task status <issue> --json`, a
+  position with `running` true is a live run, read from its own pid. A live
+  run makes the Task moving, whoever launched it.
 - **Repair before reporting a blocker.** Read the failed step's log and what
   it changed, fix the cause if you can, and relaunch what remains with
   `lf task run <issue-id> --reason "<what changed>"`. A stopped Graph is

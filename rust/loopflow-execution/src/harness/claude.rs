@@ -1,5 +1,5 @@
 use crate::harness::LaunchKind;
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 use crate::transcript::is_user_input;
 use crate::transcript::json_lines;
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -742,7 +742,7 @@ mod tests {
         }
         assert_ne!(recorded[0].0, recorded[1].0);
         for (pid, _) in recorded {
-            assert!(crate::journal::OsProcess::group(pid).unwrap().is_empty());
+            assert!(crate::process::OsProcess::group(pid).unwrap().is_empty());
         }
     }
 
@@ -1462,7 +1462,7 @@ impl super::Harness for Claude {
         };
     }
 
-    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+    fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         if process.command == "claude" {
             return true;
         }
@@ -1470,7 +1470,7 @@ impl super::Harness for Claude {
         if !name.contains('.') || !name.chars().all(|c| c.is_ascii_digit() || c == '.') {
             return false;
         }
-        let Some(executable) = crate::journal::OsProcess::executable(process.pid) else {
+        let Some(executable) = crate::process::OsProcess::executable(process.pid) else {
             return false;
         };
         executable.parent().is_some_and(|versions| {

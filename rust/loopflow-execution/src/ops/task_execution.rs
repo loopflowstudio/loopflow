@@ -7,9 +7,9 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
-use crate::journal::ProcessIdentityEvidence;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
+use crate::store::ProcessIdentityEvidence;
 use crate::store::{SharedStore, StoreResult};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, LfSessionId};
@@ -79,9 +79,9 @@ pub async fn execution_of_latest_graph(
     let mut snapshot = project_execution(
         graph,
         entry.summary.state,
-        crate::journal::run_evidence(&graph.run),
+        crate::process::RecordedProcess::from(&graph.run).evidence(),
         step.map_or(ProcessIdentityEvidence::Dead, |step| {
-            crate::journal::step_evidence(step, &graph.run)
+            crate::process::os_process::step_evidence(step, &graph.run)
         }),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
@@ -179,7 +179,7 @@ fn open_graph_execution_from_facts(
     facts: &GraphExecutionFacts,
 ) -> Option<TaskExecutionSnapshot> {
     for run in facts.open_graphs.get(task).into_iter().flatten() {
-        let state = match crate::journal::run_evidence(run) {
+        let state = match crate::process::RecordedProcess::from(run).evidence() {
             ProcessIdentityEvidence::Live => TaskExecutionState::Running,
             ProcessIdentityEvidence::Unknown => TaskExecutionState::Unknown,
             ProcessIdentityEvidence::Dead => continue,
@@ -281,7 +281,7 @@ fn project_execution(
     let (state, reason) = match (graph_process, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
-            format!("Step Process {} is running {label}", process.id),
+            format!("Step {} is running {label}", process.id),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,
@@ -289,7 +289,7 @@ fn project_execution(
         ),
         (ProcessIdentityEvidence::Unknown, _) | (_, ProcessIdentityEvidence::Unknown) => (
             TaskExecutionState::Unknown,
-            format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
+            format!("Graph run at {label} has unknown process identity; inspect its effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
             if process.result() == loopflow_storage::graph_process::ExecutionResult::Succeeded {
@@ -365,8 +365,8 @@ pub(crate) fn unresolved_work<'a>(
 
 fn work_evidence(store: &SqliteStore, work: &OpenWork) -> ProcessIdentityEvidence {
     match work {
-        OpenWork::Session { agent, .. } => crate::journal::agent_evidence(store, agent),
-        OpenWork::Graph { run, .. } => crate::journal::run_evidence(run),
+        OpenWork::Session { agent, .. } => crate::process::os_process::agent_evidence(store, agent),
+        OpenWork::Graph { run, .. } => crate::process::RecordedProcess::from(run).evidence(),
     }
 }
 
@@ -426,8 +426,8 @@ mod tests {
     use super::{
         apply_limit_recovery, project_execution, TaskExecutionSnapshot, TaskExecutionState,
     };
-    use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
+    use crate::store::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use loopflow_storage::sqlite::AgentLimitRecovery;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {

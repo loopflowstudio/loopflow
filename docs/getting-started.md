@@ -88,7 +88,7 @@ While it runs:
 
 ```bash
 lf task status <ID>              # where it is, and why
-lf ps                            # what is running: each Session and Graph run, OS-confirmed
+lf session list                  # what is running: each conversation, OS-confirmed
 ```
 
 ## 4. Pick up the conversation

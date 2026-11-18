@@ -207,7 +207,7 @@ pub fn resume_session_with_env(
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_processes_read_only(
+    let store = SqliteStore::open_read_only(
         &crate::store::database_path_from_env()?,
         crate::store::token_key::encryption_key,
     )?;
@@ -1117,20 +1117,8 @@ mod tests {
                 .iter()
                 .all(|agent| agent.agent_session_id.as_deref() == Some(&saved.id)
                     && agent.completed_at.is_some()));
-            assert_eq!(
-                rows.iter()
-                    .filter_map(crate::process::ProcessEntry::as_lf)
-                    .count(),
-                index + 1
-            );
             let attachment = store.session_attachment(&saved.id).unwrap().unwrap();
             assert!(attachment.lf_process_id.is_none());
-            assert!(rows
-                .iter()
-                .filter_map(crate::process::ProcessEntry::as_lf)
-                .any(|row| row.id == attachment.launcher_lf_process_id
-                    && row.pid == Some(std::process::id())
-                    && row.completed_at.is_some()));
             let received = std::fs::read_to_string(temp.path().join("received")).unwrap();
             let arguments = received.split('\0').collect::<Vec<_>>();
             assert_eq!(arguments[0], expected.unwrap_or_default());
@@ -1298,12 +1286,7 @@ mod tests {
             .unwrap();
         assert_eq!(failed, 1);
         for agent in agents {
-            let parent = store
-                .lf_process(agent.parent_lf_process_id.as_ref().unwrap())
-                .unwrap()
-                .unwrap();
-            assert_eq!(parent.pid, Some(std::process::id()));
-            assert!(parent.completed_at.is_some());
+            assert!(agent.parent_lf_process_id.is_some());
             assert!(agent.agent_session_id.is_some());
         }
     }

@@ -574,7 +574,7 @@ fn headless_resume_preserves_a_held_owners_capture_on_both_harnesses() {
 
 #[cfg(unix)]
 #[test]
-fn headless_resume_reads_the_saved_workspace_and_retains_process_provenance() {
+fn headless_resume_reads_the_saved_workspace_and_names_its_caller() {
     use std::os::unix::fs::PermissionsExt;
 
     let home = tempfile::tempdir().unwrap();
@@ -705,16 +705,6 @@ for line in sys.stdin:
     let agent_caller: loopflow_execution::process::AgentCaller =
         serde_json::from_slice(&std::fs::read(home.path().join("proof.caller")).unwrap()).unwrap();
     assert_eq!(agent_caller.session_id, id);
-    let process_cwd = store
-        .lf_process(&agent_caller.origin_lf_process_id)
-        .unwrap()
-        .unwrap()
-        .cwd
-        .unwrap();
-    assert_eq!(
-        std::path::Path::new(&process_cwd).canonicalize().unwrap(),
-        caller.canonicalize().unwrap()
-    );
 }
 
 #[test]

@@ -658,7 +658,9 @@ read answer",
         .find(|held| held.terminal == terminal.as_str())
         .unwrap()
         .pid;
-    let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     store
         .record_agent_process_identity(session.id.as_str(), &attachment, pid, started)
         .unwrap();

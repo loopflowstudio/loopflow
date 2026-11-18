@@ -10,9 +10,9 @@ use loopflow_execution::store::{open_store, storage_config_from_env};
 
 #[derive(Debug, Default, Args)]
 pub struct GraphProcessInventoryArgs {
-    /// List or show Graphs that ran, from their Processes, instead of reusable templates
+    /// List Graph runs instead of reusable templates
     #[arg(long)]
-    pub processes: bool,
+    pub runs: bool,
     /// Include every repository and graphs with unknown repository evidence
     #[arg(long)]
     pub all: bool,
@@ -39,7 +39,7 @@ pub struct GraphProcessInventoryArgs {
 
 impl GraphProcessInventoryArgs {
     pub fn is_empty(&self) -> bool {
-        !self.processes
+        !self.runs
             && !self.all
             && self.limit.is_none()
             && self.after.is_none()
@@ -69,7 +69,7 @@ pub fn list(args: &GraphProcessInventoryArgs, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf graph list --processes`' page, scoped to the repository containing
+/// `lf graph list --runs`' page, scoped to the repository containing
 /// `directory` unless `--all`.
 pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphProcessPage> {
     tokio::runtime::Runtime::new()?.block_on(async {
@@ -124,10 +124,6 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
     })
 }
 
-pub fn inspect(selector: &str, json: bool) -> Result<()> {
-    print(&detail(selector)?, json)
-}
-
 /// Prints one Graph that ran, with each step and how it exited.
 pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     if json {
@@ -147,9 +143,9 @@ pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf process show <selector>`: one Graph that ran, with its steps.
+/// `lf graph show <selector>`: one Graph that ran, with its steps.
 pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
-    find(selector)?.context("no Graph has that Graph process")
+    find(selector)?.with_context(|| format!("no Graph run {selector} was recorded"))
 }
 
 /// The Graph run `selector` names, if one was recorded.

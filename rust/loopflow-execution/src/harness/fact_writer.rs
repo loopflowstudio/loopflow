@@ -435,7 +435,7 @@ mod tests {
                 "conversation",
                 &attachment,
                 std::process::id(),
-                crate::journal::process_started_at(std::process::id())
+                crate::process::os_process::process_started_at(std::process::id())
                     .unwrap()
                     .unwrap(),
             )

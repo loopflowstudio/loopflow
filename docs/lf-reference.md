@@ -3,7 +3,7 @@
 ```bash
 lf help --all
 lf help pr land
-lf ps --json
+lf session list --json
 ```
 
 The command sections below are generated from the released `lf` when the website
@@ -25,7 +25,7 @@ require an explicit retry or move. Claude and Codex use native authentication on
 the execution Machine.
 
 JSON readers emit one document; a watched read such as
-`lf ps --subscribe --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
+`lf session list --subscribe --json` emits NDJSON until stdin closes. Diagnostics go to stderr. Exit 0 means the requested
 operation succeeded; 1 denotes an operational failure, 2 a syntax or lookup
 failure, and 130 interruption. A successful auto-merge request is not a merge.
 

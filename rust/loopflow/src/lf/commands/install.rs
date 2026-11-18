@@ -1584,7 +1584,7 @@ fn process_executables() -> Result<Vec<(libc::pid_t, String, Option<PathBuf>)>> 
         else {
             continue;
         };
-        let executable = loopflow_execution::journal::OsProcess::executable(pid as u32);
+        let executable = loopflow_execution::process::OsProcess::executable(pid as u32);
         // SAFETY: signal zero does not mutate the process and only probes
         // whether the pid observed above still exists.
         if executable.is_none() && unsafe { libc::kill(pid, 0) } != 0 {

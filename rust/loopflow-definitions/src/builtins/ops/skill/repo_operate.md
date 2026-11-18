@@ -70,8 +70,9 @@ Task and PR. Routine progress goes in this conversation, not Task comments.
   earlier turn. A failed read is not an empty list. To open one, run
   `lf resume <session-id> --prepare --json` and execute its `open_argv`
   unchanged.
-- **Execution.** When work looks stuck, run `lf ps --json`: live Sessions
-  and Graph runs, with PID and age, confirmed against the OS. Time alone
+- **Execution.** When work looks stuck, run `lf session list --json` and
+  `lf graph list --runs --state current --json`: what runs, confirmed
+  against the OS. Time alone
   never means dead. `lf machine doctor` reports strays and kills nothing.
   Never kill a PID you can't account for.
 - **Machines.** A Task belongs to a person on a Machine. Each person picks

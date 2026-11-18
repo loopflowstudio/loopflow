@@ -151,8 +151,8 @@ pub fn create(
                     .task_graph_row(&task)?
                     .and_then(|row| row.run)
                     .is_some_and(|(_, carrier)| {
-                        loopflow_execution::journal::carrier_evidence(&carrier)
-                            != loopflow_execution::journal::ProcessIdentityEvidence::Dead
+                        loopflow_execution::process::os_process::carrier_evidence(&carrier)
+                            != loopflow_execution::store::ProcessIdentityEvidence::Dead
                     })
                 {
                     std::thread::sleep(std::time::Duration::from_millis(50));
@@ -160,7 +160,7 @@ pub fn create(
                 let last = store.sqlite.task_graphs(&task)?.pop().ok_or_else(|| {
                     anyhow::anyhow!("creation Graph {graph_process} is unavailable")
                 })?;
-                let result = loopflow_execution::journal::observed_result(&last.run);
+                let result = loopflow_execution::process::os_process::observed_result(&last.run);
                 if !matches!(
                     result,
                     loopflow_storage::graph_process::ExecutionResult::Succeeded

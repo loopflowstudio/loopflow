@@ -9,9 +9,9 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskState;
-use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
+use crate::store::ProcessIdentityEvidence;
 use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::graph_process::{ExecutionResult, RunOwner};
@@ -99,7 +99,7 @@ pub fn stopper(
 /// never read as a dead process; no carrier at all is.
 fn ship_carrier_evidence(shipping: &TaskShipping) -> ProcessIdentityEvidence {
     match &shipping.carrier {
-        Some(carrier) => crate::journal::run_evidence(carrier),
+        Some(carrier) => crate::process::RecordedProcess::from(carrier).evidence(),
         None => ProcessIdentityEvidence::Dead,
     }
 }
@@ -117,11 +117,9 @@ fn carrier_failure(
     task: &loopflow_storage::work::task::TaskId,
     shipping: &TaskShipping,
 ) -> crate::store::StoreResult<Option<(i64, String)>> {
-    let Some(carrier) = shipping
-        .carrier
-        .as_ref()
-        .filter(|carrier| crate::journal::observed_result(carrier) == ExecutionResult::Failed)
-    else {
+    let Some(carrier) = shipping.carrier.as_ref().filter(|carrier| {
+        crate::process::os_process::observed_result(carrier) == ExecutionResult::Failed
+    }) else {
         return Ok(None);
     };
     let at = carrier.ended_at.expect("a failed run has ended");
@@ -264,7 +262,8 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .and_then(|shipping| shipping.carrier)
         {
             if carrier.id != process
-                && crate::journal::run_evidence(&carrier) != ProcessIdentityEvidence::Dead
+                && crate::process::RecordedProcess::from(&carrier).evidence()
+                    != ProcessIdentityEvidence::Dead
             {
                 return Ok(ShipStart::AlreadyShipping {
                     issue,
@@ -383,7 +382,9 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
             .and_then(|shipping| shipping.carrier.as_ref())
             .filter(|carrier| current.as_ref() != Some(&carrier.id))
         {
-            if crate::journal::run_evidence(carrier) == ProcessIdentityEvidence::Live {
+            if crate::process::RecordedProcess::from(carrier).evidence()
+                == ProcessIdentityEvidence::Live
+            {
                 if let Some(pid) = carrier.pid {
                     crate::platform::kill_process(pid);
                 }
@@ -789,7 +790,7 @@ async fn restart_ship(
 mod tests {
     use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
-    use crate::journal::ProcessIdentityEvidence;
+    use crate::store::ProcessIdentityEvidence;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
     use loopflow_model::id::LfProcessId;
     use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};

@@ -222,7 +222,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         program_status: None,
         agent_process_id: None,
         primary_scope: None,
-        agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
+        agent_process_evidence: crate::store::ProcessIdentityEvidence::Unknown,
         agent_end: None,
         starts_since_turn: 0,
         last_started_at: None,
@@ -274,7 +274,7 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
     use super::{SessionEndedBy, SessionState};
     let mut summary = summary_fixture();
     summary.task_primary = true;
-    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Dead;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
         at: 1_000,
         exit_code: Some(137),
@@ -331,14 +331,14 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
 
     summary.agent_end = None;
     summary.starts_since_turn = 1;
-    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Live;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Live;
     let row = super::summary_surface(&summary);
     assert_eq!(row.ended, None);
     let start = row.start.unwrap();
     assert_eq!((start.attempts, start.next_at), (1, None));
 
     summary.task_primary = false;
-    summary.agent_process_evidence = crate::journal::ProcessIdentityEvidence::Dead;
+    summary.agent_process_evidence = crate::store::ProcessIdentityEvidence::Dead;
     summary.agent_end = Some(crate::session::AgentEnd {
         at: 4_000,
         exit_code: None,
@@ -351,7 +351,7 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
 /// A summary whose projected state is `state`: a running one has an agent
 /// process, a detached one is held and unviewed.
 fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
-    use crate::journal::ProcessIdentityEvidence::*;
+    use crate::store::ProcessIdentityEvidence::*;
     let mut summary = summary_fixture();
     summary.interactive = interactive;
     summary.agent_process_evidence = match state {
@@ -433,15 +433,15 @@ fn session_metadata_keeps_unknown_position_visible() {
     // Session completion does not override its recorded provider's life.
     for (evidence, expected) in [
         (
-            crate::journal::ProcessIdentityEvidence::Live,
+            crate::store::ProcessIdentityEvidence::Live,
             super::SessionState::Active,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Dead,
+            crate::store::ProcessIdentityEvidence::Dead,
             super::SessionState::Closed,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Unknown,
+            crate::store::ProcessIdentityEvidence::Unknown,
             super::SessionState::Unknown,
         ),
     ] {
@@ -917,7 +917,7 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
         let summary = super::current_summary(&store, &session.id).unwrap();
         assert_eq!(
             summary.agent_process_evidence,
-            crate::journal::ProcessIdentityEvidence::Unknown
+            crate::store::ProcessIdentityEvidence::Unknown
         );
         assert_eq!(
             listed_session(&store, &session.id).action.unwrap().label,

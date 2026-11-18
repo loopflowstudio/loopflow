@@ -32,7 +32,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Task
 
-- `relocated_task_processes`: task_id, process_id
+- `relocated_task_processes` — **leaving → LOO-965, process_rows_on_owners**: task_id, process_id
 - `task_changes`: seq, id, task_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
 - `task_checkouts`: task_id, worktree, branch, base_commit, parent_pr_id
 - `task_comment_deliveries`: comment_id, comment_json, acknowledged, error, conflicting_comment_json
@@ -108,7 +108,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## LfSession
 
-- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, transport_lf_process_id, fence_locator, moved_to_machine_id, held_terminal_id, skill_version, opened_at, transition, departed_attachment, departure, agent_started_at, agent_pid, agent_os_started_at, agent_ended_at, agent_exit_code, agent_launcher_lf_process_id, agent_spawn_state, agent_command, agent_interactive, agent_endpoint, agent_inbox, attachment_token, attached_lf_process_id, attached_pid, attached_os_started_at, attached_terminal_id
+- `agent_sessions`: id, current_capture, title, title_source, completed_at, created_at, request, interactive, repo, provider_thread, task_id, wave_id, ~~work_source~~ (leaving → LOO-836, unused_store_members), bound_at, input_published, cwd, skill, provider, model, primary_scope, agent_process_id, ~~transport_lf_process_id~~ (leaving → LOO-965, process_rows_on_owners), fence_locator, moved_to_machine_id, held_terminal_id, skill_version, opened_at, transition, departed_attachment, departure, agent_started_at, agent_pid, agent_os_started_at, agent_ended_at, agent_exit_code, agent_launcher_lf_process_id, agent_spawn_state, agent_command, agent_interactive, agent_endpoint, agent_inbox, attachment_token, attached_lf_process_id, attached_pid, attached_os_started_at, attached_terminal_id
 - `session_activity`: session_id, observed_at, open_tools, pending_input, yielded, program_status, status_stream, status_sequence, attachment_token, agent_process_id, preview, cpu_sampled_at, cpu_quiet_since
 - `session_events`: seq, session_id, provider_thread, provider_turn, kind, receipt_key, provider_generation, lf_process_id, task_id, wave_id, observed_at, payload, captured_event, agent_process_id, provider_account, independent, provider_lineage, turn_thread, turn_id, turn_ended_at, turn_status, turn_error
 - `session_moves`: session_id, agent, requested_at
@@ -130,7 +130,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## LfProcess
 
 - `agent_limit_recoveries`: lf_process_id, provider, reason, retry_at, agent, updated_at
-- `processes`: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id
+- `processes` — **leaving → LOO-965, process_rows_on_owners**: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id
 
 ## Provider authentication
 

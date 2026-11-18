@@ -216,7 +216,7 @@ struct DesktopHeadlessTests {
         try await eventually { model.taskExecution[task.id].value != nil }
         let diagnostics = try #require(model.taskExecution[task.id].value?.work)
         let view = TaskWorkView(model: model, task: task)
-        for id in diagnostics.sessions.map(\.id) + diagnostics.processes.map(\.id) {
+        for id in diagnostics.sessions.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
         // The shipping line names who approved it.

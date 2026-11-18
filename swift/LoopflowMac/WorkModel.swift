@@ -1230,9 +1230,6 @@ final class WorkModel {
         didSet { reported(WorkPart.task.rawValue, "The Task", from: oldValue, to: subscribedTaskRow) }
     }
     private(set) var waves: Reading<[Wave]> = .loading
-    private(set) var processActivity: Reading<ActivitySnapshot> = .loading {
-        didSet { reported(WorkPart.activity.rawValue, "Processes", from: oldValue, to: processActivity) }
-    }
     private struct RepositoryReadingKey: Hashable {
         let machineId: String?
         let repository: String
@@ -1721,7 +1718,6 @@ final class WorkModel {
             applyTaskList(nil, wave: workScope.taskListWave, reason: reason)
         }
         if repoPath != nil { gitDestinations = .unavailable(lastGood: gitDestinations.value, reason: reason) }
-        if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
         taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         taskWork.values = taskWork.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         if let selection, selection.kind == .task {
@@ -1828,14 +1824,6 @@ final class WorkModel {
             if workActivityScope != scope { workActivityScope = scope }
             let next = Reading.available(body.snapshot)
             if workActivity != next { workActivity = next }
-        case .activity(let body):
-            guard let body else {
-                processActivity = .unavailable(lastGood: processActivity.value, reason: reason)
-                break
-            }
-            await Self.resolveRepoOrigins(body.nodes.compactMap(\.repo))
-            let next = Reading.available(body)
-            if processActivity != next { processActivity = next }
         case .checkpoint:
             break
         }

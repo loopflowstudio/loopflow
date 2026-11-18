@@ -204,7 +204,6 @@ lf task list --subscribe --json               # open Tasks, as your sidebar woul
 lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph runs and thread
 lf session list --subscribe --json            # conversations, with which ones are available for you
 lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
-lf ps --subscribe --json                      # live Sessions and Graph runs
 lf repo tracker --subscribe --json            # planning sync; keeps it exchanged while it runs
 lf desktop view list --subscribe --json           # every plan a repository window shows
 ```

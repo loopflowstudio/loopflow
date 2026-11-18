@@ -90,11 +90,9 @@ fn canonical_ids_retained_fence_serializes_stale_waiter_after_identity_change() 
         .recv_timeout(std::time::Duration::from_secs(5))
         .unwrap();
     let waiter = caller.unwrap().join().unwrap();
-    let store = SqliteStore::open_processes_read_only(
-        &home.path().join("loopflow.db"),
-        crate::test_fixture::key,
-    )
-    .unwrap();
+    let store =
+        SqliteStore::open_read_only(&home.path().join("loopflow.db"), crate::test_fixture::key)
+            .unwrap();
     // The store is still at the conversion release's schema, which kept the
     // attachment on the agent's Process row.
     let token: Option<String> = conn
@@ -422,11 +420,9 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
     let original = crate::planning_exchange::PlanningSnapshot { changes: mutations };
     assert_eq!(saved.merge(&original).unwrap(), saved);
     assert_eq!(saved.merge(&original).unwrap().changes.len(), 2);
-    let store = SqliteStore::open_processes_read_only(
-        &home.path().join("loopflow.db"),
-        crate::test_fixture::key,
-    )
-    .unwrap();
+    let store =
+        SqliteStore::open_read_only(&home.path().join("loopflow.db"), crate::test_fixture::key)
+            .unwrap();
     for selector in [
         "TASK_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
         "lOo-506",
@@ -447,7 +443,12 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id(),
+        conn.query_row(
+            "SELECT id FROM processes WHERE id=?1",
+            [PROCESS.to_ascii_lowercase()],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn

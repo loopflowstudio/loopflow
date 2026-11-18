@@ -154,8 +154,8 @@ fn repair_windows(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
                     start,
                     end: Some(at(ended)?),
                 }),
-                None => (crate::journal::run_evidence(&run)
-                    != crate::journal::ProcessIdentityEvidence::Dead)
+                None => (crate::process::RecordedProcess::from(&run).evidence()
+                    != crate::store::ProcessIdentityEvidence::Dead)
                     .then_some(RepairWindow { start, end: None }),
             }
         })
@@ -444,7 +444,8 @@ fn ci_fix_message(
 fn repair_live(run: Option<&loopflow_storage::graph_process::Execution>) -> bool {
     run.is_some_and(|run| {
         Some(&run.id) != crate::journal::current_lf_process_id().as_ref()
-            && crate::journal::run_evidence(run) != crate::journal::ProcessIdentityEvidence::Dead
+            && crate::process::RecordedProcess::from(run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
     })
 }
 
@@ -471,7 +472,8 @@ fn settle_repairs(store: &SharedStore, repo: &str, pr_number: u32) -> OpsResult<
         .map_err(repair_error)?
     {
         if Some(&run.id) == current.as_ref()
-            || crate::journal::run_evidence(&run) != crate::journal::ProcessIdentityEvidence::Dead
+            || crate::process::RecordedProcess::from(&run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
         {
             continue;
         }
@@ -1125,8 +1127,8 @@ async fn cleanup_landed_pr(store: &SharedStore, landing: &PrLanding) -> OpsResul
         .map_err(|error| OpsError::Message(error.to_string()))?
         .iter()
         .any(|graph| {
-            crate::journal::run_evidence(&graph.run)
-                != crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::RecordedProcess::from(&graph.run).evidence()
+                != crate::store::ProcessIdentityEvidence::Dead
         })
     {
         eprintln!("PR merged; retained its checkout for the Graph that landed it.");
@@ -1904,7 +1906,9 @@ mod tests {
         // stands in for the one `ci_incidents` still references.
         {
             let pid = std::process::id();
-            let born = crate::journal::process_started_at(pid).unwrap().unwrap();
+            let born = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             let conn = store.sqlite.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO processes(id,trace_id,started_at) VALUES('00000000-0000-4000-8000-000000000577','fixture',1)",

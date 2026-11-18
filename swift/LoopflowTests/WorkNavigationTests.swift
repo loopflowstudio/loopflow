@@ -986,7 +986,7 @@ struct WorkNavigationTests {
         let model = try model()
         await model.refresh()
         let found = try #require(model.task(id: "issue-review"))
-        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"processes":[],"graph":null}"#.utf8))
+        let empty = try JSONDecoder().decode(TaskOverview.self, from: Data(#"{"sessions":[],"graph_processes":[],"graph":null}"#.utf8))
         let loading = TaskWorkflowHeader(model: model, task: found.task, work: .loading)
         #expect(try loading.inspect().find(text: "Reading workflow…").string() == "Reading workflow…")
         #expect(throws: (any Error).self) { try loading.inspect().find(text: "No workflow selected") }

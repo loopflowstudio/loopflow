@@ -532,11 +532,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran and pruning
-    Process {
-        #[command(subcommand)]
-        cmd: commands::process::ProcessCommand,
-    },
     /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
     Plan {
         #[command(subcommand)]
@@ -1133,13 +1128,13 @@ impl DashboardCommand {
 }
 
 // ── Which commands change state ─────────────────────────────────────────────
-// Only a command that changes state records a Process. A read (status, list,
-// show, diff, file, every `--subscribe` reader) records none, so it never wakes a
+// Only a command that changes state writes a journal trace. A read (status, list,
+// show, diff, file, every `--subscribe` reader) writes none, and it never wakes a
 // Work reader or joins a Task's work. Every match below is exhaustive: a new
 // command chooses here.
 
 impl Commands {
-    /// Whether running this command changes state, and so records a Process.
+    /// Whether running this command changes state, and so writes a journal trace.
     pub fn changes_work(&self) -> bool {
         match self {
             Self::Task { cmd } => cmd.changes_work(),
@@ -1153,7 +1148,7 @@ impl Commands {
             Self::Wt { cmd } => cmd.changes_work(),
             Self::Machine { cmd } => cmd.changes_work(),
             Self::Account { cmd, .. } => cmd.is_some(),
-            Self::Server { .. } | Self::Holder { .. } | Self::Process { .. } => false,
+            Self::Server { .. } | Self::Holder { .. } => false,
             Self::Commit { .. } | Self::Sync(_) | Self::Steer { .. } => true,
             Self::Repo { cmd, .. } => cmd.as_ref().is_some_and(|cmd| cmd.changes_work()),
             Self::Config { cmd } => cmd.changes_work(),

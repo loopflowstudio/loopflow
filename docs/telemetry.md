@@ -123,23 +123,15 @@ lf replay <run-id>
 ## What's running now
 
 ```bash
-lf ps                           # live Sessions and Graph runs on this Machine
-lf ps --json                    # the same list, for another tool or agent
+lf session list                 # live Sessions on this Machine
+lf graph list --runs       # Graphs that ran; a live one is current
 ```
 
-```text
-$ lf ps
-LOO-953  session  claude  remove-process-rows        pid 48211  running 12m
-LOO-953  graph    code    implement (step 3 of 6)    pid 50117  running 4m
-LOO-941  ship     -       carrying #1960             pid 50388  running 1m
-repo     session  codex   loopflow                   pid 31002  idle    2h
-```
-
-Each row is a Session, a Graph run, or a Task's run or ship carrier, and the OS
-confirms its pid is alive with the start time lf recorded. A run that exited
-drops out; `lf task status <ID>` and `lf graph show <RUN>` keep its result. There
-is no call tree and no command log: commands an agent runs are tool calls in its
-transcript (`lf session history show <ID> --transcript`).
+A live Session or Graph run is one whose recorded pid the OS confirms alive
+with the start time lf recorded. A run that exited keeps its result in
+`lf task status <ID>` and `lf graph show <RUN>`. There is no call tree and no
+command log: commands an agent runs are tool calls in its transcript
+(`lf session history show <ID> --transcript`).
 
 When a process died without lf seeing it exit, the Machine server notices on its
 next pass, marks the run ended with an unknown result and releases the Session.
@@ -181,7 +173,7 @@ them and stops nothing; end one with `kill <pid>` once you know what it is.
 | `lf session history show ID` | One Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
 | `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
-| `lf ps` | Live Sessions and Graph runs, OS-confirmed |
+| `lf session list`, `lf graph list` | Live Sessions and Graph runs, OS-confirmed |
 | `lf machine prune` | Expire old history and compact the files |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
 | `lf machine doctor [--plan]` | Installation, storage and stray processes |

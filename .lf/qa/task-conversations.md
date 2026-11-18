@@ -47,9 +47,11 @@ a PTY tails unlinked temp files. PTY drivers must drain output continuously:
 an undrained PTY blocks the caller on write and looks like a hang.
 
 An earlier build's Session owner: in a fresh home, before the branch opens it,
-run the installed `lf session serve --terminal -- lf -i -a claude : '<msg>'`
-under `nohup`; it prints the owner's Process ID, and `agent_sessions.transport_lf_process_id`
-names it. Write the stand-in's transcript line, then resume with the branch.
+run the installed `lf -i -a claude : '<msg>'` (with `LF_BIN` unset) under a PTY
+driver that double-forks and `setsid`s, answering `ESC[6n` and `ESC[5n`; 0.16
+has no `lf session serve`. Its launcher and agent pids are unfinished
+`processes` rows, which the branch's migration copies to `attached_pid` and
+`agent_pid` on `agent_sessions`. Write the stand-in's transcript line, then resume with the branch.
 SIGSTOP the owner first to check the "still running under an earlier lf"
 refusal (SIGCONT afterwards; the pending TERM ends it). The installed
 `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY makes an

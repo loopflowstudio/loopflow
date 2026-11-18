@@ -314,7 +314,9 @@ fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         "Exact history still reports corrupt payload"
     );
     let pid = std::process::id();
-    let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     let graph_state = || {
         crate::store::session_projection::session_summary(&store, "session", 0)
             .unwrap()

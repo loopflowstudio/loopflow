@@ -12,14 +12,14 @@ then continue. Headless, exit when done or stuck. A Task with no owner is
 nobody's to move: read and discuss it, but don't launch or ship it.
 
 **Never start a second Graph process.** A live one is left running, and unknown
-liveness is not permission. A run listed in status is not a live process: check
-each Graph against `lf ps --json`.
+liveness is not permission. A run listed in status is not a live process: its
+`running` in `lf task status <issue> --json` is read from the run's own pid.
 
 ## Method
 
 1. **Read the work.** `lf task status <issue> --json`, then the brief, design
    and `scratch/` in its checkout, telling decisions from drafts.
-   `lf session list --json` and `lf graph show <graph-id> --processes` say what each
+   `lf session list --json` and `lf graph show <graph-id>` say what each
    Graph finished, how it ended and what it changed. If the Task is missing or
    ambiguous, ask; headless, say so and stop.
 

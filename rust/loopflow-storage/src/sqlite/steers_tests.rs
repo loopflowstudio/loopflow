@@ -21,23 +21,12 @@ const CLEAR: NativeBoundary<'static> = NativeBoundary::Select { source: "clear" 
 
 /// The retention of a held terminal after `setup` changes its store.
 fn retention_after(
-    setup: impl FnOnce(&rusqlite::Connection, &LfProcessId),
+    setup: impl FnOnce(&rusqlite::Connection, &loopflow_model::id::TerminalId),
 ) -> Option<crate::sqlite::sessions::TerminalRetention> {
     let (_home, store, _adapter, terminal) = native_fixture();
-    let owner = store
-        .session_attachment("session")
-        .unwrap()
-        .unwrap()
-        .lf_process_id
-        .unwrap();
     {
         let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "UPDATE processes SET held_terminal_id=?1 WHERE id=?2",
-            params![terminal, owner],
-        )
-        .unwrap();
-        setup(&conn, &owner);
+        setup(&conn, &terminal);
     }
     store.terminal_retention(&terminal).unwrap()
 }
@@ -71,8 +60,13 @@ fn terminal_retention_names_the_graph_run_or_absence_that_holds_an_idle_terminal
     use crate::sqlite::sessions::TerminalRetention::{HeadlessRun, NoOpenSession, RunningGraph};
     assert_eq!(retention_after(|_, _| {}), None);
     assert_eq!(
-        retention_after(|conn, owner| {
-            insert_process(conn, Some(owner), true);
+        retention_after(|conn, terminal| {
+            let graph = insert_process(conn, None, true);
+            conn.execute(
+                "UPDATE graph_processes SET held_terminal_id=?1 WHERE lf_process_id=?2",
+                params![terminal, graph],
+            )
+            .unwrap();
         }),
         Some(RunningGraph)
     );

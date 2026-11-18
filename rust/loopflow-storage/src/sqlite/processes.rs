@@ -1,16 +1,11 @@
 use std::fs::File;
-use std::num::NonZeroU32;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use fs2::FileExt;
-use rusqlite::types::Value;
-use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, OptionalExtension, TransactionBehavior};
 
-use crate::process::{
-    AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry, ProcessFilter,
-    ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
-};
+use crate::process::{AgentProcess, AttachingLf, LfProcess, ProcessEntry, SessionAttachment};
 use crate::{StoreError, StoreResult};
 use loopflow_model::id::{AgentProcessId, AgentSessionId, AttachmentToken, LfProcessId};
 
@@ -63,7 +58,7 @@ impl SessionTransfer<'_> {
         self,
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         self.commit(previous, |tx| {
@@ -77,7 +72,7 @@ impl SessionTransfer<'_> {
         next: crate::session::LfSession,
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<(crate::session::LfSession, SessionAttachment)> {
         if loopflow_model::id::canonical_session(&next.id) != self.session {
@@ -111,7 +106,7 @@ impl SessionTransfer<'_> {
         self,
         resume_thread: Option<&AgentSessionId>,
         reserved: bool,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let session = self.session.as_str();
@@ -281,6 +276,17 @@ impl AgentProcessSettlement<'_> {
     }
 }
 
+/// An lf an owner record says runs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecordedLf {
+    /// What it runs as: `Graph run`, `Session` and the like.
+    pub what: String,
+    pub id: String,
+    pub pid: u32,
+    pub os_started_at: Option<i64>,
+    pub started_at: Option<i64>,
+}
+
 pub(super) const PROCESS_SELECT: &str =
     "SELECT e.id,e.trace_id,e.parent_lf_process_id,e.via_agent,e.caller_session_id,
     e.caller_agent_process_id,e.command,e.repo,e.cwd,
@@ -322,35 +328,6 @@ fn read_agent_state(
         spawn_reserved: row.get(13)?,
     })
 }
-
-/// A finished `lf` Process nothing needs any more, over alias `p`: no agent
-/// issued it, no running parent may still read its result, and no row
-/// references it. Exit and prune both forget exactly these rows. Agent-side
-/// references (steers, Session activity, `caller_agent_process_id`) name only
-/// `kind='agent'` rows, which are never forgotten. History and turns name a
-/// Process without holding it: they keep it for 30 days after it finished,
-/// so recent Task history still finds its work, then let it go.
-pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
-    AND p.via_agent IS NOT 1
-    AND NOT EXISTS(SELECT 1 FROM processes r WHERE r.id=p.parent_lf_process_id AND r.completed_at IS NULL)
-    AND NOT EXISTS(SELECT 1 FROM processes c WHERE c.parent_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM processes a WHERE a.kind='agent' AND a.attached_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM session_events WHERE lf_process_id=p.id)
-    AND (p.completed_at < CAST(strftime('%s','now') AS INTEGER) - 30*86400 OR (
-        NOT EXISTS(SELECT 1 FROM history.session_history WHERE lf_process_id=p.id)
-        AND NOT EXISTS(SELECT 1 FROM history.turns WHERE lf_process_id=p.id)))
-    AND NOT EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_graphs WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM waves WHERE project_activation_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)
-    AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)";
 
 /// The row's `kind` column is the only place an id becomes either type.
 pub(super) fn read_process(row: &rusqlite::Row<'_>) -> rusqlite::Result<ProcessEntry> {
@@ -426,110 +403,6 @@ pub(super) fn unfinished_processes(conn: &rusqlite::Connection) -> StoreResult<V
         ))?
         .query_map([], read_process)?
         .collect::<rusqlite::Result<Vec<_>>>()?)
-}
-
-fn process_query(
-    filter: &ProcessFilter,
-    after: Option<&ProcessCursor>,
-    limit: NonZeroU32,
-) -> (String, Vec<Value>) {
-    let mut sql = String::from("WITH page AS MATERIALIZED (SELECT e.id FROM processes e WHERE 1");
-    let mut values = Vec::new();
-    let mut bind = |value| {
-        values.push(value);
-        format!("?{}", values.len())
-    };
-    for (column, value) in [
-        ("id", filter.id.as_deref()),
-        ("repo", filter.repo.as_deref()),
-        (
-            "parent_lf_process_id",
-            filter
-                .parent_lf_process_id
-                .as_ref()
-                .map(LfProcessId::as_str),
-        ),
-        ("caller_session_id", filter.caller_session_id.as_deref()),
-        (
-            "caller_agent_process_id",
-            filter
-                .caller_agent_process_id
-                .as_ref()
-                .map(AgentProcessId::as_str),
-        ),
-    ] {
-        if let Some(value) = value {
-            sql.push_str(&format!(
-                " AND e.{column}={}",
-                bind(Value::Text(value.into()))
-            ));
-        }
-    }
-    if let Some(value) = &filter.command_contains {
-        sql.push_str(&format!(
-            " AND instr(lower(CASE WHEN json_valid(e.command) THEN
-                CASE WHEN json_type(e.command)='array'
-                    AND NOT EXISTS(SELECT 1 FROM json_each(e.command) WHERE type!='text')
-                THEN (SELECT group_concat(value,' ') FROM json_each(e.command))
-                ELSE e.command END
-             ELSE e.command END),lower({}))>0",
-            bind(Value::Text(value.clone()))
-        ));
-    }
-    if let Some(value) = &filter.identity_contains {
-        sql.push_str(&format!(
-            " AND instr(e.id,{})>0",
-            bind(Value::Text(value.clone()))
-        ));
-    }
-    if let Some(outcome) = filter.outcome {
-        sql.push_str(match outcome {
-            // Only lf processes record an outcome; a provider process has none.
-            ProcessOutcomeFilter::Succeeded => " AND e.kind='lf' AND e.outcome='succeeded'",
-            ProcessOutcomeFilter::Failed => " AND e.kind='lf' AND e.outcome='failed'",
-            ProcessOutcomeFilter::Interrupted => " AND e.kind='lf' AND e.outcome='interrupted'",
-            ProcessOutcomeFilter::Unknown => " AND (e.kind='agent' OR e.outcome IS NULL)",
-        });
-    }
-    if let Some(work) = &filter.performed_work {
-        let (column, value, tasks, close) = match work {
-            ProcessWorkFilter::Task(id) => ("task_id", id.as_str(), "tw.id=", ""),
-            ProcessWorkFilter::Wave(id) => (
-                "wave_id",
-                id.as_str(),
-                "tw.project_id IN (SELECT id FROM projects WHERE wave_id=",
-                ")",
-            ),
-        };
-        let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. A Graph's steps ran
-        // in their Task's checkout. Neither a current Session bind nor
-        // another Process's command context establishes performed work.
-        sql.push_str(&format!(
-            " AND e.id IN (
-            SELECT lf_process_id FROM history.turns
-            WHERE {column}={value} AND lf_process_id IS NOT NULL
-            UNION
-            SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
-            JOIN tasks tw ON {tasks}{value}{close}
-            JOIN task_checkouts c ON c.task_id=tw.id
-            WHERE op.cwd=rtrim(c.worktree,'/') OR instr(op.cwd,rtrim(c.worktree,'/')||'/')=1
-        )"
-        ));
-    }
-    if let Some(after) = after {
-        let time = bind(Value::Integer(after.started_at));
-        let id = bind(Value::Text(after.id.clone()));
-        sql.push_str(&format!(
-            " AND e.started_at<={time} AND (e.started_at<{time} OR e.id>{id})"
-        ));
-    }
-    let limit = bind(Value::Integer(i64::from(limit.get()) + 1));
-    sql.push_str(&format!(
-        " ORDER BY e.started_at DESC,e.id ASC LIMIT {limit})
-         {PROCESS_SELECT} JOIN page ON page.id=e.id ORDER BY e.started_at DESC,e.id ASC"
-    ));
-    (sql, values)
 }
 
 fn attachment_in(
@@ -663,7 +536,7 @@ pub(super) fn attach_in(
     session: &str,
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&LfProcessStart>,
+    start: Option<&AttachingLf>,
 ) -> StoreResult<SessionAttachment> {
     let current = attachment_in(tx, session)?;
     if current.as_ref() != expected {
@@ -677,15 +550,10 @@ pub(super) fn attach_in(
         launcher_lf_process_id: process.clone(),
     };
     // The holder's OS process and terminal, when the attaching lf is this one.
-    let holder = start.filter(|start| &start.process.id == process);
-    let holder_pid = holder.and_then(|start| start.process.pid);
-    let holder_started = holder.and_then(|start| start.process.os_started_at);
+    let holder = start.filter(|start| &start.lf_process_id == process);
+    let holder_pid = holder.and_then(|start| start.holder.pid);
+    let holder_started = holder.and_then(|start| start.holder.os_started_at);
     let terminal = holder.and_then(|start| start.terminal.as_ref());
-    if let Some(start) = start {
-        // A best-effort start receipt can lose to a held write lock; the
-        // attaching lf's row lands here instead.
-        super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
-    }
     if let Some(previous) = &current {
         // A Session runs one agent: a replaced one has ended, or never spawned.
         let (ended, reserved) = agent_process_progress_in(tx, &previous.agent_process_id)?;
@@ -732,34 +600,45 @@ impl SqliteStore {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
     }
 
-    /// The unfinished rows not in `skip`, reading only the index for those in
-    /// it. `skip` forgets rows that are no longer unfinished.
-    pub fn unfinished_processes_except(
-        &self,
-        skip: &mut std::collections::HashSet<String>,
-    ) -> StoreResult<Vec<ProcessEntry>> {
+    /// Every lf an owner record says runs, with the OS process it recorded:
+    /// unended runs, carriers and CI repairs, and the lf attached to each
+    /// Session.
+    pub fn recorded_lfs(&self) -> StoreResult<Vec<RecordedLf>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let ids = conn
-            .prepare(
-                "SELECT id FROM processes INDEXED BY processes_unfinished
-                 WHERE completed_at IS NULL ORDER BY started_at DESC,id",
-            )?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut read = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.id=?1"))?;
-        let mut records = Vec::new();
-        let mut skipped = std::collections::HashSet::new();
-        for id in ids {
-            if skip.contains(&id) {
-                skipped.insert(id);
-            } else {
-                records.extend(read.query_row([&id], read_process).optional()?);
-            }
-        }
-        *skip = skipped;
-        Ok(records)
+        let mut query = conn.prepare(
+            "SELECT 'Graph run',lf_process_id,pid,os_started_at,started_at FROM graph_processes
+                 WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'Graph step',lf_process_id,pid,os_started_at,started_at
+                 FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'Project activation',project_activation_lf_process_id,
+                 project_activation_pid,project_activation_os_started_at,
+                 project_activation_started_at FROM waves
+                 WHERE project_activation_ended_at IS NULL AND project_activation_pid IS NOT NULL
+             UNION ALL SELECT 'Task run',lf_process_id,run_pid,run_os_started_at,NULL
+                 FROM task_graphs WHERE run_pid IS NOT NULL
+             UNION ALL SELECT 'Auto-Ship',lf_process_id,pid,os_started_at,at FROM task_ship_events
+                 WHERE kind IN ('approved','carried') AND ended_at IS NULL AND pid IS NOT NULL
+             UNION ALL SELECT 'CI repair',repair_lf_process_id,repair_pid,repair_os_started_at,
+                 repair_started_at FROM ci_incidents
+                 WHERE repair_finished_at IS NULL AND repair_pid IS NOT NULL
+             UNION ALL SELECT 'Session',attached_lf_process_id,attached_pid,attached_os_started_at,
+                 NULL FROM agent_sessions INDEXED BY agent_sessions_attached
+                 WHERE attached_lf_process_id IS NOT NULL AND attached_pid IS NOT NULL",
+        )?;
+        let rows = query.query_map([], |row| {
+            Ok(RecordedLf {
+                what: row.get(0)?,
+                id: row.get(1)?,
+                pid: row.get(2)?,
+                os_started_at: row.get(3)?,
+                started_at: row.get(4)?,
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Fixtures read what a released lf wrote; this lf writes no Process row.
+    #[cfg(any(test, feature = "test-support"))]
     pub fn processes_since(&self, since: i64) -> StoreResult<Vec<ProcessEntry>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(&format!(
@@ -811,53 +690,6 @@ impl SqliteStore {
                 "Ambiguous Work selector {selector:?}"
             ))),
         }
-    }
-
-    pub fn process_receipt_locator(
-        &self,
-        id: &LfProcessId,
-    ) -> StoreResult<Option<(PathBuf, String)>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let locator: Option<String> = conn
-            .query_row(
-                "SELECT receipt_locator FROM processes WHERE id=?1",
-                [id],
-                |row| row.get(0),
-            )
-            .optional()?;
-        let home = conn
-            .path()
-            .filter(|path| !path.is_empty())
-            .and_then(|path| Path::new(path).parent());
-        Ok(locator
-            .zip(home)
-            .map(|(locator, home)| (home.to_path_buf(), locator)))
-    }
-
-    pub fn process_for_receipt(&self, locator: &str) -> StoreResult<Option<LfProcess>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                &format!("{PROCESS_SELECT} WHERE e.receipt_locator=?1 AND e.kind='lf'"),
-                [locator],
-                read_lf_process,
-            )
-            .optional()?)
-    }
-
-    pub fn journal_trace_locator(
-        &self,
-        trace: &loopflow_model::id::TraceId,
-    ) -> StoreResult<Option<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT journal_trace_locator FROM processes
-                 WHERE trace_id=?1 ORDER BY started_at,id LIMIT 1",
-                [trace],
-                |row| row.get(0),
-            )
-            .optional()?)
     }
 
     /// Read one command without decoding its event history or provider payloads.
@@ -913,68 +745,6 @@ impl SqliteStore {
             name,
             requester: person.map(str::to_owned),
         })
-    }
-
-    /// Exact identity wins; otherwise require a unique literal UUID prefix.
-    pub fn resolve_process(&self, selector: &str) -> StoreResult<Option<ProcessEntry>> {
-        let canonical = selector.to_ascii_lowercase();
-        let selector = canonical.as_str();
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        if let Some(process) = conn
-            .query_row(
-                &format!("{PROCESS_SELECT} WHERE e.id=?1"),
-                [selector],
-                read_process,
-            )
-            .optional()?
-        {
-            return Ok(Some(process));
-        }
-        // Process IDs are UUID text. This range seeks the existing identity index;
-        // '%' and '_' have no wildcard meaning, unlike LIKE/GLOB.
-        let upper = format!("{selector}\u{10ffff}");
-        let mut query =
-            conn.prepare("SELECT id FROM processes WHERE id>=?1 AND id<?2 ORDER BY id LIMIT 2")?;
-        let ids = query
-            .query_map(params![selector, upper], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        match ids.as_slice() {
-            [] => Ok(None),
-            [id] => Ok(Some(conn.query_row(
-                &format!("{PROCESS_SELECT} WHERE e.id=?1"),
-                [id],
-                read_process,
-            )?)),
-            _ => Err(StoreError::InvalidData(format!(
-                "Ambiguous Process prefix {selector:?}"
-            ))),
-        }
-    }
-
-    /// Filter/deduplicate in SQL; decode only a bounded page plus one lookahead.
-    /// Missing payloads do not remove rows. No history body is read for discovery.
-    pub fn processes(
-        &self,
-        filter: &ProcessFilter,
-        after: Option<&ProcessCursor>,
-        limit: NonZeroU32,
-    ) -> StoreResult<ProcessPage> {
-        let (sql, values) = process_query(filter, after, limit);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare(&sql)?;
-        let mut entries = query
-            .query_map(params_from_iter(values), read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let next = if entries.len() > limit.get() as usize {
-            entries.pop();
-            entries.last().map(|process| ProcessCursor {
-                started_at: process.started_at(),
-                id: process.id().to_owned(),
-            })
-        } else {
-            None
-        };
-        Ok(ProcessPage { entries, next })
     }
 
     pub fn make_session_interactive(
@@ -1435,7 +1205,7 @@ impl SqliteStore {
         session: &str,
         expected: Option<&SessionAttachment>,
         process: &LfProcessId,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let canonical = loopflow_model::id::canonical_session(session);
@@ -1495,7 +1265,7 @@ impl SqliteStore {
         &self,
         session: &str,
         expected: &SessionAttachment,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1568,15 +1338,7 @@ impl SqliteStore {
 
 #[cfg(test)]
 mod discovery_tests {
-
-    use std::num::NonZeroU32;
-
-    use rusqlite::params;
-
-    use crate::process::{ProcessEntry, ProcessFilter, ProcessOutcomeFilter, ProcessWorkFilter};
-    use crate::StoreError;
-    use loopflow_model::durable::{ProjectId, TaskId};
-    use loopflow_model::id::{LfProcessId, WaveId};
+    use loopflow_model::id::LfProcessId;
 
     use crate::test_fixture::process as insert_process;
 
@@ -1631,400 +1393,6 @@ mod discovery_tests {
         assert_eq!(store.lf_process(&first.id).unwrap(), Some(first));
         assert_eq!(store.lf_process(&second.id).unwrap(), Some(second));
         assert_eq!(store.lf_process(&historical).unwrap(), Some(retained));
-    }
-
-    #[test]
-    fn process_discovery_retains_command_evidence_without_payloads() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("store.db")).unwrap();
-        let parent = insert_process(&store, 1, 1);
-        let direct = insert_process(&store, 2, 2);
-        let agent = insert_process(&store, 3, 3);
-        let interrupted = insert_process(&store, 4, 4);
-        let issuer = loopflow_model::id::AgentProcessId::new();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE processes SET parent_lf_process_id=?2,via_agent=0,outcome='failed',
-                completed_at=5,exit_code=42 WHERE id=?1",
-                params![direct, parent],
-            )
-            .unwrap();
-            conn.execute("UPDATE processes SET parent_lf_process_id=?2,via_agent=1,caller_session_id='retained-caller',
-                caller_agent_process_id=?3,outcome='succeeded',
-                completed_at=6,exit_code=0 WHERE id=?1", params![agent,direct,issuer]).unwrap();
-            conn.execute(
-                "UPDATE processes SET outcome='interrupted',completed_at=7,exit_code=130
-                WHERE id=?1",
-                [&interrupted],
-            )
-            .unwrap();
-        }
-        let page = store
-            .processes(
-                &ProcessFilter::default(),
-                None,
-                NonZeroU32::new(10).unwrap(),
-            )
-            .unwrap();
-        let entries = page
-            .entries
-            .iter()
-            .map(|entry| entry.as_lf().unwrap())
-            .collect::<Vec<_>>();
-        assert_eq!(
-            entries.iter().map(|e| &e.id).collect::<Vec<_>>(),
-            vec![&interrupted, &agent, &direct, &parent]
-        );
-        assert_eq!(page.next, None);
-        for entry in &entries {
-            assert_eq!(store.lf_process(&entry.id).unwrap().as_ref(), Some(*entry));
-        }
-        let old = entries[3];
-        assert_eq!(
-            (old.via_agent, old.completed_at, old.exit_code),
-            (None, None, None)
-        );
-        assert_eq!(old.outcome, None);
-        assert_eq!(old.signal, None);
-        let failed = entries[2];
-        assert_eq!(failed.parent_lf_process_id.as_ref(), Some(&parent));
-        assert_eq!(failed.via_agent, Some(false));
-        assert_eq!(failed.exit_code, Some(42));
-        let success = entries[1];
-        assert_eq!(
-            success.caller_session_id.as_deref(),
-            Some("retained-caller")
-        );
-        assert_eq!(success.caller_agent_process_id.as_ref(), Some(&issuer));
-        assert_eq!(success.via_agent, Some(true));
-        assert_eq!(entries[0].signal, None);
-        let issued = store
-            .processes(
-                &ProcessFilter {
-                    caller_agent_process_id: Some(issuer.clone()),
-                    ..Default::default()
-                },
-                None,
-                NonZeroU32::new(10).unwrap(),
-            )
-            .unwrap();
-        assert_eq!(
-            issued
-                .entries
-                .iter()
-                .map(ProcessEntry::id)
-                .collect::<Vec<_>>(),
-            vec![agent.as_str()]
-        );
-        for (outcome, expected) in [
-            (ProcessOutcomeFilter::Unknown, &parent),
-            (ProcessOutcomeFilter::Failed, &direct),
-            (ProcessOutcomeFilter::Succeeded, &agent),
-            (ProcessOutcomeFilter::Interrupted, &interrupted),
-        ] {
-            let filter = ProcessFilter {
-                outcome: Some(outcome),
-                ..Default::default()
-            };
-            let selected = store
-                .processes(&filter, None, NonZeroU32::new(1).unwrap())
-                .unwrap();
-            assert_eq!(selected.entries[0].id(), expected.as_str());
-            assert_eq!(selected.next, None);
-        }
-        assert!(!dir.path().join("runs").exists());
-    }
-
-    #[test]
-    fn process_discovery_separates_literal_search_from_identity_resolution() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("store.db")).unwrap();
-        let first = insert_process(&store, 1, 1);
-        let second = insert_process(&store, 16, 2);
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE processes SET command=?3,parent_lf_process_id=?2,
-                caller_session_id='caller' WHERE id=?1",
-                params![
-                    first,
-                    second,
-                    serde_json::to_string(&["lf", "pr", "land", "--strict", "%_ bytes"]).unwrap()
-                ],
-            )
-            .unwrap();
-        let filter = ProcessFilter {
-            repo: Some("/repo".into()),
-            parent_lf_process_id: Some(second.clone()),
-            caller_session_id: Some("caller".into()),
-            command_contains: Some("PR LAND --strict %_".into()),
-            identity_contains: Some("000000000001".into()),
-            ..Default::default()
-        };
-        assert_eq!(
-            store
-                .processes(&filter, None, NonZeroU32::new(1).unwrap())
-                .unwrap()
-                .entries[0]
-                .id(),
-            first.as_str()
-        );
-        assert_eq!(
-            store.resolve_process(first.as_str()).unwrap().unwrap().id(),
-            first.as_str()
-        );
-        assert_eq!(
-            store
-                .resolve_process(&second.as_str()[..35])
-                .unwrap()
-                .unwrap()
-                .id(),
-            second.as_str()
-        );
-        assert!(matches!(
-            store.resolve_process("00000000"),
-            Err(StoreError::InvalidData(_))
-        ));
-        assert_eq!(store.resolve_process("%_").unwrap(), None);
-        assert_eq!(store.lf_process(&LfProcessId::new()).unwrap(), None);
-        let miss = ProcessFilter {
-            command_contains: Some("%_".into()),
-            id: Some(second.to_string()),
-            ..Default::default()
-        };
-        assert!(store
-            .processes(&miss, None, NonZeroU32::new(1).unwrap())
-            .unwrap()
-            .entries
-            .is_empty());
-        for command in [Some("[old pr land"), Some("{\"note\":\"pr land\"}"), None] {
-            store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE processes SET command=?2 WHERE id=?1",
-                    params![first, command],
-                )
-                .unwrap();
-            let page = store
-                .processes(
-                    &ProcessFilter {
-                        id: Some(first.to_string()),
-                        command_contains: Some("pr land".into()),
-                        ..Default::default()
-                    },
-                    None,
-                    NonZeroU32::new(1).unwrap(),
-                )
-                .unwrap();
-            assert_eq!(page.entries.len(), usize::from(command.is_some()));
-            assert_eq!(
-                store
-                    .lf_process(&first)
-                    .unwrap()
-                    .unwrap()
-                    .command
-                    .as_deref(),
-                command
-            );
-        }
-    }
-
-    #[test]
-    fn process_discovery_pages_fixed_data_after_filtering_with_timestamp_ties() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("store.db")).unwrap();
-        let mut expected = Vec::new();
-        for number in 1..=12 {
-            let id = insert_process(&store, number, i64::from(number / 5));
-            if number % 2 == 0 {
-                expected.push((i64::from(number / 5), id));
-            } else {
-                store
-                    .conn
-                    .lock()
-                    .unwrap()
-                    .execute("UPDATE processes SET repo='/other' WHERE id=?1", [id])
-                    .unwrap();
-            }
-        }
-        expected.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.as_str().cmp(b.1.as_str())));
-        let filter = ProcessFilter {
-            repo: Some("/repo".into()),
-            ..Default::default()
-        };
-        let mut after = None;
-        let mut found = Vec::new();
-        loop {
-            let page = store
-                .processes(&filter, after.as_ref(), NonZeroU32::new(2).unwrap())
-                .unwrap();
-            assert!(page.entries.len() <= 2);
-            found.extend(page.entries.iter().map(|entry| entry.id().to_owned()));
-            after = page.next;
-            if after.is_none() {
-                break;
-            }
-            assert!(found.len() <= expected.len(), "cursor must make progress");
-        }
-        assert_eq!(
-            found,
-            expected
-                .into_iter()
-                .map(|(_, id)| id.to_string())
-                .collect::<Vec<_>>()
-        );
-    }
-
-    #[test]
-    fn process_discovery_deduplicates_performed_work_without_rebinding_history() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("store.db")).unwrap();
-        let wave = WaveId::new();
-        let project = ProjectId::new();
-        let first = TaskId::new();
-        let second = TaskId::new();
-        let shared = insert_process(&store, 1, 3);
-        let mechanical = insert_process(&store, 2, 2);
-        let unbound = insert_process(&store, 3, 1);
-        let observer = insert_process(&store, 4, 4);
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
-                [&wave],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO projects(id,wave_id,external_project_id,created_at)
-                VALUES(?1,?2,'project-proof',1)",
-                params![project.as_str(), wave],
-            )
-            .unwrap();
-            for (index, task) in [&first, &second].into_iter().enumerate() {
-                conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-                conn.execute(
-                    "INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at)
-                    VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,?3,1)",
-                    params![task.as_str(), project.as_str(), format!("PROOF-{index}")],
-                )
-                .unwrap();
-                conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
-                    VALUES(?1,'Now bound','human',1,1,'/missing',?2,?3)",
-                    params![format!("session-{index}"),task.as_str(),wave]).unwrap();
-                super::super::sessions::test_capture(
-                    &conn,
-                    &format!("session-{index}"),
-                    &format!("run_{index:032x}"),
-                );
-                store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
-                    VALUES(?1,'thread','work',?2,?3,?4,1)",
-                    params![format!("session-{index}"),shared,task.as_str(),wave]).unwrap();
-            }
-            // Same Process drove both Tasks, two turns and a mechanical boundary.
-            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
-                VALUES('session-0','thread','retry',?1,?2,?3,2)",params![shared,first.as_str(),wave]).unwrap();
-            // Session is bound now; the earlier turn remains unassigned.
-            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
-                VALUES('session-0','thread','before-bind',?1,1)",[&unbound]).unwrap();
-            // Known Task, unknown original process: neither current attachment nor observer is its owner.
-            store.execute_history("INSERT INTO turns(session_id,provider_thread,provider_turn,task_id,wave_id,started_at)
-                VALUES('session-0','thread','unmapped',?1,?2,1)",params![first.as_str(),wave]).unwrap();
-
-            conn.execute(
-                "UPDATE processes SET caller_session_id='session-0',via_agent=1 WHERE id=?1",
-                [&observer],
-            )
-            .unwrap();
-            // A Graph process recorded both Processes as steps in the first Task's checkout.
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.first') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
-                [first.as_str()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'proof','{}')",
-                [&observer],
-            )
-            .unwrap();
-            for process in [&shared, &mechanical] {
-                conn.execute(
-                    "UPDATE processes SET cwd='/repo.first',parent_lf_process_id=?2 WHERE id=?1",
-                    params![process, observer],
-                )
-                .unwrap();
-                conn.execute(
-                    "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?2,?1,0,'[]')",
-                    params![process, observer],
-                )
-                .unwrap();
-            }
-        }
-        let filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Task(first.clone())),
-            ..Default::default()
-        };
-        let page = store
-            .processes(&filter, None, NonZeroU32::new(1).unwrap())
-            .unwrap();
-        assert_eq!(
-            page.entries
-                .iter()
-                .map(ProcessEntry::id)
-                .collect::<Vec<_>>(),
-            vec![shared.as_str()]
-        );
-        let page = store
-            .processes(&filter, page.next.as_ref(), NonZeroU32::new(1).unwrap())
-            .unwrap();
-        assert_eq!(page.entries[0].id(), mechanical.as_str());
-        assert_eq!(page.next, None);
-        let second_filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Task(second)),
-            ..Default::default()
-        };
-        let page = store
-            .processes(&second_filter, None, NonZeroU32::new(10).unwrap())
-            .unwrap();
-        assert_eq!(
-            page.entries
-                .iter()
-                .map(ProcessEntry::id)
-                .collect::<Vec<_>>(),
-            vec![shared.as_str()]
-        );
-        let wave_filter = ProcessFilter {
-            performed_work: Some(ProcessWorkFilter::Wave(wave)),
-            ..Default::default()
-        };
-        let page = store
-            .processes(&wave_filter, None, NonZeroU32::new(10).unwrap())
-            .unwrap();
-        assert_eq!(
-            page.entries
-                .iter()
-                .map(ProcessEntry::id)
-                .collect::<Vec<_>>(),
-            vec![shared.as_str(), mechanical.as_str()]
-        );
-        assert_eq!(store.lf_process(&unbound).unwrap().unwrap().outcome, None);
-        assert_eq!(store.lf_process(&observer).unwrap().unwrap().outcome, None);
-        assert!(store
-            .conn
-            .lock()
-            .unwrap()
-            .prepare("PRAGMA foreign_key_check")
-            .unwrap()
-            .query([])
-            .unwrap()
-            .next()
-            .unwrap()
-            .is_none());
-        assert!(!dir.path().join("runs").exists());
     }
 }
 
@@ -2165,17 +1533,18 @@ mod attachment_tests {
     }
 
     #[test]
-    fn attaching_start_receipt_and_terminal_commit_only_with_the_agent() {
+    fn attaching_and_its_terminal_commit_only_with_the_agent() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let seed = insert_process(&store, 1, 1);
-        let mut process = store.lf_process(&seed).unwrap().unwrap();
-        process.id = LfProcessId::new();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "fixture").unwrap();
-        let start = crate::process::LfProcessStart {
-            process,
+        let start = crate::process::AttachingLf {
+            lf_process_id: LfProcessId::new(),
+            holder: crate::process::AttachmentHolder {
+                pid: Some(1),
+                os_started_at: Some(1),
+            },
             terminal: Some(terminal.clone()),
         };
         store
@@ -2191,7 +1560,7 @@ mod attachment_tests {
             .attach_session(
                 "conversation",
                 None,
-                &start.process.id,
+                &start.lf_process_id,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2199,7 +1568,7 @@ mod attachment_tests {
                 }
             )
             .is_err());
-        assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
+        assert_eq!(store.lf_process(&start.lf_process_id).unwrap(), None);
         assert_eq!(store.session_attachment("conversation").unwrap(), None);
         store
             .conn
@@ -2211,7 +1580,7 @@ mod attachment_tests {
             .attach_session(
                 "conversation",
                 None,
-                &start.process.id,
+                &start.lf_process_id,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2219,23 +1588,25 @@ mod attachment_tests {
                 },
             )
             .unwrap();
-        assert_eq!(
-            store.lf_process(&start.process.id).unwrap(),
-            Some(start.process.clone())
-        );
+        // No lf writes its own Process row: the attachment and its terminal
+        // are on the Session, and the agent row a released reader joins
+        // names its launcher.
+        assert_eq!(store.lf_process(&start.lf_process_id).unwrap(), None);
         let agent = store
             .agent_process(&attached.agent_process_id)
             .unwrap()
             .unwrap();
-        assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&start.process.id));
-        assert_eq!(agent.trace_id, start.process.trace_id);
+        assert_eq!(
+            agent.parent_lf_process_id.as_ref(),
+            Some(&start.lf_process_id)
+        );
         let placement: loopflow_model::id::TerminalId = store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT held_terminal_id FROM processes WHERE id=?1",
-                [&start.process.id],
+                "SELECT attached_terminal_id FROM agent_sessions WHERE id='conversation'",
+                [],
                 |row| row.get(0),
             )
             .unwrap();
@@ -2495,158 +1866,150 @@ mod attachment_tests {
     }
 }
 
+/// A released lf still running after install writes only `processes`; the
+/// expand migration's bridge copies what it writes onto the owner rows this
+/// lf reads. The statements below are 0.16.0's, verbatim.
 #[cfg(test)]
-mod forget_tests {
+mod bridge_tests {
     use rusqlite::params;
 
+    use super::SessionCaller;
     use loopflow_model::id::{LfProcessId, TraceId};
 
-    /// Forgetting a Process a row still names either fails the delete or, on a
-    /// connection that does not enforce foreign keys, leaves a reference no
-    /// migration can pass. The schema says which columns can name one.
-    #[test]
-    fn every_column_that_names_an_lf_process_keeps_it_from_being_forgotten() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        let mut statement = conn
-            .prepare(
-                "SELECT m.name, f.\"from\" FROM sqlite_master m, pragma_foreign_key_list(m.name) f
-                 WHERE m.type='table' AND f.\"table\"='processes' AND f.on_delete!='CASCADE'",
-            )
-            .unwrap();
-        let references: Vec<(String, String)> = statement
-            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert!(!references.is_empty());
-        let unguarded: Vec<_> = references
-            .into_iter()
-            // Agent rows are never forgotten.
-            .filter(|(_, column)| column != "agent_process_id")
-            .filter(|(table, column)| {
-                !super::FORGETTABLE.contains(&format!("FROM {table} WHERE {column}=p.id"))
-            })
-            .collect();
-        assert_eq!(unguarded, Vec::<(String, String)>::new());
+    /// 0.16.0 `record_process_in`: a command's start, and later its end.
+    const RELEASED_RECORD_PROCESS: &str =
+        "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
+            held_terminal_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+         ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+         WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL";
+    /// 0.16.0 `record_graph`.
+    const RELEASED_RECORD_GRAPH: &str =
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,?4)";
+    /// 0.16.0 `record_agent_endpoint`.
+    const RELEASED_RECORD_ENDPOINT: &str = "UPDATE processes SET endpoint=?2 WHERE id=?1";
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_process(
+        conn: &rusqlite::Connection,
+        id: &LfProcessId,
+        trace: &TraceId,
+        started_at: i64,
+        completed_at: Option<i64>,
+        outcome: Option<&str>,
+        exit_code: Option<i32>,
+        error: Option<&str>,
+    ) {
+        conn.execute(
+            RELEASED_RECORD_PROCESS,
+            params![
+                id,
+                trace,
+                None::<String>,
+                r#"["lf","graph","code"]"#,
+                "/repo",
+                "/repo",
+                started_at,
+                false,
+                None::<String>,
+                None::<String>,
+                completed_at,
+                outcome,
+                exit_code,
+                None::<String>,
+                error,
+                4242,
+                started_at,
+                None::<String>,
+            ],
+        )
+        .unwrap();
     }
 
     #[test]
-    fn an_exit_forgets_the_process_unless_something_still_needs_it() {
+    fn a_released_graph_runners_end_ends_its_graph_run() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
-        let session = store.test_session("session", &crate::session_record::new_artifact_key());
-        let start = |parent: Option<&LfProcessId>, via_agent: bool| {
-            let process = crate::process::LfProcess {
-                id: LfProcessId::new(),
-                pid: None,
-                os_started_at: None,
-                trace_id: TraceId::new(),
-                parent_lf_process_id: parent.cloned(),
-                via_agent: Some(via_agent),
-                caller_session_id: None,
-                caller_agent_process_id: None,
-                command: None,
-                repo: None,
-                cwd: None,
-                started_at: 1,
-                completed_at: None,
-                outcome: None,
-                exit_code: None,
-                signal: None,
-                error: None,
-            };
-            store.record_process(&process).unwrap();
-            process
+        let conn = store.conn.lock().unwrap();
+        let run = LfProcessId::new();
+        let trace = TraceId::new();
+        record_process(&conn, &run, &trace, 100, None, None, None, None);
+        conn.execute(
+            RELEASED_RECORD_GRAPH,
+            params![run, "code", "{}", None::<String>],
+        )
+        .unwrap();
+        let row = |conn: &rusqlite::Connection| {
+            conn.query_row(
+                "SELECT started_at,ended_at,pid,exit_code,error FROM graph_processes
+                 WHERE lf_process_id=?1",
+                [&run],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<u32>>(2)?,
+                        row.get::<_, Option<i32>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .unwrap()
         };
-        let finish = |process: &crate::process::LfProcess| {
-            store
-                .record_process(&crate::process::LfProcess {
-                    completed_at: Some(2),
-                    outcome: Some("succeeded".into()),
-                    ..process.clone()
-                })
-                .unwrap();
-        };
-        let kept = |process: &crate::process::LfProcess| {
-            store.process_is_recorded(process.id.as_str()).unwrap()
-        };
+        assert_eq!(row(&conn), (Some(100), None, Some(4242), None, None));
+        record_process(
+            &conn,
+            &run,
+            &trace,
+            100,
+            Some(160),
+            Some("failed"),
+            Some(1),
+            Some("gate failed"),
+        );
+        assert_eq!(
+            row(&conn),
+            (
+                Some(100),
+                Some(160),
+                None,
+                Some(1),
+                Some("gate failed".into())
+            )
+        );
+    }
 
-        let human = start(None, false);
-        let agent_issued = start(None, true);
-        let graph = start(None, false);
-        let step = start(Some(&graph.id), false);
-        let narrated = start(None, false);
-        let holder = start(None, false);
-        let running_child = start(Some(&holder.id), false);
-        let shipper = start(None, false);
-        let task = loopflow_model::durable::TaskId::new();
-        store
-            .create_task(&crate::work::task::NewTask {
-                repository_id: crate::test_fixture::repository(&store, "/repo"),
-                id: task.clone(),
-                project_id: None,
-                title: "Shipped Task".into(),
-                description: "Brief".into(),
-                due_date: None,
-            })
-            .unwrap();
-        store
-            .ship_task(
-                &task,
-                (
-                    &shipper.id,
-                    &crate::graph_process::ExecutionStart::reserved(1),
-                ),
-                "proof",
+    #[test]
+    fn a_released_launchers_endpoint_reaches_its_session() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .attach_session(
+                "conversation",
+                None,
+                &store.test_lf_process(),
+                None,
+                &SessionCaller {
+                    agent: None,
+                    capture_key: None,
+                },
             )
             .unwrap();
-        {
-            let conn = store.conn.lock().unwrap();
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,lf_process_id)
-                 VALUES(?1,'observed','narrated',1,'{}',?2)",
-                params![session.id, narrated.id],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled) VALUES(?1,'g','{}')",
-                [&graph.id],
-            )
-            .unwrap();
-        }
-        for process in [&human, &agent_issued, &step, &narrated, &holder, &shipper] {
-            finish(process);
-        }
-        assert!(kept(&shipper), "the Task names its ship process");
-        assert!(!kept(&human));
-        assert!(kept(&agent_issued));
-        assert!(kept(&narrated));
-        // A running Graph may still read its step's result.
-        assert!(kept(&step));
-        assert!(kept(&holder), "a running child names it");
         store
             .conn
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
-                 VALUES(?1,?2,0,'{}')",
-                [&graph.id, &step.id],
+                RELEASED_RECORD_ENDPOINT,
+                params![attachment.agent_process_id, "ws://127.0.0.1:4500"],
             )
             .unwrap();
-
-        finish(&running_child);
-        assert!(!kept(&running_child), "its parent had already finished");
-        finish(&graph);
-        assert!(kept(&graph) && kept(&step), "the Graph records its step");
-        // Without a step record, finishing the parent forgets its finished child.
-        let parent = start(None, false);
-        let child = start(Some(&parent.id), false);
-        finish(&child);
-        assert!(kept(&child));
-        finish(&parent);
-        assert!(!kept(&child) && !kept(&parent));
+        assert_eq!(
+            store.agent_endpoint(&attachment.agent_process_id).unwrap(),
+            Some("ws://127.0.0.1:4500".into())
+        );
     }
 }

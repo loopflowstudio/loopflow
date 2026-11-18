@@ -2,7 +2,6 @@ use loopflow_model::durable::{ProjectId, TaskId};
 use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 use loopflow_storage::execution::GraphProcessFilter;
 use loopflow_storage::graph_process::RunOwner;
-use loopflow_storage::process::{ProcessFilter, ProcessWorkFilter};
 use loopflow_storage::session::SessionFilter;
 use rusqlite::params;
 use std::num::NonZeroU32;
@@ -339,15 +338,12 @@ async fn task_checkout_machine_keeps_session_filters_beside_other_machines() {
 }
 
 #[test]
-fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_ownership() {
+fn task_work_includes_checkout_binding_without_granting_ownership() {
     let dir = tempfile::tempdir().unwrap();
     let store = crate::store::opening::open_ephemeral(&dir.path().join("db")).unwrap();
     let task = TaskId::new();
     let wave = WaveId::new();
     let project = ProjectId::new();
-    let mechanical = LfProcessId::new();
-    let bound_process = LfProcessId::new();
-    let sibling = LfProcessId::new();
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
@@ -380,24 +376,8 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
                 &loopflow_storage::session_record::new_artifact_key(),
             );
         }
-        for (id, cwd) in [
-            (&mechanical, "/missing/task%_"),
-            (&bound_process, "/elsewhere"),
-            (&sibling, "/missing/task%_-other"),
-        ] {
-            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
-        }
-        // Binding includes earlier Processes in the inventory without assigning
-        // their earlier performed work or usage to this Task.
-        store.execute_history(
-"INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
-            params![mechanical, sibling],
-        )
-        .unwrap();
     }
-    // A Graph is the Task's work when its Processes ran in the checkout.
+    // A Graph is the Task's work when it ran in the checkout.
     let independent = store.test_graph(
         "independent",
         "/missing/task%_/sub",
@@ -424,7 +404,6 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         work.graph_processes[0].summary.task_id.as_ref(),
         Some(&task)
     );
-    assert_eq!(work.processes.len(), 4);
     // Open work is the Task's unended Graph runs and live agents, never a
     // Process row: the Graph still runs, no Session's agent started.
     let open: Vec<_> = store
@@ -434,14 +413,6 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         .map(|work| work.label())
         .collect();
     assert_eq!(open, [format!("Graph run {independent}")]);
-    assert!(work
-        .processes
-        .iter()
-        .any(|process| process.id() == mechanical.as_str()));
-    assert!(work
-        .processes
-        .iter()
-        .any(|process| process.id() == bound_process.as_str()));
     assert_eq!(
         store.session_task_ids("manual").unwrap(),
         std::slice::from_ref(&task)
@@ -475,29 +446,10 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
             },
             None,
             NonZeroU32::new(100).unwrap(),
+            loopflow_storage::graph_process::Execution::result,
         )
         .unwrap();
     assert_eq!(graphs.entries, work.graph_processes);
-    // The Graph's step is the only work performed in the checkout.
-    let performed = store
-        .processes(
-            &ProcessFilter {
-                performed_work: Some(ProcessWorkFilter::Task(task.clone())),
-                ..Default::default()
-            },
-            None,
-            NonZeroU32::new(100).unwrap(),
-        )
-        .unwrap();
-    let (graph, _) = store.graph_process(independent.as_str()).unwrap().unwrap();
-    assert_eq!(
-        performed
-            .entries
-            .iter()
-            .map(loopflow_storage::process::ProcessEntry::id)
-            .collect::<Vec<_>>(),
-        [graph.steps[0].run.id.as_str()]
-    );
 
     let child = TaskId::new();
     {

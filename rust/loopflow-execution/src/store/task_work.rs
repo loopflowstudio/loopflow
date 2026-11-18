@@ -9,7 +9,8 @@ use loopflow_storage::graph_process::{ExecutionStart, TaskCarrier};
 
 /// A carrier whose OS process cannot be read stays potentially running.
 pub(crate) fn carrier_may_run(carrier: &TaskCarrier) -> bool {
-    crate::journal::carrier_evidence(carrier) != crate::store::ProcessIdentityEvidence::Dead
+    crate::process::os_process::carrier_evidence(carrier)
+        != crate::store::ProcessIdentityEvidence::Dead
 }
 
 pub fn task_graph(store: &SqliteStore, task: &TaskId) -> StoreResult<Option<TaskGraph>> {
@@ -24,7 +25,6 @@ pub fn task_work(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskWork> {
     Ok(TaskWork {
         sessions: records.sessions,
         graph_processes: records.graph_processes,
-        processes: records.processes,
         graph: records
             .graph
             .map(|row| decode_row(row).map(read_task_graph))
@@ -102,8 +102,11 @@ mod tests {
                 loopflow_storage::graph_process::TaskCarrier {
                     id: loopflow_model::id::LfProcessId::new(),
                     pid,
-                    os_started_at: pid
-                        .map(|pid| crate::journal::process_started_at(pid).unwrap().unwrap()),
+                    os_started_at: pid.map(|pid| {
+                        crate::process::os_process::process_started_at(pid)
+                            .unwrap()
+                            .unwrap()
+                    }),
                 },
             )),
         };

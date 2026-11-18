@@ -24,12 +24,12 @@ static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 const CREATION_ENV: &str = "LF_CREATION_REQUEST";
 static CREATION: Mutex<Option<String>> = Mutex::new(None);
 
-/// What a detached operation set going: the `lf` Process that carries it.
-/// `process.get` reads how it is going; `log` is its output.
+/// What a detached operation set going: the `lf` that carries it, and `log`,
+/// its output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Launched {
-    /// The operation the Process carries: `checkout.sync`, `pr.land`,
+    /// The operation that `lf` carries: `checkout.sync`, `pr.land`,
     /// `repo.release`, `graph.run`, `skill.run`.
     pub operation: String,
     #[serde(rename = "lf_process_id")]

@@ -585,7 +585,6 @@ struct GraphProcessLog: View {
     var query: RegistryQuery = RegistryQueryLocal.shared
     var openFiles: (() -> Void)? = nil
     @State private var captured: WorkFrame.TaskPart?
-    @State private var historyQuery: RegistryQuery?
     @State private var error: String?
     @State private var refresh = 0
     @Environment(\.palette) private var palette
@@ -599,7 +598,6 @@ struct GraphProcessLog: View {
         let graphs = readsWindow ? work?.graphProcesses : captured?.graphProcesses.map(\.entry)
         let details = readsWindow ? model.graphProcesses : Dictionary(uniqueKeysWithValues:
             (captured?.graphProcesses ?? []).map { ($0.entry.id, $0) })
-        let contentQuery = readsWindow ? query : historyQuery
         let readError = readsWindow ? reading?.failure : error
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
@@ -620,14 +618,13 @@ struct GraphProcessLog: View {
                     if let graph = graphs.last {
                         GraphProcessView(model: model, graph: graph,
                             run: details[graph.id],
-                            startedBy: readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil,
-                            historyQuery: contentQuery)
+                            startedBy: readsWindow ? task.flatMap { model.taskExecution[$0.id].value?.startedBy } : nil)
                     }
                     if graphs.count > 1 {
                         DisclosureGroup("Earlier runs (\(graphs.count - 1))") {
                             ForEach(Array(graphs.dropLast().reversed())) { graph in
                                 GraphProcessView(model: model, graph: graph,
-                                    run: details[graph.id], historyQuery: contentQuery)
+                                    run: details[graph.id])
                             }
                         }
                         .padding(.vertical, 8)
@@ -671,7 +668,6 @@ struct GraphProcessLog: View {
                     ownerQuery = query
                     subject = task?.runtime?.workId ?? taskId
                 }
-                historyQuery = ownerQuery
                 let subscription = try await ownerQuery.subscribeTask(task: subject)
                 do {
                     for try await line in subscription.lines {
@@ -759,7 +755,6 @@ struct GraphProcessView: View {
     let graph: GraphProcessInventoryEntry
     let run: GraphProcessDetail?
     var startedBy: Starter? = nil
-    var historyQuery: RegistryQuery? = nil
     private var expanded: Bool { model.navigation.expandedGraphProcesses.contains(graph.id) }
     @Environment(\.palette) private var palette
 
@@ -827,7 +822,7 @@ struct GraphProcessView: View {
             Text([run.presentation.reason, graphIterationLabel(run.iterations)]
                 .compactMap { $0 }.joined(separator: " · "))
                 .accessibilityIdentifier("graph-process-status-\(graph.id)")
-            GraphRunHistory(steps: run.steps, historyQuery: historyQuery)
+            GraphRunHistory(steps: run.steps)
         } else {
             Text("Reading Graph…")
         }
@@ -836,16 +831,15 @@ struct GraphProcessView: View {
 
 
 /// Leaf history stays inspectable without a terminal or window. No summary is
-/// invented from an exit: only the recorded Process facts appear here.
+/// invented from an exit: only the recorded step facts appear here.
 struct GraphRunHistory: View {
     let steps: [GraphStepProcess]
-    var historyQuery: RegistryQuery? = nil
 
     var body: some View {
         ForEach(GraphStepGroup.groups(steps)) { group in
             DisclosureGroup(group.label) {
                 ForEach(group.steps) { step in
-                    GraphRunStep(step: step, historyQuery: historyQuery)
+                    GraphRunStep(step: step)
                 }
             }
             .accessibilityIdentifier("graph-process-loop-\(group.id)")
@@ -855,10 +849,6 @@ struct GraphRunHistory: View {
 
 struct GraphRunStep: View {
     let step: GraphStepProcess
-    var historyQuery: RegistryQuery? = nil
-    @State private var history: String?
-    @State private var error: String?
-    @State private var reading = false
 
     var body: some View {
         DisclosureGroup {
@@ -871,20 +861,6 @@ struct GraphRunStep: View {
                         .formatted(date: .abbreviated, time: .standard))
                 }
                 if let code = step.exitCode { Text("Exit \(code)") }
-                if let historyQuery {
-                    Button("Read process history") {
-                        reading = true
-                        Task {
-                            defer { reading = false }
-                            do { history = try await historyQuery.processHistory(id: step.lfProcessId); error = nil }
-                            catch { self.error = error.localizedDescription }
-                        }
-                    }
-                    .disabled(reading)
-                    .accessibilityIdentifier("graph-step-history-\(step.id)")
-                }
-                if let history { Text(history).font(Typography.code(10)) }
-                if let error { Text("History unavailable: \(error)") }
             }
             .textSelection(.enabled)
         } label: {

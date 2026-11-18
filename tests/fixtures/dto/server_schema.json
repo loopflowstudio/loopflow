@@ -1851,7 +1851,7 @@
           ]
         },
         "graph_processes": {
-          "description": "`lf graph show --processes` for each of `overview`'s Graphs, in order.",
+          "description": "`lf graph show` for each of `overview`'s Graphs, in order.",
           "items": {
             "$ref": "#/$defs/GraphProcessDetail"
           },
@@ -3468,7 +3468,7 @@
     },
     "Launched": {
       "additionalProperties": false,
-      "description": "What a detached operation set going: the `lf` Process that carries it.\n`process.get` reads how it is going; `log` is its output.",
+      "description": "What a detached operation set going: the `lf` that carries it, and `log`,\nits output.",
       "properties": {
         "lf_process_id": {
           "$ref": "#/$defs/LfProcessId"
@@ -3478,7 +3478,7 @@
           "type": "string"
         },
         "operation": {
-          "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
+          "description": "The operation that `lf` carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
           "type": "string"
         },
         "run": {
@@ -6270,13 +6270,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "The CLI's retained process or Session history, as display text.",
+          "description": "`lf session history show <id>`: one Session's history, as display text.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "process.history",
+              "const": "session.history.get",
               "type": "string"
             }
           },
@@ -6999,7 +6999,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "process.get",
+              "const": "graph.run.get",
               "type": "string"
             }
           },

@@ -91,14 +91,7 @@ impl Built {
 
     /// The steps of the Task's latest Graph `name`.
     fn graph_steps(&self, issue: &str, name: &str) -> Vec<Value> {
-        let graphs = self.lf(&[
-            "graph",
-            "list",
-            "--processes",
-            "--for-task",
-            issue,
-            "--json",
-        ]);
+        let graphs = self.lf(&["graph", "list", "--runs", "--for-task", issue, "--json"]);
         let id = graphs["entries"]
             .as_array()
             .unwrap()
@@ -109,7 +102,7 @@ impl Built {
             .as_str()
             .unwrap()
             .to_string();
-        self.lf(&["graph", "show", "--processes", &id, "--json"])["steps"]
+        self.lf(&["graph", "show", &id, "--json"])["steps"]
             .as_array()
             .unwrap()
             .clone()

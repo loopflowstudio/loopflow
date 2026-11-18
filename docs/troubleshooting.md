@@ -32,7 +32,7 @@ lf task status <ID>                          # the Task's execution and the reas
 lf graph show <RUN_ID>                       # each step, when it ran and how it exited
 lf session history show <SESSION_ID> --final # the agent's last word in that conversation
 lf session list                              # the conversations running right now
-lf graph list --processes --state current    # the Graph runs running right now
+lf graph list --runs --state current    # the Graph runs running right now
 ```
 
 `lf task status` reports execution separately from the Task's own status:
@@ -238,7 +238,7 @@ alone. If status is unavailable, use `lf doctor` and check again once reads work
 Retry only after inspecting the affected work; for launches other than Tasks,
 inspect the operation's result and `lf session list` first.
 
-For a Graph launched directly, `lf graph list --processes` finds it, running or
+For a Graph launched directly, `lf graph list --runs` finds it, running or
 finished. Inspect one with `lf graph show <RUN_ID>`.
 
 ## A Task stopped advancing
@@ -417,7 +417,7 @@ an unknown result and releases their Sessions, so `lf resume` and
 ```bash
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
 lf session list --all --interactive all      # the conversations they serve
-lf graph list --processes --state current    # the Graph runs lf knows are alive
+lf graph list --runs --state current    # the Graph runs lf knows are alive
 ```
 
 A Machine runs one `lf server run`, one `lf holder run` per build with open

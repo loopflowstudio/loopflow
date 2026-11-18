@@ -71,7 +71,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
         &[
             "graph",
             "list",
-            "--processes",
+            "--runs",
             "--all",
             "--json",
             "--limit",
@@ -94,7 +94,7 @@ async fn public_graph_discovery_reads_saved_detail_without_selecting_work() {
         page.entries[0].repo.as_deref(),
         Some(expected_repo.as_str())
     );
-    let scoped = command(dir.path(), &["graph", "list", "--processes", "--json"]);
+    let scoped = command(dir.path(), &["graph", "list", "--runs", "--json"]);
     assert!(
         scoped.status.success(),
         "{}",
@@ -143,7 +143,7 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
         "lf",
         "graph",
         "list",
-        "--processes",
+        "--runs",
         "--for-task",
         "PROOF-1",
         "--for-wave",
@@ -165,31 +165,19 @@ fn graph_inventory_flags_do_not_select_task_launch_context() {
         _ => panic!("expected Graph discovery"),
     }
     assert!(
-        loopflow::lf::Cli::try_parse_from([
-            "lf",
-            "graph",
-            "list",
-            "--processes",
-            "--managed",
-            "true"
-        ])
-        .is_err(),
+        loopflow::lf::Cli::try_parse_from(["lf", "graph", "list", "--runs", "--managed", "true"])
+            .is_err(),
         "no Graph is selected over another"
+    );
+    assert!(
+        loopflow::lf::Cli::try_parse_from(["lf", "graph", "list", "--runs", "--limit", "0"])
+            .is_err()
     );
     assert!(loopflow::lf::Cli::try_parse_from([
         "lf",
         "graph",
         "list",
-        "--processes",
-        "--limit",
-        "0"
-    ])
-    .is_err());
-    assert!(loopflow::lf::Cli::try_parse_from([
-        "lf",
-        "graph",
-        "list",
-        "--processes",
+        "--runs",
         "--taskless",
         "--for-task",
         "PROOF-1"
@@ -339,7 +327,7 @@ async fn a_killed_graph_run_lists_as_stopped_and_a_live_one_as_current() {
     killed_lf.kill().unwrap();
     killed_lf.wait().unwrap();
 
-    let output = command(dir.path(), &["graph", "list", "--processes", "--json"]);
+    let output = command(dir.path(), &["graph", "list", "--runs", "--json"]);
     live_lf.kill().unwrap();
     live_lf.wait().unwrap();
     assert!(

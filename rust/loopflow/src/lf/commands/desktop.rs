@@ -972,8 +972,7 @@ pub fn saved_layout(
 /// `lf desktop dashboard <verb>`: save the
 /// arrangement in `selected` or the repository containing `directory`,
 /// reading a layout or slots from `input`, and return what the command
-/// prints. Renaming a Task is a Work change; the rest are arrangement and
-/// record no Process.
+/// prints. Renaming a Task is a Work change; the rest are arrangement.
 pub fn save_arrangement(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,

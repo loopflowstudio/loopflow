@@ -71,7 +71,7 @@ Task and PR. Routine progress goes in this conversation, not Task comments.
   `lf resume <session-id> --prepare --json` and execute its `open_argv`
   unchanged.
 - **Execution.** When work looks stuck, run `lf session list --json` and
-  `lf graph list --processes --state current --json`: what runs, confirmed
+  `lf graph list --runs --state current --json`: what runs, confirmed
   against the OS. Time alone
   never means dead. `lf machine doctor` reports strays and kills nothing.
   Never kill a PID you can't account for.

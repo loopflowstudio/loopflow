@@ -67,10 +67,10 @@ pub struct TaskDetail {
     pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
 }
 
-/// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.
+/// One of the Task's Graph runs; `lf graph show <id>` draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGraphRow {
-    /// The Graph process.
+    /// The Graph run.
     pub id: String,
     pub name: String,
     pub state: GraphProcessSummaryState,

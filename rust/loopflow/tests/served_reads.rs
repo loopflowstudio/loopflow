@@ -742,11 +742,7 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             loopflow_execution::engine::ErrorCode::NotFound
         );
     }
-    assert_eq!(
-        changes(&database),
-        before,
-        "screen reads changed Work or started a Process"
-    );
+    assert_eq!(changes(&database), before, "screen reads changed Work");
 
     // The detail names the recorded primary and observed PR checks.
     let conn = rusqlite::Connection::open(&database).unwrap();
@@ -917,7 +913,7 @@ fn server_operations_match_their_lf_commands() {
     };
     // A new Read fails to compile here until it is compared too.
     let (reads, subscriptions) = match task_diff(None, None) {
-        Read::ProcessHistory { .. }
+        Read::SessionHistoryGet { .. }
         | Read::CreationGet { .. }
         | Read::DesktopViewList { .. }
         | Read::ViewSelect { .. }
@@ -942,7 +938,7 @@ fn server_operations_match_their_lf_commands() {
         | Read::GraphList { .. }
         | Read::DesktopViewGet { .. }
         | Read::TaskRuns { .. }
-        | Read::ProcessGet { .. }
+        | Read::GraphRunGet { .. }
         | Read::SessionUsage { .. }
         | Read::TaskContext { .. }
         | Read::WavePlan { .. }
@@ -1039,13 +1035,13 @@ fn server_operations_match_their_lf_commands() {
                     task: "INF-123".into(),
                     after: None,
                 },
-                Read::ProcessHistory {
+                Read::SessionHistoryGet {
                     id: session["id"].as_str().unwrap().into(),
                 },
                 Read::CreationGet {
                     request_id: "absent-creation".into(),
                 },
-                Read::ProcessGet { id: graph },
+                Read::GraphRunGet { id: graph },
                 Read::SessionUsage {
                     days: 0,
                     wave: None,
@@ -1159,7 +1155,7 @@ fn server_operations_match_their_lf_commands() {
     };
     let server = Server::start(repo.path(), home.path());
     let database = home.path().join("loopflow.db");
-    // A server read changes no Work and records no Process.
+    // A server read changes no Work.
     let unchanged = |argv: &[&str], serve: &mut dyn FnMut()| {
         let before = changes(&database);
         serve();
@@ -1174,7 +1170,7 @@ fn server_operations_match_their_lf_commands() {
         let Ok(printed) = serde_json::from_str::<Value>(&printed) else {
             // History is rendered text, including its final newline. A path's
             // CLI newline is only its output delimiter.
-            let text = if matches!(query, Read::ProcessHistory { .. }) {
+            let text = if matches!(query, Read::SessionHistoryGet { .. }) {
                 printed
             } else {
                 printed.trim().into()
@@ -1861,19 +1857,15 @@ fn without_revision(mut value: Value) -> Value {
 }
 
 /// Each Work domain's revision and the Processes recorded.
-fn changes(database: &Path) -> (Vec<(String, i64)>, i64) {
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let revisions = conn
+fn changes(database: &Path) -> Vec<(String, i64)> {
+    rusqlite::Connection::open(database)
+        .unwrap()
         .prepare("SELECT domain, revision FROM store_revisions ORDER BY domain")
         .unwrap()
         .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
         .unwrap()
         .collect::<Result<_, _>>()
-        .unwrap();
-    let processes = conn
-        .query_row("SELECT count(*) FROM processes", [], |row| row.get(0))
-        .unwrap();
-    (revisions, processes)
+        .unwrap()
 }
 
 /// A save without its recoveries' directories, which each save names by its time.

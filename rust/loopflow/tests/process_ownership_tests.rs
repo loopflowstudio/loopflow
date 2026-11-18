@@ -218,16 +218,6 @@ async fn early_commands_exit_exactly_without_recording_initializing_or_migrating
         );
     }
     assert_eq!(
-        conn.query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.id.as_str()],
-            |row| row.get::<_, i64>(0)
-        )
-        .unwrap(),
-        0,
-        "no lf writes a Process row"
-    );
-    assert_eq!(
         conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
             .get::<_, i64>(0))
             .unwrap(),
@@ -242,37 +232,6 @@ async fn early_commands_exit_exactly_without_recording_initializing_or_migrating
         .unwrap(),
         schema
     );
-}
-
-#[tokio::test]
-#[ignore = "requires disposable OS installation: scripts/test_task_installation.py"]
-async fn install_preflight_records_no_process() {
-    let home = tempfile::tempdir().unwrap();
-    let database = home.path().join("loopflow.db");
-    let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    drop(store);
-    let parent = RunningParent::insert(&database);
-    let output = child(
-        home.path(),
-        home.path(),
-        &["self", "install", "preflight", "--json"],
-        &parent,
-    )
-    .output()
-    .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let conn = rusqlite::Connection::open(&database).unwrap();
-    // Preflight only reads, so it records no Process.
-    let count: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 0);
 }
 
 #[test]
@@ -307,16 +266,6 @@ fn empty_release_check_returns_through_process_completion() {
         "{output:?}"
     );
     assert!(!stderr.contains("Error:"), "{output:?}");
-    // A release check is a read: it records no Process.
-    let conn = rusqlite::Connection::open(&database).unwrap();
-    let rows: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(rows, 0);
 }
 
 #[tokio::test]
@@ -471,7 +420,7 @@ async fn historical_sessions_are_not_live_availability() {
 }
 
 #[tokio::test]
-async fn inspection_records_no_process_and_starts_no_work() {
+async fn inspection_starts_no_work() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -488,14 +437,6 @@ async fn inspection_records_no_process_and_starts_no_work() {
     .unwrap();
     assert!(output.status.success(), "{output:?}");
     let connection = rusqlite::Connection::open(&database).unwrap();
-    let count: i64 = connection
-        .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [parent.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(count, 0, "a read records no Process");
     let work: i64 = connection
         .query_row(
             "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='runs'",

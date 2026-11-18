@@ -1132,7 +1132,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Runs { issue, after, json } => loopflow::lf::commands::graph_inventory::list(
             &loopflow::lf::commands::graph_inventory::GraphProcessInventoryArgs {
-                processes: true,
+                runs: true,
                 for_task: Some(issue.clone()),
                 after: after.clone(),
                 ..Default::default()
@@ -3397,7 +3397,7 @@ fn execute_command(
                     loopflow::lf::commands::graph::run_task_graph(cli, &repo_root, binding)
                 })
             }
-            GraphCommand::List { json, inventory } if inventory.processes => {
+            GraphCommand::List { json, inventory } if inventory.runs => {
                 loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }
             _ => anyhow::bail!("not a Graph inspection command: {cmd:?}"),

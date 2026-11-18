@@ -450,14 +450,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             Path::new(&recorded),
             task.repo.path().canonicalize().unwrap()
         );
-        let inventory = task.run(&[
-            "graph",
-            "list",
-            "--processes",
-            "--for-task",
-            "INF-123",
-            "--json",
-        ]);
+        let inventory = task.run(&["graph", "list", "--runs", "--for-task", "INF-123", "--json"]);
         assert!(
             inventory.status.success(),
             "{}",

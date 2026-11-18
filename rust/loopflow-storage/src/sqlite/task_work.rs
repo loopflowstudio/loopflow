@@ -814,9 +814,8 @@ impl SqliteStore {
         .collect()
     }
 
-    /// Current workspace facts, without enumerating mechanical Process history.
     /// The Task's overview and, for each of its Graphs in the same order, what
-    /// `lf graph show --processes` says of it.
+    /// `lf graph show` says of it.
     pub fn task_overview_records(
         &self,
         task: &TaskId,
@@ -844,7 +843,7 @@ impl SqliteStore {
         ))
     }
 
-    /// The Task's Graph position and what `lf graph show --processes` says of
+    /// The Task's Graph position and what `lf graph show` says of
     /// each of its Graphs, without listing its Sessions: a hook reads this.
     pub fn task_progress_records(
         &self,

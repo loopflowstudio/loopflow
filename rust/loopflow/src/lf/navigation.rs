@@ -332,7 +332,7 @@ pub fn normalize_args(args: Vec<String>) -> Result<Vec<String>, clap::Error> {
 pub fn inspect(cli: &Cli) -> Option<Result<()>> {
     let command = cli.command.as_ref()?;
     if matches!(command,
-        Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.processes
+        Commands::Graph { cmd: GraphCommand::List { inventory, .. } } if inventory.runs
     ) {
         return None;
     }
@@ -372,7 +372,7 @@ pub fn inspect(cli: &Cli) -> Option<Result<()>> {
             } => {
                 anyhow::ensure!(
                     inventory.is_empty(),
-                    "filters over Graphs that ran require --processes"
+                    "filters over Graphs that ran require --runs"
                 );
                 crate::lf::commands::graph::list(&repo, *json)?;
             }

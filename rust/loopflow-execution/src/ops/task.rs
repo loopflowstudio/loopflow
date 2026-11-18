@@ -2353,7 +2353,7 @@ pub struct TaskStatus {
     pub ownership: Option<loopflow_model::durable::TaskOwnership>,
     /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
     pub overview: Option<crate::task_work::TaskOverview>,
-    /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
+    /// `lf graph show` for each of `overview`'s Graphs, in order.
     pub graph_processes: Vec<crate::durable::GraphProcessDetail>,
     pub comments: Option<loopflow_model::comment::TaskComments>,
 }

@@ -221,7 +221,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
                 params![fixture.task.id.as_str(), terminal],
             )
             .unwrap();
-        // The conversation's lf process, a child of the holder, which records no Process.
+        // The conversation's lf process, a child of the holder.
         let live = crate::process::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();

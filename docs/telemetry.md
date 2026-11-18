@@ -124,7 +124,7 @@ lf replay <run-id>
 
 ```bash
 lf session list                 # live Sessions on this Machine
-lf graph list --processes       # Graphs that ran; a live one is current
+lf graph list --runs       # Graphs that ran; a live one is current
 ```
 
 A live Session or Graph run is one whose recorded pid the OS confirms alive

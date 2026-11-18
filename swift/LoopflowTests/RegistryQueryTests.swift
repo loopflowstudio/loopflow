@@ -75,15 +75,15 @@ struct RegistryQueryTests {
         #expect(reading.work.graph?.position == .at(step: "demo"))
     }
 
-    @Test("Step history uses the exact process on the content Machine")
-    func contentRoutedStepHistory() async throws {
+    @Test("Session history routes to the content Machine")
+    func contentRoutedSessionHistory() async throws {
         let query = RegistryQuery { args, cwd in
-            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "process-step"], cwd == nil else {
-                throw RegistryQueryError("Wrong process history owner")
+            guard args == ["--machine", "peer", "--repo-id", "plan", "session", "history", "show", "session-1"], cwd == nil else {
+                throw RegistryQueryError("Wrong Session history owner")
             }
             return "gate failed: exit 1"
         }
-        #expect(try await query.onMachine("peer", repository: "plan").processHistory(id: "process-step") == "gate failed: exit 1")
+        #expect(try await query.onMachine("peer", repository: "plan").sessionHistoryText(id: "session-1") == "gate failed: exit 1")
     }
 
     /// The JSON `read::tests::desktop_encodings_name_their_reads` decodes in Rust.

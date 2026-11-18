@@ -1021,7 +1021,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT p.endpoint,s.provider_thread,p.completed_at,p.pid,p.os_started_at
+                "SELECT p.endpoint,s.provider_thread,s.agent_ended_at,s.agent_pid,s.agent_os_started_at
              FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
              WHERE s.id=?1 AND p.endpoint IS NOT NULL AND s.provider_thread IS NOT NULL",
                 [session],
@@ -1071,8 +1071,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT p.pid,p.os_started_at FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
-             AND p.pid IS NOT NULL AND p.os_started_at IS NOT NULL",
+                "SELECT agent_pid,agent_os_started_at FROM agent_sessions WHERE id=?1
+             AND agent_pid IS NOT NULL AND agent_os_started_at IS NOT NULL",
                 [session],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )

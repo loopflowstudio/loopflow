@@ -2227,6 +2227,32 @@ mod tests {
         assert!(conn
             .execute("UPDATE task_ship_events SET kind='stopped'", [])
             .is_err());
+
+        // A Session carries its current agent's lifetime, backfilled and
+        // bridged from the agent row a released launcher writes.
+        type Agent = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+        let agent = |session: &str| -> Agent {
+            conn.query_row(
+                "SELECT agent_started_at,agent_pid,agent_ended_at,agent_exit_code
+                 FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(agent("session-live"), (Some(120), Some(7001), None, None));
+        assert_eq!(agent("session-done"), (Some(121), None, Some(130), Some(0)));
+        conn.execute_batch(
+            "UPDATE processes SET completed_at=140,exit_code=1
+             WHERE id='00000000-0000-4000-8000-00000000a001';
+             INSERT INTO processes(id,trace_id,kind,started_at,spawn_state)
+             VALUES('00000000-0000-4000-8000-00000000a003','00000000-0000-4000-8000-00000000a003','agent',150,'reserved');
+             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-00000000a003'
+             WHERE id='session-done';",
+        )
+        .unwrap();
+        assert_eq!(agent("session-live"), (Some(120), None, Some(140), Some(1)));
+        assert_eq!(agent("session-done"), (Some(150), None, None, None));
         validate_foreign_keys(&conn).unwrap();
     }
 

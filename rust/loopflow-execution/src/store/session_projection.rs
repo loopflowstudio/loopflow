@@ -32,6 +32,11 @@ impl Reading {
                 live.push(identity.id.clone());
             }
         }
+        let graph_results = inputs
+            .graph_runs
+            .iter()
+            .map(|run| (run.id.to_string(), crate::journal::observed_result(run)))
+            .collect();
         if crate::observe::active() {
             for deadline in &inputs.deadlines {
                 if !crate::observe::deadline(*deadline) {
@@ -48,6 +53,7 @@ impl Reading {
                 now,
                 live_agents,
                 evidence,
+                graph_results,
             },
         })
     }
@@ -210,6 +216,59 @@ mod tests {
     }
 
     #[test]
+    fn a_session_reads_its_agent_lifetime_from_its_own_row() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let attachment = attachment::claim_session_attachment(
+            &store,
+            "session",
+            None,
+            &store.test_lf_process(),
+            true,
+        )
+        .unwrap();
+        let lifetime = || -> (Option<u32>, bool, bool) {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT agent_pid,agent_started_at IS NOT NULL,agent_ended_at IS NOT NULL
+                     FROM agent_sessions WHERE id='session'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap()
+        };
+        let evidence = || {
+            crate::store::session_projection::session_summary(&store, "session", 500)
+                .unwrap()
+                .unwrap()
+                .agent_process_evidence
+        };
+        // Reserved: started, no OS process yet, so liveness is unconfirmed.
+        assert_eq!(lifetime(), (None, true, false));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Unknown);
+        let pid = std::process::id();
+        store
+            .record_agent_process_identity(
+                "session",
+                &attachment,
+                pid,
+                crate::journal::process_started_at(pid).unwrap().unwrap(),
+            )
+            .unwrap();
+        assert_eq!(lifetime(), (Some(pid), true, false));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Live);
+        store
+            .record_agent_process_exit("session", &attachment, true)
+            .unwrap();
+        assert_eq!(lifetime(), (None, true, true));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Dead);
+    }
+
+    #[test]
     fn a_changed_identity_restarts_acquisition_before_projection() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("db");
@@ -291,7 +350,7 @@ mod tests {
         assert_eq!(before.len(), after.len());
         assert_eq!(
             after.iter().filter(|sql| sql.starts_with("SELECT")).count(),
-            4
+            6
         );
         let scans = growing_scans(&store, &after);
         assert!(scans.is_empty(), "{scans:?}");

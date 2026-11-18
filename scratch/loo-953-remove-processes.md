@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, carrier slices built)
+## Status (2026-11-17, Session lifetime built)
 
 Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
 main at `2593c489d7`; that merge touched nothing this plan depends on.
@@ -13,19 +13,56 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them, liveness by
 `run_evidence`); `detached::start_lf` returns `Started { id, pid,
 os_started_at }`, so `engine::launch` waits on its child without the store;
-the owner items and carriers below.
+the owner items, carriers and the first Session cut below.
 
-Next, in order: the Session slice (slice 3, with the retirement-by-terminal
-gap and `GraphProcessSummaryState::of_process` at `sessions.rs:428` →
-`of_run(observed_result(..))`); the expand migration's foreign-key rebuild
+Next, in order: (1) the rest of slice 3: attachment (`attachment_token`,
+`attached_lf_process_id`, `endpoint`, `inbox`, `terminal_id`) onto
+`agent_sessions`, the agent writers moved onto the Session (flipping the
+bridge below to old → new only, plus new → old for released readers), the
+`prepare_resume` beside path ended, then `task_open_process_pairs` as live
+Sessions + Graph runs (Graph runs gain `held_terminal_id`) and with it the
+retirement-by-terminal gap; (2) the expand migration's foreign-key rebuild
 together with stopping the journal writer **and the owner liveness pass**
-(see "Concept review after the carrier slices"); slices 4–6. Still reading
-`processes` beside the carriers: `process_starter` (ship "started by"),
-`run_task_graph`'s parent check (`graph.rs:79`, the Graph child's
-`parent_lf_process_id` against the carrier) and `task_state_sql`'s
+(see "Concept review after the carrier slices"); (3) slices 4–6. Still
+reading `processes` beside the carriers: `process_starter` (ship "started
+by"), `run_task_graph`'s parent check (`graph.rs:79`) and `task_state_sql`'s
 `open_processes` arm. When LOO-936 merges: rebase, rerun
 `python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
 Quotes and the OS-scan measurement: `questions.md`.
+
+**Session lifetime as built (first cut of slice 3).**
+
+- `agent_sessions.agent_{started_at,pid,os_started_at,ended_at,exit_code}`:
+  the current agent's lifetime, pid cleared at its end. Backfilled from the
+  agent row; three triggers (`session_agent_from_process_{insert,update}`,
+  `session_agent_from_attachment`) copy the agent row's lifetime onto the
+  Session, for this lf and a released one. lf's agent writers still write
+  the agent row, since it carries the attachment; they move with it.
+- Readers on the Session's columns: the projection's identities
+  (`session_projection_inputs_in`, so `session list`/summary liveness and
+  `available`), `TURN_LIVE`, `available_sql`, `session_terminal`,
+  provider transitions' `live_process`, `saved_session_connection`'s
+  liveness, `agent_process_identity`. Still joining the agent row for
+  attachment or reach: `TURN_LIVE`/`available_sql` token,
+  `require_current_actor_in`, `idle_conversation_candidates`, summary
+  terminal and preview.
+- A Session's Graph is `of_run` over its Graph run's own columns:
+  `SessionProjectionInputs.graph_runs` (unended runs its Sessions' captures
+  name) are observed by `observed_result` in `Reading::acquire`;
+  `of_process` is deleted.
+
+Checks (2026-11-17, Session lifetime): storage `migration_runner::`,
+`query_plans::`, `sqlite::{sessions,processes,provider_transitions,steers,revisions}::`
+→ 185 pass; `run_owners_carry_their_process_lifecycle_after_upgrade` (Session
+backfill and bridge) → pass; execution `store::`, `process::`,
+`harness::agent_process::`, `ops::human_session::`, `capture_tests`,
+`registry_tests`, `fact_writer` → 416/417, the failure
+`process::runtime::state_tests::history_times_provider_work_from_its_first_recorded_attempt`
+also fails at `38aa184ae5` (gate); new
+`a_session_reads_its_agent_lifetime_from_its_own_row` and the extended
+`session_metadata_reads_its_graph_from_the_process_that_captured_its_input`
+(dead Graph pid → stopped) → pass; `loopflow` `server::wake::`,
+`server::boundary::` → pass; clippy → clean.
 
 **Carrier slices as built.**
 

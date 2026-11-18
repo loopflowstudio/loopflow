@@ -26,7 +26,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 }
 
 /// The columns every `Execution` owner shares, prefixed by `alias`.
-fn run_columns(alias: &str) -> String {
+pub(super) fn run_columns(alias: &str) -> String {
     [
         "lf_process_id",
         "started_at",
@@ -41,7 +41,7 @@ fn run_columns(alias: &str) -> String {
 }
 
 /// A run read from the leading columns `run_columns` selects.
-fn read_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Execution> {
+pub(super) fn read_run(row: &rusqlite::Row<'_>) -> rusqlite::Result<Execution> {
     Ok(Execution {
         id: row.get(0)?,
         // A run a released lf recorded without its Process row has no start.

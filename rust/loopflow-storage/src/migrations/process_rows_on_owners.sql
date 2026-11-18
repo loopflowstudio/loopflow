@@ -316,3 +316,48 @@ BEGIN
         FROM processes WHERE id=NEW.repair_lf_process_id)
     WHERE identity=NEW.identity;
 END;
+
+-- A Session records its current agent's lifetime: when it was reserved, the
+-- OS process it runs as while live, and when and how it exited. lf writes the
+-- agent row with its attachment until the attachment moves onto the Session;
+-- these copy the agent row's lifetime there, for this lf and a released one.
+-- The contract migration drops them with the table.
+ALTER TABLE agent_sessions ADD COLUMN agent_started_at INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN agent_pid INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN agent_os_started_at INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN agent_ended_at INTEGER;
+ALTER TABLE agent_sessions ADD COLUMN agent_exit_code INTEGER;
+UPDATE agent_sessions SET (agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code)=(
+    SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+        CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code
+    FROM processes WHERE id=agent_sessions.agent_process_id)
+WHERE agent_process_id IS NOT NULL;
+
+CREATE TRIGGER session_agent_from_process_insert AFTER INSERT ON processes
+WHEN NEW.kind='agent'
+BEGIN
+    UPDATE agent_sessions SET agent_started_at=NEW.started_at,
+        agent_pid=CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END,
+        agent_os_started_at=CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END,
+        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code
+    WHERE agent_process_id=NEW.id;
+END;
+CREATE TRIGGER session_agent_from_process_update
+AFTER UPDATE OF started_at,pid,os_started_at,completed_at,exit_code ON processes
+WHEN NEW.kind='agent'
+BEGIN
+    UPDATE agent_sessions SET agent_started_at=NEW.started_at,
+        agent_pid=CASE WHEN NEW.completed_at IS NULL THEN NEW.pid END,
+        agent_os_started_at=CASE WHEN NEW.completed_at IS NULL THEN NEW.os_started_at END,
+        agent_ended_at=NEW.completed_at,agent_exit_code=NEW.exit_code
+    WHERE agent_process_id=NEW.id;
+END;
+CREATE TRIGGER session_agent_from_attachment AFTER UPDATE OF agent_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT OLD.agent_process_id
+BEGIN
+    UPDATE agent_sessions SET (agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code)=(
+        SELECT started_at,CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code
+        FROM processes WHERE id=NEW.agent_process_id)
+    WHERE id=NEW.id;
+END;

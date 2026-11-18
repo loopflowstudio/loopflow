@@ -116,3 +116,8 @@ concept review after slice 2a.
 - Call: `task_state_sql` reads a stored pid (`run_pid` / ship event `pid` not NULL), not OS liveness; SQL cannot call `process_identity_evidence`. A SIGKILLed carrier reads moving until the liveness pass, as its Process row does today.
 - Call: ship failure cause is the Task's latest Graph run's `graph_failure_cause`, else the ship carrier's own error (its own error alone lost the agent's exit in `task_ship_restarts_after_a_failure_wait_instead_of_on_every_read`); `failure_cause`'s child walk is deleted.
 - Call: `lf task run` marks `ShipCarrier` up front, since arrival at `end` may hand the Task off with it as carrier; a no-op end write when it never ships.
+
+## Session lifetime (2026-11-17)
+
+- Call: the Session's agent columns are filled by triggers from the agent row for this lf too, not by Rust writers, until the attachment moves onto the Session. The agent row's writers (`attach_in`, `replace_agent`, `finish`, `commit`, settlement, retention) carry the attachment in the same statements, and a replaced or detached agent has no Session to write; moving them is the attachment cut.
+- Call: retirement-by-terminal waits for `task_open_process_pairs` to become live Sessions + Graph runs, since Graph runs have no `held_terminal_id` yet.

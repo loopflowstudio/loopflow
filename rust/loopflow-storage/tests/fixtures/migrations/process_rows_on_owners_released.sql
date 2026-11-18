@@ -35,3 +35,10 @@ INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES('task-liv
 INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
 VALUES('task-live','{}','start','{}','carrier-live',1);
 INSERT INTO task_ship_events(task_id,kind,at,lf_process_id) VALUES('task-live','approved',100,'carrier-live');
+-- A Session whose live agent a released launcher holds, and one whose agent exited.
+INSERT INTO processes(id,trace_id,kind,started_at,completed_at,exit_code,pid,os_started_at,spawn_state)
+VALUES('00000000-0000-4000-8000-00000000a001','00000000-0000-4000-8000-00000000a001','agent',120,NULL,NULL,7001,119,'spawn_requested'),
+      ('00000000-0000-4000-8000-00000000a002','00000000-0000-4000-8000-00000000a002','agent',121,130,0,7002,120,'exited');
+INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,agent_process_id)
+VALUES('session-live','Live','human',1,0,'/repo','00000000-0000-4000-8000-00000000a001'),
+      ('session-done','Done','human',1,0,'/repo','00000000-0000-4000-8000-00000000a002');

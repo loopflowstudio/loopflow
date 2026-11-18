@@ -84,8 +84,8 @@ fn live_process(
 ) -> StoreResult<Option<loopflow_model::id::AgentProcessId>> {
     Ok(conn
         .query_row(
-            "SELECT p.id FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id
-         WHERE s.id=?1 AND p.pid IS NOT NULL AND p.completed_at IS NULL",
+            "SELECT agent_process_id FROM agent_sessions
+         WHERE id=?1 AND agent_pid IS NOT NULL AND agent_ended_at IS NULL",
             [session],
             |row| row.get(0),
         )

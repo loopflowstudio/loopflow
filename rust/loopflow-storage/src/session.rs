@@ -457,15 +457,6 @@ impl GraphProcessSummaryState {
             }
         }
     }
-
-    /// What a Graph process's recorded outcome and exit time say of its Graph.
-    pub fn of_process(outcome: Option<&str>, completed_at: Option<i64>) -> Self {
-        match (outcome, completed_at) {
-            (Some("succeeded"), _) => Self::Completed,
-            (None, None) => Self::Current,
-            _ => Self::Stopped,
-        }
-    }
 }
 
 /// Read-local admission context. Immutable observations override current-input

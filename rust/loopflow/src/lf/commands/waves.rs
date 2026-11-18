@@ -3265,7 +3265,6 @@ mod tests {
             "bound",
             None,
             &store.sqlite.test_lf_process(),
-            true,
         )
         .unwrap();
         store

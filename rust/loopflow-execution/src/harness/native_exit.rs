@@ -135,7 +135,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
     if let Some((store, _, attachment)) = &owner {
         let recorded = (|| -> Result<()> {
             let mut process = store
-                .lf_process(&attachment.provider_lf_process_id)?
+                .lf_process(&attachment.launcher_lf_process_id)?
                 .context("handed-off launcher is not recorded")?;
             process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
             process.outcome = Some(
@@ -239,8 +239,7 @@ mod tests {
                 .unwrap();
             let launcher = store.test_lf_process();
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment,
@@ -310,7 +309,6 @@ mod tests {
                     &session.id,
                     None,
                     &launcher,
-                    true,
                 )
                 .unwrap();
                 let exit = NativeExit {
@@ -375,8 +373,7 @@ mod tests {
                 .unwrap();
             let launcher = journal::current_lf_process_id().unwrap();
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &launcher, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &launcher).unwrap();
             let exit = NativeExit {
                 session: session.id.to_string(),
                 attachment: attachment.clone(),
@@ -404,7 +401,6 @@ mod tests {
                 &session.id,
                 current.as_ref(),
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let before = store

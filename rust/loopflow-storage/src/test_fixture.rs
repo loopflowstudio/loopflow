@@ -122,7 +122,6 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             "session",
             None,
             &process,
-            false,
             None,
             &crate::sqlite::SessionCaller {
                 agent: None,
@@ -449,7 +448,6 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
                     session,
                     None,
                     &process,
-                    false,
                     None,
                     &crate::sqlite::SessionCaller {
                         agent: None,

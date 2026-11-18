@@ -249,7 +249,7 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
         agent_process_id: loopflow_model::id::AgentProcessId::parse(agent).unwrap(),
         lf_process_id: Some(holder.clone()),
         token: loopflow_model::id::AttachmentToken::parse(token).unwrap(),
-        provider_lf_process_id: holder,
+        launcher_lf_process_id: holder,
     };
     let fence = session_fence_file(&store, &SESSION.to_ascii_lowercase()).unwrap();
     FileExt::lock_shared(&fence).unwrap();

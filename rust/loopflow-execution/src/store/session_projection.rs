@@ -167,14 +167,9 @@ mod tests {
             ("c-live", Some(started)),
         ] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            let attachment = attachment::claim_session_attachment(
-                &store,
-                id,
-                None,
-                &store.test_lf_process(),
-                true,
-            )
-            .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &store.test_lf_process())
+                    .unwrap();
             if let Some(started) = identity {
                 store
                     .record_agent_process_identity(id, &attachment, pid, started)
@@ -229,14 +224,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
-        let attachment = attachment::claim_session_attachment(
-            &store,
-            "session",
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "session", None, &store.test_lf_process())
+                .unwrap();
         let lifetime = || -> (Option<u32>, bool, bool) {
             store
                 .conn
@@ -283,14 +273,9 @@ mod tests {
         let path = home.path().join("db");
         let store = crate::store::opening::open_ephemeral(&path).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
-        let attachment = attachment::claim_session_attachment(
-            &store,
-            "session",
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "session", None, &store.test_lf_process())
+                .unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(
@@ -341,7 +326,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("live", &crate::session_record::new_artifact_key());
-        attachment::claim_session_attachment(&store, "live", None, &store.test_lf_process(), true)
+        attachment::claim_session_attachment(&store, "live", None, &store.test_lf_process())
             .unwrap();
         let read = || {
             let reading = super::Reading::acquire(&store, 500, None).unwrap();

@@ -82,8 +82,8 @@ Provider turns and retries remain history inside the conversation; they do not
 create another generic execution object.
 
 A recorded pid grants neither process-control authority nor permission to move
-a Graph cursor. An attachment handoff retains conversation identity while
-fencing the old writer.
+a Graph cursor. Each attachment starts a new agent with a fresh token, which
+fences out the old writer; the conversation keeps its identity.
 Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 

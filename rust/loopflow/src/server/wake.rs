@@ -261,8 +261,7 @@ mod tests {
             &loopflow_execution::session_record::new_artifact_key(),
         );
         let process = store.test_lf_process();
-        let claim =
-            attachment::claim_session_attachment(&store, session, None, &process, false).unwrap();
+        let claim = attachment::claim_session_attachment(&store, session, None, &process).unwrap();
         let pid = std::process::id();
         store
             .record_agent_process_identity(

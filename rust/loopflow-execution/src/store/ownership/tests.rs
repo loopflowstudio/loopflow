@@ -401,7 +401,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
             .unwrap();
         let process = store.test_lf_process();
         let first = store
-            .attach_session(&id, None, &process, true, None, &absent)
+            .attach_session(&id, None, &process, None, &absent)
             .unwrap();
         let caller = SessionCaller {
             agent: Some(AgentCaller {
@@ -418,14 +418,7 @@ fn promotion_refuses_a_replaced_caller_for_either_title_source() {
         )
         .unwrap();
         let replacement = store
-            .attach_session(
-                &id,
-                Some(&first),
-                &store.test_lf_process(),
-                true,
-                None,
-                &absent,
-            )
+            .attach_session(&id, Some(&first), &store.test_lf_process(), None, &absent)
             .unwrap();
         let before = store.session(&id).unwrap().unwrap();
         assert_eq!(before.title_source, source);

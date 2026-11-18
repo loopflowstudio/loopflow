@@ -93,7 +93,7 @@ impl Settling {
             "lf/{}",
             record
                 .attachment
-                .provider_lf_process_id
+                .launcher_lf_process_id
                 .as_str()
                 .replace('-', "")
         );

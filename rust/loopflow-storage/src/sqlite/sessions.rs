@@ -620,7 +620,7 @@ pub(super) fn claim_session_input_in(
         ));
     }
     replace_input_in(tx, &mut next, Some(process))?;
-    let attachment = super::processes::attach_in(tx, &next.id, expected, process, true, start)?;
+    let attachment = super::processes::attach_in(tx, &next.id, expected, process, start)?;
     let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     Ok((next, attachment))
 }
@@ -1989,9 +1989,8 @@ pub(super) fn require_current_actor_in(
     {
         let current: bool = conn.query_row(
             "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
-                AND agent_process_id=?2 AND agent_launcher_lf_process_id=?3
-                AND attached_lf_process_id IS NOT NULL)",
-            params![id, caller.agent_process_id, caller.origin_lf_process_id],
+                AND agent_process_id=?2 AND attached_lf_process_id IS NOT NULL)",
+            params![id, caller.agent_process_id],
             |row| row.get(0),
         )?;
         if !current {

@@ -257,13 +257,16 @@ pub struct AgentCaller {
 }
 
 /// An exact attachment capability, not another process or lifecycle owner.
-/// Every claim gets a new token, even when the same lf process reattaches.
+/// Every claim starts a new agent with a new token, even when the same lf reattaches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionAttachment {
     pub agent_process_id: AgentProcessId,
     pub lf_process_id: Option<LfProcessId>,
     pub token: loopflow_model::id::AttachmentToken,
-    pub provider_lf_process_id: LfProcessId,
+    /// The lf that attached this agent; it stays after the attachment is released.
+    #[serde(rename = "provider_lf_process_id")]
+    // Kept exit records and held hosts use this name.
+    pub launcher_lf_process_id: LfProcessId,
 }
 
 impl SessionAttachment {
@@ -271,7 +274,7 @@ impl SessionAttachment {
         AgentCaller {
             session_id,
             agent_process_id: Some(self.agent_process_id.clone()),
-            origin_lf_process_id: self.provider_lf_process_id.clone(),
+            origin_lf_process_id: self.launcher_lf_process_id.clone(),
         }
     }
 }

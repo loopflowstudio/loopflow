@@ -636,8 +636,7 @@ mod tests {
             )
             .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, &session.id, None, &process, true)
-                .unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &process).unwrap();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "build").unwrap();
         rusqlite::Connection::open(&path)
@@ -679,7 +678,6 @@ mod tests {
             &title.session,
             Some(&attachment),
             &process,
-            false,
         )
         .unwrap();
         assert_eq!(title.read_names().unwrap(), None);

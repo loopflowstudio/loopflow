@@ -49,8 +49,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     )
     .unwrap();
     let parent = recorded_lf_process(&database);
-    let attachment =
-        attachment::claim_session_attachment(&store, "orphan", None, &parent, true).unwrap();
+    let attachment = attachment::claim_session_attachment(&store, "orphan", None, &parent).unwrap();
     // Only this throwaway group can be signaled. The shell supplies the server
     // argv shape, not a configured provider, account or conversation.
     let started = time::OffsetDateTime::now_utc().unix_timestamp();
@@ -203,14 +202,9 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
     let database = home.path().join("loopflow.db");
     let store = loopflow_execution::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "held", worktree);
-    let attachment = attachment::claim_session_attachment(
-        &store,
-        "held",
-        None,
-        &recorded_lf_process(&database),
-        true,
-    )
-    .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "held", None, &recorded_lf_process(&database))
+            .unwrap();
     let agent = attachment.agent_process_id.as_str();
 
     let output = lf(repo.path(), &["monitor", "ps", "--json"]);
@@ -1007,7 +1001,6 @@ async fn historical_sessions_are_not_live_availability() {
         "finished",
         None,
         &recorded_lf_process(&database),
-        true,
     )
     .unwrap();
     let connection = rusqlite::Connection::open(&database).unwrap();

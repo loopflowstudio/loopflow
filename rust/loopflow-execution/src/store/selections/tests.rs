@@ -595,7 +595,6 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
         "selection-session",
         None,
         &store.test_lf_process(),
-        true,
     )
     .unwrap();
     store
@@ -699,14 +698,9 @@ fn stale_conversations_leave_task_activity_known() {
             .unwrap();
     }
     let unattached = selections::resolve_selection(&store, &repo, &running).unwrap();
-    let attachment = attachment::claim_session_attachment(
-        &store,
-        "before-boot",
-        None,
-        &store.test_lf_process(),
-        true,
-    )
-    .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "before-boot", None, &store.test_lf_process())
+            .unwrap();
     let started: i64 = store
         .conn
         .lock()

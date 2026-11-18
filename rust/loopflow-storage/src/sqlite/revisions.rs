@@ -288,7 +288,6 @@ mod tests {
                 "conversation",
                 None,
                 &process,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,

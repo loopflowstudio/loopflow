@@ -245,7 +245,7 @@ panes keep local records; Session panes send each bounded snapshot to the
 server as one `session.status` write with the current terminal receipt and the
 reading's AgentProcess, on the connection Desktop already holds. No process
 runs per pane. Stream identity and increasing sequence fence replacements in SQLite.
-An unchanged provider keeps reports across attachment handoff. Report text is literal
+A replaced agent's reports end with it. Report text is literal
 and display-sanitized; protocol IDs never select Sessions or grant process,
 Graph or completion authority. Detached relay observation remains unimplemented.
 `--headless` includes headless Sessions; `--all` means all repositories. Interactive mode grants neither review
@@ -290,9 +290,9 @@ a naming-only migration. Provider protocol names remain vendor-owned.
 
 An LfSession can have many historical attached Processes and at most one current
 attachment. Compare-and-set issues a fresh opaque token on every claim and release,
-including A → B → A. The token has no independent lifecycle. A continuing
-AgentProcess keeps its identity and origin through handoff and an unattached
-interval. Old clients may retain provider history but cannot start/steer turns or
+including A → B → A. The token has no independent lifecycle. Every claim starts
+a new AgentProcess, so a claim replaces the agent only after it exited or never
+spawned; a released agent keeps its identity and launcher until then. Old clients may retain provider history but cannot start/steer turns or
 change current attachment, connection, process evidence or stream activity.
 History retention grants no native-write or Graph authority. Passive connection
 acquires no claim. Dispatch fences include queued native RPCs and approval replies, not only database claim updates.
@@ -455,7 +455,7 @@ conversation: at most two corrective turns, then the Graph fails. After an
 operation step the Graph process looks for a landing of its checkout that is still
 being watched; the Graph stops there, and neither failed. Mechanical steps create
 no LfSession.
-A conversation attachment handoff grants no Graph authority.
+A conversation attachment grants no Graph authority.
 
 A Graph is `current` while its Graph process has no recorded exit, `completed` when the
 Graph process succeeded and `stopped` when it exited before the last step. A killed

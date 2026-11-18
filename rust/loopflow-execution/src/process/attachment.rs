@@ -66,18 +66,10 @@ pub fn claim_session_attachment(
     session: &str,
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
-    replace_provider: bool,
 ) -> StoreResult<SessionAttachment> {
     let caller = crate::store::sessions::session_caller()?;
     let start = current_start(process);
-    store.attach_session(
-        session,
-        expected,
-        process,
-        replace_provider,
-        start.as_ref(),
-        &caller,
-    )
+    store.attach_session(session, expected, process, start.as_ref(), &caller)
 }
 
 pub(crate) fn prepare_session_agent_process(

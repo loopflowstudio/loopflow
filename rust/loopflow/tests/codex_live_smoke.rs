@@ -71,8 +71,8 @@ async fn codex_live_one_turn_smoke() {
             [&parent],
         )
         .expect("record attaching lf Process");
-    let attachment = attachment::claim_session_attachment(&store, "smoke", None, &parent, true)
-        .expect("attachment");
+    let attachment =
+        attachment::claim_session_attachment(&store, "smoke", None, &parent).expect("attachment");
     let config = AgentConfig {
         agent: Some("codex".to_string()),
         cwd: Some(dir.path().to_path_buf()),

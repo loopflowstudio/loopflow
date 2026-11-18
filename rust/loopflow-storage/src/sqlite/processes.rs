@@ -68,14 +68,7 @@ impl SessionTransfer<'_> {
     ) -> StoreResult<SessionAttachment> {
         self.commit(previous, |tx| {
             super::sessions::require_current_actor_in(tx, &self.session, caller)?;
-            attach_in(
-                tx,
-                &self.session,
-                self.expected.as_ref(),
-                process,
-                true,
-                start,
-            )
+            attach_in(tx, &self.session, self.expected.as_ref(), process, start)
         })
     }
 
@@ -137,7 +130,6 @@ impl SessionTransfer<'_> {
                 .lf_process_id
                 .as_ref()
                 .expect("attachment is owned"),
-            true,
             start,
         )?;
         // The former thread goes to the log. Never clear a saved thread merely
@@ -217,7 +209,7 @@ impl SessionTransfer<'_> {
             &format!(
                 "UPDATE agent_sessions AS s SET completed_at=?2 WHERE s.id=?1
              AND s.completed_at IS NULL AND ?4
-             AND s.attached_lf_process_id=s.agent_launcher_lf_process_id
+             AND s.attached_lf_process_id IS NOT NULL
              AND CASE WHEN s.interactive=0 THEN ?3 IN ('completed','interrupted','failed')
              ELSE ?3 IN ('completed','interrupted') AND s.primary_scope IS NULL
              AND s.wave_id IS NULL AND {} IS NULL AND NOT EXISTS({}) END",
@@ -571,7 +563,7 @@ fn attachment_in(
         lf_process_id: row.0.as_deref().map(parse).transpose()?,
         token,
         agent_process_id: row.3.ok_or(StoreError::NotFound)?,
-        provider_lf_process_id: parse(row.2.as_deref().ok_or_else(|| {
+        launcher_lf_process_id: parse(row.2.as_deref().ok_or_else(|| {
             StoreError::InvalidData("AgentProcess has no parent LfProcess".into())
         })?)?,
     }))
@@ -671,7 +663,6 @@ pub(super) fn attach_in(
     session: &str,
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
-    replace_provider: bool,
     start: Option<&LfProcessStart>,
 ) -> StoreResult<SessionAttachment> {
     let current = attachment_in(tx, session)?;
@@ -679,18 +670,11 @@ pub(super) fn attach_in(
         return Err(attachment_changed());
     }
     super::sessions::repair_session_title_in(tx, session, None)?;
-    let replacing = current.is_none() || replace_provider;
     let attached = SessionAttachment {
-        agent_process_id: current
-            .as_ref()
-            .filter(|_| !replace_provider)
-            .map_or_else(AgentProcessId::new, |value| value.agent_process_id.clone()),
+        agent_process_id: AgentProcessId::new(),
         lf_process_id: Some(process.clone()),
         token: AttachmentToken::new(),
-        provider_lf_process_id: current.as_ref().filter(|_| !replace_provider).map_or_else(
-            || process.clone(),
-            |value| value.provider_lf_process_id.clone(),
-        ),
+        launcher_lf_process_id: process.clone(),
     };
     // The holder's OS process and terminal, when the attaching lf is this one.
     let holder = start.filter(|start| &start.process.id == process);
@@ -702,7 +686,7 @@ pub(super) fn attach_in(
         // attaching lf's row lands here instead.
         super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
     }
-    if let Some(previous) = current.as_ref().filter(|_| replace_provider) {
+    if let Some(previous) = &current {
         // A Session runs one agent: a replaced one has ended, or never spawned.
         let (ended, reserved) = agent_process_progress_in(tx, &previous.agent_process_id)?;
         if !ended && !reserved {
@@ -716,59 +700,30 @@ pub(super) fn attach_in(
             false,
         )?;
     }
-    if replacing {
-        // A new agent and its token land in one write, so the bridge to a
-        // released reader's agent row sees them together. A new agent on a
-        // finished headless run is working again; its exit completes the run
-        // once more. A moved conversation stays moved.
-        tx.execute(
-            "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
-                agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
-                agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
-                agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,
-                attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
-                attached_os_started_at=?7,attached_terminal_id=?8,
-                completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
-                    THEN NULL ELSE completed_at END WHERE id=?1",
-            params![
-                session,
-                attached.agent_process_id,
-                process,
-                time::OffsetDateTime::now_utc().unix_timestamp(),
-                attached.token,
-                holder_pid,
-                holder_started,
-                terminal,
-            ],
-        )?;
-    } else {
-        tx.execute(
-            "UPDATE agent_sessions SET attachment_token=?2,attached_lf_process_id=?3,
-                attached_pid=?4,attached_os_started_at=?5,attached_terminal_id=?6 WHERE id=?1",
-            params![
-                session,
-                attached.token,
-                process,
-                holder_pid,
-                holder_started,
-                terminal
-            ],
-        )?;
-    }
-    if let Some(previous) = current.filter(|_| !replace_provider) {
-        // The provider and its pending requests survive attachment handoff.
-        // Only its current reading follows; stale writers retain their old fence.
-        tx.execute(
-            "UPDATE session_activity SET attachment_token=?3
-             WHERE session_id=?1 AND agent_process_id=?2 AND attachment_token=?4",
-            params![
-                session,
-                attached.agent_process_id,
-                attached.token,
-                previous.token
-            ],
-        )?;
-    }
+    // A new agent and its token land in one write, so the bridge to a
+    // released reader's agent row sees them together. A new agent on a
+    // finished headless run is working again; its exit completes the run
+    // once more. A moved conversation stays moved.
+    tx.execute(
+        "UPDATE agent_sessions SET agent_process_id=?2,agent_launcher_lf_process_id=?3,
+            agent_started_at=?4,agent_pid=NULL,agent_os_started_at=NULL,agent_ended_at=NULL,
+            agent_exit_code=NULL,agent_spawn_state='reserved',agent_command=NULL,
+            agent_interactive=interactive,agent_endpoint=NULL,agent_inbox=NULL,
+            attachment_token=?5,attached_lf_process_id=?3,attached_pid=?6,
+            attached_os_started_at=?7,attached_terminal_id=?8,
+            completed_at=CASE WHEN interactive=0 AND moved_to_machine_id IS NULL
+                THEN NULL ELSE completed_at END WHERE id=?1",
+        params![
+            session,
+            attached.agent_process_id,
+            process,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            attached.token,
+            holder_pid,
+            holder_started,
+            terminal,
+        ],
+    )?;
     Ok(attached)
 }
 
@@ -1504,13 +1459,11 @@ impl SqliteStore {
         attachment_in(&conn, session)
     }
 
-    #[allow(clippy::too_many_arguments)] // Attachment and caller observations commit together.
     pub fn attach_session(
         &self,
         session: &str,
         expected: Option<&SessionAttachment>,
         process: &LfProcessId,
-        replace_provider: bool,
         start: Option<&LfProcessStart>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
@@ -1520,7 +1473,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         super::sessions::require_current_actor_in(&tx, session, caller)?;
-        let attachment = attach_in(&tx, session, expected, process, replace_provider, start)?;
+        let attachment = attach_in(&tx, session, expected, process, start)?;
         tx.commit()?;
         Ok(attachment)
     }
@@ -1588,7 +1541,6 @@ impl SqliteStore {
                     .lf_process_id
                     .as_ref()
                     .expect("attachment is owned"),
-                true,
                 start,
             )?
         } else if reserved {
@@ -1649,10 +1601,7 @@ impl SqliteStore {
         let current = attachment_in(&conn, &caller.session_id)?;
         let parent = current
             .as_ref()
-            .filter(|current| {
-                Some(&current.agent_process_id) == caller.agent_process_id.as_ref()
-                    && current.provider_lf_process_id == caller.origin_lf_process_id
-            })
+            .filter(|current| Some(&current.agent_process_id) == caller.agent_process_id.as_ref())
             .and_then(|current| current.lf_process_id.as_ref())
             .unwrap_or(&caller.origin_lf_process_id);
         conn.query_row(
@@ -1690,7 +1639,6 @@ mod discovery_tests {
                 "session",
                 None,
                 &store.test_lf_process(),
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,
@@ -2175,7 +2123,7 @@ mod attachment_tests {
                 .rename_session_prepared(&id, "Original title", source, &absent)
                 .unwrap();
             let first = store
-                .attach_session(&id, None, &process, true, None, &absent)
+                .attach_session(&id, None, &process, None, &absent)
                 .unwrap();
             let caller = SessionCaller {
                 agent: Some(AgentCaller {
@@ -2191,7 +2139,7 @@ mod attachment_tests {
                 .rename_session_prepared(&id, "Original title", source, &caller)
                 .unwrap();
             let current = store
-                .attach_session(&id, Some(&first), &replacement, true, None, &absent)
+                .attach_session(&id, Some(&first), &replacement, None, &absent)
                 .unwrap();
             let before = store.session(&id).unwrap();
             assert_eq!(before.as_ref().unwrap().title_source, source);
@@ -2208,7 +2156,7 @@ mod attachment_tests {
                     )
                     .map(|_| ()),
                 store
-                    .attach_session(&id, Some(&current), &process, true, None, &caller)
+                    .attach_session(&id, Some(&current), &process, None, &caller)
                     .map(|_| ()),
             ] {
                 assert!(
@@ -2236,7 +2184,6 @@ mod attachment_tests {
                 "conversation",
                 None,
                 &process,
-                true,
                 None,
                 &SessionCaller {
                     agent: None,
@@ -2292,7 +2239,6 @@ mod attachment_tests {
                 "conversation",
                 None,
                 &start.process.id,
-                true,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2313,7 +2259,6 @@ mod attachment_tests {
                 "conversation",
                 None,
                 &start.process.id,
-                true,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2499,7 +2444,6 @@ mod attachment_tests {
                 &session.id,
                 None,
                 &a,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,
@@ -2510,23 +2454,8 @@ mod attachment_tests {
         store
             .record_agent_process_identity(&session.id, &first, 4242, 123)
             .unwrap();
-        let second = store
-            .attach_session(
-                &session.id,
-                Some(&first),
-                &b,
-                false,
-                None,
-                &crate::sqlite::SessionCaller {
-                    agent: None,
-                    capture_key: None,
-                },
-            )
-            .unwrap();
-        assert_eq!(first.agent_process_id, second.agent_process_id);
-        assert_ne!(first.token, second.token);
         let released = store
-            .release_session_attachment(&session.id, &second)
+            .release_session_attachment(&session.id, &first)
             .unwrap();
         let rows = store.agent_processes().unwrap();
         assert_eq!(rows.len(), 1);
@@ -2544,7 +2473,6 @@ mod attachment_tests {
                 &session.id,
                 Some(&released),
                 &b,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,
@@ -2568,7 +2496,6 @@ mod attachment_tests {
                 &session.id,
                 None,
                 &parent,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,

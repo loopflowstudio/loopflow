@@ -258,7 +258,7 @@ mod tests {
         );
         let process = store.test_lf_process();
         let claim =
-            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
+            attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();

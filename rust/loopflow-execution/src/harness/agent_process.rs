@@ -785,7 +785,7 @@ mod tests {
                 .execute("DELETE FROM processes WHERE id=?1", [&process])?;
             let session = store.test_session("lost", &crate::session_record::new_artifact_key());
             let attachment =
-                attachment::claim_session_attachment(&store, &session.id, None, &process, true)?;
+                attachment::claim_session_attachment(&store, &session.id, None, &process)?;
             let parent = store.lf_process(&process)?.unwrap();
             let agent = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(agent.trace_id, parent.trace_id);
@@ -808,7 +808,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         let mut command = Command::new("/usr/bin/true");
@@ -873,7 +872,7 @@ mod tests {
             capture_key: None,
         };
         let attachment = store
-            .attach_session(&session.id, None, &launcher, true, Some(&start), &nobody)
+            .attach_session(&session.id, None, &launcher, Some(&start), &nobody)
             .unwrap();
         let live = || {
             crate::store::session_projection::session_summary(
@@ -940,7 +939,6 @@ mod tests {
                 &session.id,
                 current.as_ref(),
                 &parent,
-                true,
             )
             .unwrap();
             let mut command = Command::new("/bin/sleep");
@@ -972,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn native_move_uses_process_identity_and_terminal_follows_attachment() {
+    fn native_move_uses_process_identity_and_clears_the_terminal() {
         let home = tempfile::tempdir().unwrap();
         let database = home.path().join("db");
         let store = crate::store::opening::open_ephemeral(&database).unwrap();
@@ -984,18 +982,15 @@ mod tests {
         )
         .unwrap();
         let parent = LfProcessId::new();
-        let next = LfProcessId::new();
-        // Launchers that may still be running; an ended launcher would make
+        // A launcher that may still be running; an ended launcher would make
         // its unidentified agent dead instead.
-        for id in [&parent, &next] {
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
-                [id],
-            )
-            .unwrap();
-        }
+        sql.execute(
+            "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,strftime('%s','now'))",
+            [&parent],
+        )
+        .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         // Missing birth cannot become permission to signal or replace.
         assert!(super::stop_session_agent(
             &store,
@@ -1025,35 +1020,6 @@ mod tests {
         assert_eq!(
             summary.agent_process_evidence,
             crate::journal::ProcessIdentityEvidence::Live
-        );
-        let replacement = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            Some(&attachment),
-            &next,
-            false,
-        )
-        .unwrap();
-        assert!(
-            crate::store::session_projection::session_summary(&store, &session.id, 1)
-                .unwrap()
-                .unwrap()
-                .terminal_id
-                .is_none()
-        );
-        assert!(store
-            .record_session_terminal(&session.id, &attachment, Some("stale"))
-            .is_err());
-        store
-            .record_session_terminal(&session.id, &replacement, Some("second-pane"))
-            .unwrap();
-        assert_eq!(
-            crate::store::session_projection::session_summary(&store, &session.id, 1)
-                .unwrap()
-                .unwrap()
-                .terminal_id
-                .as_deref(),
-            Some("second-pane")
         );
         let stopped = super::stop_session_agent(
             &store,
@@ -1101,7 +1067,6 @@ mod tests {
                 &session.id,
                 None,
                 &LfProcessId::new(),
-                true,
             )
             .unwrap();
             // This test's own process holds each attachment; one recorded
@@ -1176,7 +1141,6 @@ mod tests {
                 &session.id,
                 None,
                 &LfProcessId::new(),
-                true,
             )
             .unwrap();
             // A holder recorded with another start time has exited.
@@ -1227,7 +1191,7 @@ mod tests {
         let session = store.test_session("cleanup", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let first_owner = (store.clone(), session.id.to_string(), first.clone());
         let command = || {
             let mut command = Command::new("/bin/sleep");
@@ -1281,47 +1245,6 @@ mod tests {
     }
 
     #[test]
-    fn native_cleanup_cannot_kill_the_same_agent_after_takeover() {
-        let home = tempfile::tempdir().unwrap();
-        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
-        let session = store.test_session("takeover", &crate::session_record::new_artifact_key());
-        let first = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
-        let first_owner = (store.clone(), session.id.to_string(), first.clone());
-        let mut command = Command::new("/bin/sleep");
-        command.env_clear().arg("60");
-        let mut child = super::spawn_native(command, &first_owner, Holder::Caller).unwrap();
-        let next = attachment::claim_session_attachment(
-            &store,
-            &session.id,
-            Some(&first),
-            &LfProcessId::new(),
-            false,
-        )
-        .unwrap();
-        let refused = super::stop_native(&mut child, Some(&first_owner)).is_err();
-        let alive = child.try_wait().unwrap().is_none();
-        let unchanged = store
-            .agent_process(&first.agent_process_id)
-            .unwrap()
-            .unwrap();
-        super::stop_native(
-            &mut child,
-            Some(&(store.clone(), session.id.to_string(), next.clone())),
-        )
-        .unwrap();
-        assert_eq!(first.agent_process_id, next.agent_process_id);
-        assert!(refused && alive);
-        assert!(unchanged.completed_at.is_none());
-    }
-
-    #[test]
     fn native_cleanup_failed_wait_retains_unknown_exit() {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
@@ -1331,7 +1254,6 @@ mod tests {
             &session.id,
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         let owner = (store.clone(), session.id.to_string(), attachment.clone());
@@ -1360,7 +1282,7 @@ mod tests {
         let session = store.test_session("spawn", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let owner = |attachment| (store.clone(), session.id.to_string(), attachment);
         let mut command = tokio::process::Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
@@ -1434,7 +1356,6 @@ mod tests {
                 &session.id,
                 None,
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let seen = home.path().join(&id);
@@ -1469,7 +1390,7 @@ mod tests {
         let session = store.test_session("native", &crate::session_record::new_artifact_key());
         let parent = store.test_lf_process();
         let first =
-            attachment::claim_session_attachment(&store, &session.id, None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
         let owner = (store.clone(), session.id.to_string(), first.clone());
         let mut command = Command::new("/bin/sh");
         command.env_clear().args(["-c", "exit 42"]);
@@ -1561,8 +1482,7 @@ mod tests {
                 )
                 .unwrap();
             let attached =
-                attachment::claim_session_attachment(&store, &session.id, None, &parent, true)
-                    .unwrap();
+                attachment::claim_session_attachment(&store, &session.id, None, &parent).unwrap();
             store
                 .record_agent_process_identity(&session.id, &attached, pid, start)
                 .unwrap();

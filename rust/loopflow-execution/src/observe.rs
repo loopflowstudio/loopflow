@@ -761,7 +761,6 @@ mod tests {
             "session",
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         store

@@ -152,7 +152,7 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         let (session, first) = capture.session_attachment().unwrap();
         let invocation = crate::journal::current_lf_process_id().unwrap();
         assert_eq!(first.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(first.provider_lf_process_id, invocation);
+        assert_eq!(first.launcher_lf_process_id, invocation);
         let store = crate::session_record::row_store(&capture.artifact_dir())?;
         let command = || {
             let mut command = std::process::Command::new("/bin/sh");
@@ -174,7 +174,7 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
         let second = snapshot;
         assert_ne!(first.agent_process_id, second.agent_process_id);
         assert_eq!(second.lf_process_id.as_ref(), Some(&invocation));
-        assert_eq!(second.provider_lf_process_id, invocation);
+        assert_eq!(second.launcher_lf_process_id, invocation);
         for attachment in [&first, &second] {
             let process = store.agent_process(&attachment.agent_process_id)?.unwrap();
             assert_eq!(process.parent_lf_process_id.as_ref(), Some(&invocation));
@@ -212,74 +212,56 @@ fn native_capture_replacement_retains_each_spawn_and_rejects_late_exit() {
 
 #[test]
 #[cfg(unix)]
-fn a_failed_terminal_receipt_still_closes_only_the_owned_provider() {
+fn a_failed_terminal_receipt_still_closes_the_provider() {
     use std::os::unix::process::CommandExt;
 
     let ledger = crate::journal::TestLedgerGuard::new();
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     crate::journal::with_runtime(home, &["lf".into(), "skill".into()], || {
-        for takeover in [false, true] {
-            let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
-                .map(crate::process::LfProcessRuntime::new)?;
-            capture.claim_session_attachment()?;
-            capture.mark_spawn_requested();
-            let (session, attachment) = capture.session_attachment().unwrap();
-            let store = crate::session_record::row_store(&capture.artifact_dir())?;
-            let mut command = std::process::Command::new("/bin/sleep");
-            command.env_clear().arg("60").process_group(0);
-            store.record_agent_process_launch(&session, &attachment, &command, false)?;
-            let mut child = command.spawn()?;
-            let pid = child.id();
-            let birth = crate::journal::process_started_at(pid)?.unwrap();
-            store.record_agent_process_identity(&session, &attachment, pid, birth)?;
-            let replacement = takeover.then(|| {
-                attachment::claim_session_attachment(
-                    &store,
-                    &session,
-                    Some(&attachment),
-                    &store.test_lf_process(),
-                    false,
-                )
-                .unwrap()
-            });
-            // A directory at the receipt path makes the write fail independently
-            // of the store that owns the still-running provider.
-            let receipt = capture.artifact_dir().join("terminal.json");
-            fs::create_dir(&receipt)?;
-            let result = capture.finish("interrupted");
-            let life = crate::journal::process_identity_evidence(pid, birth);
-            let current = store.session_attachment(&session);
-            let _ = child.kill();
-            let _ = child.wait();
+        let capture = crate::session_record::SessionRecorder::begin_at(home, spec(home))
+            .map(crate::process::LfProcessRuntime::new)?;
+        capture.claim_session_attachment()?;
+        capture.mark_spawn_requested();
+        let (session, attachment) = capture.session_attachment().unwrap();
+        let store = crate::session_record::row_store(&capture.artifact_dir())?;
+        let mut command = std::process::Command::new("/bin/sleep");
+        command.env_clear().arg("60").process_group(0);
+        store.record_agent_process_launch(&session, &attachment, &command, false)?;
+        let mut child = command.spawn()?;
+        let pid = child.id();
+        let birth = crate::journal::process_started_at(pid)?.unwrap();
+        store.record_agent_process_identity(&session, &attachment, pid, birth)?;
+        // A directory at the receipt path makes the write fail independently
+        // of the store that owns the still-running provider.
+        let receipt = capture.artifact_dir().join("terminal.json");
+        fs::create_dir(&receipt)?;
+        let result = capture.finish("interrupted");
+        let life = crate::journal::process_identity_evidence(pid, birth);
+        let current = store.session_attachment(&session);
+        let _ = child.kill();
+        let _ = child.wait();
 
-            assert!(
-                result.is_err(),
-                "the missing receipt remains a caller error"
-            );
-            let current = current?.unwrap();
-            if let Some(replacement) = replacement {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Live);
-                assert_eq!(current, replacement);
-            } else {
-                assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
-                assert!(current.lf_process_id.is_none());
-            }
-            assert!(capture.finish("failed").is_err());
-            assert!(capture
-                .spawn_native_agent(
-                    std::process::Command::new("/bin/true"),
-                    crate::session::Holder::Caller
-                )
-                .is_err());
-            fs::remove_dir(&receipt)?;
-            capture.finish("interrupted")?;
-            let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
-            assert_eq!(recorded.outcome, "interrupted");
-            let history = store.input_events(&capture.artifact_key())?;
-            capture.finish("interrupted")?;
-            assert_eq!(store.input_events(&capture.artifact_key())?, history);
-        }
+        assert!(
+            result.is_err(),
+            "the missing receipt remains a caller error"
+        );
+        assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
+        assert!(current?.unwrap().lf_process_id.is_none());
+        assert!(capture.finish("failed").is_err());
+        assert!(capture
+            .spawn_native_agent(
+                std::process::Command::new("/bin/true"),
+                crate::session::Holder::Caller
+            )
+            .is_err());
+        fs::remove_dir(&receipt)?;
+        capture.finish("interrupted")?;
+        let recorded: TerminalReceipt = serde_json::from_slice(&fs::read(&receipt)?)?;
+        assert_eq!(recorded.outcome, "interrupted");
+        let history = store.input_events(&capture.artifact_key())?;
+        capture.finish("interrupted")?;
+        assert_eq!(store.input_events(&capture.artifact_key())?, history);
         Ok(())
     })
     .unwrap();
@@ -940,7 +922,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             attachment.agent_process_id
         );
         assert_eq!(
-            Some(&next_attachment.provider_lf_process_id),
+            Some(&next_attachment.launcher_lf_process_id),
             next_attachment.lf_process_id.as_ref()
         );
         assert!(attachment::session_connection(&store, &session.id)?.is_none());
@@ -1064,7 +1046,7 @@ fn attached_session(
         .spawn()
         .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, "conversation", None, &first, true).unwrap();
+        attachment::claim_session_attachment(&store, "conversation", None, &first).unwrap();
     // The `sleep` stands in for the lf holding the attachment.
     store.test_set_holder(
         "conversation",
@@ -1126,7 +1108,7 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     // Ending the AgentProcess may already have reaped this exact child.
     let _ = agent_process.wait();
     assert_ne!(replacement.agent_process_id, attachment.agent_process_id);
-    assert_eq!(replacement.provider_lf_process_id, next);
+    assert_eq!(replacement.launcher_lf_process_id, next);
     assert!(attachment::session_connection(&store, "conversation")
         .unwrap()
         .is_none());

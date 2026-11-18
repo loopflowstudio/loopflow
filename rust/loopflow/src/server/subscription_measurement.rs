@@ -43,8 +43,7 @@ fn attach(store: &SqliteStore, session: &str, pid: u32) -> SessionAttachment {
             [owner.as_str()],
         )
         .unwrap();
-    let attachment =
-        attachment::claim_session_attachment(store, session, None, &owner, true).unwrap();
+    let attachment = attachment::claim_session_attachment(store, session, None, &owner).unwrap();
     let born = loopflow_execution::journal::process_started_at(pid)
         .unwrap()
         .unwrap();

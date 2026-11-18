@@ -1058,7 +1058,6 @@ mod tests {
                 &session.id,
                 None,
                 &owner,
-                false,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,

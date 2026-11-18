@@ -940,8 +940,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let first =
-            attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
+        let first = attachment::claim_session_attachment(&store, "stop", None, &process).unwrap();
         let owner = (store.clone(), "stop".to_string(), first.clone());
         let mut command = Command::new("/bin/sleep");
         command.env_clear().arg("60");
@@ -959,12 +958,6 @@ mod tests {
         harness.child = Some(child);
         harness.owner = Some(owner);
         assert_eq!(harness.process_group_id(), Some(pid));
-        let current =
-            attachment::claim_session_attachment(&store, "stop", Some(&first), &process, false)
-                .unwrap();
-        assert!(harness.stop().await.is_err());
-        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.owner = Some((store, "stop".into(), current));
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);

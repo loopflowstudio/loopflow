@@ -1,6 +1,5 @@
 //! Public launch proofs for the Session delivery cutover.
 use crate::support;
-use loopflow_execution::process::attachment;
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
@@ -431,9 +430,7 @@ fn a_task_pane_reopened_by_session_id_fails_naming_a_missing_server() {
 }
 
 #[test]
-fn public_context_capability_survives_claim_changes_and_rejects_children_and_replacement() {
-    use loopflow_model::id::LfProcessId;
-
+fn public_context_capability_rejects_children_and_replacement() {
     use std::io::Write;
     use std::time::{Duration, Instant};
 
@@ -546,24 +543,6 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         std::thread::sleep(Duration::from_millis(10));
     }
     let first = store.session_attachment(session).unwrap().unwrap();
-    let other = LfProcessId::new();
-    db.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-        [&other],
-    )
-    .unwrap();
-    let second =
-        attachment::claim_session_attachment(&store, session, Some(&first), &other, false).unwrap();
-    let third = attachment::claim_session_attachment(
-        &store,
-        session,
-        Some(&second),
-        first.lf_process_id.as_ref().unwrap(),
-        false,
-    )
-    .unwrap();
-    assert_eq!(first.agent_process_id, third.agent_process_id);
-    assert_ne!(first.token, third.token);
     // The Machine server records each boundary; the hook claims its own steers.
     let hook = |payload: serde_json::Value| {
         let mut hook = Command::new(env!("CARGO_BIN_EXE_lf"))

@@ -252,7 +252,7 @@ impl Pair {
 }
 
 #[test]
-fn a_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
+fn of_two_claims_made_apart_the_first_holds_and_a_claim_that_saw_it_takes_over() {
     let pair = Pair::new();
     let task = &pair.task;
     pair.to_laptop();
@@ -266,31 +266,50 @@ fn a_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
     crate::store::ownership::claim_task(&pair.mini.store, task)
         .unwrap()
         .unwrap();
-    std::thread::sleep(std::time::Duration::from_millis(1100));
+    // Entries order by the millisecond; the laptop's claim is the later one.
+    std::thread::sleep(std::time::Duration::from_millis(5));
     crate::store::ownership::claim_task(&pair.laptop.store, task)
         .unwrap()
         .unwrap();
     pair.to_mini();
     pair.to_laptop();
-    let first = crate::store::ownership::task_ownership(&pair.mini.store, task).unwrap();
-    assert_eq!(first.owner.unwrap().machine.id, Some(mini.clone()));
-    assert_eq!(
-        first.superseded_by.unwrap().machine.id,
-        Some(laptop.clone())
-    );
+    for side in [&pair.mini, &pair.laptop] {
+        let ownership = crate::store::ownership::task_ownership(&side.store, task).unwrap();
+        assert_eq!(ownership.owner.unwrap().machine.id, Some(mini.clone()));
+        assert!(ownership.superseded_by.is_none());
+        assert_eq!(ownership.log.len(), 2);
+    }
     assert_eq!(
         crate::store::ownership::task_execution_route(&pair.mini.store, task)
             .unwrap()
             .machine_id,
         mini
     );
-    assert!(pair
-        .mini
-        .store
-        .task_steers(task)
+    // The laptop's Sessions are told who was first; mini's hear nothing.
+    let told = |side: &Side, text: &str| {
+        side.store
+            .task_steers(task)
+            .unwrap()
+            .iter()
+            .any(|steer| steer.text.contains(text))
+    };
+    assert!(told(&pair.laptop, "claimed this Task first"));
+    assert!(!told(&pair.mini, "claimed"));
+
+    // A claim made after seeing mini's takes the Task over; mini keeps its
+    // own claim open and names the later one.
+    crate::store::ownership::claim_task(&pair.laptop.store, task)
         .unwrap()
-        .iter()
-        .any(|steer| steer.text.starts_with("Also claimed later by")));
+        .unwrap();
+    pair.to_mini();
+    pair.to_laptop();
+    let first = crate::store::ownership::task_ownership(&pair.mini.store, task).unwrap();
+    assert_eq!(first.owner.unwrap().machine.id, Some(mini));
+    assert_eq!(
+        first.superseded_by.unwrap().machine.id,
+        Some(laptop.clone())
+    );
+    assert!(told(&pair.mini, "Also claimed later by"));
     let second = crate::store::ownership::task_ownership(&pair.laptop.store, task).unwrap();
     assert_eq!(second.owner.unwrap().machine.id, Some(laptop));
     assert!(second.superseded_by.is_none());
@@ -302,7 +321,7 @@ fn a_double_claim_keeps_the_first_claimant_and_names_the_later_claim() {
             .unwrap()
             .log
             .len(),
-        2
+        3
     );
 }
 

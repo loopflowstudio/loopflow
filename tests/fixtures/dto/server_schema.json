@@ -13066,6 +13066,14 @@
             "null"
           ]
         },
+        "order": {
+          "description": "Where the entry sorts in the Task's log on every Machine, from its\nwriter's plan clock. Absent with Linear or Asana, whose comment order\ndecides, and from entries written before claims were first-wins.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
         "person": {
           "type": [
             "string",
@@ -13081,6 +13089,13 @@
         },
         "person_key": {
           "description": "The person's stable key; names are display only.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "seen": {
+          "description": "The entry in effect when this one was written, or this entry itself\nwhen there was none. Present exactly when `order` is. A claim whose\nwriter had not seen the claim holding the Task loses to it.",
           "type": [
             "string",
             "null"
@@ -13107,7 +13122,9 @@
         "machine_id",
         "machine_label",
         "writer_machine_id",
-        "at"
+        "at",
+        "order",
+        "seen"
       ],
       "type": "object"
     },

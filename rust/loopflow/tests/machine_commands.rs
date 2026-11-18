@@ -1639,6 +1639,7 @@ fn the_later_change_shows_on_both_machines_through_the_hub() {
     teammate(&["machine", "hub", "mini"]);
     teammate(&["task", "update", &identifier, "--title", "three"]);
     assert_eq!(title(&plan.remote).as_deref(), Some("three"));
+    assert!(!third.run(&["task", "sync", &identifier]).status.success());
     let refused = teammate(&["repo", "tracker"]);
     assert!(
         refused.starts_with("Plan: Git origin, unreachable since "),

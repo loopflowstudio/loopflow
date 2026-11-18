@@ -191,10 +191,9 @@ and leaves Git unsent until the server or `lf task sync`. *Made for review:*
   identifier, Git's own reason on the error line. Code links in the reference
   row (`HubPlan`) follow the types.
 
-  Assumed by the docs, to undo there if the build decides otherwise:
-  `lf task claim` / `lf task run` exchange first (slice 3) and the losing
-  claim's run stops, keeping its work. (The docs' other assumption held: a
-  clone with a remote needs no `lf config repo --bind`.)
+  Both things the docs assumed held: `lf task claim` / `lf task run` exchange
+  first and the losing claim's run stops, keeping its work; a clone with a
+  remote needs no `lf config repo --bind`.
 
   Questions writing exposed:
   - A teammate who can fetch but not push sees the plan and every save of
@@ -368,10 +367,10 @@ etude checkout and `lf` version are unknown.
    - A second clone of one remote on the same Machine cannot take the shared
      id (`bind_repository` refuses an id that locates another path); it keeps
      its own and logs. Untested.
-   - Remaining, owed before gate: the last case of "Acceptance check at
-     gate", the one whole-plan refs exist for (a home whose push is refused
+   - The last case of "Acceptance check at gate", the one whole-plan refs
+     exist for, is in the acceptance test: a home whose push is refused
      retitles through the hub; a fourth Git-only home reads that title from
-     another Machine's ref). It joins the acceptance test with slice 3.
+     the laptop's ref.
    - A record skipped because it could not be written (questions, slice 2)
      is not retried: the ref's tip is recorded once read, and later diffs
      start from it. It arrives again only when its file next changes.
@@ -379,13 +378,36 @@ etude checkout and `lf` version are unknown.
      and a provider exit exchange with the hub only; `lf task sync`,
      `lf wave status --sync`, a Task lookup that misses, a served command and
      the server's minute do Git too.
-3. **Claims are first-wins.** An ownership entry's order is its comment's
-   stamp, the same on every Machine (today `journal_order_in` orders by
-   arrival, so two Machines can read one log differently). An entry names the
-   last entry its writer had seen for the Task; a claim that names a stale one
-   loses to the claim already there, and `notify_superseded_in` stops its run
-   and keeps the work. `lf task claim` and `lf task run` on an unowned Task
-   exchange first, briefly, and go ahead if that fails.
+3. **Claims are first-wins.** *Built*, without Linear or Asana
+   (`sqlite/task_ownership.rs`, `ops/plan_git.rs` `before_claim`). An entry
+   carries `order` and `seen`; every Machine sorts the log by `order`, then
+   the writing Machine's id; a claim whose `seen` is not the entry in effect
+   just before it loses to the claim holding the Task and names no owner
+   anywhere. The Machine whose claim lost writes a steer naming who was first
+   and a Task interrupt. `lf task claim` and placing an unowned Task exchange
+   by each carrier first, five seconds at most.
+
+   What it taught:
+   - The order cannot be read off the comment's stamp. A move hands its claim
+     to the target before the comment arrives, and with no carrier in reach
+     the comment may never arrive, so the entry carries its own `order`: the
+     plan clock, and past every entry its writer held for the Task.
+     `journal_order_in` is gone; a marker that arrives with a move keeps the
+     order its writer gave it.
+   - `seen` names the last entry *in effect*, not the last in the log. Naming
+     a claim that lost would make the next entry look stale on a Machine that
+     has not received the loser yet.
+   - Only a claim loses, and only to a holder. An unassign that crossed a
+     takeover still unassigns, and the taken-over Machine claims again, as on
+     main.
+   - Seeing first does not stop a second run by a teammate: after the
+     exchange `lf task run` takes the Task over as on main, and the earlier
+     owner's Sessions are told. On your own Machines it does: the claim is
+     refused with "ownership is written on Machine mini".
+   - Routing (`work_route::resolve`) reads known Work only, so the exchange
+     sits at the claim, after the command has chosen this Machine.
+   - Not built: showing a lost claim as lost in `lf task status`; `lf ship`
+     and checkout adoption exchanging first.
 
 ## Checks
 
@@ -416,4 +438,33 @@ etude checkout and `lf` version are unknown.
   `5796dd348b`; the merge touched no plan file. After it,
   `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
   ran clean, 2026-11-18. The acceptance test reruns as slice 3 extends it.
-- Next: slice 3, first-wins claims, and the refused-push acceptance case.
+- Slice 3, run by implement, passed 2026-11-18:
+  `cargo nextest run -p loopflow -p loopflow-execution -p loopflow-storage --lib --test integration -E 'test(server::schema::tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::) | test(store::ownership::tests::) | test(task_ownership_follows_claim_handoff_and_unassign_through_the_writer) | test(of_two_claims_made_apart_the_first_holds_on_both_machines) | test(dto_fixtures::) | test(sqlite::plan_carriers::) | test(revisions::)'`
+  (101 tests; `store::ownership_lifecycle_tests::a_double_claim_…` failed as
+  the old rule's test and is rewritten as `of_two_claims_made_apart_…`, which
+  passes); the acceptance test
+  `test(the_later_change_shows_on_both_machines_through_the_hub)` with the
+  refused-push case, 62 s; clippy on the four crates. `server_schema.json`
+  and `SCHEMA.md` regenerated.
+- Seen once, cause unknown, for gate to watch: before those passes,
+  `machine_commands::of_two_claims_made_apart_the_first_holds_on_both_machines`
+  and the acceptance test timed out at nextest's 300 s twice (load average
+  about 90, together and then the claims test alone), and the claims test
+  then passed in 28 s and 19 s with nothing changed. The same commands by
+  hand took 1 to 7 s each. `ps` showed stopped (`T`) `lf` processes of other
+  sessions on the Machine at the time. No hang was found in the claim path.
+- Slice 3's run by hand, 2026-11-18 (two homes, a bare remote in `/tmp`):
+  both `lf task claim`, three `lf task sync`; `lf task status` on both showed
+  `Owner: ada`, both claims in the log, and the losing home held the steer
+  "ada on home_… claimed this Task first, before this Machine had seen it…".
+- For gate, not run here: the rest of `machine_commands::`, `transport::`,
+  `binary(transport_tests)`, `documented_commands::` (docs changed),
+  `performance_tests::`, `local_planning::` and the Task launch fixtures
+  (placing an unowned Task now exchanges first, which pushes a plan ref to a
+  fixture's remote), `migration_runner::` (the ownership trigger is recreated
+  with `seen`), and Swift.
+- Left on the Machine, not started by this pass as far as it can tell: five
+  `target/debug/lf server run` processes of this checkout, one to five hours
+  old.
+- Next: nothing in this Task's slices. Open choices are in
+  `scratch/questions.md`.

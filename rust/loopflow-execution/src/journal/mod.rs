@@ -1311,13 +1311,22 @@ pub(crate) fn process_identity_evidence(pid: u32, started_at: i64) -> ProcessIde
     }
 }
 
+/// Whether the process an owner row recorded still runs. Without its OS
+/// start time a reused pid cannot be told apart, so it cannot be confirmed.
+fn pid_evidence(pid: u32, os_started_at: Option<i64>) -> ProcessIdentityEvidence {
+    match os_started_at {
+        Some(started_at) => process_identity_evidence(pid, started_at),
+        None => ProcessIdentityEvidence::Unknown,
+    }
+}
+
 /// Whether a Graph run or step is still running: one OS lookup against the
 /// pid it recorded. A run with no end and no pid cannot be confirmed.
 pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> ProcessIdentityEvidence {
-    match (run.ended_at, run.pid, run.os_started_at) {
-        (Some(_), _, _) => ProcessIdentityEvidence::Dead,
-        (None, Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
-        (None, _, _) => ProcessIdentityEvidence::Unknown,
+    match (run.ended_at, run.pid) {
+        (Some(_), _) => ProcessIdentityEvidence::Dead,
+        (None, Some(pid)) => pid_evidence(pid, run.os_started_at),
+        (None, None) => ProcessIdentityEvidence::Unknown,
     }
 }
 
@@ -1326,10 +1335,9 @@ pub fn run_evidence(run: &loopflow_storage::graph_process::Execution) -> Process
 pub fn carrier_evidence(
     carrier: &loopflow_storage::graph_process::TaskCarrier,
 ) -> ProcessIdentityEvidence {
-    match (carrier.pid, carrier.os_started_at) {
-        (Some(pid), Some(started_at)) => process_identity_evidence(pid, started_at),
-        (Some(_), None) => ProcessIdentityEvidence::Unknown,
-        (None, _) => ProcessIdentityEvidence::Dead,
+    match carrier.pid {
+        Some(pid) => pid_evidence(pid, carrier.os_started_at),
+        None => ProcessIdentityEvidence::Dead,
     }
 }
 

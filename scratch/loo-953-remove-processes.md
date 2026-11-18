@@ -4,6 +4,7 @@
 
 Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
 main at `2593c489d7`; that merge touched nothing this plan depends on.
+Main since adds #1964 (Task conversation before checkout), no overlap.
 
 Built: slice 2a ("Slice 2a as built", QA in `scratch/qa.html`); the
 renames to `Execution`, `ExecutionResult`, `ExecutionStart`,
@@ -97,11 +98,10 @@ failing once at line 2761 after 203 s under load 60 and passing alone in 16 s
   (SIGKILL a Graph runner → next pass ends it `unknown`) moves with the
   pass, plus: SIGKILL a Task carrier → next pass, `lf task status` reads
   idle and the Task can retire.
-- **One liveness function over a pid.** `journal::carrier_evidence(&TaskCarrier)`
-  and `ship.rs`'s private `carrier_evidence(&TaskShipping)` share a name and
-  answer different questions, and `run_evidence` repeats the same
-  `(pid, os_started_at)` match. One `journal::pid_evidence(pid, os_started_at)`
-  serves all three; the ship one becomes `ship_carrier_evidence` or inlines.
+- **One liveness function over a pid** (built): `journal::pid_evidence(pid,
+  os_started_at)` (no OS start → Unknown) under `run_evidence` (no pid →
+  Unknown) and `carrier_evidence` (no pid → Dead); ship's private one is
+  `ship_carrier_evidence`.
 - **Kept as built:** the carrier end keeps `lf_process_id` (the cursor's
   carrier is how the next run sets out); one `lf task run` writes its pid on
   both `task_graphs` and, after handoff, its ship event, and its end clears

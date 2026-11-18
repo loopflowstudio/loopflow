@@ -106,7 +106,7 @@ pub fn stopper(
 
 /// Whether the run carrying a shipping Task has exited. Unknown evidence is
 /// never read as a dead process; no carrier at all is.
-fn carrier_evidence(shipping: &TaskShipping) -> ProcessIdentityEvidence {
+fn ship_carrier_evidence(shipping: &TaskShipping) -> ProcessIdentityEvidence {
     match &shipping.carrier {
         Some(carrier) => crate::journal::run_evidence(carrier),
         None => ProcessIdentityEvidence::Dead,
@@ -230,7 +230,7 @@ pub fn read_shipping(
     let Some(shipping) = sqlite.task_shipping(task)? else {
         return Ok(None);
     };
-    let alive = carrier_evidence(&shipping);
+    let alive = ship_carrier_evidence(&shipping);
     let failure = carrier_failure(sqlite, task, &shipping)?;
     let landing = sqlite.pending_task_landing(task)?;
     Ok(shipping_snapshot(
@@ -601,7 +601,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
                 || !store.sqlite.task_claimed_here(&id).map_err(task_error)?
-                || carrier_evidence(&shipping) != ProcessIdentityEvidence::Dead
+                || ship_carrier_evidence(&shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;
             }

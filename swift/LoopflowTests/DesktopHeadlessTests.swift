@@ -209,7 +209,8 @@ struct DesktopHeadlessTests {
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
                             body: ["overview": work, "graph_processes": [run], "execution": ["work": work, "ship_approval": ["at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
                                                  "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
-                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]]],
+                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]],
+                                                 "stack_parent": ["identifier": "LOO-0", "branch": "maya/loo-0-parent", "pr_number": 7]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
@@ -228,6 +229,11 @@ struct DesktopHeadlessTests {
         let line = TaskWorkflowBar.notShipping(stop, issue: task.task.identifier)
         #expect(line.hasPrefix("Not shipping: Maya stopped it "))
         #expect(line.hasSuffix(" · lf ship \(task.task.identifier) approves it again"))
+        // A stacked Task names its parent by Task beside its PR line.
+        let parent = try #require(model.taskExecution[task.id].value?.stackParent)
+        let stacked = TaskStackParentLabel(parent: parent)
+        #expect(try stacked.inspect().find(text: "Stacked on LOO-0").string() == "Stacked on LOO-0")
+        #expect(stacked.help == "Builds on LOO-0's branch maya/loo-0-parent (PR #7). lf sync main detaches it.")
 
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.

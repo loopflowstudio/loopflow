@@ -387,8 +387,16 @@ fn one_task_waits_at_human_review_after_planning_and_building() {
     keys.sort();
     assert_eq!(
         keys,
-        ["comments", "graph_processes", "sessions", "summary", "task"]
+        [
+            "comments",
+            "graph_processes",
+            "sessions",
+            "stack_parent",
+            "summary",
+            "task"
+        ]
     );
+    assert!(status["stack_parent"].is_null(), "{status}");
     assert_eq!(status["task"]["state"], "active");
     assert_eq!(
         status["task"]["graph"],

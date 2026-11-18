@@ -2080,7 +2080,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto; naming the default branch detaches a stacked Task
+    /// Branch or Task to sync onto; another open Task stacks this one on it, the default branch detaches
     pub onto: Option<String>,
     /// Print the plan, or what the sync did
     #[arg(long)]

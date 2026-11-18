@@ -1236,6 +1236,9 @@ pub(crate) async fn task_detail(
     let summary = store.sqlite.task_summary(&task.id)?;
     Ok(TaskDetail {
         summary,
+        stack_parent: status
+            .execution
+            .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
         graph_processes: status

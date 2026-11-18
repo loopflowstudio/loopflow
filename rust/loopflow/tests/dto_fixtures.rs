@@ -446,6 +446,9 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
     );
     assert!(snapshot.provider.is_none());
     assert!(snapshot.pr.is_none());
+    let parent = snapshot.stack_parent.as_ref().unwrap();
+    assert_eq!(parent.identifier, "LOO-290");
+    assert_eq!(parent.pr_number, None);
     assert!(!snapshot.branch.as_ref().unwrap().is_empty());
     assert_eq!(
         snapshot.execution.state,

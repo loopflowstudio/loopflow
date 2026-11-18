@@ -526,12 +526,18 @@ fn append_in(
                     state.as_deref(),
                     None | Some("unstarted" | "backlog" | "triage")
                 ) {
-                    super::task_state_delivery::queue_in(conn, task, "started")?;
+                    super::task_state::decide_in(conn, task, "started")?;
                 }
             }
             OwnershipKind::Unassign => {
-                super::planning_changes::PlanningChanges::Task(task)
-                    .save(conn, &[crate::work::edit::WorkValue::TaskAssignee(None)])?;
+                super::planning_write::local(
+                    conn,
+                    &crate::work::edit::WorkEdit::for_target(
+                        task.as_str(),
+                        &[crate::work::edit::WorkValue::TaskAssignee(None)],
+                    ),
+                )
+                .map(|_| ())?;
             }
             OwnershipKind::Claim => {}
         }
@@ -1017,12 +1023,16 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         if current.as_deref() != assignee {
-            super::planning_changes::PlanningChanges::Task(task).save(
+            super::planning_write::local(
                 &tx,
-                &[crate::work::edit::WorkValue::TaskAssignee(
-                    assignee.map(str::to_owned),
-                )],
-            )?;
+                &crate::work::edit::WorkEdit::for_target(
+                    task.as_str(),
+                    &[crate::work::edit::WorkValue::TaskAssignee(
+                        assignee.map(str::to_owned),
+                    )],
+                ),
+            )
+            .map(|_| ())?;
         }
         tx.commit()?;
         Ok(())

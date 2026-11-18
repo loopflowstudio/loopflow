@@ -69,12 +69,22 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
         let now = crate::journal::request::after_reply(move || {
             super::planning_sync::after_reply(|store| async move {
                 assert_assignee(&store.sqlite, &repo, &id).await;
-                super::planning_sync::sync_after_save(&store, &repo.to_string_lossy()).await;
+                super::planning_sync::sync_after_save(
+                    &store,
+                    &repo.to_string_lossy(),
+                    &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(id),
+                )
+                .await;
             })
         });
         if now.is_some() {
             assert_assignee(&store.sqlite, &repository, &task.id).await;
-            super::planning_sync::sync_after_save(&store, &repository.to_string_lossy()).await;
+            super::planning_sync::sync_after_save(
+                &store,
+                &repository.to_string_lossy(),
+                &loopflow_storage::sqlite::tracker_actions::ActionOwner::Task(task.id.clone()),
+            )
+            .await;
         }
         crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(message)
     })
@@ -85,7 +95,9 @@ pub fn change(repo: &Path, issue: &str, change: OwnershipChange) -> OpsResult<Ta
 /// who this Machine belongs to (`people` id `linear:<viewer>`). Without a viewer
 /// the assignee is left alone; ownership is already saved.
 pub(crate) async fn assert_assignee(store: &SqliteStore, repository: &Path, task: &TaskId) {
-    if !super::planning_client::is_linear(&repository.to_string_lossy()) {
+    if crate::ops::tracker::queued_tracker(repository)
+        != Some(loopflow_storage::planning_sync::TrackerKind::Linear)
+    {
         return;
     }
     match store.task_claimed_here(task) {

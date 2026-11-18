@@ -17,6 +17,7 @@ use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
 use loopflow_execution::ops::project::update_plan;
+use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
 struct FlagTables {
@@ -1000,11 +1001,17 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Checkout { .. } => unreachable!("checkout is dispatched before Work binding"),
         TaskCommand::Sync {
             issue,
-            retry_updates,
+            keep_theirs,
+            use_mine,
         } => {
+            let answer = match (keep_theirs, use_mine) {
+                (true, _) => Some(LostAnswer::KeepTheirs),
+                (_, true) => Some(LostAnswer::UseMine),
+                _ => None,
+            };
             println!(
                 "{}",
-                loopflow_execution::ops::task::task_sync(issue, *retry_updates)?
+                loopflow_execution::ops::task::task_sync(repo, issue, answer)?
             );
             Ok(())
         }
@@ -1308,37 +1315,13 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         TaskCommand::Save { .. } | TaskCommand::Abandon { .. } => {
             unreachable!("shared mutation dispatch precedes this command")
         }
-        TaskCommand::Sweep { apply, json } => {
-            let entries = loopflow_execution::ops::task::task_sweep(repo, *apply)?;
-            let incomplete = entries
-                .iter()
-                .any(|entry| entry.outcome.starts_with("incomplete:"));
-            if *json {
-                println!("{}", serde_json::to_string_pretty(&entries)?);
-            } else {
-                for entry in entries {
-                    println!(
-                        "{} / {}: {} — {}",
-                        entry.wave,
-                        entry.project,
-                        entry.issue.as_deref().unwrap_or("Project"),
-                        entry.outcome
-                    );
-                }
-            }
-            if incomplete {
-                anyhow::bail!(
-                    "chapter sweep has incomplete cancellations; see the reported retry commands"
-                );
-            }
-            Ok(())
-        }
         TaskCommand::Delete { issue } => {
-            let identifier = loopflow_execution::ops::task::task_delete(repo, issue)?;
+            let (identifier, pending) = loopflow_execution::ops::task::task_delete(repo, issue)?;
             println!("{identifier}: removed locally; execution history retained");
             if let Some(provider) = loopflow_execution::config::load_config_or_default(Some(repo))
                 .planning_transport()
                 .remote_name()
+                .filter(|_| pending)
             {
                 println!("Pending {provider} sync");
             }
@@ -3072,7 +3055,7 @@ fn execute_command(
         }) => {
             if *planning {
                 let repo = loopflow_execution::repo::working_directory()?;
-                loopflow::lf::commands::ops::sync_planning(&repo, None, true, true, *json)
+                loopflow::lf::commands::ops::sync_planning(&repo, None, true, *json)
             } else {
                 loopflow::lf::commands::doctor::run(*json)
             }
@@ -3353,7 +3336,7 @@ fn finish_command(result: anyhow::Result<()>) -> anyhow::Result<()> {
     result
 }
 
-fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::PlanningSyncStatus) {
+fn print_planning_sync(sync: &loopflow_execution::store::planning_sync::TrackerSync) {
     for line in sync.lines() {
         eprintln!("{line}");
     }

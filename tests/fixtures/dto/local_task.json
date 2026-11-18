@@ -80,8 +80,7 @@
       "rank": 0,
       "state": "unstarted",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
       "linear_id": null,
       "acquisition": {

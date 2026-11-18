@@ -11,7 +11,7 @@ use super::sqlite::scope_defaults::TaskScope;
 use super::sqlite::task_ownership::{OwnershipFacts, Person};
 use super::sqlite::SqliteStore;
 use super::{ProcessIdentityEvidence, StoreResult};
-use crate::linear_records::{LinearIssueId, LinearProjectId};
+use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::session::{LfSession, TitleSource, WorkSource};
 use crate::steer::SteerAdapter;
 use crate::work::project::Project;

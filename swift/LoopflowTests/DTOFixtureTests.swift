@@ -432,20 +432,22 @@ struct DTOFixtureTests {
         #expect(!due.task.isSuccessful)
     }
 
-    @Test("Planning delivery retains uncertainty, errors and both conflict values")
-    func planningSyncFixture() throws {
-        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: loadFixtureData("planning_sync.json"))
-        #expect(sync.connected)
-        #expect(sync.changes[0].state == .pending)
-        #expect(sync.changes[1].state == .uncertain)
-        #expect(sync.changes[1].error == "Reply lost; awaiting readback")
-        #expect(sync.changes[2].field == "task_title")
-        #expect(sync.changes[3].field == "task_assignee")
-        #expect(sync.changes[2].localValue == .string("Local title"))
-        #expect(sync.changes[2].linearValue == .string("Linear title"))
-        #expect(sync.changes[3].text.contains("provider: null"))
+    @Test("Tracker sync retains sent actions, errors and both conflict values")
+    func trackerSyncFixture() throws {
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: loadFixtureData("tracker_sync.json"))
+        #expect(sync.actions[0].phase == .queued)
+        #expect(sync.actions[1].phase == .sent)
+        #expect(sync.actions[1].error == "Reply lost; awaiting readback")
+        #expect(sync.actions[2].change == "title")
+        #expect(sync.actions[2].localValue == .string("Local title"))
+        #expect(sync.actions[2].trackerValue == .string("Linear title"))
+        #expect(sync.actions[3].text.contains("linear: null"))
+        #expect(sync.actions[1].ownerKind == .project)
+        #expect(sync.actions[5].seq == nil)
+        #expect(sync.actions[5].tracker == .git)
+        #expect(sync.actions[5].text == #"title · conflicted · lost: "Mine" · git: "Peer title""#)
         #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{}".utf8))
+            try JSONDecoder().decode(TrackerSync.self, from: Data("{}".utf8))
         }
     }
 
@@ -705,14 +707,14 @@ struct DTOFixtureTests {
         // The Machine runtime evidence carries the state and the one contextual action.
 
 
-        #expect(detail.currentProject?.sync.changes[1].field == "task_order")
+        #expect(detail.currentProject?.sync.actions[1].kind == "order")
         #expect(detail.unavailableTasks[0].taskIdentifier == "W2-127")
         #expect(detail.unavailableTasks[0].status == .unstarted)
         #expect(detail.unavailableTasks[0].owner == .wave)
         #expect(detail.tasks.items.map(\.task.identifier) == ["INF-123", "INF-124"])
         #expect(detail.tasks.items[0].task.state == "unstarted")
         #expect(detail.tasks.items[0].runtime?.provider == nil)
-        #expect(detail.tasks.items[0].task.sync.changes[0].field == "creation")
+        #expect(detail.tasks.items[0].task.sync.actions[0].kind == "create")
         #expect(detail.tasks.items[0].task.id == detail.tasks.items[0].runtime?.workId)
         #expect(detail.tasks.items[0].task.linearId == "issue-1")
         #expect(detail.tasks.items[0].task.completedAt == nil)

@@ -102,7 +102,7 @@ impl EffectiveSetting {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ResolvedSettings {
     pub config: Config,
     pub settings: BTreeMap<String, EffectiveSetting>,

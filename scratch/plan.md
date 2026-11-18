@@ -317,9 +317,18 @@ Checks run by implement, from the checkout with `LF_*` unset:
 
 - `cargo test -p loopflow-execution --lib -- personal_settings_reach_a_task_whose_worktree readings_share config::placement::tests config::remote::tests`:
   10 passed. `read_stream::tests::personal_settings_reach_a_task_whose_worktree_appears_after_a_reading`
-  failed at `dependencies.changed()` before edit 1.
+  failed at `dependencies.changed()` without the `.git` observation and
+  passes with it.
 - `cargo clippy -p loopflow-execution --all-targets -- -D warnings`: clean.
   Gate runs clippy for the workspace.
+
+## Concept review of the finished build (2026-11-18)
+
+Nothing to change. The three edits and qa's `repository` fix are in the code;
+`cargo test -p loopflow-execution --lib -- personal_settings_reach readings_share config::placement::tests observe::tests::`
+ran 21 tests, all passing. One thing noted and left: outside a Task,
+`Derived::Settings.repository` holds the checkout again and the main checkout
+is found from it through `.git`.
 
 ## Larger than this Task
 

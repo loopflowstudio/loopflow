@@ -68,8 +68,8 @@
 <main>
 
 <h1>Settings and skills as a served reader sees them, as built</h1>
-<p class="lede">LOO-978 after implement, compress and qa, read against its base
-as if for the first time. The area taken: how <code>lf server run</code>,
+<p class="lede">LOO-978 after two rounds of implement, compress and qa, read
+against its base as if for the first time. The area taken: how <code>lf server run</code>,
 Desktop and <code>--subscribe</code> readers get settings and the skill
 catalog, and <code>observe</code>, the layer that tells them an outside fact
 changed. The branch adds derived values to that layer, so the review covers the
@@ -80,11 +80,13 @@ layer and every value now kept in it, not only the two the Task names.</p>
 <span class="tag gone">removed by the branch</span></p>
 
 <h2>Outcome</h2>
-<p><strong>The plan changed.</strong> The design holds: one closed list of
-shared values, each kept with the facts it read. One rule the design states
-about itself is broken in three places, and one of them leaves a Task showing
-the wrong settings until something else pokes the file. The plan now names the
-three edits and the test; nothing else is asked of implement.</p>
+<p><strong>Nothing to change.</strong> The earlier review of this build found
+three reads going around a shared value's key. All three are built, and qa's
+second run found and fixed a fourth case the review missed: a Task whose
+checkout is gone lost the person's own settings. Run 2026-11-18 from this
+checkout: <code>cargo test -p loopflow-execution --lib -- personal_settings_reach
+readings_share config::placement::tests observe::tests::</code>, 21 passed.
+What remains is larger than this Task and is listed below.</p>
 
 <h2>One interaction, walked</h2>
 <div class="cols">
@@ -114,7 +116,7 @@ three edits and the test; nothing else is asked of implement.</p>
   </div>
 </div>
 
-<h3 style="margin-top:24px">The counterexample that breaks it</h3>
+<h3 style="margin-top:24px">The counterexample that broke it, now closed</h3>
 <div class="card">
   <p>A repository with no checked-in <code>.lf/config.yaml</code>, and
   <code>lf set agent claude</code> saved for it (the personal file beside the
@@ -127,8 +129,15 @@ three edits and the test; nothing else is asked of implement.</p>
     <div class="arrow">↓</div>
     <div class="step hot">The worktree appears. None of those answers change. The Task shows the settings of someone who never ran <code>lf set</code>, for as long as a subscription holds the slot.</div>
   </div>
-  <p class="note" style="margin-top:10px">Before this branch the next reading
-  resolved again and was right. Read from the code, not run. It reaches a
+  <p class="note" style="margin-top:10px"><strong>As built now:</strong> the
+  computation observes the checkout's <code>.git</code>, so the worktree
+  appearing is a changed fact
+  (<code>personal_settings_reach_a_task_whose_worktree_appears_after_a_reading</code>).
+  A Task no longer depends on it at all: <code>resolved_for_task</code> finds
+  the personal file from the Task's repository, which is there before the
+  worktree and after it
+  (<code>personal_settings_reach_a_task_whose_checkout_is_gone</code>).
+  Before this branch the next reading resolved again and was right. It reaches a
   display only; launches resolve for themselves. A repository that checks in
   <code>.lf/config.yaml</code> is not affected: that file appearing is the
   wake-up.</p>
@@ -150,11 +159,14 @@ three edits and the test; nothing else is asked of implement.</p>
       <td><code>Outside::shared</code>: non-null <code>invocation</code> computes inline</td>
       <td class="v yes">yes</td><td>One place decides it for all three settings values.</td></tr>
   <tr><td>My Machine names and aliases (global file)</td>
-      <td><span class="tag exist">Derived::GlobalSettings { home, outside }</span></td>
-      <td class="v part">partly</td><td>One idea under two names: <code>home</code> and <code>outside.home</code>. The computation reads the first; <code>remote::apply_document</code> inside it reads <code>lf_home_dir()</code> and the forwarded profile from the environment again.</td></tr>
+      <td><span class="tag exist">Derived::GlobalSettings { outside }</span></td>
+      <td class="v yes">yes</td><td>One home: the store's, written into <code>outside.home</code>. <code>remote::apply_document</code> takes the profile and the home as arguments.</td></tr>
   <tr><td>Which checkout a worktree belongs to</td>
-      <td><code>files::private_path</code> → <code>std::fs</code> on <code>.git</code>, inside the <code>Settings</code> computation</td>
-      <td class="v no">no</td><td>An input the person can change (make or remove a worktree) that no reading tracks. The counterexample above.</td></tr>
+      <td><code>observe::exists(.git)</code> before <code>files::private_path</code>, inside the <code>Settings</code> computation</td>
+      <td class="v yes">yes</td><td>Making or removing a worktree is a changed fact. Not covered, on purpose: a <code>.git</code> file rewritten to name another repository.</td></tr>
+  <tr><td>My own settings for a Task, whether or not its checkout exists</td>
+      <td><span class="tag exist">Derived::Settings { checkout, repository, … }</span> <code>config::resolved_for_task</code></td>
+      <td class="v part">partly</td><td>Right for a Task. For every other caller <code>repository</code> is the checkout again, and the main checkout is found from it through <code>.git</code>: one field, two ways of naming whose file. It costs a doc comment, not a wrong answer.</td></tr>
   <tr><td>Each skill's agent in a Wave</td>
       <td><span class="tag exist">Derived::SkillAgents</span></td>
       <td class="v yes">yes</td><td>Nests on <code>Settings</code>; its skill loads now nest on <code>SkillCatalog</code>, which closes the gap the plan listed.</td></tr>
@@ -169,14 +181,14 @@ three edits and the test; nothing else is asked of implement.</p>
       <td class="v no">no</td><td>Unchanged by the branch, and now said once per edit instead of once per read. Still nobody at Desktop sees it.</td></tr>
 </table>
 
-<h2>The biggest mismatch: the key is not yet what the computation read</h2>
+<h2>The biggest mismatch, as it was: the key was not what the computation read</h2>
 <p>The design's one rule, in <code>AGENTS.md</code> and the server README: a
 computation reads observed facts and its key, nothing else. <code>Outside</code>
-exists so that settings carry that rule in the code. Three reads still go
-around it.</p>
+exists so that settings carry that rule in the code. Three reads went around
+it; the right-hand column is now the code.</p>
 <div class="cols">
   <div class="card">
-    <h3>Before (as built)</h3>
+    <h3>Before (first build)</h3>
 <pre><code>// config.rs, inside derived(Settings{…})
 files::private_path(repo)        // std::fs on .git
 // placement.rs
@@ -187,29 +199,28 @@ remote::apply_document(&amp;path, &amp;mut value)
     always absent and both homes are the Machine's. They are still the drift
     the type was built to make unspellable.</p>
   </div>
-  <div class="card prop">
-    <h3>After (in the plan)</h3>
-<pre><code>// the checkout's .git is a dependency
-observe::exists(&amp;repo.join(".git"));   // in file_layers,
-                                       // before private_path
+  <div class="card">
+    <h3>After (built)</h3>
+<pre><code>// personal_file_layers: .git is a dependency
+observe::exists(&amp;repo.join(".git"));
+files::private_path(repo)
 // one home, and the profile from the key
+outside.home = store_home;
 Derived::GlobalSettings { outside }
-resolve_global_settings(&amp;outside)      // outside.home,
-                                       // outside.remote</code></pre>
-    <p class="note">Smaller: one field and one parameter go. If a caller's
-    <code>store.home_dir()</code> can differ from <code>LF_HOME</code>, keep
-    <code>home</code> as the one home and pass it with <code>outside.remote</code>
-    into the profile step instead; either way nothing inside the computation
-    calls <code>incoming()</code> or <code>lf_home_dir()</code>.</p>
+remote::apply_document(outside.remote, &amp;outside.home, …)</code></pre>
+    <p class="note">A store's home can differ from <code>LF_HOME</code>, so
+    the store's home is the one written into <code>outside</code>. Nothing
+    inside either computation calls <code>incoming()</code> or
+    <code>lf_home_dir()</code>.</p>
   </div>
 </div>
 
 <h3 style="margin-top:24px">Tested on three paths</h3>
 <table>
-  <tr><th>Path</th><th>As built</th><th>With the edits</th></tr>
+  <tr><th>Path</th><th>First build</th><th>Now</th></tr>
   <tr><td>Normal: edit a settings file</td><td>One resolve, every reading woken</td><td>Same</td></tr>
   <tr><td>Failure: worktree missing at first reading, no checked-in config</td><td class="no">Stale until another settings file changes or the server restarts</td><td class="yes"><code>.git</code> appearing bumps a revision; resolved again against the main checkout</td></tr>
-  <tr><td>Recovery: worktree removed again</td><td>Stays on the last value</td><td>Resolved again; the personal file is looked for under the path, as a bare command does</td></tr>
+  <tr><td>Recovery: worktree removed again</td><td>Stays on the last value</td><td>Resolved again. A Task keeps the person's own settings from its repository and loses only the checked-in files, as the installed <code>lf</code> does</td></tr>
 </table>
 <p class="note">What would break the edit: a main checkout whose <code>.git</code>
 directory exists before and after while a <em>linked</em> worktree's identity
@@ -242,14 +253,14 @@ covers a worktree made, removed or made again at one path; it does not cover a
 <ol class="q">
   <li>The stale-worktree case:
     <ol>
-      <li class="chosen">Observe the checkout's <code>.git</code> inside the settings computation, with a test. (chosen, in the plan)</li>
+      <li class="chosen">Observe the checkout's <code>.git</code> inside the settings computation, with a test. (chosen, built)</li>
       <li>Leave it: it needs a repository without <code>.lf/config.yaml</code> and reaches a display only.</li>
       <li>Key on the resolved private path instead.</li>
     </ol>
   </li>
   <li><code>GlobalSettings</code>:
     <ol>
-      <li class="chosen">One home: drop the field, read <code>outside.home</code> and <code>outside.remote</code>. (chosen, in the plan)</li>
+      <li class="chosen">One home: drop the field, read <code>outside.home</code> and <code>outside.remote</code>. (chosen, built; the home is the store's)</li>
       <li>Keep <code>home</code> as the caller's and drop it from <code>Outside</code> for this variant.</li>
     </ol>
   </li>
@@ -263,6 +274,12 @@ covers a worktree made, removed or made again at one path; it does not cover a
     <ol>
       <li class="chosen">Leave the downcast; one call site per variant. (chosen)</li>
       <li>A typed key per value.</li>
+    </ol>
+  </li>
+  <li>A Task whose checkout is gone:
+    <ol>
+      <li class="chosen">Its own settings come from its repository; checked-in files stay absent, as on the installed <code>lf</code>. (chosen by qa, built)</li>
+      <li>Fall back to the main checkout for every layer.</li>
     </ol>
   </li>
   <li>The live <code>sample</code> under 40-agent load needs this branch as the Machine's server. Before or after merge?</li>

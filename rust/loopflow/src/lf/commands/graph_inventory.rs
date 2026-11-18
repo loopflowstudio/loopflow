@@ -145,7 +145,7 @@ pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
 
 /// `lf graph show <selector>`: one Graph that ran, with its steps.
 pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
-    find(selector)?.context("no Graph has that Graph process")
+    find(selector)?.with_context(|| format!("no Graph run {selector} was recorded"))
 }
 
 /// The Graph run `selector` names, if one was recorded.

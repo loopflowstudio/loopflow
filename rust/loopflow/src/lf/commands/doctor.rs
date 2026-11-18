@@ -112,8 +112,9 @@ fn check_running_binaries() -> Check {
 }
 
 const STRAYS: &str = "strays";
-/// What a Loopflow agent's processes inherit: its Session, or the lf they run under.
-const IDENTITY_VARIABLES: [&str; 2] = ["LF_STEER_SESSION", "LF_PROCESS_ID"];
+/// What a Loopflow agent's processes inherit: its Session or the lf they run
+/// under, and the home whose store claims them.
+const STRAY_VARIABLES: [&str; 3] = ["LF_STEER_SESSION", "LF_PROCESS_ID", "LF_HOME"];
 
 /// OS processes carrying a Loopflow identity that no live Session or run
 /// claims. A descendant of a claimed process is that process's. Reports,
@@ -180,15 +181,35 @@ fn strays(database: &Path) -> Result<Vec<OsProcess>> {
                 .filter_map(|agent| agent.pid),
         );
     }
+    // A process works for the Machine its `LF_HOME` names, the account's own
+    // when unset; another home's work is that home's to claim.
+    let resolve = |home: &Path| std::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    let this_home = resolve(database.parent().unwrap_or(database));
+    let account_home = loopflow_execution::store::production_database_path()
+        .parent()
+        .map(Path::to_path_buf)
+        .expect("the account's database lives in its home");
     Ok(processes
         .into_iter()
         .filter(|process| !exempt.contains(&process.pid))
         .filter(|process| !ancestry(process.pid).any(|pid| claimed.contains(&pid)))
         .filter(|process| {
-            OsProcess::environment(process.pid, &IDENTITY_VARIABLES)
+            let Some(found) = OsProcess::environment(process.pid, &STRAY_VARIABLES)
                 .ok()
                 .flatten()
-                .is_some_and(|found| !found.is_empty())
+            else {
+                return false;
+            };
+            let mut home = account_home.clone();
+            let mut identified = false;
+            for (name, value) in found {
+                if name != "LF_HOME" {
+                    identified = true;
+                } else if !value.is_empty() {
+                    home = value.into();
+                }
+            }
+            identified && resolve(&home) == this_home
         })
         .collect())
 }
@@ -596,9 +617,11 @@ mod tests {
 
     #[test]
     fn a_process_carrying_a_session_that_nothing_claims_is_a_stray() {
+        let home = tempfile::tempdir().unwrap();
+        let elsewhere = tempfile::tempdir().unwrap();
         // This test binary waits as the child: macOS hides the environment
         // of platform binaries such as /bin/sleep.
-        let spawn = |session: Option<&str>| {
+        let spawn = |session: Option<&str>, lf_home: &std::path::Path| {
             let mut command = std::process::Command::new(std::env::current_exe().unwrap());
             command
                 .args([
@@ -609,6 +632,7 @@ mod tests {
                 .env(STRAY_CHILD, "1")
                 .env_remove("LF_STEER_SESSION")
                 .env_remove("LF_PROCESS_ID")
+                .env("LF_HOME", lf_home)
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
             if let Some(session) = session {
@@ -625,20 +649,21 @@ mod tests {
             }
             child
         };
-        let mut stray = spawn(Some("session_gone"));
-        let mut plain = spawn(None);
-        let home = tempfile::tempdir().unwrap();
+        let mut stray = spawn(Some("session_gone"), home.path());
+        let mut plain = spawn(None, home.path());
+        let mut other_home = spawn(Some("session_gone"), elsewhere.path());
         let found: Vec<u32> = strays(&home.path().join("loopflow.db"))
             .unwrap()
             .iter()
             .map(|process| process.pid)
             .collect();
-        for child in [&mut stray, &mut plain] {
+        for child in [&mut stray, &mut plain, &mut other_home] {
             child.kill().unwrap();
             child.wait().unwrap();
         }
         assert!(found.contains(&stray.id()), "{found:?}");
         assert!(!found.contains(&plain.id()), "{found:?}");
+        assert!(!found.contains(&other_home.id()), "{found:?}");
     }
 
     #[test]

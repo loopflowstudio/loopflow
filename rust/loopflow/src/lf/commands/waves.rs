@@ -1050,7 +1050,7 @@ fn print_remote_detail(machine: &str, detail: &TaskDetail) -> Result<()> {
     }
     for process in &detail.graph_processes {
         println!(
-            "Graph process {} · {}{}",
+            "Graph run {} · {}{}",
             process.id,
             process.name,
             process

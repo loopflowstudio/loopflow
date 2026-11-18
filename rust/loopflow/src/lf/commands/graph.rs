@@ -979,7 +979,7 @@ impl RunningGraph<'_> {
             .validate_current_schema(&loopflow_execution::store::migrations::build())
             .with_context(|| {
                 format!(
-                    "this Graph process cannot read the result of {label}; inspect its Process and effects with a compatible lf before launching further work"
+                    "this Graph run cannot read the result of {label}; inspect the step and its effects with a compatible lf before launching further work"
                 )
             })?;
         let status = status.context("could not execute Graph step")?;
@@ -1032,13 +1032,10 @@ impl RunningGraph<'_> {
         label: &str,
         step: Option<&loopflow_model::id::LfProcessId>,
     ) -> Result<(String, Option<String>)> {
-        let step = step.with_context(|| format!("{label} registered no step Process"))?;
-        let (session, input) = self.captured(Some(step))?.with_context(|| {
-            format!(
-                "{label} step Process {} captured no Session input",
-                step.as_str()
-            )
-        })?;
+        let step = step.with_context(|| format!("{label} registered no step"))?;
+        let (session, input) = self
+            .captured(Some(step))?
+            .with_context(|| format!("{label} step {} captured no Session input", step.as_str()))?;
         let answer =
             loopflow_execution::transcript::answer::input_final_answer(&self.store.sqlite, &input)?;
         Ok((session, answer))

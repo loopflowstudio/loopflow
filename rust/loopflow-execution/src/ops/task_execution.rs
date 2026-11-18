@@ -267,7 +267,7 @@ fn project_execution(
     let (state, reason) = match (graph_process, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
-            format!("Step Process {} is running {label}", process.id),
+            format!("Step {} is running {label}", process.id),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,
@@ -275,7 +275,7 @@ fn project_execution(
         ),
         (ProcessIdentityEvidence::Unknown, _) | (_, ProcessIdentityEvidence::Unknown) => (
             TaskExecutionState::Unknown,
-            format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
+            format!("Graph run at {label} has unknown process identity; inspect its effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
             if process.result() == loopflow_storage::graph_process::ExecutionResult::Succeeded {

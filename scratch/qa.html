@@ -1,66 +1,94 @@
-<!doctype html><meta charset="utf-8"><title>LOO-953 QA: Graph runs own their lifecycle</title>
-<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:900px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}</style>
-<h1>LOO-953 QA, 2026-11-16</h1>
-<p>Branch <code>lf</code> (ee2416ca3 + this fix) on a private Machine: isolated <code>HOME</code>/<code>LF_HOME</code>, a Git repository with a bare origin and git planning, command-only Graphs. Installed <code>lf</code> is the branch base (4852348e5), used as the released build.</p>
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-953 QA: no Process rows</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:920px;margin:2em auto;padding:0 1em}pre{background:#f4f4f4;padding:.6em;overflow-x:auto;font-size:12px}h2{margin-top:1.6em}td,th{padding:.2em .6em;text-align:left;vertical-align:top}</style>
+<h1>LOO-953 QA, 2026-11-18 (after slices 4, 4b, 4c, 5)</h1>
+<p>Branch <code>lf</code> (6c306a568 plus the fixes below) on a private Machine at <code>/tmp/lf-qa-953</code>: isolated <code>HOME</code>, <code>LF_HOME</code>, provider homes; a Git repository with a bare origin and git planning; a stand-in <code>claude</code> (holds interactive conversations; in headless steps it reads one line and answers once a marker file exists). The installed <code>lf 0.16.0+e66b21801</code> plays the released build. The 2026-11-16 pass (Graph run lifecycle, retry, interrupt, the runner bridge) is in this file's history.</p>
 
-<h2>1. Returning user: store written by the released lf</h2>
-<p>Ran <code>qa-ok</code> (<code>- cmd: help</code>) and <code>qa-fail</code> (help, then <code>task show no-such-task-xyz</code>) with the installed lf, then opened the store with the branch (<code>lf graph list --processes</code>).</p>
-<pre>process_rows_on_owners applied
-47964f12… qa-ok   started 1794895886 ended 1794895887 exit 0
-0c5a2f4e… qa-fail started 1794895887 ended 1794895887 exit 1 error "task show no-such-task-xyz process exited with exit status: 1"
-steps: node 1 exit 1 error "Task no-such-task-xyz is not registered"; pid NULL on ended rows</pre>
-<p>Backfill copies start, end, exit, error, repo and cwd from <code>processes</code>; pid is kept only for unfinished rows.</p>
+<h2>1. Returning user: a live Session from the released lf</h2>
+<p>The installed lf created a Task, ran <code>qa-ok</code> and <code>qa-fail</code>, and started <code>lf -i -a claude : 'hello from old'</code> in a PTY. That left two unfinished <code>processes</code> rows (launcher 29552, agent 29578). Then the branch opened the store:</p>
+<pre>$ lf session list
+session_badc5b…  available Repository  hello from old
+  Take over — Continue here; the client that has it ends, unsent text there is lost
 
-<h2>2. Direct Graph runs on the branch</h2>
-<pre>ffa910e1… qa-ok   exit 0
-1458014d… qa-fail exit 1 + error; step 1 exit 1 "Task no-such-task-xyz is not registered"</pre>
-<p><b>Broke:</b> the branch's docs and <code>task_operate</code> point at <code>lf graph show &lt;RUN_ID&gt;</code> (and <code>--json</code>); it answered <code>error: graph not found: 1458014d…</code>. Only the aliased <code>graph show --processes</code> worked.</p>
-<p><b>Fixed:</b> <code>lf graph show NAME</code> falls back to the recorded run when no authored Graph has that name (<code>navigation.rs</code>; <code>graph_inventory::find</code>/<code>print</code>). Unknown names still say "graph not found", and authored names win. <code>graph_discovery_tests::public_graph_discovery_reads_saved_detail_without_selecting_work</code> now uses the documented form; replacing the fallback with <code>None</code> made it fail, restoring it made it pass.</p>
-<pre>$ lf graph show 1458014d-829f-4d17-b696-7ebd231d5da3
-1458014d-829f-4d17-b696-7ebd231d5da3  Stopped  qa-fail
-  4fd0c5a8-…  help  succeeded
-  b17b41a3-…  task show no-such-task-xyz  failed</pre>
+agent_sessions: agent_pid 29578, agent_os_started_at 1795000142, attached_pid 29552, attached_lf_process_id c5a100ad…</pre>
+<p>The migration backfilled the Session's own columns from the released rows. <code>lf session resume</code> with the branch took it over:</p>
+<pre>Stopped the claude client that had this conversation; continuing here.
+processes: c5a100ad… lf failed (ended), d0ce51d0… agent (ended)
+agent_sessions: agent_pid 30558, attached_pid 30536 (branch lf)</pre>
+<p>The released client and its agent are gone, and only one agent remains. Killing the provider ended the Session (<code>agent_ended_at</code>, <code>completed_at</code> set), and it dropped out of <code>lf session list</code>, which lists unfinished Sessions. <code>lf session history show</code> still shows it.</p>
 
-<h2>3. Task run that fails: retry and cause</h2>
-<p><code>lf task run &lt;task&gt; qa-fail</code> through the private <code>lf server run</code>. Three attempts, each its own <code>graph_processes</code> row with exit 1 and error; then stopped.</p>
-<pre>Graph qa-fail: stopped at task show no-such-task-xyz
-latest Graph: task show no-such-task-xyz: Task no-such-task-xyz is not registered. Inspect its history and effects, then launch fresh work</pre>
-<p>The cause is the failed step's error (<code>graph_failure_cause</code>).</p>
+<h2>2. Task run with an agent step</h2>
+<p>Graph <code>qa-agent</code>: <code>- cmd: help</code>, <code>- step: probe</code> (headless, stand-in held), <code>- interactive: probe</code>. Run through the private <code>lf server run</code>.</p>
+<pre>$ lf graph list --runs --state current
+88e08eb1…  Current  qa-agent
+$ lf session list --headless
+0d4fd12d…  detached 8941bb  8941bb Agent run
+session_b576…  active  8941bb  8941bb probe
+$ lf task status   (before the fix)
+  latest Graph: Step Process a9e2b945… is running probe · started by QA</pre>
+<p>After the release: <code>Graph qa-agent: at probe</code>, step Session completed, <code>lf graph show &lt;run&gt;</code> and <code>--json</code> carry each step's outcome, exit code and error. The three views agree on what is live. What the branch wrote into <code>processes</code> across every scenario: 4 rows, all <code>kind='agent'</code> (the new→old agent bridge, one per spawn); no <code>lf</code> rows.</p>
+<p><b>Fixed:</b> user-facing reasons still said Process. <code>lf task status</code> now reads "Step &lt;id&gt; is running probe" and "Graph run at … has unknown process identity". <code>graph.run.get</code>/<code>lf graph show</code> for an unknown run says "no Graph run &lt;id&gt; was recorded" (was "no Graph has that Graph process"). Also changed: <code>lf wave</code>'s "Graph run &lt;id&gt; · name" line, the step-answer errors in <code>lf graph</code>, and the CI-repair retry hint.</p>
 
-<h2>4. Interrupt during a step</h2>
-<p><code>qa-slow</code>: help, then <code>task wait &lt;blocker&gt;</code>. While waiting, the running step's row held <code>pid</code>/<code>os_started_at</code> and no end; the run row held its own pid. <code>lf task interrupt</code> answered "stopped Graph qa-slow at task wait …" while both processes kept running: a <code>cmd:</code> step is not killed, the Graph stops before its next step (as <code>task_interrupt</code>'s comment says). After completing the blocker:</p>
-<pre>step 1: exit 0, pid cleared
-run:    exit 130, error NULL, pid cleared — not retried
-status: "Graph stopped after task wait …"</pre>
+<h2>3. Runner killed mid-step</h2>
+<pre>$ kill -9 &lt;lf graph run&gt;
+$ lf graph list --runs
+0effb4c7…  Stopped  qa-agent
+$ lf task status
+  Graph qa-agent: stopped at probe
+  latest Graph: Step 17303329… is running probe      (the orphaned step really is running)
+(release the step)
+  17303329…  probe  succeeded
+  latest Graph: Graph stopped after probe; inspect its history and effects before launching fresh work
+  action: run</pre>
+<p>The run reads stopped from its own dead pid. The orphaned step writes its own end.</p>
 
-<h2>5. Upgrade bridge: released runner across the migration</h2>
-<p>Second private home. The installed lf started <code>qa-bridge</code> (help, <code>task wait</code>, help) on the old schema. While step 2 waited, <code>lf</code> on PATH switched to the branch, which migrated the store and completed the blocker. The released runner then spawned step 3 (the branch binary) and finished.</p>
-<pre>run 44ce4cef… started 1794896169 ended 1794896182 exit 0
-step 0 exit 0 | step 1 ended 1794896182 exit 0 | step 2 exit 0   — all pids cleared
-lf graph list --processes: Completed qa-bridge</pre>
-<p>The start and end triggers copied the released runner's <code>processes</code> rows onto the owner rows.</p>
+<h2>4. Served reads over the socket</h2>
+<p>A Python client speaking newline JSON (desktop hello, revision 8):</p>
+<pre>graph.run.get {id: 88e08eb1…}           → response: compiled Graph, completed [0,1,2], steps
+graph.run.get {id: "nope"}              → unavailable: (now) no Graph run nope was recorded
+session.history.get {id: session_b576…} → rendered history text
+session.history.get {id: "nope"}        → unavailable: Session nope was not found
+process.get / process.list              → invalid: this server has no operation `process.get`</pre>
+
+<h2>5. Removed commands</h2>
+<pre>lf ps / lf top / lf process …   → error: skill or graph not found: ps. Run `lf list skill` …
+lf graph list --processes       → error: unexpected argument '--processes' found
+lf session history list         → Error: Session list was not found</pre>
+
+<h2>6. <code>lf machine doctor</code> strays</h2>
+<p><b>Broke:</b> in the private home the check reported <code>66 process(es) carry a Loopflow identity no live Session or run claims</code>: chrome-headless-shell, node, uv and esbuild belonging to this Machine's real agents and other worktrees' fixtures. The scan read every process on the Machine and checked it against this store only. On the real Machine every QA or fixture home would show up the same way.</p>
+<p><b>Fixed:</b> the scan also reads <code>LF_HOME</code>, and a process counts only for the home it names (the account's <code>~/.lf</code> when unset). <code>doctor::tests::a_process_carrying_a_session_that_nothing_claims_is_a_stray</code> now also spawns a child for another home and asserts it is not a stray. Removing the home comparison makes that test fail; restoring it makes it pass.</p>
+<pre>$ lf machine doctor
+ok    strays   every process carrying a Loopflow identity belongs to a live Session or run
+(plant python with LF_STEER_SESSION=session_ghost under this home)
+warn  strays   1 process(es) carry a Loopflow identity no live Session or run claims: 49439 (Python)</pre>
+
+<h2>7. History export</h2>
+<p>The branch's <code>lf history export --since 1d</code> wrote an origin, 4 session, 4 session_event and 11 capture lines, and no process lines. The released exporter on the same store wrote 7 <code>process</code> and 2 <code>graph_process</code> lines as well. Import runs only inside rental recovery (<code>lf machine end</code>), so skipping those lines is left to <code>machine_records</code>' tests.</p>
 
 <h2>Checks</h2>
 <ul>
-<li><code>cargo test -p loopflow --test integration graph_discovery_tests::</code>: 5 passed.</li>
-<li><code>cargo fmt</code>, <code>cargo clippy -p loopflow --all-targets -- -D warnings</code>: clean. Gate/CI run the suites.</li>
-<li>Private server stopped; no process with the QA <code>LF_HOME</code> left; no launchd job registered.</li>
+<li><code>cargo test -p loopflow --lib doctor::</code>: 4 pass; the mutation above fails 1.</li>
+<li><code>cargo test -p loopflow-execution --lib ops::task_execution</code>: 2 pass.</li>
+<li><code>cargo clippy -p loopflow -p loopflow-execution --all-targets -- -D warnings</code>, <code>cargo fmt</code>: clean.</li>
+<li>Private server, holders and stand-ins stopped; no launchd job registered for the QA home.</li>
 </ul>
 
 <h2>Works now</h2>
-<p>Graph runs and steps record their own start, end, pid, exit and error, on the branch and across an upgrade from the released build; failure causes and interrupts read them; <code>lf graph show &lt;RUN_ID&gt;</code> works as documented.</p>
+<p>A released lf's live Session survives the upgrade, and the branch takes it over with one agent left. Task runs, killed runners and orphaned steps read correctly from their own rows. <code>lf graph list --runs</code>, <code>lf graph show</code>, <code>lf task status</code> and <code>lf session list</code> agree. The renamed served reads answer. Removed commands are gone. Doctor's strays cover only this home.</p>
 
 <h2>Not reached</h2>
 <ul>
-<li>Successful Task run to the end: <code>qa-ok</code> on a Task with Auto-Ship would try to ship; direct runs cover the success row.</li>
-<li>Branch runner with an older child (dev-only skew, accepted in the plan).</li>
-<li>Agent (skill) steps and Sessions: Session slices are not built yet.</li>
+<li>Desktop windows: this run is headless. The Swift suites listed in the plan ran headless before QA.</li>
+<li>History import through rental recovery: only unit tests reach it.</li>
+<li>The docker installation proofs (Docker not running): gate/CI's <code>task-installation</code> job.</li>
 </ul>
 
 <h2>Still wrong, worst first</h2>
-<ol>
-<li>The branch's docs and operate skills describe slices not built yet: <code>lf ps</code> is still <code>lf process list</code> (call trees, "Print one parseable snapshot of live Loopflow call trees"), and <code>lf machine doctor</code> reports no strays. If this branch lands before those slices, the docs are wrong.</li>
-<li><code>lf task status</code> labels the interrupted carrier "Process: … failed" (from <code>processes.outcome</code>), while its run row says interrupted (130, no error). Goes with the Process lines.</li>
-<li><code>lf graph show &lt;RUN_ID&gt; --json</code> steps carry <code>exit_code</code> but not the step's <code>error</code>, which the row now has.</li>
-<li><code>lf graph list --processes</code> orders by id, not recency (unchanged from base).</li>
-</ol>
+<ul>
+<li><code>lf task run</code> still prints "running as Graph process &lt;id&gt;" and its JSON key is <code>graph_process</code>. About ten test files parse that text (land, machine_commands, task_graph_launch, settings_launch). It belongs with the <code>GraphProcess*</code> → <code>GraphRun*</code> follow-up Task.</li>
+<li>Rerunning <code>lf task run &lt;task&gt; qa-agent</code> once the Graph was waiting at its interactive step returned <code>{"state":"ended"}</code> and marked the Task done. Running past an interactive step may be intended; this change didn't touch that path, so it isn't checked here.</li>
+<li>A served request missing <code>sender</code> (or <code>select</code>/<code>request_id</code>) gets "this server has no operation `&lt;kind&gt;`", which names the wrong problem. This predates the branch.</li>
+<li>"skill or graph not found" errors print without a trailing newline. This predates the branch.</li>
+</ul>

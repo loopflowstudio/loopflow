@@ -6,7 +6,7 @@ definition; this change makes code, config, CLI, wire and docs say it. Its
 
 | Word | Replaces |
 |---|---|
-| plan | a Wave's "plan" meaning its Project |
+| plan | a Wave's "plan" meaning its current Project (`edit-plan`, `update-plan`) |
 | tracker | planning provider, bridge, `pm_` |
 | action | effect, receipt, delivery, export, settle (outbound to a tracker) |
 | event | observation, acceptance, acquisition (inbound from a tracker) |
@@ -36,13 +36,20 @@ tracker:
 # also: tracker: {git: {remote: origin, shared: main}}, tracker: {asana: {team: …}}, tracker: git
 ```
 
+```
+$ lf wave edit-project product --name "2026-10 — customer work"   # was edit-plan
+$ lf wave update-project --wave product --file plan.json            # was update-plan --plan
+$ lf wave plan product          # unchanged: the Wave's Projects and Tasks, the plan
+```
+
 `lf wave …` help, `lf wave status` text and errors say Project, never chapter.
 `lf task show --json` / Work DTOs say `tracker_id` and `tracker_state`.
 
 ## Done when
 
-- `git grep -nwiE 'chapters?'` finds only released migrations, release notes and stored fixtures of released schemas.
-- `provider` never names a tracker in `rust/**/{linear,asana,ops,store,config}`, `docs/`, CLI help.
+- `git grep -nwiE 'chapters?'` finds only released migrations, release notes, stored fixtures of released schemas and authored Wave files (`.lf/wave/**`: people's own words, listed in `scratch/questions.md`, not rewritten).
+- `provider` never names a tracker in `rust/**/{linear,asana,ops,store,config}`, `docs/`, CLI help, except the kept column names (`planning_provider_revision`) and the released config tag `planning.provider`.
+- `edit-plan` / `update-plan` / `WavePlanTarget` are gone; `docs/dev/planning.md` § Words and AGENTS.md no longer call the current Project "the plan".
 - `git grep -E 'TrackerObservation|linear_acceptance|Acquisition|pm_(items|projects|issue_changes|wave_projects|wave_sync)'` outside migrations/fixtures is empty.
 - `lf repo tracker` (and `key`, `journal`, `answer`) works; `lf repo plan` is gone; Desktop's sync view calls the new path; `documented_commands` passes.
 - A repo with `tracker: {linear: {team: X}}` and a repo with released `planning: {provider: linear}` + `linear: {team: X}` resolve to the same `TrackerConfig`; `lf config set` still writes the released shape.
@@ -76,6 +83,16 @@ Rust names change now: `PlanningConfig` → `TrackerConfig`, `RawPlanningConfig`
 → `RawTrackerConfig`, `GitPlan` stays (it names which plan ref). This repo's
 own `.lf/config.yaml` stays on the released shape.
 
+`repo.tracker` is the canonical key and `tracker` its shorthand, like
+`repo.plan`/`plan` today. `repo.plan` and `plan` were documented in v0.16.0
+and name the tracker "plan" with a `provider` tag; they stay read-only folds
+under the same LOO-784 marker, and every doc and help string teaches only
+`tracker`. Dotted keys follow the enum: `lf config set repo.tracker.linear.team X`
+writes `planning: {provider: linear, team: X}`; naming a different tracker
+replaces the block (a repository has one tracker), never merges two tags.
+`typed()` gains that one rule; `lf config get repo.tracker` prints the
+canonical shape.
+
 Passed over: `tracker: linear` + sibling `linear: {team}` — reuses the released
 block but splits one value across two keys and collides with Wave files'
 `linear: {initiative}`.
@@ -91,6 +108,21 @@ something. No alias (solo dev, Desktop ships with lf). Callers:
 `docs/surfaces.md`, `docs/dev/planning.md`, `ops/README.md`, user-facing
 strings in `ops/planning_sync.rs` and `ops/task.rs`.
 
+### A Wave's current Project is a Project, not its plan
+
+The plan (glossary) is the shared Waves, Projects and Tasks; `lf wave plan`
+prints a Wave's part of it and keeps its name, with `bind`, `connect`,
+`reteam` (they bind that plan to the tracker). The two commands that change
+the current Project rename: `WaveCommand::EditPlan` → `EditProject`
+(`lf wave edit-project`), `UpdatePlan` → `UpdateProject`
+(`lf wave update-project --file`), `WavePlanTarget` → `WaveProjectTarget`.
+Callers: `docs/work.md:434,442`, `docs/dev/planning.md:9,400-405`,
+`docs/dev/reference.md:84`, builtin `split-wave.md:36-40`. Glossary rows
+become "plan | the shared Waves, Projects and Tasks" and "Project | a Wave's
+current Project: its KRs, targets and Tasks"; AGENTS.md "A Wave's current
+plan is its In Progress Linear Project" says "A Wave's current Project is its
+In Progress Linear Project". No alias.
+
 ### Inbound is event
 
 `TrackerObservation` → `TrackerEvent`; `observe_issue` → `fetch_issue`
@@ -98,7 +130,11 @@ strings in `ops/planning_sync.rs` and `ops/task.rs`.
 `linear/events.rs`; `sqlite/linear_acceptance.rs` → `sqlite/linear_events.rs`;
 `linear/observations.rs`, `sqlite/linear_observations.rs`,
 `store/linear_observation_tests.rs` → `*_events*`; `TaskAcquisition` →
-`TrackerState`, `LinearIssueEvidence` stays (evidence is the retained row).
+`TrackerState`, `LinearIssueEvidence` → `LinearIssueState` (the last event
+kept per issue; `TrackerState` is its per-Task projection, so the pair says
+one thing at two grains).
+`task_events` / `project_events` keep their names: local history, and the
+`tracker_` prefix keeps the two apart.
 `ops/tracker_events.rs` already uses the word.
 
 ### Wire: fold LOO-942 in
@@ -160,8 +196,10 @@ rebuild each and are noted in `scratch/questions.md`.
    reads the new (and back), `check_migrations.py` green, `EXPLAIN QUERY PLAN`
    on the renamed hot reads (`query_plans.rs`). Shows whether mirror triggers
    coexist with the canonical-identity and revision triggers.
-2. **CLI + config.** `lf repo tracker`, `TrackerConfig`, `tracker:` fold with
-   tests for both spellings, Desktop caller, docs; steer LOO-784.
+2. **CLI + config.** `lf repo tracker`, `lf wave edit-project` /
+   `update-project`, `TrackerConfig`, `tracker:` / `repo.tracker` fold and
+   dotted-key rule with tests for each spelling, Desktop caller, docs,
+   glossary; steer LOO-784.
 3. **Wire + Chapter.** `tracker_id`, `tracker_state`, `ProjectUnavailable`,
    `projects` with Swift and fixtures; remaining chapter prose in
    `waves.rs`, `lf/mod.rs` help, `wave_lifecycle.rs`, builtins, Swift views.
@@ -171,7 +209,7 @@ rebuild each and are noted in `scratch/questions.md`.
 
 ## What goes
 
-`lf repo plan` and `RepoPlanCommand`; the "Older code still says…" paragraph;
+`lf repo plan` and `RepoPlanCommand`; `lf wave edit-plan`, `update-plan`, `WavePlanTarget`; `repo.plan` in docs and help; the "Older code still says…" paragraph;
 `TrackerObservation`, `TaskAcquisition`; DTO keys `linear_id`, `acquisition`,
 `chapter_unavailable`, `chapters`; every runtime reference to the old table
 names. Released migrations, release notes and released-schema fixtures under

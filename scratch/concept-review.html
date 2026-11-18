@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-955 concept review: one tracker vocabulary</title>
+<style>
+:root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dcd8cf;--yes:#2f7d4a;--no:#b4432f;--new:#2a5db0;--code:#f0ede6}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#e9e6df;--mute:#9a958b;--line:#34322e;--yes:#6cc28a;--no:#e7806b;--new:#7fa8ec;--code:#22211e}}
+body{background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,-apple-system,system-ui,sans-serif;max-width:60rem;margin:3rem auto;padding:0 1.5rem}
+h1{font-size:1.6rem;margin-bottom:.2rem}h2{margin-top:2.6rem;font-size:1.2rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+code,pre{font:13.5px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);border-radius:4px}
+code{padding:0 .25em}pre{padding:.8rem 1rem;overflow:auto}
+table{border-collapse:collapse;width:100%;font-size:14.5px}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.new{border-left:3px solid var(--new);padding-left:.8rem}.old{border-left:3px solid var(--mute);padding-left:.8rem;color:var(--mute)}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:1rem}@media(max-width:700px){.pair{grid-template-columns:1fr}}
+.tag{font-size:12px;font-weight:600;color:var(--new)}.tag.was{color:var(--mute)}
+p.lede{color:var(--mute);margin-top:0}
+ol li{margin:.5rem 0}
+</style></head><body>
+
+<h1>One tracker vocabulary: do the words line up?</h1>
+<p class="lede">LOO-955, reviewed before implementation. Area taken: the whole planning surface people touch, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store and the docs. I took the whole surface because the Task renames a vocabulary, and a vocabulary is only right if it holds everywhere at once.</p>
+
+<h2>Product concepts against code concepts</h2>
+<p>Legend: <span class="yes">yes</span> means the plan as written lines them up. <span class="no">no</span> means a mismatch the plan left. <span class="tag">proposed</span> marks this review's change.</p>
+<table>
+<tr><th>What a person knows</th><th>Code behind it (after the plan)</th><th></th><th>What is wrong</th></tr>
+<tr><td><b>the plan</b>: Waves, Projects, Tasks</td><td><code>lf plan</code>, <code>lf wave plan</code>, <code>planning_write</code>…</td><td class="yes">yes</td><td></td></tr>
+<tr><td><b>a Wave's current Project</b></td><td><code>lf wave edit-plan</code>, <code>lf wave update-plan --plan</code>, <code>WavePlanTarget</code>; glossary row "a Wave's plan is its Project"; AGENTS.md "current plan"</td><td class="no">no</td><td><b>One name for two ideas.</b> "plan" names both the whole shared structure and one Wave's current Project. The Task brief says the second use goes, but the plan never mentions these commands, and the glossary it calls the single definition still says it.</td></tr>
+<tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>TrackerConfig</code>, <code>lf repo tracker</code>, <code>tracker_*</code> tables</td><td class="yes">yes</td><td></td></tr>
+<tr><td><b>choosing the tracker</b> in config</td><td>reads <code>planning</code>, <code>plan</code>, <code>repo.plan</code>, <code>linear.team</code>, and now <code>tracker</code>; dotted keys undefined for the new shape</td><td class="no">no</td><td><b>One idea under five spellings, and the canonical one is wrong.</b> <code>repo.plan: {provider: linear}</code> was documented in v0.16.0 and uses both retired meanings at once. The plan adds <code>tracker</code> without saying what happens to it, or what <code>lf config set repo.tracker.linear.team</code> writes.</td></tr>
+<tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>tracker_events</code>, <code>linear/events.rs</code></td><td class="yes">yes</td><td><code>task_events</code> / <code>project_events</code> also say event, but for local history. The <code>tracker_</code> prefix keeps them apart; no change.</td></tr>
+<tr><td><b>what the tracker last said</b> about a Task</td><td><code>TrackerState</code> (was <code>TaskAcquisition</code>) and <code>LinearIssueEvidence</code></td><td class="no">no</td><td><b>One fact at two grains under two names.</b> <code>TaskAcquisition</code> is derived from the evidence row (same state and seen-at fields). Renaming one and keeping "evidence" for the other leaves the old split in place.</td></tr>
+<tr><td><b>sync</b> (verb)</td><td><code>planning_sync</code>, <code>lf wave sync</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td><b>provider</b>: claude, codex</td><td>agent code; kept columns <code>planning_provider_revision</code>; config tag <code>planning.provider</code></td><td class="no">no</td><td>The plan keeps these on purpose (each costs a hot-table rebuild, and the released lf reads the config tag). Its own Done-when grep still forbids them, so implement would fail the check or rename them anyway. The carve-out has to be written down.</td></tr>
+<tr><td><b>Project</b> (was Chapter)</td><td>DTO <code>ProjectUnavailable</code>, <code>WaveRemoval.projects</code></td><td class="yes">yes</td><td>The Done-when grep also catches <code>.lf/wave/*/GOAL.md</code> and <code>MEMORY.md</code>, which people wrote. Those stay as written and are listed for their authors.</td></tr>
+</table>
+
+<h2>Biggest mismatch: "plan" still names a Wave's Project</h2>
+<p>Walk it. Someone reads the glossary, learns "the plan is the shared Waves, Projects and Tasks", then runs:</p>
+<div class="pair">
+<div class="old"><div class="tag was">existing, and kept by the plan</div>
+<pre>$ lf wave plan product        # Projects and Tasks: the plan ✓
+$ lf wave edit-plan product --name "2026-10"
+                              # edits… the Project
+$ lf wave update-plan --wave product --plan p.json
+                              # replaces the Project's KRs</pre>
+<p>Within two commands "plan" means two different things. The error text for <code>update-plan</code> says "Project", and <code>docs/dev/reference.md:84</code> says "one selected plan per Wave".</p></div>
+<div class="new"><div class="tag">proposed</div>
+<pre>$ lf wave plan product        # unchanged
+$ lf wave edit-project product --name "2026-10"
+$ lf wave update-project --wave product --file p.json</pre>
+<p>"plan" is the whole structure and "Project" is the thing you edit. <code>bind</code>, <code>connect</code> and <code>reteam</code> stay under <code>lf wave plan</code> because they bind the Wave's plan to the tracker. The glossary row and AGENTS.md change to match. No alias.</p></div>
+</div>
+<p>Passed over: an <code>lf wave project edit|update|bind</code> group. It would pull <code>bind</code> out of the plan group and move three commands to fix two.</p>
+
+<h2>Config: one canonical key, and dotted keys that follow it</h2>
+<div class="pair">
+<div class="old"><div class="tag was">plan as written</div>
+<pre>reads: planning · plan · repo.plan · linear.team · tracker
+docs:  repo.plan: {provider: linear, team}
+set:   repo.tracker.linear.team → ?</pre></div>
+<div class="new"><div class="tag">proposed</div>
+<pre>canonical: repo.tracker   shorthand: tracker
+  tracker: {linear: {team: X}}   # or git, {asana: …}, {git: {shared: team}}
+read-only folds (LOO-784 marker): planning, plan, repo.plan, linear.team
+writes: planning: {provider: linear, team: X}   # released shape
+lf config set repo.tracker.asana.team Y  → replaces the block
+lf config get repo.tracker               → canonical shape</pre></div>
+</div>
+<p>Failure path: a repository on Linear sets an Asana team. With merge semantics both tags survive and the fold has to pick one silently. Replacing the block makes "one repository, one tracker" true in the file. Recovery: setting the Linear team again restores it.</p>
+
+<h2>What did not move</h2>
+<ul>
+<li>Staged table renames with mirror triggers. The probe is sound. Its risk only touches the table section, and it stays slice 1.</li>
+<li><code>lf repo tracker</code> over <code>lf repo sync</code>.</li>
+<li>The wire: <code>tracker_id</code> and <code>tracker_state {state, synced_at}</code>, with LOO-942 folded in.</li>
+<li>The scope rule that leaves <code>observe::</code>, metric observations and Swift <code>*Observation</code> services alone.</li>
+</ul>
+
+<h2>Questions</h2>
+<ol>
+<li>Wave Project commands: (a) <code>edit-project</code> / <code>update-project</code>, as written into the plan; (b) one <code>lf wave project …</code> group; (c) leave them as "plan".</li>
+<li>Config dotted keys: (a) a different tracker name replaces the block, as written; (b) a mismatched tag is an error.</li>
+<li><code>LinearIssueEvidence</code>: (a) <code>LinearIssueState</code>, as written; (b) keep "evidence".</li>
+<li>Authored Wave files that say "chapter" (<code>.lf/wave/infrastructure/GOAL.md:38,49</code> and others): (a) leave them as written, as planned; (b) their authors reword them in this PR.</li>
+</ol>
+</body></html>

@@ -59,8 +59,8 @@ one list (`CALLER_SESSION_ENV`), before applying the new conversation's.
 | Codex | `CODEX_CI`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_TOOL_CALL_ID`, `CODEX_VERSION`, `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` |
 
 An inherited `CLAUDE_CODE_CHILD_SESSION` turns off an interactive Claude's
-transcript (`-p` runs keep theirs), so the Session couldn't be resumed; an inherited `CODEX_SANDBOX` gives a nested Codex
-its parent's sandbox. Settings a person chooses pass through:
+transcript (`-p` runs keep theirs), so the Session couldn't be resumed; an
+inherited `CODEX_SANDBOX` gives a nested Codex its parent's sandbox. Settings a person chooses pass through:
 `CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
 `ANTHROPIC_*`, `CODEX_HOME`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_*`,
 and the `NO_COLOR`, `PAGER` and locale values Codex also sets. lf's hooks

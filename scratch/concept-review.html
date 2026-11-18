@@ -1,115 +1,131 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-959 concept review, after the LOO-953 sync</title>
+<title>LOO-959 concept review, as built</title>
 <style>
-:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mute:#666;--yes:#1f7a3a;--no:#b3261e;--prop:#2457c5;--line:#ddd;--code:#f0efe9}
-@media(prefers-color-scheme:dark){:root{--fg:#e8e8e3;--bg:#151515;--mute:#9a9a9a;--yes:#6fcf8a;--no:#ff8a80;--prop:#8fb0ff;--line:#333;--code:#222}}
-body{font:15px/1.55 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:980px;margin:0 auto;padding:24px 16px 64px}
-h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:32px 0 8px}h3{font-size:15px;margin:20px 0 6px}
-p,li{max-width:76ch}.mute{color:var(--mute)}
+:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mute:#666;--yes:#1f7a3a;--no:#b3261e;--part:#b07800;--prop:#2457c5;--line:#ddd;--code:#f0efe9}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e8e3;--bg:#151515;--mute:#9a9a9a;--yes:#6fcf8a;--no:#ff8a80;--part:#e0b050;--prop:#8fb0ff;--line:#333;--code:#222}}
+body{font:15px/1.55 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:1000px;margin:0 auto;padding:24px 16px 64px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:32px 0 8px}
+p,li{max-width:78ch}.mute{color:var(--mute)}
 code{font:13px ui-monospace,Menlo,monospace;background:var(--code);padding:1px 4px;border-radius:3px}
-pre{font:13px/1.45 ui-monospace,Menlo,monospace;background:var(--code);padding:10px 12px;border-radius:6px;overflow-x:auto;margin:6px 0}
+pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);padding:10px 12px;border-radius:6px;overflow-x:auto;margin:6px 0}
 table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
 th,td{border-top:1px solid var(--line);padding:7px 8px;text-align:left;vertical-align:top}
 th{font-weight:600}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:#b07800;font-weight:600}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:var(--part);font-weight:600}
 .prop{border-left:3px solid var(--prop);padding:2px 0 2px 12px;margin:10px 0}
-.prop b.tag{color:var(--prop)}
+b.tag{color:var(--prop)}
 .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:700px){.grid{grid-template-columns:1fr}}
+@media(max-width:720px){.grid{grid-template-columns:1fr}}
 .card{border:1px solid var(--line);border-radius:8px;padding:10px 12px}
 ol.q>li{margin:12px 0}ol.q ol{list-style:lower-alpha;margin-top:4px}
 </style></head><body>
 
 <h1>Do the recovery concepts line up?</h1>
-<p class="mute">LOO-959 at <code>89943efba2</code>, after syncing onto LOO-953 (<code>0c80e7d1dc</code>). PR #1972. Nothing here changes code.</p>
+<p class="mute">LOO-959 as built, at <code>74e8218230</code> against <code>origin/main</code>. PR #1972. Read on 2026-11-18, after slice 7, its compress and its qa. This page changes no code. Blue marks what is proposed; everything else exists.</p>
 
-<div class="prop"><b class="tag">Answered 2026-11-18</b>
-<p>Jack: "1a", "2a", "3 -- i feel like ship is supposed to be a small short hand that maybe updates the proposed graph to be auto mode, and has grown into this sprawling concept. lets reduce its impact on the overall system and protocol", "4 no idea", "5 no idea".</p>
-<p>Built next in LOO-959: one Rust <code>outlook</code> on the Session (1a); <code>could_not_start</code> as its own kind (2a). Decided for review: 4a, the pass's <code>recover:</code> request reaches <code>reopen</code> through argv and <code>LF_RECOVERING_SESSION</code> goes; 5a, an <code>openpty</code> failure records "no PTY left: N in use", read like doctor's check. Ship's reduction (3) is LOO-968; until then LOO-959 adds nothing to ship and the restart count keeps its two rules.</p></div>
-
-<p><b>Area reviewed:</b> work on this Machine coming back after it dies, as the branch now builds it: a Task's work session, a Task's run and its carrier, the counters behind both, the Session's <code>ended</code>/<code>start</code> fields, the <code>lf task status</code> and Desktop lines, and <code>lf machine doctor</code>'s PTY check. Not reviewed: LOO-953's liveness columns themselves, and stacking.</p>
+<p><b>Area reviewed:</b> work on this Machine that stops without anyone stopping it, and what a person is told about it. That is a Task's conversation, a Task's run, the server's recovery pass that brings both back, the counters behind the pass, and the two lines <code>lf task status</code> and Desktop print. The whole branch, seen new, since the earlier pages each covered one slice.</p>
+<p><b>Result:</b> nothing for this work to change before gate. The conversation side has one owner per idea. What is left is the run side, which says the same thing in a different shape, and four smaller duplications. Each is a wire or behavior choice.</p>
 
 <h2>One interaction, with its failure and recovery</h2>
-<p>The Mac crashes with three Tasks open. After the reboot, the server's first reading:</p>
-<pre>LOO-a  work session died (no exit recorded)  → pass starts it, attempt 1      Conversation: running (started again 09:14, attempt 1)
-LOO-b  carrier `lf task run` died at implement → `lf task run LOO-b` again    Run died at implement; the server's next pass carries it again
-LOO-c  work session's transcript never saved  → fresh thread, seeded request  "transcript … is gone; continuing on a fresh thread"
-LOO-d  first start ever, claude not on PATH   → start_failure recorded         Conversation: closed · starting again · last start failed: claude is not installed…</pre>
-<p>Every row recovers. What a person has to decode is the last column. "Is it coming back, when, and what do I do?" is one question, and the answer is put together in three places from three fields.</p>
+<p>The Mac restarts with four Tasks open. These are the lines as the code prints them:</p>
+<pre>LOO-a  conversation killed, restarted         Conversation: died 09:14 (no exit recorded) · starting again
+                                              Conversation: running (started again 09:14, attempt 1)
+LOO-b  keeps dying before a turn              Conversation: died 09:16 (exit 1) · starts again 09:18
+       five times                             Conversation: died 09:40 (exit 1) · started 5 times; `lf resume --task LOO-b` opens it
+LOO-c  claude not on the server's PATH        Conversation: could not start: claude is not installed on this Machine's PATH · tries again 09:15
+LOO-d  `lf task run` died at implement        Run died at implement; the server's next pass carries it again
+       dies again                             Run died at implement; it is carried again in 2 min (restart 4 of 5)
+       five times                             Run died 5 times at implement; `lf task run LOO-d` starts it again
+       quit by the person                     Conversation: quit 09:20; `lf resume --task LOO-d` opens it</pre>
+<p>Every row says what stopped and either that it is coming back or which command continues it. That is the outcome the Task set. Read the two halves side by side, though: the conversation "starts again 09:18", the run "is carried again in 2 min". One gives a clock time, the other a duration. One counts "attempt 1", the other "restart 4 of 5". One names "the server's next pass", a thing the person never otherwise meets.</p>
 
 <h2>Product concepts and code concepts</h2>
 <table>
 <tr><th>A person knows</th><th>The code has</th><th></th><th>What is wrong</th></tr>
-<tr><td>My Task's work session: running</td><td><code>SessionState</code> active / detached</td><td class="yes">yes</td><td></td></tr>
-<tr><td>It died and is coming back (now, or at 12:05)</td><td><code>SessionState::Closed</code> + <code>ended.by = died</code> + <code>start.next_at</code>, folded by <code>SessionFacts::conversation_line</code> (Rust) and again by <code>SessionRecord.conversationLine</code> (Swift)</td><td class="no">no</td><td>One idea, no single value. Two folds, already different: Swift never says "starts again 12:05" or "when the server runs", and says "open it to continue" where Rust names <code>lf resume --task X</code>.</td></tr>
-<tr><td>I quit it; it stays quit</td><td><code>ended.by = person</code> from exit 0 / 130 (<code>AgentEnd::by_person</code>)</td><td class="part">partly</td><td>Right concept. Whether a provider SIGTERMed at shutdown exits 0, and so reads as a quit, is still unmeasured on real Claude (acceptance check 5).</td></tr>
-<tr><td>It gave up; this command continues it</td><td><code>start.gave_up</code>, <code>CONVERSATION_STARTS</code> = 5</td><td class="yes">yes</td><td>Desktop shows no command; see row 2.</td></tr>
-<tr><td>It couldn't start, and why</td><td><code>start.failure</code> (<code>agent_sessions.start_failure</code>)</td><td class="no">no</td><td>A conversation that never started reads "closed · starting again" (Rust) or "Died" (Swift). Neither is true. And a PTY shortage records the raw OS error, not the "no PTY left: 511 in use" the plan and docs promise; only the PATH check names its cause.</td></tr>
-<tr><td>Machine is out of room</td><td><code>doctor</code> <code>ptys</code> check, no cap</td><td class="yes">yes</td><td></td></tr>
-<tr><td>Its transcript was lost; it continued fresh</td><td><code>lost_thread</code> → <code>new_thread</code></td><td class="yes">yes</td><td>Since LOO-963 the commonest cause (an inherited <code>CLAUDE_CODE_CHILD_SESSION</code>) is gone; the path still matters for crashes.</td></tr>
-<tr><td>My Task's run died and is carried again</td><td><code>DiedRun</code> (derived from <code>task_graphs.run_pid</code> left behind), <code>restart_runs</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>How many times it was carried again</td><td><code>task_graphs.restarts</code> counts ship-carrier failures <em>and</em> run-carrier deaths</td><td class="no">no</td><td>One count, two give-up rules: a run waits for a person after 5; a ship never gives up and only grows its backoff. A Task that stops shipping inherits ship failures as "deaths" toward 5.</td></tr>
-<tr><td>I started it myself (so the pass backs off)</td><td><code>record_persons_start</code>, unless env <code>LF_RECOVERING_SESSION</code> names this Session</td><td class="no">no</td><td>Who started it is carried by an inherited env var, not by the start. Nothing removes it before the provider runs, so the agent's own shells carry it; an <code>lf resume</code> they run of this Session counts as the pass's start. Same class as LOO-963. The start already has an owner-shaped name, the request <code>recover:&lt;session&gt;:&lt;agent&gt;:&lt;n&gt;</code>.</td></tr>
+<tr><td>My Task's conversation is running</td><td><code>SessionState</code> active / detached</td><td class="yes">yes</td><td></td></tr>
+<tr><td>It died; is it coming back, when, or what do I run</td><td><code>SessionRecord.outlook {kind, at, reason, command}</code>, folded once in <code>human_session::session_ending</code></td><td class="yes">yes</td><td>One value, on the wire, for every client.</td></tr>
+<tr><td>I quit it; it stays quit</td><td>exit 0 or 130 (<code>AgentEnd::by_person</code>) → <code>outlook.kind = quit</code>, and also <code>ended.by = person</code></td><td class="part">partly</td><td>Said twice. No printer reads <code>ended.by</code>. Whether real Claude exits 0 on SIGTERM at shutdown is still unmeasured.</td></tr>
+<tr><td>It could not start, and why</td><td><code>outlook.kind = could_not_start</code>, <code>agent_sessions.start_failure</code>, <code>transport::pty_failure</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>It is starting (first start, or a start in flight)</td><td>nothing: <code>SessionState::Unknown</code>, no outlook</td><td class="no">no</td><td>A concept the person has and the code lacks. <code>lf task status</code> prints <code>Conversation: unknown</code> for about a second after every <code>lf task checkout</code> and <code>lf task run</code>, on the normal path.</td></tr>
+<tr><td>Whether the server will start it</td><td>The pass: <code>conversations_to_start</code> (SQL) + <code>due_task_conversations</code>. The line: <code>session_ending</code> + <code>left_alone</code></td><td class="part">partly</td><td>One rule written twice. They agree today in every case read (a conversation that left with its Task is caught by the claim check). The pass also reads <code>completed_at</code>; the fold does not. A drift here is a line that promises a start nobody makes.</td></tr>
+<tr><td>The sentence itself</td><td><code>SessionFacts::conversation_line</code> (Rust) and <code>SessionRecord.conversationLine</code> (Swift)</td><td class="part">partly</td><td>Two printers of one outlook. They differ already: the CLI says "died 12:01 (exit 137)", Desktop "Died (exit 137)" with no time.</td></tr>
+<tr><td>My Task's run died and is carried again</td><td><code>DiedRun</code> from <code>task_graphs.run_pid</code> / <code>run_died_at</code>; <code>restart_runs</code></td><td class="yes">yes</td><td>One owner for noticing, one for carrying.</td></tr>
+<tr><td>Is the run coming back, when, or what do I run</td><td><code>DiedRun::reason</code>, a sentence placed in the Task run's <code>waiting</code> / <code>blocked</code> state</td><td class="no">no</td><td>The same idea as the conversation's outlook, under a second shape. See below.</td></tr>
+<tr><td>How many times it was carried again</td><td><code>task_graphs.restarts</code>, read by <code>RUN_RESTARTS</code> (wait after 5) and by ship (never waits)</td><td class="no">no</td><td>One count, two rules. LOO-968 removes the ship rule.</td></tr>
+<tr><td>I started it myself, so the count begins again</td><td>Conversation: <code>record_start</code> resets unless the request is <code>recover:…</code>. Run: nothing; only a finished step resets</td><td class="no">no</td><td>One rule for the conversation, none for the run. After "died 5 times", a person's <code>lf task run</code> that dies before finishing a step is not carried again.</td></tr>
+<tr><td>This Machine is out of room</td><td><code>lf machine doctor</code> <code>ptys</code>; "no PTY left: N in use" on the start</td><td class="yes">yes</td><td>No cap, no eviction; the OS refuses and the start says why.</td></tr>
+<tr><td>Its transcript was lost; it continued on a fresh thread</td><td><code>lost_thread</code> → <code>new_thread</code>, in <code>human_session::open</code></td><td class="part">partly</td><td>Told only in the pane that starts. Status reads "running (started again …, attempt 1)".</td></tr>
+<tr><td>—</td><td>"the recovery pass", "carrier"</td><td class="part">partly</td><td>Code concepts. "Carried again" is the docs' word and reads fine. "The server's next pass" reaches the status line.</td></tr>
 </table>
 
-<h2>The biggest mismatch: "is it coming back?" has no answer on the wire</h2>
+<h2>The biggest mismatch: a died run and a died conversation answer the same question in two shapes</h2>
 <div class="grid">
 <div class="card"><b>Now</b>
-<pre>SessionRecord
-  state:  closed
-  ended:  {at, by: died, exit_code: 137}
-  start:  {attempts: 1, last_started_at,
-           next_at, gave_up: false, failure}
+<pre>Session (conversation)
+  outlook: {kind: coming_back,
+            at: 09:18, reason, command}
+  → "died 09:16 (exit 1) · starts again 09:18"
+  no server → waiting_for_you + command
 
-Rust  conversation_line(state, ended, start,
-                        now, server_runs) → text
-Swift conversationLine(state, ended, start) → other text</pre>
-<p>Each client re-derives the outlook. The repository already rejects this shape elsewhere: "consumers never reconstruct the condition from process flags" (<code>task_condition_states.json</code>).</p></div>
+Task run
+  state:  waiting | blocked
+  reason: "Run died at implement; it is carried
+           again in 2 min (restart 4 of 5)"
+  no server → same sentence, still promising</pre>
+<p>The run's answer is prose inside a state documented for usage-limit waits. A client cannot tell "died, coming back at 09:18" from "waiting on a limit" without reading the sentence. With no server running, the conversation says so and the run does not.</p></div>
 <div class="card prop"><b class="tag">Proposed</b>
-<pre>SessionRecord
-  state:  closed
-  ended:  {at, by: died, exit_code: 137}     (unchanged)
-  outlook: {kind: coming_back | waiting_for_you
-                | quit | could_not_start,
-            at,        // when it comes back, if it does
-            reason,    // "exit 137", "no PTY left: 511 in use"
-            command}   // "lf resume --task LOO-12", or null
-  start:  {attempts, last_started_at}       (facts only)</pre>
-<p>Rust folds once (where <code>server_runs</code>, backoff and give-up are known). <code>lf task status</code> and Desktop print <code>outlook</code>; <code>could_not_start</code> replaces "closed · starting again".</p></div>
+<pre>Task run
+  died:    {at_step: implement, at}
+  outlook: {kind: coming_back | waiting_for_you,
+            at, reason, command}     // same type
+  → "Run died at implement · starts again 09:18"
+  → "Run died 5 times at implement;
+     `lf task run LOO-d` starts it again"</pre>
+<p>One type, one fold of "does this Machine bring it back" (claimed here, checked out here, a server runs, starts left), used for both. The run stops borrowing <code>waiting</code>. A person's <code>lf task run</code> counts from zero, as a person's resume does.</p></div>
 </div>
-<p><b>Normal path:</b> running → <code>outlook</code> null. <b>Failure:</b> SIGKILL → <code>coming_back</code>, <code>at</code> now. <b>Recovery:</b> started → running, <code>start.attempts</code> 1. <b>Give-up:</b> <code>waiting_for_you</code> with the command. <b>Counterexample kept:</b> the outlook is only as true as the reader's Machine; a Task checked out elsewhere would read <code>coming_back</code> that no server here will do, so the fold needs "checked out here", which <code>session_ending</code> does not read today.</p>
-<p>Cost: one wire field, fixtures, Swift decoder; two text functions shrink to one printer each. Nothing stored changes.</p>
+<p><b>Normal path:</b> a live run has no outlook. <b>Failure:</b> carrier killed → <code>coming_back</code>, <code>at</code> now. <b>Recovery:</b> carried again; a finished step clears the count. <b>Give-up:</b> <code>waiting_for_you</code> with <code>lf task run</code>. <b>Counterexample kept:</b> while ship has its own restart rule, a shipping Task would need a third reading of the same count, so this is cleanest after LOO-968 makes <code>lf task run</code> the only carrier. Before that it adds a type to an area about to shrink.</p>
+<p><b>Cost:</b> a wire field on the Task's run, its fixtures and Swift decoder, and the shared fold. It is larger than this work and belongs with or after LOO-968.</p>
 
 <h2>Smaller findings</h2>
 <ol>
-<li><b>Restart count:</b> keep one column (decided 2a) but one give-up rule, or name the ship case apart. As built, the column means "carried again since a step" and two rules read it.</li>
-<li><b>Who started it:</b> move "started by the pass" from <code>LF_RECOVERING_SESSION</code> onto the start itself (the registry already holds the <code>recover:</code> request), or add the variable to the launch scrub LOO-963 added.</li>
-<li><b>PTY cause:</b> the start path turns an <code>openpty</code> failure into "no PTY left: N in use (kern.tty.ptmx_max)" using doctor's reading, as the docs say today.</li>
+<li><b>"Starting" has no value.</b> A prepared conversation that the server is about to start, and one whose start is in flight, read <code>unknown</code>. The pass already knows both (<code>ConversationToStart.agent</code> is none; a counted start newer than the end). The fold could give them an outlook.</li>
+<li><b><code>ended.by</code> repeats <code>outlook.kind</code>.</b> <code>ended</code> could be <code>{at, exit_code}</code>.</li>
+<li><b>Two printers.</b> The server could send the sentence, or one fixture of expected lines could hold both printers to it.</li>
+<li><b>One rule, two writers</b> for "the server starts it". A test over the recovery fixtures that the outlook says <code>coming_back</code> exactly when the pass lists the conversation would hold them together without restructuring either.</li>
+<li><b>"The server's next pass"</b> in the run's line. "Run died at implement · starting again" says it in the conversation's words.</li>
+<li><b>"started again … attempt 3"</b> on a conversation whose first two starts failed and which never ran before. It was started, not started again.</li>
 </ol>
 
 <h2>Larger than this work</h2>
 <ul>
-<li><b>Stack parent has two sources.</b> <code>lf sync</code> with no argument merged <code>main</code>: the Task no longer records LOO-953 as its parent (scratch notes <code>lf pr publish</code> reset it), while PR #1972 still targets LOO-953. Today's sync needed the branch named by hand. One record of "stacked on" would take a stacking Task.</li>
-<li><b>Acceptance check 5 and a real reboot</b> remain a person's to run.</li>
+<li><b>Ship's separate restart rule</b> (LOO-968). Until then <code>task_graphs.restarts</code> means two things.</li>
+<li><b>Retention</b> of logs, capture folders and Session rows; <b>fixture servers and holders</b> left running. Both are in <code>scratch/questions.md</code>, unfiled.</li>
+<li><b>Two checks only a person can run:</b> real Claude's exit code on SIGTERM, and a real reboot with three Tasks.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>Where does "is it coming back" live?
-<ol><li>One Rust-derived <code>outlook</code> on the Session (proposed above); both lines print it.</li>
-<li>Keep the three fields; make Swift's line match Rust's by hand and add a fixture test that compares them.</li>
+<li>The run's "is it coming back":
+<ol><li>Give the Task run the conversation's outlook type, with or after LOO-968.</li>
+<li>Now, reword the three sentences only (clock time, "starting again", no "pass"); keep them as prose in the run's state.</li>
 <li>Leave as built.</li></ol></li>
-<li>A conversation whose first start failed:
-<ol><li>Its own state, "could not start: &lt;reason&gt;", never "died" or "closed".</li>
-<li>Leave it reading as a death.</li></ol></li>
-<li>Ship restarts on the shared count:
-<ol><li>Ships give up after 5 too, then name <code>lf ship</code>.</li>
-<li>Ships keep restarting forever; a Task that stops shipping starts its count at 0.</li>
+<li>A person's <code>lf task run</code> after "died 5 times":
+<ol><li>Counts from zero, like a person's resume of a conversation.</li>
+<li>Leave: only a finished step resets the count.</li></ol></li>
+<li><code>Conversation: unknown</code> before the first start and while one is in flight:
+<ol><li>The outlook covers it; the line reads "starting".</li>
+<li>Leave: it lasts about a second.</li></ol></li>
+<li><code>ended.by</code>:
+<ol><li>Drop it; <code>outlook.kind</code> says quit.</li>
+<li>Keep it as the fact beside the exit code.</li></ol></li>
+<li>The conversation sentence:
+<ol><li>The server sends it; the CLI and Desktop print it.</li>
+<li>Keep two printers, held to one fixture of expected lines.</li>
 <li>Leave as built.</li></ol></li>
-<li>"Started by the pass":
-<ol><li>Read from the start's request, delete <code>LF_RECOVERING_SESSION</code>.</li>
-<li>Keep the variable, scrub it from provider launches.</li></ol></li>
-<li>PTY shortage message: <b>a</b> build it in this Task, <b>b</b> drop the promise from the docs and file it.</li>
+<li>"The server starts it", written in the pass and in the fold:
+<ol><li>One predicate both call.</li>
+<li>A test that they agree on the recovery fixtures.</li>
+<li>Leave as built.</li></ol></li>
 </ol>
 </body></html>

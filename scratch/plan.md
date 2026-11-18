@@ -762,6 +762,30 @@ for someone to choose):
 Unfiled follow-ups are in `questions.md` under "Follow-up to file" (Machine
 retention; fixture servers and holders left running).
 
+## Concept review of the whole branch (2026-11-18, HEAD `74e8218230`)
+
+`scratch/concept-review.html`, read against `origin/main`. Nothing for
+implement. The conversation side has one owner per idea. Found, each a wire or
+behavior choice, asked on the page as questions 1–6:
+
+1. A died run answers "is it coming back" as a sentence inside the run's
+   `waiting`/`blocked` state (`DiedRun::reason`), while a died conversation
+   answers with `outlook`. Two shapes, two vocabularies ("starts again 09:18"
+   against "carried again in 2 min"), and only the conversation says when no
+   server runs. One outlook type for both fits after LOO-968 leaves one
+   carrier; before it, it adds a type to an area about to shrink.
+2. A person's `lf resume` counts the conversation's starts from zero; a
+   person's `lf task run` does not reset `task_graphs.restarts`.
+3. "Starting" has no value: `Conversation: unknown` before the first start and
+   while one is in flight, on the normal path.
+4. "The server starts it" is written twice: `conversations_to_start` +
+   `due_task_conversations` for the pass, `session_ending` + `left_alone` for
+   the line. They agree in every case read; the pass also reads
+   `completed_at`, and a conversation that left with its Task is caught by
+   the claim check instead.
+5. Wording: "the server's next pass" in the run's line; "started again …
+   attempt 3" on a conversation that never ran before its failed starts.
+
 ## Checks
 
 - `cargo test -p loopflow --lib server::recovery::tests::`: 7 pass (implement).

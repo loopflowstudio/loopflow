@@ -401,8 +401,11 @@ etude checkout and `lf` version are unknown.
   changed with the `--json` shape and were not compiled here).
 - Slice 2, run by implement, passed 2026-11-18:
   `cargo test -p loopflow-execution --lib ops::plan_git::`.
-  SLICE2_ACCEPTANCE
+  `cargo nextest run -p loopflow --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(dto_fixtures::subscribe_frames)'`
+  (the acceptance test: 137 s);
+  `cargo nextest run -p loopflow -p loopflow-storage --lib -E 'test(server::schema::tests::) | test(revisions::) | test(migration_runner::)'`
+  (one migration test finished at 299 s of nextest's 300 on a loaded
+  Machine). `server_schema.json` regenerated.
 - Not compiled here: Swift (`RepositoryPlan.swift` gained `GitCarrier` and
-  `CarrierStanding`; three test files follow). `server_schema.json` is
-  regenerated at gate if `server::schema::tests::` asks.
+  `CarrierStanding`; three test files follow).
 - Next: slice 3, first-wins claims.

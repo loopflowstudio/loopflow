@@ -2453,6 +2453,51 @@
       ],
       "type": "object"
     },
+    "GitCarrier": {
+      "description": "Git's line: `Plan: Git origin, unreachable since Nov 18 14:02, 3 unsent.`",
+      "properties": {
+        "error": {
+          "description": "Why the last exchange failed, while it still fails.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "failing_since": {
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "records": {
+          "description": "The first of them in change order: a Task's identifier, `wave <name>`,\n`project <name>` or `comment <id>`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "remote": {
+          "description": "The remote's name.",
+          "type": "string"
+        },
+        "unsent": {
+          "description": "How many records changed here the carrier has not taken.",
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "remote",
+        "unsent",
+        "records",
+        "error",
+        "failing_since"
+      ],
+      "type": "object"
+    },
     "GithubObservation": {
       "description": "The last attempt to refresh one persisted GitHub PR. This metadata lives on\n`TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`\nprocesses without making GitHub the source of truth.",
       "properties": {
@@ -3240,14 +3285,14 @@
       "description": "The hub's line: `Hub mini, unreachable since Nov 18 14:02, 2 unsent.`",
       "properties": {
         "error": {
-          "description": "Why the last exchange failed, while the hub still does not answer.",
+          "description": "Why the last exchange failed, while it still fails.",
           "type": [
             "string",
             "null"
           ]
         },
         "failing_since": {
-          "description": "When the hub stopped answering (Unix seconds), while it still does not.",
+          "description": "When the carrier stopped working (Unix seconds), while it still does not.",
           "format": "int64",
           "type": [
             "integer",
@@ -3266,7 +3311,7 @@
           "type": "array"
         },
         "unsent": {
-          "description": "How many records changed here the hub has not taken.",
+          "description": "How many records changed here the carrier has not taken.",
           "format": "uint",
           "minimum": 0,
           "type": "integer"
@@ -5145,6 +5190,17 @@
     "PlanCarriers": {
       "description": "The ways a plan without a tracker reaches other Machines. Every Machine\nholds the whole plan; with none of these it stays on this one.",
       "properties": {
+        "git": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GitCarrier"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The repository's remote; `null` without one."
+        },
         "hub": {
           "anyOf": [
             {
@@ -5158,6 +5214,7 @@
         }
       },
       "required": [
+        "git",
         "hub"
       ],
       "type": "object"

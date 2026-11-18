@@ -53,25 +53,33 @@ fn watch(terminals: &Registry) {
     let mut watcher = Watcher::default();
     loop {
         watcher.read(&path, terminals);
-        changes.wait(if watcher.ending { ENDING } else { UNREAD });
+        changes.wait(watcher.wait(SystemTime::now()));
     }
 }
 
 /// The watcher's store, what it read last and when, when it last settled
-/// and retained, and whether a due conversation's terminal was still ending.
+/// and retained, and when the pass must read again though nothing moved: a
+/// due conversation's terminal was still ending, or a backoff comes due.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
     retained: Option<SystemTime>,
-    ending: bool,
+    wake: Option<SystemTime>,
 }
 
 impl Watcher {
-    /// Run the pass if the revisions moved or a minute passed. The first
-    /// reading runs it: after a reboot or a server restart, that is when what
-    /// died meanwhile comes back.
+    /// How long to wait for a change before reading anyway.
+    fn wait(&self, now: SystemTime) -> Duration {
+        self.wake.map_or(UNREAD, |at| {
+            at.duration_since(now).unwrap_or(Duration::ZERO).min(UNREAD)
+        })
+    }
+
+    /// Run the pass if the revisions moved, a minute passed or a wake came
+    /// due. The first reading runs it: after a reboot or a server restart,
+    /// that is when what died meanwhile comes back.
     fn read(&mut self, path: &Path, terminals: &Registry) {
         if self.store.is_none() && path.exists() {
             self.store = loopflow_execution::store::open_sqlite(path)
@@ -95,7 +103,7 @@ impl Watcher {
                 == (revisions.planning, revisions.sessions, revisions.processes)
                 && now.duration_since(at).is_ok_and(|waited| waited < UNREAD)
         });
-        if unchanged && !self.ending {
+        if unchanged && self.wake.is_none_or(|at| now < at) {
             return;
         }
         self.seen = Some((revisions, now));
@@ -118,8 +126,11 @@ impl Watcher {
             Ok(())
         };
         match recover_conversations(store, unix(now), held, start) {
-            Ok(ending) => self.ending = ending,
+            Ok(wake) => {
+                self.wake = wake.map(|at| SystemTime::UNIX_EPOCH + Duration::from_secs(at as u64))
+            }
             Err(error) => {
+                self.wake = None;
                 tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
             }
         }
@@ -162,18 +173,21 @@ fn unix(at: SystemTime) -> i64 {
 /// Start every due Task conversation that has no terminal, one at a time,
 /// and record why a start failed on its Session. Each start's request names
 /// the ended agent and the attempt, so the registry answers a repeat with the
-/// terminal it already started. `true` when a due one still had its terminal.
+/// terminal it already started. Returns when to read again though nothing
+/// moved: [`ENDING`] from now when a due one still had its terminal, else
+/// when the soonest backoff comes due.
 fn recover_conversations(
     store: &SqliteStore,
     now: i64,
     held: impl Fn(&LfSessionId) -> bool,
     mut start: impl FnMut(&ConversationToStart, String) -> Result<()>,
-) -> Result<bool> {
-    let mut ending = false;
-    for conversation in loopflow_execution::ops::recovery::due_task_conversations(store, now)? {
+) -> Result<Option<i64>> {
+    let due = loopflow_execution::ops::recovery::due_task_conversations(store, now)?;
+    let mut wake = due.next_at;
+    for conversation in due.now {
         let ConversationToStart { session, agent, .. } = &conversation;
         if held(session) {
-            ending = true;
+            wake = Some(now + ENDING.as_secs() as i64);
             continue;
         }
         // A start after a death is counted before it is made. A first start
@@ -203,7 +217,7 @@ fn recover_conversations(
             }
         }
     }
-    Ok(ending)
+    Ok(wake)
 }
 
 #[cfg(test)]
@@ -392,8 +406,10 @@ mod tests {
         let first = format!("recover:{}:{}:1", fixture.session, fixture.agent);
         assert_eq!(fixture.pass(NOW, false), [first]);
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
-        // The start is in flight: the next change starts nothing.
-        assert!(fixture.pass(NOW + 30, false).is_empty());
+        // The start is in flight: the next change starts nothing, and the
+        // watcher reads again when the backoff comes due.
+        let wake = recover_conversations(&fixture.store, NOW + 30, |_| false, |_, _| Ok(()));
+        assert_eq!(wake.unwrap(), Some(NOW + 60));
         // Still down a minute later: started again, as a new request.
         assert_eq!(
             fixture.pass(NOW + 60, false),
@@ -426,8 +442,8 @@ mod tests {
         assert!(fixture.pass(NOW, true).is_empty());
         assert_eq!(fixture.attempts(), (0, None));
         // Its terminal is ending: the watcher reads again soon.
-        let ending = recover_conversations(&fixture.store, NOW, |_| true, |_, _| Ok(())).unwrap();
-        assert!(ending);
+        let wake = recover_conversations(&fixture.store, NOW, |_| true, |_, _| Ok(())).unwrap();
+        assert_eq!(wake, Some(NOW + 1));
     }
 
     #[test]

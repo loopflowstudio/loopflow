@@ -43,7 +43,8 @@ lf task status LOO-12   # Conversation: running (started again 12:01, attempt 1)
 ```
 
 A watcher thread (`recovery.rs`) reads the store when its planning, Session or
-process revisions move, and at least once a minute. The server writes nothing on the way down; every fact
+process revisions move, when a conversation's backoff comes due, and at least
+once a minute. The server writes nothing on the way down; every fact
 the pass needs is written before it is needed (`meta.json`, the holder's
 `exit.json`, Session and Graph-run rows with pid and OS start time). Its
 first reading after start is the restart and reboot case. Each reading:

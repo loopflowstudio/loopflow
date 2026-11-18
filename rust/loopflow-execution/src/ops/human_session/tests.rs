@@ -311,7 +311,19 @@ fn a_task_conversation_says_how_it_ended_and_when_it_starts_again() {
     let start = super::summary_surface(&summary).start.unwrap();
     assert_eq!(
         start.next_at,
-        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2))
+        crate::transcript::rfc3339(2_000),
+        "a start counted after the death is under way"
+    );
+
+    summary.agent_end = Some(crate::session::AgentEnd {
+        at: 2_500,
+        exit_code: Some(137),
+    });
+    let start = super::summary_surface(&summary).start.unwrap();
+    assert_eq!(
+        start.next_at,
+        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
+        "a death after that start waits its backoff"
     );
 
     summary.starts_since_turn = loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;

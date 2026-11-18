@@ -549,8 +549,16 @@ fn session_ending(
     let attempts = session.starts_since_turn;
     let gave_up = attempts >= loopflow_storage::sqlite::session_recovery::CONVERSATION_STARTS;
     let down = state == SessionState::Closed;
+    // A start counted after the agent ended is the one under way: it was due
+    // then. The backoff names the start after the next death.
+    let starting = session
+        .last_started_at
+        .zip(session.agent_end)
+        .filter(|(started, end)| *started >= end.at)
+        .map(|(started, _)| started);
     let next_at = (down && !gave_up).then(|| {
-        crate::ops::recovery::next_start_at(attempts, session.last_started_at)
+        starting
+            .or_else(|| crate::ops::recovery::next_start_at(attempts, session.last_started_at))
             .or(session.agent_end.map(|end| end.at))
             .and_then(crate::transcript::rfc3339)
     });

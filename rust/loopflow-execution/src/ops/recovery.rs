@@ -66,16 +66,23 @@ pub fn launch_failure(conversation: &ConversationToStart) -> Option<String> {
 }
 
 /// The Task conversations to start again now, most recently active Task
-/// first: open Tasks claimed here whose conversation was never started, or
-/// whose agent died rather than being quit, and whose backoff has passed. An agent still unfinished in the
-/// store counts as died only when its recorded process is gone; unknown
-/// liveness waits. The first start after a death is immediate; later ones wait
-/// the landing's repair backoff (1 minute, doubling to 30) from the last.
+/// first, and when the soonest one still waiting its backoff comes due.
+#[derive(Debug, Default)]
+pub struct DueConversations {
+    pub now: Vec<ConversationToStart>,
+    pub next_at: Option<i64>,
+}
+
+/// Open Tasks claimed here whose conversation was never started, or whose
+/// agent died rather than being quit. An agent still unfinished in the store
+/// counts as died only when its recorded process is gone; unknown liveness
+/// waits. The first start after a death is immediate; later ones wait the
+/// landing's repair backoff (1 minute, doubling to 30) from the last.
 pub fn due_task_conversations(
     store: &SqliteStore,
     now: i64,
-) -> crate::store::StoreResult<Vec<ConversationToStart>> {
-    let mut due = Vec::new();
+) -> crate::store::StoreResult<DueConversations> {
+    let mut due = DueConversations::default();
     for conversation in store.conversations_to_start()? {
         let died = conversation.agent.is_none()
             || conversation.ended_at.is_some()
@@ -83,10 +90,14 @@ pub fn due_task_conversations(
                 crate::journal::process_identity_evidence(pid, start)
                     == ProcessIdentityEvidence::Dead
             });
-        let waited = next_start_at(conversation.starts_since_turn, conversation.last_started_at)
-            .is_none_or(|at| at <= now);
-        if died && waited && store.task_claimed_here(&conversation.task)? {
-            due.push(conversation);
+        if !died || !store.task_claimed_here(&conversation.task)? {
+            continue;
+        }
+        match next_start_at(conversation.starts_since_turn, conversation.last_started_at) {
+            Some(at) if at > now => {
+                due.next_at = Some(due.next_at.map_or(at, |soonest| soonest.min(at)));
+            }
+            _ => due.now.push(conversation),
         }
     }
     Ok(due)

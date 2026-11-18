@@ -567,7 +567,15 @@ Must survive:
 - Gate: every Swift suite with an inline
   Session fixture (keys `ended`/`start` added to 13 files), `binary(session_lifecycle_tests)`
   (`work_first_entry.json`), `test(performance_tests::)` (`summary_query` gained one PK join).
-- A real reboot with three Tasks (qa; a person runs it).
+- qa (private Machine, branch `lf`): kill, backoff, quit, server restart with a live
+  holder, simulated reboot (SIGKILL server, holder, provider), died carrier, five-start
+  give-up, shutdown SIGTERM (`scratch/qa.html`). Fixed: the pass woke for backoffs only on
+  the 60 s tick (`server/recovery.rs` wakes at the soonest `next_at`), and a start under
+  way read as "starts again <next backoff>" (`session_ending`). After them:
+  `server::recovery::tests::` (7), `human_session::tests::a_task_conversation…`,
+  `dto_fixtures::` (52), `lf::commands::session::tests::`,
+  `context_launch_tests::a_killed_task_conversation` pass; clippy clean.
+- A real reboot with three Tasks (a person runs it).
 
 ## Docs
 

@@ -37,6 +37,29 @@
   checkouts' `target/debug` builds (LOO-932, LOO-935, LOO-916, `rewrite-skills`),
   up to 20 hours old.
 
+## From qa (2026-11-17, private Machine)
+
+- Acceptance check 5, run live. SIGTERM to the server, the holder and a
+  provider that traps TERM and exits 0, in one `kill`: recorded died (137) and
+  started again with the next server. The holder dies from TERM before writing
+  `exit.json`, and an unknown end reads as SIGKILL (`held.rs:43`). SIGTERM to
+  that provider alone, holder alive: recorded exit 0, read as quit, stays
+  down. So a shutdown reads as quit only if the provider exits 0 and its
+  holder records it before TERM reaches the holder. Whether real Claude exits
+  0 on SIGTERM was not checked. The `holder_stopping` marker stays unbuilt.
+- The restart count resets only on a finished turn. After a person quits and
+  resumes, the count from earlier deaths stays (`running (started again 15:39,
+  attempt 3)` after a person's resume), and the next death has fewer starts
+  left. Is a person's resume a reset?
+- A Task run's restart backoff still waits for the 60 s tick or a store
+  change (the run came back 25 s after its death); conversations now wake on
+  their own `next_at`.
+- With the server down, a dead conversation reads `closed · starting again`;
+  nothing is going to start it until a server runs.
+- A recovered conversation whose provider never wrote a transcript fails each
+  resume (world stand-in: exit 1, five times, then gives up). Real Claude
+  writes one at its first turn, so only a death before that hits it.
+
 ## Measurements (2026-11-17, this Mac: 128 GiB, 16 cores)
 
 - `kern.tty.ptmx_max` 511. 144 `/dev/ttys*` in use, 73 of them live held

@@ -56,3 +56,36 @@ earlier-build Desktop shell; its Task needs a checkout (`lf wt create` then
 `lf task create --worktree`). Running `open_argv` from
 `lf session resume --prepare --json` with `LF_SERVER_STATUS` set to any path
 takes the Desktop pane's relayed route.
+
+# Recovery: kills, restarts and reboots
+
+Start the branch's `lf server run` detached (Python `os.fork()`/`os.setsid()`,
+stdin `/dev/null`); the recovery pass lives in it. `lf task checkout <task>`
+prepares the conversation and the pass starts it. `kill -9` the provider (find
+it by `pgrep -f 'w/bin/claude --name <task>'`) and poll `lf task status <task> |
+grep Conversation` once a second: `died … · starting again`, then `running
+(started again …, attempt n)`. A second kill with no finished turn waits the
+backoff; `start.next_at` in `--json` says when, and the start lands on that
+second. The world stand-in finishes no turns, so the count never resets: five
+kills give up with "started 5 times". Type `quit` through `lf resume --task` in
+a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL
+to the server, every `lf holder run` and every provider, then a new server.
+
+Replace a binary a server or holder runs with `rm` then `cp`: `cp` over it
+breaks its macOS signature and every next exec dies with 137.
+
+The world stand-in can't resume a conversation that never wrote a transcript,
+so a recovered never-turned conversation dies with exit 1 each start. Before
+the first kill, write a line to `$CLAUDE_CONFIG_DIR/projects/<cwd with / and .
+as ->/<id>.jsonl`, taking `<id>` from the provider's `--session-id` argv.
+
+A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
+human-review`), commit it, and `lf task run <task> qarun`. Its headless step
+needs a `claude` ahead of the world's on both the server's and the CLI's
+`PATH` that, for `-p`, reads one line, waits for a marker file, prints a
+stream-json `result` line, and otherwise execs the world's. Kill the carrier's
+process group (`kill -9 -<pid of lf task run>`) and the step's provider: the
+run reads `Run died at implement; the server's next pass carries it again`,
+then a new `lf task run <task>` (parent: the server) continues at `implement`.
+Killing only the carrier leaves the Graph running; it arrives by itself.
+`lf task run <task> qarun` at the interactive step passes it and ends the run.

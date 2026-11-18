@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-959 qa: Task conversations and runs after a kill or reboot</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
+pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
+.ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
+td,th{padding:.3rem .6rem;border-bottom:1px solid #eee;text-align:left;vertical-align:top}table{border-collapse:collapse}
+</style></head><body>
+<h1>LOO-959 qa: Task conversations and runs after a kill or reboot</h1>
+<p>Branch <code>lf</code> (bef7fbb94 plus this step's fixes) on a private lf-world Machine
+(<code>one-task</code>, then three more Tasks), its own <code>lf server run</code>, stand-in providers.
+All observations are from <code>lf task status</code> as a person reads it. 2026-11-17.</p>
+
+<h2>1. Kill the conversation's provider <span class="ok">works</span></h2>
+<pre>$ kill -9 26991            # 15:31:49
+t+1: Conversation: died 15:31 (exit 137) · starting again
+t+2: Conversation: running (started again 15:31, attempt 1)</pre>
+<p>Under two seconds from death to a new provider resuming the same thread.</p>
+
+<h2>2. Kill it again: backoff <span class="fix">fixed</span></h2>
+<p>Before: the pass woke only on a store change or its 60 s tick, so a backoff due 15:32:52 started at ~15:33:20,
+showing "starting again" for 30 s with nothing happening.</p>
+<pre>15:32:49 Conversation: died 15:32 (exit 137) · starts again 15:32
+15:32:55 Conversation: died 15:32 (exit 137) · starting again
+...
+15:33:23 Conversation: running (started again 15:33, attempt 2)</pre>
+<p>Fix: <code>due_task_conversations</code> also returns the soonest <code>next_at</code>, and the watcher
+waits until then (<code>server/recovery.rs</code>). After it, a backoff due 23:53:07Z started at:</p>
+<pre>INFO loopflow::server::recovery: Task conversation started ... 2026-11-17T23:53:07.938Z  attempt=5
+  PID STARTED
+88158 Tue Nov 17 15:53:07 2026</pre>
+
+<h2>3. A start under way <span class="fix">fixed</span></h2>
+<p>Before: once the pass had counted a start, the line named the backoff for the death after it:
+<code>died 15:39 (exit 137) · starts again 15:41</code> while the provider was coming up at 15:39:51.
+Now a start counted after the agent ended reads as due then: <code>· starting again</code>
+(<code>session_ending</code>, test <code>a_task_conversation_says_how_it_ended_and_when_it_starts_again</code>).</p>
+
+<h2>4. Quit stays quit <span class="ok">works</span></h2>
+<pre>$ lf resume --task 3040a4      # in a PTY; typed hello, then quit
+reply ff045d80-…: hello
+Left “Design transcript search”. Continue with: lf resume session_53124fb7…
+Conversation: quit 15:47; `lf resume --task 3040a4` opens it
+after 60s
+Conversation: quit 15:47; `lf resume --task 3040a4` opens it</pre>
+
+<h2>5. Server restart with a live holder <span class="ok">works</span></h2>
+<p>Server stopped and a new build started three times. Each time the same provider pid kept running, the line stayed
+<code>running</code>, and no second provider started.</p>
+
+<h2>6. Simulated reboot <span class="ok">works</span></h2>
+<pre>$ kill -9 &lt;server&gt; &lt;holder&gt; &lt;provider&gt;
+Conversation: closed · starting again        # no server: nothing is going to start it yet
+15:49:05 server started
+t+1 Conversation: died 15:49 (exit 137) · starting again | holders 35129
+t+2 Conversation: running (started again 15:49, attempt 4) | 35206 | holders 35129</pre>
+<p>One holder, one provider, one start.</p>
+
+<h2>7. Five starts, then the person's <span class="ok">works</span></h2>
+<pre>Conversation: died 15:53 (exit 137) · started 5 times; `lf resume --task 3040a4` opens it
+(65 s later, unchanged; no provider)</pre>
+
+<h2>8. A Task run whose carrier died <span class="ok">works</span></h2>
+<p>Graph <code>implement → interactive: human-review</code>, headless stand-in holding <code>implement</code>.</p>
+<pre>$ kill -9 -59139; kill -9 &lt;step provider&gt;       # carrier's group, 15:52:43
+15:52:47 2f0aa8 moving | latest Graph: Run died at implement; the server's next pass carries it again
+15:53:09 2f0aa8 moving | Graph qarun: running at implement
+87738 92135 /tmp/lfqa959/bin/lf task run 2f0aa8         # parent: the server</pre>
+<p>Killing only the carrier leaves the Graph running; released, it arrived at <code>human-review</code> with the Task
+<code>active</code>, not shipping. Carried again after 25 s: run backoffs still wait for the tick.</p>
+
+<h2>9. Shutdown SIGTERM (acceptance check 5) <span class="ok">holds</span>, with a window</h2>
+<p>Stand-in patched with <code>trap "exit 0" TERM</code>.</p>
+<table>
+<tr><th>Signal</th><th>Recorded</th><th>Next</th></tr>
+<tr><td>TERM to server, holder and provider in one <code>kill</code></td><td>died, exit 137 (holder died before <code>exit.json</code>; unknown reads as SIGKILL, <code>held.rs:43</code>)</td><td>started again by the next server</td></tr>
+<tr><td>TERM to the provider alone, holder alive</td><td>exit 0: <code>quit 16:01</code></td><td>stays down</td></tr>
+</table>
+<p>A shutdown reads as quit only if the provider exits 0 and the holder records it before TERM reaches the holder.
+Whether real Claude exits 0 on SIGTERM was not checked.</p>
+
+<h2>What works now</h2>
+<p>Kill, backoff on time, quit, server restart, reboot (simulated), give-up after five, died carrier carried again
+from its step, shutdown TERM counted as died. Tests after the fixes: <code>server::recovery::tests::</code> (7),
+<code>human_session::tests::a_task_conversation…</code>, <code>dto_fixtures::</code> (52),
+<code>lf::commands::session::tests::</code>, <code>context_launch_tests::a_killed_task_conversation</code>; clippy clean.</p>
+
+<h2>Not reached</h2>
+<ul>
+<li>A real Machine restart with three Tasks: simulated with SIGKILL; launchd's own order at logout was not observed.</li>
+<li>Desktop's conversation line: no Desktop build was run; the Swift DTO fixture covers decoding only.</li>
+<li>A launch failure (provider missing from the server's <code>PATH</code>): covered by fixtures, not driven live.</li>
+<li>Real Claude: stand-ins only. They finish no turns, so the restart count never reset here.</li>
+</ul>
+
+<h2>Still wrong or open, worst first</h2>
+<ol>
+<li><span class="open">Restart count outlives a person's quit and resume.</span> After quitting and resuming, the line read
+<code>running (started again 15:39, attempt 3)</code>, and later deaths had fewer starts left. Real turns reset it.</li>
+<li>Run backoffs wait for the 60 s tick (25 s observed); conversations no longer do.</li>
+<li>With the server down, a dead conversation reads <code>closed · starting again</code>.</li>
+<li>A conversation killed before its first turn has no transcript; the stand-in fails each resume five times. Real Claude: unchecked.</li>
+</ol>
+</body></html>

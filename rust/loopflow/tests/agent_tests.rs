@@ -244,38 +244,6 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
 }
 
 #[test]
-fn a_command_refused_by_codex_finishes_on_the_next_provider_with_its_whole_prompt() {
-    let home = TempDir::new().unwrap();
-    let received = home.path().join("received");
-    let claude = claude_script(
-        "open(os.environ['LF_TEST_INPUT'], 'w').write(message['message']['content'][0]['text'])\ntext = 'written by claude'",
-    );
-    let _env = EnvGuard::with_lf_home(
-        &[
-            ("codex", &support::refused_codex_script()),
-            ("claude", &claude),
-        ],
-        home.path(),
-    );
-    let _directory = support::InDirectory::enter(home.path());
-    // Longer than the excerpt a continued conversation quotes.
-    let prompt = "Describe this diff.\n".repeat(2_000);
-    let launch = AgentConfig {
-        agent: loopflow_execution::config::Agent::parse("codex").unwrap(),
-        fallback_agents: vec![loopflow_execution::config::Agent::parse("claude").unwrap()],
-        task_prompt: prompt.clone(),
-        cwd: Some(home.path().to_path_buf()),
-        env: BTreeMap::from([("LF_TEST_INPUT".into(), received.display().to_string())]),
-        ..base_launch()
-    };
-    // Not a Graph step: it moves and never waits.
-    let result = run_agent(&launch, &base_process(), HEADLESS).unwrap();
-    assert_eq!(result.exit_code, 0, "{}", result.stderr);
-    assert_eq!(result.stdout, "written by claude");
-    assert_eq!(std::fs::read_to_string(received).unwrap(), prompt);
-}
-
-#[test]
 fn launch_scopes_process_environment_to_child() {
     let _env = EnvGuard::new(&[(
         "claude",

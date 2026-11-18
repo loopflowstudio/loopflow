@@ -1185,57 +1185,34 @@ fn _climb(
         return next;
     }
     next.resume_token = None;
-    match _history_import(process) {
-        History::Worked(turn) => {
-            next.skill_invocation = None;
-            next.task_prompt = turn;
+    (next.skill_invocation, next.task_prompt) = match _history_import(process) {
+        Ok(Some(turn)) => (None, turn),
+        // The provider refused before the agent said anything: the launch's
+        // own first turn, whole.
+        Ok(None) => (launch.skill_invocation.clone(), launch.task_prompt.clone()),
+        Err(error) => {
+            tracing::warn!(%error, "conversation could not move providers; the task starts over");
+            (None, _with_original_task(AGENT_FAILOVER_PROMPT, launch))
         }
-        // Nothing to continue: the launch's own first turn, whole.
-        History::Unanswered => {
-            next.skill_invocation = launch.skill_invocation.clone();
-            next.task_prompt = launch.task_prompt.clone();
-        }
-        History::Unread => {
-            next.skill_invocation = None;
-            next.task_prompt = _with_original_task(AGENT_FAILOVER_PROMPT, launch);
-        }
-    }
+    };
     next
 }
 
-/// What the conversation holds for the next provider's first turn.
-enum History {
-    /// The agent replied or used a tool: the import `lf session new -a` uses.
-    Worked(String),
-    /// The provider refused before the agent said anything.
-    Unanswered,
-    /// No Session, or a transcript that cannot be read yet.
-    Unread,
-}
-
-fn _history_import(process: &ProcessConfig) -> History {
-    let Some((session_id, _)) = process
+/// The conversation so far as the next provider's first turn, through the
+/// import `lf session new -a` uses. None when the agent has not replied or
+/// used a tool; an error when the run has no Session or its transcript cannot
+/// be read yet.
+fn _history_import(process: &ProcessConfig) -> anyhow::Result<Option<String>> {
+    let (session_id, _) = process
         .runtime
         .as_ref()
         .and_then(|runtime| runtime.session_attachment())
-    else {
-        return History::Unread;
-    };
-    let imported = (|| -> anyhow::Result<Option<String>> {
-        let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
-        let session = store
-            .session(&session_id)?
-            .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
-        crate::ops::human_session::conversation_log::continuation_of_work(&store, &session)
-    })();
-    match imported {
-        Ok(Some(turn)) => History::Worked(turn),
-        Ok(None) => History::Unanswered,
-        Err(error) => {
-            tracing::warn!(%error, "conversation could not move providers; the task starts over");
-            History::Unread
-        }
-    }
+        .ok_or_else(|| anyhow::anyhow!("the run has no Session"))?;
+    let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+    let session = store
+        .session(&session_id)?
+        .ok_or_else(|| anyhow::anyhow!("Session {session_id} is not recorded"))?;
+    crate::ops::human_session::conversation_log::continuation_of_work(&store, &session)
 }
 
 /// The provider's own words for a failure, when it gave any.

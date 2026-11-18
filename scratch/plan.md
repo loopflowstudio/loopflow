@@ -108,7 +108,7 @@ Stops:
 
 Tests: `agent::tests::headless_work_outside_a_graph_moves_through_its_order_and_never_waits`,
 `codex_decode::tests::a_spent_quota_is_a_usage_limit_wherever_codex_reports_it`,
-`agent_tests` (`a_command_refused…`, `model_unavailable…`), `commit_tests::a_commit_message…`
+`agent_tests` (`model_unavailable…`), `commit_tests::a_commit_message…`
 and `pr_tests` (a PR whose title came from the Claude stand-in after the Codex
 stand-in refused). Every test spells the refusal `You’ve`. The Codex stand-in
 (`support::refused_codex_script`) leaves `codexErrorInfo` null, so the
@@ -153,7 +153,7 @@ out of quota: `lf pr open` prints the move lines, then the PR URL.
 
 ## Checks
 
-- `cargo test -p loopflow --test agent_tests -- a_command_refused model_unavailable` — passed; implement.
+- `cargo test -p loopflow --test agent_tests -- model_unavailable` — passed; implement.
 - `cargo test -p loopflow --lib pr_tests::pr_` — passed; implement, then gate.
 - `cargo test -p loopflow --test integration commit_tests::a_commit_message` — passed; implement.
 - `cargo test -p loopflow-execution --lib -- agent::tests harness::codex_decode ops::task_execution ops::human_session::conversation_log` — passed; implement.

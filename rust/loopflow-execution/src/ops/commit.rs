@@ -242,14 +242,14 @@ fn step_commit_message(step: &str, written: Option<&CommitMessage>) -> String {
 /// A hung provider must not hold the Graph or the skill run that asked.
 const COMMIT_MESSAGE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
-/// Where an agent named on the command line stands against the
-/// `commit-message` skill's own preference.
+/// Where an agent named on the command line stands against the message
+/// skill's own preference.
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum MessageAgent<'a> {
     /// `-a`: the person chose the agent for this message.
     Chosen(Option<&'a str>),
-    /// A step commit: the run's agent writes the message only when
-    /// `commit-message` resolves none of its own.
+    /// A step commit: the run's agent writes the message only when the skill
+    /// resolves none of its own.
     Fallback(Option<&'a str>),
 }
 

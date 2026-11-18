@@ -341,6 +341,13 @@ is gone by the query falls through to resume under the same lock.
 
 Compress (2026-11-17): `invocation_intent` reads `resume_intent` only past the NewThread return; `nextest -p loopflow-execution --lib ops::human_session::` (48): pass.
 
+QA (2026-11-17, `scratch/qa.html`): view, ended, take-over, create-and-say-so and wrong input walked in a private Machine.
+Fixed: two `lf resume`s of an ended Session at once left the losing launch's view nested in a held terminal
+(`lf session attach` under the holder, `viewed=1` forever). The losing launch now ends (View attaches only when
+`transport::current()` is none) and its exec'd relay joins the Session's running terminal (`transport::relay`, plain
+terminals only). `transport_tests::simultaneous_resumes_share_one_provider_and_leave_no_view_behind` fails with either
+half reverted; it, six neighbouring `transport_tests`, `ops::human_session::` + `transport::viewer_tests::` (58) and clippy: pass.
+
 Then gate.
 
 Not this Task: what `lf open` itself does. Jack Heart: "lets start with maknig

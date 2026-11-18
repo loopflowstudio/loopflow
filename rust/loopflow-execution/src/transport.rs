@@ -1353,7 +1353,21 @@ pub fn relay(id: &TerminalId, session: Option<&LfSessionId>) -> Result<()> {
     } else {
         None
     };
-    attach_with_terminal(id, session, terminal)
+    attach_with_terminal(id, session, terminal)?;
+    // A delegated launch that lost to a concurrent opening ends without a
+    // provider; its view joins the terminal running the Session instead.
+    // Desktop's relays report the end and reopen by Session themselves.
+    let Some(session) = session.filter(|_| std::env::var_os("LF_SERVER_STATUS").is_none()) else {
+        return Ok(());
+    };
+    // An unreadable store leaves this view ended, as it was before the read.
+    let running = crate::journal::process_ledger()
+        .ok()
+        .and_then(|store| store.session_terminal(session.as_str()).ok().flatten());
+    match running.filter(|running| running != id) {
+        Some(running) => attach_with_terminal(&running, Some(session), None),
+        None => Ok(()),
+    }
 }
 
 /// The held terminal's PTY position the screen shows and the partial event

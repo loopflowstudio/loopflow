@@ -101,3 +101,7 @@
 
 - **`lf resume`'s record is read before launching or delegating**, so a delegated resume returns the Session as it was before the delegated child ran (it used to read after).
 - **A View whose held terminal is gone launches without stopping anything first**; only TakeOver stops the holder (with its diagnostic). `resume_native_session` still stops any agent before resuming.
+
+## Picks made headless (QA, 2026-11-17)
+
+- **A losing concurrent launch's view joins the running terminal only in plain terminals.** Desktop relays (`LF_SERVER_STATUS`) report the end and are assumed to reopen by Session; not checked with a window.

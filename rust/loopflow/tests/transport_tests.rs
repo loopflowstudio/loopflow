@@ -821,6 +821,86 @@ fn a_held_conversation_outlives_its_view() {
     fixture.held_ends(&held);
 }
 
+/// Two `lf resume`s of one Session at once start one provider. Both decide
+/// before either launch runs, so both start a launch terminal; the one that
+/// loses ends, and its view joins the terminal running the conversation
+/// instead of leaving a view nested in a held terminal nobody sees.
+#[test]
+fn simultaneous_resumes_share_one_provider_and_leave_no_view_behind() {
+    let fixture = Fixture::new();
+    let _service = ServerProof::start(&fixture, false);
+    let path = fixture.waiting_provider();
+    let prepared = fixture
+        .command(&["-a", "claude", "resume", "--prepare", "--json"])
+        .env("PATH", &path)
+        .output()
+        .unwrap();
+    assert!(
+        prepared.status.success(),
+        "{}",
+        String::from_utf8_lossy(&prepared.stderr)
+    );
+    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
+    let session = prepared["id"].as_str().unwrap().to_owned();
+    // Hold the Session's launch lock so both openers decide only after it
+    // is released, before either delegated launch has started its provider.
+    let locks = fixture.home.path().join("human-sessions");
+    std::fs::create_dir_all(&locks).unwrap();
+    let name = hex::encode(&Sha256::digest(session.as_bytes())[..16]);
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(locks.join(format!(".{name}.launch.lock")))
+        .unwrap();
+    // SAFETY: flock on a descriptor this test owns.
+    assert_eq!(unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) }, 0);
+    let open = || {
+        let mut command = fixture.command(&["resume", &session]);
+        command.env("PATH", &path);
+        Terminal::spawn_with_placement(command, Some(true))
+    };
+    let mut first = open();
+    let mut second = open();
+    std::thread::sleep(Duration::from_secs(2));
+    drop(lock);
+    first.wait_text("ready for");
+    second.wait_text("ready for");
+    let launches = fixture.launches(1);
+    let provider: libc::pid_t = launches[0].split(':').next().unwrap().parse().unwrap();
+    let _provider = KillOnDrop(provider);
+    first.assert_viewing("the first view");
+    second.assert_viewing("the second view");
+    assert_eq!(fixture.launches(1).len(), 1, "{launches:?}");
+    first.stop();
+    second.stop();
+    let held = fixture.terminal_of(&session);
+    let running = || -> Vec<String> {
+        let sql = fixture.sql();
+        let mut query = sql
+            .prepare("SELECT id FROM held_terminals WHERE ended_at IS NULL")
+            .unwrap();
+        query
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while running() != [held.clone()] {
+        assert!(
+            Instant::now() < deadline,
+            "held terminals still running beside {held}: {:?}",
+            running()
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    // SAFETY: the pid the fixture's provider recorded for itself.
+    unsafe { libc::kill(provider, libc::SIGKILL) };
+    fixture.held_ends(&held);
+}
+
 /// A `claude` stand-in that logs its PID and parent, then waits on its terminal.
 fn parented_provider(fixture: &Fixture) -> String {
     fixture.provider(

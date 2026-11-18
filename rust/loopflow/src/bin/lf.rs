@@ -1516,8 +1516,7 @@ fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<
 
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
-    // The relay avoids the command tree. A reveal records its terminal
-    // association only after the held terminal acknowledges its view.
+    // The relay avoids the command tree.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
         .get(1..4)

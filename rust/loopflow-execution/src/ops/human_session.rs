@@ -963,7 +963,10 @@ pub async fn open(
         View => {
             if let Some(terminal) = store.sqlite.session_terminal(&session.id)? {
                 drop(launch_lock);
-                if crate::transport::current() != Some(&terminal) {
+                // A delegated launch that lost the race to another terminal
+                // ends here; its caller joins that terminal instead of
+                // leaving a view nested inside a held terminal nobody sees.
+                if crate::transport::current().is_none() {
                     // The newest view shows where the conversation runs,
                     // not where it was launched.
                     if let Some(attachment) = store.sqlite.session_attachment(&session.id)? {

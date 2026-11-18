@@ -1140,45 +1140,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn a_spent_quota_is_a_usage_limit_wherever_codex_reports_it() {
-        let error = json!({
-            "message": "You’ve hit your usage limit.",
-            "codexErrorInfo": "usageLimitExceeded",
-            "additionalDetails": null,
-        });
-        let codes = |events: Vec<ConversationEvent>| -> Vec<String> {
-            events
-                .into_iter()
-                .filter_map(|event| match event {
-                    ConversationEvent::Error { code, .. } => Some(code),
-                    _ => None,
-                })
-                .collect()
-        };
-        let notified = display(
-            &mut CodexDecoder::default(),
-            "error",
-            json!({"threadId": "thread_1", "turnId": "turn_1", "error": error, "willRetry": false}),
-        );
-        assert_eq!(codes(notified), ["provider_rate_limited"]);
-        let completed = display(
-            &mut CodexDecoder::default(),
-            "turn/completed",
-            json!({"threadId": "thread_1", "turn": {"id": "turn_1", "status": "failed", "error": error}}),
-        );
-        assert_eq!(codes(completed), ["provider_rate_limited"]);
-        let disconnected = display(
-            &mut CodexDecoder::default(),
-            "turn/completed",
-            json!({"threadId": "thread_1", "turn": {"id": "turn_1", "status": "failed", "error": {
-                "message": "stream disconnected",
-                "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": null}},
-            }}}),
-        );
-        assert_eq!(codes(disconnected), ["codex_error"]);
-    }
-
     fn display(decoder: &mut CodexDecoder, method: &str, params: Value) -> Vec<ConversationEvent> {
         decoder
             .decode(&json!({"method": method, "params": params}), None)

@@ -63,3 +63,13 @@
 - **`-a claude` with every Claude model refused** ends "add another agent to
   `agents`", which the pin ignores. A launch cannot tell a pin from an
   unconfigured default, where that advice is right.
+
+- **Sync onto main (2026-11-18) took main's `record_session_agent` and
+  `codex_decode::error_code`.** Main had landed both independently. Its
+  version writes `provider`/`model` on every retry, so a model move inside one
+  provider now updates `model` too (the note above said it stayed). Its
+  `error_code` also maps `modelNotFound`, `unauthorized` and
+  `serverOverloaded`, so the branch's text-only classification of those two is
+  now a second reader. The branch's `a_spent_quota_is_a_usage_limit_wherever_codex_reports_it`
+  repeated main's `each_stated_cause_has_its_code_on_the_error_and_on_the_failed_turn`
+  and is deleted.

@@ -134,8 +134,7 @@ async fn ensure_first_project(store: &Store, wave: &crate::work::wave::Wave) -> 
             loopflow_storage::graph_process::RunOwner::ProjectActivation,
         );
     }
-    let acquisition = super::planning_sync::lock_wave_planning(wave).await?;
-    super::project::import_binding(store, wave, &acquisition)?;
+    let _acquisition = super::planning_sync::lock_wave_planning(wave).await?;
     let id = store
         .sqlite
         .ensure_project(wave.id(), wave.slug())

@@ -3334,8 +3334,8 @@ mod tests {
             .task_ids(),
             [active]
         );
-        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
-            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,1)", [active]).unwrap();
+        db.execute("INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+            VALUES('own_55555555555555555555555555555555',?1,'recorded',NULL,NULL,3,3000,(SELECT id FROM machines WHERE is_local=1),1)", [active]).unwrap();
         store
             .sqlite
             .record_program_status(

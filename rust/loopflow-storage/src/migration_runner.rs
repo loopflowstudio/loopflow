@@ -384,11 +384,6 @@ pub(crate) fn validate_persisted_json(conn: &rusqlite::Connection) -> StoreResul
             "dashboard_id",
             "arrangement_json",
         )?);
-        failures.extend(validate_json_column::<
-            crate::work::selection::WorkPaneLayout,
-        >(
-            conn, "work_pane_layouts", "work_id", "layout_json"
-        )?);
         failures.extend(validate_json_column::<crate::work::selection::SlotLayout>(
             conn,
             "dashboards",

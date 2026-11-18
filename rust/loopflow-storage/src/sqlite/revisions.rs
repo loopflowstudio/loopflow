@@ -136,11 +136,9 @@ mod tests {
         "command_answers",
         "creation_receipts",
         "access_profiles",
-        "pm_project_name_cutover",
         "planning_user",
         "planning_peer_changes",
         "planning_peer_observed",
-        "project_binding_imports",
         "blob_tokens",
         // Desktop reads GitHub people once per repository through `lf repo people`.
         "github_people",
@@ -149,9 +147,7 @@ mod tests {
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",
-        // Rental capacity is read by `lf pool`/`lf ondemand`, not workspace surfaces.
-        "ondemands",
-        "pools",
+        // Owned Machines' pools are read by `lf machine pool`, not workspace surfaces.
         "pool_machines",
         "provider_account_limits",
         "provider_account_switches",
@@ -163,18 +159,23 @@ mod tests {
         // Delivery diagnostics are explicit CLI reads, not workspace projections.
         // A busy Session's pending move; its Stop hook reads it, no view does.
         "session_moves",
-        "session_steers",
         "steer_adapters",
-        "steer_batches",
         "steer_delivered",
-        "steer_deliveries",
         "store_revisions",
         "task_linear_ingested_comments",
         // A Task's last reading is compared by the next reader; its news is the steers.
         "task_update_readings",
-        "tool_responses",
         // Wave retry receipts are read only by explicit lifecycle operations.
         "wave_lifecycle_operations",
+        // Leaving (LOO-954): nothing reads or writes these.
+        "ondemands",
+        "pm_project_name_cutover",
+        "pools",
+        "project_binding_imports",
+        "session_steers",
+        "steer_batches",
+        "steer_deliveries",
+        "tool_responses",
     ];
 
     fn store() -> (tempfile::TempDir, SqliteStore) {

@@ -289,15 +289,6 @@ pub struct WorkIdentity {
     pub external_id: Option<String>,
 }
 
-fn deleted_task_issues_in(
-    conn: &Connection,
-    wave_id: &WaveId,
-) -> StoreResult<std::collections::HashSet<String>> {
-    let mut statement = conn.prepare("SELECT issue_id FROM task_deletions WHERE wave_id=?1")?;
-    let rows = statement.query_map([wave_id.as_str()], |row| row.get::<_, String>(0))?;
-    rows.map(|row| row.map_err(StoreError::from)).collect()
-}
-
 pub fn read_nonterminal_task_worktrees(path: &Path) -> StoreResult<Vec<PathBuf>> {
     Ok(read_task_worktree_ownership(path)?
         .into_iter()
@@ -831,14 +822,6 @@ impl SqliteStore {
         }
         conn.execute_batch(&crate::migration_runner::migration_sql_for_test(name))?;
         Ok(())
-    }
-
-    pub fn deleted_task_issues(
-        &self,
-        wave_id: &WaveId,
-    ) -> StoreResult<std::collections::HashSet<String>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        deleted_task_issues_in(&conn, wave_id)
     }
 
     pub fn upsert_wave_prepared(

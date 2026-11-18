@@ -188,8 +188,9 @@ pub struct GraphExecutionFacts {
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
 
-/// The Graph a Task took up and never ran: no run carries it and no
-/// GraphProcess was started for it. A conversation opening on such a Task
+/// The Graph a Task took up and never ran: it stands at `start`, no run
+/// carries it and no GraphProcess was started for it. A Task waiting at an
+/// interactive step has run. A conversation opening on such a Task
 /// owes its setup, and the Task reads as starting that Graph.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnrunGraph {
@@ -205,7 +206,8 @@ fn unrun_graphs_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, 
             "SELECT t.task_id,json_extract(t.graph,'$.name'),
                 (SELECT e.kind_json FROM task_events e WHERE e.task_id=t.task_id ORDER BY e.id DESC LIMIT 1)
              FROM task_graphs t
-             WHERE t.task_id IN (SELECT value FROM json_each(?1)) AND t.run_start IS NULL
+             WHERE t.task_id IN (SELECT value FROM json_each(?1)) AND t.step='start'
+               AND t.run_start IS NULL
                AND NOT EXISTS(SELECT 1 FROM graph_processes g WHERE g.task_id=t.task_id)",
         )?
         .query_map([ids], |row| {

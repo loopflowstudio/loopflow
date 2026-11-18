@@ -1030,6 +1030,10 @@ mod tests {
                     env!("CARGO_MANIFEST_DIR"),
                     "/tests/fixtures/migrations/planning_local_sessions.sql"
                 ))
+                .replace(
+                    "UPDATE tasks SET primary_session_id='session-proof' WHERE id='task-proof';",
+                    "INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task-proof','session-proof');",
+                )
                 .replace("task-proof", task.as_str())
                 .replace("wave-proof", local_wave.as_ref().unwrap().as_str()),
             )

@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
-use loopflow_execution::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -364,7 +363,6 @@ writes! {
         task: Option<String>,
         wave: Option<String>,
         agent: Option<String>,
-        intent: SessionOpenIntent,
     } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session()?,
 
@@ -997,17 +995,6 @@ writes! {
         &[("destination".to_owned(), destination.clone())].into(),
     )?,
 
-    /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
-    #[serde(rename = "desktop.layout.save")]
-    DesktopLayoutSave {
-        directory: PathBuf,
-        work: String,
-        layout: String,
-    } => loopflow_storage::work::selection::WorkPaneLayout;
-    { work, layout, .. } => {
-        super::desktop::save_layout(None, directory, work, &mut layout.as_bytes())?
-    },
-
     /// `lf config set <key> <value> <destination flags> --json`: declare a
     /// setting in the destination's file; `value` is YAML.
     #[serde(rename = "config.set")]
@@ -1093,7 +1080,6 @@ impl Write {
                 task,
                 wave,
                 agent,
-                intent,
                 ..
             } => {
                 let mut words = Vec::new();
@@ -1104,7 +1090,6 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
-                words.extend(intent.flag());
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);
@@ -1152,7 +1137,6 @@ impl Write {
         match self {
             Self::TaskSave { content, .. } => Some(content),
             Self::DesktopDashboardSlots { slots, .. } => Some(slots),
-            Self::DesktopLayoutSave { layout, .. } => Some(layout),
             _ => None,
         }
     }
@@ -1213,8 +1197,7 @@ impl Write {
             | Self::DesktopDashboardHide { directory, .. }
             | Self::DesktopDashboardShow { directory, .. }
             | Self::DesktopDashboardSlots { directory, .. }
-            | Self::DesktopDashboardMove { directory, .. }
-            | Self::DesktopLayoutSave { directory, .. } => directory,
+            | Self::DesktopDashboardMove { directory, .. } => directory,
             Self::DesktopPortfolioSet { .. }
             | Self::AccountDisconnect { .. }
             | Self::AccountConnect { .. }
@@ -1310,7 +1293,7 @@ mod tests {
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1"}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
-            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
+            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,
@@ -1359,7 +1342,7 @@ mod tests {
         };
         assert_eq!(
             spelled(
-                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#
+                r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#
             ),
             [
                 "lf",

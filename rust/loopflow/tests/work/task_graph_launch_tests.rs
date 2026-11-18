@@ -1096,16 +1096,21 @@ impl GraphTask {
             &lf,
             format!(
                 r#"#!/usr/bin/env python3
-import json, os, sqlite3, sys
+import json, os, sqlite3, subprocess, sys
 from pathlib import Path
-if sys.argv[1:4] == ['session', 'resume', '--start-if-free']:
+if sys.argv[1:3] == ['session', 'resume']:
     home = Path(os.environ['LF_HOME'])
+    # The Graph's background Task conversation resumes the same Session; only
+    # lf open's resume is the opening under test.
+    parent = subprocess.run(['ps', '-o', 'command=', '-p', str(os.getppid())], capture_output=True, text=True).stdout.split()
+    if 'open' not in parent[1:]:
+        sys.exit(0)
     # Capture completion at attachment, not after the caller exits.
     with sqlite3.connect(home / 'loopflow.db') as db:
         outcomes = [row[0] for row in db.execute('SELECT p.outcome FROM processes p JOIN graph_processes g ON g.lf_process_id=p.id')]
     (home / 'opened-graphs.json').write_text(json.dumps(outcomes))
     with (home / 'opened').open('a') as opened:
-        opened.write(sys.argv[4] + '\n')
+        opened.write(sys.argv[3] + '\n')
     sys.exit(9 if (home / 'open-fails').exists() else 0)
 os.execv({binary}, [{binary}, *sys.argv[1:]])
 "#,

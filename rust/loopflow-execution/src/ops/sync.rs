@@ -217,16 +217,7 @@ pub(crate) fn sync_for_delivery(
 
 /// Continue a local sync after its conflict paths have been resolved.
 pub fn continue_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    continue_sync_after_authorization(repo, adopt, || Ok(()))
-}
-
-pub fn continue_sync_after_authorization(
-    repo: &Path,
-    adopt: bool,
-    before_mutation: impl FnOnce() -> OpsResult<()>,
-) -> OpsResult<()> {
     let authorization = authorize_sync_control(repo, adopt)?;
-    before_mutation()?;
     let result = continue_merge(repo, authorization.owner().target_sha.as_deref())?;
     if result.success {
         verify_control_completion(repo, authorization.owner())?;
@@ -243,16 +234,7 @@ pub fn continue_sync_after_authorization(
 
 /// Abort a local sync that was left open for inline resolution.
 pub fn abort_sync_for_resolution(repo: &Path, adopt: bool) -> OpsResult<()> {
-    abort_sync_after_authorization(repo, adopt, || Ok(()))
-}
-
-pub fn abort_sync_after_authorization(
-    repo: &Path,
-    adopt: bool,
-    before_mutation: impl FnOnce() -> OpsResult<()>,
-) -> OpsResult<()> {
     let authorization = authorize_sync_control(repo, adopt)?;
-    before_mutation()?;
     abort_merge(repo)?;
     authorization.complete()?;
     Ok(())

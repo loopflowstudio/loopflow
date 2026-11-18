@@ -60,7 +60,10 @@
         "terminal-1"
       ],
       "work_path": "product / LOO-1",
-      "actions": [],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "graph_membership": {
         "kind": "independent"
       },

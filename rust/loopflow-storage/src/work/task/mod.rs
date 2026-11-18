@@ -147,21 +147,6 @@ pub enum GithubObservationResult {
     Degraded { reason: String },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TaskPrRepairKind {
-    AvoidableRebaseAgent,
-    ManualGitRepair,
-}
-
-impl TaskPrRepairKind {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::AvoidableRebaseAgent => "avoidable_rebase_agent",
-            Self::ManualGitRepair => "manual_git_repair",
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 #[non_exhaustive]

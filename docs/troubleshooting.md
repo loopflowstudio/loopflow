@@ -75,8 +75,9 @@ The surviving conversation keeps its draft and pending requests, and the selecte
 pane regains focus when input is ready. Switching Tasks is unnecessary.
 
 While **Opening… Input paused** or **Reconnecting…** appears, the screen may be
-readable before typing is available. If another view has control, choose
-**Take back** only when you want to move input here; Refresh does not take it.
+readable before typing is available. Other views of the conversation never
+block typing here: every view types. A provider running in a client lf cannot
+share is taken over when the pane opens; that client ends.
 If the provider has ended, use the offered resume action to continue its history.
 Refresh never repeats a submitted message or restarts the Task's Graph.
 
@@ -101,8 +102,6 @@ open; its screen and local reading actions remain available. If automatic retrie
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
 running and restores its status automatically when that channel returns.
-A read-only pane's **Move here** requests control explicitly; a lost connection
-alone never takes it from another viewer.
 
 If the diagnosis reports disabled background access, enable Loopflow in macOS
 System Settings, or enable its user service on Linux. Retry and status do not

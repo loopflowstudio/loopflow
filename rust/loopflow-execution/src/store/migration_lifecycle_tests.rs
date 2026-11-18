@@ -15,7 +15,7 @@ fn settings_authority_preserves_task_history_and_migrates_preferences() {
     crate::config::migrate::preflight(&conn, &mut guards).unwrap();
     drop(guards);
     upgrade_from_migration(&conn, "settings_authority");
-    let retained: (String, String) = conn.query_row("SELECT t.worktree,s.provider FROM tasks t JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
+    let retained: (String, String) = conn.query_row("SELECT c.worktree,s.provider FROM tasks t JOIN task_checkouts c ON c.task_id=t.id JOIN agent_sessions s ON s.task_id=t.id WHERE t.id='retained'", [], |row| Ok((row.get(0)?, row.get(1)?))).unwrap();
     assert_eq!(retained, ("/repo.task".into(), "claude".into()));
     let values: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&std::fs::read_to_string(home.path().join("config.yaml")).unwrap())

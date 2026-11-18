@@ -348,11 +348,6 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         [SESSION],
     )
     .unwrap();
-    let opaque: (String, String, String) = conn
-        .query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?))
-        })
-        .unwrap();
     let mutations: std::collections::BTreeMap<String, crate::planning_exchange::PlanningMutation> =
         conn.prepare("SELECT id,mutation FROM planning_peer_changes ORDER BY id")
             .unwrap()
@@ -377,28 +372,11 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         (SESSION.to_ascii_lowercase(), "not JSON".to_string())
     );
     assert_eq!(
-        conn.query_row("SELECT worktree,branch,base_commit FROM tasks", [], |r| Ok(
-            (
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?
-            )
-        ))
-        .unwrap(),
-        opaque
-    );
-    assert_eq!(
         conn.query_row("SELECT provider_thread FROM agent_sessions", [], |r| r
             .get::<_, String>(
             0
         ))
         .unwrap(),
-        "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
-    );
-    assert_eq!(
-        conn.query_row("SELECT request_id FROM tool_responses", [], |r| r
-            .get::<_, String>(0))
-            .unwrap(),
         "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"
     );
     // `ship_it` drops Workflows short of `end`; the next run takes up a graph.
@@ -480,14 +458,6 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
     assert!(conn
         .execute(
             "UPDATE tasks SET external_issue_id=upper(external_issue_id)",
-            []
-        )
-        .unwrap_err()
-        .to_string()
-        .contains("canonical identity"));
-    assert!(conn
-        .execute(
-            "UPDATE tasks SET checkout_machine_id=upper(checkout_machine_id)",
             []
         )
         .unwrap_err()

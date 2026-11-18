@@ -1188,9 +1188,6 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
             )?;
             Ok(())
         }
-        TaskCommand::View { issue, once } => {
-            loopflow::lf::commands::task_view::run(repo, issue.as_deref(), *once)
-        }
         TaskCommand::Status {
             issue,
             json,
@@ -1596,8 +1593,7 @@ fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<
 
 fn run() -> anyhow::Result<()> {
     // A terminal relay is exec'd by the process that resolved its connection.
-    // The relay avoids the command tree. A passive reveal records its terminal
-    // association only after the held terminal acknowledges input control.
+    // The relay avoids the command tree.
     let mut raw_args: Vec<String> = std::env::args().collect();
     if raw_args
         .get(1..4)
@@ -1606,16 +1602,14 @@ fn run() -> anyhow::Result<()> {
         journal::mark_effect_free_read();
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        let replace = std::env::var_os("LF_RELAY_IF_FREE").is_none();
-        std::env::remove_var("LF_RELAY_IF_FREE");
-        return loopflow_execution::transport::relay_over(&raw_args[4..], replace);
+        return loopflow_execution::transport::relay_over(&raw_args[4..]);
     }
     if let Some(relay) = loopflow_execution::transport::relay_args(&raw_args) {
         journal::mark_effect_free_read();
         journal::continue_after_exec()?;
         ctrlc::set_handler(|| loopflow_execution::agent::exit_on_interrupt())
             .expect("failed to set Ctrl+C handler");
-        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref(), relay.moved)?;
+        loopflow_execution::transport::relay(&relay.terminal, relay.session.as_ref())?;
         // JSON return opens the ordinary projection after relaying ends.
         if let Some(session) = relay.json_session {
             loopflow::lf::commands::session::print_returned(&session)?;
@@ -1885,7 +1879,6 @@ fn run() -> anyhow::Result<()> {
                 Commands::Config {
                     cmd: loopflow::lf::ConfigCommand::Settings { .. }
                 } | Commands::Open(_)
-                    | Commands::Workspace(_)
             )
         )
     {
@@ -2224,9 +2217,6 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     };
     if let Some(Commands::Open(args)) = &cli.command {
         return loopflow::lf::commands::open::explain(cli, args, json);
-    }
-    if let Some(Commands::Workspace(args)) = &cli.command {
-        return loopflow::lf::commands::open::explain_workspace(cli, args, json);
     }
     if let Some(Commands::Task {
         cmd:
@@ -2703,10 +2693,6 @@ fn dispatch(mut cli: Cli, args: &[String]) -> anyhow::Result<()> {
     if let Some(Commands::Desktop { cmd }) = &cli.command {
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
-    if let Some(Commands::Workspace(workspace)) = &cli.command {
-        journal::observe_process(args);
-        return loopflow::lf::commands::open::run_workspace(&cli, workspace);
-    }
     if let Some(Commands::Open(open)) = &cli.command {
         // Bounded observation records this Process and the calling
         // conversation, which tells a link to the caller's own Work apart.
@@ -3073,7 +3059,7 @@ fn execute_command(
                 None => loopflow::lf::commands::run::run(repo, None, Some(&text), cli),
             })
         }
-        Some(Commands::Desktop { .. } | Commands::Open(_) | Commands::Workspace(_)) => {
+        Some(Commands::Desktop { .. } | Commands::Open(_)) => {
             unreachable!("Desktop and opening dispatch precede Work preparation")
         }
         Some(Commands::Config { cmd }) => match cmd {

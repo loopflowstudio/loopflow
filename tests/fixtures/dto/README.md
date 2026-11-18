@@ -117,18 +117,13 @@ no ownership; execution locations never enter planning exchange.
 `task_files_frames.json` preserves request/Task/Machine/checkout identity and distinguishes filesystem invalidation from heartbeat.
 
 `dashboard.json` pins an independently identified Dashboard and its expression
-and arrangement; Task panes and drafts remain Work-owned. Rust and Swift round-trip
+and arrangement; pane layouts and drafts stay on each Mac. Rust and Swift round-trip
 it without manufacturing defaults.
 
 `view_plan.json` pins the shared headless selection/arrangement plan, including
 repeated Work, duplicate suppression and a backlog Task without a primary Session.
 Rust round-trips it; Swift decodes the same plan directly and from `lf desktop view list --subscribe` in `subscribe_frames.json`.
-
-`pane_layout.json` covers portable pane content, focus versus explicit zoom, hidden
-members, two Shell tabs, two Files tabs, selected-tab identities and file-draft
-base recovery. Shell identity is independent of its tool pane; saved intent never
-asserts a live native process. `view_plan.json` includes query discovery
-metadata, independent Dashboard identity and portable tile-face intent.
+It includes query discovery metadata and independent Dashboard identity.
 
 `sessions.json` pins `lf session list --json`: one Session record each, as the
 server sends it.

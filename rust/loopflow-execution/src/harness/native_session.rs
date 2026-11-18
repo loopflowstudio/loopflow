@@ -37,20 +37,6 @@ pub fn launch_session(
     run_session_command_with_env(&command, &environment, agent_session, launch_lock, capture)
 }
 
-pub(crate) fn resume_session(
-    artifact_key: &String,
-    provider_session: &crate::session_record::ProviderSessionRef,
-    named_work: bool,
-) -> Result<()> {
-    resume_session_with_env(
-        artifact_key,
-        Some(provider_session),
-        &BTreeMap::new(),
-        None,
-        named_work,
-    )
-}
-
 /// Continue a recorded conversation. `named_work` is the resume command's: a
 /// Task or Wave resume starts only beside the Machine server.
 pub fn resume_session_with_env(
@@ -1033,7 +1019,7 @@ fn native_return(
         );
     let command = format!("lf resume {session}");
     crate::transport::native_client(
-        format!("Left {name}. Continue with: {command}  (Ctrl+] steps away without stopping)"),
+        format!("Left {name}. Continue with: {command}"),
         format!("Detached from {name}; it keeps running. Return with: {command}"),
     )
 }

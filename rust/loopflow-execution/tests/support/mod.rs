@@ -247,11 +247,7 @@ pub fn codex_app_server_script(output: &str, setup: &str) -> String {
     let output = serde_json::to_string(output)
         .expect("encode mock Codex output")
         .replace('\'', r#"'"'"'"#);
-    let rollout = concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/codex_rollout.py"
-    )
-    .replace('\'', r#"'"'"'"#);
+    let rollout = codex_rollout_script();
     // Codex names threads and turns with UUIDs; a resumed thread keeps its id.
     codex_socket_script(&r#"#!/bin/sh
 __SETUP__
@@ -275,6 +271,18 @@ while read -r line; do :; done
     .replace("__SETUP__", setup)
     .replace("__ROLLOUT__", &rollout)
     .replace("__OUTPUT__", &output))
+}
+
+/// The script that appends a completed turn to the rollout Codex keeps,
+/// where lf reads final answers, quoted for a single-quoted shell word:
+/// `python3 '<script>' THREAD TURN ANSWER_JSON`.
+#[allow(dead_code)] // Shared provider mock compiled into multiple test crates.
+pub fn codex_rollout_script() -> String {
+    concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/support/codex_rollout.py"
+    )
+    .replace('\'', r#"'"'"'"#)
 }
 
 #[allow(dead_code)] // Shared provider transport compiled into multiple test crates.

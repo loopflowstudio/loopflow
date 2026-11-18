@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, slices 4–5 built; next: gate)
+## Status (2026-11-18, slices 4–5 built; next: slice 4b names, then gate)
 
 LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
 slice of this PR is built: slice 2a, the owner and carrier slices, the Session
@@ -41,6 +41,29 @@ Quotes and the OS-scan measurement: `questions.md`.
   and Graph rows a released exporter wrote.
 - Docs and operate skills name `lf session list`, `lf graph list
   --processes --state current` and `lf graph show` in place of `lf ps`.
+
+**Slice 4b (concept review after slice 4, 2026-11-18): name what replaced
+`lf ps` for what it lists.** Slice 4 made `lf graph list --processes` the
+documented "what ran" command (docs, `repo_operate`, `task_operate`), so the
+deleted concept is now the name people type. The "Process-line slice" the
+rename was waiting for was slice 4 itself; nothing else will carry it.
+
+- `lf graph list --processes` → `--runs` ("Graph runs instead of reusable
+  templates"; `lf task runs` already uses the word). Delete `--processes`,
+  no alias. Follow it through `navigation.rs`' "require --processes" error,
+  `task_row.rs`, `ops::task`, `task_work.rs`, the 12 doc/skill lines, and
+  fixtures (`graph_discovery_tests`, `world_recipes`, `graph_tests`,
+  `task_graph_launch_tests`). `task_operate.md:22`'s
+  `lf graph show <graph-id> --processes` drops the flag (`graph show`
+  accepts a run id).
+- Read kinds: `process.get` (= `lf graph show <id>`) → `graph.run.get`;
+  `process.history` (= `lf session history show`) → `session.history`.
+  Rust `Read`, Swift `RegistryQuery.swift`, `server/README.md`,
+  `server_schema.json` in one change; Desktop and lf ship together.
+- Stays for a follow-up Task (file it at gate): the type and DTO rename
+  `GraphProcess*` → `GraphExecution*`/`GraphRun*`, `work.graph_processes`,
+  `graph_process.rs` (42 files, Rust and Swift). Internal names; nobody
+  types them.
 
 **Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
 `record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a
@@ -96,10 +119,8 @@ which changed no migration.
 - `lf ps` and `lf top` are deleted (2026-11-17: "i thikn we delete lf ps?");
   `lf session list` and `lf graph list` show what runs. `lf graph show
   <RUN_ID>` stays ("what else would it accept").
-- Wire names still saying Process (`GraphStepProcess`,
-  `work.graph_processes`, `graph_process.rs`) rename with the Process-line
-  slice in one DTO change; `RecordKind::GraphProcess*` goes with the export
-  in slice 4.
+- User-facing names lose Process in slice 4b; the internal `GraphProcess*`
+  type rename is a follow-up Task.
 
 ## Problem and outcome
 

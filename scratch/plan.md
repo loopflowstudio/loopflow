@@ -1,0 +1,271 @@
+# LOO-937: Store each Task fact once, with shared facts apart from one Machine's
+
+## Outcome
+
+Each fact about a Task has one home, and nothing reads a second copy. A store
+test fails the moment code reads or writes a member marked leaving, so a
+duplicate can't quietly come back. A Process and a Session record their Task
+when they start; membership reads that column instead of matching paths, and
+`relocated_task_processes` with its two-sided queries goes.
+
+What people notice:
+- A Task's Processes and Sessions stay with it when its repository moves on
+  disk, and when a checkout path is later reused by another clone. Today that
+  depends on a frozen-pair table and a `sqlite_master` probe on every read.
+- `lf task status` and the Desktop Task list show the same title, URL and
+  order on every surface, because there is one stored value per fact.
+- Dragging a Task tile in Desktop's Working board changes its rank, the same
+  order Linear and `lf task` show. Today the board keeps a separate order
+  that nothing else sees.
+
+## What the live store says (2026-11-17, `~/.lf/loopflow.db`, read-only)
+
+1,391 Tasks, 1,286 `pm_items`, 89 tables, 736 columns, `tasks` 42 columns,
+1.02 GB.
+
+| Copy | Disagreements | What it is |
+|---|---|---|
+| `tasks.primary_session_id` vs `task_primary_sessions` | 78 | old column, leaving (LOO-935 marked it) |
+| `tasks` checkout columns vs `task_checkouts` | 55 (brief) | old columns, leaving |
+| `tasks.issue_title` vs `pm_items.name` | 4 | **not a duplicate**: desired vs observed |
+| `tasks.planning_state` vs `pm_items.state` | 15 | same: desired vs observed |
+| `tasks.planning_rank` vs `pm_items.rank` | 605 | same, and provider rank only seeds new Tasks |
+| `tasks.planning_url/branch_name/team_id` vs `pm_items` | 19 | **true duplicate**: provider facts nobody edits |
+| `tasks.issue_title` vs `task_linear_observations.last_title` | 14 | change detector copy |
+| `tasks.issue_title` vs `task_creation_intents.title` | 68 | idempotency-check copy |
+| `projects.project_name` vs `pm_projects.name` | 4 | desired vs observed (same as Tasks) |
+| `task_primary_sessions` row vs its Session's `task_id` | 3 | two homes for "which Task" |
+| `agent_sessions` with no `task_id`, cwd inside a checkout | 2,659 | membership only by path |
+| `processes` inside a checkout (by path) | 156,651 of 187,600 | membership only by path |
+
+## The finding that reshapes the brief
+
+`tasks` vs `pm_items` (and `projects` vs `pm_projects`) is not one fact stored
+twice. `tasks` holds the value lf shows and edits (desired); `pm_items` holds
+the last thing the provider said (observed), and it is the merge base:
+`field_baseline` reads `pm_items.name` into `tracker_actions.base_json`
+(`sqlite/tracker_actions.rs:512-619`), and `planning/rules.rs:112-200` decides
+confirmed/conflicted from the three values. Collapsing them would break the
+conflict answer LOO-925 (#1957) just shipped. So both stay, with names that say
+which is which, and what gets removed is the copies inside each side:
+
+- Provider facts nobody edits locally (`planning_url`, `planning_branch_name`,
+  `planning_team_id`, `planning_provider_revision`) live only in `pm_items`.
+  `tasks` keeps only values a person or lf can set.
+- The observed side keeps one representation of observed order: `pm_items.rank`
+  within the Project. `pm_projects.task_order_json` is derivable from it
+  (`linear_acceptance.rs:470-500` only accepts a list whose every item already
+  matches `pm_items`), so it goes.
+- `task_linear_observations.last_title/last_description/last_revision` are a
+  third copy used only to decide whether to steer the agent with a new
+  definition (`children.rs:1100-1116`). `pm_items` already holds the previous
+  observation; the steer compares against it before `put_item` overwrites it.
+- `task_creation_intents.title/description` are read only to check that a
+  repeated create request matches (`children.rs:62-90`). `creation_receipts`
+  already keeps a request fingerprint; the check uses it.
+
+## Inventory (reviewed before code changes)
+
+Kept, merged or removed, and why. "Leaving" means: stop reading and writing
+now, mark `-- leaving: <member> LOO-877` (or the Task named), drop after the
+30-day window (`scripts/check_migrations.py` `STAGING_DAYS`).
+
+### `tasks`: what a Task is (shared, no Machine facts)
+
+| Column | Verdict | Why |
+|---|---|---|
+| id, repository_id, project_id, issue_identifier, external_issue_id, created_at, updated_at | keep | identity, binding to the provider (`external_issue_id` is how `pm_items` joins) |
+| issue_title, issue_description, planning_state, planning_completed_at, planning_due_date, planning_assignee, planning_rank, planning_deleted_at | keep | desired values; edits and the queue write them (`planning_write.rs:86-96`) |
+| planning_revision | keep | the peer exchange's clock (`planning_peers.rs`) |
+| workspace_slug, abandon_reason, abandoned_at, completion_request, completion_error, paused, shipped_at | keep | Task lifecycle |
+| planning_url, planning_branch_name, planning_team_id, planning_provider_revision | **leaving** | provider facts; readers join `pm_items` (`task_details.rs`, `children.rs`) |
+| pm_snapshot_synced_at | **leaving** | when the provider was last read = `pm_items.observed_at` |
+| planning_completed | **leaving** | old boolean; `planning_state` is set on every row (0 rows rely on the fallback in `TASK_COLUMNS`) |
+| worktree, branch, base_commit, parent_pr_id, checkout_machine_id, primary_session_id, ship_* (6) | already leaving (LOO-935) | finish the reads: `sqlite/processes.rs:350` prune check still reads `tasks.ship_lf_process_id`; `sqlite.rs:379-410` keeps a pre-`task_checkouts` fallback path for old registries — delete it |
+| regressed_in | already leaving (LOO-730) | untouched |
+
+Renaming `issue_*`/`planning_*` to the product's words is a table rebuild that
+keeps every column; it belongs with LOO-939 (naming), not here. Noted in
+`scratch/questions.md`.
+
+### Provider side (shared observed copy)
+
+| Member | Verdict | Why |
+|---|---|---|
+| `pm_items` | keep | observed Task, merge base. Gains nothing. |
+| `pm_projects` (minus `task_order_json`) | keep | observed Project, merge base |
+| `pm_projects.task_order_json` | **leaving** | observed order = `pm_items` of the Project by `rank`; `observed_order()` (`planning_order.rs:47`) derives it |
+| `projects` provider-only columns (`planning_provider_revision`, `planning_initiatives`, `planning_teams`, `pm_snapshot_synced_at`) | check in slice 3 | same test as Tasks: if nothing edits it locally and `pm_projects` has it, it leaves |
+| `task_linear_observations.last_title/last_description/last_revision` | **leaving** | change detector reads the prior `pm_items` row |
+| `task_linear_observations.last_success_at/degraded_reason/updated_at` | keep | observation health per Task; no other home |
+| `task_creation_intents.title/description` | **leaving** | repeat-check uses `creation_receipts.fingerprint`. The table's export columns and the table itself are LOO-938's (one queue) |
+
+### Order
+
+| Member | Verdict | Why |
+|---|---|---|
+| `tasks.planning_rank` | keep: the one order | position within a Project or among standalone Tasks; syncs as an `order` action |
+| `task_orders` | **leaving** | Desktop Working-board order, repository-wide, never synced. Board sorts by Project rank then Task rank; a tile Move calls `reorder_in` |
+| `pm_projects.task_order_json` | **leaving** | see above |
+| `pm_items.rank` | keep | observed rank |
+
+### Execution (keyed by Machine)
+
+| Member | Verdict | Why |
+|---|---|---|
+| `task_checkouts`, `task_primary_sessions`, `task_ship_events` | keep | LOO-874's homes |
+| `task_prs.branch/base_commit/parent_pr_id` | keep for now | trigger-copied from `task_checkouts` and enforced equal (`task_machine_local.sql:105-140`); PR delivery reads them for merged PRs too, where the checkout is gone. Not a free duplicate; questions.md |
+| `pr_landings.worktree` | keep | a landing is supervised on one Machine (`supervisor_machine_id`) and may have no Task (`lf land` in any checkout). Execution table already |
+| `processes.task_id` | **add** | the Task a Process belongs to, written at insert |
+| `agent_sessions.task_id` | keep, backfill | becomes the only Session→Task link |
+| `relocated_task_processes` | **leaving** | membership no longer depends on paths |
+
+## Source of truth after the change
+
+- Task (shared): `tasks`. Observed provider Task: `pm_items`. Queue: `tracker_actions` (LOO-925/938).
+- Checkout here: `task_checkouts`. Primary conversation here: `task_primary_sessions`. Auto-Ship: `task_ship_events`.
+- A Process's Task: `processes.task_id`. A Session's Task: `agent_sessions.task_id`.
+- Order: `tasks.planning_rank` (desired), `pm_items.rank` (observed).
+
+## Process and Session membership
+
+Writers:
+- `record_process_in` (`sqlite.rs:1584`) and the agent insert
+  (`sqlite/processes.rs:674`) are the only production inserts. The lf insert
+  resolves `task_id` in the same statement: the explicit Task when the launch
+  names one, else the deepest `task_checkouts` row containing `cwd` (the
+  recursive ancestor probe already in `session_tasks`, `task_work.rs:89`).
+  The agent insert copies `agent_sessions.task_id`.
+- Session creation already sets `task_id` for `--task` launches; a Session
+  started inside a checkout without `--task` gets it from the same probe.
+
+Readers: `process_membership`, `lf_process_ids`, `session_membership`,
+`session_tasks`, `task_of_process` (`task_work.rs:30-140`) read the column.
+`has_relocations`, `relocated_process_membership`, the freeze in
+`relocate_repository` (`repositories.rs:136`), the second writer in
+`read_stream/events.rs:362-376` test fixture, and the prune clause
+(`processes.rs:347`) go.
+
+Backfill: `agent_sessions.task_id` (2,659 rows) in the migration. Processes
+do not fit there. Measured on a `VACUUM INTO` copy of the live store
+(2026-11-17): the deepest-checkout probe, materialized into a temp table and
+applied with `UPDATE … FROM`, resolved 156,708 of 187,600 Processes in
+28.6 s wall, 4.5 s CPU. Holding the shared write lock for 30 s at upgrade
+stalls every agent. A correlated-CTE version of the same query ran over 10
+minutes, so the shape matters. So the migration adds the column, and the
+server's maintenance pass backfills in batches of 5,000 ids per write
+transaction (oldest first, relocations applied first), the same way pruning
+already runs. Until it finishes, an old Process with no `task_id` is absent
+from its Task's list; most of those are 30-day-prunable plain `lf`
+invocations (`FORGETTABLE`, `processes.rs:330`). Rows the prune deletes
+anyway are not backfilled.
+
+Released `lf` keeps inserting Processes without `task_id` during the window.
+A trigger `processes_task_on_insert ... WHEN NEW.task_id IS NULL` fills it from
+the checkout probe, marked `-- removes with LOO-877`, and filed in LOO-877's
+brief. It is the one compat shim this Task adds.
+
+Path matching stays nowhere else. A Process launched outside lf has no row,
+so nothing needs it.
+
+Reconciliation rule for the 3 primary Sessions whose `task_id` disagrees:
+`task_primary_sessions` names the Task; the migration sets the Session's
+`task_id` to it.
+
+## A duplicate can't come back
+
+`open_ephemeral` under `cfg(test)` installs an SQLite authorizer
+(rusqlite `hooks` feature) that denies `SQLITE_READ`/`SQLITE_UPDATE` on every
+leaving column and any access to a leaving table. `build.rs` already orders
+migrations; it also emits the leaving list from `-- leaving:` marks. Every
+store test then fails with the member's name if production SQL touches it.
+Migration-replay and old-release fixture tests open through a path without the
+authorizer. Break it in your head: re-add `t.planning_url` to `TASK_COLUMNS`
+and every Task read test fails.
+
+## Acceptance check at gate
+
+```bash
+# membership survives a move, with no relocation table
+cargo test -p loopflow-storage --lib sqlite::repositories::   # relocate keeps Processes and Sessions with their Task
+cargo test -p loopflow-storage --lib task_work::              # membership by task_id
+# the guard
+cargo test -p loopflow-storage --lib leaving_members_are_unreadable
+# against a copy of the live store
+cp ~/.lf/loopflow.db /tmp/lf937.db && LF_HOME=… lf task status LOO-937 --json   # same title/url/sessions/processes as released lf
+sqlite3 /tmp/lf937.db "select count(*) from processes where task_id is null and cwd in checkout"  # 0
+```
+
+Report before/after in the PR: tables, columns, store size, `pub fn` count in
+`loopflow-storage` (900 now), SQL call sites outside it (`rg` count, method
+stated).
+
+## Absent and error states
+
+- Task with no provider binding: no `pm_items` row; URL/branch/team absent
+  (they were absent before). Peer-only Machines lose the URL a released peer
+  sent through `planning_peer_changes`; a Machine bound to Linear observes it
+  itself. Marked for review.
+- Process in no checkout and no named Task: `task_id` NULL, same as today's
+  non-match.
+- Checkout removed, then path reused: membership unchanged, which today needs
+  the frozen pairs.
+
+## Operational boundary
+
+One write lock for hundreds of agents: the process insert gains one indexed
+ancestor probe (depth ≤ path components). Check with `EXPLAIN QUERY PLAN` on
+the 187k-row store; membership queries lose the `sqlite_master` probe and the
+anti-join. New index `processes(task_id)` partial `WHERE task_id IS NOT NULL`.
+
+## Exclusions
+
+- The outgoing queues and `task_creation_intents` as a table: LOO-938.
+- Column and table renames to product words: LOO-939.
+- Moving `processes` out of the main store: not this Task (LOO-936 moved
+  Session history only).
+- Dropping anything: LOO-877 and the final review Task (LOO-940) file the
+  contracts.
+
+## What goes
+
+- `relocated_task_processes` reads/writes; `has_relocations`,
+  `relocated_process_membership`, the freeze in `relocate_repository`
+  (its test at `repositories.rs:379-430` stays, asserting membership instead
+  of frozen pairs), `events.rs:362-376` fixture inserts (test-only; the brief's
+  "second path"), `processes.rs:347` and `:350` prune clauses.
+- `sqlite.rs:379-410` pre-`task_checkouts` registry fallback.
+- Reads/writes of `tasks.planning_url/branch_name/team_id/provider_revision/
+  completed`, `pm_snapshot_synced_at`; the `TaskUrl`/`TaskBranch`/`TaskTeam`
+  `WorkValue`s and their peer export.
+- `task_orders` and `commit_task_order`/`task_order_inputs`/`task_order_in`,
+  `TaskOrder` key's manual position.
+- `pm_projects.task_order_json` reads/writes.
+- `task_linear_observations` title/description/revision columns and
+  `seed_task_linear_observation`'s copy of them.
+- `task_creation_intents.title/description` writes and the comparison.
+
+Survives: every Task's title, description, state, rank, URL (via `pm_items`),
+every Process/Session association, conflict answers.
+
+## Slices
+
+1. **Process and Session record their Task.** Migration adds
+   `processes.task_id` + index + released-lf trigger, backfills both tables,
+   marks `relocated_task_processes` leaving. Writers set it; membership reads
+   it; relocation code goes. Demo: `relocate_repository` test, then reuse the
+   old path for a new clone, and `lf task status` still lists only the
+   original Processes. This could prove the plan wrong if some launch has no
+   knowable Task at insert, or if the insert-time probe shows up in
+   `EXPLAIN QUERY PLAN` as anything but index seeks. The batched backfill is
+   part of this slice; check each batch's lock hold on the `/tmp` copy.
+2. **The guard.** Authorizer in test stores, leaving list from `build.rs`.
+   Fix the reads it catches (the `ship_lf_process_id` prune clause, the
+   registry fallback). Every later slice lands under it.
+3. **Provider facts live in `pm_items`.** URL, branch name, team, provider
+   revision, synced-at, `planning_completed`; same check for `projects`.
+   The observation steer compares against `pm_items`; intents' title copy
+   goes.
+4. **One order.** Working board sorts by rank; tile Move calls `reorder_in`;
+   `task_orders` and `task_order_json` leave. Swift Working board test
+   updated.

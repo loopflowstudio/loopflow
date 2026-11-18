@@ -65,6 +65,11 @@ Loopflow chooses an automation floor for headless work only:
 - Less-permissive vendor configuration is raised to this floor; Claude prints a
   warning when that happens.
 
+A headless run in its Task's checkout (`lf task run`, `lf ship`, `lf -b <skill>`
+there) goes past the floor: it runs as `yolo` on all four harnesses and can
+write anywhere the OS user can. Loopflow does not confine a Task to its
+checkout.
+
 Interactive launches send no permission settings, so the vendor's own
 configuration and approval prompts apply. `yolo: true` selects the vendor's full
 bypass mode; for Codex that also disables its sandbox. See

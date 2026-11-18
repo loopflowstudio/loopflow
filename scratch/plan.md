@@ -205,6 +205,34 @@ lf task run <ID> -a pi:<configured model>
   boundary" for the OS environment only; `harness/README.md` gets the table and
   loses the capability from its row.
 
+## Docs written first
+
+Written as intended behavior, before the code; implement reads these and makes
+them true, or changes them in the same slice.
+
+- `docs/config.md`: Yolo (rule 1, `permissions`), Agent (`lf task run -a
+  opencode:…` / `pi:…`), "Keep going when a provider runs out" (not-installed
+  move, OpenCode and Pi unclassified), Pi (boundary sentence gone).
+- `docs/security.md`: a headless run in its Task's checkout is `yolo`, unconfined.
+- `docs/orchestration.md`: no second attempt when no agent started; a headless
+  question fails the step.
+- `docs/subscriptions.md`: two rows in the refusal table.
+- `docs/troubleshooting.md`: "Agent not found" for a Task step.
+- `rust/loopflow-execution/src/harness/README.md`: the parity table;
+  "execution boundary" out of the capabilities row.
+
+The docs commit the implementation to three things the plan had left open:
+- the move line in `lf task status`: `implement went on under codex after:
+  'opencode' is not installed` (the limit move's format, reason =
+  `missing_agent_message`'s first sentence);
+- test names for slices 3 and 4:
+  `a_question_with_nobody_there_ends_the_step`,
+  `a_worker_stops_on_interrupt_and_its_session_resumes`;
+- a `harness::launch_matrix` cell asserting a worker in a Task checkout is `yolo`.
+
+`documented_commands::` runs at gate (new examples: `lf task run LOO-12 -a …`,
+`lf steer LOO-12 "…"`).
+
 ## Absent and error states
 
 - Harness not installed, another agent in the order: the step runs there; the

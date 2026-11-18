@@ -38,3 +38,14 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 
 9. **`Failed{resumable:false}`** is read and never written. Deleting the field
    touches a stored event shape and its DTO fixtures; not done here.
+
+10. **How is a worker's question answered?** `docs/orchestration.md` now says:
+    the step fails with the question as its reason; answer with
+    `lf steer LOO-12 "…"` and `lf task run` again. Pi's message today says
+    "open this Session in Pi to answer it", which `lf resume` cannot do for a
+    headless Session. Is steer-then-run the answer path, and should the
+    failure reason print that command?
+
+11. **The parity table's "no" cells name no Task** for idle steer wake
+    (OpenCode, Pi) or Pi limit classification; only LOO-518 exists. File them,
+    or leave the cause in the cell?

@@ -65,6 +65,8 @@ model fallthrough and explicit pins.
 | Graph step's order exhausted on a usage limit | Wait 5, 15, 30, then 60 minutes, trying the order again after each; then stop with the provider error and a next step |
 | Revoked login | Skip that provider's other models; with no other provider left, stop and say how to sign in again |
 | Order exhausted otherwise | Stop with the provider error and a next step |
+| Graph step's agent is not installed | Pass over it to the next entry and record the move; with none left, fail once with the install command |
+| OpenCode or Pi fails | Stop with the provider error; their failures are not read for limits |
 
 ```
 claude: You've hit your limit. Resets 3pm (America/Los_Angeles).

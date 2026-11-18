@@ -323,6 +323,17 @@ With no agent preference configured, lf uses the sole installed harness. If more
 than one is installed, choose with `lf set --global default_agent claude` or pass
 `-a claude` for one command. `lf config settings --explain` shows the selection.
 
+A Task step moves to the next entry of `agents` when its first choice is not
+installed, and `lf task status <ID>` names the move. Pinned with `-a`, or with
+nothing else in the order, the run stops after one attempt with this message:
+
+```bash
+lf task run LOO-12 -a opencode
+# 'opencode' is not installed. Install OpenCode 2 or later with `npm install -g @opencode/cli`; the `opencode-ai` package stops at 1.x.
+```
+
+Install it, sign in, and `lf task run LOO-12` again.
+
 ## Context too large
 
 **Symptom:** a run fails on context or token limits.

@@ -255,8 +255,13 @@ change goes back to `build` with your words in the plan; otherwise it goes on to
 interactive step with a loop behind it, you, or the agent standing in, decide
 advance or iterate; blocked there, the Task waits at that step. A step that
 fails is tried again, up to three attempts, starting at that step; the steps
-before it stay done. A run that stops leaves the Task at the step it stopped
-on, `lf task status` names it, and the next `lf task run` starts there:
+before it stay done. A skill step that failed before any agent started (its
+harness is not installed, say) is not tried again, since the next attempt would
+fail the same way: fix the cause and `lf task run`. A headless step whose agent
+asks a question fails with the question as its reason; answer with
+`lf steer LOO-12 "…"` and run again. A run that stops leaves the Task at the
+step it stopped on, `lf task status` names it, and the next `lf task run`
+starts there:
 
 ```bash
 lf task status LOO-12               # Graph code: stopped at land --wait-and-fix

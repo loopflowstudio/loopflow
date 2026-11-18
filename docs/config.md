@@ -65,10 +65,21 @@ Once every entry has refused on a usage limit, the step waits 5, 15, 30, then
 Interactive Sessions keep the refusal visible and require an explicit retry or
 move, with or without a Task.
 
+A Graph step also passes over an entry whose CLI is not installed on this
+Machine. Either move shows on the Task:
+
 ```bash
 lf task status MTG-328
 #   compress went on under claude after: codex_error: You've hit your usage limit
+#   implement went on under codex after: 'opencode' is not installed
 ```
+
+When the missing CLI was the only choice (a pin, or the last entry), the step
+fails once with [how to install it](troubleshooting.md#agent-not-found). Chats
+and batches never move: a missing CLI stops them with the same message.
+
+OpenCode and Pi failures are not read for usage limits. A step that fails on
+either stops with the provider's error instead of moving or waiting.
 
 | Setting | Compress tries | Everything else tries |
 | --- | --- | --- |
@@ -809,6 +820,18 @@ agent: opencode:opencode/glm-5.2         # explicit model
 agent: opencode:moonshotai/kimi-k2       # explicit provider/model
 ```
 
+A Task runs on any of the four. `-a` on `lf task run` chooses for every step of
+that run:
+
+```bash
+lf task run LOO-12 -a opencode:opencode/gemini-4-carbon
+lf task run LOO-12 -a pi:anthropic/claude-sonnet-4-6
+lf task status LOO-12               # each step's answer, usage and where the Graph stands
+```
+
+Each step gets the Task's context and steers, records its answer, usage and
+native conversation, and the Graph goes on to the next step.
+
 ### Claude model
 
 ```bash
@@ -904,8 +927,7 @@ Automatic subscription-limit recovery, native response schemas,
 turn limits and transferring Pi history to another harness are unavailable.
 Headless extension dialogs fail with an instruction
 to open the Session interactively. Pi's tools use the OS user's permissions;
-project trust and the working directory do not sandbox them. Provider-only
-worktree confinement is unsupported; managed Tasks use the caller's OS boundary.
+project trust and the working directory do not sandbox them.
 
 ### Supported Harnesses
 
@@ -975,16 +997,14 @@ that are already more permissive are not downgraded. For example, Codex
 
 `--yolo` or `yolo: true` is the explicit Loopflow bypass: Claude uses
 `--dangerously-skip-permissions`, Codex sends `sandbox: "danger-full-access"`
-and `approvalPolicy: "never"` through its app-server protocol, and OpenCode uses
-`permission: {"*": "allow"}` via `OPENCODE_CONFIG_CONTENT`.
+and `approvalPolicy: "never"` through its app-server protocol, and OpenCode
+allows every action through `permissions` in `OPENCODE_CONFIG_CONTENT`. Pi has
+no permission prompts or sandbox to skip.
 
-Managed Task turns require an execution boundary independently of vendor
-permission settings. Claude and Codex bypass their own permission prompts within
-managed execution; `yolo` does not remove the required boundary. Pi uses the same
-caller-owned OS environment and its own credentials; no vendor sandbox is implied.
-OpenCode cannot currently satisfy that managed execution requirement. For
-provider-only worktree scope, Codex uses `workspace-write`, Claude uses its strict fail-closed Bash
-sandbox, and OpenCode denies external-directory tools, including with `yolo`.
+A headless run in its Task's checkout runs as `yolo` on every harness, whatever
+`yolo` is set to: `lf task run`, `lf ship`, and `lf -b <skill>` there. Nothing
+confines its writes to the checkout. To contain a Task, choose where it runs
+([Security](security.md#choose-the-execution-boundary-first)).
 
 Stopped-session resume reloads Loopflow settings at the saved checkout. The
 provider's conversation identity stays attached; native authentication applies; a current model

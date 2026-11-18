@@ -752,7 +752,7 @@ fn process_notification(
                     .filter(|message| state.reported_error.as_deref() != Some(*message))
                 {
                     out.push(Decoded::from(ConversationEvent::Error {
-                        code: "codex_error".into(),
+                        code: turn_error_code(params.pointer("/turn/error")).into(),
                         message: message.to_owned(),
                         evidence: None,
                     }));
@@ -898,7 +898,7 @@ fn process_notification(
             } else {
                 state.reported_error = Some(message.clone());
                 out.push(Decoded::from(ConversationEvent::Error {
-                    code: "codex_error".to_string(),
+                    code: turn_error_code(params.get("error")).to_string(),
                     message,
                     evidence: None,
                 }));
@@ -945,6 +945,19 @@ fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) 
     if !latest_is_higher {
         latest.peak_input_tokens = Some(previous_peak);
         latest.context_window_tokens = Some(previous_window);
+    }
+}
+
+/// The error code for a `TurnError`. Codex names a spent quota in
+/// `codexErrorInfo`; that one shares the code a refused Claude turn reports,
+/// which a headless run reads as a usage limit.
+fn turn_error_code(error: Option<&Value>) -> &'static str {
+    match error
+        .and_then(|error| error.get("codexErrorInfo"))
+        .and_then(Value::as_str)
+    {
+        Some("usageLimitExceeded") => "provider_rate_limited",
+        _ => "codex_error",
     }
 }
 
@@ -1072,6 +1085,45 @@ mod tests {
                 at("TurnCompleted", turn, " Completed"),
             ]
         );
+    }
+
+    #[test]
+    fn a_spent_quota_is_a_usage_limit_wherever_codex_reports_it() {
+        let error = json!({
+            "message": "You’ve hit your usage limit.",
+            "codexErrorInfo": "usageLimitExceeded",
+            "additionalDetails": null,
+        });
+        let codes = |events: Vec<ConversationEvent>| -> Vec<String> {
+            events
+                .into_iter()
+                .filter_map(|event| match event {
+                    ConversationEvent::Error { code, .. } => Some(code),
+                    _ => None,
+                })
+                .collect()
+        };
+        let notified = display(
+            &mut CodexDecoder::default(),
+            "error",
+            json!({"threadId": "thread_1", "turnId": "turn_1", "error": error, "willRetry": false}),
+        );
+        assert_eq!(codes(notified), ["provider_rate_limited"]);
+        let completed = display(
+            &mut CodexDecoder::default(),
+            "turn/completed",
+            json!({"threadId": "thread_1", "turn": {"id": "turn_1", "status": "failed", "error": error}}),
+        );
+        assert_eq!(codes(completed), ["provider_rate_limited"]);
+        let disconnected = display(
+            &mut CodexDecoder::default(),
+            "turn/completed",
+            json!({"threadId": "thread_1", "turn": {"id": "turn_1", "status": "failed", "error": {
+                "message": "stream disconnected",
+                "codexErrorInfo": {"responseStreamDisconnected": {"httpStatusCode": null}},
+            }}}),
+        );
+        assert_eq!(codes(disconnected), ["codex_error"]);
     }
 
     fn display(decoder: &mut CodexDecoder, method: &str, params: Value) -> Vec<ConversationEvent> {

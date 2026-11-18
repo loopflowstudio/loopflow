@@ -985,6 +985,30 @@ impl SqliteStore {
         Ok(())
     }
 
+    /// A retry that moved to another agent: the Session names the agent now
+    /// attached, which is whose transcript it reads and how it is closed.
+    pub fn record_session_agent(
+        &self,
+        session: &str,
+        expected: &SessionAttachment,
+        provider: &str,
+        model: Option<&str>,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        require_attachment_in(&tx, session, expected)?;
+        tx.execute(
+            "UPDATE agent_sessions SET provider=?2,model=?3 WHERE id=?1",
+            params![
+                loopflow_model::id::canonical_session(session),
+                provider,
+                model
+            ],
+        )?;
+        tx.commit()?;
+        Ok(())
+    }
+
     pub fn record_session_connection(
         &self,
         session: &str,

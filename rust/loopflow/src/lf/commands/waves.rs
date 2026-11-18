@@ -4844,10 +4844,7 @@ mod tests {
                 roadmap.tasks
             );
         };
-        assert!(
-            reason.contains("no such column: tg.auto_ship"),
-            "{reason}"
-        );
+        assert!(reason.contains("no such column: tg.auto_ship"), "{reason}");
         let graph = loopflow_execution::store::task_work::task_overview(&store.sqlite, &task)
             .unwrap()
             .0

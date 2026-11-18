@@ -129,10 +129,7 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
         .get(&task.id)
         .map(|graph| starter(graph.caller_session.as_ref()))
         .transpose()?;
-    let auto_ship = store
-        .sqlite
-        .task_auto_ship(&task.id)
-        .map_err(task_error)?;
+    let auto_ship = store.sqlite.task_auto_ship(&task.id).map_err(task_error)?;
     Ok(TaskSnapshot {
         machine_id,
         issue_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),

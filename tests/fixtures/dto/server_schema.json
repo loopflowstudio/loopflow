@@ -312,6 +312,42 @@
         }
       ]
     },
+    "AutoShip": {
+      "description": "The Task's Auto-Ship mark: its state, when it was set and who set it.",
+      "properties": {
+        "at": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "by": {
+          "$ref": "#/$defs/Starter"
+        },
+        "state": {
+          "$ref": "#/$defs/AutoShipState"
+        }
+      },
+      "required": [
+        "state",
+        "at",
+        "by"
+      ],
+      "type": "object"
+    },
+    "AutoShipState": {
+      "description": "Auto-Ship on a Task's Graph: whether its interactive steps run headless,\nstanding in for the person, and whether its landing may merge.",
+      "oneOf": [
+        {
+          "const": "on",
+          "description": "`lf ship` or `lf -b task run` turned it on.",
+          "type": "string"
+        },
+        {
+          "const": "stopped",
+          "description": "`lf task hold` stopped it; only `lf ship` turns it on again.",
+          "type": "string"
+        }
+      ]
+    },
     "BoardPr": {
       "properties": {
         "url": {
@@ -3288,13 +3324,13 @@
     },
     "Hold": {
       "additionalProperties": false,
-      "description": "What `task.hold` withdrew.",
+      "description": "What `task.hold` stopped.",
       "properties": {
         "issue": {
           "type": "string"
         },
         "stopped": {
-          "description": "A run was shipping the Task; otherwise only the stop was saved.",
+          "description": "Auto-Ship was on; otherwise only the stop was saved.",
           "type": "boolean"
         }
       },
@@ -8281,16 +8317,6 @@
         "ship_control": {
           "$ref": "#/$defs/TaskRunControl"
         },
-        "shipping": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShippingSnapshot"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "task": {
           "$ref": "#/$defs/TaskSummary"
         }
@@ -8310,7 +8336,6 @@
         "execution",
         "run_control",
         "ship_control",
-        "shipping",
         "pr",
         "section"
       ],
@@ -10607,56 +10632,6 @@
         "locator"
       ],
       "type": "object"
-    },
-    "ShipMark": {
-      "description": "When someone approved or stopped Auto-Ship, and who.",
-      "properties": {
-        "at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "by": {
-          "$ref": "#/$defs/Starter"
-        }
-      },
-      "required": [
-        "at",
-        "by"
-      ],
-      "type": "object"
-    },
-    "ShippingSnapshot": {
-      "description": "What a shipping Task is doing, derived from its ship process, its state\nand its landing. Nothing here waits on a person.",
-      "properties": {
-        "reason": {
-          "description": "One line saying what is happening.",
-          "type": "string"
-        },
-        "shipped_at": {
-          "description": "When the Task was handed off.",
-          "format": "int64",
-          "type": "integer"
-        },
-        "state": {
-          "$ref": "#/$defs/ShippingState"
-        }
-      },
-      "required": [
-        "shipped_at",
-        "state",
-        "reason"
-      ],
-      "type": "object"
-    },
-    "ShippingState": {
-      "enum": [
-        "building",
-        "landing",
-        "repairing",
-        "restarting",
-        "unassigned"
-      ],
-      "type": "string"
     },
     "Skipped": {
       "properties": {
@@ -13439,7 +13414,7 @@
               "type": "string"
             },
             "ships": {
-              "description": "No interactive step is left ahead: Auto-Ship is approved and the\nrun may merge the PR.",
+              "description": "The run may merge the PR: Auto-Ship is on, or no interactive step\nis left ahead, and nobody stopped Auto-Ship.",
               "type": "boolean"
             },
             "state": {
@@ -13627,85 +13602,21 @@
       ],
       "type": "object"
     },
-    "TaskShip": {
-      "description": "What `task.ship` set going.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "Auto-Ship is approved and `process` ships the Task to `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "log": {
-              "description": "The ship's output once its launcher lets go; null under `-b`.",
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "state": {
-              "const": "shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id",
-            "log"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Another live process already ships it.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "lf_process_id": {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            "state": {
-              "const": "already_shipping",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue",
-            "lf_process_id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The Task already stands at `end`.",
-          "properties": {
-            "issue": {
-              "type": "string"
-            },
-            "state": {
-              "const": "at_end",
-              "type": "string"
-            }
-          },
-          "required": [
-            "state",
-            "issue"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "TaskSnapshot": {
       "properties": {
         "actions": {
           "$ref": "#/$defs/TaskActionModel"
+        },
+        "auto_ship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AutoShip"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Auto-Ship on the Task's Graph: on, stopped, and who set it when;\n`null` when nobody has."
         },
         "base_commit": {
           "type": [
@@ -13798,28 +13709,6 @@
         "repo_id": {
           "type": "string"
         },
-        "ship_approval": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShipMark"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "Who approved Auto-Ship and when, while the Task is approved."
-        },
-        "ship_stop": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ShipMark"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "description": "The stop that keeps a run from approving Auto-Ship, until `lf ship`."
-        },
         "started_by": {
           "anyOf": [
             {
@@ -13898,13 +13787,12 @@
         "observation",
         "actions",
         "started_by",
-        "ship_approval",
-        "ship_stop"
+        "auto_ship"
       ],
       "type": "object"
     },
     "TaskState": {
-      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it and the Auto-Ship approval. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
+      "description": "A Task's state, derived from its checkout, Graph position, whether a\nGraph runs for it and its Auto-Ship mark. Completion and abandonment\nare durable; the open states follow what the Task is doing now. Whether\nanyone owns it is ownership, not state.",
       "oneOf": [
         {
           "enum": [
@@ -13919,7 +13807,7 @@
         },
         {
           "const": "idle",
-          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nafter a stopped one, or shipping whose ship process exited.",
+          "description": "A checkout, no Graph running and not at an interactive step: before its first run,\nafter a stopped one, or with Auto-Ship on and nothing running.",
           "type": "string"
         },
         {
@@ -13934,7 +13822,7 @@
         },
         {
           "const": "shipping",
-          "description": "A Graph runs for it and no interactive step ahead will stop it: none remain, or\nAuto-Ship approved stand-ins at the rest. It finishes on its own to merge.",
+          "description": "A Graph runs for it with Auto-Ship on: it stands in at each interactive\nstep and finishes on its own to merge.",
           "type": "string"
         },
         {
@@ -15794,7 +15682,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --task <issue> ship --json`, started detached: approves Auto-Ship.",
+          "description": "`lf --task <issue> ship --json`, started detached: turns Auto-Ship on\nand returns the run, as `task.run` does.",
           "examples": [
             {
               "directory": "/repo",
@@ -15821,18 +15709,20 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskShip"
+            "$ref": "#/$defs/TaskRun"
           },
           "x-result-example": {
+            "graph_process": "85c31c1e-850c-4821-878d-55527b6dba46",
             "issue": "LOO-1",
-            "lf_process_id": "85c31c1e-850c-4821-878d-55527b6dba46",
-            "log": "/Users/maya/.lf/logs/ship-LOO-1.log",
-            "state": "shipping"
+            "log": "/Users/maya/.lf/logs/graph-85c31c1e-850c-4821-878d-55527b6dba46.log",
+            "run": "code from human-review",
+            "ships": true,
+            "state": "running"
           }
         },
         {
           "additionalProperties": false,
-          "description": "`lf task hold <issue> --json`: withdraws the Task's Auto-Ship approval.",
+          "description": "`lf task hold <issue> --json`: stops the Task's Auto-Ship.",
           "examples": [
             {
               "directory": "/repo",

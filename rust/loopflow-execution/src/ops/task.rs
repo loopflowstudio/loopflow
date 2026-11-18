@@ -841,17 +841,13 @@ async fn start_task_run(
         .map(|mark| mark.state);
     let on = auto_ship == Some(loopflow_storage::sqlite::AutoShipState::On);
     let through = mode.runs_through() || on;
-    let ships = auto_ship != Some(loopflow_storage::sqlite::AutoShipState::Stopped)
-        && (on || reaches_end);
+    let ships =
+        auto_ship != Some(loopflow_storage::sqlite::AutoShipState::Stopped) && (on || reaches_end);
     let row = crate::store::task_work::task_graph_row(&store.sqlite, &task.id)
         .map_err(task_error)?
         .ok_or_else(|| task_error(format!("Task {issue} lost its graph while starting")))?;
     let Some(start) = start else {
-        if store
-            .sqlite
-            .end_task_graph(&task.id)
-            .map_err(task_error)?
-        {
+        if store.sqlite.end_task_graph(&task.id).map_err(task_error)? {
             settle_pending_completion(store, task).await?;
         }
         return Ok(TaskRunStart::Ended);

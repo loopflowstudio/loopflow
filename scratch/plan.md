@@ -225,31 +225,46 @@ stops).
 
 ## Slices
 
-1. **Auto-Ship is live in a run** (teaches the most: can the runner decide
-   stand-in per step, and does `lf ship` collapse to task run?). Migration
-   columns + `AutoShip` read/write; runner reads it at interactive steps and at
-   landing; `lf ship` = `ship_on` + `carry_task_run` (bare returns once
-   registered, `-b` waits; the run stands in because Auto-Ship is on, not
-   because of its mode); `-b` writes on-unless-stopped; the route write and
-   `Approval` go. Delete the carrier loop, `ShipStep`, `ShipMerge`,
-   `TaskShip`. Shows: steps 1–3 and 5 of the acceptance check with one Graph
-   process. If the runner can't switch mid-run cleanly, the fallback is
-   reading Auto-Ship once per `drive` and relaunching at the interactive step;
-   say which in the plan when it lands.
-2. **State and wire**: `task_state_sql`, snapshot `auto_ship`, status line,
-   roadmap `shipping` gone, Swift and fixtures, moves carry Auto-Ship in the
-   graph record.
-3. **One recovery**: delete `restart_ship`, `ship_halt`, shipping exclusions,
-   the retention and graph-inventory ship carrier arms; acceptance step 4.
-4. **Store leaves**: stop all `task_ship_events` / `shipped_at` writes, delete
-   the storage API listed above, task summaries write `auto_ship`, backfill +
-   NULL `shipped_at`, leaving marks, contract Task, docs (`docs/surfaces.md`,
-   `docs/orchestration.md:270`, `docs/telemetry.md:60`, `docs/dev/data.md:47`,
-   `docs/dev/machines.md:406`, `docs/dev/planning.md:565`,
-   `docs/dev/reference*.md`, `server/README.md`, iOS README, and the operate
-   skills' "any run with no interactive step left ahead approves Auto-Ship"
-   line in `repo_operate.md`, `task_operate.md`, `wave_operate.md`,
-   `launch-plan.md`: it now "may merge the PR" without approving anything).
+Implement (2026-11-18) built slices 1–4 in one pass on top of LOO-959; they
+could not land apart because the state SQL, the runner and the stored log
+shared every reader.
+
+Built:
+
+- `task_graph_auto_ship` migration (named to apply after LOO-959's
+  `process_rows_on_owners`): three `task_graphs` columns,
+  `task_summaries.auto_ship`, backfill, `shipped_at` cleared, leaving marks for
+  LOO-971 (the contract Task). SCHEMA.md regenerated.
+- Storage: `AutoShip`/`AutoShipState`, `set_task_auto_ship` (with
+  `keeps_stop` for `-b`), `task_auto_ship`; the ship log API, `Approval`,
+  the route write and `RunOwner::ShipCarrier` deleted. Take-up and moves keep
+  the mark; reopening clears it.
+- Runner: `GraphRunner::stopping_at_interactive` is gone; `RunningGraph::stands_in`
+  reads Auto-Ship at each interactive step (the runner read it once per step,
+  so no fallback was needed), `stopped_landing` reads `stopped`.
+  `SkillOutcome::Unapproved` became `StopsAt`.
+- `lf ship` = `ship_on` + `carry_task_run` (stands in from the waiting step);
+  `task.ship` returns `TaskRun`; `TaskShip` deleted. `-b task run` turns it on
+  unless stopped; `start_task_run` runs through interactive steps while it is on.
+- Recovery: one loop, `lf task run` for every dead run; `ship_halt`,
+  `restart_ship`, the shipping exclusions and `local_shipping_tasks` deleted.
+- Wire: `TaskSnapshot.auto_ship`; roadmap `shipping` gone (`ship_control`
+  says "Auto-Ship is already on"); fixtures, server schema, Swift
+  (`TaskExecution.autoShip`, Stop Auto-Ship reads it), dev docs.
+- `lf task status`: "Auto-Ship: on, by X <time>" / "Auto-Ship: stopped by X …".
+
+Left for gate:
+
+- The acceptance fixture as one test (steps 1–5 above). Today the pieces are
+  separate tests in `task_graph_launch_tests.rs`:
+  `a_bare_ship_stands_in_because_auto_ship_is_on`,
+  `a_stopped_ship_kills_nothing_and_its_run_carries_on`,
+  `task_ship_stop_sticks_through_a_headless_relaunch`,
+  `a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on`,
+  `a_ship_meets_a_hand_merged_pr_at_its_landing_step`.
+- Swift suites (`DTOFixtureTests|DesktopHeadlessTests|TaskConceptTests|WorkModelTests|ServerProtocolTests`)
+  were edited, not run here.
+- `docs/dev/index.html` regeneration if the website check asks.
 
 ## Exclusions
 

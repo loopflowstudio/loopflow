@@ -264,7 +264,9 @@ pub struct TaskRunRestarts {
 
 /// Auto-Ship on a Task's Graph: whether its interactive steps run headless,
 /// standing in for the person, and whether its landing may merge.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum AutoShipState {
     /// `lf ship` or `lf -b task run` turned it on.
@@ -293,7 +295,9 @@ impl AutoShipState {
 }
 
 /// The Task's Auto-Ship mark: its state, when it was set and who set it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
 pub struct AutoShip {
     pub state: AutoShipState,
     pub at: i64,
@@ -306,7 +310,10 @@ impl AutoShip {
     }
 }
 
-pub(super) fn auto_ship_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<Option<AutoShip>> {
+pub(super) fn auto_ship_in(
+    conn: &rusqlite::Connection,
+    task: &TaskId,
+) -> StoreResult<Option<AutoShip>> {
     use rusqlite::OptionalExtension;
     let Some((state, at, by)) = conn
         .query_row(
@@ -1067,12 +1074,19 @@ mod tests {
         let on = mark(super::AutoShipState::On, 10);
         let stopped = mark(super::AutoShipState::Stopped, 20);
         // No Graph, nothing to carry the mark.
-        assert_eq!(store.set_task_auto_ship(&task.id, &on, false, None).unwrap(), None);
+        assert_eq!(
+            store
+                .set_task_auto_ship(&task.id, &on, false, None)
+                .unwrap(),
+            None
+        );
         store
             .take_up_task_graph(&task.id, r#"{"name":"code","steps":[]}"#)
             .unwrap();
         assert_eq!(
-            store.set_task_auto_ship(&task.id, &on, false, None).unwrap(),
+            store
+                .set_task_auto_ship(&task.id, &on, false, None)
+                .unwrap(),
             Some(None)
         );
         store
@@ -1297,8 +1311,10 @@ mod tests {
         );
         let (shipping, stopped, withdrawn, never) =
             (TaskId::new(), TaskId::new(), TaskId::new(), TaskId::new());
-        conn.execute_batch("INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);")
-            .unwrap();
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);",
+        )
+        .unwrap();
         for (task, issue) in [
             (&shipping, "SHIP-1"),
             (&stopped, "SHIP-2"),
@@ -1346,13 +1362,18 @@ mod tests {
                 by: person(Some("Casey")),
             })
         );
-        assert_eq!(mark(&withdrawn).unwrap().state, super::AutoShipState::Stopped);
+        assert_eq!(
+            mark(&withdrawn).unwrap().state,
+            super::AutoShipState::Stopped
+        );
         assert_eq!(mark(&never), None);
         // A released lf reads no Task as shipping.
         let shipped: i64 = conn
-            .query_row("SELECT count(*) FROM tasks WHERE shipped_at IS NOT NULL", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT count(*) FROM tasks WHERE shipped_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(shipped, 0);
     }

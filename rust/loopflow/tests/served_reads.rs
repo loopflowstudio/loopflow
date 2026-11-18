@@ -1515,9 +1515,8 @@ fn server_operations_match_their_lf_commands() {
         assert_eq!(written["owner"], printed["owner"], "{args:?}");
         assert_eq!(written["owner"].is_null(), !claimed, "{written}");
     }
-    // Stopping a Task that is not shipping saves the stop, which keeps a run
-    // from merging until `lf ship`, retaining who requested the stop. The
-    // merge request it takes back is the ship tests'.
+    // Auto-Ship is a mark on the Task's Graph; this Task has none, so a stop
+    // saves nothing, served or through `lf`. The ship tests hold Tasks that do.
     // No run is live, so an interrupt reaches nothing, in the app as through `lf`.
     let interrupt = Write::TaskInterrupt {
         directory: directory.clone(),
@@ -1591,7 +1590,7 @@ fn server_operations_match_their_lf_commands() {
             .clone()
     };
     compare(stop.clone(), &|| stop.clone(), &stopped);
-    assert_eq!(stopped()["kind"], "person", "no stop saved");
+    assert!(stopped().is_null(), "a Task with no Graph saved a stop");
 
     // Which repositories the app shows, as the app reads them.
     let portfolio = || without_clock(Read::DesktopPortfolio.read().unwrap());

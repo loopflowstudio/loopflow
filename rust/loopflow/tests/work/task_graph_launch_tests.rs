@@ -1928,7 +1928,9 @@ sys.exit(code)
     }
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 1);
 
-    // Once capacity is available, a manual run picks up the refused step.
+    // Once capacity is available, a manual run picks up the refused step; with
+    // Auto-Ship stopped it waits at review for a person.
+    task.ok(&["task", "hold", "INF-123"]);
     fs::write(
         task.repo.path().join(".lf/graphs/late.yaml"),
         "- cmd: task sync --plan\n",
@@ -2245,10 +2247,10 @@ fn end_is_retained_while_the_tasks_pr_blocks_completion() {
     assert_eq!(task.graph()["position"], at("end"));
     // Nothing runs while completion waits on the PR, so the Task reads idle.
     assert_eq!(task.state(), "idle");
-    // A stop stands at `end` too.
+    // Nothing turned Auto-Ship on; a stop stands at `end` all the same.
     let stop = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let stop = String::from_utf8_lossy(&stop.stdout);
-    assert!(stop.contains("INF-123 stopped shipping"), "{stop}");
+    assert!(stop.contains("INF-123 was not shipping"), "{stop}");
     let error = refusal(task.run(&["task", "complete", "INF-123"]));
     assert!(error.to_lowercase().contains("pull request"), "{error}");
     assert_eq!(task.graph()["position"], at("end"));
@@ -2728,7 +2730,7 @@ fn a_second_ship_refuses_while_a_run_carries_the_task() {
 }
 
 #[test]
-fn a_bare_ship_prints_what_task_run_prints_and_stands_in_by_auto_ship() {
+fn a_bare_ship_stands_in_because_auto_ship_is_on() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
     assert_eq!(task.graph()["position"], at("review"));
@@ -2736,16 +2738,15 @@ fn a_bare_ship_prints_what_task_run_prints_and_stands_in_by_auto_ship() {
     let shipped = task.task_run(&["--task", "INF-123", "ship"]);
     assert!(shipped.success(), "{}", shipped.text);
     assert!(
-        shipped.text.contains("INF-123 · ") && shipped.text.contains("running as Graph process"),
+        shipped.text.contains("INF-123: standing in at review"),
         "{}",
         shipped.text
     );
-    assert!(shipped.text.contains("ships:  this run may merge the PR"), "{}", shipped.text);
     assert_eq!(task.graph()["position"], at("end"));
     assert_eq!(stand_ins(&task).len(), 1);
     let status = task.status();
-    assert_eq!(status["execution"]["auto_ship"]["state"], "on", "{status}");
-    assert_eq!(status["execution"]["auto_ship"]["by"]["kind"], "person");
+    assert_eq!(status["auto_ship"]["state"], "on", "{status}");
+    assert_eq!(status["auto_ship"]["by"]["kind"], "person");
 }
 
 #[test]
@@ -2815,8 +2816,8 @@ fn task_ship_stop_sticks_through_a_headless_relaunch() {
     assert_ne!(task.state(), "shipping");
     assert!(handoffs(&task).is_empty());
     let status = task.status();
-    assert_eq!(status["execution"]["auto_ship"]["state"], "stopped", "{status}");
-    assert_eq!(status["execution"]["auto_ship"]["by"]["kind"], "person");
+    assert_eq!(status["auto_ship"]["state"], "stopped", "{status}");
+    assert_eq!(status["auto_ship"]["by"]["kind"], "person");
     // Standing at the landing step, a plain relaunch waits there again.
     let waiting = task.task_run(&["task", "run", "INF-123"]);
     assert!(waiting.success(), "{}", waiting.text);
@@ -2845,7 +2846,7 @@ fn a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on() {
         task.ok(&["task", "list"]);
     }
     assert_eq!(task.state(), "idle");
-    assert_eq!(task.status()["execution"]["auto_ship"]["state"], "on");
+    assert_eq!(task.status()["auto_ship"]["state"], "on");
     let stopped = task.run(&["--task", "INF-123", "ship", "--stop"]);
     let stopped = String::from_utf8_lossy(&stopped.stdout);
     assert!(stopped.contains("INF-123 stopped shipping"), "{stopped}");
@@ -2919,7 +2920,9 @@ fn a_ship_whose_carrier_dies_still_reaches_its_end() {
     first.wait().unwrap();
     fs::remove_file(task.home.path().join("hold")).unwrap();
     // The Graph outlives its carrier and arrives at `end` itself.
-    wait_for("the run to reach end", || task.graph()["position"] == at("end"));
+    wait_for("the run to reach end", || {
+        task.graph()["position"] == at("end")
+    });
     // Auto-Ship was turned on once.
     assert_eq!(handoffs(&task).len(), 1);
 }

@@ -7,7 +7,7 @@ use rusqlite::params;
 use std::num::NonZeroU32;
 
 #[test]
-fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
+fn defer_holds_the_lifecycle_and_a_run_ships_only_with_auto_ship_on() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
@@ -133,7 +133,12 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
     };
     // Auto-Ship on makes the running Task shipping; a stop makes it moving again.
     store
-        .set_task_auto_ship(&task, &mark(loopflow_storage::sqlite::AutoShipState::On), false, None)
+        .set_task_auto_ship(
+            &task,
+            &mark(loopflow_storage::sqlite::AutoShipState::On),
+            false,
+            None,
+        )
         .unwrap();
     assert_eq!(state(), crate::durable::TaskState::Shipping);
     store
@@ -146,7 +151,12 @@ fn defer_holds_the_lifecycle_and_a_run_with_nothing_interactive_ahead_ships() {
         .unwrap();
     assert_eq!(state(), crate::durable::TaskState::Moving);
     store
-        .set_task_auto_ship(&task, &mark(loopflow_storage::sqlite::AutoShipState::On), false, None)
+        .set_task_auto_ship(
+            &task,
+            &mark(loopflow_storage::sqlite::AutoShipState::On),
+            false,
+            None,
+        )
         .unwrap();
     // The carrier exits: with Auto-Ship on and nothing running, no person is needed.
     store

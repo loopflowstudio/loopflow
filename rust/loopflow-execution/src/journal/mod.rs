@@ -434,9 +434,7 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
     );
     match current_context() {
         Some(context) => crate::os_process::detached::acknowledge(&context.lf_process_id),
-        None => {
-            eprintln!("Process history unavailable: no compatible process ledger for this process")
-        }
+        None => tracing::warn!("trace log unavailable: no compatible store for this process"),
     }
     tracing::debug!(
         elapsed_ms = started.elapsed().as_millis(),

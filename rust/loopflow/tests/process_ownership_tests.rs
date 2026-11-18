@@ -169,8 +169,6 @@ fn parser_returns_exact_status_without_admitting_an_early_store() {
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
-        assert!(!String::from_utf8_lossy(&output.stderr)
-            .contains("Process history unavailable: no compatible process ledger"));
         assert_eq!(
             std::fs::read(&database).unwrap(),
             b"retained incompatible store"
@@ -212,10 +210,6 @@ async fn early_commands_exit_exactly_without_recording_initializing_or_migrating
             .output()
             .unwrap();
         assert_eq!(output.status.code(), Some(code), "{output:?}");
-        assert!(
-            !String::from_utf8_lossy(&output.stderr).contains("Process history unavailable"),
-            "{output:?}"
-        );
     }
     assert_eq!(
         conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row

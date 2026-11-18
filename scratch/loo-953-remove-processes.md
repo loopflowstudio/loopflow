@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, slices 4, 4b and 5 built; next: slice 4c, then gate)
+## Status (2026-11-18, slices 4, 4b, 4c and 5 built; next: gate)
 
 Realign 2026-11-18: `grep -rn -e '--processes' rust docs swift` and a grep
 for `process.get`/`process.history` return nothing; 4b stands as built.
@@ -64,50 +64,29 @@ Quotes and the OS-scan measurement: `questions.md`.
   entry), the counts in `early_commands_exit…`, the release check,
   `inspection_starts_no_work`, and the `processes` half of `served_reads`'
   `changes()`; `store_revisions` still catches a read that writes.
-- Remaining user-visible Process wording: the admission notice `Process
-  history unavailable…` (`journal::admit_process`); slice 4c moves it.
 - Follow-up Task at gate: `GraphProcess*` → `GraphRun*`,
   `work.graph_processes`, `graph_process.rs` (42 files, Rust and Swift).
 
-**Broken by slice 4, found in 4b, not fixed:** the ignored installation proof
-`running_provider_uses_updated_install_for_commands_hooks_and_graph`
-(`os_process/installation_tests.rs:146-172`) reads each step's `command` and
-the agent-attributed commands from `processes`. Steps record no command now,
-so the proof needs other evidence that the step ran the replacement binary
-(launcher-written, like the cwd evidence the Rex fixtures use). It runs only
-in `scripts/test_task_installation.py` (CI).
+**Slice 4c as built (2026-11-18).** Design: `git show 7b9a8e0638:scratch/loo-953-remove-processes.md`.
 
-**Slice 4c (concept review after 4b, 2026-11-18): next implement.**
-
-1. The installation proof is CI's `task-installation` job
-   (`.github/workflows/ci.yml:306`), so the branch fails CI until it is
-   rewritten. Read the owner rows' own columns: `graph_processes` for
-   `graph='entry-proof'` with `caller_session_id` = the Session (replaces the
-   `via_agent` Process read) and its `graph_process_steps` with
-   `exit_code=0` (2). Binary identity needs no recorded command: the prior
-   install is the failing binary and the provider's `LF_BIN` is
-   `/missing/old/lf`, so a step that exits 0 ran the replacement. Delete the
-   `processes` reads and the "Reads record no Process" comment.
-   The second proof, `graph_live_across_switch_runs_next_step_on_selected_install`
-   (same file, :184-343), also reads `processes`: the failure dump's
-   `command, exit_code` (:261), each step's `p.command` (:306) and the
-   runner's (:331). Both binaries work there, so exit codes can't tell them
-   apart. Launcher-written evidence replaces the reads: the `git` shim in
-   `tools/` already runs inside each step's `sync --plan`, so it can append
-   `$GRAPH_ID_ENV` and `readlink /proc/$PPID/exe` (Linux-only proof) to a
-   file. Step 1 must name the prior binary and step 2 the replacement;
-   `graph_process_steps.exit_code` gives the exits. The runner keeping its
-   lf needs the same thing one level up, or that assertion goes.
-2. `journal::admit_process`' `eprintln!("Process history unavailable…")` is
-   the last user-facing Process name, and it prints on a person's terminal
-   for a store lf could not open. Under the recording-gap rule and the quiet
-   terminal it becomes a `warn!` in `logs/lf.log` naming the trace log
-   (`"trace log unavailable: …"`); stderr stays clean. The two
-   `process_ownership_tests` assertions that the string is absent keep
-   passing; check one still fails if the line goes back to stderr, else
-   delete them as wiring.
-3. Checks: the installation proof via `scripts/test_task_installation.py`
-   if Docker is here, else gate/CI; `binary(process_ownership_tests)`.
+- `running_provider_uses_updated_install…` reads `graph_processes`
+  (`graph='entry-proof'`, `caller_session_id` = the Session) and two
+  `graph_process_steps` with `exit_code=0`; the prior install fails, so a
+  step exiting 0 ran the replacement.
+- `graph_live_across_switch…`: the `tools/` git shim appends
+  `$PPID readlink /proc/$PPID/exe` inside a step; distinct pids other than the
+  runner's, in order, must be [prior, replacement]. The runner keeping its
+  lf is read from `/proc/<runner pid>/exe` after the switch, while step 1
+  holds (the gate execs the install, so the pid is that lf). Assumes a
+  step's lf spawns git directly, not through a shell.
+- `journal::admit_process` warns `trace log unavailable: …` into
+  `logs/lf.log`; stderr stays clean. Both `process_ownership_tests` string
+  checks are deleted: help and parse errors exit before admission, so they
+  could not fail; `stderr.is_empty()` on success stays.
+- Checks: `binary(process_ownership_tests)` 8 pass; execution lib tests
+  build; `clippy -p loopflow-execution --all-targets` clean. The two
+  installation proofs need Docker (not running here): gate/CI's
+  `task-installation` job.
 
 **Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
 `record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a

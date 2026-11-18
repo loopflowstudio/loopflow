@@ -75,19 +75,19 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Git tracker
 
-- `git_tracker_changes`: id, record_table, mutation, object_id, field, clock
-- `git_tracker_conflicts`: repo, kind, object_id, reason, active
-- `git_tracker_destinations`: repo, id, endpoint, reference, fetched_revision, fetch_error, publication_revision, publication_state, publication_digest, publication_error
-- `git_tracker_imports`: repo, destination, revision
-- `git_tracker_routes`: mutation_id, repo, destination
-- `git_tracker_seen`: id
-- `planning_destinations`: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
-- `planning_peer_changes`: id, record_table, mutation, object_id, field, clock
-- `planning_peer_conflicts`: repo, kind, object_id, reason, active
-- `planning_peer_imports`: repo, destination, revision
-- `planning_peer_observed`: id
-- `planning_peer_routes`: mutation_id, repo, destination
-- `planning_user`: singleton, user_key
+- `git_tracker_changes` — **leaving → LOO-938, plan_hub**: id, record_table, mutation, object_id, field, clock
+- `git_tracker_conflicts` — **leaving → LOO-938, plan_hub**: repo, kind, object_id, reason, active
+- `git_tracker_destinations` — **leaving → LOO-938, plan_hub**: repo, id, endpoint, reference, fetched_revision, fetch_error, publication_revision, publication_state, publication_digest, publication_error
+- `git_tracker_imports` — **leaving → LOO-938, plan_hub**: repo, destination, revision
+- `git_tracker_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
+- `git_tracker_seen` — **leaving → LOO-938, plan_hub**: id
+- `planning_destinations` — **leaving → LOO-938, plan_hub**: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
+- `planning_peer_changes` — **leaving → LOO-938, plan_hub**: id, record_table, mutation, object_id, field, clock
+- `planning_peer_conflicts` — **leaving → LOO-938, plan_hub**: repo, kind, object_id, reason, active
+- `planning_peer_imports` — **leaving → LOO-938, plan_hub**: repo, destination, revision
+- `planning_peer_observed` — **leaving → LOO-938, plan_hub**: id
+- `planning_peer_routes` — **leaving → LOO-938, plan_hub**: mutation_id, repo, destination
+- `planning_user` — **leaving → LOO-938, plan_hub**: singleton, user_key
 - `repository_plans`: id, repo, selected
 
 ## Hub plan

@@ -74,3 +74,19 @@ WHEN NEW.repo IS NOT OLD.repo OR NEW.hub_machine_id IS NOT OLD.hub_machine_id OR
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_hub_plans_delete AFTER DELETE ON hub_plans
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
+
+-- The Git planning ref, its peer journal and destinations are gone; released
+-- lf still writes them until the staging window passes.
+-- leaving: git_tracker_changes LOO-938
+-- leaving: git_tracker_conflicts LOO-938
+-- leaving: git_tracker_destinations LOO-938
+-- leaving: git_tracker_imports LOO-938
+-- leaving: git_tracker_routes LOO-938
+-- leaving: git_tracker_seen LOO-938
+-- leaving: planning_destinations LOO-938
+-- leaving: planning_peer_changes LOO-938
+-- leaving: planning_peer_conflicts LOO-938
+-- leaving: planning_peer_imports LOO-938
+-- leaving: planning_peer_observed LOO-938
+-- leaving: planning_peer_routes LOO-938
+-- leaving: planning_user LOO-938

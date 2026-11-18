@@ -38,9 +38,10 @@ fn prune(json: bool) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "closed {} dead Processes · forgot {} finished · moved {} observations · converted {} turns · forgot {} history rows{}",
+            "closed {} dead Processes · forgot {} finished · gave {} their Task · moved {} observations · converted {} turns · forgot {} history rows{}",
             report.closed_processes,
             report.forgotten_processes,
+            report.assigned_processes,
             report.moved_observations,
             report.converted_turns,
             report.forgotten_history,

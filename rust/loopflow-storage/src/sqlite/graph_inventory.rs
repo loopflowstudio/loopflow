@@ -433,6 +433,14 @@ impl SqliteStore {
                 task.map(TaskId::as_str)
             ],
         )?;
+        // The Task a Graph names outranks the directory it was started from;
+        // its steps inherit it from their parent.
+        if let Some(task) = task {
+            conn.execute(
+                "UPDATE processes SET task_id=?2 WHERE id=?1",
+                params![graph_process, task.as_str()],
+            )?;
+        }
         Ok(())
     }
 
@@ -630,8 +638,8 @@ impl SqliteStore {
                       outcome: Option<&str>| {
             let conn = self.conn.lock().expect("store mutex poisoned");
             conn.execute(
-                "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
-                 VALUES(?1,?8,?2,?3,?4,?4,?5,?6,?7)",
+                &format!("INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome,task_id)
+                 VALUES(?1,?8,?2,?3,?4,?4,?5,?6,?7,{})", super::task_work::process_task("?2", "?4", "NULL", "NULL")),
                 params![
                     id,
                     parent,

@@ -350,22 +350,19 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
                 &loopflow_storage::session_record::new_artifact_key(),
             );
         }
-        for (id, cwd) in [
-            (&mechanical, "/missing/task%_"),
-            (&bound_process, "/elsewhere"),
-            (&sibling, "/missing/task%_-other"),
+        // Each Process recorded its Task when it started: the checkout holding
+        // its cwd, or none.
+        for (id, cwd, recorded) in [
+            (&mechanical, "/missing/task%_", Some(task.as_str())),
+            (&bound_process, "/elsewhere", None),
+            (&sibling, "/missing/task%_-other", None),
         ] {
-            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,?3,1,2,'succeeded')", params![id, TraceId::new(), cwd]).unwrap();
+            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,task_id) VALUES(?1,?2,?3,1,2,'succeeded',?4)", params![id, TraceId::new(), cwd, recorded]).unwrap();
         }
-        // Binding includes earlier Processes in the inventory without assigning
-        // their earlier performed work or usage to this Task.
+        // History naming a Process before its Session was bound does not make
+        // it the Task's work.
         store.execute_history(
 "INSERT INTO session_history(session_id,receipt_key,lf_process_id,observed_at,payload) VALUES('history','before-bind',?1,1,'{}')", [&bound_process]).unwrap();
-        conn.execute(
-            "UPDATE processes SET parent_lf_process_id=?1 WHERE id=?2",
-            params![mechanical, sibling],
-        )
-        .unwrap();
     }
     // A Graph is the Task's work when its Processes ran in the checkout.
     let independent = store.test_graph(
@@ -394,7 +391,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         work.graph_processes[0].summary.task_id.as_ref(),
         Some(&task)
     );
-    assert_eq!(work.processes.len(), 4);
+    assert_eq!(work.processes.len(), 3);
     // The open reading agrees with the full one about unfinished Processes.
     let initial_open = store.task_open_processes(&task).unwrap();
     assert_eq!(initial_open.len(), 2);
@@ -419,8 +416,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     assert!(!open
         .iter()
         .any(|process| process.id() == unfinished.as_str()));
-    // With every Process unfinished, each membership path in state agrees:
-    // checkout, Session event and attachment.
+    // With every Process unfinished, the open reading agrees with the full one.
     store
         .conn
         .lock()
@@ -439,7 +435,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
     let all = ids(crate::store::task_work::task_work(&store, &task)
         .unwrap()
         .processes);
-    assert_eq!(all.len(), 5);
+    assert_eq!(all.len(), 3);
     let in_state: Vec<_> = all
         .iter()
         .filter(|id| ![unfinished.as_str(), bound_process.as_str()].contains(&id.as_str()))
@@ -463,7 +459,7 @@ fn task_work_includes_checkout_binding_and_mechanical_history_without_granting_o
         .processes
         .iter()
         .any(|process| process.id() == mechanical.as_str()));
-    assert!(work
+    assert!(!work
         .processes
         .iter()
         .any(|process| process.id() == bound_process.as_str()));

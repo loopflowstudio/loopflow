@@ -112,7 +112,8 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 /// Shared mutation routes are planning evidence, never an execution reservation.
 impl SqliteStore {
     /// Move current addresses together. Captures, Process rows and provider
-    /// history retain the paths at which they were recorded.
+    /// history retain the paths at which they were recorded; each Process
+    /// keeps the Task it recorded when it started.
     pub fn relocate_repository(&self, id: &RepositoryId, destination: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -132,16 +133,6 @@ impl SqliteStore {
                 "{destination} already retains another repository; no Work was moved"
             )));
         }
-        // Freeze only observed checkout membership before changing its address.
-        // A future clone reusing the old path cannot acquire this history.
-        tx.execute(
-            "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
-             SELECT t.id,e.id FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
-               JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
-               ON e.cwd=rtrim(c.worktree,'/') OR instr(e.cwd,rtrim(c.worktree,'/')||'/')=1
-             WHERE w.repo=?1 AND (c.worktree=?1 OR instr(c.worktree,?1||'/')=1)",
-            [&source],
-        )?;
         for table in [
             "repository_plans",
             "waves",
@@ -352,7 +343,7 @@ mod tests {
     #[test]
     fn relocation_rolls_back_and_retains_nested_task_processes() {
         use loopflow_model::durable::{ProjectId, TaskId};
-        use loopflow_model::id::{LfProcessId, TraceId, WaveId};
+        use loopflow_model::id::WaveId;
         use rusqlite::params;
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
@@ -360,8 +351,7 @@ mod tests {
         let wave = WaveId::new();
         let project = ProjectId::new();
         let task = TaskId::new();
-        let process = LfProcessId::new();
-        {
+        let process = {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/before',1)",
@@ -376,9 +366,9 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
-        }
+            crate::test_fixture::start_process(&conn, Some("/before/task/src"), None)
+        };
         assert!(store.relocate_repository(&id, "/after").is_err());
         assert_eq!(
             store.repository_path(&id).unwrap().as_deref(),
@@ -410,19 +400,8 @@ mod tests {
             })
             .unwrap();
         assert_eq!(cwd, "/before/task/src");
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM relocated_task_processes", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-            1
-        );
-        let unrelated = LfProcessId::new();
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',2)",
-            params![unrelated, TraceId::new()],
-        )
-        .unwrap();
+        // A clone reusing the old path is not the moved Task's work.
+        let unrelated = crate::test_fixture::start_process(&conn, Some("/before/task/src"), None);
         assert!(super::super::task_work::task_of_process(&conn, &unrelated)
             .unwrap()
             .is_none());

@@ -16,6 +16,8 @@ use serde::{Deserialize, Serialize};
 use crate::StoreResult;
 
 const PROCESS_BATCH: i64 = 10_000;
+/// Processes given their Task per transaction.
+const TASK_BATCH: i64 = 5_000;
 /// Rows moved or forgotten per transaction.
 const ROW_BATCH: i64 = 10_000;
 /// Pages freed per incremental vacuum transaction: 40 MB of 4 KiB pages,
@@ -31,6 +33,8 @@ pub const HISTORY_DAYS: i64 = 90;
 pub struct RetentionReport {
     pub closed_processes: u64,
     pub forgotten_processes: u64,
+    /// Processes written without a Task (by an earlier lf) that now record one.
+    pub assigned_processes: u64,
     /// Observations an earlier lf kept in `loopflow.db`, now in `history.db`.
     pub moved_observations: u64,
     /// Turns an earlier lf kept as three rows, now one row in `history.turns`.
@@ -62,9 +66,11 @@ pub fn prune(
     let moved_observations = move_observations(&conn, &history)?;
     let converted_turns = super::turns::convert_turn_rows(database)?;
     forgotten_history += forget_old_history(&history, database, cutoff)?;
+    let forgotten_processes = forget_processes(&conn)?;
     Ok(RetentionReport {
         closed_processes,
-        forgotten_processes: forget_processes(&conn)?,
+        forgotten_processes,
+        assigned_processes: assign_process_tasks(&conn)?,
         moved_observations,
         converted_turns,
         forgotten_history,
@@ -301,6 +307,56 @@ fn forget_processes(conn: &Connection) -> StoreResult<u64> {
     }
 }
 
+/// Give each Process written without a Task the one it belongs to, oldest
+/// first, so a parent or caller resolves before the rows that inherit from it.
+/// The same rules as an insert, plus what an earlier lf recorded instead: the
+/// Task a Graph names, and the Task of a Session the Process started.
+/// `process_task_backfill` remembers how far the pass has read, so a row with
+/// no Task is examined once.
+fn assign_process_tasks(conn: &Connection) -> StoreResult<u64> {
+    let lf = super::task_work::process_task(
+        "p.parent_lf_process_id",
+        "p.cwd",
+        "p.caller_session_id",
+        "p.caller_agent_process_id",
+    );
+    let task = format!(
+        "SELECT CASE WHEN p.kind='agent'
+            THEN (SELECT {} FROM agent_sessions s WHERE s.id=p.agent_session_id)
+            ELSE coalesce((SELECT task_id FROM graph_processes WHERE lf_process_id=p.id),
+                (SELECT a.task_id FROM session_events se INDEXED BY session_events_process
+                    JOIN agent_sessions a ON a.id=se.session_id
+                    WHERE se.lf_process_id=p.id AND se.kind IN ('captured','started')
+                    AND a.primary_scope IS NULL AND a.task_id IS NOT NULL LIMIT 1),
+                {lf}) END
+         FROM processes p WHERE p.rowid=?1",
+        super::task_work::agent_task("s")
+    );
+    let mut assigned = 0;
+    loop {
+        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let rows = tx
+            .prepare(
+                "SELECT rowid,task_id IS NULL FROM processes
+                 WHERE rowid>(SELECT after_rowid FROM process_task_backfill) ORDER BY rowid LIMIT ?1",
+            )?
+            .query_map([TASK_BATCH], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, bool>(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let Some(&(last, _)) = rows.last() else {
+            return Ok(assigned);
+        };
+        let mut assign = tx.prepare(&format!(
+            "UPDATE processes SET task_id=({task}) WHERE rowid=?1 AND ({task}) IS NOT NULL"
+        ))?;
+        for (row, _) in rows.iter().filter(|(_, unassigned)| *unassigned) {
+            assigned += assign.execute([row])? as u64;
+        }
+        drop(assign);
+        tx.execute("UPDATE process_task_backfill SET after_rowid=?1", [last])?;
+        tx.commit()?;
+    }
+}
+
 /// Return freed pages to the filesystem. The first reclaim converts the store
 /// to incremental auto-vacuum with one VACUUM; later passes free pages in place.
 /// A busy store is left for the next pass.
@@ -399,6 +455,84 @@ mod tests {
             })
             .unwrap();
         assert_eq!(violations, 0);
+    }
+
+    #[test]
+    fn prune_gives_processes_an_earlier_lf_wrote_their_task_once() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("store.db");
+        let store = crate::test_fixture::open(&path).unwrap();
+        let repository = crate::test_fixture::repository(&store, "/repo");
+        let task = |title: &str| {
+            store
+                .create_task(&crate::work::task::NewTask {
+                    id: loopflow_model::durable::TaskId::new(),
+                    repository_id: repository.clone(),
+                    project_id: None,
+                    title: title.into(),
+                    description: String::new(),
+                    due_date: None,
+                })
+                .unwrap()
+                .id
+        };
+        let (checked_out, named) = (task("Checked out"), task("Named"));
+        drop(store);
+        let now = time::OffsetDateTime::now_utc().unix_timestamp();
+        let conn = Connection::open(&path).unwrap();
+        conn.execute(
+            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task')",
+            [checked_out.as_str()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('bound','Bound','human',1,0,'/elsewhere',?1)",
+            [named.as_str()],
+        )
+        .unwrap();
+        // Rows as released lf writes them: no Task, running, so nothing forgets them.
+        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
+        let insert = |n: u8, kind: &str, cwd: &str, parent: Option<u8>, caller: Option<u8>| {
+            conn.execute(
+                "INSERT INTO processes(id,trace_id,kind,cwd,parent_lf_process_id,caller_agent_process_id,
+                    agent_session_id,started_at)
+                 VALUES(?1,?1,?2,?3,?4,?5,CASE WHEN ?2='agent' THEN 'bound' END,?6)",
+                rusqlite::params![id(n), kind, cwd, parent.map(id), caller.map(id), now],
+            )
+            .unwrap();
+        };
+        insert(1, "lf", "/repo.task/src", None, None);
+        insert(2, "lf", "/tmp", Some(1), None);
+        insert(3, "agent", "/elsewhere", Some(2), None);
+        insert(4, "lf", "/tmp", Some(1), Some(3));
+        insert(5, "lf", "/elsewhere", None, None);
+        insert(6, "lf", "/repo.task", None, Some(3));
+        let tasks = || -> Vec<Option<String>> {
+            conn.prepare("SELECT task_id FROM processes ORDER BY id")
+                .unwrap()
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .collect::<Result<_, _>>()
+                .unwrap()
+        };
+        assert_eq!(prune(&path, &[], now).unwrap().assigned_processes, 5);
+        let (checked_out, named) = (Some(checked_out.to_string()), Some(named.to_string()));
+        // The checkout, the parent, the agent's Session, the calling agent over
+        // the parent; a row with no Task stays without one; and a checkout
+        // over the calling agent.
+        assert_eq!(
+            tasks(),
+            [
+                checked_out.clone(),
+                checked_out.clone(),
+                named.clone(),
+                named,
+                None,
+                checked_out
+            ]
+        );
+        assert_eq!(prune(&path, &[], now).unwrap().assigned_processes, 0);
     }
 }
 

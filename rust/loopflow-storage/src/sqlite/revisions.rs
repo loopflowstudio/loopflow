@@ -144,6 +144,8 @@ mod tests {
         "github_people",
         // Acquisition attempts and watermarks do not change displayed Work.
         "linear_team_checks",
+        // How far the maintenance pass has given Processes their Task.
+        "process_task_backfill",
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",

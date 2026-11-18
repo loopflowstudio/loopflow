@@ -344,7 +344,6 @@ pub(super) const FORGETTABLE: &str = "p.kind='lf' AND p.completed_at IS NOT NULL
     AND NOT EXISTS(SELECT 1 FROM ci_incidents WHERE repair_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM task_ship_events WHERE lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM agent_sessions WHERE transport_lf_process_id=p.id)
-    AND NOT EXISTS(SELECT 1 FROM relocated_task_processes WHERE process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE owner=p.id)
     AND NOT EXISTS(SELECT 1 FROM desktop_shells WHERE launcher_lf_process_id=p.id)
     AND NOT EXISTS(SELECT 1 FROM tasks WHERE ship_lf_process_id=p.id)";
@@ -498,18 +497,17 @@ fn process_query(
             ),
         };
         let value = bind(Value::Text(value.into()));
-        // Native starts retain their original assignment. A Graph's steps ran
-        // in their Task's checkout. Neither a current Session bind nor
+        // Native starts retain their original assignment. A Graph's steps
+        // recorded their Task when they started. Neither a current Session bind nor
         // another Process's command context establishes performed work.
         sql.push_str(&format!(
             " AND e.id IN (
             SELECT lf_process_id FROM history.turns
             WHERE {column}={value} AND lf_process_id IS NOT NULL
             UNION
-            SELECT op.id FROM graph_process_steps gs JOIN processes op ON op.id=gs.lf_process_id
-            JOIN tasks tw ON {tasks}{value}{close}
-            JOIN task_checkouts c ON c.task_id=tw.id
-            WHERE op.cwd=rtrim(c.worktree,'/') OR instr(op.cwd,rtrim(c.worktree,'/')||'/')=1
+            SELECT op.id FROM tasks tw JOIN processes op INDEXED BY processes_task ON op.task_id=tw.id
+            JOIN graph_process_steps gs ON gs.lf_process_id=op.id
+            WHERE {tasks}{value}{close}
         )"
         ));
     }
@@ -671,12 +669,20 @@ pub(super) fn attach_in(
             super::record_process_in(tx, &start.process, start.terminal.as_ref())?;
         }
         tx.execute(
-            "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
-                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state)
+            &format!(
+                "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,
+                started_at,agent_session_id,agent_provider,agent_interactive,spawn_state,task_id)
              SELECT ?2,'agent',(SELECT trace_id FROM processes WHERE id=?3),
-                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,'reserved' FROM agent_sessions s WHERE s.id=?1",
-            params![session,attached.agent_process_id,process,
-                time::OffsetDateTime::now_utc().unix_timestamp()],
+                ?3,s.provider,s.repo,s.cwd,?4,s.id,s.provider,s.interactive,'reserved',{}
+             FROM agent_sessions s WHERE s.id=?1",
+                super::task_work::agent_task("s")
+            ),
+            params![
+                session,
+                attached.agent_process_id,
+                process,
+                time::OffsetDateTime::now_utc().unix_timestamp()
+            ],
         )?;
         // A new AgentProcess on a finished headless run is working again; its
         // exit completes the run once more. A moved conversation stays moved.
@@ -694,6 +700,13 @@ pub(super) fn attach_in(
             attached.lf_process_id,
             attached.token
         ],
+    )?;
+    // The lf Process running a Task's conversation is that Task's work, whatever
+    // directory it was started from.
+    tx.execute(
+        "UPDATE processes SET task_id=agent.task_id FROM processes agent
+         WHERE agent.id=?1 AND agent.task_id IS NOT NULL AND processes.id=?2",
+        params![attached.agent_process_id, attached.lf_process_id],
     )?;
     if let Some(previous) = current.filter(|_| !replace_provider) {
         // The provider and its pending requests survive attachment handoff.
@@ -2063,7 +2076,8 @@ mod discovery_tests {
                 [&observer],
             )
             .unwrap();
-            // A Graph process recorded both Processes as steps in the first Task's checkout.
+            // A Graph process recorded both Processes as steps in the first
+            // Task's checkout, and each recorded that Task when it started.
             conn.execute(
                 "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.first') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree",
                 [first.as_str()],
@@ -2076,8 +2090,8 @@ mod discovery_tests {
             .unwrap();
             for process in [&shared, &mechanical] {
                 conn.execute(
-                    "UPDATE processes SET cwd='/repo.first',parent_lf_process_id=?2 WHERE id=?1",
-                    params![process, observer],
+                    "UPDATE processes SET cwd='/repo.first',parent_lf_process_id=?2,task_id=?3 WHERE id=?1",
+                    params![process, observer, first.as_str()],
                 )
                 .unwrap();
                 conn.execute(

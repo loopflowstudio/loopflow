@@ -27,7 +27,7 @@ impl SqliteStore {
                  OR EXISTS({})
                  OR EXISTS(SELECT 1 FROM graph_process_steps WHERE graph_lf_process_id IN ({}))",
                 super::task_work::session_ids("?1"),
-                super::task_work::lf_process_ids(&conn, "?1")?,
+                super::task_work::lf_process_ids("?1"),
             ),
             [task.as_str()],
             |row| row.get(0),

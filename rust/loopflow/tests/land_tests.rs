@@ -2067,7 +2067,10 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
                 return;
             };
             let pids: Vec<i64> = db
-                .prepare("SELECT pid FROM processes WHERE completed_at IS NULL AND pid IS NOT NULL")
+                .prepare(
+                    "SELECT pid FROM graph_processes WHERE ended_at IS NULL AND pid IS NOT NULL
+                     UNION SELECT pid FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL",
+                )
                 .and_then(|mut rows| rows.query_map([], |row| row.get(0))?.collect())
                 .unwrap_or_default();
             for pid in pids {

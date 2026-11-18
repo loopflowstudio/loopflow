@@ -1405,12 +1405,17 @@ fn every_viewer_starts_with_the_snapshot_and_shares_live_output() {
     assert!(String::from_utf8_lossy(snapshot).contains("drawn"));
     assert_eq!(events(&items, "resize")[0]["rows"], 24);
     // Both views type into the same agent, and both see what each typed.
+    // Each view has its own connection, so the second line waits for the
+    // first to be echoed; otherwise their arrival order is unspecified.
     second.input("hello\n");
+    for viewer in [&mut first, &mut second] {
+        let items = until_out(viewer, "line hello");
+        assert!(items.iter().all(|item| !matches!(item, Item::Snapshot(_))));
+    }
     first.input("again\n");
     for viewer in [&mut first, &mut second] {
         let items = until_out(viewer, "line again");
         assert!(items.iter().all(|item| !matches!(item, Item::Snapshot(_))));
-        assert!(String::from_utf8_lossy(&out(&items)).contains("line hello"));
     }
     first.input("done\n");
     first.finish();

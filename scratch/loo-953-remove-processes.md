@@ -73,12 +73,11 @@ subscribe::reads_record_no_process` → 22 pass; `documented_commands::` 4,
 `scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|
 RegistryQueryTests|DesktopHeadlessTests|DesktopLogTests|WorkSelectionTests|
 WorkNavigationTests'` → 156 pass; clippy and fmt clean; server schema
-fixture regenerated. Gate/CI: `binary(session_lifecycle_tests)`,
-`session_cli_tests` (two fixtures still read `store.lf_process` of an lf
-that no longer writes its row), `work_open_tests`, `binary(two_people)`,
+fixture regenerated; `session_cli_tests::` 24 and the `local_planning`
+public-run fixture pass after dropping their Process-row reads. Gate/CI:
+`binary(session_lifecycle_tests)`, `work_open_tests`, `binary(two_people)`,
 `binary(transport_tests)`, `test(transport::)`, `test(performance_tests::)`,
-`binary(lf)`, `local_planning` (one fixture reads `work["processes"]`),
-`agent_tests`/`native_session` fixtures over `processes_since`, and the
+`binary(lf)`, the rest of `local_planning`, and the
 journal stop's flaky-under-load
 `completion_preserves_retained_session_input_and_unknown_process_history`.
 `check_migrations.py` and `schema_page.py --check` were clean before slice 4,

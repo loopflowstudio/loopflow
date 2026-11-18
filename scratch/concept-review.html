@@ -1,276 +1,68 @@
 <!doctype html>
-<<<<<<< HEAD
-<html lang="en"><head><meta charset="utf-8"><title>LOO-959 concept review, after slice 6</title>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-968 concept review: Auto-Ship as built</title>
 <style>
-:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mute:#666;--yes:#1f7a3a;--no:#b3261e;--prop:#2457c5;--line:#ddd}
-@media(prefers-color-scheme:dark){:root{--fg:#e8e8e3;--bg:#151515;--mute:#9a9a9a;--yes:#6fcf8a;--no:#ff8a80;--prop:#8fb0ff;--line:#333}}
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:960px;margin:2rem auto;padding:0 1rem}
-table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.prop{border-left:3px solid var(--prop);padding-left:.8rem}
-code{font-size:.9em}pre{background:rgba(127,127,127,.12);padding:.7rem;overflow:auto}.mute{color:var(--mute)}
+:root{--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#d2d2d7;--yes:#1a7f37;--no:#b42318;--prop:#f3efe2;--card:#f6f6f8}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#e8e8ea;--mute:#9a9aa0;--line:#3a3a3f;--yes:#4ac26b;--no:#ff7b72;--prop:#2c2818;--card:#1f1f22}}
+body{background:var(--bg);color:var(--fg);font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:60rem;margin:2rem auto;padding:0 1rem}
+code{font:13px ui-monospace,Menlo,monospace}
+table{border-collapse:collapse;width:100%;margin:1rem 0}
+td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.mute{color:var(--mute)}
+.prop{background:var(--prop);border-left:3px solid #c9a227;padding:.6rem .9rem;margin:1rem 0}
 .cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.card{background:var(--card);padding:.7rem 1rem;border-radius:6px}
+pre{background:var(--card);padding:.7rem 1rem;border-radius:6px;overflow:auto}
 </style></head><body>
-<h1>Do the concepts line up? LOO-959 after slice 6</h1>
-<p><b>Area:</b> recovery of a Task's conversation and its run after a kill, a reboot or a server restart, with all six slices in it (HEAD <code>4040a941</code>, against LOO-953's branch). Taken whole because slice 6 changed what "comes back" means: a conversation can now come back without its provider thread.</p>
+<h1>Do the concepts line up? Auto-Ship as built</h1>
+<p><b>Area:</b> how a Task gets taken the rest of the way without a person: <code>lf ship</code>, <code>lf -b task run</code>, <code>lf task hold</code>, the run reading Auto-Ship at each step, recovery, and the state labels every surface shows. Reviewed at HEAD <code>4c0481cb6e</code> against the LOO-959 base <code>89943efba2</code> (89 files, +1,141 / −2,478).</p>
+
+<h2>One interaction, with its failure and recovery</h2>
+<pre>lf ship LOO-12          # LOO-12 · code from human-review running as Graph process …  ships: yes
+lf task status LOO-12   # shipping · Auto-Ship: on by Maya, 09:04
+  (the run is killed)   # recovery starts `lf task run LOO-12`, under RUN_RESTARTS; it stands in at human-review
+lf task hold LOO-12     # LOO-12 stopped shipping   (nothing killed)
+  (run reaches pr land) # Waiting at pr land: not approved to merge (Maya stopped shipping). `lf ship` lands it.
+lf ship LOO-12          # on again; same run path; lands</pre>
+<p>One carrier, one recovery loop, one restart rule. The run decides at each step by reading the mark, so a turn-on or a stop mid-run counts without restarting anything. The code matches: <code>RunningGraph::stands_in</code> and <code>stopped_landing</code> are the only two readers that change behavior, <code>task_state_sql</code> the only one that changes a label.</p>
 
 <h2>Pairings</h2>
 <table>
 <tr><th>What a person knows</th><th>In the code</th><th></th><th>Note</th></tr>
-<tr><td>The Task's conversation</td><td>primary Session; <code>conversation</code> in <code>lf task status --json</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>It died / I quit it</td><td><code>ended.by</code> from launcher exit (0/130 = person)</td><td class="yes">yes</td><td>SIGTERM-at-shutdown exit code on real Claude still unmeasured (a person's Machine).</td></tr>
-<tr><td>It's starting again, attempt k, next at</td><td><code>start {attempts, last_started_at, next_at, gave_up, failure}</code>; one rule <code>next_start_at</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>I started it myself, so the count starts over</td><td><code>record_start</code> in <code>lf session resume</code>, unless <code>LF_RECOVERING_SESSION</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>It comes back, even when the crash took its transcript</td><td><code>human_session::open</code> → <code>lost_thread</code> → <code>new_thread</code>, one rule for the pass and <code>lf resume</code></td><td class="yes">yes</td><td>Fixed by slice 6. qa: first attempt, both starters.</td></tr>
-<tr><td>It came back <em>without its memory</em></td><td>a pane diagnostic before the provider draws; nothing on the Session</td><td class="no">no</td><td>The one fact a person would want and can't read later. Status says <code>running (started again 23:29, attempt 1)</code>, same as a resume that kept everything.</td></tr>
-<tr><td>The run died at a step and is carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, <code>died_run</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>After a reboot things come back in order</td><td><code>Registry::open</code> settles, then the pass, one start at a time</td><td class="yes">yes</td><td></td></tr>
+<tr><td>Auto-Ship (on / stopped)</td><td><code>task_graphs.auto_ship{,_at,_by}</code>, <code>AutoShip</code>, <code>AutoShipState</code>, <code>TaskSnapshot.auto_ship</code>, Swift <code>autoShip</code></td><td class="yes">yes</td><td>One name from column to button.</td></tr>
+<tr><td><code>lf ship</code></td><td><code>ship_on</code> + <code>carry_task_run</code>; <code>task.ship</code> returns <code>TaskRun</code></td><td class="yes">yes</td><td>Same output, same Graph process as <code>lf task run</code>.</td></tr>
+<tr><td>"the run stands in for me"</td><td><code>stands_in</code> per interactive step; <code>start_task_run</code> runs through while on</td><td class="yes">yes</td><td>Read when reached, not at launch.</td></tr>
+<tr><td>Stopping it</td><td><code>lf task hold</code> · Desktop <b>Stop Auto-Ship</b> · prints "stopped shipping" · <code>ship_stop</code> · engine <code>Hold</code> · alias <code>ship --stop</code></td><td class="no">no</td><td>One action, five names. Every one does the same thing (set <code>stopped</code>, clear armed auto-merge); the words disagree. Tests still call the <code>ship --stop</code> alias.</td></tr>
+<tr><td><code>shipping</code> state, Autonomous section</td><td><code>TaskState::Shipping</code>, <code>TaskSection::Autonomous</code>, derived from Auto-Ship on + a live run</td><td class="no">no</td><td>One idea under three words (Auto-Ship, shipping, Autonomous). Derived, not stored, so it is only naming. Excluded by the plan.</td></tr>
+<tr><td>"stopped" vs "never set"</td><td><code>stopped</code> blocks merging; NULL lets a run that reaches a merging step land</td><td class="yes">yes</td><td>The three-way mark earns its third state: <code>auto</code> and <code>deliver</code> land with nobody turning Auto-Ship on. <code>docs/orchestration.md</code> says so.</td></tr>
+<tr><td><code>lf -b task run</code></td><td><code>batch_on</code> writes <code>on</code> unless stopped; the launcher flag also stands in</td><td class="no">partly</td><td>A launch flag writes a lasting Task fact, so a single headless pass turns the Task Autonomous for later bare runs and recovery. That's intended (recovery relaunches bare <code>lf task run</code>), but a person reading <code>-b</code> as "this run, headless" won't expect it.</td></tr>
+<tr><td>A run that gave up</td><td><code>TaskRunStopped</code> leaves the mark; position stays <code>run</code>; state <code>idle</code></td><td class="yes">yes</td><td>Same label as a non-shipping run that gave up (<code>completion_is_independent_of_graph_position</code>). The next <code>lf task run</code> stands in again.</td></tr>
+<tr><td>Ship process, ship log, shipping snapshot</td><td>gone (<code>task_ship_events</code> leaving for LOO-971)</td><td class="yes">yes</td><td>No concept left that a person never sees.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a fresh thread looks like a resume</h2>
+<h2>Biggest mismatch: the stop has five names</h2>
 <div class="cols">
-<div><h3>Built</h3>
-<pre>crash → transcript gone → kill
-pane:   The claude transcript of this
-        conversation is gone; continuing
-        on a fresh thread.   (scrolls away)
-status: running (started again 23:29,
-        attempt 1)
-Desktop: same line</pre>
-<p class="mute">Someone attaching later meets an agent that forgot the conversation and has no line saying why.</p></div>
-<div class="prop"><h3>Possible later (not proposed now)</h3>
-<pre>status: running on a fresh thread since
-        23:29 (the old transcript was gone)</pre>
-<p class="mute">Needs one nullable Session fact (the lost thread it replaced) on the wire: DTO fixture plus 13 Swift inline fixtures. Already recorded in <code>questions.md</code>.</p></div>
+<div class="card"><b>Existing</b><br>
+<code>lf task hold LOO-12</code> → "LOO-12 stopped shipping"<br>
+Desktop: <b>Stop Auto-Ship</b><br>
+Run: "not approved to merge (Maya stopped shipping)"<br>
+Status: "Auto-Ship: stopped by Maya"</div>
+<div class="card prop"><b>Proposed (not built)</b><br>
+Output says what changed: "LOO-12: Auto-Ship stopped" / "Auto-Ship was not on"; the run says "Waiting at pr land: Auto-Ship stopped by Maya. `lf ship` lands it." Tests call <code>task hold</code>, not the alias. Whether the command stays <code>hold</code> is question 1.</div>
 </div>
-<p><b>Recommendation: ship as built.</b> The outcome this Task promises (every open Task runs again or names one command) now holds for the crash case; the fresh thread carries the original request and skill, so the agent's first reply already shows where it starts. The missing line is wording, not recovery, and it costs a wire change this Task doesn't need.</p>
+<p>This is copy, not model. The model under it is right: one mark, one writer per action, two readers. Nothing here needs another implement pass; gate can take the test alias swap.</p>
 
-<h2>Counterexample kept</h2>
-<p><code>thread_lost</code> reads the home from the resuming process's <code>CLAUDE_CONFIG_DIR</code>/<code>CODEX_HOME</code>, which for the pass is the server's. A thread that ran under another home reads as gone. The fresh start is still right (Claude started by that server couldn't resume it either), but the pane's "is gone" is false: the file exists elsewhere. Before slice 6 this case failed five times and gave up.</p>
-
-<h2>Plan changes</h2>
-<ul><li>Outcome line now says a lost transcript comes back on a fresh thread seeded with its original request (it said "from its saved thread").</li>
-<li>"Concept review after slice 6" records the two items above. Nothing to build before gate.</li></ul>
+<h2>What would break it</h2>
+<ul>
+<li>A released <code>lf ship</code> dying across the upgrade is not carried again (its pid lived on <code>task_ship_events</code>). Recorded in <code>questions.md</code>; <code>lf task run</code> recovers it.</li>
+<li>A graph with no land step and a hand-merged PR now finishes its steps before completing. Recorded as a decision.</li>
+</ul>
 
 <h2>Questions</h2>
 <ol>
-<li>A conversation that came back on a fresh thread: (a) pane notice only, as built (chosen) · (b) a Session fact and a status/Desktop line, in a follow-up Task · (c) in this Task before gate.</li>
-<li>A thread found under a different provider home: (a) fresh start, wording as is (chosen) · (b) say "not found in this server's claude home" instead of "gone" · (c) look in the person's home too and copy it, as account homes once did.</li>
-<li>SIGTERM at shutdown on real Claude (acceptance 5): (a) a person measures it during the real reboot (chosen) · (b) build <code>holder_stopping</code> now, before the measurement.</li>
+<li>The stop command: (a) keep <code>lf task hold</code>, change only the printed words to "Auto-Ship stopped"; (b) rename to <code>lf task auto-ship off</code>-style pair with <code>lf ship</code>; (c) leave as is.</li>
+<li><code>lf -b task run</code> writing Auto-Ship on: (a) keep (recovery and later bare runs stand in); (b) <code>-b</code> stands in for its own run only and writes nothing, so only <code>lf ship</code> turns it on.</li>
+<li>The board's words: (a) keep <code>shipping</code>/Autonomous; (b) rename the state and section to Auto-Ship so one word runs through (separate Task, wire change).</li>
 </ol>
 </body></html>
-||||||| parent of 536bda017a (LOO-968 concept review: one Auto-Ship mark, no route approval, missed ship readers)
-=======
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>LOO-968 concept review: ship is shorthand for Auto-Ship</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<style>
-  :root {
-    --bg: #fbfaf7; --fg: #1d1c1a; --dim: #6b675f; --line: #e2ded5;
-    --card: #ffffff; --yes: #1f7a4a; --no: #b3261e; --prop: #2d5bd7;
-    --propbg: #eef2fd; --gone: #8a8478; --code: #f2efe8;
-  }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: #161614; --fg: #ebe8e1; --dim: #9b968c; --line: #34322d;
-      --card: #1e1d1a; --yes: #5fcf8e; --no: #ff8a80; --prop: #8fb0ff;
-      --propbg: #1d2540; --gone: #77726a; --code: #26241f;
-    }
-  }
-  body { background: var(--bg); color: var(--fg); font: 16px/1.55 ui-serif, Georgia, serif;
-         max-width: 980px; margin: 0 auto; padding: 40px 24px 80px; }
-  h1 { font-size: 28px; margin: 0 0 6px; }
-  h2 { font-size: 20px; margin: 44px 0 10px; border-bottom: 1px solid var(--line); padding-bottom: 6px; }
-  p.lede { color: var(--dim); margin-top: 0; }
-  code { font: 13.5px ui-monospace, Menlo, monospace; background: var(--code); padding: 1px 4px; border-radius: 3px; }
-  table { border-collapse: collapse; width: 100%; font-size: 14.5px; background: var(--card); }
-  th, td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; }
-  th { font-weight: 600; }
-  .yes { color: var(--yes); font-weight: 700; }
-  .no { color: var(--no); font-weight: 700; }
-  .prop { background: var(--propbg); }
-  .tag { font: 12px ui-monospace, Menlo, monospace; padding: 1px 6px; border-radius: 10px; border: 1px solid var(--prop); color: var(--prop); }
-  .gone { color: var(--gone); text-decoration: line-through; }
-  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
-  .box { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
-  .box.prop { border-color: var(--prop); }
-  .box h3 { margin: 0 0 8px; font-size: 16px; }
-  pre { font: 13px/1.5 ui-monospace, Menlo, monospace; background: var(--code); padding: 10px 12px; border-radius: 6px; overflow-x: auto; margin: 6px 0; }
-  ol.q li { margin-bottom: 10px; }
-  ol.q ol { list-style: lower-alpha; margin-top: 4px; }
-  blockquote { margin: 0; padding: 4px 14px; border-left: 3px solid var(--line); color: var(--dim); }
-  @media (max-width: 720px) { .cols { grid-template-columns: 1fr; } }
-</style>
-</head>
-<body>
-
-<h1>Ship is shorthand for Auto-Ship</h1>
-<p class="lede">LOO-968 concept review, 2026-11-18, before implementation. The area: everything that decides whether a
-Task's run stands in for people and merges — <code>lf ship</code>, <code>lf -b task run</code>, stop/hold, the
-<code>shipping</code> state and Autonomous section, recovery, and the records behind them. The plan was read against
-LOO-959's head <code>89943efba2</code>, which this branch stacks on.</p>
-
-<blockquote>"i feel like ship is supposed to be a small short hand that maybe updates the proposed graph to be auto
-mode, and has grown into this sprawling concept. lets reduce its impact on the overall system and protocol" — Jack</blockquote>
-
-<p>The kickoff plan already gets the large move right: one carrier, one recovery, the landing as a Graph step. This review
-found three places where the plan's own model was still bigger than the concept, and changed the plan for all three.
-<span class="tag">proposed</span> marks what the review changed.</p>
-
-<h2>Do the product's concepts and the code's line up?</h2>
-<table>
-  <tr><th>What a person knows / does</th><th>Today (code)</th><th>Kickoff plan</th><th>After this review</th></tr>
-  <tr>
-    <td><b>Auto-Ship</b> — Desktop's button, Notice, docs, every operate skill</td>
-    <td><span class="no">no</span> four records: <code>tasks.shipped_at</code>, <code>task_ship_events</code>, <code>ShipApproval</code>, <code>ShipStop</code></td>
-    <td><span class="no">no</span> one record, new name: <code>AutoMode</code>, <code>auto_on_*</code>/<code>auto_off_*</code>, wire <code>auto</code>, "auto mode: on"</td>
-    <td class="prop"><span class="yes">yes</span> <code>AutoShip</code>, columns <code>auto_ship*</code>, wire <code>auto_ship</code>, "Auto-Ship: on, by Maya 2h ago"</td>
-  </tr>
-  <tr>
-    <td>Auto-Ship is on, stopped, or never set</td>
-    <td><span class="no">no</span> derived from the last of five event kinds</td>
-    <td><span class="no">no</span> two marks (on, off); <code>is_on = on ∧ ¬off</code>; four columns</td>
-    <td class="prop"><span class="yes">yes</span> one mark <code>Option&lt;AutoShip { state: On|Stopped, at, by }&gt;</code>; three columns</td>
-  </tr>
-  <tr>
-    <td><code>lf ship</code> — "ship this"</td>
-    <td><span class="no">no</span> its own carrier loop, process and restart rule</td>
-    <td><span class="yes">yes</span> write on, then <code>lf task run</code></td>
-    <td class="prop"><span class="yes">yes</span> unchanged</td>
-  </tr>
-  <tr>
-    <td><code>lf ship --stop</code>, <code>lf task hold</code>, Stop Auto-Ship</td>
-    <td><span class="no">no</span> withdraw kills the carrier; three names, one action</td>
-    <td><span class="yes">yes</span> write off; run stops at its next interactive step or landing</td>
-    <td class="prop"><span class="yes">yes</span> writes <code>stopped</code>. Three names stay (question 4)</td>
-  </tr>
-  <tr>
-    <td>"Nothing is left for me in this graph, so it may merge" (the <code>ships:</code> line)</td>
-    <td><span class="no">no</span> stored as an approval (<code>Approval::Route</code>) at launch and again at <code>end</code></td>
-    <td><span class="no">no</span> still a write: "on, unless off"</td>
-    <td class="prop"><span class="yes">yes</span> computed from the Graph, never stored; merging waits only on <code>stopped</code></td>
-  </tr>
-  <tr>
-    <td><code>shipping</code> state / Autonomous section</td>
-    <td><span class="no">no</span> carrier subquery over ship events plus <code>shipped_at</code></td>
-    <td><span class="yes">yes</span> live run ∧ on</td>
-    <td class="prop"><span class="yes">yes</span> live run ∧ <code>auto_ship='on'</code>. Two names for one bucket remain (question 3)</td>
-  </tr>
-  <tr>
-    <td>A Task that dies comes back</td>
-    <td><span class="no">no</span> two paths: <code>restart_runs</code> (5 then wait) and <code>restart_ship</code> (never gives up)</td>
-    <td><span class="yes">yes</span> one path, one rule</td>
-    <td class="prop"><span class="yes">yes</span> unchanged; plus retention's <code>ship_carrier</code> arm and graph-inventory's ship exit update go (plan missed them)</td>
-  </tr>
-  <tr>
-    <td>"How did this Task ship?" in telemetry</td>
-    <td><code>task_summaries.ship_events</code> counts event kinds</td>
-    <td><span class="no">no</span> not mentioned; would count an empty, leaving table</td>
-    <td class="prop"><span class="yes">yes</span> <code>task_summaries.auto_ship</code>: the final state; <code>ship_events</code> leaving</td>
-  </tr>
-</table>
-
-<h2>The biggest mismatch: a stored approval nobody reads</h2>
-<p>The kickoff plan kept <code>Approval::Route</code>: a run with no interactive step ahead writes Auto-Ship on, and so does
-reaching <code>end</code>. Walk what reads that write under the new model:</p>
-<ul>
-  <li>The runner reads <code>on</code> only at an interactive step. A run with no interactive step ahead never reaches one.</li>
-  <li>Landing reads only <code>stopped</code> (<code>stopped_landing</code>, <code>graph.rs:843</code>). <code>on</code> doesn't gate it.</li>
-  <li>At <code>end</code>, today's ship carrier already returns <code>ShipStep::Finished</code> without merging (<code>ship.rs:543</code>); after this Task there is no carrier at all.</li>
-  <li>The only reader left is the label: <code>shipping</code> versus <code>moving</code>.</li>
-</ul>
-<p>So the write is a stored copy of something the Graph answers, plus an "unless stopped" rule to keep the copy from
-overriding a person. Deleting it deletes the <code>Approval</code> enum, the conditional, and the only writer of Auto-Ship
-that isn't a person's command.</p>
-
-<div class="cols">
-  <div class="box">
-    <h3>Before (kickoff plan)</h3>
-<pre>lf task run LOO-1      # at demo, land ahead
-  ships: no interactive step is left…
-  → task_graphs.auto_on_at = now
-       (unless auto_off_at)
-  → state shipping · Autonomous
-  → land merges
-  → end: write on again (unless off)</pre>
-  </div>
-  <div class="box prop">
-    <h3>After <span class="tag">proposed</span></h3>
-<pre>lf task run LOO-1      # at demo, land ahead
-  ships: no interactive step is left…
-  → nothing written
-  → state moving · Working
-  → land merges (waits only if stopped)
-  → end</pre>
-  </div>
-</div>
-<p>What changes on purpose: that run shows in Working, not Autonomous. Nobody turned Auto-Ship on, and the board says so.
-What survives: it still merges, <code>lf task hold</code> still stops it at the landing, the <code>ships:</code> line still
-warns. "Approval never granted without a person's <code>lf ship</code> or <code>-b</code>" becomes literally true.</p>
-<p>Counterexample checked: a routed path reaching <code>end</code> on a graph that also had interactive steps (the
-<code>task_work.rs:619</code> comment). Today that write hands the Task to a ship carrier that finishes at <code>end</code>
-without merging. Nothing is lost.</p>
-
-<h2>The record, before and after</h2>
-<div class="cols">
-  <div class="box">
-    <h3>Kickoff plan</h3>
-<pre>task_graphs
-  auto_on_at   auto_on_by
-  auto_off_at  auto_off_by
-
-AutoMode { on: Option&lt;AutoMark&gt;,
-           off: Option&lt;AutoMark&gt; }
-writers: lf ship · -b · route · end · stop</pre>
-  </div>
-  <div class="box prop">
-    <h3>After <span class="tag">proposed</span></h3>
-<pre>task_graphs
-  auto_ship ('on'|'stopped')
-  auto_ship_at  auto_ship_by
-
-Option&lt;AutoShip { state, at, by }&gt;
-writers: lf ship (on) · -b (on unless stopped)
-         stop/hold (stopped)</pre>
-  </div>
-</div>
-
-<h2>One interaction, with failure and recovery</h2>
-<p>Maya's Task waits at <code>human-review</code> on <code>code</code>.</p>
-<ol>
-  <li><code>lf ship LOO-1</code> writes <code>on, by Maya</code> and runs <code>lf task run LOO-1</code>. One Graph process; state <code>shipping</code>.</li>
-  <li>The run stands in at <code>human-review</code>, runs <code>deliver</code> (<code>land --wait-and-fix</code>).</li>
-  <li>The Machine sleeps; the run dies. <code>restart_runs</code> relaunches <code>lf task run LOO-1</code> — the same rule as any run. It reads <code>on</code> at <code>verify</code> and stands in.</li>
-  <li>Instead: Maya runs <code>lf ship --stop</code> mid-<code>implement</code>. <code>stopped, by Maya</code>. The run finishes implement, reaches <code>human-review</code>, blocks; state <code>active</code>. <code>lf -b task run</code> stands in by its mode but waits at <code>land</code>: "not approved to merge (Maya stopped shipping). <code>lf ship</code> lands it."</li>
-</ol>
-<p>One gap the walk exposed, left as question 5: <code>ship_settle_merge</code> today completes a Task whose PR someone
-merged by hand even on a graph with no land step (<code>build</code>, <code>pursue</code>, <code>deep-clean</code>,
-<code>queue</code> end at <code>pr-publish</code> or <code>gate</code>). The plan's answer "the land step sees it" holds
-only for graphs that have one.</p>
-
-<h2>Larger than this work</h2>
-<ul>
-  <li><b>Autonomous and shipping</b> are two names for one bucket; docs write "Autonomous (shipping)". Renaming the section touches every surface's board.</li>
-  <li><b>Three names for stop</b>: <code>lf ship --stop</code>, <code>lf task hold</code>, Stop Auto-Ship. With stop as one write, <code>hold</code> could become the only command, or <code>--stop</code> could.</li>
-</ul>
-
-<h2>Questions</h2>
-<ol class="q">
-  <li>The fact's name.
-    <ol><li>Auto-Ship everywhere (chosen).</li><li>"auto mode" everywhere, renaming the Desktop buttons and docs.</li></ol></li>
-  <li>A run with no interactive step ahead.
-    <ol><li>Writes nothing, shows <code>moving</code>, still merges (chosen).</li><li>Writes Auto-Ship on so it shows <code>shipping</code>/Autonomous (kickoff plan).</li></ol></li>
-  <li>The board bucket.
-    <ol><li>Leave Autonomous and <code>shipping</code> as they are (chosen, out of scope).</li><li>File a Task to call both "Auto-Ship".</li></ol></li>
-  <li>Stop's three names.
-    <ol><li>Keep all three (chosen, out of scope).</li><li>File a Task to keep only <code>lf ship --stop</code>.</li><li>Keep only <code>lf task hold</code>.</li></ol></li>
-  <li>A hand-merged PR on a graph without a land step.
-    <ol><li>Rely on the Task's PR observation to complete it (implement checks it does; plan assumes so).</li><li>Keep a small merge check in the runner between steps.</li></ol></li>
-  <li>Stop doesn't kill the run (kickoff choice, kept).
-    <ol><li>Yes.</li><li>Stop also interrupts the live run, as <code>lf task interrupt</code> does.</li></ol></li>
-</ol>
-
-</body>
-</html>
->>>>>>> 536bda017a (LOO-968 concept review: one Auto-Ship mark, no route approval, missed ship readers)

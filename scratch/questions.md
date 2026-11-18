@@ -31,3 +31,7 @@
 - A Graph process killed with its carrier stays open until the hourly prune, so the Task reads `shipping` (was `moving` on the base) with nothing running. Base behavior; `lf machine prune` settles it.
 - Five recovery fixtures time out here on HEAD 3f2a4f7e89 without the QA edits too (run alone, `--test-threads=1`): `a_restarted_wait_with_no_explicit_agent_ignores_the_readers`, `a_restarted_wait_keeps_its_explicit_agent`, `a_shipping_tasks_restarted_wait_keeps_its_explicit_agent`, `a_task_run_takes_its_waves_agent_without_flags` ("timed out waiting for the Task conversation and Graph launches"), `a_task_run_whose_carrier_died_is_carried_again_and_gives_up_after_five`. The live world's recovery carried a killed run within a minute, so this looks like the fixture's MachineServer, not the pass. Gate should check CI.
 - `a_second_ship_refuses_while_a_run_carries_the_task` is gone: a ship on a live run now reports that run (`a_ship_on_a_running_task_reports_its_run_and_starts_nothing`).
+
+## Concept review after QA (2026-11-18, headless)
+
+- Nothing to change before gate; page `scratch/concept-review.html`. Open: the stop's five names (`task hold`, Stop Auto-Ship, "stopped shipping", `ship_stop`, `ship --stop` alias), `-b` writing a lasting mark, `shipping`/Autonomous wording. Gate can switch the fixtures from the `ship --stop` alias to `task hold`.

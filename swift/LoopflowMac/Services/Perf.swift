@@ -154,16 +154,17 @@ enum Perf {
     /// Capture before launching Tasks so their model work retains the initiating event.
     @MainActor
     static func userAction<Result>(_ interval: Interval, scenario: String, id: String,
-                                   repository: String? = nil, liveSessions: Int?, owner: UUID, _ action: () -> Result) -> Result {
+                                   repository: String? = nil, machine: String? = nil, liveSessions: Int?, owner: UUID,
+                                   _ action: () -> Result) -> Result {
         InteractionTrace.$input.withValue(InteractionInput.current) {
-            begin(interval, scenario, id: id, repository: repository, liveSessions: liveSessions, owner: owner)
+            begin(interval, scenario, id: id, repository: repository, machine: machine, liveSessions: liveSessions, owner: owner)
             return InteractionTrace.$current.withValue(pending[Key(interval: interval, owner: owner)]?.interaction, operation: action)
         }
     }
 
     @MainActor
     static func begin(_ interval: Interval, _ scenario: String, id: String, detail: String = "",
-                      repository: String? = nil, liveSessions: Int? = nil, owner: UUID? = nil) {
+                      repository: String? = nil, machine: String? = nil, liveSessions: Int? = nil, owner: UUID? = nil) {
         let key = Key(interval: interval, owner: owner)
         if let inherited = InteractionTrace.current {
             if inherited.isFinished { return }
@@ -185,9 +186,12 @@ enum Perf {
             if interval == .coldStart, let ms = PerfClock.millisecondsSinceProcessStart() {
                 input = InteractionInput(uptime: ProcessInfo.processInfo.systemUptime - ms / 1000, source: .processStart)
             } else { input = InteractionTrace.input }
-            interaction = Interaction(name: interval.experience(scenario), scenario: scenario, input: input,
+            // A request's ID names its interaction, so the Machine's spans for
+            // that request join the journal record.
+            interaction = Interaction(id: UUID(uuidString: id) ?? UUID(), name: interval.experience(scenario), scenario: scenario, input: input,
                 context: Interaction.Context(thermalState: ProcessInfo.processInfo.thermalState.rawValue,
-                                             liveSessions: liveSessions, repository: repository), sink: journal.append)
+                                             liveSessions: liveSessions, repository: repository, machine: machine),
+                sink: journal.append)
         } else { interaction = nil }
         let eventWindow = NSApp?.currentEvent?.window
         let window = eventWindow?.canBecomeMain == true ? eventWindow : NSApp?.mainWindow ?? NSApp?.keyWindow

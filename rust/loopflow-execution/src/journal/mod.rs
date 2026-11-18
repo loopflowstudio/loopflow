@@ -27,6 +27,9 @@ const JOURNAL_ROOT: &str = ".lf/journal/traces";
 const JOURNAL_EXCLUDE_ENTRY: &str = ".lf/journal/";
 pub const PROCESS_RECEIPT_ROOT: &str = "runtime/exec-processes";
 pub const LF_TRACE_ID_ENV: &str = "LF_TRACE_ID";
+/// The tracing target of a Start's timings: the server's creation steps and the
+/// conversation's setup steps. `logs/lf.log` keeps it at INFO for the report.
+pub const START_TIMING_TARGET: &str = "loopflow::start_timing";
 pub const LF_PROCESS_ID_ENV: &str = "LF_PROCESS_ID";
 
 /// Serializes tests that mutate process-global store or Process identity variables.
@@ -515,15 +518,6 @@ pub fn admit_process(repo_root: &Path, command: &[String]) {
         elapsed_ms = started.elapsed().as_millis(),
         "admitted Process"
     );
-}
-
-/// Complete this Process before it execs into another program. The image that
-/// replaces it keeps the PID but is not this command; its exit is recorded by
-/// whoever waits on it.
-pub fn finish_before_exec() {
-    if let Some(context) = current_context() {
-        finish_runtime(&context.cwd, &Ok::<(), anyhow::Error>(()));
-    }
 }
 
 const EXEC_PROCESS_ENV: &str = "LF_EXEC_PROCESS";

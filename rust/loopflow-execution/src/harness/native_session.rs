@@ -127,7 +127,10 @@ pub fn launch_session(
                     start: Start::New,
                     context_file,
                 },
-                None,
+                config
+                    .launch_lock
+                    .as_ref()
+                    .and_then(crate::ops::human_session::LaunchLock::take),
                 capture.or(created.as_ref()),
             )
         };
@@ -598,9 +601,6 @@ fn run_client(
         .unwrap_or_else(std::env::current_dir)?;
     let agent_session = client.thread.as_ref();
     let started = std::time::Instant::now();
-    // A connect that exec'd into this launch keeps its Session launch lock held
-    // until the provider is recorded.
-    let launch_lock = launch_lock.or_else(crate::ops::human_session::inherited_launch_lock);
     let attachment = native_provider_attachment(launch, client.remote.as_deref())?;
     let capture_dir = environment
         .get(crate::session_record::CAPTURE_KEY_ENV)

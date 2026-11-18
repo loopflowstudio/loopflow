@@ -545,6 +545,74 @@ fn commit_skill_step(repo_root: &Path, skill: &str, agent: Option<&str>) {
     }
 }
 
+/// Start a conversation's prepared input in this `lf session resume`, as `lf -i`
+/// would in the conversation's directory with its agent and Work. This process
+/// stays the provider's launcher and its one LfProcess.
+fn launch_conversation(
+    launch: loopflow_execution::ops::human_session::ConversationLaunch,
+    args: &[String],
+) -> anyhow::Result<()> {
+    use loopflow_execution::durable::WorkRef;
+    let loopflow_execution::ops::human_session::ConversationLaunch {
+        agent,
+        cwd,
+        work,
+        skill,
+        first_turn,
+        prepared_capture,
+        lock,
+        ..
+    } = launch;
+    let mut cli = Cli {
+        interactive: true,
+        agent: Some(agent),
+        prepared_capture,
+        launch_lock: Some(lock),
+        command: Some(match skill {
+            Some(skill) => Commands::Skill {
+                cmd: loopflow::lf::SkillCommand::External(vec![skill, first_turn]),
+            },
+            None => Commands::Inline {
+                prompt: vec![first_turn],
+            },
+        }),
+        ..Cli::default()
+    };
+    // The provider starts on this thread, so its agent is selected here.
+    let _settings = loopflow_execution::config::settings::select_invocation(cli.setting_values()?);
+    let _cwd = CwdGuard::enter(&cwd)?;
+    // Work reaches the provider's environment as `lf --task X -i` hands it.
+    let (_work_env, binding) = match work {
+        Some(mut binding) if matches!(binding.work, WorkRef::Task(_)) => {
+            let declaration = EnvGuard::set(
+                loopflow_execution::ops::WORK_DECLARATION_ENV,
+                format!("task:{}", binding.work.id()),
+            );
+            cli.wave = binding.wave_name.clone();
+            binding.cwd = cwd;
+            (Some(declaration), Some(binding))
+        }
+        Some(binding) => {
+            cli.wave = binding.wave_name;
+            let wave = binding.wave_id.map(|wave| {
+                EnvGuard::set(
+                    loopflow_execution::work::wave::context::WAVE_ID_ENV,
+                    wave.to_string(),
+                )
+            });
+            (wave, None)
+        }
+        None => (None, None),
+    };
+    let kind = loopflow_execution::transport::LaunchInput {
+        batch: false,
+        interactive: true,
+        has_prompt: true,
+    }
+    .kind();
+    finish_command(dispatch_launch(kind, &mut cli, args, binding.as_ref()))
+}
+
 fn prepare_work_binding(
     selector: &str,
     repo: &Path,
@@ -1459,8 +1527,12 @@ fn init_tracing(verbose: bool) {
             .init();
         return;
     }
+    // Creation and conversation setup steps are timings a Start's report reads.
     tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::new("warn,loopflow::server=info"))
+        .with_env_filter(EnvFilter::new(format!(
+            "warn,loopflow::server=info,{}=info",
+            loopflow_execution::journal::START_TIMING_TARGET
+        )))
         .with_ansi(false)
         .with_writer(|| loopflow_execution::diagnostic_log::DiagnosticLog)
         .event_format(loopflow_execution::diagnostic_log::IdentifiedLines)
@@ -2168,6 +2240,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
             },
             cli.batch || cli.interactive,
         )?;
@@ -2328,6 +2401,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                 id,
                 connection,
                 fork,
+                ..
             },
     }) = &cli.command
     {
@@ -2819,6 +2893,7 @@ fn dispatch_here(
                 stack_on: stack_on.clone(),
                 directive: directive.clone(),
                 branch: None,
+                from_last_fetch: false,
             },
             *json || cli.json,
         );
@@ -2845,7 +2920,10 @@ fn dispatch_here(
     }
     if let Some(Commands::Session { cmd }) = &cli.command {
         journal::admit_process(&std::env::current_dir()?, args);
-        return loopflow::lf::commands::session::run(cmd, &cli);
+        return match loopflow::lf::commands::session::run(cmd, &cli)? {
+            Some(launch) => launch_conversation(launch, args),
+            None => Ok(()),
+        };
     }
     if let Some(Commands::Steer {
         target,

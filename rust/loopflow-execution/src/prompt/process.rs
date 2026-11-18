@@ -214,6 +214,7 @@ fn prepare_prompt(
         skip_permissions: config.yolo,
         structured_replies: structured_replies_for_context(&client_context, action_style),
         directive_relay: None,
+        launch_lock: None,
         env: [(
             crate::config::USER_NAME_ENV.to_string(),
             components.user_name.clone().unwrap_or_default(),

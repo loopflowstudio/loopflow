@@ -150,14 +150,62 @@ pub fn entry_of(
 
 /// What a reading of Graphs' execution asks of the store once: the input each
 /// Process captured last, open Graph execution in the selected Tasks' work,
-/// and the receipt files of unfinished Processes.
+/// the selected Tasks that never ran their Graph, and the receipt files of
+/// unfinished Processes.
 #[derive(Debug, Default)]
 pub struct GraphExecutionFacts {
     pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>,
+    pub unrun: HashMap<TaskId, UnrunGraph>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
     pub receipt_home: Option<PathBuf>,
     pub receipts: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
+}
+
+/// The Graph a Task took up and never ran: no run carries it and no
+/// GraphProcess was started for it. A conversation opening on such a Task
+/// owes its setup, and the Task reads as starting that Graph.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnrunGraph {
+    pub graph: String,
+    /// The error of the Task's latest event when it is a resumable failure:
+    /// the last attempt to start stopped there.
+    pub stopped: Option<String>,
+}
+
+fn unrun_graphs_in(conn: &Connection, ids: &str) -> StoreResult<HashMap<TaskId, UnrunGraph>> {
+    let rows = conn
+        .prepare(
+            "SELECT t.task_id,json_extract(t.graph,'$.name'),
+                (SELECT e.kind_json FROM task_events e WHERE e.task_id=t.task_id ORDER BY e.id DESC LIMIT 1)
+             FROM task_graphs t
+             WHERE t.task_id IN (SELECT value FROM json_each(?1)) AND t.run_start IS NULL
+               AND NOT EXISTS(SELECT 1 FROM graph_processes g WHERE g.task_id=t.task_id)",
+        )?
+        .query_map([ids], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    rows.into_iter()
+        .map(|(task, graph, event)| {
+            let stopped = match event.as_deref().map(serde_json::from_str) {
+                Some(Ok(crate::work::task::TaskEventKind::Failed {
+                    error,
+                    resumable: true,
+                })) => Some(error),
+                Some(Err(error)) => return Err(invalid(error)),
+                _ => None,
+            };
+            Ok((
+                TaskId::parse(&task).map_err(invalid)?,
+                UnrunGraph { graph, stopped },
+            ))
+        })
+        .collect()
 }
 
 /// How a headless step is getting past a usage limit. `retry_at` set means
@@ -543,13 +591,22 @@ impl SqliteStore {
                 receipts.insert(id, locator);
             }
         }
+        let unrun = unrun_graphs_in(&conn, &ids)?;
         Ok(GraphExecutionFacts {
             open_processes,
+            unrun,
             inputs,
             receipt_home: home,
             receipts,
             limit_recoveries,
         })
+    }
+
+    /// The Graph `task` took up, when it never ran it.
+    pub fn unrun_task_graph(&self, task: &TaskId) -> StoreResult<Option<UnrunGraph>> {
+        let conn = self.conn.lock().expect("store mutex poisoned");
+        let ids = super::children::ids_json([task.as_str()]);
+        Ok(unrun_graphs_in(&conn, &ids)?.remove(task))
     }
 }
 

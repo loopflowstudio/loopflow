@@ -1223,6 +1223,17 @@ fn assert_background_conversation(run_graph: bool) {
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
     }
+    // A background start never takes the terminal of someone opening the
+    // conversation at the same moment.
+    let held: String = rusqlite::Connection::open(&db)
+        .unwrap()
+        .query_row(
+            "SELECT command FROM processes WHERE command LIKE '%\"session\",\"resume\"%'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert!(held.contains("--start-if-free"), "{held}");
 
     // Checking the Task out again keeps the one conversation.
     succeed(

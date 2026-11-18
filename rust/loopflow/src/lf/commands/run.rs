@@ -699,12 +699,13 @@ fn print_context_header(built: &PromptBuild, cli: &Cli) {
 fn run_prompt(built: &PromptBuild, cli: &Cli, kind: LaunchKind) -> Result<Option<String>> {
     if kind.mode() == Mode::Interactive {
         info!("launching interactive vendor session");
-        let runtime = begin_process_runtime(built, "tui", None)?;
+        let runtime = begin_process_runtime(built, "tui", None, cli.prepared_capture.as_deref())?;
         let mut environment = built.agent_config.env.clone();
         environment.extend(runtime.environment());
         let result = (|| {
             let mut config = built.agent_config.clone();
             config.env = environment.clone();
+            config.launch_lock = cli.launch_lock.clone();
             let context_file =
                 loopflow_execution::agent::write_system_prompt_file(&config, &built.log_name)?;
             launch_session(&config, kind, context_file.as_deref(), Some(&runtime))
@@ -747,7 +748,7 @@ fn run_prompt(built: &PromptBuild, cli: &Cli, kind: LaunchKind) -> Result<Option
         "checked cli availability"
     );
 
-    let runtime = begin_process_runtime(built, "headless", cli.resume.as_deref())?;
+    let runtime = begin_process_runtime(built, "headless", cli.resume.as_deref(), None)?;
 
     let result = run_headless_prompt(built, &runtime, kind);
     // Explicit native resume can retire this provider while its executor waits.
@@ -850,6 +851,7 @@ fn begin_process_runtime(
     built: &PromptBuild,
     surface: &str,
     resume: Option<&str>,
+    prepared_capture: Option<&str>,
 ) -> Result<LfProcessRuntime> {
     let started = Instant::now();
     let cwd = built
@@ -882,10 +884,10 @@ fn begin_process_runtime(
             &built.context,
             AgentProcessRequest::from_prepared(&built.agent_config)?,
         )
-    } else if let Some(id) = loopflow_execution::ops::human_session::prepared_artifact_key()? {
+    } else if let Some(id) = prepared_capture {
         loopflow_execution::session_record::SessionRecorder::start_prepared(
             &loopflow_execution::store::lf_home_dir(),
-            &id,
+            id,
             spec,
             &built.context,
             Some(AgentProcessRequest::from_prepared(&built.agent_config)?),
@@ -1219,7 +1221,7 @@ for line in sys.stdin:
         let command = vec!["lf".to_string(), "implement".to_string()];
         let admitted = || {
             loopflow_execution::journal::with_runtime(home.path(), &command, || {
-                let runtime = begin_process_runtime(&built, "headless", None)?;
+                let runtime = begin_process_runtime(&built, "headless", None, None)?;
                 let artifact_key = runtime.artifact_key();
                 let run_dir = runtime.artifact_dir();
 

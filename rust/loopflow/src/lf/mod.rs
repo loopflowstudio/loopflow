@@ -151,6 +151,15 @@ pub struct Cli {
     /// The conversation `lf -b resume ID --message TEXT` continues.
     #[arg(skip)]
     pub resume: Option<String>,
+
+    /// The prepared capture a conversation's fresh launch publishes.
+    #[arg(skip)]
+    pub prepared_capture: Option<String>,
+
+    /// The Session launch lock a conversation's fresh launch holds until its
+    /// provider is recorded.
+    #[arg(skip)]
+    pub launch_lock: Option<loopflow_execution::ops::human_session::LaunchLock>,
 }
 
 impl Cli {
@@ -415,6 +424,8 @@ impl Cli {
             wt: self.wt.clone(),
             cwd: self.cwd.clone(),
             resume: self.resume.clone(),
+            prepared_capture: self.prepared_capture.clone(),
+            launch_lock: self.launch_lock.clone(),
         }
     }
 
@@ -1805,6 +1816,9 @@ pub enum SessionCommand {
         /// Leave the other client running; continue in a new conversation forked from it
         #[arg(long, conflicts_with = "message")]
         fork: bool,
+        /// Time a new Task's setup steps under the creation request that started it
+        #[arg(long)]
+        request_id: Option<String>,
     },
     /// Restart this scope's conversation on a fresh provider thread, seeded with
     /// what the last thread knew; `-a` switches harness

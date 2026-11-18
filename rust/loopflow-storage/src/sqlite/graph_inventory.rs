@@ -379,11 +379,14 @@ impl SqliteStore {
     }
 
     /// Graphs in Graph-process-id order after `after`, at most `limit`.
+    /// `observe` reads each run's result as the caller sees it: a run whose
+    /// pid has died reads as ended before the liveness pass records it.
     pub fn graph_inventory(
         &self,
         filter: &GraphProcessFilter,
         after: Option<&str>,
         limit: NonZeroU32,
+        observe: impl Fn(&Execution) -> crate::graph_process::ExecutionResult,
     ) -> StoreResult<GraphProcessPage> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let graphs = match &filter.task_id {
@@ -393,7 +396,10 @@ impl SqliteStore {
         let search = filter.search.as_deref().map(str::to_lowercase);
         let mut entries = Vec::new();
         for graph in &graphs {
-            let entry = entry_in(&conn, graph)?;
+            let mut entry = entry_in(&conn, graph)?;
+            if entry.summary.state == GraphProcessSummaryState::Current {
+                entry.summary.state = GraphProcessSummaryState::of_run(observe(&graph.run));
+            }
             let summary = &entry.summary;
             if filter
                 .repo
@@ -767,7 +773,7 @@ mod tests {
     use std::num::NonZeroU32;
 
     use crate::execution::GraphProcessFilter;
-    use crate::graph_process::RunOwner;
+    use crate::graph_process::{Execution, RunOwner};
     use crate::session::GraphProcessSummaryState;
 
     /// Two waits on one Task's step and a later wait still running its time.
@@ -966,7 +972,7 @@ mod tests {
 
         let all = NonZeroU32::new(10).unwrap();
         let page = store
-            .graph_inventory(&GraphProcessFilter::default(), None, all)
+            .graph_inventory(&GraphProcessFilter::default(), None, all, Execution::result)
             .unwrap();
         assert_eq!(page.entries.len(), 3);
         let state = |id: &loopflow_model::id::LfProcessId| {
@@ -1008,6 +1014,7 @@ mod tests {
                 },
                 None,
                 all,
+                Execution::result,
             )
             .unwrap();
         assert_eq!(repo.entries.len(), 1);
@@ -1017,10 +1024,16 @@ mod tests {
                 &GraphProcessFilter::default(),
                 None,
                 NonZeroU32::new(2).unwrap(),
+                Execution::result,
             )
             .unwrap();
         let rest = store
-            .graph_inventory(&GraphProcessFilter::default(), first.next.as_deref(), all)
+            .graph_inventory(
+                &GraphProcessFilter::default(),
+                first.next.as_deref(),
+                all,
+                Execution::result,
+            )
             .unwrap();
         assert_eq!((first.entries.len(), rest.entries.len()), (2, 1));
     }

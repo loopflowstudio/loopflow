@@ -123,6 +123,6 @@ fn doctor_keeps_reporting_when_the_database_is_corrupt() {
         .as_array()
         .unwrap()
         .iter()
-        .any(|check| check["name"] == "processes" && check["status"] == "fail"));
+        .any(|check| check["name"] == "store" && check["status"] == "fail"));
     assert_eq!(fs::read(path).unwrap(), b"not a sqlite database");
 }

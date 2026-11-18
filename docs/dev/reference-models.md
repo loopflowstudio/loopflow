@@ -458,10 +458,11 @@ being watched; the Graph stops there, and neither failed. Mechanical steps creat
 no LfSession.
 A conversation attachment grants no Graph authority.
 
-A Graph is `current` while its Graph process has no recorded exit, `completed` when the
-Graph process succeeded and `stopped` when it exited before the last step. A killed
-Graph process leaves dead Processes as history. Nothing restarts or resumes it. The caller,
-normally the Task conversation, inspects `lf process show ID --json` or
+A Graph is `current` while its Graph run has no recorded end and its pid is not
+dead, `completed` when the run succeeded and `stopped` when it exited before the
+last step. A killed Graph run reads `stopped` from its own pid, and the Machine
+server's liveness pass records its end. Nothing restarts or resumes it. The caller,
+normally the Task conversation, inspects `lf graph show ID --json` or
 `lf task status`, then launches fresh work. Unknown liveness stays unknown.
 
 ### Attribution, binding and ownership

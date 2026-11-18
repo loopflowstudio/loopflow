@@ -152,7 +152,7 @@ impl Command {
             && self
                 .args
                 .first()
-                .is_some_and(|name| matches!(name.as_str(), "list" | "show" | "usage" | "activity"))
+                .is_some_and(|name| matches!(name.as_str(), "show" | "usage" | "activity"))
         {
             self.command = "history".into();
             if self.args.first().is_some_and(|name| name == "activity") {
@@ -161,23 +161,9 @@ impl Command {
         } else if self.command == "activity" {
             self.command = "history".into();
         }
-        if self.command == "monitor" && self.args.first().is_some_and(|name| name == "ps") {
-            self.args[0] = "list".into();
-        }
-        if self.command == "monitor"
-            && self
-                .args
-                .first()
-                .is_some_and(|name| matches!(name.as_str(), "list" | "top"))
-        {
-            self.command = "process".into();
-        } else if self.command == "ps" {
-            self.command = "list".into();
-        }
         let owner = match self.command.as_str() {
             "doctor" => Some("machine"),
             "install" => Some("self"),
-            "list" | "top" => Some("process"),
             "usage" => Some("session"),
             "replay" => Some("history"),
             "release" | "ci" | "tokens" => Some("repo"),

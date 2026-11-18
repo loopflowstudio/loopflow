@@ -106,9 +106,10 @@ async fn agent_settlement_on_read_ends_a_detached_provider_without_losing_histor
     assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
 }
 
-/// A held checkout names the Session's agent, including one with no OS identity.
+/// A held checkout names the Session whose agent holds it, including one
+/// with no OS identity.
 #[test]
-fn task_checkout_blockers_name_the_held_agent() {
+fn task_checkout_blockers_name_the_held_session() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let lf = |cwd: &Path, args: &[&str]| {
@@ -137,24 +138,17 @@ fn task_checkout_blockers_name_the_held_agent() {
     let database = home.path().join("loopflow.db");
     let store = loopflow_execution::store::open_sqlite(&database).unwrap();
     reserve_session(&store, "held", worktree);
-    let attachment =
-        attachment::claim_session_attachment(&store, "held", None, &recorded_lf_process(&database))
-            .unwrap();
-    let agent = attachment.agent_process_id.as_str();
-
-    let status = json(repo.path(), &["desktop", "task", id, "--json"]);
-    assert!(status.to_string().contains(agent), "{status}");
+    attachment::claim_session_attachment(&store, "held", None, &recorded_lf_process(&database))
+        .unwrap();
 
     // Cancellation is the Task's decision; only checkout cleanup is held.
     let abandoned = lf(repo.path(), &["task", "abandon", id]);
     assert!(abandoned.status.success(), "{abandoned:?}");
     let reason = String::from_utf8_lossy(&abandoned.stderr);
-    let named = reason
-        .split("Process ")
-        .skip(1)
-        .filter_map(|rest| rest.split_whitespace().next())
-        .collect::<Vec<_>>();
-    assert!(named.contains(&agent), "{reason}");
+    assert!(
+        reason.contains("Session held has live or unresolved execution"),
+        "{reason}"
+    );
     assert!(worktree.exists());
 }
 
@@ -192,7 +186,7 @@ fn parser_returns_exact_status_without_admitting_an_early_store() {
 }
 
 #[tokio::test]
-async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
+async fn early_commands_exit_exactly_without_recording_initializing_or_migrating() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -223,20 +217,15 @@ async fn early_commands_record_exact_exits_without_initializing_or_migrating() {
             "{output:?}"
         );
     }
-    let rows: Vec<(i32, String)> = conn
-        .prepare(
-            "SELECT exit_code,outcome FROM processes WHERE parent_lf_process_id=?1
-             ORDER BY started_at,rowid",
-        )
-        .unwrap()
-        .query_map([parent.id.as_str()], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap()
-        .collect::<Result<_, _>>()
-        .unwrap();
     assert_eq!(
-        rows,
-        // `--help` is the help read and records none.
-        vec![(0, "succeeded".into()), (2, "failed".into())]
+        conn.query_row(
+            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
+            [parent.id.as_str()],
+            |row| row.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0,
+        "no lf writes a Process row"
     );
     assert_eq!(
         conn.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
@@ -286,56 +275,6 @@ async fn install_preflight_records_no_process() {
     assert_eq!(count, 0);
 }
 
-#[tokio::test]
-async fn exit_observation_writes_only_agent_issued_processes() {
-    let home = tempfile::tempdir().unwrap();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let caller = serde_json::json!({
-        "session_id": "session",
-        "agent_process_id": null,
-        "origin_exec_id": LfProcessId::new(),
-    })
-    .to_string();
-    let rows = || -> Vec<bool> {
-        rusqlite::Connection::open(&database)
-            .unwrap()
-            .prepare("SELECT via_agent FROM processes")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
-    };
-    let rejected = ["task", "--no-such-flag"];
-
-    let direct = command(home.path(), home.path(), &rejected)
-        .output()
-        .unwrap();
-    assert!(!direct.status.success(), "{direct:?}");
-    assert_eq!(rows(), Vec::<bool>::new(), "nothing saw it running");
-
-    let hook = command(
-        home.path(),
-        home.path(),
-        &["__context-block", "--moment", "start"],
-    )
-    .env("LF_AGENT_CALLER", &caller)
-    .stdin(std::process::Stdio::null())
-    .output()
-    .unwrap();
-    assert_eq!(rows(), Vec::<bool>::new(), "the harness ran it: {hook:?}");
-
-    let issued = command(home.path(), home.path(), &rejected)
-        .env("LF_AGENT_CALLER", &caller)
-        .output()
-        .unwrap();
-    assert!(!issued.status.success(), "{issued:?}");
-    assert_eq!(rows(), [true]);
-}
-
 #[test]
 fn empty_release_check_returns_through_process_completion() {
     let repo = TestRepo::new();
@@ -381,7 +320,7 @@ fn empty_release_check_returns_through_process_completion() {
 }
 
 #[tokio::test]
-async fn command_failure_records_the_process_result() {
+async fn command_failures_exit_1_and_keep_retained_work() {
     let home = tempfile::tempdir().unwrap();
     let database = home.path().join("loopflow.db");
     let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
@@ -419,19 +358,6 @@ async fn command_failure_records_the_process_result() {
     assert_eq!(result.status.code(), Some(1), "{result:?}");
     assert!(String::from_utf8_lossy(&result.stderr).contains("index.lock"));
     assert_eq!(std::fs::read_to_string(lock).unwrap(), "retained lock");
-    let conn = rusqlite::Connection::open(database).unwrap();
-    let failed: i64 = conn
-        .query_row(
-            "SELECT count(*) FROM processes
-             WHERE parent_lf_process_id=?1 AND outcome='failed' AND exit_code=1",
-            [parent.id.as_str()],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        failed, 3,
-        "resolution, dispatch and delivery failures retain their command outcomes"
-    );
 }
 
 fn command(home: &Path, cwd: &Path, args: &[&str]) -> Command {

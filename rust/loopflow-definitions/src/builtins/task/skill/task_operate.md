@@ -12,8 +12,8 @@ then continue. Headless, exit when done or stuck. A Task with no owner is
 nobody's to move: read and discuss it, but don't launch or ship it.
 
 **Never start a second Graph process.** A live one is left running, and unknown
-liveness is not permission. A run listed in status is not a live process: check
-each Graph against `lf ps --json`.
+liveness is not permission. A run listed in status is not a live process: its
+`running` in `lf task status <issue> --json` is read from the run's own pid.
 
 ## Method
 

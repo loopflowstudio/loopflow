@@ -253,7 +253,7 @@ lf session usage --days 30 --json   # recorded provider usage, newest first
 lf session usage --task INF-123 --json # the same evidence drilled to one Task
 lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
 lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf ps --json                          # live Sessions and Graph runs, each OS-confirmed
+lf graph list --processes --state current --json   # live Graph runs, each OS-confirmed
 lf session list --json --select id,title,state   # only those fields of each Session
 ```
 

@@ -446,6 +446,7 @@ fn task_work_includes_checkout_binding_without_granting_ownership() {
             },
             None,
             NonZeroU32::new(100).unwrap(),
+            loopflow_storage::graph_process::Execution::result,
         )
         .unwrap();
     assert_eq!(graphs.entries, work.graph_processes);

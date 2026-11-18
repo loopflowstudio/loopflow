@@ -654,11 +654,7 @@ mod tests {
     async fn explanation_missing_subjects_are_unavailable_not_unbound() {
         use crate::ops::context::{explain_context, ContextFact};
         let (directory, store) = test_store().await;
-        for (task, session, process) in [
-            (Some("absent"), None, None),
-            (None, Some("absent"), None),
-            (None, None, Some("absent")),
-        ] {
+        for (task, session) in [(Some("absent"), None), (None, Some("absent"))] {
             let report = explain_context(
                 &store,
                 directory.path(),
@@ -669,9 +665,6 @@ mod tests {
             assert!(matches!(report.task, ContextFact::Unavailable { .. }));
             if session.is_some() {
                 assert!(matches!(report.session, ContextFact::Unavailable { .. }));
-            }
-            if process.is_some() {
-                assert!(matches!(report.process, ContextFact::Unavailable { .. }));
             }
         }
     }

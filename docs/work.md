@@ -194,7 +194,7 @@ lf task list --subscribe                          # a JSON line each time the li
 it answers instantly and offline.
 
 `--subscribe` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf session history`, `lf repo tracker`, `lf ps` and the
+`lf session list`, `lf session history`, `lf repo tracker` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to

@@ -231,13 +231,20 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
     assert_eq!(retired.status.code(), Some(2));
     assert!(retired.stdout.is_empty());
     assert!(String::from_utf8_lossy(&retired.stderr).contains("skill not found: list"));
-    let db = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0
-    );
+    // A launch would have created the store and a Session in it.
+    let sessions = || {
+        let store = home.path().join(".lf/loopflow.db");
+        if !store.exists() {
+            return 0;
+        }
+        rusqlite::Connection::open(&store)
+            .unwrap()
+            .query_row("SELECT count(*) FROM agent_sessions", [], |row| {
+                row.get::<_, i64>(0)
+            })
+            .unwrap()
+    };
+    assert_eq!(sessions(), 0);
 
     fs::write(
         repo.path().join(".lf/skills/list.md"),
@@ -279,13 +286,7 @@ fn typed_help_inspects_reserved_definitions_without_launching() {
         success(run(repo.path(), home.path(), &["help", "--", "task"])),
         success(run(repo.path(), home.path(), &["help", "task"]))
     );
-    assert_eq!(
-        db.query_row("SELECT count(*) FROM agent_sessions", [], |row| row
-            .get::<_, i64>(0))
-            .unwrap(),
-        0,
-        "inspection must not start an agent Session"
-    );
+    assert_eq!(sessions(), 0, "inspection must not start an agent Session");
 }
 
 #[test]
@@ -655,7 +656,7 @@ fn desktop_state_uses_the_retained_reader_without_an_inspect_alias() {
 }
 
 #[test]
-fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
+fn history_owns_recorded_reads_and_replay() {
     let parse = |args: &[&str]| {
         Cli::try_parse_from(normalize_args(args.iter().map(|s| s.to_string()).collect()).unwrap())
             .unwrap()
@@ -683,11 +684,8 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
     assert_eq!(feed.since, "24h");
     assert!(feed.json);
 
-    for verb in ["list", "show", "replay"] {
-        let mut args = vec!["lf", "history", verb];
-        if matches!(verb, "show" | "replay") {
-            args.push("exact-capture");
-        }
+    for verb in ["show", "replay"] {
+        let args = ["lf", "history", verb, "exact-capture"];
         assert!(matches!(
             parse(&args).command,
             Some(Commands::Session {
@@ -695,7 +693,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             })
         ));
     }
-    assert!(Cli::try_parse_from(["lf", "process", "replay", "exact-capture"]).is_err());
     assert!(matches!(
         parse(&["lf", "replay", "exact-capture"]).command,
         Some(Commands::Session {
@@ -715,7 +712,7 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
 fn history_help_is_passive_and_saved_commands_keep_their_evidence_selectors() {
     let repo = fixture();
     let home = tempfile::tempdir().unwrap();
-    for verb in ["list", "show", "usage", "replay"] {
+    for verb in ["show", "usage", "replay"] {
         let help = success(run(repo.path(), home.path(), &["history", verb, "--help"]));
         assert_eq!(
             help,

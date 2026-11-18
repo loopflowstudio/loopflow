@@ -64,11 +64,11 @@ need an explicit add before they can receive a login.
 ## Local by default
 
 ```bash
-lf session history list                        # Processes recorded on this Machine
-lf process list --json                           # OS-live processes on this Machine
+lf session list --json                           # live conversations on this Machine
+lf graph list --processes --state current --json # live Graph runs on this Machine
 lf wave status product                 # current Project, Task conditions and Session evidence
 
-lf --machine build-home session history list   # run the same reader on build-home
+lf --machine build-home session list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
 ```
 
@@ -507,21 +507,21 @@ no signal authority.
 ## Observe processes
 
 ```bash
-lf process list --json
-lf process top
-lf process prune --dry-run
+lf session list --json
+lf graph list --processes --state current --json
+lf machine doctor
 ```
 
-The outer command journal records command receipts. `lf process list` and `lf process top` join
-those receipts to current OS process facts. Completed processes disappear from
-the live view. This is observation, not a durable lifecycle model.
+Each owner record (a Session's agent and attachment, a Graph run or step, a
+Task or ship carrier) carries the pid and OS start time of the process it runs
+as; liveness is one OS lookup against them. The Machine server's liveness pass
+records the end of an owner whose process died without writing it.
 
-`lf process prune` removes dead command receipts only after their terminal outcome
-is recorded, and may reap only AgentProcesses whose recorded identity is live
-and whose attached LfProcess is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
-unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
-that identity without inventing an outcome. An unclaimed provider PID is
-never killed merely because it resembles a Loopflow child.
+Lazy recovery may reap only AgentProcesses whose recorded identity is live and
+whose attached lf is provably dead. `lf machine doctor` reports strays, OS
+processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID` that no live record
+claims, and kills nothing. An unclaimed provider PID is never killed merely
+because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process

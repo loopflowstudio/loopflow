@@ -240,7 +240,7 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
 /// is in `codexErrorInfo`, and the sentence's apostrophe is U+2019.
 #[test]
 fn codex_usage_limit_goes_on_under_the_next_agent() {
-    const REFUSAL: &str = r#"{"message":"You\u2019ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.","additionalDetails":null,"codexErrorInfo":"usageLimitExceeded"}"#;
+    const REFUSAL: &str = r#"{"message":"You\u2019ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null,"misalignment":null}"#;
     let codex = support::codex_socket_script(
         &r#"#!/bin/sh
 read -r initialize

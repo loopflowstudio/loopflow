@@ -48,7 +48,9 @@ reads is camelCase: `codex app-server generate-ts` (0.170.0),
 `turn/completed`'s `turn.error` (`harness/testdata/codex_error.jsonl`, where
 it is `null`). `generate-ts` on 2026-11-18 lists `usageLimitExceeded`,
 `modelNotFound`, `unauthorized` and `serverOverloaded` as spelled in the
-decoder. Not captured: the app-server's own JSON for one of these failures.
+decoder. Captured 2026-11-18 from `codex app-server` on the spent account:
+`harness/testdata/codex_usage_limit.jsonl` is its three lines, unedited. The
+error object also carries `"misalignment":null`.
 
 ## Design
 

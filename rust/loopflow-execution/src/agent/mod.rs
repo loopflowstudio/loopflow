@@ -1696,7 +1696,6 @@ trust_level = "trusted"
 
     #[test]
     fn bare_claude_command_does_not_select_a_model() {
-        // OpenCode opens a private server instead of an argv; opencode.rs covers its bare model.
         let launch = AgentConfig {
             agent: crate::config::Agent::parse("claude").unwrap(),
             ..default_launch()

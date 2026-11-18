@@ -494,8 +494,8 @@ pub fn run(
     let harness = launch.harness;
     let program = harness.kind().as_str();
     let mut progress = crate::startup::Startup::new(format!("Preparing {program}"));
-    // Admission and Task checks precede provider setup, including private servers
-    // and Claude's folder-trust write.
+    // Admission and Task checks precede provider setup, including Claude's
+    // folder-trust write.
     let owner = launch.recording;
     validate_launch(launch)?;
     if let Some(key) = launch

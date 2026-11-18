@@ -40,7 +40,7 @@ Each harness file answers the rest:
 | method | answers |
 |---|---|
 | `capabilities()` | who names the thread, initial prompt on resume, failure classification, native skills, turn limit, output schema, respawn after crash, install hint |
-| `open(&Launch)` | native interactive client: argv, hook and title flags; starts private servers and returns any observer companion |
+| `open(&Launch)` | native interactive client: argv, hook and title flags |
 | `driver(&Launch, events, approval)` | headless stream `Driver`: start, input, interrupt, stop |
 
 `HarnessKind::harness()` is the only harness dispatch. Core launch and transcript
@@ -49,8 +49,7 @@ That policy includes input recency, live process ownership and saved-turn detail
 A harness whose server may host other conversations validates it before the
 shared AgentProcess close path signals the recorded process group.
 
-An interactive client with a companion waits in this process; any other client
-may `exec` into a held terminal.
+An interactive client may `exec` into a held terminal.
 
 | harness | interactive client | names the thread |
 |---|---|---|
@@ -59,12 +58,19 @@ may `exec` into a held terminal.
 | Pi work session | native TUI with the lf extension | provider |
 | Codex chat | `codex`, prompt in argv | provider (start hook) |
 | Codex work session | `codex --remote` after lf opens the app-server thread | provider |
-| OpenCode | `opencode --server … --session` beside a private server; waits | provider |
+| OpenCode | `opencode --standalone`, prompt in `--prompt` | lf (`--session ses_…`) |
 
 `cargo test -p loopflow-execution --lib harness::launch_matrix -- --nocapture`
 runs every harness as a chat, work session, batch and worker against stand-in provider scripts, and prints each cell's argv, hook ownership, wait mechanism and recorded thread.
 Headless matrix runs wait here; held-terminal exec handoff is covered by the
 transport fixtures.
+
+A headless OpenCode turn is one `opencode run --standalone --format json --auto`
+process: the prompt on stdin, one JSON line per finished part, and an exit that
+settles the turn. Each later turn is another run on the same `--session`. lf
+starts no OpenCode server. The context plugin, loaded through
+`OPENCODE_CONFIG_CONTENT`, supplies instructions, context, steers between tools
+and, for a work session or worker, turn reports to the Machine server.
 
 ## What a Task step does on each harness
 

@@ -1,5 +1,5 @@
 //! Launch and resume policy as table rows.
-//! Native argv comes from the harness; companions run in the launch matrix.
+//! Native argv comes from the harness; real launches run in the launch matrix.
 //! Owners, PTYs, provider processes, native conversation identity and the
 //! handler's own refusals stay with the full-Machine tests in `tests/README.md`.
 

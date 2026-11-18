@@ -58,8 +58,8 @@ Loopflow chooses an automation floor for headless work only:
 
 - Non-interactive Codex runs get `workspace-write` and approval policy `never`.
 - Non-interactive Claude runs skip permission prompts.
-- Non-interactive OpenCode keeps its configured permissions; Loopflow answers
-  each permission ask for the running turn.
+- Non-interactive OpenCode runs with `--auto`: it approves every permission its
+  configuration does not deny.
 - Pi uses its own tool policy and credentials; it provides no built-in sandbox.
 - More-permissive vendor configuration remains more permissive.
 - Less-permissive vendor configuration is raised to this floor; Claude prints a

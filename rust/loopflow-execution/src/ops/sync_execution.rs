@@ -84,7 +84,7 @@ pub(crate) fn run_sync_in(
     }
     let stacked_onto = stacked
         .as_ref()
-        .and_then(|stacked| stacked.parent_branch.as_ref())
+        .and_then(|stacked| stacked.live_parent_branch())
         .map(|branch| format!("origin/{branch}"));
     let fork_base = stacked.as_ref().map(|stacked| stacked.fork_base.clone());
     let default_target = if on_main { &upstream } else { &default };

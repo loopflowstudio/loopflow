@@ -444,7 +444,7 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
         let default = get_default_branch(repo)?;
-        let clear_parent = stacked.parent_branch.is_none()
+        let clear_parent = stacked.parent_merged
             || owner.target_ref == default
             || owner.target_ref == format!("origin/{default}");
         if clear_parent {

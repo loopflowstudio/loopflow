@@ -398,8 +398,18 @@ pub struct StackedSync {
     /// The recorded base, or the parent's merge commit once HEAD holds it.
     pub fork_base: String,
     pub child: Task,
+    /// The parent Task's identifier.
+    pub parent_identifier: String,
+    /// The parent's PR branch, kept after it merges.
+    pub parent_branch: String,
+    pub parent_merged: bool,
+}
+
+impl StackedSync {
     /// The live parent branch, or `None` once the parent has merged.
-    pub parent_branch: Option<String>,
+    pub fn live_parent_branch(&self) -> Option<&str> {
+        (!self.parent_merged).then_some(self.parent_branch.as_str())
+    }
 }
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
@@ -457,8 +467,39 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         Ok(Some(StackedSync {
             fork_base,
             child: *task,
-            parent_branch: (!merged).then_some(parent.branch),
+            parent_identifier: parent_task.identifier,
+            parent_branch: parent.branch,
+            parent_merged: merged,
         }))
+    })
+}
+
+/// The identifier of another open Task that `target` names, by identifier or
+/// by branch: one neither finished nor abandoned whose PR has not merged.
+pub fn open_task_named(worktree: &Path, target: &str) -> OpsResult<Option<String>> {
+    block_on_task(async move {
+        let own = match resolve_managed_task(worktree).await? {
+            ManagedTask::Managed { task, .. } => Some(task.id),
+            _ => None,
+        };
+        let store = task_store().await?;
+        let named = match store.get_task_by_issue(target).await.map_err(task_error)? {
+            Some(task) => Some(task),
+            None => store.get_task_by_branch(target).await.map_err(task_error)?,
+        };
+        let Some(task) = named.filter(|task| own.as_ref() != Some(&task.id)) else {
+            return Ok(None);
+        };
+        let state = store.task_state(&task.id).await.map_err(task_error)?;
+        if matches!(state, TaskState::Done | TaskState::Abandoned) {
+            return Ok(None);
+        }
+        let merged = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(task_error)?
+            .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+        Ok((!merged).then_some(task.identifier))
     })
 }
 
@@ -472,7 +513,7 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        if let Some(parent) = &stacked.parent_branch {
+        if let Some(parent) = stacked.live_parent_branch() {
             return Err(task_error(format!(
                 "Task PR is stacked on {parent}, which has not merged; land the parent first"
             )));

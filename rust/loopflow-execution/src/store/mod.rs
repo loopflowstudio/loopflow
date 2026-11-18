@@ -2277,8 +2277,8 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl crate::harness::Harness for RecordingHarness {
-        async fn start(&mut self, _config: &crate::agent::AgentConfig) -> anyhow::Result<()> {
+    impl crate::harness::Driver for RecordingHarness {
+        async fn start(&mut self) -> anyhow::Result<()> {
             Ok(())
         }
         async fn send_input(&mut self, _content: &str) -> anyhow::Result<()> {

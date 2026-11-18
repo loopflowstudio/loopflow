@@ -15,6 +15,7 @@ from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent
 SESSIONS = HOME / "native-sessions.json"
+SERVER_CONFIG = HOME / "native-opencode-config.json"
 LOCATIONS = HOME / "native-locations.json"
 EVENTS = queue.Queue()
 REPLIES = {}
@@ -65,20 +66,20 @@ def _record_launch():
         Path(evidence + ".caller").write_text(os.environ["LF_AGENT_CALLER"])
         Path(evidence + ".args").write_text("\n".join(sys.argv[1:]))
     config = json.loads(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
-    if "serve" not in sys.argv:
-        (HOME / "received.json").write_text(
-            json.dumps(
-                {
-                    "args": sys.argv[1:],
-                    "cwd": os.getcwd(),
-                    "participant": os.environ.get("LF_USER_NAME"),
-                    "opencode": json.dumps(config),
-                    "model": json.loads((HOME / "native-model.json").read_text())
-                    if (HOME / "native-model.json").exists()
-                    else None,
-                }
-            )
+    (HOME / "received.json").write_text(
+        json.dumps(
+            {
+                "args": sys.argv[1:],
+                "cwd": os.getcwd(),
+                "participant": os.environ.get("LF_USER_NAME"),
+                "opencode": json.dumps(config),
+                "server": json.loads(SERVER_CONFIG.read_text()),
+                "model": json.loads((HOME / "native-model.json").read_text())
+                if (HOME / "native-model.json").exists()
+                else None,
+            }
         )
+    )
     with (HOME / "launched").open("a") as output:
         output.write(os.environ["LF_CAPTURE_KEY"] + "\n")
     with (HOME / "declarations").open("a") as output:
@@ -346,6 +347,7 @@ if "serve" not in sys.argv:
     if __WAIT__:  # noqa: F821 — substituted by the Rust fixture before execution
         sys.stdin.readline()
     raise SystemExit(0)
+SERVER_CONFIG.write_text(os.environ.get("OPENCODE_CONFIG_CONTENT", "{}"))
 sessions = json.loads(SESSIONS.read_text()) if SESSIONS.exists() else {}
 locations = json.loads(LOCATIONS.read_text()) if LOCATIONS.exists() else {}
 server = ThreadingHTTPServer(("127.0.0.1", 0), Server)

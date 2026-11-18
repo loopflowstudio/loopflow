@@ -22,8 +22,9 @@ const FIRST: u64 = 128 * 1024;
 const TAIL: u64 = 8 * 1024 * 1024;
 
 /// Turn boundaries, usage and assistant prose; user/context payloads in Codex
-/// response_item rows are skipped before parsing. Every Pi row is: its entries chain through parents.
-const MARKERS: [&[u8]; 6] = [
+/// response_item rows are skipped before parsing. Every Pi row is parsed:
+/// its entries chain through parents.
+pub(crate) const MARKERS: [&[u8]; 6] = [
     b"\"type\":\"user\"",
     b"\"type\":\"assistant\"",
     b"\"type\":\"system\"",
@@ -33,10 +34,7 @@ const MARKERS: [&[u8]; 6] = [
 ];
 
 fn markers(harness: HarnessKind) -> &'static [&'static [u8]] {
-    match harness {
-        HarnessKind::Pi => &[],
-        _ => &MARKERS,
-    }
+    harness.harness().transcript_markers()
 }
 
 /// A conversation's current or last turn: a transcript `Turn` without what

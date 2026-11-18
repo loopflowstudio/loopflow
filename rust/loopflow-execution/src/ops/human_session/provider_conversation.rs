@@ -3,7 +3,7 @@
 //! started alone is found in its home and admitted when first connected.
 
 use loopflow_model::id::AgentSessionId;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,20 +15,20 @@ use crate::provider_auth::Provider;
 use crate::session::{LfSession, TitleSource};
 use crate::store::{ProviderAccountId, SharedStore};
 use crate::transcript::native_home;
-use crate::transcript::{conversation_home, is_user_input, json_lines, recorded_cwd, transcript};
+use crate::transcript::{conversation_home, recorded_cwd, transcript};
 
 pub(super) async fn human_input_times<'a>(
     store: &SharedStore,
     sessions: impl IntoIterator<Item = &'a LfSession>,
 ) -> Result<BTreeMap<String, i64>> {
-    let mut codex = BTreeMap::<PathBuf, Vec<(String, AgentSessionId)>>::new();
-    let mut claude = BTreeMap::new();
+    let mut homes = BTreeMap::<(HarnessKind, PathBuf), Vec<(String, AgentSessionId)>>::new();
     let mut times = BTreeMap::new();
     for session in sessions {
-        let provider = match session.provider.as_deref() {
-            Some("codex") => Provider::Codex,
-            Some("claude") => Provider::Claude,
-            _ => continue,
+        let Some(kind) = session.provider.as_deref().and_then(HarnessKind::parse) else {
+            continue;
+        };
+        let Some(provider) = kind.provider() else {
+            continue;
         };
         let Some(key) = session.artifact_key.as_deref() else {
             continue;
@@ -40,26 +40,15 @@ pub(super) async fn human_input_times<'a>(
         else {
             continue;
         };
-        let id = reference.agent_session;
         let home = fs::canonicalize(&home).unwrap_or(home);
-        if provider == Provider::Codex {
-            codex
-                .entry(home)
-                .or_default()
-                .push((session.id.to_string(), id));
-        } else {
-            let at = claude.entry((home.clone(), id.clone())).or_insert_with(|| {
-                transcript(HarnessKind::Claude, &home, id.as_str())
-                    .and_then(|path| claude_input_time(&path, id.as_str()))
-            });
-            if let Some(at) = at {
-                times.insert(session.id.to_string(), *at);
-            }
-        }
+        homes
+            .entry((kind, home))
+            .or_default()
+            .push((session.id.to_string(), reference.agent_session));
     }
-    for (home, sessions) in codex {
+    for ((kind, home), sessions) in homes {
         let wanted = sessions.iter().map(|(_, id)| id.as_str()).collect();
-        let native = codex_input_times(&home.join("history.jsonl"), &wanted);
+        let native = kind.harness().human_input_times(&home, &wanted);
         for (session, id) in sessions {
             if let Some(at) = native.get(id.as_str()) {
                 times.insert(session, *at);
@@ -67,43 +56,6 @@ pub(super) async fn human_input_times<'a>(
         }
     }
     Ok(times)
-}
-
-fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
-    let mut times = BTreeMap::<String, i64>::new();
-    for row in json_lines(path) {
-        let Some(id) = row["session_id"].as_str().filter(|id| wanted.contains(id)) else {
-            continue;
-        };
-        let Some(at) = row["ts"]
-            .as_i64()
-            .filter(|at| *at >= 0)
-            .and_then(|at| at.checked_mul(1000))
-        else {
-            continue;
-        };
-        times
-            .entry(id.to_string())
-            .and_modify(|saved| *saved = (*saved).max(at))
-            .or_insert(at);
-    }
-    times
-}
-
-fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
-    json_lines(path)
-        .filter_map(|row| {
-            if row["sessionId"].as_str() != Some(id) || !is_user_input(&row) {
-                return None;
-            }
-            let at = time::OffsetDateTime::parse(
-                row["timestamp"].as_str()?,
-                &time::format_description::well_known::Rfc3339,
-            )
-            .ok()?;
-            i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
-        })
-        .max()
 }
 
 /// The Session that recorded `id` as its provider conversation.
@@ -229,7 +181,7 @@ pub async fn select(
             .await?
             .and_then(|account| account.home)
             .ok_or_else(|| anyhow!("{provider} account {account} has no home"))?;
-        let harness = HarnessKind::parse(provider.as_str())
+        let harness = HarnessKind::from_provider(provider)
             .expect("conversations are found only for agent providers");
         crate::transcript::copy_between(harness, id, &home, &native_home(provider))?;
         store
@@ -244,7 +196,10 @@ pub async fn select(
 async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> {
     let accounts = store.list_provider_accounts(None).await?;
     let mut found: Vec<NativeConversation> = Vec::new();
-    for provider in [Provider::Codex, Provider::Claude] {
+    for harness in HarnessKind::ALL {
+        let Some(provider) = harness.provider() else {
+            continue;
+        };
         let stored = accounts
             .iter()
             .filter(|account| account.provider == provider.as_str())
@@ -257,10 +212,6 @@ async fn find(store: &SharedStore, id: &str) -> Result<Vec<NativeConversation>> 
             {
                 continue;
             }
-            let harness = match provider {
-                Provider::Codex => HarnessKind::Codex,
-                _ => HarnessKind::Claude,
-            };
             if let Some(transcript) = transcript(harness, &home, id) {
                 found.push(NativeConversation {
                     provider,
@@ -354,6 +305,7 @@ mod tests {
             &path,
             concat!(
                 "{\"session_id\":\"a\",\"ts\":20}\n",
+                "{\"session_id\":\"b\",\"ts\":30}\n",
                 "broken\n",
                 "{\"session_id\":\"a\",\"ts\":10}\n",
                 "{\"session_id\":\"unrelated\",\"ts\":99}\n",
@@ -364,20 +316,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            super::codex_input_times(&path, &std::collections::BTreeSet::from(["a"])),
-            std::collections::BTreeMap::from([("a".into(), 20_000)])
+            crate::harness::HarnessKind::Codex
+                .harness()
+                .human_input_times(home.path(), &std::collections::BTreeSet::from(["a", "b"])),
+            std::collections::BTreeMap::from([("a".into(), 20_000), ("b".into(), 30_000)])
         );
-        assert!(super::codex_input_times(
-            &home.path().join("missing"),
-            &std::collections::BTreeSet::from(["a"])
-        )
-        .is_empty());
+        assert!(crate::harness::HarnessKind::Codex
+            .harness()
+            .human_input_times(
+                &home.path().join("missing"),
+                &std::collections::BTreeSet::from(["a"])
+            )
+            .is_empty());
     }
 
     #[test]
     fn claude_recency_requires_main_conversation_human_input() {
         let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("claude.jsonl");
+        let path = home
+            .path()
+            .join("projects/work")
+            .join(format!("{ID}.jsonl"));
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
         let human = serde_json::json!({"type":"user", "userType":"external", "sessionId":ID,
             "timestamp":"2026-01-01T00:00:00.123Z", "message":{"content":"Continue here"}});
         let mut rows = vec![human.clone()];
@@ -423,12 +383,26 @@ mod tests {
                 .collect::<String>(),
         )
         .unwrap();
-        assert_eq!(super::claude_input_time(&path, ID), Some(1_767_225_600_123));
+        assert_eq!(
+            crate::harness::HarnessKind::Claude
+                .harness()
+                .human_input_times(home.path(), &std::collections::BTreeSet::from([ID]))
+                .get(ID)
+                .copied(),
+            Some(1_767_225_600_123)
+        );
         let mut image = human;
         image["message"]["content"] =
             serde_json::json!([{"type":"image","source":{"type":"base64","data":"fixture"}}]);
         fs::write(&path, image.to_string()).unwrap();
-        assert_eq!(super::claude_input_time(&path, ID), Some(1_767_225_600_123));
+        assert_eq!(
+            crate::harness::HarnessKind::Claude
+                .harness()
+                .human_input_times(home.path(), &std::collections::BTreeSet::from([ID]))
+                .get(ID)
+                .copied(),
+            Some(1_767_225_600_123)
+        );
     }
 
     #[tokio::test]

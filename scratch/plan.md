@@ -212,6 +212,8 @@ and `< /dev/null`.
 - Slice 3, Rust half built: `TaskSnapshot.stack_parent` (required nullable),
   status line, `task_checkout.json`, server schema.
 - Slice 4: docs and LOOPFLOW.md were written ahead; goldens regenerated.
+  Realign narrowed `docs/ops.md`'s "any other branch merges" line to unstacked
+  Tasks, matching the refusal in `ops/sync_execution.rs:90`.
 - Fixtures: `sync_tests::sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it`,
   `sync_tests::publish_keeps_the_prs_base_and_names_a_disagreement`, unit rows in
   `ops::pr::tests::` and `lf` bin `task_pr_line_names_the_stack_parent_by_task`.
@@ -220,9 +222,6 @@ Remaining:
 - Desktop: decode `stack_parent` beside `TaskExecution` (`swift/Loopflow/Models/TaskWork.swift`),
   Swift fixture test in `DTOFixtureTests` (`task_checkout.json` now carries it),
   "Stacked on LOO-12" beside the PR line.
-- A stacked Task syncing onto a plain branch is still refused (now naming the
-  three choices). `docs/ops.md` says "Any other branch … merges without changing
-  the stack"; true only for an unstacked Task. See questions.
 - `lf sync <Task> --plan` does not resolve the Task; it plans the literal ref.
 
 ## Larger than this work (on the page, not planned)

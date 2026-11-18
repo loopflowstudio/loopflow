@@ -309,8 +309,9 @@ different parent moves to the new one and carries only its own commits across.
 `lf task checkout LOO-13 --stack-on LOO-12` records the same thing without
 merging. `lf task status LOO-13` reads `stacked on LOO-12 (#1974,
 jack/loo-12-retry-budget)`, and Desktop shows "Stacked on LOO-12" beside the
-PR. Any other branch, or a Task whose PR has merged, merges without changing
-the stack.
+PR. In an unstacked Task, any other branch, or a Task whose PR has merged,
+merges without recording a stack; a stacked Task syncs onto its parent, another
+open Task, or the default branch, which detaches it.
 
 Record a stack with these commands, not with `git merge` of the parent's branch
 or `gh pr edit --base`: lf reads neither, so the next `lf sync` merges main

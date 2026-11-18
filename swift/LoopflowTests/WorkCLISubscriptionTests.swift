@@ -31,13 +31,13 @@ struct WorkCLISubscriptionTests {
         do {
             try await eventually { model.task(id: id)?.task.task.name == "Before outage" }
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             #expect(model.task(id: id)?.task.task.name == "Before outage")
 
             _ = try await fixture.run(["task", "update", id, "--title", "Changed while offline"])
             _ = try await server.status()
             try await eventually {
-                model.roadmap.errorMessage == nil
+                model.roadmap.failure == nil
                     && model.task(id: id)?.task.task.name == "Changed while offline"
             }
             // Recovery must leave a live observation, not just refresh once.
@@ -45,7 +45,7 @@ struct WorkCLISubscriptionTests {
             try await eventually { model.task(id: id)?.task.task.name == "Changed after recovery" }
 
             await server.stop()
-            try await eventually { model.roadmap.errorMessage != nil }
+            try await eventually { model.roadmap.failure != nil }
             keeping.cancel()
             await keeping.value
             // Cancelling the window's reader must not reopen the replacement.
@@ -106,9 +106,7 @@ struct WorkCLISubscriptionTests {
         let session = try #require(store.sessions.first { $0.record.taskPrimary })
         #expect(session.state == .prepared)
         #expect(session.record.workspace?.identity == location)
-        #expect(session.launchArguments.contains("--start-if-free"))
-        #expect(workspace.conversationStart == nil)
-        #expect(await query.startOffer(refused: .reveal, issue: id, cwd: fixture.repo.path) == nil)
+        #expect(session.record.action != nil)
         let recorded = try await query.sessionPage(cwd: fixture.repo.path).entries
         #expect(recorded.filter(\.taskPrimary).map(\.id) == [session.id])
         #expect(recorded.filter { $0.primaryScope == "repository" }.count == 1)
@@ -154,7 +152,7 @@ struct WorkCLISubscriptionTests {
         try await eventually { model.task(id: id) != nil }
         // An unstarted Task waits in the board's Backlog, where it offers Start; the strip lists Working Tasks.
         try await eventually {
-            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:], sessions: [:])
+            WaveStandup(tasks: model.visibleTasks, closed: [], doneDays: 0, now: .now, github: [:])
                 .backlog.contains { $0.id == id }
         }
         #expect(!selectedPlanMembers(model).contains { $0.work.id == id })
@@ -278,14 +276,14 @@ struct WorkCLISubscriptionTests {
         let layout = workspace.multiplexer.layout
         _ = try await fixture.run(["wave", "create", "product", "--json"])
         let before = try #require(model.task(id: id)?.task)
-        await model.moveTask(before, toWave: "product")
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(before, toWave: "product")
+        #expect(model.navigation.notices.current == nil,
+                "\(model.gitDestinations.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.task(id: id)?.task.task.waveId != nil }
         #expect(model.visibleWork.standaloneTasks.isEmpty)
-        await model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
-        #expect(model.navigation.taskRunDrafts[id]?.error == nil,
-                "\(model.peerPlanning.errorMessage ?? "") · \(model.workActivity.errorMessage ?? "")")
+        model.moveTask(try #require(model.task(id: id)?.task), toWave: nil)
+        #expect(model.navigation.notices.current == nil,
+                "\(model.gitDestinations.failure ?? "") · \(model.workActivity.failure ?? "")")
         try await eventually { model.visibleWork.standaloneTasks.count == 1 }
         #expect(model.selection == .task(id: id))
         #expect(registry.selectedWork == key)

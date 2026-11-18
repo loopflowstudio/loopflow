@@ -71,6 +71,20 @@ fn codex_task(
     (server, worktree, id)
 }
 
+fn native_logs(home: &Path) -> String {
+    fs::read_dir(home.join("logs"))
+        .into_iter()
+        .flatten()
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            fs::read_to_string(entry.path())
+                .ok()
+                .map(|text| format!("{}: {text}", entry.path().display()))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// Live agent Processes once their exit records are written. The terminal
 /// gets the provider's exit after a short wait; its host lingers to settle the
 /// provider, so a reader waits for it.
@@ -127,8 +141,11 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
                     .unwrap();
                 assert!(
                     output.status.success(),
-                    "{mode}/{setting:?} {args:?}: {}",
-                    String::from_utf8_lossy(&output.stderr)
+                    "{mode}/{setting:?} {args:?}: {}\n{}\n{}\n{}",
+                    output.status,
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                    native_logs(home.path())
                 );
             };
             if let Some(setting) = setting {
@@ -141,10 +158,27 @@ fn codex_service_tier_reaches_native_and_headless_launch_and_resume() {
             let read = |name: &str| -> serde_json::Value {
                 serde_json::from_slice(&fs::read(home.path().join(name)).unwrap()).unwrap()
             };
+            let session = (mode == "-i").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &worktree,
+                    "codex",
+                    None,
+                    "Tier probe",
+                )
+            });
             let args = if mode == "-b" {
                 vec![mode, "-a", "codex", "graph", "tier-check"]
             } else {
-                vec![mode, "--task", &task, "-a", "codex", ":", "Tier probe"]
+                vec![
+                    mode,
+                    "--task",
+                    &task,
+                    "-a",
+                    "codex",
+                    "resume",
+                    session.as_ref().unwrap(),
+                ]
             };
             run(&args);
             let params = read("native-config.json");
@@ -254,19 +288,18 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
         fs::write(native.join("config.toml"), config).unwrap();
         fs::write(native.join("history.jsonl"), unrelated).unwrap();
         fs::write(home.path().join(failure), "").unwrap();
+        let session = support::prepare_native_conversation(
+            &home.path().join("loopflow.db"),
+            &worktree,
+            "codex",
+            None,
+            "Preserve this request",
+        );
         let start = std::time::Instant::now();
         let output = native_codex_command(
             &worktree,
             home.path(),
-            &[
-                "-i",
-                "--task",
-                &task,
-                "-a",
-                "codex",
-                ":",
-                "Preserve this request",
-            ],
+            &["-i", "--task", &task, "resume", &session],
         )
         .output()
         .unwrap();
@@ -316,18 +349,13 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             unrelated
         );
         let adopted: i64 = database.query_row(
-            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')='unrelated-native-session'",
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND provider_thread='unrelated-native-session'",
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(
             adopted, 0,
             "failed startup must not adopt unrelated history"
         );
-        let session: String = database
-            .query_row("SELECT id FROM agent_sessions LIMIT 1", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
         fs::remove_file(home.path().join(failure)).unwrap();
         let output = native_codex_command(&worktree, home.path(), &["session", "resume", &session])
             .output()
@@ -383,17 +411,16 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
         ],
     );
     let command = |args: &[&str]| native_codex_command(&worktree, home.path(), args);
-    let output = command(&[
-        "-i",
-        "--task",
-        &task,
-        "-a",
+    let session = support::prepare_native_conversation(
+        &home.path().join("loopflow.db"),
+        &worktree,
         "codex",
-        "probe",
+        Some("probe"),
         "Find the bug.",
-    ])
-    .output()
-    .unwrap();
+    );
+    let output = command(&["-i", "--task", &task, "resume", &session])
+        .output()
+        .unwrap();
     assert!(
         output.status.success(),
         "{}",
@@ -449,29 +476,23 @@ fn codex_terminal_delivers_large_input_and_approvals_then_reconnects_without_rep
     assert!(!state.contains_key("/<session-flags>/config.toml:session_start:0:0"));
     assert!(hooks["SessionStart"].as_array().unwrap().len() > 1);
     let database = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // The Task's own conversation may start beside this one.
-    let session: String = database
-        .query_row(
-            "SELECT session_id FROM session_events WHERE kind='captured' AND receipt_key=?1",
-            [key],
-            |row| row.get(0),
-        )
-        .unwrap();
     // Closing before subscription must not report the already-recorded first
     // request as unsent. A genuine terminal failure must still fail.
     for marker in ["close-terminal", "fail-terminal"] {
+        assert_eq!(settled_live_agents(&database), 0);
         fs::write(home.path().join(marker), "").unwrap();
         let output = command(&["session", "resume", &session]).output().unwrap();
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert_eq!(
             output.status.success(),
             marker == "close-terminal",
-            "{stderr}"
+            "{marker}: {stderr}"
         );
         assert!(!stderr.contains("before submitting"), "{stderr}");
         assert_eq!(read("native-turns.json").as_array().unwrap().len(), 1);
         fs::remove_file(home.path().join(marker)).unwrap();
     }
+    assert_eq!(settled_live_agents(&database), 0);
     let output = command(&["session", "resume", &session]).output().unwrap();
     assert!(
         output.status.success(),
@@ -509,17 +530,19 @@ fn terminal_context_refreshes_without_replacing_instructions_or_losing_failed_se
         env!("CARGO_BIN_EXE_lf"),
         &home.path().join("machine"),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&home.path().join("machine/loopflow.db"))
-        .unwrap();
-    store
-        .create_wave(&loopflow::work::wave::Wave::new(
-            loopflow::id::WaveId::new(),
+    let store =
+        loopflow_execution::store::open_sqlite(&home.path().join("machine/loopflow.db")).unwrap();
+    loopflow_execution::work::wave::bootstrap::upsert_wave(
+        &store,
+        &loopflow_execution::work::wave::Wave::new(
+            loopflow_model::id::WaveId::new(),
             "fixture".into(),
-            loopflow::repository::CanonicalRepo::discover(repo.path())
+            loopflow_execution::repository::discover(repo.path())
                 .unwrap()
                 .to_string(),
-        ))
-        .unwrap();
+        ),
+    )
+    .unwrap();
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let provider = bin.join(harness);
@@ -531,7 +554,7 @@ for arg in "$@"; do
     printf '%s\000' "$arg" >> "$HOME/argv"
 done
 printf '%s' "$LF_CONTEXT_DELIVERY" > "$HOME/delivery-path"
-printf '%s' "$LF_PROVIDER_CONTEXT" > "$HOME/provider-context"
+printf '%s' "$LF_BARE_STEER" > "$HOME/bare-steer"
 cat > "$HOME/input"
 printf 'provider fixture refused this request\n' >&2
 exit 23
@@ -574,7 +597,7 @@ exit 23
             .unwrap();
         fs::read_to_string(args[index + 1]).unwrap()
     };
-    assert_eq!(instructions.matches("<lf:work-guidance>").count(), 1);
+    assert_eq!(instructions.matches("<lf:loopflow>").count(), 1);
     assert!(!instructions.contains("CURRENT_SCRATCH"));
     assert!(!instructions.contains("CURRENT_WAVE_MEMORY"));
     assert!(!instructions.contains("Saved active skill."));
@@ -595,8 +618,10 @@ exit 23
             .map(|group| group["hooks"][0]["command"].as_str().unwrap().to_owned())
             .collect()
     };
-    let provider_context = fs::read_to_string(home.path().join("provider-context")).unwrap();
-    let adapter: loopflow::steer::SteerAdapter = serde_json::from_str(&provider_context).unwrap();
+    // A chat reports to no server; its hooks read steers from the store.
+    let bare_steer = fs::read_to_string(home.path().join("bare-steer")).unwrap();
+    let adapter: loopflow_execution::steer::SteerAdapter =
+        serde_json::from_str(&bare_steer).unwrap();
     let identity = format!("This Session: {}\n", adapter.session);
     assert!(!instructions.contains(&adapter.session));
     let invoke = |moment: &str| {
@@ -609,7 +634,7 @@ exit 23
             .env("PATH", "/usr/bin:/bin")
             .env("HOME", home.path())
             .env("LF_HOME", home.path().join("machine"))
-            .env("LF_PROVIDER_CONTEXT", &provider_context)
+            .env("LF_BARE_STEER", &bare_steer)
             .env(
                 "LF_CONTEXT_DELIVERY",
                 fs::read_to_string(home.path().join("delivery-path")).unwrap(),
@@ -685,6 +710,8 @@ fn headless_codex_keeps_large_first_turn_separate_from_additive_instructions() {
         "diff: false\ndiff_files: false\npaste: false\n",
     );
     repo.create_file("scratch/thread-context.md", "ONLY_THREAD_FIXTURE_CONTEXT");
+    repo.stage_all();
+    repo.commit("Define the probe skill and its context");
     let provider = bin.join("codex");
     let script = support::codex_socket_script(
         r#"#!/bin/sh
@@ -735,10 +762,6 @@ while read -r line; do :; done
         .as_str()
         .unwrap()
         .contains("<lf:loopflow>"));
-    assert!(!thread["params"]["developerInstructions"]
-        .as_str()
-        .unwrap()
-        .contains("<lf:work-guidance>"));
     assert!(thread["params"]["baseInstructions"].is_null());
     assert!(thread["params"]["config"]["model_instructions_file"].is_null());
     assert!(!thread["params"]["developerInstructions"]
@@ -812,6 +835,8 @@ fn claude_terminal_delivers_large_first_turn_without_prompt_arguments() {
         ".lf/config.yaml",
         "diff: false\ndiff_files: false\npaste: false\n",
     );
+    repo.stage_all();
+    repo.commit("Define the large skill");
     let bin = home.path().join("bin");
     fs::create_dir(&bin).unwrap();
     let provider = bin.join("claude");
@@ -856,11 +881,11 @@ fn claude_opens_lf_created_worktree_already_trusted() {
         "{}.agent-trust",
         repo.path().file_name().unwrap().to_string_lossy()
     ));
-    loopflow::git::worktree_add(
+    loopflow_execution::git::worktree_add(
         repo.path(),
         &worktree,
         "agent-trust",
-        loopflow::git::WorktreeBranch::New {
+        loopflow_execution::git::WorktreeBranch::New {
             start_point: "HEAD",
         },
     )
@@ -1113,8 +1138,8 @@ fn assert_background_conversation(run_graph: bool) {
     // from starting. These receipts deliberately exceed the former count cap.
     let conn = rusqlite::Connection::open(&db).unwrap();
     for _ in 0..16 {
-        let task = loopflow::durable::TaskId::new();
-        let terminal = loopflow::id::TerminalId::new();
+        let task = loopflow_execution::durable::TaskId::new();
+        let terminal = loopflow_model::id::TerminalId::new();
         let session = uuid::Uuid::new_v4().to_string();
         conn.execute(
             "INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
@@ -1245,7 +1270,7 @@ fn a_task_checkout_without_the_agent_installed_skips_its_conversation() {
 }
 
 #[test]
-fn existing_task_checkout_preloads_work_without_enrolling_other_checkouts() {
+fn a_task_checkout_and_any_other_carry_the_same_launcher_text() {
     let repo = TestRepo::new();
     repo.create_branch("launcher");
     let task_checkout = repo
@@ -1278,7 +1303,8 @@ exit 17
     )
     .unwrap();
     fs::set_permissions(&provider, fs::Permissions::from_mode(0o755)).unwrap();
-    for (checkout, work) in [(repo.path(), false), (task_checkout.as_path(), true)] {
+    // A Task's checkout and any other carry the same launcher text.
+    for checkout in [repo.path(), task_checkout.as_path()] {
         let output = Command::new(env!("CARGO_BIN_EXE_lf"))
             .env_clear()
             .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
@@ -1296,7 +1322,7 @@ exit 17
             String::from_utf8_lossy(&output.stderr)
         );
         let instructions = fs::read_to_string(home.path().join("instructions")).unwrap();
-        assert_eq!(instructions.contains("<lf:work-guidance>"), work);
+        assert_eq!(instructions.matches("<lf:loopflow>").count(), 1);
         assert!(!instructions.contains("You are this Task's operator"));
     }
     let db = rusqlite::Connection::open(&registered.database).unwrap();
@@ -1390,7 +1416,7 @@ fn graph_context_preview_preserves_absent_store_and_captured_first_skill() {
     repo.create_file(".lf/skills/decide.md", "Do not assemble future input.");
     repo.create_file(
         ".lf/graphs/inspect.yaml",
-        "- probe\n- loop: probe\n  step: decide\n",
+        "- loop:\n    - probe\n    - decide\n",
     );
     let output = Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -1464,7 +1490,7 @@ fn graph_context_preview_retains_native_arguments_and_operating_guidance() {
     assert!(input["system_prompt"]
         .as_str()
         .unwrap()
-        .contains("# Using lf"));
+        .contains("<lf:loopflow>"));
     assert!(!home.path().join("machine").exists());
     assert!(!repo.path().join(".lf/tmp").exists());
 }
@@ -1574,6 +1600,8 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
                     for (file, content) in files {
                         repo.create_file(file, content);
                     }
+                    repo.stage_all();
+                    repo.commit("Define the probe skill and its documents");
                     repo.path().to_path_buf()
                 }
             };
@@ -1626,13 +1654,30 @@ fn explicit_documents_match_preview_capture_and_codex_input() {
             assert!(!home.path().join("runs").exists());
             // Creating the Task opened the store; preview still writes nothing.
             assert_eq!(home.path().join("loopflow.db").exists(), work.is_some());
+            let managed_session = (selection == "external").then(|| {
+                support::prepare_native_conversation(
+                    &home.path().join("loopflow.db"),
+                    &checkout,
+                    "codex",
+                    Some("probe"),
+                    "Report final marker.",
+                )
+            });
+            if let Some(session) = &managed_session {
+                let skill = args.iter().position(|arg| *arg == "skill").unwrap();
+                args.truncate(skill);
+                args.extend(["resume", session]);
+            }
             let output = native_codex_command(&checkout, home.path(), &args)
                 .output()
                 .unwrap();
             assert!(
                 output.status.success(),
-                "{selection}/{large}: {}",
-                String::from_utf8_lossy(&output.stderr)
+                "{selection}/{large}: {}\n{}\n{}\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+                native_logs(home.path())
             );
             let turns: serde_json::Value =
                 serde_json::from_slice(&fs::read(home.path().join("native-turns.json")).unwrap())

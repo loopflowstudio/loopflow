@@ -25,7 +25,24 @@ _EVERY_JOB = (".github/workflows/", "scripts/macos_inputs.py")
 _DESKTOP_BUILD_INPUTS = (
     "scripts/loopflow-dev.py",
     "rust/loopflow/build.rs",
-    "rust/loopflow/ghostty-vt",
+    "rust/loopflow-execution/build.rs",
+    "rust/loopflow-terminal/build.rs",
+    "rust/loopflow-terminal/ghostty-vt",
+)
+# Protocol owners shared by Desktop and iOS, below the server dispatcher.
+_PROTOCOL_INPUTS = (
+    "tests/fixtures/dto/",
+    "rust/loopflow-execution/tests/fixtures/dto/",
+    "rust/loopflow/src/server/",
+    "rust/loopflow-execution/src/machine/wire.rs",
+    "rust/loopflow-execution/src/machine/mobile.rs",
+    "rust/loopflow-execution/src/machine/schema.rs",
+    "rust/loopflow-execution/src/read_stream.rs",
+    "rust/loopflow-execution/src/read_stream/events.rs",
+    "rust/loopflow-execution/src/terminal_holder/wire.rs",
+    "rust/loopflow-execution/src/transport/wire.rs",
+    "rust/loopflow/src/lf/commands/read.rs",
+    "rust/loopflow/src/lf/commands/write.rs",
 )
 IOS_INPUTS = (
     "swift/Loopflow/",
@@ -33,11 +50,7 @@ IOS_INPUTS = (
     "swift/ios.yml",
     "swift/project.yml",
     "scripts/test_ios.py",
-    "tests/fixtures/dto/",
-    "rust/loopflow/src/server/",
-    "rust/loopflow/src/transport/wire.rs",
-    "rust/loopflow/src/lf/commands/read.rs",
-    "rust/loopflow/src/lf/commands/write.rs",
+    *_PROTOCOL_INPUTS,
 )
 _UI_INPUTS = (
     "swift/",
@@ -49,7 +62,7 @@ _UI_INPUTS = (
 _SWIFT_TEST_INPUTS = (
     *_DESKTOP_BUILD_INPUTS,
     "swift/",
-    "tests/fixtures/dto/",
+    *_PROTOCOL_INPUTS,
     "scripts/swift_",
     "scripts/test_desktop.sh",
     "scripts/test_network.py",
@@ -57,16 +70,13 @@ _SWIFT_TEST_INPUTS = (
     "scripts/desktop-",
     "scripts/check_swift_multiplatform_boundaries.py",
     "scripts/check_desktop_launch.py",
-    "rust/loopflow/src/server/",
-    "rust/loopflow/src/lf/commands/read.rs",
-    "rust/loopflow/src/lf/commands/write.rs",
     # swift-test runs this check, and pytest loads any conftest beside it.
     "python/tests/test_desktop_performance.py",
     "python/tests/conftest.py",
 )
 _PROCESS_INPUTS = (
-    "rust/loopflow/src/store/copy.rs",
-    "rust/loopflow/src/journal/os_process.rs",
+    "rust/loopflow-storage/src/copy.rs",
+    "rust/loopflow-execution/src/journal/os_process.rs",
     "rust/loopflow/src/lf/commands/install",
 )
 _MACOS_CFG = re.compile(r'target_os\s*=\s*"macos"')

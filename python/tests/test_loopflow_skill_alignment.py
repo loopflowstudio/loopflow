@@ -5,8 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / "skills/loopflow/SKILL.md"
-LOOPFLOW = ROOT / "rust/loopflow/src/builtins/LOOPFLOW.md"
-WORK = ROOT / "rust/loopflow/src/builtins/ops/skill/work.md"
+LOOPFLOW = ROOT / "rust/loopflow-definitions/src/builtins/LOOPFLOW.md"
 
 
 def test_skill_frontmatter_is_valid() -> None:
@@ -42,17 +41,9 @@ def test_external_user_and_internal_worker_authority_are_distinct() -> None:
     assert install in readme
 
 
-def test_launcher_surfaces_load_the_shared_work_contract() -> None:
-    for text in (LOOPFLOW.read_text(), (ROOT / "docs/agent-api.md").read_text()):
-        assert "lf help skill work" in text
-
+def test_launcher_surfaces_leave_wave_reads_to_help() -> None:
     for text in (SKILL.read_text(), LOOPFLOW.read_text()):
         assert "lf wave list --json" not in text
-
-    work = WORK.read_text()
-    assert "lf wave list --json" in work
-    assert "lf wave status <wave> --json" in work
-    assert "lf wave show --json" in work
 
 
 def test_placeholders_never_sit_inside_double_quotes() -> None:

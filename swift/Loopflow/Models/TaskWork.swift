@@ -4,12 +4,11 @@ import Foundation
 public struct TaskWork: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]
-    public let processes: [ProcessEntry]
     /// The graph the Task took up; `nil` until its first `lf task run`.
     public let graph: TaskGraph?
 
     enum CodingKeys: String, CodingKey {
-        case sessions, processes, graph
+        case sessions, graph
         case graphProcesses = "graph_processes"
     }
 }
@@ -22,10 +21,13 @@ public struct TaskExecution: Decodable, Sendable, Equatable {
     public let shipApproval: ShipMark?
     /// Keeps a run from approving Auto-Ship and waits it at its landing step, until `lf ship`.
     public let shipStop: ShipMark?
+    /// The Task this one is stacked on; `nil` when it builds on the default branch.
+    public let stackParent: TaskStackParent?
 
     enum CodingKeys: String, CodingKey {
         case work
         case startedBy = "started_by", shipApproval = "ship_approval", shipStop = "ship_stop"
+        case stackParent = "stack_parent"
     }
 
     public init(from decoder: Decoder) throws {
@@ -34,6 +36,27 @@ public struct TaskExecution: Decodable, Sendable, Equatable {
         startedBy = try container.decode(Starter?.self, forKey: .startedBy)
         shipApproval = try container.decode(ShipMark?.self, forKey: .shipApproval)
         shipStop = try container.decode(ShipMark?.self, forKey: .shipStop)
+        stackParent = try container.decode(TaskStackParent?.self, forKey: .stackParent)
+    }
+}
+
+/// The open Task a stacked Task builds on, named by Task rather than PR row.
+public struct TaskStackParent: Decodable, Sendable, Hashable {
+    public let identifier: String
+    public let branch: String
+    /// `nil` until the parent opens its PR.
+    public let prNumber: UInt64?
+
+    enum CodingKeys: String, CodingKey {
+        case identifier, branch
+        case prNumber = "pr_number"
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        identifier = try container.decode(String.self, forKey: .identifier)
+        branch = try container.decode(String.self, forKey: .branch)
+        prNumber = try container.decode(UInt64?.self, forKey: .prNumber)
     }
 }
 
@@ -79,7 +102,7 @@ public struct ShipMark: Decodable, Sendable, Hashable {
     public let by: Starter
 }
 
-/// Workspace facts; mechanical Process history is a separate diagnostic read.
+/// Workspace facts without the Task's full history.
 public struct TaskOverview: Codable, Sendable, Equatable {
     public let sessions: [TaskSession]
     public let graphProcesses: [GraphProcessInventoryEntry]

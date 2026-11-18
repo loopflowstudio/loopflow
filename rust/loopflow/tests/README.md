@@ -38,10 +38,10 @@ resolves its settings, what `task run`/`task checkout` would do, or what
 one to three seconds:
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(adoption::tests::)'            # promotion and binding
+cargo nextest run -p loopflow-execution --lib -E 'test(adoption::tests::)'            # promotion and binding
 cargo nextest run -p loopflow --lib -E 'test(run::launch_policy_tests::)'   # launch and resume settings
-cargo nextest run -p loopflow --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
-cargo nextest run -p loopflow --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::)'  # Machine dispatch and ownership
+cargo nextest run -p loopflow-execution --lib -E 'test(ops::task::explain::tests::)'  # Task run and checkout previews
+cargo nextest run -p loopflow -p loopflow-execution --lib -E 'test(ssh::dispatch_tests::) | test(task_ownership::tests::) | test(store::ownership_lifecycle_tests::)'  # Machine dispatch and ownership
 cargo nextest run -p loopflow --test session_lifecycle_tests -E 'test(promotion_)'
 ```
 
@@ -56,7 +56,7 @@ handler calls (`engine::creation::create`, `ops::human_session::bind`,
 `resolve_session_config` for launch settings, with a Clap-parsed `Cli`;
 `ops::task::explain_task_run` and `explain_task_checkout` for previews;
 `navigation::machine_invocation`, `ssh::parse_remote_command` and
-`machine::transport_failure` for dispatch), with the store and checkout the
+`machine::connection::transport_failure` for dispatch), with the store and checkout the
 CLI would see:
 
 - `LF_HOME` and `LF_BIN` under `test_ambient::EnvGuard`, with
@@ -107,7 +107,7 @@ resume per harness:
 | `previews_do_not_start_a_provider_and_terminal_schema_is_explicitly_unsupported` | `--context` and the handlers' schema refusals start no provider; a refused resume keeps its Session |
 | `task_conversation_preparation_is_passive_and_connect_uses_shared_launch_settings` | `resume --prepare` starts nothing; a Task conversation's first `lf resume` launches with shared settings and the next continues it |
 
-The rest of `session_launch_contract` covers accounts, provider switches,
+The rest of `session_launch_contract` covers native authentication, provider switches,
 OpenCode diagnostics and Machine dispatch.
 
 Task Graph run and its previews (`task_graph_launch_tests` in the library,
@@ -154,7 +154,7 @@ handoff; [native readiness measurements](../../../scripts/benchmarks/agent-start
 remain a separate opt-in benchmark.
 Run this check when changing transport ownership or process journaling: every
 added CLI process pays connection and schema setup costs, including at exit.
-Journal connection changes also run `cargo test -p loopflow --lib journal::tests`
+Journal connection changes also run `cargo test -p loopflow-execution --lib journal::tests`
 to preserve completion and interruption receipts after database contention.
 Transport cleanup checks wait for both the recorded exit and socket removal:
 the interruption hook records completion before later cleanup hooks run.
@@ -242,7 +242,7 @@ Prompt fixtures read the harness's actual inputs, including context files and
 stdin, rather than assuming everything remains in argv.
 
 Context byte-budget fixtures must reach their boundary with short temporary
-paths too. Run `TMPDIR=/tmp cargo test -p loopflow --lib context_block` when
+paths too. Run `TMPDIR=/tmp cargo test -p loopflow-execution --lib context_block` when
 changing them; macOS's longer default paths can hide an undersized fixture.
 
 The composed delivery fixture runs a real CLI/Graph against an isolated Home and
@@ -250,7 +250,7 @@ simulated provider observations, ordinary Task/comment saves and independent com
 then checks its captured CLI and monitor population in Rust
 and Swift. It builds the CLI with Cargo so a unit-test binary cannot accidentally
 launch an installed version. Regenerate its wire capture with
-`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow --lib ordinary_task_comments_and_completion_preserve_live_graph_and_arrival`,
+`LOOPFLOW_UPDATE_LIFECYCLE_FIXTURE=1 cargo test -p loopflow-execution --lib ordinary_task_comments_and_completion_preserve_live_graph_and_arrival`,
 then run `cargo test -p loopflow --test integration dto_fixtures::composed_lifecycle` and
 `swift test --package-path swift --filter 'composedTaskLifecycle|dueDate'`.
 
@@ -286,16 +286,20 @@ Cross-provider replay fixtures must install stand-ins for both the recorded and
 override providers, with a fixture/system-only PATH. A developer's installed
 provider must neither satisfy a missing fixture nor receive a test launch.
 
-## Linear acquisition fixtures
+## Work and tracker fixtures
 
-Linear acquisition fixtures live under `rust/loopflow/tests/linear/` and compile
+Work and tracker acquisition fixtures live under `rust/loopflow/tests/work/` and compile
 inside the library, where fetched response types stay private. Focused Cargo tests
 build the current CLI and take its path from Cargo’s artifact output:
 
 ```sh
 cargo test -p loopflow --lib local_planning
-cargo test -p loopflow --lib linear::acceptance
+cargo test -p loopflow-execution --lib linear::events
+cargo test -p loopflow-storage --lib sqlite::linear_events
 ```
+
+Application lifecycle checks stay in `linear::events`; supplied-fact SQL
+checks live in `store::sqlite::linear_events`.
 
 CI and the disposable installation runner supply their prepared candidate through
 `LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
@@ -338,7 +342,7 @@ cargo nextest run -p loopflow --lib -E 'test(status_tests::) | test(wave_reposit
 Task decision feedback has a focused store-and-Graph-runner check:
 
 ```bash
-cargo test -p loopflow --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
+cargo test -p loopflow-execution --lib task_decision_live_unblock_returns_feedback_without_navigation -- --test-threads=1
 ```
 
 It completes a keyed Ask while the decision is active and verifies that feedback
@@ -381,26 +385,20 @@ uv run --script tests/e2e/codex_connect.py --codex "$(command -v codex)" \
 
 `--graph-decision-retry missing` exhausts the corrections of an invalid answer;
 `replace` proves a failed turn decides nothing.
-`--shared-provider-home` proves Loopflow and plain Codex share one home signed
-in as one stored account at a time: switching, saved-back logins and provider
-conversation IDs in `lf session`.
-`tests/e2e/claude_shared_home.py --claude "$(command -v claude)" --lf
-target/debug/lf --output <dir>` proves the same for Claude with synthetic
-logins and a local endpoint: a Claude started after a switch sends the login
-Loopflow installed, and a launch gets no account home or credential variable.
-On macOS it writes and removes one Keychain item scoped to its temporary config
-directory. The fixture copies the candidate, uses private Machines and stops
-only its identified provider process children. Native execution uses synthetic
-Responses, not configured accounts or installed data. Ordinary retry, usage,
-binding and review behavior belong in `session_lifecycle_tests`; legacy Linear Project adoption belongs in
-`ops::linear::adoption_tests`.
+Shared-home acceptance checks that native clients and lf find the same
+conversations, while native authentication stays authoritative. Retired managed
+homes supply transcripts only. Account switching and saved-back credentials are
+outside launch behavior. Use isolated homes and synthetic provider endpoints;
+ordinary retry, usage, binding and review behavior belong in
+`session_lifecycle_tests`.
+
 
 `planning_reconnect_tests` runs public work-watch and Graph-boundary recovery against
 synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
-Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
+Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
 `planning_setup_tests` proves configuration selection and personal-key recovery.
 `planning_foreground_tests` exercises disposable custom refs through public CLI and
@@ -453,7 +451,7 @@ exercise acquisition in a different order from Task creation. Process-sensitive
 cleanup fixtures must observe child readiness before inspecting live executables.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
+cargo nextest run -p loopflow-execution --lib -E 'test(ops::linear::task_planning_tests::)' --no-fail-fast
 ```
 
 Every CLI fixture must select an explicit disposable `LF_HOME` and pin
@@ -502,7 +500,7 @@ match the intended contract instead of restoring retired commands in the prose.
 
 ```bash
 cargo test -p loopflow --lib builtins::tests
-cargo test -p loopflow --lib prompt::tests
+cargo test -p loopflow-execution --lib prompt::tests
 ```
 
 When changing the builtin catalog or Graph composition, also exercise discovery.
@@ -518,7 +516,7 @@ names and data-preservation assertions at the migration boundary; current catalo
 resolution belongs in skill catalog tests. Include the legacy Graph repair check:
 
 ```bash
-cargo test -p loopflow --lib legacy_task_graph_repair
+cargo test -p loopflow-execution --lib legacy_task_graph_repair
 ```
 
 Skill export tests use isolated homes and cover builtin/global definitions,
@@ -526,7 +524,7 @@ personal agent directories and pruning. `sync-skills --repo` exports repository
 skills and Graph recipes into the checkout; default sync exports globally.
 
 ```bash
-cargo test -p loopflow --lib skills::tests
+cargo test -p loopflow-execution --lib skills::tests
 ```
 
 Settings and recipe changes also run the provider-boundary matrix:
@@ -632,7 +630,7 @@ provider/GitHub tests. Known live-check limits belong in Infrastructure memory.
 Landing changes also affect release finalization and Linear completion recovery:
 
 ```bash
-cargo nextest run -p loopflow -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
+cargo nextest run -p loopflow -p loopflow-execution -E 'binary(release_tests) | test(ops::linear::task_planning_tests::task_completion) | test(ops::pr_landing::)' --no-fail-fast
 ```
 
 Detached repair proofs enter through the compiled CLI so admission records its
@@ -686,11 +684,11 @@ on a development machine. Cold pulls retry registry throttling with bounded
 backoff within a five-minute download budget. Exhausted acquisition reports an
 infrastructure failure before any installation tests run.
 
-CLI owner-tree changes must include `cargo test -p loopflow --lib graph::compiled::tests`
+CLI owner-tree changes must include `cargo test -p loopflow-execution --lib graph::compiled::tests`
 to verify builtin operation labels, plus the affected proofs above. The regular
 Rust suite skips those installation proofs; a skipped case is not verification.
 Task status reads a Graph from recorded command outcomes and OS liveness. Run
-`cargo test -p loopflow --lib ops::task_execution::tests` for running, between
+`cargo test -p loopflow-execution --lib ops::task_execution::tests` for running, between
 steps, stopped and failed.
 Managed Task fixtures must bind the checkout's Team and Initiative before
 creating Task worktrees; reuse `support::bind_task_planning` for the shared fixture.
@@ -754,23 +752,23 @@ When changing harness event mapping, run the recorded-trace conformance tests
 alongside the provider's unit tests. Keep trace expectations aligned with the
 event contract, including durable final-answer receipts and usage checkpoints.
 
-After Session-history or schema changes, run `lf session history list --json`,
+After Session-history or schema changes, run `lf session history --json`,
 `lf session usage --json` and `lf machine doctor --json` against a disposable Machine with inherited `LF_*` and
 `LOOPFLOW_*` authority removed and `LF_BIN` pinned to the compiled source CLI.
 Never use the installed store to prove an unmerged migration.
 
-## Codex daemon account switching
+## Native authentication and retry policy
 
-```bash
-cargo test -p loopflow --lib lf::commands::account::daemon_tests
-cargo test -p loopflow --lib expired_grace_restarts_even_when_activity_becomes_unreadable -- --ignored
-```
-
-Run the second check explicitly at gate when changing daemon login reconciliation.
-It takes the real five-minute grace period, bounded by a 315-second test timeout.
-Both checks use disposable Unix sockets and a stand-in restart executable, without
-credentials or a live provider. They cover busy-to-idle, unreadable probes, expiry,
-and adoption after restart; configured Codex behavior remains demo/review evidence.
+`session_launch_contract::native_auth_owns_launches_with_a_populated_catalog`
+checks native launch/resume with unusable saved accounts, transcript-only adoption,
+sandboxed Tasks and remote preparation. Credential markers stay private to the
+fixture. `agent::tests::native_retry_policy_matrix` checks Task-attributed and
+taskless headless refusal handling, with pinned agents and fallback orders.
+Only headless Graph steps follow
+configured model/harness fallbacks and wait out a usage limit, explicit pins
+stop, a revoked login skips its provider's models, and quota snapshots or
+successful answers mentioning limits do not trigger fallback. Fixtures use isolated homes,
+provider stand-ins and no live inference or credential refresh.
 
 ## Boundary-specific checks
 
@@ -793,8 +791,8 @@ Graph is its Graph process and step Processes; assert on those Processes and on 
 turn a step Process captured.
 
 ```bash
-cargo test -p loopflow --lib ops::graph_run
-cargo test -p loopflow --lib store::sqlite::graph_inventory
+cargo test -p loopflow-execution --lib ops::graph_run
+cargo test -p loopflow-storage --lib sqlite::graph_inventory
 cargo nextest run -p loopflow --test session_lifecycle_tests --no-fail-fast
 ```
 
@@ -816,7 +814,7 @@ Run the same Linux suite when changing Linear mutation inputs or acknowledgement
 the reconnect peer must accept partial Initiative updates and return `success`.
 
 ```bash
-cargo nextest run -p loopflow --lib -E 'test(linear::) | test(ops::linear::) | test(ops::linear_observe::)' --no-fail-fast
+cargo nextest run -p loopflow-execution --lib -E 'test(linear::) | test(ops::linear::) | test(ops::tracker_events::)' --no-fail-fast
 cargo nextest run -p loopflow --test planning_reconnect_tests --no-fail-fast
 ```
 
@@ -830,7 +828,7 @@ not exercised by macOS-only checks.
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
 refuses unqualified CLI requests so a fixture cannot reach your own server. Run
-them one at a time: together they can miss a follower's arrival deadline.
+them one at a time: together they can miss a host's reply deadline.
 On macOS, run Rex fixtures directly: `scripts/test_network.py` blocks Rex's
 `/usr/bin/login` launcher before the terminal command executes. These fixtures
 use private homes, an isolated server and stand-in providers.
@@ -925,10 +923,9 @@ Every integration test binary except the deliberate real-provider `codex_live_sm
 `CODEX_HOME` and `CLAUDE_CONFIG_DIR`: agent shells export the developer's real
 provider home, and a fixture launch would swap its login there.
 
-Managed-account status fixtures also pin `CLAUDE_CONFIG_DIR` to a disposable
-native home: verification observes the native login before polling managed
-accounts. Put managed homes below the fixture root so their sibling login locks
-cannot collide in the shared temporary directory.
+Native-auth fixtures pin `CLAUDE_CONFIG_DIR` and `CODEX_HOME` to disposable
+homes. Seed retained managed homes below the fixture root and assert that launch
+leaves their credentials unchanged.
 
 When changing Machine selection, run the affected fixtures with `LF_HOME` unset in
 the test runner. CLI fixtures must select their own disposable Machine. Upgrade
@@ -936,9 +933,9 @@ proofs open a temporary shared store through the promotion boundary.
 
 Machine command changes also require `cargo test -p loopflow --test global_commands`
 to preserve repository-independent commands and explicit Machine isolation.
-When changing remote account-selection docs, run `cd website && uv run python
-dev.py test -k test_docs_subscriptions_page_owns_account_selection`; the rendered
-guide must retain the current invocation, laptop account selection, and target-resident login contract.
+Rendered authentication docs must describe destination-native login, headless
+model/harness fallback, explicit interactive recovery and no subscription
+credential transfer. Website checks should assert that contract.
 
 `scripts/test.py` and `test_network.py` clear all inherited `LF_*` authority.
 The prepared `LOOPFLOW_TEST_LF` candidate survives the network boundary; provider
@@ -1029,7 +1026,7 @@ types. A Swift String round trip alone cannot prove that a Rust producer accepts
 an identity value.
 
 Session fixtures share `AMBIENT_TASK_ENV` in
-`rust/loopflow/tests/support/ambient.rs`. Its guard clears inherited control Machine,
+`rust/loopflow-execution/tests/support/ambient.rs`. Its guard clears inherited control Machine,
 captured-input identity/directory, Task authority, and review Session identity under the
 suite's environment lock and restores them afterward. Prove isolation from a
 live Session without shell-level scrubbing:

@@ -113,7 +113,7 @@ struct TaskFilesView: View {
                 HStack(spacing: 12) {
                     ForEach(store.tabs) { tab in
                         HStack(spacing: 4) {
-                            Button((tab.path as NSString).lastPathComponent) { store.selectFile(tab.path, mode: .read) }
+                            Button((tab.path as NSString).lastPathComponent) { store.selectFileFromInput(tab.path, mode: .read) }
                                 .fontWeight(store.selection == tab.path ? .semibold : .regular)
                                 .help(tab.path)
                             if store.documents[tab.path]?.dirty == true { Text("•").help("Unsaved draft") }
@@ -418,7 +418,7 @@ struct TaskFilesView: View {
 
     private func selectFile(_ path: String, mode: TaskFilesStore.Mode) {
         let wasDropdown = store.navigator == .dropdown
-        store.selectFile(path, mode: mode)
+        store.selectFileFromInput(path, mode: mode)
         if wasDropdown { dismissNavigator() }
     }
 
@@ -591,6 +591,7 @@ private struct TaskDocumentView: NSViewRepresentable {
             host.addSubview(document.scroll)
         }
         document.editor.applyPalette(palette)
+        document.editor.recordReadiness()
         document.scroll.backgroundColor = NSColor(palette.background)
     }
 }

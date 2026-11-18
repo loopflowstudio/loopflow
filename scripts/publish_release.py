@@ -34,7 +34,6 @@ TARGETS = (
     "aarch64-unknown-linux-gnu",
 )
 REQUIRED_SECRETS = (
-    "CARGO_REGISTRY_TOKEN",
     "FLY_API_TOKEN",
     "NOTARY_ISSUER",
     "NOTARY_KEY",
@@ -245,24 +244,6 @@ def _stage_github_release(artifacts: ReleaseArtifacts) -> None:
     ):
         command.extend(["--asset", str(asset)])
     _run(command)
-
-
-def _publish_crate() -> None:
-    result = subprocess.run(
-        ["cargo", "publish", "--locked", "-p", "loopflow"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        pass_fds=_release_fds(),
-    )
-    output = f"{result.stdout}\n{result.stderr}".strip()
-    if result.returncode == 0:
-        print(output, flush=True)
-        return
-    if "already exists on crates.io index" in output or "already uploaded" in output:
-        print("Version already exists on crates.io; continuing", flush=True)
-        return
-    raise RuntimeError(f"cargo publish failed\n{output}")
 
 
 def _upload_dmg(dmg: Path, key: str, cache_control: str) -> None:
@@ -485,9 +466,6 @@ def publish_release(tag: str, artifact_dir: Path) -> ArtifactReceipt:
     _stage_github_release(artifacts)
     stages.append("github_draft_staged")
 
-    _publish_crate()
-    stages.append("crate_published")
-
     version = tag.removeprefix("v")
     _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
     stages.append("versioned_dmg_uploaded")
@@ -664,15 +642,9 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
         website_matches = _download_if_present(health_url, health) and json.loads(
             health.read_text()
         ) == {"status": "ok", "release": tag}
-        crate = scratch / "crate.json"
-        crate_url = f"https://crates.io/api/v1/crates/loopflow/{version}"
-        crate_present = _download_if_present(crate_url, crate)
-        if crate_present and json.loads(crate.read_text())["version"]["num"] != version:
-            raise RuntimeError("public crate version does not match release")
         missing = [
             name
             for name, present in (
-                ("crate", crate_present),
                 ("versioned DMG", versioned_present),
                 ("website", website_matches),
                 ("latest DMG", latest_matches),
@@ -687,9 +659,6 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             if not website_matches and (newest := _newest_tag()) != tag:
                 raise RuntimeError(f"cannot repair {tag}: newest release is {newest}")
             dmg = scratch / "Loopflow.dmg"
-            if not crate_present:
-                _publish_crate()
-                proof = _record_repaired_stage(proof, "crate_published")
             if not versioned_present:
                 _upload_dmg(dmg, f"Loopflow-{version}.dmg", "public, max-age=31536000, immutable")
                 proof = _record_repaired_stage(proof, "versioned_dmg_uploaded")
@@ -704,12 +673,10 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
             if is_stable:
                 _download(LATEST_DMG_URL, latest_dmg)
             _download(health_url, health)
-            _download(crate_url, crate)
             if (
                 _sha256(versioned_dmg) != proof.artifact_sha256["Loopflow.dmg"]
                 or (is_stable and _sha256(latest_dmg) != proof.artifact_sha256["Loopflow.dmg"])
                 or json.loads(health.read_text()) != {"status": "ok", "release": tag}
-                or json.loads(crate.read_text())["version"]["num"] != version
             ):
                 raise RuntimeError("publication repair did not pass public read-back")
         native = scratch / "native"
@@ -747,7 +714,6 @@ def verify_release(tag: str, *, repair: bool = False) -> PublicReleaseReceipt:
                     "versioned_dmg_verified",
                     *(["latest_dmg_verified"] if is_stable else []),
                     "website_release_verified",
-                    "crate_version_verified",
                     "exact_tag_smoke_passed",
                 )
             )

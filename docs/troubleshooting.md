@@ -13,9 +13,9 @@ lf resume                       # return to this scope’s conversation
 
 | Survives | Where it lives | Pick it up with |
 |---|---|---|
-| Conversations, interactive and headless | `~/.lf/loopflow.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
+| Conversations, interactive and headless | `~/.lf/loopflow.db`, `~/.lf/history.db` and the provider's own history | `lf resume SESSION`, `lf resume --task <ID>` |
 | A Task's worktree, branch, PR and thread | Beside your repository, on the code host | `lf task run <ID>` |
-| A stopped Graph | Its step Processes, as history | `lf task runs <ID>` |
+| A stopped Graph | Its run and step results, as history | `lf task runs <ID>` |
 | Uncommitted files | The worktree; prune never removes them | `lf wt list` |
 
 A stopped Graph never resumes. `lf task run` starts a fresh one in the same
@@ -27,11 +27,12 @@ stopped on; the steps before it stay done.
 Read before you relaunch anything.
 
 ```bash
-lf doctor                                    # installation, store and process health
+lf doctor                                    # installation, store and stray processes
 lf task status <ID>                          # the Task's execution and the reason for it
-lf process show <GRAPH_ID>         # each step, its Process and how it exited
+lf graph show <RUN_ID>                       # each step, when it ran and how it exited
 lf session history show <SESSION_ID> --final # the agent's last word in that conversation
-lf process list                                        # what is running right now
+lf session list                              # the conversations running right now
+lf graph list --runs --state current    # the Graph runs running right now
 ```
 
 `lf task status` reports execution separately from the Task's own status:
@@ -54,9 +55,9 @@ liveness stays unknown; lf never guesses a process is dead.
 lf doctor --json
 ```
 
-Doctor checks installation selection, store compatibility and Process integrity
+Doctor checks installation selection, store compatibility and stray processes
 separately. It reads storage without initializing it or applying migrations, so
-an incompatible store still reports readable Process evidence.
+an incompatible store still reports which Sessions and runs it can read.
 
 Binary freshness compares against locally cached `origin/main`, without
 fetching. That reference may be stale, and merged source may be newer than the
@@ -67,6 +68,23 @@ Contention reads the last day of `logs/lf.log`: `database is locked` failures
 and any write that held the store lock for 3 s or more, grouped by the lf
 binary that logged them, with the holder's pids and the function that held the
 lock. Lines from binaries older than this check group as `unidentified (older lf)`.
+
+## Desktop reopened, but the Session will not accept typing
+
+Select the same Task and use **Refresh session** in the Session pane's toolbar.
+The surviving conversation keeps its draft and pending requests, and the selected
+pane regains focus when input is ready. Switching Tasks is unnecessary.
+
+While **Opening… Input paused** or **Reconnecting…** appears, the screen may be
+readable before typing is available. Other views of the conversation never
+block typing here: every view types. A provider running in a client lf cannot
+share is taken over when the pane opens; that client ends.
+If the provider has ended, use the offered resume action to continue its history.
+Refresh never repeats a submitted message or restarts the Task's Graph.
+
+If Refresh leaves input paused, follow the pane's connection error and recovery
+action, then check the server below. See [Session recovery](sessions.md#when-desktop-loses-its-connection)
+for what survives a Desktop exit versus a provider exit.
 
 ## Desktop cannot connect
 
@@ -85,8 +103,6 @@ open; its screen and local reading actions remain available. If automatic retrie
 end, **Retry connection** reconnects without replaying input or restarting the provider.
 A lost connection-status channel also pauses input; the terminal relay keeps
 running and restores its status automatically when that channel returns.
-A read-only pane's **Move here** requests control explicitly; a lost connection
-alone never takes it from another viewer.
 
 If the diagnosis reports disabled background access, enable Loopflow in macOS
 System Settings, or enable its user service on Linux. Retry and status do not
@@ -182,9 +198,24 @@ lf server receipt REQUEST_ID --json  # read the recorded creation; starts nothin
 lf task status TASK_ID --json        # inspect any Task the receipt identifies
 ```
 
-A `run_requested` receipt means launch is unconfirmed. Inspect the Task's Graphs
-and processes before starting anything; a lost answer does not establish a failed
-launch. See [creation recovery](server.md#recover-a-submitted-creation).
+An `admitted` or `started` receipt is complete: the Task exists, and an
+`admitted` Task's conversation sets it up. Open it with
+`lf resume --task TASK_ID`; while the Task's Graph has never run, opening runs
+setup again. A `run_requested` receipt means a `-b` launch is unconfirmed. Inspect the Task's Graphs and processes before starting
+anything; a lost answer does not establish a failed launch. See
+[creation recovery](server.md#recover-a-submitted-creation).
+
+## Setup failed in a new Task's conversation
+
+The conversation prints the step and its error, for example a `git worktree add`
+failure, and the Task's position reads `Setup stopped: checkout failed: …` in
+`lf task status` and Desktop. Fix the cause and reopen it:
+
+```bash
+lf resume --task TASK_ID   # runs setup again
+```
+
+The agent starts once the checkout exists, even if the Graph step failed.
 
 ## A launch reports `outcome_unknown`
 
@@ -205,11 +236,10 @@ recover during that wait.
 This error does not stop or repeat the launched work. Leave a running Graph
 alone. If status is unavailable, use `lf doctor` and check again once reads work.
 Retry only after inspecting the affected work; for launches other than Tasks,
-inspect the operation's result and `lf process list` first.
+inspect the operation's result and `lf session list` first.
 
-For a Graph launched directly, `lf graph list --processes` also finds finished
-runs. Inspect one with `lf process show <ID>`; a finished run no longer appears
-in the live process list.
+For a Graph launched directly, `lf graph list --runs` finds it, running or
+finished. Inspect one with `lf graph show <RUN_ID>`.
 
 ## A Task stopped advancing
 
@@ -255,33 +285,28 @@ Headless runs retry transient capacity, rate-limit, availability and transport
 failures four times, continuing the same provider conversation so partial work
 survives; the backoff tops out at 30 seconds.
 
-An exhausted subscription takes a different path: lf marks that login
-unavailable until its reported reset and moves to your next login with room,
-then to the next provider in `agents`. A limit that refuses the launch itself
-moves on the same way. A model-unavailable refusal skips directly to the next
-allowed entry in `agents`, without marking the login’s quota spent. An explicit
-model pin stays put and stops with advice to change the pin.
+A classified usage-limit or model-unavailable refusal moves a Graph step
+through its configured model/harness order; other headless work stops with
+the provider error. It never selects another login or
+reads reset times. An explicit agent pins the harness; bare Claude can still
+try its other models. When the whole order, or an explicit model pin, is
+refused on a usage limit, the step waits 5, 15, 30, then 60 minutes, trying
+again from the first entry after each; then it stops with the provider error
+and a next step. A revoked login skips its provider's other models and, with no
+other provider left, stops with how to sign in again. Other refusals stop at
+once. Interactive Sessions retain the
+refusal and require an explicit retry or move, even when attached to a Task.
 
 ```bash
-lf account                         # every login, its capacity and when it resets
-lf account next -a claude:fable    # the login a Fable launch takes, or what holds each one back
-lf set --global agents claude,codex # let headless steps move to Codex when Claude is out
-lf gate -a codex                    # run this one on another harness
-lf --only-account claude=work@ gate # stay inside the logins you name
+lf set --global agents claude,codex
+lf config settings --skill gate --explain
+lf -a codex gate
 ```
 
-A step with nowhere left to move stops its run once, without automatic retries.
-The stop line and `lf task status` say whether its order ran out or it had no
-next entry. Use
-`lf config settings --skill <name> --explain` to inspect the order and any
-`agent` choice or `-a` that pins its provider.
-Change the pin to select another model or provider, or remove it to allow `agents`
-fallbacks. Add entries if the list is missing or has only one entry.
-After a reset or an `agents` change, `lf task run <ID>` starts the run again
-at the stopped step; earlier steps stay done.
-
-`--account` prefers a login and still falls back; `--only-account` never leaves
-the logins it names.
+Inspect the resolved order and any pin before retrying. Repair authentication
+with the native client on the execution Machine, or wait for provider capacity.
+For a stopped Task, `lf task run <ID>` continues the remaining steps. Earlier
+steps stay done. [Native authentication](subscriptions.md) covers homes and resume.
 
 ## Agent not found
 
@@ -291,7 +316,7 @@ The error names the install command. For Claude Code:
 
 ```bash
 npm install -g @anthropic-ai/claude-code
-lf account connect claude
+claude
 ```
 
 With no agent preference configured, lf uses the sole installed harness. If more
@@ -316,15 +341,16 @@ shrink it. Persistent docs belong in `docs:` in `.lf/config.yaml`.
 ```bash
 scripts/disk-cleanup.sh            # reclaim now; each removal is logged to ~/.lf/logs/disk.log
 scripts/disk-cleanup.sh install    # run the disk-cleanup skill hourly from crontab
-lf process prune                   # only lf's records: dead Process rows and receipts, then vacuum
+lf machine prune                   # only lf's records: expired history, then vacuum
+ls -la ~/.lf/loopflow.db ~/.lf/history.db   # state stays small
 ```
 
 The script prunes every repository under `~/src`: finished worktrees, completed
 Tasks' build output and merged branches through `lf wt prune`, and ignored
 build output (`target`, `node_modules`, `.venv`, `.build`, `DerivedData`) that no process
 holds and nothing wrote for 4 hours. It removes nothing under `~/.lf`: the
-database, its pre-migration clones (lf's own, see
-`rust/loopflow/src/store/MIGRATIONS.md`), captures, logs and account homes stay.
+databases, its pre-migration clones (lf's own, see
+`rust/loopflow-storage/src/MIGRATIONS.md`), captures, logs and account homes stay.
 Anything a process holds open is never removed; when `lsof` fails, neither is
 anything else that check protects.
 
@@ -333,6 +359,12 @@ what it kept and why, and worktrees still holding unpushed work; it deletes
 nothing itself. Edit `scripts/disk-cleanup.sh` or
 `.lf/skills/disk-cleanup.md` to change the policy. Provider transcripts follow
 each provider's own retention; raise Claude's `cleanupPeriodDays` to keep more.
+
+`history.db` grows with use. The Machine server keeps 90 days of Session
+history, pruning every hour; turns are kept. `lf doctor` reports the file's
+size and oldest rows, and warns when history is past retention. Deleting it
+while nothing runs loses only past history and usage: Tasks, conversations,
+Graph routing and `lf resume` read `loopflow.db`.
 
 ## Stale worktrees and branches
 
@@ -363,35 +395,29 @@ A branch behind `main`:
 lf sync                            # refresh main, keeping its unpublished commits, then merge it in
 ```
 
-## Orphaned agent processes
+## Stray agent processes
 
 ```bash
-lf process prune --dry-run --json  # each candidate and why
-lf process prune --json            # recheck, then reap
+lf machine doctor --json           # the strays check: each process, its pid and what it carries
 ```
 
-Pruning reports each agent process it settles or keeps, with the reason, then
-closes Process rows whose exit is proven, forgets finished ones nothing
-references, and compacts the store; a dry run changes none of it. A
-missing PID, a completed Task or an old Session does not prove the agent
-exited: unresolved records keep protecting their checkouts.
+A stray is an OS process carrying an lf Session or run (`LF_STEER_SESSION`,
+`LF_PROCESS_ID`) that no live Session or Graph run claims: an agent left behind
+when its terminal or holder was killed, or a child an agent started that
+outlived it. Its children are listed under it. Doctor stops nothing; `kill <pid>`
+one once you know what it is.
 
-When `lf machine doctor` fails `lineage` and says `lf process prune` repairs the
-parents, an AgentProcess points at an lf process that was never recorded:
-
-```bash
-lf process prune --dry-run         # lists the ancestry it would release
-lf process prune                   # releases it; the Session can resume
-```
-
-The release is kept as a Session fact in `lf session history show <session>`.
+A run whose process died is not a stray. The Machine server checks each
+recorded pid against the OS on its regular pass, marks the dead ones ended with
+an unknown result and releases their Sessions, so `lf resume` and
+`lf task run` work without any cleanup.
 
 ## Many `lf` processes running
 
 ```bash
 ps -axo pid,etime,command | grep -E '[ /]lf( |$)'   # every lf process, its age and the binary that started it
 lf session list --all --interactive all      # the conversations they serve
-lf process list                              # live call trees lf recorded
+lf graph list --runs --state current    # the Graph runs lf knows are alive
 ```
 
 A Machine runs one `lf server run`, one `lf holder run` per build with open

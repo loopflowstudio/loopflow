@@ -47,15 +47,15 @@ agent forwarding uses a separate connection. Add and status
 transfer no credentials. SSH requires an added connection and checks its identity
 before dispatch. Every receiving invocation validates identity through read-only
 storage before help, repository lookup or Process admission; no shell-side identity
-probe duplicates that check. Launch retains its sender probe and credential
+probe duplicates that check. Launch retains its sender probe and service credential
 preparation. `--context`/`--explain` skip both, and neither side admits a Process.
 Names and paths resolve at the destination. Missing or changed identity fails without
-initialization, repair or local fallback. `lf machine connect mini <provider> [email]` installs a separate
-login through SSH stdin: a fresh login the Machine refreshes itself, or, on a
-rental, a Claude access token the laptop refreshes from a login it keeps for
-rentals. An access token cannot refresh, so no machine rotates another's login;
-the rental registers the identity the sender asserts. Account-selected launches
-connect missing or expiring logins in the foreground. See [subscriptions](../subscriptions.md#use-subscriptions-over-ssh).
+initialization, repair or local fallback.
+
+`lf machine connect mini <provider>` installs supported service credentials
+through SSH stdin. Claude and Codex instead use native authentication established
+on the destination. Personal `forward` settings can send named variables and home
+files; native clients interpret them. Launch does not select or refresh logins. See [native authentication](../subscriptions.md#remote-machines-and-rentals).
 
 Remove forgets the connection without contacting the remote. Historical machine
 identity and routes remain in SQLite, and ownership entries keep naming the Machine. Previously observed routes
@@ -64,11 +64,11 @@ need an explicit add before they can receive a login.
 ## Local by default
 
 ```bash
-lf session history list                        # Processes recorded on this Machine
-lf process list --json                           # OS-live processes on this Machine
-lf wave status product                 # current plan, Task conditions and Session evidence
+lf session list --json                           # live conversations on this Machine
+lf graph list --runs --state current --json # live Graph runs on this Machine
+lf wave status product                 # current Project, Task conditions and Session evidence
 
-lf --machine build-home session history list   # run the same reader on build-home
+lf --machine build-home session list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
 ```
 
@@ -76,13 +76,16 @@ lf --machine build-home --wave product wave-operate
 its Machine identity, resolves its own files and store, and returns the result.
 Planning intent, including Task ownership, has one owner of record: the planning
 provider, or Loopflow's journal when the plan is local. Execution facts stay with
-the Machine that produced them, and inventories remain local. SSH command
-routing needs no resident API server. Desktop uses a separate local client API
-server; LOO-718 adds authenticated remote client access. Neither moves execution
-ownership into a central service.
+the Machine that produced them, and inventories remain local. Work sent to
+another Machine runs in that Machine's server: a Task or Session write for a
+Task mini runs travels over SSH to `lf server connect` there, a pipe to mini's
+server that starts it when none is running. Commands run on a Machine itself
+need no server, and `ssh mini lf …` by hand is the way in when its server
+cannot run. LOO-718 adds authenticated remote client access. Neither moves
+execution ownership into a central service.
 
 The Machine and ownership types live in
-[`durable.rs`](../../rust/loopflow/src/durable.rs). SSH routing is exposed by
+[`durable.rs`](../../rust/loopflow-execution/src/durable.rs). SSH routing is exposed by
 the CLI under [`lf/`](../../rust/loopflow/src/lf).
 
 ## Own Tasks
@@ -95,7 +98,7 @@ lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim` and `unclaim` entries; the later entry wins in provider order, and
+holds `claim` and `unclaim` entries; the later entry wins in tracker order, and
 no current owner is stored beside it. Each entry names its person, the Machine
 it puts the Task on and the Machine that wrote it, so every Machine stores the
 same rows. Moving a Task is a claim by the same person naming another Machine;
@@ -104,7 +107,7 @@ wrote as `handoff` read as such claims. `lf task run` and `lf task checkout`
 claim an unowned Task when they allocate its checkout. Completion, abandonment
 and reopening write no entries; a Done Task shows its last owner as history.
 
-A person is named once, in `people`: by the planning provider's user
+A person is named once, in `people`: by the tracker's user
 (`linear:<user>`, learned when Linear first shows the Task's assignee), else by
 the Git journal's planning user key (`journal:<key>`), with a display name.
 Ownership entries and Machines refer to that row; the Git email names nobody new.
@@ -156,9 +159,36 @@ inside one IMMEDIATE transaction:
 
 | Task is | Writer |
 |---|---|
-| Yours, on another of your Machines | That Machine, over `lf --machine` |
+| Yours, on another of your Machines | That Machine, as a typed operation over SSH |
 | Unowned | Your Wave Machine |
 | Someone else's | Your own Wave Machine; your later claim wins |
+
+A write for a Task another Machine runs travels as the operation itself, not
+as a command line. Running, shipping, holding, claiming or unassigning the Task,
+and opening or resuming its Session, reach the writer the same way:
+
+```bash
+lf task hold LOO-123 --json             # LOO-123 runs on mini; mini's server answers
+ssh mini lf server status               # while it runs, the laptop is a connected client
+```
+
+The sender runs `lf server connect` on the writer over SSH, a pipe to the
+writer's server that checks its Machine identity and starts the server when
+none is running. The write goes as itself, with a `sender` naming the
+repository and the sender's profile, participant name and agent override; a
+run or ship also carries the values `forward.env` names, and the files
+`forward.files` names are delivered first. `lf task status <issue>
+--subscribe` for a Task mini runs subscribes to mini's server the same way.
+The writer's server runs it in its own checkout and answers; an operation that
+arrives this way is never forwarded again. An older `lf` there fails naming
+its version and `ssh mini 'lf install'`; one that dies, or SSH that cannot
+reach mini, fails with what the destination printed.
+
+A writer with an older `lf` fails the call and names its version and the
+update command, for example ``mini runs lf 0.15.2, which cannot take this
+operation; update it with `ssh -- 'mini' 'lf install'` ``. A writer with a newer
+protocol asks you to update this Machine with `lf install`. Nothing falls back
+to running the write locally.
 
 Nothing routes to another person's Machine, and nobody moves or unclaims
 another person's claim; moving a Task to another person is deferred. The Machine in a claim
@@ -260,7 +290,7 @@ Checked mini: it can take MTG-321
 Stopped MTG-321 at `implement`
 Committed and pushed MTG-321 on mtg-321
 Arrived on mini (Graph at `implement`); its Session moved with it
-Running on mini as Graph process 0199a213-81c0-7800-8aa1-bbab2a035a55
+Running on mini as Graph run 0199a213-81c0-7800-8aa1-bbab2a035a55
   follow: lf task status MTG-321
 ```
 
@@ -292,10 +322,10 @@ not restarted.
 
 **Nothing to prepare on mini.** The check before the move clones the repository
 on a Machine that has none and takes the Task in from planning. A personal Git
-plan (`planning: {provider: git, personal: true}`) is read under the laptop's
+plan (`tracker: {git: {personal: true}}`) is read under the laptop's
 planning key, which a Machine without one adopts; a Machine already planning
-under another key fails the check. A provider login mini lacks is asked for in
-the foreground, as account-selected launches do. Both Machines need an `lf` that
+under another key fails the check. Authenticate the native provider on mini
+before moving work; a missing login produces the native client's error. Both Machines need an `lf` that
 knows how to take a Task in; an older one fails the check, and nothing moves.
 
 **The laptop afterwards.**
@@ -398,8 +428,8 @@ unfinished Task and has not expired; there is no queue. `--rent R` admits
 (limit, then the price from the provider's published per-second rates), writes
 the rental as `requested` with its sandbox name `lf-<id>` before the create,
 creates once, waits for SSH, installs `lf`, adds the Machine, forwards GitHub
-and installs each Claude account's rental access token (and, when the repository
-plans in Linear, a freshly refreshed Linear access token), clones and binds the
+and, when the repository plans in Linear, installs a freshly refreshed Linear
+access token, clones and binds the
 repository, then hands off. A sandbox that never answers SSH is deleted at once.
 An unanswered create is `unconfirmed` until its name finds it (then deleted,
 since it has no route) or the create's window passes (`lost`); it is never
@@ -416,7 +446,7 @@ preference does not create that capacity on another machine. File-backed setting
 resolution must distinguish the authored capacity choice from its runtime binding.
 
 Providers are reached through one embedded bridge
-(`rust/loopflow/src/rental/sandbox.py`) under `uv`, with the provider's pinned
+(`rust/loopflow-execution/src/rental/sandbox.py`) under `uv`, with the provider's pinned
 SDK where it has one (RunPod speaks plain HTTP). It creates, finds and
 deletes machines by the name lf gave them. Daytona and Modal build an image (an
 `lf` user, git, gh, Node and Claude Code, Rust, uv); RunPod and AWS boot
@@ -428,7 +458,7 @@ security group.
 
 The hard deadline never needs the laptop. Daytona (`ttl_minutes`) and Modal
 (`timeout`) hold it themselves; elsewhere the guardian
-(`rust/loopflow/src/rental/guardian.py`) does, starting before anything else on
+(`rust/loopflow-execution/src/rental/guardian.py`) does, starting before anything else on
 the machine. On RunPod it is the main process and the setup its child: when it
 exits it deletes its pod with
 the pod-scoped key RunPod injects, after reading the price charged so the
@@ -466,8 +496,7 @@ shell / automation / Loopflow.app
 ```
 
 [What runs on a Machine](index.md#what-runs-on-a-machine) is the process
-model: a launch runs here, held by the Machine server's holder, or detached
-under a Graph process. Wave operations are finite attributed conversations.
+model and its four launch kinds. Wave operations are finite attributed conversations.
 Each Task Graph runs through the common Graph runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 
@@ -478,21 +507,21 @@ no signal authority.
 ## Observe processes
 
 ```bash
-lf process list --json
-lf process top
-lf process prune --dry-run
+lf session list --json
+lf graph list --runs --state current --json
+lf machine doctor
 ```
 
-The outer command journal records command receipts. `lf process list` and `lf process top` join
-those receipts to current OS process facts. Completed processes disappear from
-the live view. This is observation, not a durable lifecycle model.
+Each owner record (a Session's agent and attachment, a Graph run or step, a
+Task or ship carrier) carries the pid and OS start time of the process it runs
+as; liveness is one OS lookup against them. The Machine server's liveness pass
+records the end of an owner whose process died without writing it.
 
-`lf process prune` removes dead command receipts only after their terminal outcome
-is recorded, and may reap only AgentProcesses whose recorded identity is live
-and whose attached LfProcess is provably dead. Receipts use Process IDs, so PID reuse cannot overwrite an
-unfinished Process’s identity. Failed terminal writes and interrupt cleanup retain
-that identity without inventing an outcome. An unclaimed provider PID is
-never killed merely because it resembles a Loopflow child.
+Lazy recovery may reap only AgentProcesses whose recorded identity is live and
+whose attached lf is provably dead. `lf machine doctor` reports strays, OS
+processes carrying `LF_STEER_SESSION` or `LF_PROCESS_ID` that no live record
+claims, and kills nothing. An unclaimed provider PID is never killed merely
+because it resembles a Loopflow child.
 
 Cross-process control requires exact PID/start identity and the applicable
 conversation and AgentProcess record. Revalidate native scope or exclusive process
@@ -540,8 +569,10 @@ Private-Home development and tests retain explicit `LF_BIN` selection. Store
 schema validation and migration authority still apply to every build; ordinary
 main-Machine opens never initialize or advance its schema.
 
-`LF_HOME` explicitly selects a private, disposable Home. Its database is
-always `$LF_HOME/loopflow.db`; no other variable selects a store. Every variable
+`LF_HOME` explicitly selects a private, disposable Home. Its store is
+always `$LF_HOME/loopflow.db`, with history and turns in `$LF_HOME/history.db`;
+no other
+variable selects either. Every variable
 Loopflow sets or reads is listed in [Environment](environment.md). A private Home
 migrates itself on open, including a branch's unmerged migration; editing that
 migration afterwards needs a fresh `LF_HOME`. Loopflow never copies main data into
@@ -570,7 +601,7 @@ jobs pin that path. The installation promotion lock likewise stays at
 `~/.lf/promotion.lock`. Neither path is relocated.
 
 Artifact switching lives in
-[`installation.rs`](../../rust/loopflow/src/installation.rs) and the
+[`installation.rs`](../../rust/loopflow-execution/src/installation.rs) and the
 install command implementation under [`lf/commands/`](../../rust/loopflow/src/lf/commands).
 
 ## Boundary contracts

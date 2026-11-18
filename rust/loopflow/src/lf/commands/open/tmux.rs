@@ -6,26 +6,12 @@ use anyhow::{Context, Result};
 
 use super::{run_host, viewed_placement, OpenHost, Resolved};
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
-pub(super) struct TmuxLocation {
-    socket: String,
-    pane: String,
-}
+use loopflow_execution::terminal_host::TmuxLocation;
 
-impl TmuxLocation {
-    pub(super) fn current() -> Option<Self> {
-        let tmux = std::env::var("TMUX").ok()?;
-        Some(Self {
-            socket: tmux.rsplitn(3, ',').nth(2)?.into(),
-            pane: std::env::var("TMUX_PANE").ok()?,
-        })
-    }
-
-    fn command(&self) -> Command {
-        let mut command = Command::new("tmux");
-        command.args(["-S", &self.socket]);
-        command
-    }
+fn host_command(location: &TmuxLocation) -> Command {
+    let mut command = Command::new("tmux");
+    command.args(["-S", &location.socket]);
+    command
 }
 
 /// A new window right after the caller's, named for the Work. Its pane is the
@@ -42,7 +28,7 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
     let window = |after: Option<&str>| {
         let mut command = caller
             .as_ref()
-            .map(TmuxLocation::command)
+            .map(host_command)
             .unwrap_or_else(|| Command::new("tmux"));
         command.arg("new-window");
         if let Some(pane) = after {
@@ -73,7 +59,7 @@ pub(super) fn open(target: &Resolved, focus: bool, argv: &[String]) -> Result<St
 pub(super) fn focus(destination: &str) -> Result<()> {
     let location: TmuxLocation =
         serde_json::from_str(destination).context("Recorded tmux view is unreadable")?;
-    let mut command = location.command();
+    let mut command = host_command(&location);
     command.args([
         "select-window",
         "-t",
@@ -84,7 +70,7 @@ pub(super) fn focus(destination: &str) -> Result<()> {
         &location.pane,
     ]);
     run_host(command, OpenHost::Tmux.label())?;
-    let mut switch = location.command();
+    let mut switch = host_command(&location);
     switch.args(["switch-client", "-t", &location.pane]);
     run_host(switch, OpenHost::Tmux.label()).map(drop)
 }

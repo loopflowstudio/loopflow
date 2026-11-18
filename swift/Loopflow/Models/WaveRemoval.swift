@@ -13,7 +13,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     public let moved: [Task]
     public let deleted: [Task]
     public let completedTasks: Int
-    public let chapters: Int
+    public let projects: Int
     public let sessions: Int
     public let initiatives: [InitiativeArchive]
     public let hasFiles: Bool
@@ -73,7 +73,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, name, preview, destination, waves, moved, deleted, chapters, sessions
+        case id, name, preview, destination, waves, moved, deleted, projects, sessions
         case initiatives, uncommitted, files, summary
         case alreadyRemoved = "already_removed"
         case completedTasks = "completed_tasks"
@@ -91,7 +91,7 @@ public struct WaveRemoval: Decodable, Sendable, Hashable {
         moved = try container.decode([Task].self, forKey: .moved)
         deleted = try container.decode([Task].self, forKey: .deleted)
         completedTasks = try container.decode(Int.self, forKey: .completedTasks)
-        chapters = try container.decode(Int.self, forKey: .chapters)
+        projects = try container.decode(Int.self, forKey: .projects)
         sessions = try container.decode(Int.self, forKey: .sessions)
         initiatives = try container.decode([InitiativeArchive].self, forKey: .initiatives)
         hasFiles = try container.decode(Bool.self, forKey: .hasFiles)

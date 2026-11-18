@@ -12,11 +12,13 @@ mod support;
 use std::fs;
 use std::process::{Command, Stdio};
 
-use loopflow::ops::task::task_stack;
-use loopflow::ops::{
+use loopflow_execution::ops::task::task_stack;
+use loopflow_execution::ops::{
     arm as land, create_or_update_pr, submit, LandOptions, NullProgress, PrOptions,
 };
-use loopflow::work::task::{GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication};
+use loopflow_execution::work::task::{
+    GithubPr, PrMergeMode, PrMergeRequest, PrPresentation, PrPublication,
+};
 use loopflow_test_support::TestRepo;
 use support::{register_task_with_pr, EnvGuard};
 

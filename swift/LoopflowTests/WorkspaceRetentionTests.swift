@@ -194,7 +194,7 @@ struct WorkspaceRetentionTests {
         #expect(registry.warmWork == [repository, wave] + keys.prefix(limit))
         // Primaries hold no checkout: `presented` belongs to Task viewers.
         let primary = registry.retained(wave)!
-        #expect(primary.conversationIntent == .start)
+        #expect(primary.opensConversationAutomatically)
         primary.multiplexer.load(sessionId: "wave-conversation")
         primary.closePane(primary.multiplexer.sessionPane!.id)
         #expect(primary.conversationClosed)

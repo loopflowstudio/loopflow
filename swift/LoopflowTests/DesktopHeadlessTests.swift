@@ -42,7 +42,8 @@ struct DesktopHeadlessTests {
     func nestedRunHistory() throws {
         func step(_ id: String, _ iterations: [[UInt32]], outcome: String = "succeeded") -> GraphStepProcess {
             GraphStepProcess(lfProcessId: id, label: "implement", key: 0, iterations: iterations,
-                             startedAt: 10, completedAt: 15, outcome: outcome, exitCode: outcome == "failed" ? 1 : 0)
+                             startedAt: 10, completedAt: 15, outcome: outcome, exitCode: outcome == "failed" ? 1 : 0,
+                             error: nil)
         }
         let steps = [step("a", [[0], [1]]), step("b", [[0], [1]]),
                      step("c", [[0, 1]]), step("d", [[0], [1]], outcome: "failed")]
@@ -69,12 +70,12 @@ struct DesktopHeadlessTests {
     }
 
     @Test("The repository roadmap reads Git planning through the ordinary query")
-    func roadmapPeerPlanning() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
+    func roadmapGitDestinations() async throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("git_destinations.json"))
         let status = String(decoding: data, as: UTF8.self)
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
-            if args == ["repo", "plan", "--json"], cwd == "/src/loopflow" {
+            if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
                 return "{\"destinations\":\(status)}"
             }
             if args.first == "roadmap" { return roadmap }
@@ -83,24 +84,40 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.peerPlanning.value?.count == 2)
+        #expect(model.gitDestinations.value?.count == 2)
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
-        let statusView = try view.inspect().find(PeerPlanningView.self)
+        let statusView = try view.inspect().find(GitDestinationsView.self)
         #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
 
-    @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")
-    func planningSync() throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("planning_sync.json"))
-        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: data)
-        let view = PlanningSyncView(sync: sync)
-        for change in sync.changes {
-            #expect(try view.inspect().find(text: change.text).string() == change.text)
+    @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")
+    func trackerSync() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("tracker_sync.json"))
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: data)
+        let view = TrackerSyncView(sync: sync, repo: "/r")
+        for action in sync.actions {
+            #expect(try view.inspect().find(text: action.text).string() == action.text)
         }
-        for connected in [true, false] {
-            let settled = try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{\"connected\":\(connected),\"changes\":[]}".utf8))
-            #expect(try PlanningSyncView(sync: settled).inspect().findAll(ViewType.Text.self).isEmpty)
-        }
+        #expect(try view.inspect().findAll(ViewType.Button.self).isEmpty)
+        let confirmed = try JSONDecoder().decode(TrackerSync.self, from: Data("{\"actions\":[]}".utf8))
+        #expect(try TrackerSyncView(sync: confirmed, repo: "/r").inspect().findAll(ViewType.Text.self).isEmpty)
+    }
+
+    @Test("A lost line, a Task's or a Project's, offers Keep theirs and Use mine")
+    func trackerSyncAnswers() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("tracker_sync.json"))
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: data)
+        let lost = try #require(sync.actions.first { $0.phase == .conflicted })
+        var answers: [(String, String, LostAnswer)] = []
+        let view = TrackerSyncView(sync: sync, repo: "/r")
+            .environment(\.answerLost) { repo, action, answer in answers.append((repo, action.id, answer)) }
+        let buttons = try view.inspect().findAll(ViewType.Button.self)
+        #expect(buttons.count == 2 * sync.actions.filter { $0.phase == .conflicted }.count)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-keep-theirs-\(lost.id)").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-use-mine-\(lost.id)").button().tap()
+        #expect(answers.map(\.0) == ["/r", "/r"])
+        #expect(answers.map(\.1) == [lost.id, lost.id])
+        #expect(answers.map(\.2) == [.keepTheirs, .useMine])
     }
 
     @Test("A builtin Workflow offers Customize beside its interactive steps")
@@ -149,7 +166,7 @@ struct DesktopHeadlessTests {
                 return WorkFrame(sequence: sequence, answers: answers, unavailable: nil, content: .checkpoint, wire: nil)
             }
             let line: [String: Any] = [
-                "answers": answers, "unavailable": NSNull(), "body": body,
+                "answers": answers, "unavailable": NSNull(), "body": body, "read_at": NSNull(),
             ]
             return try WorkFrame.decode(part: try #require(WorkPart(rawValue: part)),
                                         scope: WorkScope(repo: nil, headless: false, task: task, activity: nil, taskListWave: nil),
@@ -192,14 +209,15 @@ struct DesktopHeadlessTests {
         feed.send(try frame("task", sequence: 2, answers: 2, task: task.task.identifier,
                             body: ["overview": work, "graph_processes": [run], "execution": ["work": work, "ship_approval": ["at": 1793266000, "by": ["kind": "person", "name": "Maya"]],
                                                  "started_by": ["kind": "session", "id": "session_1", "name": "LOO-1 task", "requester": "Maya"],
-                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]]],
+                                                 "ship_stop": ["at": 1793266380, "by": ["kind": "person", "name": "Maya"]],
+                                                 "stack_parent": ["identifier": "LOO-0", "branch": "maya/loo-0-parent", "pr_number": 7]],
                                    "comments": ["identifier": task.task.identifier, "comments": [], "pending_sync": [], "conflicts": [String: String](), "refresh_error": NSNull()]]))
         try await eventually { model.taskWork[task.id].value != nil }
         let shown = try #require(model.taskWork[task.id].value)
         try await eventually { model.taskExecution[task.id].value != nil }
         let diagnostics = try #require(model.taskExecution[task.id].value?.work)
         let view = TaskWorkView(model: model, task: task)
-        for id in diagnostics.sessions.map(\.id) + diagnostics.processes.map(\.id) {
+        for id in diagnostics.sessions.map(\.id) {
             _ = try view.inspect().find(viewWithAccessibilityIdentifier: "task-work-\(id)")
         }
         // The shipping line names who approved it.
@@ -211,6 +229,11 @@ struct DesktopHeadlessTests {
         let line = TaskWorkflowBar.notShipping(stop, issue: task.task.identifier)
         #expect(line.hasPrefix("Not shipping: Maya stopped it "))
         #expect(line.hasSuffix(" · lf ship \(task.task.identifier) approves it again"))
+        // A stacked Task names its parent by Task beside its PR line.
+        let parent = try #require(model.taskExecution[task.id].value?.stackParent)
+        let stacked = TaskStackParentLabel(parent: parent)
+        #expect(try stacked.inspect().find(text: "Stacked on LOO-0").string() == "Stacked on LOO-0")
+        #expect(stacked.help == "Builds on LOO-0's branch maya/loo-0-parent (PR #7). lf sync main detaches it.")
 
         // Any Graph process is one line that opens to its id, its launched graph,
         // where it stands and every step it started.
@@ -258,7 +281,6 @@ struct DesktopHeadlessTests {
         // A frame read before the write cannot stand for it.
         feed.send(try frame("task", sequence: 4, answers: 2, task: task.task.identifier, body: moved))
         try await eventually { model.taskWork[task.id].value?.graphProcesses.count == 2 }
-        #expect(model.navigation.taskRunDrafts[task.id]?.acting == true)
         feed.send(try frame("task", sequence: 5, answers: 3, task: task.task.identifier, body: moved))
         feed.send(try frame("planning", sequence: 6, answers: 3, body: planning))
         feed.send(try frame("checkpoint", sequence: 7, answers: 3, body: [:]))
@@ -276,8 +298,8 @@ struct DesktopHeadlessTests {
             ["task", "run", task.task.identifier, "--from", "demo", "--json"],
         ])
         feed.send(WorkFrame(sequence: 8, answers: 3, unavailable: "offline", content: .task(nil), wire: nil))
-        try await eventually { model.taskWork[task.id].errorMessage == "offline" }
-        _ = try log.inspect().find(text: "Graph processes could not be read: offline")
+        try await eventually { model.taskWork[task.id].failure == "offline" }
+        #expect(model.navigation.notices.current?.text == "The Task couldn't be read: offline")
         _ = try log.inspect().find(viewWithAccessibilityIdentifier: "task-work-44444444-4444-4444-8444-444444444444")
     }
 
@@ -304,12 +326,13 @@ struct DesktopHeadlessTests {
         await source.fail()
         await model.loadGraphCatalog(force: true)
         #expect(model.workflowCatalog.value == retained)
-        #expect(model.workflowCatalog.errorMessage == "catalog unreadable")
-        #expect(model.graphCatalog.errorMessage == "catalog unreadable")
+        #expect(model.workflowCatalog.failure == "catalog unreadable")
+        #expect(model.graphCatalog.failure == "catalog unreadable")
         #expect(model.paletteIsStale)
         #expect(model.navigation.palette == .workflow("feature"))
         let view = WorkflowCatalogInspector(entry: retained?.first, model: model)
-        _ = try view.inspect().find(text: "catalog unreadable")
+        #expect(model.navigation.notices.current?.text == "Graphs couldn't be read: catalog unreadable")
+        #expect(throws: (any Error).self) { try view.inspect().find(text: "catalog unreadable") }
         _ = try view.inspect().find(button: "Refresh")
     }
 
@@ -417,7 +440,8 @@ struct DesktopHeadlessTests {
         #expect(try await tapped(4) == ["task", "run", task.task.identifier, "--from", "review-design", "--json"])
 
         // Completion has its own operation and does not move the Workflow.
-        await model.completeTask(task)
+        model.completeTask(task)
+        for _ in 0..<200 where await started.calls.last?.contains("complete") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "complete", task.task.identifier, "--json"])
 
         // A shipping Task offers Stop Auto-Ship in place of Auto-Ship.
@@ -430,58 +454,15 @@ struct DesktopHeadlessTests {
         for _ in 0..<200 where await started.calls.last?.contains("hold") != true { try await Task.sleep(for: .milliseconds(5)) }
         #expect(await started.calls.last == ["task", "hold", shipping.task.identifier, "--json"])
 
-        // The toast after Auto-Ship offers Undo; after Stop Auto-Ship it only reports.
-        var undone = false
-        let toast = ShipNoticeToast(notice: ShipNotice(task: task, shipped: true)) { undone = true }
-        #expect(try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-notice").text().string()
-            == "\(task.task.identifier) is shipping")
-        try toast.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo").button().tap()
-        #expect(undone)
-        let back = ShipNoticeToast(notice: ShipNotice(task: task, shipped: false)) {}
-        #expect(throws: (any Error).self) {
-            try back.inspect().find(viewWithAccessibilityIdentifier: "task-ship-undo")
-        }
-    }
-
-    @Test("The Workflow bar shows the interactive steps, what runs now and Auto-Ship, and opens to its step cells")
-    func taskWorkflowBar() throws {
-        let roadmap = try JSONDecoder().decode(RoadmapSnapshot.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")))
-        let wave = try #require(roadmap.waves.first)
-        let task = try #require(wave.tasks.items.first { $0.runControl.unavailable == nil && $0.shipping == nil })
-        let work = try JSONDecoder().decode(TaskOverview.self,
-            from: Data(contentsOf: fixtures.appendingPathComponent("task_work.json")))
-        let workflow = try #require(work.graph)
-        let model = WorkModel(query: RegistryQuery { _, _ in "{}" })
-
-        // The fixture's run carries the Task from review-design to demo.
-        let bar = TaskWorkflowBar(model: model, task: task, work: .available(work))
-        #expect(bar.live == "review-design → demo")
-        #expect(try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-name").text().string() == "feature")
-        _ = try bar.inspect().find(viewWithAccessibilityIdentifier: "task-ship")
-        let stages = TaskWorkflowBar.stages(workflow, shipping: false)
-        #expect(stages.map(\.name) == ["review-design", "demo", "end"])
-        #expect(stages.map(\.place) == [.passed, .going, .ahead])
-        #expect(stages.map(\.who) == ["you", "you", nil])
-        // Shipping hands the stages ahead to stand-ins, and the reason is the live line.
-        #expect(TaskWorkflowBar.stages(workflow, shipping: true).map(\.who) == ["you", "stand-in", nil])
-        // Waiting at demo, or stopped short of it, the Task stands there.
-        let waiting = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps, position: .at(step: "demo"))
-        #expect(TaskWorkflowBar.stages(waiting, shipping: false).map(\.place) == [.passed, .here, .ahead])
-        let stopped = TaskGraph(name: workflow.name, interactiveSteps: workflow.interactiveSteps,
-                                position: .run(step: "review-design", at: "implement", lfProcessId: "p", running: false))
-        #expect(TaskWorkflowBar.stages(stopped, shipping: false).map(\.place) == [.passed, .here, .ahead])
-        #expect(TaskWorkflowBar(model: model, task: task, work: .available(TaskOverview(
-            sessions: [], graphProcesses: [], graph: stopped))).live == "Stopped at implement before demo")
-        let shipping = try #require(wave.tasks.items.first { $0.shipping != nil })
-        let shipped = TaskWorkflowBar(model: model, task: shipping, work: .available(work))
-        #expect(shipped.live == shipping.shipping?.reason)
-        _ = try shipped.inspect().find(viewWithAccessibilityIdentifier: "task-ship-stop")
-
-        // Stage cells stay closed until the dots are clicked.
-        #expect(throws: (any Error).self) {
-            try bar.inspect().find(viewWithAccessibilityIdentifier: "task-workflow-bar-stage-demo")
-        }
+        // Auto-Ship says it was requested, never that it shipped; its Undo stops Auto-Ship.
+        model.shipTask(task)
+        let notice = try #require(model.navigation.notices.current)
+        #expect(notice.text == "\(task.task.identifier) Auto-Ship requested")
+        let view = NoticeView(center: model.navigation.notices)
+        let sent = await started.calls.count
+        try view.inspect().find(viewWithAccessibilityIdentifier: "notice-action").button().tap()
+        for _ in 0..<200 where await started.calls.count == sent { try await Task.sleep(for: .milliseconds(5)) }
+        #expect(await started.calls.last == ["task", "hold", task.task.identifier, "--json"])
     }
 
     @Test("Task lifecycle controls remain available without a Workflow", arguments: ["unstarted", "completed", "canceled"])
@@ -498,6 +479,11 @@ struct DesktopHeadlessTests {
         planning["state"] = state
         planning["completed"] = state == "completed"
         row["task"] = planning
+        row["runtime"] = NSNull()
+        let lifecycle = state == "completed" ? "done" : state == "canceled" ? "abandoned" : "unstarted"
+        row["lifecycle"] = lifecycle
+        let refusal: Any = state == "unstarted" ? NSNull() : "Reopen the Task"
+        row["run_control"] = ["unavailable": refusal]
         let task = try JSONDecoder().decode(RoadmapTask.self, from: JSONSerialization.data(withJSONObject: row))
         #expect(task.id == original.id)
         let model = WorkModel(query: RegistryQuery { _, _ in throw RegistryQueryError("Rendering must not mutate") })
@@ -610,7 +596,7 @@ struct DesktopHeadlessTests {
         #expect(try session("run").statusLabel == "Session")
     }
 
-    @Test("Loading, unavailable, empty and selected Work have distinct content")
+    @Test("Loading, unread, empty and selected Work have distinct content")
     func workStates() async throws {
         let query = RegistryQuery { _, _ in throw RegistryQueryError("Unexpected external read") }
         let model = WorkModel(query: query)
@@ -620,7 +606,10 @@ struct DesktopHeadlessTests {
         model.applyFixture(roadmap: .unavailable(lastGood: nil, reason: "offline"),
                            waves: .available([]),
                            workActivity: .loading, repos: [])
-        _ = try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-unavailable")
+        // A failed first read stays empty: the Notice says why.
+        #expect(throws: (any Error).self) {
+            try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
+        }
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-empty")
         }
@@ -638,9 +627,10 @@ struct DesktopHeadlessTests {
         var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         var planning = try #require(items[0]["task"] as? [String: Any])
-        planning["sync"] = ["connected": true, "changes": [[
-            "id": "pending-title", "field": "title", "state": "pending",
-            "local_value": "Saved title", "linear_value": NSNull(), "error": NSNull(),
+        planning["sync"] = ["actions": [[
+            "id": "pending-title", "seq": 1, "owner_kind": "task", "owner_id": "task", "kind": "field",
+            "change": "title", "subject": "task_title", "phase": "queued", "tracker": "linear",
+            "error": NSNull(), "local_value": "Saved title", "tracker_value": NSNull(),
         ]]]
         items[0]["task"] = planning
         tasks["items"] = items
@@ -664,8 +654,8 @@ struct DesktopHeadlessTests {
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         model.select(.task(id: task.id))
-        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "planning-sync-pending-title").text().string()
-        #expect(pending == "Saved locally; pending planning sync · title")
+        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-sync-pending-title").text().string()
+        #expect(pending == "title · queued")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

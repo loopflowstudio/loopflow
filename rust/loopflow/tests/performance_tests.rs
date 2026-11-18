@@ -44,6 +44,10 @@ fn cli_volume_records_real_reads_without_contents() {
     assert!(end["connections"].as_u64().unwrap() > 0);
     assert!(end["statements"].as_u64().unwrap() > 0);
     assert!(end["rows"].as_u64().unwrap() > 0);
+    // SQLite's profiler rounds to milliseconds; fast statements may legitimately
+    // report zero. Prove profile callbacks happened independently of duration.
+    assert!(end["sql_profiles"].as_u64().unwrap() > 0);
+    assert!(end["sql_ms"].as_f64().unwrap() >= 0.0);
     assert!(!text.contains(home.path().to_str().unwrap()));
     assert!(!text.contains("SELECT"));
     assert!(!text.contains("session"));
@@ -103,11 +107,11 @@ fn task_wait_reuses_its_store_and_builds_status_only_on_return() {
     }
     let args = |timeout| ["task", "wait", id, "--timeout", timeout, "--json"];
     let (immediate, body) = volume(home.path(), repo.path(), &args("0s"));
-    let initial: loopflow::engine::task::Waited = serde_json::from_str(&body).unwrap();
+    let initial: loopflow_execution::engine::task::Waited = serde_json::from_str(&body).unwrap();
     assert!(!initial.reached);
     assert_eq!(initial.task.task_id, id);
     let (waited, body) = volume(home.path(), repo.path(), &args("2s"));
-    let last: loopflow::engine::task::Waited = serde_json::from_str(&body).unwrap();
+    let last: loopflow_execution::engine::task::Waited = serde_json::from_str(&body).unwrap();
     assert!(!last.reached);
     assert_eq!(last.task.task_id, initial.task.task_id);
     assert_eq!(last.task.work.graph_processes.len(), 16);

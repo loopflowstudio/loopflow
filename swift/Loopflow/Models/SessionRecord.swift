@@ -19,12 +19,6 @@ public enum SessionAvailability: String, Codable, Sendable, Hashable {
     }
 }
 
-public enum SessionActionKind: String, Codable, Sendable, Hashable {
-    case reveal
-    case open
-    case moveHere = "move_here"
-}
-
 /// Who chose a Session's title. Rust never lets a generated suggestion
 /// replace a human-assigned name. `unavailable` means the canonical name lives
 /// on another Machine; the title is only a local label.
@@ -126,16 +120,11 @@ public enum SessionGraphOccurrence: String, Codable, Sendable, Hashable {
     case past
 }
 
+/// The one thing opening a Session does here: Reconnect, Open here, Take over,
+/// Try again or Start conversation.
 public struct SessionAction: Codable, Sendable, Hashable {
-    public let kind: SessionActionKind
     public let label: String
     public let help: String
-    public let unavailableReason: String?
-
-    enum CodingKeys: String, CodingKey {
-        case kind, label, help
-        case unavailableReason = "unavailable_reason"
-    }
 }
 
 public struct SessionWorkspace: Codable, Sendable, Hashable {
@@ -227,23 +216,21 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
     public var workspace: SessionWorkspace?
     public let waveId: String?
     public let workPath: String?
-    public let actions: [SessionAction]
-    public let title: String
+    /// What opening it here does; nil for a Run.
+    public let action: SessionAction?
+    public var title: String
     public let titleSource: SessionTitleSource
     public let graphMembership: SessionGraphMembership
     public let detail: String
     /// Provider harness recorded on the Session's capture manifest; nil when the
     /// capture is on another Machine or its manifest is unreadable.
     public let provider: String?
-    /// The login its conversation is pinned to; nil for a shared or unrouted one.
+    /// Historical attribution: the saved login its conversation last recorded; never the current native login.
     public let account: String?
     /// The model its current input launched with, when one was named.
     public let model: String?
-    /// Its next message would fail: the login it would use cannot take its model now.
-    public let blocked: Bool
     public let cwd: String
     public let state: SessionState
-    public let readySummary: String?
     public var openArgv: [String]
     public let terminalIds: [String]
     /// Its current or last turn while it is live; nil when nothing says.
@@ -262,31 +249,11 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         }
     }
 
-    public func action(_ kind: SessionActionKind) -> SessionAction? {
-        actions.first { $0.kind == kind }
-    }
-
-    /// Every Task this Session belongs to: its memberships, its checkout's Task
-    /// and its own Work when that is a Task.
-    public var taskMemberships: Set<String> {
-        Set(taskIds + [workspace?.taskId, work?.kind == .task ? work?.id : nil].compactMap { $0 })
-    }
-
-    public func names(task id: String) -> Bool { taskMemberships.contains(id) }
-
-    /// A first launch ended with no history, so there is nothing to open and no
-    /// holder: MoveHere is the explicit click that repeats it.
-    public var launchRetry: SessionAction? {
-        action(.open) == nil ? action(.moveHere) : nil
-    }
-
-    /// Another client holds input; only Take back transfers it.
-    public var heldElsewhere: Bool {
-        action(.moveHere) != nil && launchRetry == nil
-    }
+    /// Membership is supplied by the shared Task/checkout query.
+    public func names(task id: String) -> Bool { taskIds.contains(id) }
 
     enum CodingKeys: String, CodingKey {
-        case id, interactive, work, workspace, title, detail, provider, account, model, blocked, cwd, state, availability
+        case id, interactive, work, workspace, title, detail, provider, account, model, cwd, state, availability
         case preview, transition
         case programStatus = "program_status"
         case agentProcessId = "agent_process_id"
@@ -294,11 +261,10 @@ public struct SessionRecord: Codable, Sendable, Hashable, Identifiable {
         case taskPrimary = "task_primary"
         case waveId = "wave_id"
         case taskIds = "task_ids"
-        case actions
+        case action
         case titleSource = "title_source"
         case graphMembership = "graph_membership"
         case workPath = "work_path"
-        case readySummary = "ready_summary"
         case openArgv = "open_argv"
         case terminalIds = "terminal_ids"
         case turn, raw
@@ -423,7 +389,7 @@ extension SessionRecord {
         try values.encode(workspace, forKey: .workspace)
         try values.encode(waveId, forKey: .waveId)
         try values.encode(workPath, forKey: .workPath)
-        try values.encode(actions, forKey: .actions)
+        try values.encode(action, forKey: .action)
         try values.encode(title, forKey: .title)
         try values.encode(titleSource, forKey: .titleSource)
         try values.encode(graphMembership, forKey: .graphMembership)
@@ -431,10 +397,8 @@ extension SessionRecord {
         try values.encode(provider, forKey: .provider)
         try values.encode(account, forKey: .account)
         try values.encode(model, forKey: .model)
-        try values.encode(blocked, forKey: .blocked)
         try values.encode(cwd, forKey: .cwd)
         try values.encode(state, forKey: .state)
-        try values.encode(readySummary, forKey: .readySummary)
         try values.encode(openArgv, forKey: .openArgv)
         try values.encode(terminalIds, forKey: .terminalIds)
         try values.encode(turn, forKey: .turn)
@@ -457,7 +421,7 @@ extension SessionRecord {
         workspace = try values.decodeIfPresent(SessionWorkspace.self, forKey: .workspace)
         waveId = (try values.decodeIfPresent(String.self, forKey: .waveId)).map { StructuredIdentity.uuid($0) }
         workPath = try values.decodeIfPresent(String.self, forKey: .workPath)
-        actions = try values.decode([SessionAction].self, forKey: .actions)
+        action = try values.decode(SessionAction?.self, forKey: .action)
         title = try values.decode(String.self, forKey: .title)
         titleSource = try values.decode(SessionTitleSource.self, forKey: .titleSource)
         graphMembership = try values.decode(SessionGraphMembership.self, forKey: .graphMembership)
@@ -465,10 +429,8 @@ extension SessionRecord {
         provider = try values.decodeIfPresent(String.self, forKey: .provider)
         account = try values.decodeIfPresent(String.self, forKey: .account)
         model = try values.decodeIfPresent(String.self, forKey: .model)
-        blocked = try values.decode(Bool.self, forKey: .blocked)
         cwd = try values.decode(String.self, forKey: .cwd)
         state = try values.decode(SessionState.self, forKey: .state)
-        readySummary = try values.decodeIfPresent(String.self, forKey: .readySummary)
         openArgv = try values.decode([String].self, forKey: .openArgv)
         terminalIds = try values.decode([String].self, forKey: .terminalIds)
         turn = try values.decode(SessionTurn?.self, forKey: .turn)

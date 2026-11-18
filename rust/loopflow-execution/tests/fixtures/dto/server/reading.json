@@ -1,0 +1,19 @@
+{
+  "type": "reading",
+  "id": "tasks-1",
+  "frame": {
+    "answers": 3,
+    "unavailable": "repository is unavailable",
+    "body": null,
+    "work": null,
+    "read_at": {
+      "graphs": 7,
+      "planning": 12,
+      "processes": 3,
+      "sessions": 41,
+      "task_updates": 5,
+      "usage": 90
+    }
+  },
+  "checkpoint": "fixture-checkpoint"
+}

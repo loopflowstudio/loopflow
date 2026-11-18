@@ -335,6 +335,10 @@ jobs:
           # expression is 3.48+); the runner's system Python links an older one.
           UV_PYTHON_PREFERENCE: only-managed
         run: uv run python scripts/check_migrations.py
+      - name: Verify the generated schema page
+        env:
+          UV_PYTHON_PREFERENCE: only-managed
+        run: uv run python scripts/schema_page.py --check
 
   python-test:
     needs: [merge-proof, scratch-clear]
@@ -345,6 +349,8 @@ jobs:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v7
       - run: uv sync
+      - name: Fetch Cargo dependencies for offline build fixtures
+        run: cargo fetch --locked
       - name: Run Python tests without external networking
         run: uv run --no-sync python scripts/test_network.py uv run --no-sync pytest python/tests/
 

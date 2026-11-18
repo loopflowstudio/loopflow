@@ -32,14 +32,14 @@ struct WorkNavigator: View {
         return filter == .working ? scope : "\(scope) · \(filter.rawValue)"
     }
 
-    /// Nil while the list loads: the work status above already says so, and an empty list is not yet known.
+    /// Nil until the list is read: the work status above says it is loading, and
+    /// a failed read is the Notice's.
     private var emptyListText: String? {
         switch model.navigation.sidebarScope {
         case .dashboard(let id):
             return model.dashboard(id) == nil ? "This Dashboard is no longer available." : "No Tasks in this Dashboard"
         case .repository, .wave:
-            if model.taskListReading.isLoading { return nil }
-            if model.taskListReading.errorMessage != nil { return "Task list unavailable" }
+            if model.taskListReading.value == nil { return nil }
             if case .wave = model.navigation.sidebarScope { return "No working Tasks in this Wave" }
             return "No working Tasks in this list"
         }
@@ -60,13 +60,8 @@ struct WorkNavigator: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let status = model.workStatus.message {
-                WorkReadStatus(model: model, status: status)
-            }
-            if let error = model.dashboardError ?? model.selectionPlans.errorMessage,
-               ![model.roadmap.errorMessage, model.taskListReading.errorMessage, model.sessions.errorMessage]
-                .compactMap({ $0 }).contains(error) {
-                Text(error).font(Typography.body(11)).foregroundStyle(palette.warning).padding(10)
+            if let status = model.workStatus.progress {
+                WorkReadStatus(status: status)
             }
             // The repository tops the sidebar; a selected Wave moves up under it.
             VStack(alignment: .leading, spacing: 5) {
@@ -102,8 +97,11 @@ struct WorkNavigator: View {
                         VStack(alignment: .leading, spacing: 5) {
                             Text("Open Task is outside this list")
                             Button("Show working tasks") {
-                                model.navigation.sidebarFilter = .working
-                                model.navigation.sidebarWaveID = nil
+                                Perf.userAction(Perf.hierarchyInteraction, scenario: "sidebar_working", id: "outline:\(WorkNavigation.SidebarFilter.working.rawValue)",
+                                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                                    model.navigation.sidebarFilter = .working
+                                    model.navigation.sidebarWaveID = nil
+                                }
                             }
                         }.font(Typography.body(11)).padding(10)
                     }
@@ -134,12 +132,14 @@ struct WorkNavigator: View {
         }
         .onChange(of: rowOrder.isEmpty, initial: true) { _, empty in
             guard !empty else { return }
-            Perf.endAfterCommit(Perf.coldStart, id: "launch")
             let source = model.showsSavedWork ? "saved" : "fresh"
             DispatchQueue.main.async { LaunchJournal.home.mark(.usable, ["source": source]) }
         }
-        .onChange(of: model.navigation.sidebarFilter) { _, _ in
-            Perf.endAfterCommit(Perf.hierarchyInteraction, id: "outline")
+        .onChange(of: model.sidebarTaskIDs + model.sidebarAutonomousTaskIDs) { before, after in
+            Perf.rowsChanged(from: before, to: after, owner: model.navigation.performanceOwner)
+        }
+        .onChange(of: model.navigation.sidebarFilter) { _, filter in
+            Perf.stateObserved(Perf.hierarchyInteraction, id: "outline:\(filter.rawValue)", owner: model.navigation.performanceOwner)
         }
         .onChange(of: model.navigation.sidebarFocusRequested, initial: true) { _, requested in
             guard requested else { return }
@@ -150,7 +150,9 @@ struct WorkNavigator: View {
         }
         .onKeyPress(.return) {
             guard let focusedWork else { return .ignored }
-            model.select(focusedWork)
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: focusedWork.kind == .task ? "task" : "wave",
+                            id: focusedWork.id, repository: model.repoPath, liveSessions: model.liveSessionCount,
+                            owner: model.navigation.performanceOwner) { model.select(focusedWork) }
             return .handled
         }
         .renderFlash()
@@ -196,13 +198,13 @@ struct WorkNavigator: View {
         let state: SidebarSelection = pressedScope == scope || model.navigation.destination == .work(reference) ? .shown
             : model.navigation.sidebarScope == scope ? .containing : .none
         return Button {
-            // The click darkens the row first; it moves once that has landed.
-            guard !reduceMotion else { model.select(reference); return }
-            withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
-            Task {
-                try? await Task.sleep(for: .milliseconds(120))
+            Perf.userAction(Perf.taskWorkspaceReady, scenario: "wave", id: reference?.id ?? "repository",
+                            repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                // Select in the click; the pressed highlight animates over the selected row.
                 model.select(reference)
-                pressedScope = nil
+                guard !reduceMotion else { return }
+                withAnimation(.easeOut(duration: 0.12)) { pressedScope = scope }
+                withAnimation(.easeOut(duration: 0.12).delay(0.12)) { pressedScope = nil }
             }
         } label: {
             HStack {
@@ -252,7 +254,7 @@ struct WorkNavigator: View {
         let selected = model.isSelected(.task(id: id))
         let muted = quiet || model.selection?.kind == .wave && found?.wave?.wave.id != model.selection?.id
         let sessions = model.taskSessions(id)
-        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.errorMessage)
+        let status = SessionProgramStatus(sessions: sessions, unavailable: model.sessions.failure)
         let presentation = model.taskPresentation(id: id)
         let title = presentation.title
         // Rows slide under the pointer while scrolling. Only the ⌘N hint reads the
@@ -275,7 +277,12 @@ struct WorkNavigator: View {
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
         .foregroundStyle(selected ? palette.workSelectedText : muted ? palette.textSecondary : palette.text)
         .background {
-            Button { model.select(.task(id: id)) } label: {
+            Button {
+                Perf.userAction(Perf.taskWorkspaceReady, scenario: "task", id: id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount, owner: model.navigation.performanceOwner) {
+                    model.select(.task(id: id))
+                }
+            } label: {
                 SidebarSelectionShape(state: selected ? .shown : .none)
                     .contentShape(Rectangle())
             }.buttonStyle(.plain).focused($focusedWork, equals: .task(id: id)).accessibilityLabel(title)
@@ -454,8 +461,7 @@ struct WorkBreadcrumbs: View {
 struct WorkMachineControl: View {
     let model: WorkModel
     let target: WorkMachineTarget
-    @State private var machines: [Machine] = []
-    @State private var error: String?
+    private var machines: [Machine] { model.machines.value ?? [] }
 
     var body: some View {
         let current = model.machine(of: target)
@@ -465,10 +471,9 @@ struct WorkMachineControl: View {
                     .disabled(id == current.id)
                     .accessibilityIdentifier("work-machine-" + id)
             }
-            if let error { Text(error) }
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: error == nil ? "desktopcomputer" : "exclamationmark.triangle")
+                Image(systemName: "desktopcomputer")
                 Text(current.id.map(name) ?? current.label ?? "Machine unknown").lineLimit(1)
             }
             .font(Typography.caption())
@@ -477,7 +482,7 @@ struct WorkMachineControl: View {
         .fixedSize()
         .help("Machine this Work runs on")
         .accessibilityIdentifier("work-machine")
-        .task(id: target) { await load() }
+        .task(id: target) { await model.loadMachines() }
     }
 
     /// This Machine first, then your registered Machines.
@@ -493,19 +498,12 @@ struct WorkMachineControl: View {
         return machines.first { $0.id == id }?.label ?? (current.id == id ? current.label : nil) ?? id
     }
 
-    private func load() async {
-        error = nil
-        // A newer load or a navigation cancels this one; that is not a failure to show.
-        do { machines = try await model.machines() }
-        catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
-    }
-
+    /// A failure posts to the window that asked.
     private func use(_ id: String) async {
-        error = nil
+        let notices = model.navigation.notices
         do { try await model.useMachine(id, for: target) }
         catch is CancellationError {}
-        catch { self.error = error.localizedDescription }
+        catch { notices.post(Notice("Could not run on \(name(id)): \(error.localizedDescription)")) }
     }
 }
 
@@ -912,15 +910,8 @@ struct WorkTaskIdentity: View {
 }
 
 struct WorkReadStatus: View {
-    let model: WorkModel
     let status: String
     var body: some View {
-        HStack {
-            Text(status)
-            if case .failed = model.workStatus {
-                Button("Retry") { Task { await model.refresh() } }
-                    .accessibilityIdentifier("work-retry")
-            }
-        }.font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
+        Text(status).font(Typography.body(11)).padding(10).accessibilityIdentifier("work-status")
     }
 }

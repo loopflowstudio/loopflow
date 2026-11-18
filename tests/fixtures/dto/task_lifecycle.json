@@ -82,6 +82,7 @@
           {
             "completed_at": 1793156345,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -94,6 +95,7 @@
           {
             "completed_at": 1793156346,
             "exit_code": 0,
+            "error": null,
             "iterations": [
               []
             ],
@@ -167,8 +169,8 @@
       },
       "shipping": null,
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -177,7 +179,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -185,28 +187,46 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-              "field": "state",
               "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "complete",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "local_value": "completed",
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 3,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -215,13 +235,19 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-              "linear_value": null,
+              "seq": 4,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "person",
@@ -231,13 +257,16 @@
                 "created_at": "2026-10-28T02:59:02.871386Z",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "done",
+      "selection_states": [
+        "done"
+      ]
     },
     "status": {
       "comments": {
@@ -309,8 +338,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -417,135 +446,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"task\",\"complete\",\"FIX-1\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "8cb12475-d978-4dd0-b8e6-7d8a14dbe2ed",
-              "kind": "lf",
-              "os_started_at": 1793156345,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 77966,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156345,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": 1793156345,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": "succeeded",
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": 1793156346,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": 0,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": "succeeded",
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -602,6 +510,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -614,6 +523,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -626,7 +536,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -678,16 +587,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -776,6 +684,7 @@
             {
               "completed_at": 1793156345,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -788,6 +697,7 @@
             {
               "completed_at": 1793156346,
               "exit_code": 0,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -861,8 +771,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -871,7 +781,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -879,28 +789,46 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-                "field": "state",
                 "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "complete",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
                 "local_value": "completed",
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -909,13 +837,19 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-                "linear_value": null,
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "person",
@@ -925,37 +859,58 @@
                   "created_at": "2026-10-28T02:59:02.871386Z",
                   "id": "2e5de426-1620-43a5-a234-6b203e56f531"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-            "field": "state",
             "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "complete",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "local_value": "completed",
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 3,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -964,13 +919,19 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-            "linear_value": null,
+            "seq": 4,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "person",
@@ -980,10 +941,9 @@
               "created_at": "2026-10-28T02:59:02.871386Z",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,
@@ -995,10 +955,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1013,6 +973,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   },
@@ -1096,6 +1060,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -1169,8 +1134,8 @@
       },
       "shipping": null,
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -1179,7 +1144,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -1187,28 +1152,46 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "completed",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-              "field": "state",
               "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "complete",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
               "local_value": "completed",
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 3,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -1217,13 +1200,19 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             },
             {
-              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-              "field": "comment",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-              "linear_value": null,
+              "seq": 4,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
               "local_value": {
                 "author": {
                   "kind": "person",
@@ -1233,13 +1222,16 @@
                 "created_at": "2026-10-28T02:59:02.871386Z",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "done",
+      "selection_states": [
+        "done"
+      ]
     },
     "status": {
       "comments": {
@@ -1311,8 +1303,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1422,115 +1414,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": null,
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -1584,6 +1475,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1596,7 +1488,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -1651,16 +1542,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -1746,6 +1636,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -1819,8 +1710,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -1829,7 +1720,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -1837,28 +1728,46 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "completed",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-                "field": "state",
                 "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "complete",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
                 "local_value": "completed",
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 3,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -1867,13 +1776,19 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               },
               {
-                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-                "field": "comment",
                 "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-                "linear_value": null,
+                "seq": 4,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
                 "local_value": {
                   "author": {
                     "kind": "person",
@@ -1883,37 +1798,58 @@
                   "created_at": "2026-10-28T02:59:02.871386Z",
                   "id": "2e5de426-1620-43a5-a234-6b203e56f531"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "done",
+        "selection_states": [
+          "done"
+        ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
-            "field": "state",
             "id": "cf640209-0cd9-4f5f-9739-7ab1ddfe10fc",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "complete",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
             "local_value": "completed",
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 3,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 57952d15-3228-4c75-8669-82a2f150e012 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -1922,13 +1858,19 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           },
           {
-            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
-            "field": "comment",
             "id": "2e5de426-1620-43a5-a234-6b203e56f531",
-            "linear_value": null,
+            "seq": 4,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": "Comment 2e5de426-1620-43a5-a234-6b203e56f531 is pending sync: provider unavailable; confirmation unavailable: provider unavailable",
             "local_value": {
               "author": {
                 "kind": "person",
@@ -1938,10 +1880,9 @@
               "created_at": "2026-10-28T02:59:02.871386Z",
               "id": "2e5de426-1620-43a5-a234-6b203e56f531"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,
@@ -1953,10 +1894,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1971,6 +1912,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   },
@@ -2054,6 +1999,7 @@
           {
             "completed_at": null,
             "exit_code": null,
+            "error": null,
             "iterations": [
               []
             ],
@@ -2131,8 +2077,8 @@
         "state": "building"
       },
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -2141,7 +2087,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -2149,20 +2095,32 @@
         "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
         "state": "unstarted",
         "sync": {
-          "changes": [
+          "actions": [
             {
-              "error": null,
-              "field": "state",
               "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-              "linear_value": "unstarted",
+              "seq": 1,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "state",
+              "change": "reopen",
+              "subject": null,
+              "phase": "conflicted",
+              "tracker": "linear",
+              "error": null,
               "local_value": "started",
-              "state": "adopted_linear"
+              "tracker_value": "unstarted"
             },
             {
-              "error": null,
-              "field": "comment",
               "id": "57952d15-3228-4c75-8669-82a2f150e012",
-              "linear_value": null,
+              "seq": 2,
+              "owner_kind": "task",
+              "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+              "kind": "comment",
+              "change": "comment",
+              "subject": null,
+              "phase": "queued",
+              "tracker": "linear",
+              "error": null,
               "local_value": {
                 "author": {
                   "kind": "integration"
@@ -2171,13 +2129,18 @@
                 "created_at": "2026-10-28T02:58:56.626836Z",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012"
               },
-              "state": "pending"
+              "tracker_value": null
             }
-          ],
-          "connected": true
+          ]
         },
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-      }
+      },
+      "lifecycle": "shipping",
+      "selection_states": [
+        "open",
+        "shipping",
+        "autonomous"
+      ]
     },
     "status": {
       "comments": {
@@ -2243,8 +2206,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "pr": {
@@ -2352,115 +2315,14 @@
               "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
             }
           ],
-          "processes": [
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"python3\",\"/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpH8HBDJ/hold.py\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "ad653185-cde7-4ed4-9c19-d91aa2e1192e",
-              "kind": "lf",
-              "os_started_at": 1793156341,
-              "outcome": null,
-              "parent_lf_process_id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "pid": 76819,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156341,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"session\",\"serve\",\"--\",\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "pid": 76404,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "0890211c-c3ff-460e-837e-de35e8580176",
-              "pid": 76451,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"--batch\",\"--task\",\"task_9d1de6a17408459aa2db78181c5fb02a\",\"graph\",\"run\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "e44c2a0a-547f-4555-8fd6-9da6bea46218",
-              "kind": "lf",
-              "os_started_at": 1793156340,
-              "outcome": null,
-              "parent_lf_process_id": "1a6eca5d-1b13-4239-981d-abe5e0713e34",
-              "pid": 76666,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156340,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            },
-            {
-              "caller_agent_process_id": null,
-              "caller_session_id": null,
-              "command": "[\"/Users/jack/src/loopflow.loo-604-one-lf-api/target/debug/lf\",\"-b\",\"task\",\"run\",\"FIX-1\",\"delivery\"]",
-              "completed_at": null,
-              "cwd": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "error": null,
-              "exit_code": null,
-              "id": "4140dd63-7b1d-46da-b40e-4ba3da0b7bc2",
-              "kind": "lf",
-              "os_started_at": 1793156337,
-              "outcome": null,
-              "parent_lf_process_id": null,
-              "pid": 75863,
-              "repo": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
-              "signal": null,
-              "started_at": 1793156339,
-              "trace_id": "ad7f679a-1f08-4bb8-a834-0486976b0396",
-              "via_agent": false
-            }
-          ],
           "sessions": []
         },
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -2514,6 +2376,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2526,7 +2389,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -2581,16 +2443,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -2676,6 +2537,7 @@
             {
               "completed_at": null,
               "exit_code": null,
+              "error": null,
               "iterations": [
                 []
               ],
@@ -2753,8 +2615,8 @@
           "state": "building"
         },
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -2763,7 +2625,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -2771,20 +2633,32 @@
           "repo_id": "repo_e5aa50b1a744490b8ebb7f1b02455c36",
           "state": "unstarted",
           "sync": {
-            "changes": [
+            "actions": [
               {
-                "error": null,
-                "field": "state",
                 "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-                "linear_value": "unstarted",
+                "seq": 1,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "state",
+                "change": "reopen",
+                "subject": null,
+                "phase": "conflicted",
+                "tracker": "linear",
+                "error": null,
                 "local_value": "started",
-                "state": "adopted_linear"
+                "tracker_value": "unstarted"
               },
               {
-                "error": null,
-                "field": "comment",
                 "id": "57952d15-3228-4c75-8669-82a2f150e012",
-                "linear_value": null,
+                "seq": 2,
+                "owner_kind": "task",
+                "owner_id": "task_9d1de6a17408459aa2db78181c5fb02a",
+                "kind": "comment",
+                "change": "comment",
+                "subject": null,
+                "phase": "queued",
+                "tracker": "linear",
+                "error": null,
                 "local_value": {
                   "author": {
                     "kind": "integration"
@@ -2793,29 +2667,46 @@
                   "created_at": "2026-10-28T02:58:56.626836Z",
                   "id": "57952d15-3228-4c75-8669-82a2f150e012"
                 },
-                "state": "pending"
+                "tracker_value": null
               }
-            ],
-            "connected": true
+            ]
           },
           "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf"
-        }
+        },
+        "lifecycle": "shipping",
+        "selection_states": [
+          "open",
+          "shipping",
+          "autonomous"
+        ]
       },
       "sync": {
-        "changes": [
+        "actions": [
           {
-            "error": null,
-            "field": "state",
             "id": "79c0e14d-701c-4451-8624-24cba9d5be87",
-            "linear_value": "unstarted",
+            "seq": 1,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "state",
+            "change": "reopen",
+            "subject": null,
+            "phase": "conflicted",
+            "tracker": "linear",
+            "error": null,
             "local_value": "started",
-            "state": "adopted_linear"
+            "tracker_value": "unstarted"
           },
           {
-            "error": null,
-            "field": "comment",
             "id": "57952d15-3228-4c75-8669-82a2f150e012",
-            "linear_value": null,
+            "seq": 2,
+            "owner_kind": "task",
+            "owner_id": "task_00000000000000000000000000000001",
+            "kind": "comment",
+            "change": "comment",
+            "subject": null,
+            "phase": "queued",
+            "tracker": "linear",
+            "error": null,
             "local_value": {
               "author": {
                 "kind": "integration"
@@ -2824,10 +2715,9 @@
               "created_at": "2026-10-28T02:58:56.626836Z",
               "id": "57952d15-3228-4c75-8669-82a2f150e012"
             },
-            "state": "pending"
+            "tracker_value": null
           }
-        ],
-        "connected": true
+        ]
       },
       "task": {
         "assignee": null,
@@ -2839,10 +2729,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
@@ -2855,6 +2745,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   }

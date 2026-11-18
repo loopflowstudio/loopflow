@@ -11,13 +11,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -37,7 +36,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "moving",
       "completion_pending": "Completion pending: follow-through needs resolution. Retry: lf task complete W2-SOURCE",
       "reason": "ready",
@@ -283,7 +282,13 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "done": {
     "task": {
@@ -297,13 +302,12 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -323,7 +327,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -569,7 +573,11 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "none": {
     "task": {
@@ -583,13 +591,12 @@
       "completed_at": "2026-10-07T20:00:00Z",
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -609,7 +616,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "done",
@@ -855,7 +862,11 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   },
   "due": {
     "task": {
@@ -869,13 +880,12 @@
       "completed_at": null,
       "due_date": "2026-10-08",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -927,7 +937,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "unrelated": {
     "task": {
@@ -941,13 +956,12 @@
       "completed_at": null,
       "due_date": "2026-10-08",
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -999,7 +1013,12 @@
     },
     "shipping": null,
     "pr": null,
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "unstarted",
+    "selection_states": [
+      "unstarted",
+      "backlog"
+    ]
   },
   "conversion": {
     "task": {
@@ -1013,13 +1032,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1039,7 +1057,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "moving",
       "completion_pending": null,
       "reason": "ready",
@@ -1285,7 +1303,13 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "moving",
+    "selection_states": [
+      "open",
+      "moving",
+      "working"
+    ]
   },
   "completed_running": {
     "task": {
@@ -1299,13 +1323,12 @@
       "completed_at": null,
       "due_date": null,
       "sync": {
-        "connected": false,
-        "changes": []
+        "actions": []
       },
-      "linear_id": null,
-      "acquisition": {
+      "tracker_id": null,
+      "tracker_state": {
         "state": "available",
-        "observed_at": null
+        "synced_at": null
       },
       "repo_id": "repo_00000000000040008000000000000001",
       "repo": "/repo",
@@ -1325,7 +1348,7 @@
       }
     },
     "runtime": {
-      "work_id": "ts_commits",
+      "work_id": "source-issue",
       "status": "done",
       "completion_pending": null,
       "reason": "ready",
@@ -1571,6 +1594,10 @@
       "merge_commit": "merged-head",
       "abandoned_at": null
     },
-    "graph_source": null
+    "graph_source": null,
+    "lifecycle": "done",
+    "selection_states": [
+      "done"
+    ]
   }
 }

@@ -1,7 +1,6 @@
 """Planning refresh and Graph-boundary recovery against a disposable Linear HTTPS peer."""
 
 import copy
-import hashlib
 import json
 import os
 import queue
@@ -148,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             data = {"projects": _page([project])}
         elif "query IssueOwnership" in query:
             data = {"issue": issue}
-        elif "query IssueObservation" in query or "query IssueComments" in query:
+        elif "query IssueEvent" in query or "query IssueComments" in query:
             data = {
                 "issue": {
                     **issue,
@@ -167,7 +166,7 @@ class Handler(BaseHTTPRequestHandler):
             issue["completedAt"] = (
                 issue["updatedAt"] if variables["stateId"] == "completed" else None
             )
-            state["state_writes"] += 1
+            state["state_writes"].append((variables["id"], variables["stateId"]))
             # Commit, then lose the response. Never send this mutation twice.
             return {"errors": [{"message": "lost state response"}]}
         elif "mutation DeliverTaskField" in query:
@@ -263,7 +262,9 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
     remote_id = db.execute(
         "SELECT id FROM tasks WHERE external_issue_id=?", (server.state["issues"][2]["id"],)
     ).fetchone()[0]
-    local_id = db.execute("SELECT id FROM tasks WHERE issue_identifier='INF-124'").fetchone()[0]
+    local_id, completed = db.execute(
+        "SELECT id, external_issue_id FROM tasks WHERE issue_identifier='INF-124'"
+    ).fetchone()
     prs = db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall()
     watch = None
     graph = None
@@ -272,36 +273,6 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         with server.lock:
             server.state["offline"] = True
         if mode == "graph":
-            # Graph admission requires a managed login, even with a contained provider.
-            profile = root / "accounts/claude/reconnect"
-            profile.mkdir(parents=True)
-            credential = json.dumps(
-                {"claudeAiOauth": {"accessToken": "fixture-reconnect", "expiresAt": 4102444800000}}
-            )
-            (profile / ".credentials.json").write_text(credential)
-            now = int(time.time())
-            db.execute(
-                "INSERT INTO provider_accounts(provider,account_id,home,"
-                "credential_state,created_at,updated_at,observed_email,"
-                "observed_subject,observed_credential_digest) "
-                "VALUES('claude',?,?,'connected',?,?,?,?,?)",
-                (
-                    "reconnect",
-                    str(profile),
-                    now,
-                    now,
-                    "reconnect@example.com",
-                    "reconnect",
-                    hashlib.sha256(credential.encode()).hexdigest(),
-                ),
-            )
-            db.commit()
-            run(
-                "set",
-                "--global",
-                "accounts.claude.reconnect",
-                "{login_email: reconnect@example.com, routing_state: automatic}",
-            )
             (repo / ".lf/graphs").mkdir(exist_ok=True)
             (repo / ".lf/skills").mkdir(exist_ok=True)
             (repo / ".lf/graphs/reconnect.yaml").write_text("- reconnect-proof\n- cmd: context\n")
@@ -326,13 +297,14 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
         saved = json.loads(run("task", "comment", "INF-124", "Saved offline", "--json"))
         comment_id = saved["pending_sync"][0]
         receipt = db.execute(
-            "SELECT id FROM task_state_deliveries WHERE task_id=? ORDER BY seq DESC LIMIT 1",
+            "SELECT id FROM tracker_actions WHERE task_id=? AND kind='state' "
+            "ORDER BY seq DESC LIMIT 1",
             (local_id,),
         ).fetchone()[0]
         task_graphs = db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall()
         _await(
             lambda: db.execute(
-                "SELECT error FROM task_state_deliveries WHERE id=?", (receipt,)
+                "SELECT error FROM tracker_actions WHERE id=?", (receipt,)
             ).fetchone()[0],
             "active connection did not observe outage",
         )
@@ -351,15 +323,13 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
 
         def caught_up() -> bool:
             return (
-                db.execute(
-                    "SELECT settled FROM task_state_deliveries WHERE id=?", (receipt,)
-                ).fetchone()
-                == (1,)
+                db.execute("SELECT phase FROM tracker_actions WHERE id=?", (receipt,)).fetchone()
+                == ("confirmed",)
                 and db.execute(
-                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?",
+                    "SELECT phase FROM tracker_actions WHERE kind='comment' AND subject=?",
                     (comment_id,),
                 ).fetchone()
-                == (1,)
+                == ("confirmed",)
                 and db.execute(
                     "SELECT count(*) FROM task_comments WHERE id=?", (incoming["id"],)
                 ).fetchone()
@@ -389,7 +359,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert graph.wait(timeout=30) == 0, (root / "graph.log").read_text()
             assert caught_up(), "Graph boundaries did not acquire and settle pending planning"
         else:
-            # Acquisition and uncertain-write settlement may need separate refreshes.
+            # Refresh and uncertain-write settlement may need separate refreshes.
             refresh_until(caught_up, "planning refresh did not catch up after reconnect")
         assert db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall() == task_graphs
         assert db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall() == prs
@@ -397,12 +367,15 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             None,
         )
         assert db.execute(
-            "SELECT count(*) FROM task_changes WHERE task_id=? AND field='task_title' "
-            "AND conflict_json IS NULL AND acknowledged=0",
+            "SELECT count(*) FROM tracker_actions WHERE task_id=? AND kind='field' "
+            "AND subject='task_title' AND phase IN ('queued','sent')",
             (fixture["task"],),
         ).fetchone() == (1,)
         with server.lock:
-            assert server.state["state_writes"] == 1
+            # Each state write commits and loses its reply; none is sent twice.
+            writes = server.state["state_writes"]
+            assert len(writes) == len(set(writes)), writes
+            assert (completed, "completed") in writes, writes
             assert len([c for c in server.state["comments"] if c["id"] == comment_id]) == 1
             assert not server.state["unexpected"], server.state["unexpected"]
         if not graph:
@@ -425,8 +398,8 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
 
             def delivered() -> bool:
                 return db.execute(
-                    "SELECT acknowledged FROM task_comment_deliveries WHERE comment_id=?", (gap,)
-                ).fetchone() == (1,)
+                    "SELECT phase FROM tracker_actions WHERE kind='comment' AND subject=?", (gap,)
+                ).fetchone() == ("confirmed",)
 
             watch = Subscription(fixture, env, "planning", "status")
             watch.frame(lambda f: True)
@@ -554,7 +527,7 @@ for line in sys.stdin:
             issues=[issue, other, remote],
             comments=[],
             offline=False,
-            state_writes=0,
+            state_writes=[],
             requests=0,
             unexpected=[],
         )

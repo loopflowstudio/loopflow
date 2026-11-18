@@ -1,0 +1,10 @@
+# Build the plan in chunks, then review the finished change whole.
+- loop:
+    - loop:
+        - implement         # one chunk of the plan, fresh context
+        - cmd: sync
+        - realign           # decides: next chunk, or on
+    - compress
+    - qa
+    - concept-review        # decides: the finished change, whole
+- pr-publish

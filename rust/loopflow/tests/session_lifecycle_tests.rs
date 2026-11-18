@@ -2,6 +2,7 @@
 //! The real `lf` binary runs in a private Machine; a script stands in for the provider.
 #![cfg(unix)]
 
+use loopflow_execution::process::attachment;
 mod support;
 
 use std::io::Write;
@@ -34,7 +35,7 @@ impl Fixture {
         let provider = bin.join("opencode");
         std::fs::write(
             &provider,
-            include_str!("support/opencode_server.py")
+            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
                 .replace("__WAIT__", if waits { "True" } else { "False" }),
         )
         .unwrap();
@@ -178,7 +179,8 @@ impl Fixture {
     fn finish_on_resume(&self) {
         std::fs::write(
             self.home.path().join("bin/opencode"),
-            include_str!("support/opencode_server.py").replace("__WAIT__", "False"),
+            include_str!("../../loopflow-execution/tests/support/opencode_server.py")
+                .replace("__WAIT__", "False"),
         )
         .unwrap();
     }
@@ -197,8 +199,25 @@ impl Fixture {
         }
     }
 
+    /// The store, with Session history attached as `history` and turns as `usage`.
     fn db(&self) -> rusqlite::Connection {
-        rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap()
+        let store = self.home.path().join("loopflow.db");
+        let db = rusqlite::Connection::open(&store).unwrap();
+        db.execute(
+            "ATTACH ?1 AS history",
+            [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db.execute(
+            "ATTACH ?1 AS usage",
+            [loopflow_storage::history::history_path(&store)
+                .to_string_lossy()
+                .as_ref()],
+        )
+        .unwrap();
+        db
     }
 
     fn count(&self, table: &str) -> i64 {
@@ -255,7 +274,7 @@ Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
                             CASE WHEN m.task_id IS s.task_id AND m.wave_id IS s.wave_id THEN s.work_source END)
                     END
                  FROM agent_sessions s JOIN session_events i ON i.session_id=s.id AND i.kind='captured'
-                 LEFT JOIN session_events m ON m.session_id=s.id AND m.kind='observed'
+                 LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                  WHERE i.receipt_key=?1",
                 [run_id],
@@ -293,7 +312,6 @@ fn task_conversation_starts_at_launch_not_creation() {
         )
         .unwrap();
         if headless {
-            support::register_codex_account(fixture.home.path());
             let binary = fixture.home.path().join("bin/codex");
             std::fs::write(
                 &binary,
@@ -400,7 +418,7 @@ fn task_conversation_starts_at_launch_not_creation() {
         );
         assert_eq!(fixture.captures(), 1);
         let native: String = db.query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session], |row| row.get(0)).unwrap();
         assert!(
             !native.is_empty(),
@@ -438,7 +456,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let before: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -453,7 +472,8 @@ fn primary_readiness_is_metadata_only_for_repository_wave_and_task() {
         let after: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE session_id=?1",
+                "SELECT (SELECT count(*) FROM session_events WHERE session_id=?1)
+                    + (SELECT count(*) FROM history.session_history WHERE session_id=?1)",
                 [id],
                 |row| row.get(0),
             )
@@ -475,7 +495,7 @@ fn work_first_repository_entry_preserves_primary_and_mixed_inventory() {
     let prompt = preview["task_prompt"].as_str().unwrap();
     assert!(prompt.contains("What do you want to work on?"));
     assert!(prompt.contains("no setup checklist first"));
-    assert!(prompt.contains("Opening this conversation asks for nothing"));
+    assert!(prompt.contains("Opening asks for nothing"));
     let empty = fixture.json(&["desktop", "plan", "--all", "--json"]);
     let primary = fixture.json(&["session", "resume", "--prepare", "--json"]);
     let again = fixture.json(&["session", "resume", "--prepare", "--json"]);
@@ -616,32 +636,28 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .output()
         .unwrap();
     assert!(launch.status.success(), "{launch:?}");
-    let config: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(fixture.home.path().join("native-server-config.json")).unwrap(),
+    // A chat is a bare Codex terminal: Codex keeps its own configured roots
+    // and argv adds the main checkout the worktree's Git metadata lives in.
+    let argv: Vec<String> = serde_json::from_str(
+        std::fs::read_to_string(fixture.home.path().join("native-argv.jsonl"))
+            .unwrap()
+            .lines()
+            .next()
+            .unwrap(),
     )
     .unwrap();
-    let roots = config["sandbox_workspace_write.writable_roots"]
-        .as_array()
-        .unwrap();
+    let main_checkout = fixture.repo.path().canonicalize().unwrap();
     assert!(
-        roots.contains(&serde_json::json!(fixture
-            .home
-            .path()
-            .canonicalize()
-            .unwrap()
-            .join("configured-root"))),
-        "{roots:?}"
-    );
-    assert!(
-        roots.len() >= 2,
-        "worktree Git access must retain configured roots"
+        argv.windows(2)
+            .any(|pair| pair[0] == "--add-dir" && Path::new(&pair[1]) == main_checkout),
+        "worktree Git access needs the main checkout: {argv:?}"
     );
     let capture = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&capture);
     let native: String = fixture
         .db()
         .query_row(
-            "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+            "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
             [&session],
             |row| row.get(0),
         )
@@ -657,14 +673,14 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         fixture
             .db()
             .query_row(
-                "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+                "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
                 [&session],
                 |row| row.get::<_, String>(0)
             )
             .unwrap(),
         native
     );
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     // A bare run stops before the interactive review step; it may return as
     // its Graph registers, so wait for it to stop there.
     let run = fixture
@@ -702,9 +718,9 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
             [task_id],
         )
         .unwrap();
-    loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+    loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
         .unwrap()
-        .observe_pm_issue_change("fixture-deleted", None, true)
+        .record_tracker_event("fixture-deleted", None, true)
         .unwrap();
     let refused = fixture
         .command(&["session", "resume", &session])
@@ -724,7 +740,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["plan_state"], "removed");
+    assert_eq!(history["tracker_state"]["state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -877,12 +893,12 @@ fn sigint_records_session_interruption_and_retires_the_orphan() {
     assert!(fixture.sessions().is_empty());
     assert!(fixture.session_row(&input).3);
     let history = fixture.json(&["session", "history", &id, "--json"]);
-    assert!(history
+    assert!(history["events"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|event| event["payload"]["type"] == "attachment_exit"
-            && event["payload"]["outcome"] == "interrupted"));
+        .any(|event| event["payload"]["source"] == "terminal.json"
+            && event["payload"]["evidence"]["outcome"] == "interrupted"));
 }
 
 #[test]
@@ -900,13 +916,14 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
     for index in 0..113 {
         let id = format!("inventory-{index:03}");
         let foreign_row = index < 110;
-        let session = loopflow::session::LfSession {
+        let session = loopflow_execution::session::LfSession {
             captured: None,
             caller_artifact_key: None,
             task_id: (index >= 110).then(|| task.task.id.clone()),
             wave_id: None,
             graph_lf_process_id: None,
-            work_source: (index >= 110).then_some(loopflow::session::WorkSource::Declared),
+            work_source: (index >= 110)
+                .then_some(loopflow_execution::session::WorkSource::Declared),
             bound_at: None,
             id: id.clone().into(),
             artifact_key: Some(uuid::Uuid::new_v4().simple().to_string()),
@@ -931,9 +948,8 @@ fn inventory_scopes_before_paging_and_keeps_worktree_repository_identity() {
                     "ZZZ local"
                 }
             ),
-            title_source: loopflow::session::TitleSource::Human,
+            title_source: loopflow_execution::session::TitleSource::Human,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };
@@ -1073,23 +1089,26 @@ fn public_history_discovers_unlinked_native_receipts_without_borrowing_a_later_b
         "native-history",
         &fixture.repo.head_sha(),
     );
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
+    loopflow_execution::store::sessions::bind_session(
+        &store,
+        &session,
+        closed.captured,
+        &task.task.id,
+    )
+    .unwrap();
     store
-        .bind_session(&session, closed.captured, &task.task.id)
+        .execute_history(
+            "INSERT INTO turns(session_id,provider_thread,provider_turn,ended_at,status,
+                 usage_at,usage_final,usage_partial,input_tokens,cached_input_tokens,output_tokens,
+                 reasoning_tokens)
+             VALUES(?1,'retained-thread','retained-turn',strftime('%s','now'),
+                 'completed',strftime('%s','now'),0,0,12,0,3,0)",
+            [&session],
+        )
         .unwrap();
-    let count = serde_json::json!({"inputTokens":12,"outputTokens":3,
-        "cachedInputTokens":0,"reasoningOutputTokens":0});
-    for (kind, payload) in [
-        ("usage", serde_json::json!({"total":count,"last":count})),
-        ("completed", serde_json::json!({"status":"completed"})),
-    ] {
-        fixture.db().execute(
-            "INSERT INTO session_events(session_id,provider_thread,provider_turn,kind,receipt_key,observed_at,payload)
-             VALUES(?1,'retained-thread','retained-turn',?2,'',strftime('%s','now'),?3)",
-            rusqlite::params![session,kind,payload.to_string()]).unwrap();
-    }
     let captures = fixture.count("agent_sessions");
     {
         let command = vec!["history", "usage", "--days", "0", "--json"];
@@ -1252,10 +1271,14 @@ fn ensured_conversation_recovers_native_exit_before_history_is_published() {
         .unwrap();
         let failed = fixture.run(&["session", "resume", id]);
         assert!(!failed.status.success());
-        // The connect became the launcher, so the launcher's own error is the
-        // connect's: the provider exited before publishing resumable history.
-        let stderr = String::from_utf8_lossy(&failed.stderr);
-        assert!(stderr.contains("failed to start"), "{stderr}");
+        // The reopening runs in a held terminal, so its error reaches the
+        // viewer's screen: the provider exited before publishing resumable history.
+        let screen = format!(
+            "{}{}",
+            String::from_utf8_lossy(&failed.stdout),
+            String::from_utf8_lossy(&failed.stderr)
+        );
+        assert!(screen.contains("failed to start"), "{screen}");
         let previous = fixture.launches()[0].clone();
         fixture
             .db()
@@ -1331,12 +1354,11 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     };
 
     // No Session is different from an existing Session without native history.
-    // Reading the explicit Start offer must not admit either a Session or a turn.
+    // Reading the Start offer must not admit either a Session or a turn.
     let absent = fixture.json(&["resume", "--task", "INF-125", "--explain", "--json"]);
     assert_eq!(absent["state"], Value::Null);
     assert_eq!(absent["action"]["intent"], "start");
-    assert_eq!(absent["actions"].as_array().unwrap().len(), 1);
-    assert_eq!(absent["actions"][0]["label"], "Start conversation");
+    assert_eq!(absent["opening"]["label"], "Start conversation");
     assert!(members("INF-125").is_empty());
 
     // The Task's only unfinished interactive conversation is its primary.
@@ -1505,8 +1527,8 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
     assert!(fixture.run(&LAUNCH).status.success());
     let original = fixture.launches()[0].clone();
     let (session, ..) = fixture.session_row(&original);
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     let origin: String = fixture
         .db()
         .query_row(
@@ -1515,20 +1537,22 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
             |row| row.get(0),
         )
         .unwrap();
-    let origin = loopflow::id::LfProcessId::parse(&origin).unwrap();
+    let origin = loopflow_model::id::LfProcessId::parse(&origin).unwrap();
     let attachment = store
         .session_attachment(&session)
         .unwrap()
         .unwrap_or_else(|| {
-            store
-                .claim_session_attachment(&session, None, &origin, true)
-                .unwrap()
+            attachment::claim_session_attachment(&store, &session, None, &origin).unwrap()
         });
-    let caller = serde_json::to_string(&attachment.caller(session.clone().into())).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
-    store
-        .bind_session(&session, closed.captured, &task.task.id)
-        .unwrap();
+    loopflow_execution::store::sessions::bind_session(
+        &store,
+        &session,
+        closed.captured,
+        &task.task.id,
+    )
+    .unwrap();
     // Synthetic provider provenance crosses real public CLI admission. The
     // same causal parent may issue taskless, checkout-bound or explicitly selected work.
     for (cwd, args, expected, source, declaration) in [
@@ -1576,27 +1600,9 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let work = fixture.run_parents(&capture);
         assert_eq!(work.0, expected);
         assert_eq!(work.2.as_deref(), source);
-        let retained: bool = fixture
-            .db()
-            .query_row(
-                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
-                SELECT p.id,p.parent_lf_process_id FROM processes p
-                JOIN session_events e ON e.lf_process_id=p.id
-                WHERE e.kind='captured' AND e.receipt_key=?1
-                UNION ALL
-                SELECT p.id,p.parent_lf_process_id FROM processes p
-                JOIN ancestors a ON p.id=a.parent_lf_process_id
-             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
-                rusqlite::params![capture, origin],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
-    store
-        .claim_session_attachment(&session, Some(&attachment), &origin, true)
-        .unwrap();
+    attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin).unwrap();
     let before = fixture.launches().len();
     let stale = fixture
         .command(&LAUNCH)
@@ -1612,7 +1618,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
 }
 
 #[test]
-fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
+fn declared_agent_tools_use_their_checkout() {
     let fixture = Fixture::new(false);
     let x = fixture.repo.create_named_worktree("task-x");
     let task =
@@ -1647,9 +1653,6 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
         fixture.run_parents(&captures[1]).0,
         Some(sibling.id.to_string())
     );
-    let (caller, ..) = fixture.session_row(&captures[0]);
-    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_lf_process_id,a.parent_lf_process_id FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id JOIN processes a ON a.id=s.agent_process_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-    assert_eq!(parent.0, parent.1);
     for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
         .unwrap()
         .lines()
@@ -1663,7 +1666,7 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
 #[ignore = "requires disposable Linux account with no installed Loopflow"]
 fn declared_agent_can_start_another_tasks_graph() {
     assert!(Path::new("/.dockerenv").is_file());
-    assert!(!loopflow::installation::root().unwrap().exists());
+    assert!(!loopflow_execution::installation::root().unwrap().exists());
     let fixture = Fixture::new(false);
     support::bind_task_planning(&fixture.repo);
     let y = fixture.repo.create_named_worktree("task-y");
@@ -1684,8 +1687,8 @@ fn declared_agent_can_start_another_tasks_graph() {
         "- cmd: sync --plan\n- interactive: demo\n",
     )
     .unwrap();
-    let store = loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
-        .unwrap();
+    let store =
+        loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db")).unwrap();
     // X's explicit Session selection must not become Y's Graph policy.
     support::select_wave_graph(
         fixture.repo.path(),
@@ -1770,19 +1773,12 @@ fn declared_agent_can_start_another_tasks_graph() {
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
     );
-    // The step ran in Y's checkout under a Graph process X's conversation started.
+    // The Graph ran in Y's checkout, started by X's conversation.
     let observed: (String, String) = fixture
         .db()
         .query_row(
-            "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
-            SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
-            FROM processes step
-            JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
-            UNION ALL
-            SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
-            FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
-         ) SELECT DISTINCT a.cwd,s.task_id FROM ancestors a
-         JOIN agent_sessions s ON s.id=a.caller_session_id",
+            "SELECT g.cwd,s.task_id FROM graph_processes g
+             JOIN agent_sessions s ON s.id=g.caller_session_id",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -1931,7 +1927,7 @@ fn unavailable_store_starts_no_provider() {
 #[test]
 fn finished_headless_runs_leave_the_open_list_and_keep_their_history() {
     let fixture = Fixture::new(false);
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     let provider = fixture.home.path().join("bin/codex");
     std::fs::write(
         &provider,
@@ -1991,9 +1987,12 @@ fn saved_graph_stand_in(fixture: &Fixture) {
     std::fs::write(lf.join("skills/decide-proof.md"), "Decide the fixture.").unwrap();
     std::fs::write(
         lf.join("graphs/work-then-decide.yaml"),
-        "- work-proof\n- loop: work-proof\n  step: decide-proof\n",
+        "- loop:\n    - work-proof\n    - decide-proof\n",
     )
     .unwrap();
+    // Committed, as a repository's definitions are: a step leaves only its own edits.
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the fixture skills and Graph");
 }
 
 /// (input, node, ordinal at that node, outcome, Task) from conversation history.
@@ -2037,7 +2036,7 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
         let starts: i64 = fixture
             .db()
             .query_row(
-                "SELECT count(*) FROM session_events WHERE kind='started'",
+                "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
                 [],
                 |row| row.get(0),
             )
@@ -2052,42 +2051,9 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             Some(if exhausted { "failed" } else { "succeeded" })
         );
         assert_eq!(steps.len(), if exhausted { 4 } else { 3 });
-        // The decision is the plain skill command; its contract is in the message.
+        // Every correction repeats the decision's node in its one conversation.
         let decision = &steps[1];
-        assert_eq!(decision["argv"][0], "--batch");
-        assert!(decision["argv"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "decide-proof"));
-        assert!(decision["argv"]
-            .as_array()
-            .unwrap()
-            .last()
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains("Return the final answer as the declared JSON value"));
-        // Every correction resumes the conversation that gave the answer.
-        let conversation: String = fixture
-            .db()
-            .query_row(
-                "SELECT id FROM agent_sessions WHERE skill='decide-proof'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
         for correction in &steps[2..] {
-            let args = correction["argv"].as_array().unwrap();
-            assert_eq!(args[0], "--batch");
-            assert_eq!(args[1], "--output-schema");
-            let schema: serde_json::Value =
-                serde_json::from_str(args[2].as_str().unwrap()).unwrap();
-            assert_eq!(
-                schema["properties"]["decision"]["enum"],
-                serde_json::json!(["advance", "iterate", "blocked"])
-            );
-            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }
@@ -2139,11 +2105,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     assert_eq!(stopped["iterations"], serde_json::json!([[0]]));
     let error: String = fixture
         .db()
-        .query_row(
-            "SELECT d.error FROM processes d JOIN graph_processes g ON g.lf_process_id=d.id",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT error FROM graph_processes", [], |row| row.get(0))
         .unwrap();
     assert!(error.contains("Release target is missing"), "{error}");
     assert!(fixture.sessions().is_empty());
@@ -2156,10 +2118,12 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
             |row| row.get(0),
         )
         .unwrap();
-    let history = fixture.json(&["session", "history", &session, "--json"]);
+    // The decision that stopped it is the answer its conversation kept.
+    let answer = fixture.run(&["history", "show", &session, "--final"]);
+    assert!(answer.status.success(), "{answer:?}");
     assert!(
-        history.to_string().contains("Release target is missing"),
-        "{history}"
+        String::from_utf8_lossy(&answer.stdout).contains("Release target is missing"),
+        "{answer:?}"
     );
 }
 
@@ -2169,6 +2133,8 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
     saved_graph_stand_in(&fixture);
     std::fs::write(fixture.repo.path().join(".lf/graphs/choose.yaml"),
         "- xor:\n    router: decide-proof\n    paths:\n      alpha:\n        description: Do the selected work\n        skill: work-proof\n      zeta:\n        description: Leave this path untouched\n        skill: review-proof\n").unwrap();
+    fixture.repo.stage_all();
+    fixture.repo.commit("Define the routed Graph");
     let output = fixture.run(&["--agent", "opencode", "graph", "choose", "--batch"]);
     assert!(
         output.status.success(),
@@ -2201,7 +2167,7 @@ fn custom_router_returns_a_captured_path_without_an_in_turn_command() {
 fn standalone_graph_launches_in_a_completed_tasks_checkout() {
     let fixture = Fixture::new(false);
     support::install_native_codex(&fixture.home.path().join("bin"));
-    support::managed_codex_account(fixture.home.path());
+    support::seed_store(fixture.home.path());
     let checkout = fixture.repo.create_named_worktree("finished-work");
     std::fs::create_dir_all(checkout.join(".lf/graphs")).unwrap();
     std::fs::create_dir_all(checkout.join(".lf/skills")).unwrap();
@@ -2353,16 +2319,26 @@ fn opencode_disconnect_after_tool_preserves_unknown_native_completion() {
     ]);
     assert!(!output.status.success(), "{output:?}");
     assert!(fixture.home.path().join("tool-effect").exists());
-    let rows: (i64, i64) = fixture
+    let starts: i64 = fixture
         .db()
         .query_row(
-            "SELECT (SELECT count(*) FROM session_events WHERE kind='started'),
-                (SELECT count(*) FROM session_events WHERE kind='completed')",
+            "SELECT count(*) FROM history.turns WHERE started_at IS NOT NULL",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| row.get(0),
         )
         .unwrap();
-    assert_eq!(rows, (1, 0));
+    assert_eq!(starts, 1);
+    // The exit read closes the turn OpenCode's store left open; it never
+    // reads as a turn that finished.
+    let endings: Vec<String> = fixture
+        .db()
+        .prepare("SELECT status FROM history.turns WHERE ended_at IS NOT NULL")
+        .unwrap()
+        .query_map([], |row| row.get(0))
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap();
+    assert_eq!(endings, ["interrupted"]);
     // The Graph stopped at its first step and launched nothing after it.
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);
@@ -2427,7 +2403,7 @@ fn repository_upgrade_and_move_resume_the_same_native_conversation() {
         .unwrap();
     let native = || {
         fixture.db().query_row(
-        "SELECT json_extract(payload,'$.evidence.provider_session_id') FROM session_events WHERE session_id=?1 AND json_extract(payload,'$.evidence.provider_session_id') IS NOT NULL ORDER BY seq DESC LIMIT 1",
+        "SELECT provider_thread FROM session_events WHERE session_id=?1 AND kind='captured' AND provider_thread IS NOT NULL ORDER BY seq DESC LIMIT 1",
         [&session], |row| row.get::<_, String>(0)).unwrap()
     };
     let before = native();
@@ -2496,7 +2472,7 @@ fn pi_managed_graph_routes_one_branch_and_nested_lf_retains_task_and_checkout() 
         &provider,
         format!(
             "#!/usr/bin/python3 -I\n{}",
-            include_str!("../src/harness/testdata/pi_rpc.py")
+            include_str!("../../loopflow-execution/src/harness/testdata/pi_rpc.py")
         ),
     )
     .unwrap();
@@ -2604,10 +2580,11 @@ fn promotion_explicit_sources_with_run_keep_the_selected_work() {
         fixture.with_attached_clients([child], || {
             let id = fixture.session_row(&capture).0;
             let store =
-                loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+                loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                     .unwrap();
             let attachment = store.session_attachment(&id).unwrap().unwrap();
-            let caller = serde_json::to_string(&attachment.caller(id.clone().into())).unwrap();
+            let caller =
+                serde_json::to_string(&attachment.caller(id.clone().into(), None)).unwrap();
             let source = if select_session {
                 ["--session", id.as_str()]
             } else {
@@ -2809,10 +2786,11 @@ fn promotion_selects_session_in_owned_and_shared_checkouts() {
             fixture.session_row(&second_capture).0,
         ];
         let store =
-            loopflow::store::sqlite::SqliteStore::new(&fixture.home.path().join("loopflow.db"))
+            loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
                 .unwrap();
         let attachment = store.session_attachment(&ids[1]).unwrap().unwrap();
-        let caller = serde_json::to_string(&attachment.caller(ids[1].clone().into())).unwrap();
+        let caller =
+            serde_json::to_string(&attachment.caller(ids[1].clone().into(), None)).unwrap();
         let caller_cwd = store.session(&ids[1]).unwrap().unwrap().cwd;
         let created = fixture.json(&[
             "task",

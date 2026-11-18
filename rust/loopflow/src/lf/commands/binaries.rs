@@ -1,7 +1,8 @@
 //! Live lf processes by the binary they run.
 //!
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
-//! processes. The inventory names every recorded, live lf Process by executable
+//! processes. The inventory names every live lf its records name (owner
+//! records for this lf, Process rows for a released one) by executable
 //! and version, and flags the ones a launch through the entry no longer runs
 //! (`installation::superseded`). A superseded process keeps running on its
 //! own; `lf resume` of a conversation an earlier build's owner runs ends that
@@ -16,11 +17,10 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use crate::id::LfProcessId;
-use crate::journal::{
-    lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
-};
-use crate::store::sqlite::SqliteStore;
+use loopflow_execution::process::{OsProcess, RecordedProcess};
+use loopflow_execution::store::ProcessIdentityEvidence;
+use loopflow_model::id::LfProcessId;
+use loopflow_storage::sqlite::SqliteStore;
 
 const VERSION_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -67,7 +67,7 @@ impl RunningBinary {
     fn is_app_helper(&self) -> bool {
         self.path
             .as_deref()
-            .is_some_and(crate::installation::is_app_helper)
+            .is_some_and(loopflow_execution::installation::is_app_helper)
     }
 
     /// `lf-d49c57c`, `Loopflow.app lf`, or the file name.
@@ -75,7 +75,7 @@ impl RunningBinary {
         let Some(path) = &self.path else {
             return "an unreadable executable".into();
         };
-        if crate::installation::is_app_helper(path) {
+        if loopflow_execution::installation::is_app_helper(path) {
             let bundle = path
                 .ancestors()
                 .nth(3)
@@ -105,13 +105,19 @@ impl RunningBinary {
 
 /// Every live recorded lf Process except this one, grouped by binary.
 pub fn inventory() -> Result<BinaryInventory> {
-    let database = crate::store::database_path_from_env()?;
+    let database = loopflow_execution::store::database_path_from_env()?;
     let now = OffsetDateTime::now_utc().unix_timestamp();
-    let target = crate::installation::launch_target()
+    let target = loopflow_execution::installation::launch_target()
         .inspect_err(|error| tracing::warn!(%error, "the lf a launch runs now is unknown"))
         .ok();
     let processes = if database.exists() {
-        live_lf_processes(&SqliteStore::open_processes_read_only(&database)?, now)?
+        live_lf_processes(
+            &SqliteStore::open_read_only(
+                &database,
+                loopflow_execution::store::token_key::encryption_key,
+            )?,
+            now,
+        )?
     } else {
         Vec::new()
     };
@@ -129,7 +135,7 @@ pub fn inventory() -> Result<BinaryInventory> {
     let binaries = group(processes, |path| {
         let version = path.and_then(&mut version_of);
         let is_selected = match path {
-            Some(path) => !crate::installation::superseded(path),
+            Some(path) => !loopflow_execution::installation::superseded(path),
             // Without an entry there is nothing to be behind.
             None => selected.is_none(),
         };
@@ -147,20 +153,54 @@ fn live_lf_processes(
         .iter()
         .map(|process| (process.pid, process))
         .collect::<HashMap<_, _>>();
-    let current = crate::journal::current_lf_process_id();
+    let current = loopflow_execution::journal::current_lf_process_id();
     let records = store.unfinished_processes()?;
     // A native launcher execs its provider: its pid now runs the agent, whose
     // binary no install replaces.
     let providers: std::collections::HashSet<_> = records
         .iter()
         .filter_map(|record| match record {
-            crate::process::ProcessEntry::Agent(agent) => Some((agent.pid?, agent.os_started_at?)),
-            crate::process::ProcessEntry::Lf(_) => None,
+            loopflow_execution::process::ProcessEntry::Agent(agent) => {
+                Some((agent.pid?, agent.os_started_at?))
+            }
+            loopflow_execution::process::ProcessEntry::Lf(_) => None,
         })
         .collect();
     let mut live = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let confirmed = |pid: u32, started_at: i64| {
+        by_pid
+            .get(&pid)
+            .is_some_and(|process| process.evidence(started_at) == ProcessIdentityEvidence::Live)
+    };
+    // This lf records each run on its owner and each attachment on its Session.
+    for recorded in store.recorded_lfs()? {
+        let Some(os_started_at) = recorded.os_started_at else {
+            continue;
+        };
+        if current.as_ref().map(LfProcessId::as_str) == Some(recorded.id.as_str())
+            || providers.contains(&(recorded.pid, os_started_at))
+            || !confirmed(recorded.pid, os_started_at)
+            || !seen.insert(recorded.pid)
+        {
+            continue;
+        }
+        let Ok(id) = LfProcessId::parse(&recorded.id) else {
+            continue;
+        };
+        live.push((
+            RunningLfProcess {
+                label: recorded.what,
+                id,
+                pid: recorded.pid,
+                started_at: recorded.started_at.unwrap_or(os_started_at),
+            },
+            OsProcess::executable(recorded.pid),
+        ));
+    }
+    // A released lf still records itself as a Process row.
     for record in records {
-        let crate::process::ProcessEntry::Lf(record) = record else {
+        let loopflow_execution::process::ProcessEntry::Lf(record) = record else {
             continue;
         };
         if Some(&record.id) == current.as_ref() {
@@ -174,23 +214,29 @@ fn live_lf_processes(
             continue;
         }
         let mut live_pid = None;
-        let receipt = recorded_process_receipt(store, &record);
-        let evidence = lf_process_evidence(&record, &receipt, |pid, started_at| {
-            let Some(process) = by_pid.get(&pid) else {
-                return ProcessIdentityEvidence::Dead;
-            };
-            let evidence = process.evidence(started_at);
-            if evidence == ProcessIdentityEvidence::Live {
+        let recorded = RecordedProcess {
+            ended: record.completed_at.is_some(),
+            pid: record.pid,
+            os_started_at: record.os_started_at,
+            started_at: Some(record.started_at),
+        };
+        let evidence = recorded.evidence_by(|pid, started_at| {
+            if confirmed(pid, started_at) {
                 live_pid = Some(pid);
+                ProcessIdentityEvidence::Live
+            } else {
+                ProcessIdentityEvidence::Dead
             }
-            evidence
         });
         let (ProcessIdentityEvidence::Live, Some(pid)) = (evidence, live_pid) else {
             continue;
         };
+        if !seen.insert(pid) {
+            continue;
+        }
         live.push((
             RunningLfProcess {
-                label: super::top::lf_command_label(record.command.as_deref()),
+                label: loopflow_execution::command::lf_command_label(record.command.as_deref()),
                 id: record.id,
                 pid,
                 started_at: record.started_at,
@@ -236,7 +282,8 @@ fn binary_version(path: &Path) -> Option<String> {
     if let Some(home) = std::env::var_os("HOME") {
         command.env("HOME", home);
     }
-    let output = crate::os_process::bounded_output(&mut command, VERSION_TIMEOUT).ok()?;
+    let output =
+        loopflow_execution::os_process::bounded_output(&mut command, VERSION_TIMEOUT).ok()?;
     if !output.status.success() {
         return None;
     }
@@ -354,7 +401,7 @@ pub fn report_after_promote(replaced_app: bool, store: &Path) {
             "kept: live lf processes are unknown"
         }
     };
-    for backup in crate::store::migrations::migration_backups(store) {
+    for backup in loopflow_execution::store::migrations::migration_backups(store) {
         println!("pre-migration clone {clone_reason}: {}", backup.display());
     }
 }
@@ -364,8 +411,8 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::{group, parse_version, superseded_summary, BinaryInventory, RunningLfProcess};
-    use crate::id::LfProcessId;
-    use crate::store::sqlite::SqliteStore;
+    use loopflow_model::id::LfProcessId;
+    use loopflow_storage::sqlite::SqliteStore;
 
     fn process(pid: u32) -> RunningLfProcess {
         RunningLfProcess {
@@ -414,8 +461,10 @@ mod tests {
     #[test]
     fn a_launcher_running_its_provider_is_no_lf_binary() {
         let directory = tempfile::tempdir().unwrap();
-        let store = SqliteStore::open_ephemeral(&directory.path().join("lf.db")).unwrap();
-        let me = crate::journal::OsProcess::read(std::process::id())
+        let store =
+            loopflow_execution::store::opening::open_ephemeral(&directory.path().join("lf.db"))
+                .unwrap();
+        let me = loopflow_execution::process::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();
         let launcher = LfProcessId::new();
@@ -446,7 +495,7 @@ mod tests {
                 "INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,started_at,pid,os_started_at,
                      agent_provider,agent_interactive,attached_lf_process_id)
                  VALUES(?1,'agent',?2,?2,?3,?4,?3,'claude',1,?2)",
-                rusqlite::params![crate::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
+                rusqlite::params![loopflow_model::id::AgentProcessId::new(), launcher, me.started_at, me.pid],
             )
             .unwrap();
         assert!(listed(&store).is_empty());

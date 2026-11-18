@@ -13,24 +13,23 @@ lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation her
 lf open --task LOO-12 --tab                  # attach in a sibling tab
 lf open --task LOO-12 --focus                # reveal its existing view
 lf open --wave product                      # the product Wave's conversation
-lf workspace --wave product                 # the Wave's Task overview
-lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
+lf open --wave product --workspace          # the Wave's Task overview
+lf open --task LOO-12 --host desktop         # the conversation in Desktop
 ```
 
 Direct CLI opening attaches in the current terminal, including inside Rex.
 An agent call defaults to a sibling tab in its conversation's host. It never
 attaches inside its own tool call. Desktop navigation focuses its existing view.
 
-Ordinary terminal opening reports an already-open conversation's location and
-offers `--focus`; it does not move input or create a duplicate. `--focus` reports
-**Not open** if there is no live view. A plain terminal without sibling-tab
+Terminal opening adds a view even when the conversation is already open
+elsewhere, and every view types. `--focus` reveals an existing view instead and
+reports **Not open** if there is none. A plain terminal without sibling-tab
 support reports that limitation and gives a command to run in a terminal you
 open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
 failure never falls through to another.
 
-`lf open` resolves one conversation, independently of workspace layouts.
-`lf workspace` opens configured arrangements and repository or Wave overviews;
-`lf task view` inspects workflow. Opening a conversation does not advance a Graph
+`lf open` resolves one conversation; `lf open --workspace` opens a repository
+or Wave overview instead. Opening a conversation does not advance a Graph
 or replay its prompt. Success means the conversation attached; attachment
 failure reaches the opening command and can be retried.
 
@@ -97,11 +96,16 @@ The Mac app shows the same records the commands print; it keeps no copy of its o
 - **Dashboards**: Tasks side by side, chosen by a query.
 - **Wave view**: the Wave conversation beside a standup board, with the Tasks
   being worked on three to a page below. The board shows one section at a time:
-  Backlog, Working (with each Session Available or Busy), Autonomous (shipping)
-  and Done. The repository page is the same view over every repository Task.
+  Backlog (unstarted or unassigned), Working (with Task conversation availability),
+  Autonomous (shipping) and Done. The repository page is the same view over every repository Task.
   Every pane and view part zooms and hides from buttons on hover, its dividers
   drag, and the header's `Show…` menu brings hidden parts back.
 - **⌘K**: search Waves, Tasks, Sessions and Graphs.
+
+Task lifecycle, conversation membership and availability agree across the page,
+sidebar, board and pickers. Dragging a sidebar Task changes the shared order used
+by ordinary repository and Wave lists. See the [Desktop guide](../swift/README.md)
+for status, ownership and ordering details.
 
 ```bash
 lf desktop view 'state:available'                       # a Dashboard of every available conversation
@@ -109,17 +113,53 @@ lf desktop dashboard query attention 'state:available or state:blocked'   # save
 ```
 
 Queries take `wave:`, `task:`, `kind:task|wave` and
-`state:open|available|running|blocked|paused|idle|backlog|done`; whitespace
-means AND, and `or` and parentheses compose.
+`state:open|available|busy|blocked|unstarted|idle|active|moving|shipping|backlog|working|autonomous|done`;
+whitespace means AND, and `or` and parentheses compose.
+
+### Changes show at once
+
+Click **Complete** on the selected Task: its row is gone in that frame, the next
+Task down (else the one above, else the empty state) is selected, and the Wave
+count drops by one. The same holds on a remote Machine and on the phone.
+
+| Change | What you see in the click |
+|---|---|
+| Complete, Abandon | the row leaves every list except Done; selection moves on |
+| Reopen | the Task returns to Working if it is owned and started, else Backlog |
+| Claim | your name as owner; a started Task moves to Working |
+| Unassign | no owner; the Task moves to Backlog |
+| Move | the Task leaves one Wave's list and joins the other |
+| Rename a Session | the new title |
+| Start, Auto-Ship, Stop Auto-Ship | a Notice: "LOO-5 Auto-Ship requested" |
+
+The Machine's next reading replaces what the click showed. If the Machine
+refuses, the row comes back and one Notice says why:
+
+```text
+LOO-4 couldn't be completed: its PR #12 is open · Show
+```
+
+A Notice is one line at the bottom of the window with at most one action. A new
+one replaces the last; it goes after six seconds. Auto-Ship's Notice carries
+**Undo**, which stops Auto-Ship. A read that fails also raises a Notice, once,
+and the view keeps what it last showed. Some Notices stand until what they say
+ends: the Machine away, a Wave with Tasks outside its plan (**Copy recovery**),
+a new Task saved before its Machine answered. They wait under the six-second
+ones.
+
+If the Machine stops answering for a few seconds, keep working: changes still
+show at once and go out when it answers, each sent once. After about ten
+seconds the change controls grey out and lists read as last read until the
+Machine is back; changes made before that go out then. Quitting Desktop drops
+changes the Machine has not answered.
 
 ### Connection recovery
 
 Desktop uses the local Loopflow server to read Work and attach Session terminals.
 Installation prepares the connection. Check availability with `lf server status`.
 The native connection row shows recovery while keeping the screen and local
-reading actions available; input waits for acknowledgement. **Retry** reconnects;
-**Move here** explicitly requests control when another viewer has it. Recovery
-never replays uncertain input. See [Connect clients](server.md) for updates,
+reading actions available; input waits for acknowledgement. **Retry** reconnects.
+Recovery never replays uncertain input. See [Connect clients](server.md) for updates,
 background access and the distinction from Machine execution destinations.
 
 ## Drive Desktop from a script
@@ -161,11 +201,10 @@ until stdin closes.
 ```bash
 lf wave show --all --subscribe --json         # every Wave's plan and Tasks
 lf task list --subscribe --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph runs and thread
 lf session list --subscribe --json            # conversations, with which ones are available for you
 lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
-lf process list --subscribe --json                      # live lf call trees
-lf repo plan --subscribe --json         # planning sync; keeps it exchanged while it runs
+lf repo tracker --subscribe --json            # planning sync; keeps it exchanged while it runs
 lf desktop view list --subscribe --json           # every plan a repository window shows
 ```
 
@@ -181,14 +220,17 @@ Every Task list read (`lf task list`, `lf wave show`, `lf wave status`,
  "runtime": {"status": "active", "reason": "…", "owner": {…}, …},
  "next_move": {"owner": "task", "reason": "…"},
  "condition": {"state": "clear", "reason": "…", …},
- "graph_name": "code", "pr": {"phase": "open", …}, "section": "now", …}
+ "graph_name": "code", "pr": {"phase": "open", …}, "section": "working",
+ "lifecycle": "active", "selection_states": ["open", "busy", "active", "working"], …}
 ```
 
 `runtime.status` is one of `unstarted`, `idle`, `active`, `moving`,
-`shipping`, `done` or `abandoned` (`runtime` is `null` before a first run);
+`shipping`, `done` or `abandoned`. `lifecycle` includes completion or cancellation
+of never-started work; `selection_states` supplies the same lifecycle, board
+section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
 on. `lf task status <issue> --json` prints one
-Task as a row, each fact once, with its Sessions, Graph processes and
+Task as a row, each fact once, with its Sessions, Graph runs and
 thread.
 
 A Session record:

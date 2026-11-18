@@ -48,8 +48,8 @@ impl Materializing {
             .clone()
             .try_acquire_many_owned(bytes as u32)
             .map_err(|_| {
-                crate::engine::Error::new(
-                    crate::engine::ErrorCode::Busy,
+                loopflow_execution::engine::Error::new(
+                    loopflow_execution::engine::ErrorCode::Busy,
                     "shared subscription retained capacity reached; retry shortly",
                 )
             })?;
@@ -362,8 +362,9 @@ mod tests {
                 .deliver(
                     ServerMessage::Response {
                         id: "large".into(),
-                        trace_id: crate::id::TraceId::default(),
+                        trace_id: loopflow_model::id::TraceId::default(),
                         result: serde_json::Value::String("x".repeat(MAX_BULK / 2)),
+                        revisions: None,
                     },
                     reservation,
                 )

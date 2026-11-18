@@ -4,14 +4,14 @@ import SwiftUI
 
 /// Collapsed Comments below a Task's Description. The count and thread arrive
 /// with the selected Task's `lf task status` subscription; a failed reading keeps any
-/// earlier thread visible and says it may be out of date. Comments are never derived
-/// from the Description.
+/// earlier thread visible and the Notice says why. Comments are never derived from
+/// the Description.
 struct TaskCommentsView: View {
     let model: WorkModel
     let task: RoadmapTask
     @Environment(\.palette) private var palette
 
-    private var reading: WorkReading<TaskComments> { model.comments[task.id] }
+    private var reading: Reading<TaskComments> { model.comments[task.id] }
     private var thread: TaskComments? { reading.value }
     private var expanded: Bool { model.navigation.expandedComments.contains(task.id) }
 
@@ -22,7 +22,6 @@ struct TaskCommentsView: View {
                 count: thread?.comments.count,
                 expanded: expanded,
                 inFlight: false,
-                failure: reading.errorMessage == nil ? nil : thread != nil,
                 identifier: "task-comments",
                 accessibilityLabel: accessibilityHeading,
                 help: heading,
@@ -31,8 +30,7 @@ struct TaskCommentsView: View {
                     if navigation.expandedComments.remove(task.id) == nil {
                         navigation.expandedComments.insert(task.id)
                     }
-                },
-                retry: { Task { await model.refresh() } }
+                }
             )
             .padding(.top, Spacing.sm)
             if expanded {
@@ -54,7 +52,7 @@ struct TaskCommentsView: View {
 
     @ViewBuilder
     private var statusText: some View {
-        Text(reading.errorMessage.map { "Comments could not be read: \($0)" } ?? "Reading comments…")
+        Text(reading.isLoading ? "Reading comments…" : "")
             .font(Typography.body(12.5))
             .foregroundStyle(palette.textSecondary)
             .textSelection(.enabled)
@@ -64,7 +62,7 @@ struct TaskCommentsView: View {
 
     private func threadView(_ thread: TaskComments) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            if let reason = reading.errorMessage ?? thread.refreshError {
+            if let reason = thread.refreshError {
                 Text("Latest read failed: \(reason)")
                     .font(Typography.body(12))
                     .foregroundStyle(palette.textSecondary)
@@ -93,7 +91,7 @@ struct TaskCommentsView: View {
                             .foregroundStyle(palette.textTertiary)
                     }
                     if let conflict = thread.conflicts[comment.id] {
-                        Text("Saved local comment; the planning provider’s edit is current")
+                        Text("Saved your comment locally. The tracker’s edit is current.")
                             .font(Typography.strong(12.5))
                         MarkdownBlocks(source: Self.readableBody(conflict)).equatable()
                     }

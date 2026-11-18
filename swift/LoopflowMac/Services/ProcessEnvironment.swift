@@ -39,18 +39,18 @@ enum GUIProcessEnvironment {
             copy["PATH"] = helper.deletingLastPathComponent().path + ":" + (copy["PATH"] ?? "")
         }
         // The GUI is a new human control surface, not a continuation of the
-        // Work process that opened it. Preserve Machine and account authority.
-        for key in ["LF_WAVE_ID", "LF_RUN_ID", "LF_CAPTURE_KEY", "LF_PREPARED_CAPTURE", "LF_HUMAN_SESSION_RUN", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",
-                    "LF_AS", "LF_GRAPH_ID", "LF_HUMAN_SESSION", "LF_AGENT_CALLER",
+        // Work process that opened it. Retain Machine routing and native provider configuration.
+        for key in ["LF_WAVE_ID", "LF_EXECUTION_ID", "LF_CAPTURE_KEY", "LF_RUN_DIR", "LF_TRACE_ID", "LF_PROCESS_ID",
+                    "LF_AS", "LF_GRAPH_ID", "LF_AGENT_CALLER",
                     "LOOPFLOW_DIRECTIVE_FILE",
                     "LF_TERMINAL_ID", "LF_TERMINAL_TTY"] {
             copy.removeValue(forKey: key)
         }
         // Embedded terminals are their own terminal. A launcher's terminal
         // session and agent output policy (`open` passes both through) would
-        // otherwise strip color and paging from every pane. Provider account
-        // variables share those prefixes and are authority, not output policy.
-        for key in copy.keys where !providerAccountKeys.contains(key)
+        // otherwise strip color and paging from every pane. Native provider
+        // credentials and homes share those prefixes and remain available.
+        for key in copy.keys where !nativeProviderKeys.contains(key)
             && (launcherTerminalKeys.contains(key)
                 || launcherTerminalPrefixes.contains(where: key.hasPrefix)) {
             copy.removeValue(forKey: key)
@@ -66,7 +66,7 @@ enum GUIProcessEnvironment {
         "TERM", "TERM_PROGRAM", "TERM_PROGRAM_VERSION", "TMUX", "TMUX_PANE",
         "CI", "PAGER", "GIT_PAGER", "GH_PAGER", "AI_AGENT", "CLAUDECODE",
     ]
-    private static let providerAccountKeys: Set<String> = [
+    private static let nativeProviderKeys: Set<String> = [
         "CODEX_HOME", "CODEX_ACCESS_TOKEN", "CODEX_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN",
     ]
     private static let launcherTerminalPrefixes = ["WARP_", "CMUX_", "HERDR_", "CLAUDE_CODE_", "CODEX_"]

@@ -50,13 +50,12 @@ struct WorkspacePanesView: View {
     }
 
     private func endWorkspaceAction() {
-        Perf.endAfterCommit(Perf.retainedWorkspaceAction, id: "workspace")
+        Perf.stateObserved(Perf.retainedWorkspaceAction, id: "workspace", owner: workspace.performanceOwner)
     }
 }
 
-/// The one action of a Work whose conversation is not open here: Rust's explicit
-/// Start after a refused reveal, Retry after a failure, else Open. The model
-/// routes it by the Work's kind.
+/// The one action of a Work whose conversation is not open here: Retry after a
+/// failure, else Open. The model routes it by the Work's kind.
 struct ConversationOpenButton: View {
     let workspace: SessionsWorkspace
     let model: WorkModel
@@ -64,11 +63,11 @@ struct ConversationOpenButton: View {
 
     var body: some View {
         let failed = workspace.conversationError != nil
-        Button(workspace.conversationStart?.label ?? (failed ? "Retry" : "Open conversation")) {
+        Button(failed ? "Retry" : "Open conversation") {
             Task { await model.openConversation(in: workspace, store: sessions) }
         }
         .buttonStyle(.bordered)
-        .help(workspace.conversationStart?.help ?? (failed ? "Try opening this conversation again" : "Show the recorded conversation"))
+        .help(failed ? "Try opening this conversation again" : "Open this conversation here, starting it if it has none")
         .accessibilityIdentifier("open-conversation")
     }
 }
@@ -101,10 +100,9 @@ struct ConversationPlaceholder: View {
 
     private var note: String {
         if let error = workspace.conversationError { return error }
-        if let start = workspace.conversationStart { return start.help }
         if workspace.conversationClosed { return "Closed here. Select it again to reopen the conversation." }
         if model.showsSavedWork { return WorkCache.savedReason }
-        return model.roadmap.errorMessage ?? model.sessions.errorMessage ?? "Show the recorded conversation."
+        return "Open the conversation here."
     }
 }
 
@@ -141,18 +139,16 @@ extension WorkspacePanesView: Equatable {
 }
 
 /// The Session slot before a conversation runs here: what that means and its
-/// one explicit action. Move here and an unstarted Task's Start share it.
+/// one explicit action, such as an unstarted Task's Start.
 struct SessionSlotOffer<Description: View>: View {
     let title: String
     let systemImage: String
-    /// Nil when no action applies; the slot still explains itself.
-    let action: String?
+    let action: String
     let actionImage: String
     var note: String?
     var unavailable: String?
     var help: String
     var accessibilityLabel: String?
-    var accessibilityHint: String?
     let actionIdentifier: String
     let perform: () -> Void
     @ViewBuilder let description: Description
@@ -163,22 +159,19 @@ struct SessionSlotOffer<Description: View>: View {
         PaneEmptyState(title: title, systemImage: systemImage, summary: unavailable ?? note) {
             description
         } actions: {
-            if let action {
-                VStack(spacing: Spacing.sm) {
-                    Button(action: perform) { Label(action, systemImage: actionImage) }
-                        .buttonStyle(.bordered)
-                        .tint(theme.palette.text)
-                        .foregroundStyle(theme.palette.text)
-                        .disabled(unavailable != nil)
-                        .help(unavailable ?? help)
-                        .accessibilityLabel(accessibilityLabel ?? action)
-                        .accessibilityHint(accessibilityHint ?? "")
-                        .accessibilityIdentifier(actionIdentifier)
-                    if !compact, let note = unavailable ?? note {
-                        Text(note)
-                            .font(Typography.caption(9))
-                            .foregroundStyle(theme.palette.textSecondary)
-                    }
+            VStack(spacing: Spacing.sm) {
+                Button(action: perform) { Label(action, systemImage: actionImage) }
+                    .buttonStyle(.bordered)
+                    .tint(theme.palette.text)
+                    .foregroundStyle(theme.palette.text)
+                    .disabled(unavailable != nil)
+                    .help(unavailable ?? help)
+                    .accessibilityLabel(accessibilityLabel ?? action)
+                    .accessibilityIdentifier(actionIdentifier)
+                if !compact, let note = unavailable ?? note {
+                    Text(note)
+                        .font(Typography.caption(9))
+                        .foregroundStyle(theme.palette.textSecondary)
                 }
             }
         }
@@ -410,7 +403,6 @@ struct SplitDivider: View {
 
 struct SessionPaneView: View {
     @Environment(\.theme) private var theme
-    @State private var shellError: String?
     @State private var changingSession = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let pane: PaneState
@@ -466,11 +458,6 @@ struct SessionPaneView: View {
         .accessibilityLabel("\(_title), \(isFocused ? "active" : "open")")
         .accessibilityIdentifier(item.map { "session-pane-\($0.id)" } ?? "session-pane-empty")
         .modifier(CreationPresentation(recovery: .shared, resource: .session(item?.id ?? ""), visible: item != nil))
-        .alert("Could not change pane", isPresented: Binding(
-            get: { shellError != nil }, set: { if !$0 { shellError = nil } }
-        )) {
-            Button("OK") { shellError = nil }
-        } message: { Text(shellError ?? "") }
         .onReceive(NotificationCenter.default.publisher(for: .ghosttyTerminalBell)) { notification in
             guard let terminal = notification.object as? TerminalIdentity,
                   terminal == _terminalIdentity else { return }
@@ -519,9 +506,15 @@ struct SessionPaneView: View {
                     help: "Reconnect this pane to the existing conversation.",
                     disabled: changingSession) {
                     changingSession = true
-                    Task { @MainActor in
-                        defer { changingSession = false }
-                        await sessions.refresh(item.id)
+                    Perf.userAction(.reconnect, scenario: "refresh_to_typing", id: item.id,
+                                    repository: sessions.repoPath, liveSessions: sessions.sessions.count,
+                                    owner: workspace.performanceOwner) {
+                        Perf.acknowledged(.reconnect, id: item.id, owner: workspace.performanceOwner)
+                        Task { @MainActor in
+                            defer { changingSession = false }
+                            await sessions.refresh(item.id)
+                            Perf.reconnected(id: item.id, owner: workspace.performanceOwner)
+                        }
                     }
                 }
             }
@@ -621,7 +614,7 @@ struct SessionPaneView: View {
                     do {
                         let files = try workspace.files(for: browser.content, task: model.task(id: taskId)?.task, query: sessions.query)
                         files.page = page
-                    } catch { shellError = error.localizedDescription }
+                    } catch { paneFailed(error) }
                 }
             }
             Button("Task & workflow", systemImage: "list.bullet") {
@@ -634,7 +627,7 @@ struct SessionPaneView: View {
         if workspace.key.kind == .task {
             Button("Shell", systemImage: "terminal") {
                 if let shell = store.shellPane, shell.content.selectedShell != nil { store.setFocusedPane(shell.id) }
-                else { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                else { do { try workspace.newShell() } catch { paneFailed(error) } }
             }
         }
     }
@@ -656,6 +649,7 @@ struct SessionPaneView: View {
 
     private func changeSession(_ session: SessionItem, agent: String?) {
         changingSession = true
+        let notices = model.navigation.notices
         Task { @MainActor in
             defer { changingSession = false }
             do {
@@ -676,8 +670,13 @@ struct SessionPaneView: View {
                 if model.workspaceKey(for: model.selection, repository: workspace.key.repository) == workspace.key {
                     model.navigation.selectedSessionId = record.id
                 }
-            } catch { shellError = error.localizedDescription }
+            } catch { paneFailed(error, in: notices) }
         }
+    }
+
+    /// The asking window's Notice; a late reply keeps the window it started in.
+    private func paneFailed(_ error: Error, in notices: NoticeCenter? = nil) {
+        (notices ?? model.navigation.notices).post(Notice("Could not change pane: \(error.localizedDescription)"))
     }
 
     @ViewBuilder
@@ -744,7 +743,7 @@ struct SessionPaneView: View {
                 try sessions.surfaces.insertText(text, terminal: terminal, surface: surface)
                 store.setFocusedPane(session.id)
                 sessions.surfaces.focus(terminal)
-            } catch { shellError = error.localizedDescription }
+            } catch { paneFailed(error) }
         }
     }
 
@@ -759,7 +758,7 @@ struct SessionPaneView: View {
                             .background(tab.id == selected ? theme.palette.surfaceElement : .clear,
                                         in: RoundedRectangle(cornerRadius: 4))
                     }
-                    Button { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                    Button { do { try workspace.newShell() } catch { paneFailed(error) } }
                         label: { Image(systemName: "plus") }
                         .accessibilityLabel("New shell tab")
                 }.buttonStyle(.plain).font(Typography.code(11))
@@ -809,10 +808,11 @@ struct SessionPaneView: View {
                             }
                             Text("Shell attachment ended. Reconnect checks the same execution; New Shell starts fresh.")
                             Button("Reconnect") { workspace.reconnectShell(tab) }
-                            Button("New Shell") { do { try workspace.newShell() } catch { shellError = error.localizedDescription } }
+                            Button("New Shell") { do { try workspace.newShell() } catch { paneFailed(error) } }
                         }
                     } else if let command = try? workspace.shellAttachment(tab) {
                         GhosttyTerminalView(
+                repository: sessions.repoPath,
                             workingDirectory: NSHomeDirectory(),
                             argv: command,
                             terminal: terminal,
@@ -891,8 +891,6 @@ struct SessionPaneView: View {
     @ViewBuilder
     func _sessionPlaceholder(_ item: SessionItem) -> some View {
         switch item.state {
-        case .elsewhere:
-            _elsewherePlaceholder(item)
         case .opening, .prepared:
             SessionOpeningView(screen: item.lastScreen)
                 .foregroundStyle(theme.palette.text)
@@ -906,11 +904,6 @@ struct SessionPaneView: View {
                 }
                 openButton(item)
             }.padding()
-        case .unavailable(let message):
-            PaneEmptyState(title: "Conversation unavailable", systemImage: "terminal",
-                           description: message) {
-                openButton(item)
-            }
         case .failed(let message):
             PaneEmptyState(title: "Session failed to open", systemImage: "exclamationmark.triangle",
                            description: message) {
@@ -927,62 +920,26 @@ struct SessionPaneView: View {
         }
     }
 
-    /// Retry uses the workspace opening intent; only Take back and a consumed
-    /// launch's Try again go past it.
+    /// Opening is `lf resume`: it views a held terminal, resumes an ended
+    /// Session, or takes over a native client; the label says which.
     @ViewBuilder
     private func openButton(_ item: SessionItem) -> some View {
-        if let action = item.record.action(.moveHere) ?? item.record.action(.open) {
-            let retry = item.error != nil && item.record.launchRetry == nil
-            Button(retry ? "Retry" : action.label) {
-                sessions.beginPaneLoad(item.id)
-                Task { @MainActor in
-                    if retry { await sessions.select(item.id, intent: workspace.conversationIntent) }
-                    else if action.kind == .moveHere { await sessions.moveHere(item.id) }
-                    else { await sessions.start(item.id) }
+        if let action = item.record.action {
+            Button(action.label) {
+                Perf.userAction(.taskWorkspaceReady, scenario: "session", id: item.id,
+                                repository: model.repoPath, liveSessions: model.liveSessionCount,
+                                owner: workspace.performanceOwner) {
+                    sessions.beginPaneLoad(item.id)
+                    Perf.acknowledged(.taskWorkspaceReady, id: item.id, owner: workspace.performanceOwner)
+                    Task { @MainActor in await sessions.select(item.id) }
                 }
             }
             .buttonStyle(.bordered)
             .tint(theme.palette.text)
             .foregroundStyle(theme.palette.text)
-            .disabled(!retry && action.unavailableReason != nil)
-            .help(retry ? "Open the conversation without taking another terminal’s input" : action.unavailableReason ?? action.help)
+            .help(action.help)
             .accessibilityIdentifier("session-open-here-\(item.id)")
         }
-    }
-
-    /// A Session whose provider client lives in another terminal. The pane
-    /// explains what that means and makes the takeover explicit: nothing is
-    /// transferred until Take back.
-    private func _elsewherePlaceholder(_ item: SessionItem) -> some View {
-        let action = item.record.action(.moveHere)
-        return ZStack {
-            if let screen = item.lastScreen {
-                ScrollView {
-                    Text(screen).font(.system(.body, design: .monospaced))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }.opacity(0.35).allowsHitTesting(false)
-            }
-            SessionSlotOffer(
-                title: "Active in another terminal", systemImage: "rectangle.on.rectangle",
-                action: action?.label, actionImage: "arrow.down.forward.square",
-                note: action?.help,
-                unavailable: action?.unavailableReason, help: action?.help ?? "",
-                accessibilityLabel: "Take back session",
-                accessibilityHint: action?.help,
-                actionIdentifier: "session-move-here-\(item.id)",
-                perform: {
-                    sessions.beginPaneLoad(item.id)
-                    Task { @MainActor in await sessions.moveHere(item.id) }
-                }
-            ) {
-                Text(item.record.action(.open)?.unavailableReason ?? "This conversation is controlled by another client.")
-                // Document explicit Take back; the prepared launcher keeps its own intent.
-                Text(item.record.openArgv.filter { !SessionOpenIntent.flags.contains($0) }
-                    .map(shellEscape).joined(separator: " "))
-                    .font(.caption.monospaced()).textSelection(.enabled)
-            }
-        }
-        .accessibilityIdentifier("session-elsewhere-\(item.id)")
     }
 
     @ViewBuilder
@@ -990,6 +947,7 @@ struct SessionPaneView: View {
         if let location = pane.content.location, surface.workspace?.identity == location,
            let terminal = pane.terminal {
             GhosttyTerminalView(
+                repository: sessions.repoPath,
                 workingDirectory: sessions.presentationDirectory(for: surface, checkout: location.worktree),
                 argv: item.launchArguments,
                 terminal: terminal,
@@ -999,7 +957,9 @@ struct SessionPaneView: View {
                     Perf.agentInput("surface_created", session: item.id)
                     sessions.beginPaneLoad(item.id)
                 },
-                onSurfaceFailed: { reason in sessions.recordPaneFailure(item.id, reason: reason) },
+                onSurfaceFailed: { reason in
+                    sessions.recordPaneFailure(item, reason: reason)
+                },
                 onFocus: focusPane
             )
             .id(item.launchId)

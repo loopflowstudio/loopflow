@@ -1,0 +1,3 @@
+# Plan, then build: the whole path from a direction to a published PR.
+- graph: plan
+- graph: build

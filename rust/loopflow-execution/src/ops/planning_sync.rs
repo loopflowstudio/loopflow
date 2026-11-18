@@ -1,0 +1,723 @@
+//! Foreground Git exchange and local-save delivery for the selected transport.
+//! Inbound and outbound sync run independently; the common writer alone changes Work.
+//! Blocking workers retain their locks through cancellation, commit and readback.
+
+use crate::work::wave::Wave;
+use std::fs::OpenOptions;
+use std::future::Future;
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
+
+use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
+use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
+use loopflow_model::durable::{ProjectId, TaskId};
+use loopflow_model::id::WaveId;
+use loopflow_storage::planning_exchange::PlanningSnapshot;
+use loopflow_storage::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
+
+use super::{OpsError, OpsResult};
+
+fn message(error: impl std::fmt::Display) -> OpsError {
+    OpsError::Message(error.to_string())
+}
+
+/// Saved Tasks need no network before a read or local save. On a cache miss,
+/// fetch the selected planning destinations once, without allocating execution.
+pub(crate) async fn find_task(
+    store: &Store,
+    repo: &str,
+    selector: &str,
+) -> OpsResult<Option<loopflow_storage::work::task::Task>> {
+    let read = || {
+        crate::store::children::resolve_task_id(&store.sqlite, selector, Some(repo))?
+            .map(|id| store.sqlite.task(&id))
+            .transpose()
+            .map(Option::flatten)
+    };
+    if let Some(task) = read().map_err(message)? {
+        return Ok(Some(task));
+    }
+    if let Err(error) = fetch_repository(store, repo).await {
+        tracing::warn!(%error, "tracker refresh pending; resolving retained Task");
+    }
+    read().map_err(message)
+}
+
+/// One fetch per destination, also used before resolving a cold Task.
+/// An unavailable remote never prevents a saved local plan from being used.
+pub async fn fetch_repository(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Fetch).await
+}
+
+/// Publishes unless another process is publishing; that one or the next
+/// connection tick sends this save out.
+pub async fn publish_repository(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Publish { wait: false }).await
+}
+
+/// Publishes after any concurrent publication, whose export may predate this
+/// Machine's latest save, so pending changes are out when it returns.
+pub async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Publish { wait: true }).await
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Exchange {
+    Fetch,
+    Publish { wait: bool },
+}
+
+/// A short command saves first, then makes one exchange attempt with the owner
+/// it saved ahead of older work. A served command answers first and the attempt
+/// runs after its reply; queued actions are durable rows, so a server that
+/// stops before it runs loses nothing. Failure leaves its successful local
+/// mutation and durable pending state intact.
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &ActionOwner) {
+    let (deferred, owner) = (repo.to_owned(), saved.clone());
+    if crate::journal::request::after_reply(move || {
+        after_reply(|store| async move { sync_saved(&store, &deferred, &owner).await })
+    })
+    .is_none()
+    {
+        return;
+    }
+    sync_saved(store, repo, saved).await
+}
+
+/// Run `sync` on the Machine's store once a served command has answered.
+pub(crate) fn after_reply<F, Fut>(sync: F)
+where
+    F: FnOnce(crate::store::SharedStore) -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let finished = tokio::runtime::Runtime::new()
+        .map_err(message)
+        .and_then(|runtime| {
+            runtime.block_on(async {
+                let store = crate::store::open_existing_store()
+                    .await
+                    .map_err(message)?
+                    .ok_or_else(|| message("no Loopflow store on this Machine"))?;
+                sync(Arc::new(store)).await;
+                Ok(())
+            })
+        });
+    if let Err(error) = finished {
+        tracing::warn!(%error, "planning synchronization after reply did not start");
+    }
+}
+
+async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
+    let attempt = async {
+        let config = crate::config::load_config(Some(Path::new(repo)))
+            .map_err(message)?
+            .unwrap_or_default();
+        match config.planning_transport() {
+            crate::config::TrackerConfig::Git { .. } => publish_repository(store, repo).await,
+            crate::config::TrackerConfig::Linear { .. }
+            | crate::config::TrackerConfig::Asana { .. } => {
+                super::tracker::drain::drain_repository(
+                    store,
+                    repo,
+                    super::tracker::drain::Scope::First(saved),
+                    super::tracker::drain::Bound::PASS,
+                )
+                .await?;
+                Ok(())
+            }
+        }
+    };
+    if let Err(error) = attempt.await {
+        tracing::debug!(%error, "planning synchronization pending after local save");
+        crate::journal::request::diagnostic(format_args!(
+            "Saved locally; planning synchronization pending. See `lf repo tracker`."
+        ));
+    }
+}
+
+/// `lf repo tracker answer <id>`: answer one lost line of `repo`, whoever owns
+/// it, then make one exchange attempt for that owner. `id` is the line's
+/// action id or the short prefix `lf repo tracker` prints.
+pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
+    tokio::runtime::Runtime::new()
+        .map_err(message)?
+        .block_on(async {
+            let store = planning_store().await?;
+            let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
+            let repo = main.to_string_lossy();
+            let tracker = super::tracker::queued_tracker(&main).unwrap_or(TrackerKind::Git);
+            let lost: Vec<_> = store
+                .sqlite
+                .repository_tracker_actions(&repo, tracker)
+                .map_err(message)?
+                .into_iter()
+                .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
+                .collect();
+            let line = match lost.as_slice() {
+                [line] => line.clone(),
+                [] => {
+                    return Err(message(format!(
+                        "{id} is not a lost line in {repo}; `lf repo tracker` lists them"
+                    )))
+                }
+                _ => return Err(message(format!("{id} names more than one lost line"))),
+            };
+            store
+                .sqlite
+                .answer_lost(std::slice::from_ref(&line), answer)
+                .map_err(message)?;
+            let owner = match line.owner_kind {
+                ActionOwnerKind::Task => {
+                    Some(ActionOwner::Task(TaskId::from_raw(line.owner_id.clone())))
+                }
+                ActionOwnerKind::Project => Some(ActionOwner::Project(ProjectId::from_raw(
+                    line.owner_id.clone(),
+                ))),
+                _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
+            };
+            if let Some(owner) = owner {
+                sync_after_save(&store, &repo, &owner).await;
+            }
+            Ok(line)
+        })
+}
+
+/// Resolve the repository configuration before touching a planning remote.
+/// A Linear outage cannot select Git: routing is configuration, not availability.
+pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
+    use crate::config::{load_config, GitPlan, TrackerConfig};
+    let config = load_config(Some(Path::new(repo)))
+        .map_err(message)?
+        .unwrap_or_default();
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
+        return Ok(None);
+    };
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => Some(provisioned_user_key(store).await?),
+    };
+    let reference = plan
+        .reference(key.as_deref())
+        .expect("a personal plan has a provisioned user key");
+    let Some(destination) =
+        crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
+            .map_err(message)?
+    else {
+        return Ok(None);
+    };
+    let id = store
+        .bind_git_destination(repo, &destination)
+        .await
+        .map_err(message)?;
+    Ok(Some(id))
+}
+
+/// A Task moving here from another of the person's Machines brings their
+/// planning key, so a personal Git plan reads the same journal on both. A
+/// Machine that already plans under another key refuses: keys never change.
+pub async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
+    use crate::config::{load_config, GitPlan, TrackerConfig};
+    let config = load_config(Some(repo))
+        .map_err(message)?
+        .unwrap_or_default();
+    if !matches!(
+        config.planning_transport(),
+        TrackerConfig::Git {
+            plan: GitPlan::Personal,
+            ..
+        }
+    ) {
+        return Ok(());
+    }
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) if saved == key => Ok(()),
+        Some(saved) => Err(message(format!(
+            "this Machine plans under planning key {saved}, the sending Machine under {key}; \
+             a personal plan follows one key, so this Machine cannot read the Task's plan"
+        ))),
+        None => store
+            .provision_planning_user_key(key)
+            .await
+            .map_err(message),
+    }
+}
+
+/// The first personal connection creates the key; a concurrent creator's key wins.
+async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
+    if let Some(key) = store.planning_user_key().await.map_err(message)? {
+        return Ok(key);
+    }
+    let key = uuid::Uuid::new_v4().to_string();
+    let result = store.provision_planning_user_key(&key).await;
+    match store.planning_user_key().await.map_err(message)? {
+        Some(saved) => Ok(saved),
+        None => result.map(|()| key).map_err(message),
+    }
+}
+
+/// Passive status uses configuration, never a persisted copy of its selection.
+/// Retained routes remain readable in a Work folder without a Git checkout.
+pub async fn git_destinations(
+    store: &Store,
+    repo: &str,
+) -> OpsResult<Vec<crate::store::GitDestination>> {
+    let Some(active) = active_destination(store, repo).await? else {
+        return Ok(Vec::new());
+    };
+    store
+        .git_destinations(repo, active.as_deref())
+        .await
+        .map_err(message)
+}
+
+/// `lf repo tracker journal`: each destination's retained changes.
+pub async fn git_journal(
+    store: &Store,
+    repo: &str,
+) -> OpsResult<Vec<crate::store::PlanningJournal>> {
+    let Some(active) = active_destination(store, repo).await? else {
+        return Ok(Vec::new());
+    };
+    store
+        .git_journal(repo, active.as_deref())
+        .await
+        .map_err(message)
+}
+
+/// The Git destination this repository plans through: `None` when it does not
+/// plan through Git, `Some(None)` outside a checkout or before its remote exists.
+async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Option<String>>> {
+    use crate::config::{load_config, GitPlan, TrackerConfig};
+    let config = load_config(Some(Path::new(repo)))
+        .map_err(message)?
+        .unwrap_or_default();
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
+        return Ok(None);
+    };
+    let key = match plan {
+        GitPlan::Shared(_) => None,
+        GitPlan::Personal => store.planning_user_key().await.map_err(message)?,
+    };
+    let reference = plan.reference(key.as_deref());
+    let active = if crate::repo::discover_repo_root(Path::new(repo))
+        .map_err(message)?
+        .is_some()
+    {
+        reference
+            .map(|reference| {
+                crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
+                    .map(|destination| destination.map(|destination| destination.id()))
+                    .map_err(message)
+            })
+            .transpose()?
+            .flatten()
+    } else {
+        None
+    };
+    Ok(Some(active))
+}
+
+/// A World build is this process's only writer to a remote nobody else reads,
+/// so its saves stay local and `World::finish` publishes once.
+/// A Git exchange per save made a 150-Task world cost minutes.
+static EXCHANGE_DEFERRED: AtomicBool = AtomicBool::new(false);
+
+pub fn defer_exchange(deferred: bool) {
+    EXCHANGE_DEFERRED.store(deferred, Ordering::SeqCst);
+}
+
+async fn exchange_repository(store: &Store, repo: &str, exchange: Exchange) -> OpsResult<()> {
+    if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
+        return Ok(());
+    }
+    let Some(destination) = configured_destination(store, repo).await? else {
+        return Ok(());
+    };
+    let sqlite = store.sqlite.clone();
+    let repo = repo.to_owned();
+    crate::journal::request::spawn_blocking(move || {
+        exchange_destination(&sqlite, &repo, &destination, exchange)
+    })
+    .await
+    .map_err(message)?
+}
+
+fn exchange_destination(
+    store: &SqliteStore,
+    repo: &str,
+    id: &str,
+    exchange: Exchange,
+) -> OpsResult<()> {
+    let publish = matches!(exchange, Exchange::Publish { .. });
+    // The blocking worker retains effect ownership through status writes, even
+    // if its async waiter is canceled. Refresh never takes this lock.
+    let _lock = if let Exchange::Publish { wait } = exchange {
+        let path = store
+            .home_dir()
+            .map_err(message)?
+            .join("locks/planning-peers")
+            .join(format!("{id}.lock"));
+        let lock = if wait {
+            wait_for_publication(&path)?
+        } else {
+            super::tracker::drain::lock_delivery(&path)?
+        };
+        let Some(lock) = lock else {
+            return Ok(());
+        };
+        Some(lock)
+    } else {
+        None
+    };
+    let result = (|| {
+        let binding = store
+            .git_destination(repo, id)
+            .map_err(message)?
+            .ok_or_else(|| message("planning destination is missing"))?;
+        let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
+        if publish {
+            store.recover_task_filings(repo).map_err(message)?;
+            publish_destination(store, repo, id, &git)
+        } else {
+            fetch_destination(store, repo, id, &git).map(|_| ())
+        }
+    })();
+    // Do not persist tracker data or credential-bearing destinations in errors.
+    let error = result.as_ref().err().map(|_| {
+        if publish {
+            "Git publication pending; local planning retained"
+        } else {
+            "Git fetch failed; retained import unchanged"
+        }
+    });
+    store
+        .record_destination_error(repo, id, !publish, error)
+        .map_err(message)?;
+    result
+}
+
+/// A holder stuck past the wait leaves the save to the next publication.
+fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
+    let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
+    loop {
+        if let Some(lock) = super::tracker::drain::lock_delivery(path)? {
+            return Ok(Some(lock));
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
+
+fn fetch_destination(
+    store: &SqliteStore,
+    repo: &str,
+    destination: &str,
+    git: &PlanningGit,
+) -> OpsResult<Option<(PlanningRevision, PlanningSnapshot)>> {
+    let remote = git.fetch().map_err(message)?;
+    store
+        .record_destination_fetch(
+            repo,
+            destination,
+            remote.as_ref().map(|document| document.revision.as_str()),
+        )
+        .map_err(message)?;
+    let imported = if let Some(document) = remote {
+        let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
+        crate::store::git_tracker::import_git_plan(
+            store,
+            repo,
+            destination,
+            document.revision.as_str(),
+            &snapshot,
+        )
+        .map_err(message)?;
+        Some((document.revision, snapshot))
+    } else {
+        None
+    };
+    store
+        .record_destination_error(repo, destination, true, None)
+        .map_err(message)?;
+    Ok(imported)
+}
+
+fn publish_destination(
+    store: &SqliteStore,
+    repo: &str,
+    destination: &str,
+    git: &PlanningGit,
+) -> OpsResult<()> {
+    // Always fetch before deciding what to publish, including recovery from a
+    // lost push response. Never publish from a stale local Git document alone.
+    let (remote, remote_snapshot) = match fetch_destination(store, repo, destination, git)? {
+        Some((revision, snapshot)) => (Some(revision), snapshot),
+        None => (None, PlanningSnapshot::default()),
+    };
+    let exported = store.export_git_plan(repo, destination).map_err(message)?;
+    // Omitted/held objects retain their last shared history, not private local
+    // moves. Only today's selected export may add local mutations to the remote.
+    let merged = remote_snapshot.merge(&exported).map_err(message)?;
+    if let Some(remote) = &remote {
+        if merged == remote_snapshot {
+            return store
+                .record_destination_publication(
+                    repo,
+                    destination,
+                    remote.as_str(),
+                    "confirmed",
+                    &exported,
+                )
+                .map_err(message);
+        }
+    } else if merged.changes.is_empty() {
+        return Ok(());
+    }
+    let bytes = merged.to_bytes().map_err(message)?;
+    let local = git.local().map_err(message)?;
+    let reusable = match (&local, &remote) {
+        (Some(local), Some(remote)) => {
+            local.bytes == bytes && git.is_ancestor(remote, &local.revision).map_err(message)?
+        }
+        (Some(local), None) => local.bytes == bytes,
+        _ => false,
+    };
+    let saved = if reusable {
+        local.expect("reusable revision is present")
+    } else {
+        git.save(&bytes, local.as_ref().map(|d| &d.revision), remote.as_ref())
+            .map_err(message)?
+    };
+    // Persist uncertainty before the effect. A crash at any later point recovers
+    // by fetching first, not by assuming that a failed response means no push.
+    store
+        .record_destination_publication(
+            repo,
+            destination,
+            saved.revision.as_str(),
+            "unconfirmed",
+            &exported,
+        )
+        .map_err(message)?;
+    let state = match git.publish(&saved.revision).map_err(message)? {
+        PlanningPublication::Confirmed => "confirmed",
+        PlanningPublication::Pending => "pending",
+        PlanningPublication::Unconfirmed => "unconfirmed",
+    };
+    store
+        .record_destination_publication(
+            repo,
+            destination,
+            saved.revision.as_str(),
+            state,
+            &exported,
+        )
+        .map_err(message)
+}
+
+/// Provider exit is also a useful boundary for Taskless conversations.
+pub(crate) fn check_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, false)
+}
+
+/// `wave status --sync`'s exchange, before it refreshes the Wave inventory.
+pub fn refresh_directory(directory: &Path) -> OpsResult<()> {
+    sync_directory(directory, true)
+}
+
+fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
+    let repo = crate::repository::discover(directory)
+        .map_err(message)?
+        .to_string();
+    if !super::tracker::connected(&repo) {
+        return Ok(());
+    }
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?
+        .block_on(async {
+            let store = planning_store().await?;
+            if refresh {
+                super::tracker_events::refresh_repository(&store, &repo).await;
+            } else {
+                super::tracker_events::sync_repository(&store, &repo).await;
+            }
+            Ok(())
+        })
+}
+
+/// Foreground Git exchange while a provider runs.
+/// Dropping the connection cancels requests; durable identities survive cancellation.
+#[derive(Debug)]
+pub(crate) struct PlanningSync {
+    stop: Option<tokio::sync::oneshot::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl PlanningSync {
+    /// Repository planning follows every foreground provider, not Task attribution.
+    /// One thread owns initialization and exchange. Callers may already be inside
+    /// an async runtime; startup errors still return before the provider launches.
+    pub(crate) fn start_for_directory(directory: &Path) -> OpsResult<Self> {
+        let repo = crate::repository::discover(directory)
+            .map_err(message)?
+            .to_string();
+        if super::tracker::connected(&repo) {
+            return Ok(Self {
+                stop: None,
+                thread: None,
+            });
+        }
+        let config = storage_config_from_env()?;
+        let (ready, started) = std::sync::mpsc::sync_channel(1);
+        let (stop, stopped) = tokio::sync::oneshot::channel();
+        #[cfg(any(test, feature = "test-support"))]
+        let context = super::linear::LINEAR_TEST_CONTEXT
+            .try_with(Clone::clone)
+            .ok();
+        let thread = std::thread::Builder::new()
+            .name("planning-sync".into())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        let _ = ready.send(Err(message(error)));
+                        return;
+                    }
+                };
+                let drive = async {
+                    let store = match open_planning_store(&config).await.map(Arc::new) {
+                        Ok(store) => store,
+                        Err(error) => {
+                            let _ = ready.send(Err(error));
+                            return;
+                        }
+                    };
+                    if ready.send(Ok(())).is_err() {
+                        return;
+                    }
+                    tokio::select! {
+                        _ = stopped => {},
+                        _ = repeat_sync("Git plan fetch", Duration::from_secs(5), || {
+                            fetch_repository(&store, &repo)
+                        }) => {},
+                        _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
+                            publish_repository(&store, &repo)
+                        }) => {},
+                    }
+                };
+                #[cfg(any(test, feature = "test-support"))]
+                if let Some(context) = context {
+                    runtime.block_on(super::linear::LINEAR_TEST_CONTEXT.scope(context, drive));
+                    return;
+                }
+                runtime.block_on(drive);
+            })?;
+        let connection = Self {
+            stop: Some(stop),
+            thread: Some(thread),
+        };
+        started.recv().map_err(message)??;
+        Ok(connection)
+    }
+}
+
+// Each branch has its own delay after an attempt. A slow delivery cannot
+// postpone fetches or cause missed ticks to burst when the request returns.
+async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
+    operation: &str,
+    delay: Duration,
+    mut attempt: impl FnMut() -> F,
+) {
+    loop {
+        if let Err(error) = attempt().await {
+            tracing::debug!(%error, operation, "planning synchronization pending");
+        }
+        tokio::time::sleep(delay).await;
+    }
+}
+
+impl Drop for PlanningSync {
+    fn drop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+pub fn storage_config_from_env() -> OpsResult<crate::store::StorageConfig> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Ok(config) =
+        super::linear::LINEAR_TEST_CONTEXT.try_with(|ctx| StorageConfig::sqlite(ctx.path.clone()))
+    {
+        return Ok(config);
+    }
+    crate::store::storage_config_from_env()
+        .map_err(|err| OpsError::Message(format!("failed to resolve planning store: {err}")))
+}
+
+pub async fn planning_store() -> OpsResult<Store> {
+    open_planning_store(&storage_config_from_env()?).await
+}
+
+pub(super) async fn open_planning_store(config: &StorageConfig) -> OpsResult<Store> {
+    #[cfg(any(test, feature = "test-support"))]
+    if let Ok(store) = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|ctx| Store::from_sqlite_for_test(ctx.store.sqlite.clone()))
+    {
+        return Ok(store);
+    }
+    let config = config.clone();
+    // Store opening uses synchronous SQLite I/O. Keep it off the deadline's executor.
+    crate::journal::request::spawn_blocking(move || {
+        tokio::runtime::Handle::current().block_on(open_store(&config))
+    })
+    .await
+    .map_err(|_| message("Could not open the planning store"))?
+    .map_err(|err| OpsError::Message(format!("failed to open planning store: {err}")))
+}
+
+pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::store::PlanningLocks>> {
+    // Keep the existing lock inode namespace shared with already-running callers.
+    let path = crate::store::lf_home_dir().join("chapter-locks");
+    #[cfg(any(test, feature = "test-support"))]
+    let path = super::linear::LINEAR_TEST_CONTEXT
+        .try_with(|context| context.path.with_extension("chapter-locks"))
+        .unwrap_or(path);
+    std::fs::create_dir_all(&path).map_err(|error| OpsError::Message(error.to_string()))?;
+    let file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path.join(format!("{}.lock", wave.id())))
+        .map_err(|error| OpsError::Message(error.to_string()))?;
+    // The OS releases the lock if the holder exits.
+    for _ in 0..300 {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),
+            Err(cause) if cause.kind() == std::io::ErrorKind::WouldBlock => {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+            Err(cause) => return Err(OpsError::Message(cause.to_string())),
+        }
+    }
+    Err(OpsError::Message(
+        "another planning operation is active; retry after it finishes".into(),
+    ))
+}

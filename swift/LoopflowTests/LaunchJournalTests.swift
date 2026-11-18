@@ -1,10 +1,67 @@
 #if os(macOS)
+import AppKit
 import Foundation
 import Testing
 @testable import LoopflowMac
 
+private final class LaunchJournalBundleMarker: NSObject {}
+
 @Suite("Launch journal")
 struct LaunchJournalTests {
+    @Test @MainActor
+    func startJourneyFollowsOnlyItsPreparedSession() {
+        let owner = UUID()
+        Perf.begin(.startTask, "start_to_typing", id: "task-one", owner: owner)
+        Perf.retarget(.startTask, from: "another-task", to: "wrong-session", owner: owner)
+        Perf.finish(.startTask, id: "wrong-session", owner: owner, outcome: .failed)
+        #expect(Perf.isPending(.startTask, owner: owner))
+        Perf.retarget(.startTask, from: "task-one", to: "session-one", owner: owner)
+        Perf.finish(.startTask, id: "task-one", owner: owner, outcome: .failed)
+        #expect(Perf.isPending(.startTask, owner: owner))
+        Perf.finish(.startTask, id: "session-one", owner: owner, outcome: .cancelled)
+        #expect(!Perf.isPending(.startTask, owner: owner))
+    }
+
+    @Test @MainActor
+    func startupIntervalCanBeginBeforeAppKit() async throws {
+        let variable = "LOOPFLOW_STARTUP_INTERVAL_PROOF"
+        if let proof = ProcessInfo.processInfo.environment[variable] {
+            #expect(NSApp == nil)
+            Perf.begin(.coldStart, "startup", id: "startup-before-appkit")
+            #expect(Perf.isPending(.coldStart))
+            Perf.end(.coldStart, id: "startup-before-appkit", inputReady: false)
+            try Data().write(to: URL(fileURLWithPath: proof))
+            return
+        }
+
+        // Earlier view tests may have initialized AppKit in this process.
+        _ = NSApplication.shared
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let proof = directory.appendingPathComponent("completed")
+        let child = Process()
+        child.executableURL = Bundle.main.executableURL
+        child.arguments = [
+            "--test-bundle-path", try #require(Bundle(for: LaunchJournalBundleMarker.self).executablePath),
+            "--testing-library", "swift-testing",
+            "--filter", "LaunchJournalTests/startupIntervalCanBeginBeforeAppKit", "--no-parallel",
+        ]
+        child.environment = ProcessInfo.processInfo.environment.merging(
+            [variable: proof.path], uniquingKeysWith: { _, new in new })
+        let status: Int32 = try await withCheckedThrowingContinuation { exited in
+            child.terminationHandler = { exited.resume(returning: $0.terminationStatus) }
+            do {
+                try child.run()
+            } catch {
+                child.terminationHandler = nil
+                exited.resume(throwing: error)
+            }
+        }
+        #expect(status == 0)
+        #expect(FileManager.default.fileExists(atPath: proof.path))
+    }
+
     @Test("A launch records each milestone once, with the app version and no arguments")
     func launchRecord() throws {
         let directory = try temporaryDirectory()

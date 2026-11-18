@@ -21,7 +21,6 @@ PROOFS = {
     "task_graph_read_keeps_captured_topology_and_counts_both_returns": "graph_tests",
     "installation_uses_candidate_authority_from_any_checkout": "global_commands",
     "installation_reaches_candidate_verdict_with_an_unreadable_task_registry": "global_commands",
-    "install_preflight_records_no_process": "process_ownership_tests",
     # Structured-ID upgrade on a case-sensitive filesystem with live owners.
     "canonical_ids_live_receipt_defers_then_normal_settlement_allows_upgrade": CANONICAL_IDS,
     "canonical_ids_changed_claim_waits_for_canonical_live_caller": CANONICAL_IDS,
@@ -108,7 +107,8 @@ def _wait_for_docker() -> None:
 
 def _migration_order(repo: Path) -> str:
     """Every slug migration in this tree: origin/main's merge order, then the rest by name."""
-    directory = "rust/loopflow/src/store/migrations"
+    directory = "rust/loopflow-storage/src/migrations"
+    directories = ("rust/loopflow/src/store/migrations", directory)
     log = subprocess.run(
         [
             "git",
@@ -122,14 +122,18 @@ def _migration_order(repo: Path) -> str:
             "--name-only",
             "--format=",
             "--",
-            directory,
+            *directories,
         ],
         cwd=repo,
         capture_output=True,
         text=True,
     )
     present = {path.stem for path in (repo / directory).glob("[a-z]*.sql")}
-    merged = [Path(line).stem for line in log.stdout.splitlines() if Path(line).stem in present]
+    merged = [
+        Path(line).stem
+        for line in log.stdout.splitlines()
+        if Path(line).parent.as_posix() in directories and Path(line).stem in present
+    ]
     order = list(dict.fromkeys(merged)) + sorted(present - set(merged))
     return "".join(f"{slug}\n" for slug in order)
 

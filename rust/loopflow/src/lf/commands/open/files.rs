@@ -26,7 +26,8 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
                 && cli.task.is_none()
                 && cli.wave.is_none()
                 && !cli.selects_repository()
-                && crate::repo::discover_repo_root(&std::env::current_dir()?)?.is_none() =>
+                && loopflow_execution::repo::discover_repo_root(&std::env::current_dir()?)?
+                    .is_none() =>
         {
             return report(cli, args, None, &args.files, explain)
         }
@@ -36,7 +37,7 @@ pub(super) fn run(cli: &crate::lf::Cli, args: &OpenArgs, explain: bool) -> Resul
         Some(task) => task.worktree()?.clone(),
         None if args.selection.url.is_none() => {
             let directory = std::env::current_dir()?;
-            crate::repo::discover_repo_root(&directory)?.unwrap_or(directory)
+            loopflow_execution::repo::discover_repo_root(&directory)?.unwrap_or(directory)
         }
         None => target.cwd().to_path_buf(),
     };

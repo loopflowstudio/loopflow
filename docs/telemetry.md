@@ -50,12 +50,24 @@ and Task, and shows how turn time grows as context grows. `lf context` shows
 each budget, where it was set and current usage;
 [configuration](config.md#context-budgets) says how to change them.
 
+## How a Task went
+
+```bash
+lf task status LOO-12 --json | jq .summary   # one row, written when the Task completes or is abandoned
+```
+
+The summary names how the Task ended and when, the Graph it ran, how many times
+each loop went around again (`loop_passes`, by the deciding step), its Auto-Ship
+log by kind (`ship_events`), wall time from its first Graph run, and the
+first line its last `reflect` step said. It is `null` until the Task ends.
+Cost stays in `lf session usage --task`. Each recorded run also carries
+`skill_version`, the SHA-256 of the skill text it launched with, in
+`lf session usage --json`, so two runs of one skill name compare by its text.
+
 ## What happened
 
 ```bash
 lf session history --task LOO-12                  # what its Sessions did: input, turns, outcomes
-lf session history list --task LOO-12             # every command that ran for it, newest first
-lf session history list --search "land" --all     # one command, across every repository
 lf session history show <id> --final              # what the agent concluded
 lf session history show <id> --context            # what its input was made of
 lf session history show <id> --transcript         # the conversation, as its providers kept it
@@ -66,13 +78,12 @@ lf session retention                              # what providers still keep, a
 `lf session history` orders what Sessions did — input captured, provider turns,
 recorded outcomes — each tagged with its Task or Wave. Changes no Session made
 (PRs, Steers, Workflow moves, sync) are on the Task: `lf task status`.
-`session history list` is the command record underneath it, one row per lf or
-agent process (`kind`), with its parent and outcome. Narrow it with `--parent`,
-`--caller SESSION` or `--outcome`; an agent `--parent` lists the lf commands it
-issued.
+There is no separate command record: an `lf` command an agent ran is a tool call
+in its transcript, and a Graph run's steps and results are in
+`lf graph show <RUN>`.
 
-`session history show` opens any process or Session by ID. `--events` prints a
-Session's raw input events, including which account it actually ran on.
+`session history show` opens a Session by ID. `--events` prints a
+Session's raw input events, native conversation identity and provider outcomes.
 `--instructions` explains which instructions were included and which were left out.
 
 Conversation text stays with its provider: `session history show` reads it from Claude,
@@ -96,8 +107,14 @@ answer) and why: Claude removes conversations idle longer than
 `cleanupPeriodDays` (30 days unless set in its `settings.json`); Codex, OpenCode
 and Pi keep everything. Raise `cleanupPeriodDays` to keep more Claude history.
 
-Replay a captured request as new work, with the same prompt, model, account and
-permissions; the original record is left alone:
+lf keeps its own records of what happened apart from the store of current
+work, in `~/.lf/history.db`: one row per provider turn (time, status, model,
+tokens, final message, and the Task, Wave, skill and Graph step it ran for),
+kept, and 90 days of Session history (retries, failures, provider changes).
+The Machine server prunes history past 90 days every hour; `lf machine prune`
+does the same at once.
+
+Replay a captured request as new work, with the same prompt, model and permissions, using current native authentication; the original record is left alone:
 
 ```bash
 lf replay <run-id>
@@ -106,15 +123,19 @@ lf replay <run-id>
 ## What's running now
 
 ```bash
-lf process top                  # live call trees, refreshing; the first move when work feels slow
-lf process list --json          # one parseable snapshot, for another tool or agent
-lf process prune --dry-run      # receipts, orphaned providers and Process rows safe to remove
+lf session list                 # live Sessions on this Machine
+lf graph list --runs       # Graphs that ran; a live one is current
 ```
 
-Both show only processes the OS says are alive; finished calls drop out and move
-to `lf session history`. `lf process prune` removes stale receipts and provider
-processes whose lf parent is provably dead, never an unclaimed provider, then
-forgets finished Process rows nothing references and compacts the store.
+A live Session or Graph run is one whose recorded pid the OS confirms alive
+with the start time lf recorded. A run that exited keeps its result in
+`lf task status <ID>` and `lf graph show <RUN>`. There is no call tree and no
+command log: commands an agent runs are tool calls in its transcript
+(`lf session history show <ID> --transcript`).
+
+When a process died without lf seeing it exit, the Machine server notices on its
+next pass, marks the run ended with an unknown result and releases the Session.
+`lf machine prune` drops history past its retention and compacts the files.
 
 ## How big the codebase is
 
@@ -130,11 +151,16 @@ cheap in lines and expensive in tokens; this shows it.
 ## Is Loopflow healthy
 
 ```bash
-lf machine doctor             # store, process records, lineage, attribution, installation, lock contention
+lf machine doctor             # store, attribution, installation, lock contention, stray processes
 lf machine doctor --plan  # repository planning, read without changing it
 ```
 
 Each check reports ok, warn or fail with its detail. `--json` returns the same audit.
+
+The `strays` check lists OS processes that carry an lf Session or run
+(`LF_STEER_SESSION`, `LF_PROCESS_ID`) but that no live Session or Graph run
+claims, with children folded under the stray that started them. Doctor reports
+them and stops nothing; end one with `kill <pid>` once you know what it is.
 
 ## Reference
 
@@ -144,14 +170,13 @@ Each check reports ok, warn or fail with its detail. `--json` returns the same a
 | `lf session usage --context` / `--weekly` | Input by source / context cost and turn time by week |
 | `lf session usage --parent SESSION` | Usage of the inputs one Session issued |
 | `lf session history [--task\|--wave]` | What Sessions did, newest first |
-| `lf session history list` | Recorded commands; filter by Task, Wave, parent, caller, text, outcome |
-| `lf session history show ID` | One process or Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
+| `lf session history show ID` | One Session; `--final`, `--context`, `--transcript`, `--events`, `--instructions` |
 | `lf session history search TEXT` / `lf session retention` | Find text in recent conversations / what providers still keep |
 | `lf replay ID` | New work from a captured request |
-| `lf process list`, `lf process top` | Live process trees |
-| `lf process prune` | Remove dead receipts, orphaned providers and finished Process rows |
+| `lf session list`, `lf graph list` | Live Sessions and Graph runs, OS-confirmed |
+| `lf machine prune` | Expire old history and compact the files |
 | `lf repo tokens [--days N]` | Codebase size in lines and tokens |
-| `lf machine doctor [--plan]` | Installation, storage and process integrity |
+| `lf machine doctor [--plan]` | Installation, storage and stray processes |
 
 `lf usage`, `lf history` and `lf doctor` resolve to the same commands. Every
 flag is in the [`lf` reference](lf-reference.md#lf-session).

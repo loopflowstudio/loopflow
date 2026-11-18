@@ -117,7 +117,7 @@ fn one_task(world: &World) -> Result<()> {
         0.2,
     )?;
     world.task_run(&task, "feature", 0.03, 8, Outcome::Succeeded)?;
-    world.task_run(&task, "pursue", 0.01, 4, Outcome::Succeeded)?;
+    world.task_run(&task, "plan", 0.01, 4, Outcome::Succeeded)?;
     Ok(())
 }
 
@@ -207,7 +207,7 @@ fn portfolio(world: &World) -> Result<()> {
         0.5,
     )?;
     world.task_run(&running, "feature", 0.03, 5, Outcome::Succeeded)?;
-    world.wait_at(&running, "demo")?;
+    world.wait_at(&running, "human-review")?;
     world.uncommitted(
         &running,
         &[(
@@ -226,7 +226,7 @@ fn portfolio(world: &World) -> Result<()> {
         "Additive migrations should not lock out older lf.",
     )?;
     let failed = world.checkout(&failed)?;
-    // `code` sets out on `pursue`, which fails at `sync` (its fifth step).
+    // `code` plans, then builds, and fails at `sync` (its fifth step).
     world.task_run(&failed, "code", 0.02, 6, Outcome::FailedAt(4))?;
 
     world.task(
@@ -377,7 +377,7 @@ fn lifecycle(world: &World) -> Result<()> {
 
 fn density(world: &World) -> Result<()> {
     const PHRASES: [&str; 4] = [
-        "Retry and publish the chapter safely",
+        "Retry and publish the project safely",
         "Understand running work",
         "A calmer desktop workspace",
         "Keep Task observation read-only",
@@ -459,7 +459,7 @@ const BACKLOG: &[(&str, &str)] = &[
     ),
     (
         "Archive stale backlog ideas",
-        "Ideas older than a chapter clutter the backlog but shouldn't be lost.\n\n\
+        "Ideas older than a project clutter the backlog but shouldn't be lost.\n\n\
          Offer an Archived section, collapsed by default, and a one-click way \
          back. Archiving never deletes a Task.",
     ),
@@ -564,7 +564,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         let done = world.task(
             Some("desktop"),
             title,
-            "Small polish from the last chapter.",
+            "Small polish from the last project.",
         )?;
         let done = world.checkout(&done)?;
         world.task_run(&done, "pursue", days, 12, Outcome::Succeeded)?;
@@ -892,7 +892,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         ("Retire the old release script", 20.0),
         ("Move fixtures to worlds", 12.0),
     ] {
-        let done = world.task(Some("archive"), title, "Finished last chapter.")?;
+        let done = world.task(Some("archive"), title, "Finished last project.")?;
         let done = world.checkout(&done)?;
         world.task_run(&done, "pursue", days, 15, Outcome::Succeeded)?;
         world.complete(&done, "Landed", days)?;

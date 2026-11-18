@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::lf::Cli;
-use crate::work::wave::config::{try_read_wave_chat_config, WaveChatConfig};
+use loopflow_execution::work::wave::config::{try_read_wave_chat_config, WaveChatConfig};
 
 #[derive(Debug, Deserialize)]
 struct Author {
@@ -39,7 +39,7 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
     if !channel_id.bytes().all(|byte| byte.is_ascii_digit()) || channel_id.is_empty() {
         return Err(anyhow!("Discord channel_id must be a numeric channel id"));
     }
-    let token = std::env::var(crate::os_process::DISCORD_TOKEN_ENV)
+    let token = std::env::var(loopflow_execution::os_process::DISCORD_TOKEN_ENV)
         .context("set LF_DISCORD_TOKEN through Doppler")?;
     let mut authorization = header::HeaderValue::from_str(&format!("Bot {token}"))
         .map_err(|_| anyhow!("invalid Discord token"))?;
@@ -55,12 +55,13 @@ pub fn serve(repo: &Path, wave: &str) -> Result<()> {
     let runtime = tokio::runtime::Runtime::new()?;
     runtime.block_on(async {
         let store = Arc::new(
-            crate::store::open_existing_store()
+            loopflow_execution::store::open_existing_store()
                 .await?
                 .ok_or_else(|| anyhow!("Discord bridge needs an initialized local store"))?,
         );
         let binding =
-            crate::ops::resolve_work_binding(&store, repo, &format!("wave:{wave}")).await?;
+            loopflow_execution::ops::resolve_work_binding(&store, repo, &format!("wave:{wave}"))
+                .await?;
         let cli = Cli::try_parse_from(["lf", "--batch", "--wave", wave])?;
         let mut cursor = messages(&client, &url, None)
             .await?

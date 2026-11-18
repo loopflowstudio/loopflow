@@ -4,7 +4,6 @@ import Loopflow
 
 struct WaveDetailReading {
     private(set) var snapshot: WaveRoadmap?
-    private(set) var errorMessage: String?
 
     func plan(cached: WavePlan) -> WavePlan {
         guard let snapshot else { return cached }
@@ -13,17 +12,11 @@ struct WaveDetailReading {
 
     mutating func update(_ snapshot: WaveRoadmap) {
         self.snapshot = snapshot
-        errorMessage = nil
     }
 
-    mutating func recordFailure(_ error: Error) {
-        snapshot = nil
-        errorMessage = "Wave status unavailable: \(error.localizedDescription)"
-    }
-
+    /// The Wave has no live reading; the planning reading's Notice says why.
     mutating func clear() {
         snapshot = nil
-        errorMessage = nil
     }
 }
 
@@ -138,7 +131,6 @@ private struct WavePlanView: View {
                         onOpenTask: onOpenTask
                     )
                 }
-                liveStatusFooter
             }
             .padding(Spacing.xl)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -162,7 +154,7 @@ private struct WavePlanView: View {
             historyNow = Date()
             reading.update(snapshot)
         } else {
-            reading.recordFailure(RegistryQueryError(streamed.reason ?? "Wave status unavailable"))
+            reading.clear()
         }
         isAwaitingDetail = false
     }
@@ -245,7 +237,7 @@ private struct WavePlanView: View {
 
     private var projectAndTasks: some View {
         VStack(alignment: .leading, spacing: Spacing.md) {
-            if let project = displayedPlan.currentProject { WaveProjectView(project: project) }
+            if let project = displayedPlan.currentProject { WaveProjectView(project: project, repo: wave.repo) }
             if isAwaitingDetail {
                 WorkSectionHeading("Tasks")
                 ProgressView("Loading Tasks…").accessibilityIdentifier("wave-detail-loading")
@@ -256,7 +248,7 @@ private struct WavePlanView: View {
                     Text(reason).foregroundStyle(palette.warning)
                 case .available(let inventory, let truncated):
                     let tasks = closed.merged(after: inventory).filter {
-                        historyFilter.includes($0.task, condition: $0.condition, now: historyNow)
+                        historyFilter.includes($0, now: historyNow)
                     }
                     WorkSectionHeading(title: "Tasks", count: tasks.count) {
                         TaskHistoryControls(filter: $historyFilter)
@@ -278,35 +270,7 @@ private struct WavePlanView: View {
                 WorkSectionHeading("Tasks")
                 Text("Task status unavailable.").foregroundStyle(palette.textSecondary)
             }
-            ForEach(reading.snapshot?.unavailableTasks ?? [], id: \.taskId) { task in
-                Text("\(task.taskIdentifier): \(task.reason) · \(task.recovery)")
-                    .foregroundStyle(palette.warning)
-            }
         }.accessibilityIdentifier("wave-tasks")
-    }
-
-    /// Live-status failures are operational detail, not primary hierarchy: a
-    /// quiet footer says the authored plan is showing cached and hides the raw
-    /// reason behind disclosure. Volatile status and metrics never survive a
-    /// failed refresh; the plan above still renders from the cached `WavePlan`.
-    @ViewBuilder
-    private var liveStatusFooter: some View {
-        if let errorMessage = reading.errorMessage {
-            DisclosureGroup {
-                Text(errorMessage)
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, Spacing.xxs)
-            } label: {
-                Label("Showing cached plan · live status unavailable", systemImage: "arrow.triangle.2.circlepath")
-                    .font(Typography.caption(10))
-                    .foregroundStyle(palette.textSecondary)
-            }
-            .tint(palette.textSecondary)
-            .accessibilityIdentifier("wave-live-status-footer")
-        }
     }
 
     private func applyMockDetail() {
@@ -522,7 +486,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let contractIssueCount: Int
     private let unavailableWaves: Set<String>
 
-    var chapterUnavailable: Bool { !unavailableWaves.isEmpty }
+    var projectUnavailable: Bool { !unavailableWaves.isEmpty }
 
     func targetUnavailable(for metric: MetricReading) -> Bool {
         unavailableWaves.contains(metric.identity.waveId)
@@ -537,13 +501,13 @@ struct WaveMetricPortfolioPresentation: Equatable {
         requiresWorkCount = targetedCount - holdingCount
         contractIssueCount = portfolio.contractIssues.count
         unavailableWaves = Set(portfolio.contractIssues.compactMap {
-            if case let .chapterUnavailable(waveId, _) = $0 { return waveId }
+            if case let .projectUnavailable(waveId, _) = $0 { return waveId }
             return nil
         })
     }
 
     var headline: String {
-        if chapterUnavailable { return "Project targets unavailable." }
+        if projectUnavailable { return "Project targets unavailable." }
         if officialCount > 0 && targetedCount == 0 { return "No targets set for this Project." }
         switch (targetedCount, holdingCount) {
         case (0, _):
@@ -699,7 +663,7 @@ private extension MetricUnknownCause {
 private extension MetricContractIssue {
     var summary: String {
         switch self {
-        case let .chapterUnavailable(waveId, reason): return "\(waveId): Project targets unavailable: \(reason)"
+        case let .projectUnavailable(waveId, reason): return "\(waveId): Project targets unavailable: \(reason)"
         case let .unresolvedTarget(waveId, metricId): return "\(waveId)/\(metricId): Project target has no readable instrument contract"
         case let .malformedContract(path, message): return "\(path): \(message)"
         case let .instrumentMismatch(waveId, metricId, contractInstrument, registeredInstrument):
@@ -718,7 +682,7 @@ private struct RoadmapTaskView: View {
 
     /// State, owner when owned, and who moves next.
     private var statusLine: String {
-        let state = task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted"
+        let state = task.historyLabel
         let owner = task.runtime?.owner.map { " · \($0.summary)" } ?? ""
         return "\(state)\(owner) · next: \(task.nextMove.owner.rawValue)"
     }
@@ -786,7 +750,7 @@ private struct WaveWorkInspector: View {
                     .font(Typography.sectionTitle(15))
                     .foregroundStyle(palette.text)
                 details(
-                    status: task.task.historyLabel ?? task.runtime?.status.label ?? "unstarted",
+                    status: task.historyLabel,
                     reason: task.condition.reason,
                     provider: task.runtime?.provider,
                     location: taskLocation,
@@ -867,12 +831,13 @@ private struct PrLink: View {
 
 struct WaveProjectView: View {
     let project: ProjectPlanningSnapshot
+    let repo: String
     @Environment(\.palette) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(project.name).font(Typography.sectionTitle(15)).textSelection(.enabled)
-            PlanningSyncView(sync: project.sync)
+            TrackerSyncView(sync: project.sync, repo: repo)
             ForEach(project.krs) { kr in
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Circle()

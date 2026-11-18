@@ -42,7 +42,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "start",
@@ -51,20 +51,10 @@
       "prepare_only": false
     },
     "state": "unknown",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "opening": {
+      "label": "Start conversation",
+      "help": "No saved provider history; this starts it"
+    },
     "impediments": [],
     "unavailable": []
   },
@@ -111,7 +101,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "resume",
@@ -120,20 +110,10 @@
       "prepare_only": true
     },
     "state": "unknown",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "opening": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "impediments": [],
     "unavailable": []
   },
@@ -180,29 +160,19 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
-      "intent": "take_over",
+      "intent": "view",
       "agent": "codex",
       "fork": false,
       "prepare_only": false
     },
-    "state": "unknown",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "state": "active",
+    "opening": {
+      "label": "Open here",
+      "help": "View the running conversation here: lf resume session-proof"
+    },
     "impediments": [],
     "unavailable": [
       "Recorded live endpoint is not probed"
@@ -251,11 +221,11 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": null,
     "state": null,
-    "actions": [],
+    "opening": null,
     "impediments": [],
     "unavailable": [
       "Session input has no recorded provider"
@@ -304,7 +274,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "intent": "new_thread",
@@ -313,20 +283,7 @@
       "prepare_only": false
     },
     "state": "unknown",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "opening": null,
     "impediments": [],
     "unavailable": []
   }

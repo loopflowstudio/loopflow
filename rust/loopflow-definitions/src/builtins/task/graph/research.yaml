@@ -1,0 +1,4 @@
+# Investigate and report, with no PR. The Task ends on findings you accept.
+- loop:
+    - step: research
+    - interactive: research

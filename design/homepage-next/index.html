@@ -1531,8 +1531,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 @media (max-width:900px){.appmock .wf{flex-direction:column;align-items:stretch;gap:12px}.appmock .wf .node{flex:none}.appmock .wf .edge i{width:2px;height:22px;margin:0 auto}.appmock .wf .edge i::after{right:-4px;top:auto;bottom:-1px;border-top:8px solid #b9b1a6;border-left:5px solid transparent;border-right:5px solid transparent;border-bottom:0}}
 .home-page .pair h2{max-width:900px}
 .home-page .pair .halves .more{margin:0;border:0;padding:0}
-.home-page :is(.clihero,.bigcli) .term .bar{display:inline-block;width:120px;height:8px;border-radius:4px;background:#3a3434;vertical-align:middle;overflow:hidden}
-.home-page :is(.clihero,.bigcli) .term .bar i{display:block;height:100%;background:#e06c8b;border-radius:4px}
 .home-page .home-hero .rotating{background:linear-gradient(180deg,#fdf9fa,#f8eef1);box-shadow:inset 0 0 0 1px #722f3714,0 10px 24px -20px #722f3740}
 /* A heading with five cycling words runs a ten-second cycle. */
 @media (prefers-reduced-motion: no-preference) {
@@ -1800,7 +1798,6 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
   <pre tabindex="0" aria-label="lf commands" class="term"><span class="p">$</span> <b>lf</b> wt create cpu-pods       <span class="c"># a worktree and a branch</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini \         <span class="c"># where it runs</span>
-     --account claude=you@ \  <span class="c"># whose login pays</span>
      -a claude:opus \         <span class="c"># which agent and model</span>
      --wt cpu-pods \          <span class="c"># in which worktree</span>
      --docs docs/runpod.md \  <span class="c"># what it reads first</span>
@@ -1810,19 +1807,14 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
 <span class="p">$</span> <b>lf</b> pr open                  <span class="c"># a draft PR, opened for you</span>
 <span class="p">$</span> <b>lf</b> land --wait-and-fix      <span class="c"># merge when checks pass; fix if not</span>
 
-<span class="p">$</span> <b>lf</b> account
-<span class="c">  claude  you@    </span><i class="bar"><i style="width:78%"></i></i><span class="c">  78% left</span>
-<span class="c">  claude  work@   </span><i class="bar"><i style="width:21%"></i></i><span class="c">  21% left</span>
-<span class="c">  codex   you@    </span><i class="bar"><i style="width:52%"></i></i><span class="c">  52% left</span>
-
 <span class="p">$</span> <b>lf</b> usage --wt cpu-pods
 <span class="c">  3 sessions · 2 agents · 412k tokens · $4.18</span>
 
 <span class="p">$</span> <b>lf</b> --machine mini monitor
 <span class="c">  6 sessions running · 2 available</span></pre>
   <div class="bigcli-foot">
-    <p>It scales across your machines and your subscriptions: private, secure remote jobs and telemetry made easy through <code>ssh</code>, and multi-subscription balancing that moves to the next login when one runs out.</p>
-    <p class="more"><a href="https://loopflow.studio/docs/lf-reference">The CLI ↗</a><a href="https://loopflow.studio/docs/subscriptions">Accounts and usage ↗</a></p>
+    <p>Run work across your machines through <code>ssh</code>, with persistent conversations and provider-reported usage. Choose the model and harness for each Skill; headless runs can continue through your configured fallback order.</p>
+    <p class="more"><a href="https://loopflow.studio/docs/lf-reference">The CLI ↗</a><a href="https://loopflow.studio/docs/subscriptions">Native authentication ↗</a></p>
   </div>
 </section>
 <section class="pair split problem">
@@ -1910,7 +1902,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
   <div class="halves">
     <article>
       <p>Each task has one owner, one working copy and one pull request, so your agents and a friend’s agents can work in the same project without taking the same task or writing over each other.</p>
-      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear, with Asana and Notion coming. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
+      <p>The plan is shared: your tasks live on a shared ref in your project’s GitHub repository, or in Linear or Asana. Comment on someone’s task, and their agents read it before their next step. Your conversations stay on your computer; only the plan travels.</p>
       <p class="more"><a href="https://loopflow.studio/docs/work#share-the-plan">Share the plan ↗</a></p>
     </article>
     <article>
@@ -1931,7 +1923,7 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
   <ul>
     <li><b><a href="https://claude.com/claude-code" target="_blank" rel="noopener">Claude Code</a> · <a href="https://openai.com/codex" target="_blank" rel="noopener">Codex</a> · <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode</a> · <a href="https://pi.dev" target="_blank" rel="noopener">Pi</a></b><span>the coding agent, on your own account</span></li>
     <li><b><a href="https://github.com" target="_blank" rel="noopener">GitHub</a></b><span>your code, your pull requests, and your reviewers</span></li>
-    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana · Notion</b><span>the plan your team already reads, or keep it in Git; Asana and Notion coming</span></li>
+    <li><b><a href="https://linear.app" target="_blank" rel="noopener">Linear</a> · Asana</b><span>the plan your team already reads, or keep it in Git</span></li>
     <li><b><a href="https://wisprflow.ai" target="_blank" rel="noopener">Wispr Flow</a></b><span>talk instead of typing</span></li>
     <li><b><a href="https://www.superlogical.com/rex" target="_blank" rel="noopener">Rex</a> · <a href="https://cmux.com" target="_blank" rel="noopener">cmux</a> · <a href="https://herdr.dev" target="_blank" rel="noopener">herdr</a></b><span><code>lf</code> runs inside them</span></li>
   </ul>

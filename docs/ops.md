@@ -2,9 +2,8 @@
 
 Your Task came back as a pull request. This page takes it the rest of the way:
 landed, with failing CI repaired for you, then released. It also covers the
-environment that work runs in: checkouts, other machines, and the provider
-accounts that pay for it. Each section is one `lf` noun: `pr`, `repository`,
-`wt`, `machine`, `account`.
+environment that work runs in: checkouts, other Machines, native provider logins
+and service authentication.
 
 Land, publish, CI repair and release are Loopflow's own verbs, so Skills and
 Graphs that use them don't care which code host is behind them. GitHub is the
@@ -30,7 +29,7 @@ Nothing repairs its PR until a waited landing does.
 To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf ship LOO-12               # remaining steps, then deliver: gate, land --wait-and-fix
+lf ship LOO-12               # remaining steps, then deliver: reflect, gate, land --wait-and-fix
 ```
 
 A PR merged while shipping sends the Task to its graph's last interactive step
@@ -116,7 +115,7 @@ unreadable CI status stays unavailable. A local pass is reported as local.
 
 If your CI only tests PRs in some state (a label, no draft, a cleared notes
 directory), name that step in your agent guide. Gate does it before publishing.
-`lf skill customize gate` copies the Skill to change the rest.
+`lf skill customize gate --full` copies the Skill to change the rest.
 
 ### When CI fails
 
@@ -130,7 +129,7 @@ The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A shipping Task
 whose ship process died starts again on the next read of this Machine's work
-(`lf task status`, `lf process list`, Desktop). After bare `lf land` returns, nothing
+(`lf task status`, `lf session list`, Desktop). After bare `lf land` returns, nothing
 repairs its PR.
 
 `lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.
@@ -162,10 +161,8 @@ tail ~/.lf/logs/refresh.log    # what each scheduled update did
 Installing a build schedules `lf install` on your stream: daily at 09:00 local
 time, or the cadence already set. On macOS this is the LaunchAgent
 `com.loopflow.refresh`, which also runs at login and whenever it loads. On Linux
-it is a crontab line. The same schedule renews rental Claude logins every 2
-hours (`com.loopflow.rental-renewal`, the crontab line ending `# loopflow rental
-renewal`; logs in `~/.lf/logs/rental-renewal.log`); with no live rental it does
-nothing.
+it is a crontab line. Subscription credentials are not renewed by this schedule;
+the native client owns refresh on its execution Machine.
 
 Turn it off on macOS:
 
@@ -280,6 +277,7 @@ target needs an explicit `X.Y.Z`.
 lf commit -m "retry budget" -p      # commit and push; paths after it commit only those
 lf sync --plan                      # what sync would do, without touching git
 lf sync                             # merge main, or the stack parent, into this branch
+lf sync LOO-12                      # stack this Task on LOO-12 and merge its branch
 lf wt create spike                  # a worktree beside the repository, in its layout
 lf wt prune --branches --dry-run    # branches of merged PRs and finished Tasks
 ```
@@ -294,7 +292,40 @@ Sync follows a stack parent through its squash merge. Stack one Task on any
 other Task that has a branch, before that parent lands or even opens a PR:
 
 ```bash
-lf task run LOO-13 --stack-on LOO-12
+lf task run LOO-13 --stack-on LOO-12   # a new Task, forked from LOO-12's branch
+lf sync LOO-12                         # from LOO-13's worktree, once it already exists
+```
+
+```
+$ lf sync LOO-12
+Stacked LOO-13 on LOO-12; PR #1972 now targets jack/loo-12-retry-budget
+Merging origin/jack/loo-12-retry-budget...
+Synced onto origin/jack/loo-12-retry-budget.
+```
+
+`lf sync` names its target by Task identifier or by branch. When the target is
+another open Task, sync records it as this Task's stack parent, moves the PR's
+base to the parent's branch, and merges it. A Task already stacked on a
+different parent moves to the new one and carries only its own commits across.
+`lf task checkout LOO-13 --stack-on LOO-12` records the same thing without
+merging. `lf task status LOO-13` reads `stacked on LOO-12 (#1974,
+jack/loo-12-retry-budget)`, and Desktop shows "Stacked on LOO-12" beside the
+PR. In an unstacked Task, any other branch, or a Task whose PR has merged,
+merges without recording a stack; a stacked Task syncs onto its parent, another
+open Task, or the default branch, which detaches it.
+
+Record a stack with these commands, not with `git merge` of the parent's branch
+or `gh pr edit --base`: lf reads neither, so the next `lf sync` merges main
+and the PR's base disagrees with the Task.
+
+`lf pr publish` keeps the PR's base. It sets the base when it creates the PR,
+and after that moves it only when the stack parent has merged, retargeting to
+main. When the base disagrees with the stack, publish updates the title and
+body, leaves the base, and names a command for each side:
+
+```
+PR #1972 targets jack/loo-12-retry-budget (LOO-12), but LOO-13 records no stack parent.
+Kept the PR's base. Record it: lf sync LOO-12. Follow the record: gh pr edit 1972 --base main
 ```
 
 When the parent has no PR yet, stacking pushes its branch if origin lacks it or
@@ -342,7 +373,7 @@ access, and [Surfaces](surfaces.md) for app-owned Desktop automation.
 
 ```bash
 lf machine add mini                              # save an SSH destination; offers to install lf
-lf machine connect mini claude jack@example.com  # a login of its own, approved in this laptop's browser
+ssh mini                                        # sign in with the native client on mini
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf --wave product set machine mini               # new Tasks in Wave `product` run there
@@ -356,7 +387,6 @@ Group machines you own into a pool, and rent more when none is free:
 
 ```bash
 lf pool add lab && lf machine add jack@mini --pool lab
-lf machine connect code-1 claude jack@example.com # once: approve the laptop's Claude login for rentals
 lf ondemand add code --provider daytona --vcpus 4 --memory-gb 8 --max 2 --max-usd-per-hour 0.40
 lf ondemand add gpu --provider runpod --vcpus 8 --memory-gb 32 --gpu A40 --max 1 --max-usd-per-hour 1
 lf task run LOO-570 --pool lab --rent code --quote   # where it would run, the most it could cost
@@ -365,7 +395,11 @@ lf --wave infrastructure set machine.capacity code            # the Wave's new T
 lf machine end code-1                                # give a rented machine back now
 ```
 
-Providers read their keys from the environment (`doppler run -- lf …`):
+Claude and Codex use the destination's native authentication. For unattended
+rentals, explicitly configure the documented credentials or home files with
+[named forwarding](subscriptions.md#remote-machines-and-rentals).
+
+Rental providers read their keys from the environment (`doppler run -- lf …`):
 Daytona `DAYTONA_API_KEY`; Modal `MODAL_TOKEN_ID`/`MODAL_TOKEN_SECRET` or
 `~/.modal.toml`; RunPod `RUNPOD_API_KEY`; AWS `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY` and `AWS_REGION`. `--gpu` rents one GPU on RunPod, AWS or Modal, on a
@@ -379,33 +413,21 @@ the token's lifetime (about a day). Its provider deletes a rented machine at
 its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
-Processes are copied home, so `lf session list` shows them "from code-1".
+Graph runs are copied home, so `lf session list` shows them "from code-1".
 Unpushed work refuses the give-back unless you pass `--force`.
 
-## Accounts
+## Authentication
 
 ```bash
-lf account                                         # one row per login: weekly room, what to fix
-lf account connect codex=work@example.com --chrome-profile Work
-lf set account.codex work@,personal@               # this repository: work first
-lf account next                                    # which login the next launch takes, and why
-lf account use work@                               # stay on work@ until it fills up; `use auto` undoes it
-lf account pause personal@                         # out of rotation
+codex login                          # on the Machine that runs Codex
+lf -a codex implement
+lf account connect linear --chrome-profile Work
 ```
 
-Connect registers a login you already have. It runs the provider's sign-in in
-the Chrome profile you name and refuses a login that doesn't match the email.
-Every launch takes the eligible account on the largest plan with the most
-weekly quota left per hour until its window resets, switching the shared login
-when another account ranks ahead; route order breaks ties. `lf account use`
-holds launches on one login until it fills up or `lf account use auto`.
-`lf account --cached` reads saved evidence without contacting providers.
-
-Unknown capacity stays unknown, never zero.
-
-For one launch, `--account codex=work@` prefers an account and keeps fallback;
-`--only-account` restricts the launch and its children. See
-[Sessions](sessions.md) for how a launch picks its account.
+Claude and Codex own their native logins. Loopflow does not select subscriptions,
+switch credentials or poll quotas. GitHub, planning services, Doppler and OpenCode
+retain service authentication through `lf account`. See
+[Native authentication](subscriptions.md) for homes, resume and refusal recovery.
 
 ## Reference
 
@@ -425,7 +447,7 @@ For one launch, `--account codex=work@` prefers an account and keeps fallback;
 | `lf pool …`, `lf ondemand …` | Machines you own, machines you rent |
 | `lf server status` | Observe local client access and connection errors |
 | `lf install` | Update Loopflow and its server registration |
-| `lf account [connect\|route\|use\|token\|set]` | Provider logins, capacity and routing |
+| `lf account` | Service authentication |
 
 Every flag is in the [`lf` reference](lf-reference.md): [`lf pr`](lf-reference.md#lf-pr),
 [`lf repo`](lf-reference.md#lf-repo), [`lf wt`](lf-reference.md#lf-wt),

@@ -85,7 +85,8 @@ struct WorkPaletteTests {
         #expect(palette.selectionEdge != palette.failure)
         #expect(palette.keyboardFocus != palette.selectionEdge)
         #expect(palette.keyboardFocus != palette.failure)
-        for state in [ProgramStatusState.working, .blocked, .error, .done, .idle] {
+        for (state, label) in [(ProgramStatusState.working, "Busy"), (.blocked, "Blocked"),
+                               (.error, "Error"), (.done, "Done"), (.idle, "Available")] {
             let report = ProgramStatusReport(state: state, id: nil, kind: nil, progress: nil,
                                              app: nil, title: nil, msg: nil)
             for selected in [false, true] {
@@ -96,7 +97,7 @@ struct WorkPaletteTests {
                         .modifier(AppAppearance(appearance: appearance))
                     let inspected = try view.inspect()
                     #expect(try inspected.environment(\.palette).keyboardFocus == palette.keyboardFocus)
-                    #expect(try inspected.find(text: state.rawValue.capitalized).string() == state.rawValue.capitalized)
+                    #expect(try inspected.find(text: label).string() == label)
                     let shapes = inspected.findAll(ViewType.Shape.self)
                     let ring = try #require(shapes.first { (try? $0.opacity()) != nil })
                     #expect(try ring.opacity() == (focused ? 1 : 0))

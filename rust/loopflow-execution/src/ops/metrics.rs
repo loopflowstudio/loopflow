@@ -1,0 +1,729 @@
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use anyhow::{anyhow, bail, Context, Result};
+use serde::Deserialize;
+use time::OffsetDateTime;
+
+use crate::store::Store;
+use crate::work::wave::metrics::{
+    compose_metric_portfolio, discover_metric_contracts, load_metric_contract,
+    MetricContractDiscovery, MetricContractIssueDto, MetricObservation, MetricPortfolioDto,
+    ObservationAcceptance,
+};
+use crate::work::wave::Wave;
+
+pub async fn wave_metric_portfolio(
+    store: &Store,
+    wave: &Wave,
+    evaluation_time: OffsetDateTime,
+) -> Result<MetricPortfolioDto> {
+    match super::project::current_project(store, wave) {
+        Ok(project) => {
+            project_metric_portfolio(store, wave, &project.metric_targets, evaluation_time).await
+        }
+        Err(error) => {
+            let mut discovery = discover_wave_contracts(wave)?;
+            discovery
+                .contract_issues
+                .push(MetricContractIssueDto::ProjectUnavailable {
+                    wave_id: wave.id().to_string(),
+                    reason: error.to_string(),
+                });
+            compose_persisted_portfolio(store, discovery, None, evaluation_time).await
+        }
+    }
+}
+
+pub(crate) async fn project_metric_portfolio(
+    store: &Store,
+    wave: &Wave,
+    targets: &[crate::work::wave::metrics::MetricTarget],
+    evaluation_time: OffsetDateTime,
+) -> Result<MetricPortfolioDto> {
+    let mut discovery = discover_wave_contracts(wave)?;
+    for target in targets {
+        if !discovery
+            .contracts
+            .iter()
+            .any(|source| source.contract.identity.metric_id == target.metric_id)
+        {
+            discovery
+                .contract_issues
+                .push(MetricContractIssueDto::UnresolvedTarget {
+                    wave_id: wave.id().to_string(),
+                    metric_id: target.metric_id.clone(),
+                });
+        }
+    }
+    compose_persisted_portfolio(store, discovery, Some(targets), evaluation_time).await
+}
+
+pub(crate) fn validate_project_targets(
+    wave: &Wave,
+    targets: &[crate::work::wave::metrics::MetricTarget],
+) -> Result<()> {
+    let discovery = discover_wave_contracts(wave)?;
+    for target in targets {
+        if !discovery
+            .contracts
+            .iter()
+            .any(|source| source.contract.identity.metric_id == target.metric_id)
+        {
+            bail!(
+                "project target references unavailable Wave metric {}",
+                target.metric_id
+            );
+        }
+    }
+    Ok(())
+}
+
+pub(crate) async fn stored_wave_metric_portfolio(
+    store: &Store,
+    wave: &Wave,
+    evaluation_time: OffsetDateTime,
+) -> Result<MetricPortfolioDto> {
+    wave_metric_portfolio(store, wave, evaluation_time).await
+}
+
+pub(crate) fn metric_prompt_section(tag: &str, portfolio: Result<MetricPortfolioDto>) -> String {
+    match portfolio {
+        Ok(portfolio) => format!(
+            "<lf:{tag}>\n{}\n</lf:{tag}>",
+            serde_json::to_string(&portfolio).expect("metric portfolio DTO always serializes")
+        ),
+        Err(error) => format!("<lf:{tag}>\nUnavailable: {error}\n</lf:{tag}>"),
+    }
+}
+
+fn discover_wave_contracts(wave: &Wave) -> Result<MetricContractDiscovery> {
+    let metrics_dir = metric_contract_repo(wave, std::env::var_os("LOOPFLOW_DEV_WAVE_REPO"))
+        .join(".lf/wave")
+        .join(wave.slug())
+        .join("metrics");
+    discover_metric_contracts(&metrics_dir, wave.id().as_str()).map_err(|error| anyhow!(error))
+}
+
+fn metric_contract_repo(wave: &Wave, dev_repo: Option<OsString>) -> PathBuf {
+    dev_repo
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(wave.repo()))
+}
+
+async fn compose_persisted_portfolio(
+    store: &Store,
+    discovery: MetricContractDiscovery,
+    targets: Option<&[crate::work::wave::metrics::MetricTarget]>,
+    evaluation_time: OffsetDateTime,
+) -> Result<MetricPortfolioDto> {
+    if discovery.contracts.is_empty() {
+        return compose_metric_portfolio(
+            discovery,
+            &Default::default(),
+            &Default::default(),
+            targets,
+            evaluation_time,
+        )
+        .map_err(|error| anyhow!(error));
+    }
+    if !store
+        .metric_storage_available()
+        .await
+        .map_err(|error| anyhow!("failed to inspect metric storage: {error}"))?
+    {
+        return compose_metric_portfolio(
+            discovery,
+            &Default::default(),
+            &Default::default(),
+            targets,
+            evaluation_time,
+        )
+        .map_err(|error| anyhow!(error));
+    }
+    let contracts = discovery
+        .contracts
+        .iter()
+        .map(|source| source.contract.clone())
+        .collect::<Vec<_>>();
+    let identities = contracts
+        .iter()
+        .map(|contract| contract.identity.clone())
+        .collect::<Vec<_>>();
+    let instruments = store
+        .metric_instruments(&identities)
+        .await
+        .map_err(|error| anyhow!("failed to read metric instruments: {error}"))?;
+    let observations = store
+        .metric_observation_evidence(&contracts)
+        .await
+        .map_err(|error| anyhow!("failed to read metric observations: {error}"))?;
+    compose_metric_portfolio(
+        discovery,
+        &instruments,
+        &observations,
+        targets,
+        evaluation_time,
+    )
+    .map_err(|error| anyhow!(error))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum MetricProducerObservation {
+    Observed {
+        wave: String,
+        metric_id: String,
+        instrument: String,
+        value: f64,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_start: OffsetDateTime,
+        #[serde(with = "time::serde::rfc3339")]
+        source_window_end: OffsetDateTime,
+        complete: bool,
+    },
+    Unavailable {
+        wave: String,
+        metric_id: String,
+        instrument: String,
+        #[serde(with = "time::serde::rfc3339")]
+        source_as_of: OffsetDateTime,
+        reason: String,
+    },
+}
+
+impl MetricProducerObservation {
+    fn address(&self) -> (&str, &str, &str) {
+        match self {
+            Self::Observed {
+                wave,
+                metric_id,
+                instrument,
+                ..
+            }
+            | Self::Unavailable {
+                wave,
+                metric_id,
+                instrument,
+                ..
+            } => (wave, metric_id, instrument),
+        }
+    }
+
+    fn bind(
+        self,
+        contract: &crate::work::wave::metrics::MetricContract,
+    ) -> Result<MetricObservation> {
+        let mut observation = match self {
+            Self::Observed {
+                value,
+                source_window_start,
+                source_window_end,
+                complete,
+                ..
+            } => MetricObservation::Observed {
+                identity: contract.identity.clone().into(),
+                contract_revision: contract.contract_revision.clone(),
+                instrument: contract.instrument.clone(),
+                observation_id: String::new(),
+                value,
+                source_window_start,
+                source_window_end,
+                complete,
+            },
+            Self::Unavailable {
+                source_as_of,
+                reason,
+                ..
+            } => MetricObservation::Unavailable {
+                identity: contract.identity.clone().into(),
+                contract_revision: contract.contract_revision.clone(),
+                instrument: contract.instrument.clone(),
+                observation_id: String::new(),
+                source_as_of,
+                reason,
+            },
+        };
+        let observation_id = observation
+            .expected_observation_id()
+            .map_err(|error| anyhow!(error))?;
+        match &mut observation {
+            MetricObservation::Observed {
+                observation_id: target,
+                ..
+            }
+            | MetricObservation::Unavailable {
+                observation_id: target,
+                ..
+            } => *target = observation_id,
+        }
+        Ok(observation)
+    }
+}
+
+pub async fn publish_metric_observations(
+    store: &Store,
+    repo: &Path,
+    observations: Vec<MetricProducerObservation>,
+    received_at: OffsetDateTime,
+) -> Result<Vec<String>> {
+    if observations.is_empty() {
+        return Ok(Vec::new());
+    }
+    if !store
+        .metric_storage_available()
+        .await
+        .map_err(|error| anyhow!("failed to inspect metric storage: {error}"))?
+    {
+        return Ok(vec![
+            "metric storage awaits the next released migration; observations were not persisted"
+                .to_string(),
+        ]);
+    }
+
+    let waves = store
+        .list_waves(Some(&repo.display().to_string()))
+        .await
+        .map_err(|error| anyhow!("failed to list repository Waves: {error}"))?;
+    let mut results = Vec::new();
+    for input in observations {
+        let (wave_name, metric_id, instrument) = {
+            let (wave_name, metric_id, instrument) = input.address();
+            (
+                wave_name.to_string(),
+                metric_id.to_string(),
+                instrument.to_string(),
+            )
+        };
+        let wave = waves
+            .iter()
+            .find(|wave| wave.slug() == wave_name)
+            .with_context(|| {
+                format!("producer metric {wave_name}/{metric_id} has no registered Wave")
+            })?;
+        if metric_id.contains('/')
+            || metric_id.contains('\\')
+            || metric_id == "."
+            || metric_id == ".."
+        {
+            bail!("producer metric id {metric_id:?} is not a direct contract filename");
+        }
+        let contract_path = repo
+            .join(".lf/wave")
+            .join(&wave_name)
+            .join("metrics")
+            .join(format!("{metric_id}.md"));
+        let contract =
+            load_metric_contract(&contract_path, wave.id().as_str()).map_err(|error| {
+                anyhow!(
+                    "load producer contract {}: {error}",
+                    contract_path.display()
+                )
+            })?;
+        if contract.instrument != instrument {
+            bail!(
+                "producer metric {wave_name}/{metric_id} emitted instrument {instrument:?}, contract declares {:?}",
+                contract.instrument
+            );
+        }
+        let observation = input.bind(&contract)?;
+        observation
+            .validate(&contract, received_at)
+            .map_err(|error| anyhow!("validate {wave_name}/{metric_id} observation: {error}"))?;
+
+        let registered = store
+            .metric_instruments(std::slice::from_ref(&contract.identity))
+            .await
+            .map_err(|error| anyhow!("read producer binding: {error}"))?;
+        match registered.get(&contract.identity) {
+            Some(existing) if existing != &instrument => bail!(
+                "producer metric {wave_name}/{metric_id} is already bound to {existing:?}, not {instrument:?}"
+            ),
+            Some(_) => {}
+            None => store
+                .register_metric_instrument(&contract.identity, &instrument, received_at)
+                .await
+                .map_err(|error| anyhow!("register producer binding: {error}"))?,
+        }
+
+        let acceptance = store
+            .accept_metric_observation(&contract, observation, received_at)
+            .await
+            .map_err(|error| anyhow!("accept {wave_name}/{metric_id} observation: {error}"))?;
+        let result = match acceptance {
+            ObservationAcceptance::Accepted => "accepted",
+            ObservationAcceptance::Duplicate => "duplicate",
+        };
+        results.push(format!("{wave_name}/{metric_id}: {result}"));
+    }
+    Ok(results)
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::test_linear_input::SeedLinear;
+    use std::ffi::OsString;
+    use std::fs;
+
+    use tempfile::tempdir;
+    use time::Duration;
+
+    use crate::store::StorageConfig;
+    use crate::work::wave::metrics::{
+        load_metric_contract, MetricEvidenceDto, MetricObservation, MetricStage,
+    };
+    use loopflow_model::id::WaveId;
+    use loopflow_storage::work::project::ProjectKR;
+
+    use super::*;
+    use loopflow_storage::planning::TrackerProject;
+
+    fn project(id: &str, slug: &str) -> TrackerProject {
+        TrackerProject {
+            description: None,
+            revision: None,
+            id: id.to_string(),
+            slug: slug.to_string(),
+            name: slug.replace('-', " "),
+            summary: String::new(),
+
+            metric_targets: Vec::new(),
+            status: loopflow_storage::work::project::ProjectStatus::Started,
+            krs: vec![ProjectKR {
+                text: "Proof holds for one week".to_string(),
+                holds: false,
+            }],
+            initiative_ids: vec!["initiative-1".to_string()],
+            team_ids: vec!["team-1".to_string()],
+        }
+    }
+
+    fn contract_markdown(
+        id: &str,
+        _project_id: &str,
+        stage: MetricStage,
+        instrument: &str,
+    ) -> String {
+        let stage = match stage {
+            MetricStage::Installed => "installed",
+            MetricStage::Graduated => "graduated",
+        };
+        format!(
+            "---\nschema: 1\nid: {id}\nstage: {stage}\ninstrument: {instrument}\nunit: ratio\nwindow: 7d\nfreshness: 6h\n---\n\n# {id}\n\nCount complete Task loops.\n"
+        )
+    }
+
+    fn observed(
+        contract: &crate::work::wave::metrics::MetricContract,
+        end: OffsetDateTime,
+    ) -> MetricObservation {
+        let mut observation = MetricObservation::Observed {
+            identity: contract.identity.clone().into(),
+            contract_revision: contract.contract_revision.clone(),
+            instrument: contract.instrument.clone(),
+            observation_id: String::new(),
+            value: 1.0,
+            source_window_start: end - Duration::days(7),
+            source_window_end: end,
+            complete: true,
+        };
+        let id = observation.expected_observation_id().unwrap();
+        let MetricObservation::Observed { observation_id, .. } = &mut observation else {
+            unreachable!()
+        };
+        *observation_id = id;
+        observation
+    }
+
+    #[test]
+    fn desktop_dev_build_reads_contracts_from_the_launched_checkout() {
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            "/src/loopflow".to_string(),
+        );
+
+        assert_eq!(
+            metric_contract_repo(
+                &wave,
+                Some(OsString::from("/src/loopflow.define-live-metrics"))
+            ),
+            PathBuf::from("/src/loopflow.define-live-metrics")
+        );
+        assert_eq!(
+            metric_contract_repo(&wave, None),
+            PathBuf::from(wave.repo())
+        );
+    }
+
+    #[tokio::test]
+    async fn shared_portfolio_joins_persisted_evidence_without_changing_krs() {
+        let directory = tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
+        fs::create_dir_all(&metrics_dir).unwrap();
+        let trust_path = metrics_dir.join("task-loop-trust.md");
+        fs::write(
+            &trust_path,
+            contract_markdown(
+                "task-loop-trust",
+                "project-api",
+                MetricStage::Graduated,
+                "lifecycle-scorecard",
+            ),
+        )
+        .unwrap();
+        fs::write(
+            metrics_dir.join("surface-parity.md"),
+            contract_markdown(
+                "surface-parity",
+                "project-surface",
+                MetricStage::Installed,
+                "surface-scorecard",
+            ),
+        )
+        .unwrap();
+
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        store
+            .apply_migration_for_test("project_metric_observations")
+            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let projects = [
+            project("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "loopflow-api"),
+            project("project-surface", "mac-surface"),
+        ];
+        let unchanged_krs = projects
+            .iter()
+            .map(|project| project.krs.clone())
+            .collect::<Vec<_>>();
+        let contract = load_metric_contract(&trust_path, wave.id().as_str()).unwrap();
+        let source_time = OffsetDateTime::UNIX_EPOCH + Duration::days(30);
+        store
+            .register_metric_instrument(&contract.identity, &contract.instrument, source_time)
+            .await
+            .unwrap();
+        store
+            .accept_metric_observation(&contract, observed(&contract, source_time), source_time)
+            .await
+            .unwrap();
+
+        let portfolio = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(portfolio.metrics.len(), 2);
+        assert!(matches!(
+            portfolio.contract_issues.as_slice(),
+            [MetricContractIssueDto::ProjectUnavailable { .. }]
+        ));
+        assert!(portfolio.metrics.iter().any(|metric| {
+            matches!(
+                metric.evidence,
+                MetricEvidenceDto::Unknown {
+                    cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                        value: 1.0,
+                        ..
+                    }
+                }
+            )
+        }));
+        assert!(portfolio
+            .metrics
+            .iter()
+            .any(|metric| { matches!(metric.evidence, MetricEvidenceDto::Unknown { .. }) }));
+
+        let mut snapshot = crate::test_linear_input::InventoryFixture {
+            wave_id: wave.id().clone(),
+            initiative: "initiative-1".into(),
+            synced_at: 1,
+            snapshot: crate::test_linear_input::Inventory {
+                projects: vec![projects[0].clone()],
+                items: vec![],
+            },
+        };
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        loopflow_storage::sqlite::project_selection::write_project_binding(
+            &store.sqlite,
+            wave.id(),
+            None,
+            &projects[0].id,
+            &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
+        )
+        .unwrap();
+        let untargeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert!(untargeted.contract_issues.is_empty());
+        assert!(untargeted.metrics.iter().any(|metric| matches!(
+            metric.evidence,
+            MetricEvidenceDto::Untargeted { value: 1.0, .. }
+        )));
+        let mut targeted_project = projects[0].clone();
+        targeted_project.revision = Some("2026-09-30T00:00:01Z".into());
+        targeted_project
+            .metric_targets
+            .push(crate::work::wave::metrics::MetricTarget {
+                metric_id: "task-loop-trust".into(),
+                target: crate::work::wave::metrics::Threshold::AtLeast { value: 1.0 },
+            });
+        snapshot.snapshot = crate::test_linear_input::Inventory {
+            projects: vec![targeted_project],
+            items: vec![],
+        };
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        let targeted = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert!(targeted
+            .metrics
+            .iter()
+            .any(|metric| matches!(metric.evidence, MetricEvidenceDto::Met { value: 1.0, .. })));
+        snapshot.snapshot = crate::test_linear_input::Inventory {
+            projects: projects.to_vec(),
+            items: vec![],
+        };
+        snapshot.snapshot.projects[0].revision = Some("2026-09-30T00:00:02Z".into());
+        store.seed_inventory(snapshot.clone(), None).await.unwrap();
+        let before = store.list_projects(Some(wave.id())).await.unwrap();
+        let selected = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(selected.metrics, untargeted.metrics);
+        assert!(selected.contract_issues.is_empty());
+        assert_eq!(store.list_projects(Some(wave.id())).await.unwrap(), before);
+
+        let owned = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+        assert_eq!(owned.metrics.len(), 2);
+        assert_eq!(owned.metrics[0].description, "Count complete Task loops.");
+        let prompt = metric_prompt_section("wave-metrics", Ok(owned));
+        assert!(prompt.contains("\"description\":\"Count complete Task loops.\""));
+        assert_eq!(
+            projects
+                .iter()
+                .map(|project| project.krs.clone())
+                .collect::<Vec<_>>(),
+            unchanged_krs
+        );
+    }
+
+    #[tokio::test]
+    async fn source_build_keeps_installed_metric_visible() {
+        let directory = tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
+        fs::create_dir_all(&metrics_dir).unwrap();
+        fs::write(
+            metrics_dir.join("task-loop-trust.md"),
+            contract_markdown(
+                "task-loop-trust",
+                "project-api",
+                MetricStage::Installed,
+                "lifecycle-scorecard",
+            ),
+        )
+        .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+
+        let portfolio = wave_metric_portfolio(
+            &store,
+            &wave,
+            OffsetDateTime::UNIX_EPOCH + Duration::days(30),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(portfolio.metrics.len(), 1);
+        assert!(!portfolio.metrics[0].instrumented);
+        assert!(matches!(
+            portfolio.metrics[0].evidence,
+            MetricEvidenceDto::Unknown { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn lifecycle_producer_persists_the_reading_consumers_project() {
+        let directory = tempdir().unwrap();
+        let repo = directory.path().join("repo");
+        let metrics_dir = repo.join(".lf/wave/product/metrics");
+        fs::create_dir_all(&metrics_dir).unwrap();
+        fs::write(
+            metrics_dir.join("task-loop-trust.md"),
+            contract_markdown(
+                "task-loop-trust",
+                "project-api",
+                MetricStage::Installed,
+                "lifecycle-scorecard",
+            ),
+        )
+        .unwrap();
+        let store = crate::store::open_ephemeral_store(&StorageConfig::sqlite(
+            directory.path().join("registry.db"),
+        ))
+        .await
+        .unwrap();
+        store
+            .apply_migration_for_test("project_metric_observations")
+            .unwrap();
+        let wave = Wave::new(
+            WaveId::new(),
+            "product".to_string(),
+            repo.display().to_string(),
+        );
+        store.create_wave(&wave).await.unwrap();
+        let source_time = OffsetDateTime::UNIX_EPOCH + Duration::days(30);
+        let result = publish_metric_observations(
+            &store,
+            &repo,
+            vec![MetricProducerObservation::Observed {
+                wave: "product".to_string(),
+                metric_id: "task-loop-trust".to_string(),
+                instrument: "lifecycle-scorecard".to_string(),
+                value: 1.0,
+                source_window_start: source_time - Duration::days(7),
+                source_window_end: source_time,
+                complete: true,
+            }],
+            source_time,
+        )
+        .await
+        .unwrap();
+
+        let portfolio = wave_metric_portfolio(&store, &wave, source_time + Duration::hours(1))
+            .await
+            .unwrap();
+
+        assert_eq!(result, ["product/task-loop-trust: accepted"]);
+        assert!(portfolio.metrics[0].instrumented);
+        assert!(matches!(
+            portfolio.metrics[0].evidence,
+            MetricEvidenceDto::Unknown {
+                cause: crate::work::wave::metrics::MetricUnknownCauseDto::TargetUnavailable {
+                    value: 1.0,
+                    ..
+                }
+            }
+        ));
+    }
+}

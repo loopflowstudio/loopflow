@@ -2,7 +2,7 @@ use loopflow::lf::commands::install::build_preview;
 
 fn initialize_store(path: &std::path::Path) {
     let connection = rusqlite::Connection::open(path).unwrap();
-    loopflow::store::migrations::apply_sqlite(&connection).unwrap();
+    loopflow_execution::store::migrations::apply_sqlite(&connection).unwrap();
 }
 
 #[test]

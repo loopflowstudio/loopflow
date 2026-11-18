@@ -59,6 +59,14 @@ targets:
       - target: Loopflow
       - package: Sparkle
     postBuildScripts:
+      - name: Stamp app build identity
+        script: |
+          set -eu
+          export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
+          uv run --project "$SRCROOT/.." python "$SRCROOT/../scripts/bundle_version.py" "$TARGET_BUILD_DIR/$INFOPLIST_PATH"
+        inputFiles:
+          - "$(TARGET_BUILD_DIR)/$(INFOPLIST_PATH)"
+        basedOnDependencyAnalysis: false
       - name: Bundle Loopflow control tools
         script: |
           set -eu

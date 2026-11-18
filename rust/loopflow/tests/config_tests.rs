@@ -3,8 +3,8 @@ use crate::support;
 use std::fs;
 use std::path::Path;
 
-use loopflow::config::load_config;
-use loopflow::config::load_config_or_default;
+use loopflow_execution::config::load_config;
+use loopflow_execution::config::load_config_or_default;
 use support::with_clean_home;
 use tempfile::TempDir;
 

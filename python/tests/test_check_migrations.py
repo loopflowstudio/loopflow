@@ -11,7 +11,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/check_migrations.py"
-MIGRATIONS = Path("rust/loopflow/src/store/migrations")
+MIGRATIONS = Path("rust/loopflow-storage/src/migrations")
 
 
 def _git(repo: Path, *args: str, when: dt.datetime | None = None) -> None:
@@ -77,7 +77,7 @@ def test_package_order_records_merge_order_without_unmerged_slugs(repo: Path):
     command = [sys.executable, "scripts/check_migrations.py", "--write-package-order"]
     result = subprocess.run(command, cwd=repo, capture_output=True, text=True)
     assert result.returncode == 0, result.stderr
-    snapshot = repo / "rust/loopflow/migration-order.txt"
+    snapshot = repo / "rust/loopflow-storage/migration-order.txt"
     assert snapshot.read_text() == "task_graphs\na_later_migration\n"
 
     (repo / MIGRATIONS / "unfinished.sql").write_text("CREATE TABLE unfinished (id TEXT);")
@@ -133,10 +133,11 @@ def test_a_slug_reusing_a_released_name_fails(repo: Path):
     assert "reuses the released migration name" in result.stderr
 
 
-def test_runtime_sql_names_its_columns(repo: Path):
-    (repo / "rust/loopflow/src/writer.rs").write_text(
-        'const SQL: &str = "INSERT INTO waves VALUES (?1)";\n'
-    )
+@pytest.mark.parametrize("crate", ["loopflow", "loopflow-storage"])
+def test_runtime_sql_names_its_columns(repo: Path, crate: str):
+    source = repo / "rust" / crate / "src/writer.rs"
+    source.parent.mkdir(parents=True, exist_ok=True)
+    source.write_text('const SQL: &str = "INSERT INTO waves VALUES (?1)";\n')
     result = check(repo)
     assert result.returncode == 1
     assert "positional INSERT" in result.stderr
@@ -263,3 +264,59 @@ def test_a_unique_index_older_rows_never_enter_is_additive(repo: Path):
     )
     result = check(repo)
     assert result.returncode == 0, result.stderr
+
+
+def test_source_moves_keep_original_order_age_and_immutable_bytes(repo: Path):
+    """A relocation is neither a new expand date nor a new migration identity."""
+    merge(repo, "z_expand.sql", "ALTER TABLE waves ADD title TEXT;", days_ago=31)
+    relocated = Path("rust/loopflow/src/store/migrations")
+    (repo / relocated.parent).mkdir(parents=True)
+    _git(repo, "mv", str(MIGRATIONS), str(relocated))
+    _git(repo, "commit", "-qm", "move storage")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    # The checkout can still be on either side of the move while main advances.
+    _git(repo, "mv", str(relocated), str(MIGRATIONS))
+    (repo / MIGRATIONS / "a_contract.sql").write_text(
+        "-- expand: z_expand\n-- exports: /exports/waves.json\nALTER TABLE waves DROP COLUMN id;\n"
+    )
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+    assert "contract of z_expand (31 days)" in result.stdout
+    # Read main's bytes from the path that exists there, not the checkout's path.
+    (repo / MIGRATIONS / "z_expand.sql").write_text("SELECT 1;\n")
+    result = check(repo)
+    assert result.returncode != 0
+    assert "z_expand.sql differs from origin/main" in result.stderr
+
+
+def test_a_leaving_mark_names_a_current_member_and_a_task(repo: Path):
+    marking = repo / MIGRATIONS / "stop_names.sql"
+    marking.write_text("-- leaving: waves.id LOO-1\n-- leaving: graphs LOO-2\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+
+    marking.write_text("-- leaving: waves.colour LOO-1\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "marks waves.colour leaving, but no such table or column" in result.stderr
+
+    marking.write_text("-- leaving: waves.id\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "is not `-- leaving: <table>[.<column>] <Task ID>`" in result.stderr
+
+
+def test_a_contract_of_a_marking_migration_drops_only_marked_members(repo: Path):
+    merge(repo, "add_name.sql", "ALTER TABLE waves ADD COLUMN name TEXT;\n", 40)
+    merge(repo, "add_title.sql", "-- leaving: waves.name LOO-1\n-- leaving: graphs LOO-1\n", 31)
+    contract = repo / MIGRATIONS / "drop_marked.sql"
+
+    contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN id;\n")
+    result = check(repo)
+    assert result.returncode == 1
+    assert "drops column waves.id, which add_title does not mark leaving" in result.stderr
+
+    contract.write_text(CONTRACT + "ALTER TABLE waves DROP COLUMN name;\nDROP TABLE graphs;\n")
+    result = check(repo)
+    assert result.returncode == 0, result.stderr
+

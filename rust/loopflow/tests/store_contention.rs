@@ -8,8 +8,7 @@
 //! file locks and the WAL's shared memory, not per process, so threads here
 //! contend exactly as separate processes do.
 
-use loopflow::process::LfProcess;
-use loopflow::store::sqlite::SqliteStore;
+use loopflow_execution::process::LfProcess;
 use std::path::Path;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Barrier};
@@ -22,9 +21,9 @@ fn process() -> LfProcess {
     let ts = 1_700_000_000;
     LfProcess {
         os_started_at: None,
-        id: loopflow::id::LfProcessId::new(),
+        id: loopflow_model::id::LfProcessId::new(),
         pid: None,
-        trace_id: loopflow::id::TraceId::new(),
+        trace_id: loopflow_model::id::TraceId::new(),
         parent_lf_process_id: None,
         // Agent-issued, so the exit keeps the receipt after probing whether to forget it.
         via_agent: Some(true),
@@ -55,7 +54,7 @@ fn count(path: &Path, sql: &str) -> i64 {
 fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("loopflow.db");
-    drop(SqliteStore::new(&path).expect("materialize the schema"));
+    drop(loopflow_execution::store::open_sqlite(&path).expect("materialize the schema"));
 
     let lost = Arc::new(AtomicUsize::new(0));
     let barrier = Arc::new(Barrier::new(FLEET));
@@ -68,7 +67,7 @@ fn every_receipt_at_fleet_fanout_is_recorded_exactly_once() {
             barrier.wait();
             for seq in 0..EVENTS_PER_WRITER {
                 // Open per event, exactly as `journal::open_ledger()` does.
-                let recorded = SqliteStore::new(Path::new(&path))
+                let recorded = loopflow_execution::store::open_sqlite(Path::new(&path))
                     .and_then(|store| store.record_process(&process()));
                 if let Err(error) = recorded {
                     lost.fetch_add(1, Ordering::Relaxed);

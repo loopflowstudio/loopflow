@@ -43,16 +43,16 @@ Task Work ----> managed worktree ----> commits
 | PR head, required checks, merge | GitHub |
 | landing checks and repair admission | exact recorded PR head plus landing generation |
 
-Task types live under [`work/task/`](../../rust/loopflow/src/work/task). Operational Git,
-PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow/src/ops).
+Task types live under [`store/work/task/`](../../rust/loopflow-storage/src/work/task). Operational Git,
+PR, CI, and landing workflows live under [`ops/`](../../rust/loopflow-execution/src/ops).
 The exact landing fence is modeled in
-[`pr_landing.rs`](../../rust/loopflow/src/pr_landing.rs).
+[`pr_landing.rs`](../../rust/loopflow-storage/src/pr_landing.rs).
 
 ## Create or reuse the worktree
 
 `lf checkout` resolves a saved Task inside one Wave's planning and
 creates or reuses its managed worktree without creating a PR. Saved planning
-works without Linear; an unknown provider alias needs initial acquisition.
+works without Linear; an unknown tracker alias is fetched first.
 It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
 runs a fresh Graph there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree
@@ -260,7 +260,7 @@ attempt; the next attempt starts after a backoff, with the earlier summaries.
 ### Recovery
 
 There is no schedule. Any lf read of this Machine's Tasks or processes
-(`lf task status`, `lf task list`, `lf process list`, `lf wave status`, Desktop's planning
+(`lf task status`, `lf task list`, `lf session list`, `lf wave status`, Desktop's planning
 reads) first settles AgentProcesses whose lf died and starts the ship process of
 each shipping Task checked out here again when it has exited. A Machine nothing
 reads recovers on its next read.
@@ -340,13 +340,13 @@ Independently accepted later work is an ordinary Task plus a linking comment.
 Keep a saved Task when its comment fails; retry only the comment. Synchronization
 uses the same Task and comment writers as other Work. Historical filing events
 stay intact: private recovery converts reserved children and notes, retaining
-unknown provider creations and relations with their original IDs and inputs.
+unknown tracker creations and relations with their original IDs and inputs.
 These receipts carry no completion or process authority.
 
 `lf task complete` settles status without moving the Task's graph. Reaching
 `end` persists a completion request in the same transaction as arrival, then
 tries completion. Failure retains both arrival and the reason; operators retry
-completion alone. Accepted provider status changes clear superseded requests
+completion alone. Accepted tracker status changes clear superseded requests
 without touching graph position or Process history. Reads never execute the trigger. A Task with a PR needs merge
 evidence; its follow-up Tasks need not be complete.
 A PR-less Task may finish with retained files and commits, without a landing

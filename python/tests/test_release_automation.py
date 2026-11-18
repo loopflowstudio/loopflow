@@ -186,7 +186,6 @@ def test_host_publisher_owns_credentialed_release_steps():
     for proof in (
         "check_release_host()",
         "_stage_github_release(artifacts)",
-        "_publish_crate()",
         '"versioned_dmg_uploaded"',
         '"scripts/deploy_website.py"',
         '"--finalize"',
@@ -267,7 +266,6 @@ def _cron_host(
         f"""case "$1 $2" in
   "machine id") echo {LOCAL_MACHINE} ;;
   "wave status") cat "$HOME/wave-status.json" ;;
-  "account --json") echo '{{"accounts":[{{"scope":"managed","verification":"accepted"}}]}}' ;;
   "--wave infrastructure") echo "$@" >> "$HOME/ran" ;;
 esac
 """,

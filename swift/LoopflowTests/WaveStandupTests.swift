@@ -17,7 +17,7 @@ struct WaveStandupTests {
 
     private func task(_ id: String, section: String = "working", state: String? = nil, completedAt: String? = nil,
                       rank: Int = 0, status: String? = nil, owner: String? = nil, email: String?? = .none,
-                      pr: String? = nil, reason: String = "Next move") throws -> RoadmapTask {
+                      pr: String? = nil, selectionStates: [String] = [], reason: String = "Next move") throws -> RoadmapTask {
         let rows = try #require(JSONSerialization.jsonObject(
             with: Data(contentsOf: fixtures.appendingPathComponent("task_history_rows.json"))) as? [[String: Any]])
         var row = rows[0]
@@ -31,6 +31,8 @@ struct WaveStandupTests {
         plan["completed_at"] = completedAt.map { $0 as Any } ?? NSNull()
         row["task"] = plan
         row["section"] = section
+        row["selection_states"] = selectionStates
+        row["lifecycle"] = status ?? (["done", "abandoned"].contains(section) ? section : owner == nil ? "unstarted" : "moving")
         row["next_move"] = ["owner": "task", "reason": reason]
         let key = email ?? owner.map { "\($0.lowercased().replacingOccurrences(of: " ", with: "."))@example.com" }
         let ownerJSON: Any = owner.map { person -> Any in
@@ -38,7 +40,7 @@ struct WaveStandupTests {
              "machine": ["id": NSNull(), "label": NSNull()]] as [String: Any]
         } ?? NSNull()
         row["runtime"] = (status ?? owner.map { _ in "moving" }).map { status -> Any in
-            ["work_id": "work-\(id)", "status": status, "reason": "Running", "updated_at": "2026-10-26T12:00:00Z",
+            ["work_id": id, "status": status, "reason": "Running", "updated_at": "2026-10-26T12:00:00Z",
              "provider": "claude", "completion_pending": NSNull(), "owner": ownerJSON] as [String: Any]
         } ?? NSNull()
         row["pr"] = pr.map { phase -> Any in
@@ -49,9 +51,8 @@ struct WaveStandupTests {
     }
 
     private func standup(_ tasks: [RoadmapTask], closed: [RoadmapTask]? = nil, doneDays: Int = 7,
-                         github: [String: GitHubPerson] = [:],
-                         sessions: [String: WaveStandup.SessionAttention] = [:]) -> WaveStandup {
-        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github, sessions: sessions)
+                         github: [String: GitHubPerson] = [:]) -> WaveStandup {
+        WaveStandup(tasks: tasks, closed: closed ?? tasks, doneDays: doneDays, now: now, github: github)
     }
 
     @Test func columnsAreRustSections() throws {
@@ -59,23 +60,23 @@ struct WaveStandupTests {
             try task("DONE-1", section: "done", state: "completed", completedAt: "2026-10-25T09:00:00Z"),
             try task("DONE-OLD", section: "done", state: "completed", completedAt: "2026-10-01T09:00:00Z"),
             try task("CANCELED", section: "abandoned", state: "canceled", completedAt: "2026-10-25T09:00:00Z"),
-            try task("IDLE", rank: 2, status: "idle", owner: "Jack Heart"),
+            try task("IDLE", rank: 2, status: "idle", owner: "Jack Heart", selectionStates: ["available"]),
             try task("MOVING", rank: 1, status: "moving", owner: "Jack Heart", reason: "Waiting on CI"),
             try task("MERGED", rank: 3, status: "active", owner: "Jack Heart", pr: "merged"),
-            try task("SHIP", section: "autonomous", rank: 4, status: "shipping", owner: "Jack Heart"),
+            try task("SHIP", section: "autonomous", rank: 4, status: "shipping", owner: "Jack Heart", selectionStates: ["busy"]),
             try task("FRESH", section: "backlog", rank: 5),
             // Started, then unassigned: Rust files it under Backlog, whatever its state.
             try task("HELD", section: "backlog", rank: 0, status: "idle"),
         ]
-        let standup = standup(tasks, sessions: ["IDLE": .available, "SHIP": .busy])
+        let standup = standup(tasks)
         #expect(standup.done.map(\.id) == ["DONE-1"])
-        #expect(standup.working.map(\.id) == ["MOVING", "IDLE", "MERGED"])
-        #expect(standup.working[0].note == "Waiting on CI")
+        #expect(standup.working.map(\.id) == ["IDLE", "MOVING", "MERGED"])
+        #expect(standup.working[1].note == "Waiting on CI")
         #expect(standup.working[2].note == "merged")
-        #expect(standup.working[1].session == .available)
+        #expect(standup.working[0].session == .available)
         #expect(standup.autonomous.map(\.id) == ["SHIP"])
         #expect(standup.autonomous[0].session == .busy)
-        #expect(standup.backlog.map(\.id) == ["HELD", "FRESH"])
+        #expect(standup.backlog.map(\.id) == ["FRESH", "HELD"])
         // One person owns everything: a solo Wave shows no pictures.
         #expect(!standup.showsPeople)
         #expect(self.standup(tasks, doneDays: 0).done.map(\.id).sorted() == ["DONE-1", "DONE-OLD"])
@@ -110,10 +111,10 @@ struct WaveStandupTests {
 
     @Test func peopleAppearOnceTwoPeopleShareTheWave() throws {
         let tasks = [
-            try task("A", owner: "Jack Heart"),
+            try task("A", owner: "Jack Heart", selectionStates: ["busy"]),
             try task("B", owner: "Ada Lovelace"),
         ]
-        let standup = standup(tasks, sessions: ["A": .busy])
+        let standup = standup(tasks)
         #expect(standup.showsPeople)
         #expect(standup.working.compactMap(\.person?.initials) == ["JH", "AL"])
         let text = standup.text(heading: WaveStandup.heading(try roadmap()), section: .working)
@@ -136,9 +137,6 @@ struct WaveStandupTests {
         model.navigation.boardSections[.wave(roadmap.wave.id)] = .done
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-section-done")
         _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-done-days")
-        for notice in roadmap.unavailableTasks {
-            _ = try board.inspect().find(viewWithAccessibilityIdentifier: "wave-notice-\(notice.taskId)")
-        }
         if let project = roadmap.currentProject {
             #expect(try board.inspect().find(viewWithAccessibilityIdentifier: "wave-current-project").text().string()
                 .hasPrefix(project.name))

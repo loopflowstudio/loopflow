@@ -74,10 +74,10 @@ struct Watcher {
 impl Watcher {
     /// When to read again though nothing moved.
     fn wake(&self) -> Option<SystemTime> {
-        match (self.conversations_due, self.runs_due) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
-        }
+        self.conversations_due
+            .into_iter()
+            .chain(self.runs_due)
+            .min()
     }
 
     /// How long to wait for a change before reading anyway.

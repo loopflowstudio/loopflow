@@ -679,13 +679,12 @@ pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
             let Some(died) = died_run(&store.sqlite, &id).map_err(task_error)? else {
                 continue;
             };
-            match died.next_at() {
-                None => continue,
-                Some(due) if due > now => {
-                    wait(due);
-                    continue;
-                }
-                Some(_) => {}
+            let Some(due) = died.next_at() else {
+                continue;
+            };
+            if due > now {
+                wait(due);
+                continue;
             }
             let Some((task, worktree, _)) = continuable(&store, &id, now).await? else {
                 continue;

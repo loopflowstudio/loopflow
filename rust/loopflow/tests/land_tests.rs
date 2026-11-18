@@ -2021,7 +2021,7 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
     // The Task's own Session stays open in the checkout for the whole landing.
     let session = loopflow_model::id::LfProcessId::new();
-    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'task-session',?5)",
+    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at,task_id) VALUES(?1,?2,?3,?4,'task-session',?5,(SELECT task_id FROM task_checkouts WHERE ?4=rtrim(worktree,'/') OR instr(?4,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
         rusqlite::params![session, loopflow_model::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));

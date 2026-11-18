@@ -753,8 +753,9 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
         ),
     ] {
         db.execute(
-            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
-             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
+            // Each records the Task of the checkout holding `cwd`, as lf does.
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome,task_id)
+             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6,(SELECT task_id FROM task_checkouts WHERE ?5=rtrim(worktree,'/') OR instr(?5,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
             rusqlite::params![
                 id.as_str(),
                 loopflow::id::TraceId::new().as_str(),

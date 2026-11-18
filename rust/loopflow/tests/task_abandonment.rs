@@ -35,7 +35,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         }
         let process = LfProcessId::new();
         db.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
+            "INSERT INTO processes(id,trace_id,cwd,started_at,task_id) VALUES(?1,?1,?2,?3,(SELECT task_id FROM task_checkouts WHERE ?2=rtrim(worktree,'/') OR instr(?2,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
             params![
                 process.as_str(),
                 repo.path().to_str().unwrap(),

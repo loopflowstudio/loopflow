@@ -495,7 +495,7 @@ fn build_cleanup_retains_unfinished_association_and_unknown_execution() {
         .unwrap();
     let process = loopflow_model::id::LfProcessId::new();
     conn.execute(
-        "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,?4)",
+        "INSERT INTO processes(id,trace_id,cwd,started_at,task_id) VALUES(?1,?2,?3,?4,(SELECT task_id FROM task_checkouts WHERE ?3=rtrim(worktree,'/') OR instr(?3,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
         params![
             process,
             loopflow_model::id::TraceId::new(),

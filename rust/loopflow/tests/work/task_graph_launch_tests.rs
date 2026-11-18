@@ -403,7 +403,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let parent = loopflow_model::id::LfProcessId::new();
         let trace = loopflow_model::id::TraceId::new();
         db.execute(
-            "INSERT INTO processes(id,trace_id,cwd,command,started_at) VALUES(?1,?2,?3,'caller',1)",
+            "INSERT INTO processes(id,trace_id,cwd,command,started_at,task_id) VALUES(?1,?2,?3,'caller',1,(SELECT task_id FROM task_checkouts WHERE ?3=rtrim(worktree,'/') OR instr(?3,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
             rusqlite::params![parent, trace, caller.to_str().unwrap()],
         )
         .unwrap();
@@ -2459,7 +2459,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let exec = uuid::Uuid::new_v4().to_string();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    db.execute("INSERT INTO processes(id,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
+    db.execute("INSERT INTO processes(id,trace_id,cwd,started_at,command,task_id) VALUES(?1,?1,?2,?3,'historical inspection',(SELECT task_id FROM task_checkouts WHERE ?2=rtrim(worktree,'/') OR instr(?2,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
         rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
     db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
         VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",

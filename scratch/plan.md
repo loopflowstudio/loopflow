@@ -57,8 +57,12 @@ queue row.
   `planning_peer_*` row.
 - A Git repository journals every save as today; switching a repository to
   Git publishes its whole current plan on the first exchange.
-- A foreground Session on a Git repository with no saves fetches only for
-  acquisition (every 5 s), never for publication.
+- A foreground Session on a Git repository makes at most one fetch per 5 s
+  tick, whatever other repositories on the Machine are doing; it publishes on
+  a tick only when its destination has an unexported change or an
+  unconfirmed push. A save still publishes right after the command answers.
+- A foreground Session in a Linear or Asana repository starts no Git
+  exchange thread.
 - The live store loses the journal rows of repositories with no Git
   destination (about 26k changes and their observed rows).
 
@@ -92,7 +96,18 @@ exchange. Linear → Git: the first Git exchange records `git` and, in the same
 transaction, captures every record the repository owns (`capture` is
 idempotent against observed heads), so nothing saved before the switch is
 missing from the first publication. Git → Linear: journaling continues until
-the next drain records `linear`; harmless.
+the next drain records `linear`; harmless. Both recordings are conditional
+writes (`WHERE planning_tracker IS NOT ?`): the drain runs on every save and
+tick, and must not take the write lock to restate a value. The value is a
+`TrackerKind`.
+
+Seeding happens in the bind transaction, before the first acquisition, and a
+switched repository keeps its journal. Git → Linear → Git depends on both:
+the kept observed heads are what was last exchanged, so the seed's captures
+name them as parents and the Linear-era values win causally, while a peer's
+change made in between still surfaces as a lost line. A pruned journal
+would make every changed field a lost line, and seeding after the import
+would let the remote's stale values overwrite Linear's silently.
 
 This is a stored copy of one config fact. The rule in `docs/dev/planning.md`
 ("there is no stored selection") is about the Git destination; the
@@ -112,19 +127,34 @@ what is stored and why.
    Check `EXPLAIN QUERY PLAN` for the per-write repository lookup
    (tasks → `repository_plans` by id; projects → waves.repo; comments →
    task) against a 10k-Task store.
-2. **Publish only what changed.** `PlanningSync`'s publication tick runs only
-   when the store's `planning` revision moved since its last confirmed
-   publication, or that publication is `pending`/`unconfirmed`. An import
-   bumps the revision and costs one extra publication pass; acceptable.
-   Test: a foreground connection on an unchanged repository records no
-   publication attempt over several ticks (count `record_peer_publication`
-   or fetches through the fixture remote).
+2. **One exchange loop, gated by Git's own outbox.** Git's outbox is the
+   journal changes owned by the repository with no `planning_peer_routes`
+   row for the active destination (`unrouted_changes`). `PlanningSync`
+   keeps one loop, at 5 s. Each tick publishes (which acquires first, as
+   today) when the destination has an unrouted owned change or its
+   `publication_state` is not `confirmed`, and otherwise only acquires.
+   Delete the 1 s publication loop. Saves keep publishing after the reply
+   (`sync_after_save`), so the loop is only the retry path: a failed
+   publication waits at most 5 s. `start_for_directory` reads the planning
+   config once and starts no thread unless it is Git. Passed over: gating on
+   the store's `planning` revision. It is one revision for the whole store,
+   and any Linear save or import in another repository moves it, so a Git
+   Session beside a busy Linear repository would still fetch every second.
+   Add the outbox check as a storage read (`EXISTS` over `unrouted_changes`'s
+   join, `LIMIT 1`) and check its `EXPLAIN QUERY PLAN` against a 10k-Task
+   store. Test: a foreground connection on an unchanged Git repository
+   records no publication over several ticks, while saves in a second,
+   Linear repository on the same store go on; then a save whose push fails
+   is published by the next tick.
 3. **Delete the rows nothing reads.** The same migration deletes
    `planning_peer_routes`, `planning_peer_observed` and `planning_peer_changes`
    rows whose record belongs to a repository with no `planning_destinations`
-   row (or to no record). Rows of switched repositories (manabot, kata,
+   row, and orphaned rows (no live record) only when they are unrouted.
+   Routed orphans are history a peer holds; the routes table keeps them on
+   purpose. Rows of switched repositories (manabot, kata,
    etude-studio) stay: SQL cannot read their config, and they stop growing
-   once their tracker is recorded. Delete `planning_write::seed` from the
+   once their tracker is recorded. Pruning them would break a switch back to
+   Git (see Source of truth). Delete `planning_write::seed` from the
    migration runner if only a released migration's hook calls it and the
    hook can call `capture` per record instead. Report before/after.
 
@@ -134,7 +164,9 @@ what is stored and why.
   `planning_peers.rs` (record + seed on bind), `tracker_actions.rs` or
   `repositories.rs` (record the tracker), new migration via
   `scripts/new_migration.py planning_tracker`.
-- `rust/loopflow-execution/src/ops/planning_sync.rs` (publication tick),
+- `rust/loopflow-execution/src/ops/planning_sync.rs` (one loop, outbox gate,
+  Git-only start), `loopflow-storage/src/sqlite/planning_peers.rs` (outbox
+  read),
   `ops/tracker/drain.rs` (record linear/asana).
 - `docs/dev/planning.md`: the journal is Git-only; publication is
   change-driven; the stored tracker. `rust/loopflow-storage/SCHEMA.md`
@@ -168,13 +200,14 @@ what is stored and why.
 - Linear-only fields in the Git document (`task_linear_id`, `task_url`,
   `task_team`, `project_initiatives`…): released peers read the document;
   noted in `scratch/questions.md`.
-- Acquisition cadence (5 s per foreground Session, not shared across
-  processes the way Linear's ten-second team stamp is).
+- Sharing the 5 s tick across processes, the way Linear's ten-second team
+  stamp is shared.
 
 ## What goes
 
 - Unconditional `capture` in `write_record` for `Local`/`Tracker` writes.
-- The every-second unconditional publication in `PlanningSync`.
+- The 1 s publication loop in `PlanningSync`, and its thread in
+  non-Git repositories.
 - About 26k journal rows and their observed/route rows in the live store.
 
 ## Inventory: what the product sends

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-938 concept review: planning changes leaving the Machine</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--mut:#6b6760;--line:#ddd8cf;--card:#fff;--yes:#2f7d4f;--no:#b2452f;--prop:#2b5fa8;--propbg:#eaf1fb;--code:#f2efe8}
+@media (prefers-color-scheme:dark){:root{--bg:#161513;--fg:#ebe7df;--mut:#9d978c;--line:#34312c;--card:#1e1d1a;--yes:#6cc28d;--no:#ea8a73;--prop:#8db4ef;--propbg:#1c2738;--code:#26241f}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:980px;margin:2.5rem auto;padding:0 1.25rem}
+h1{font-size:1.5rem;margin:0 0 .3rem}h2{font-size:1.15rem;margin:2.2rem 0 .6rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+p.lede{color:var(--mut);margin-top:0}
+code{background:var(--code);padding:.05rem .3rem;border-radius:3px;font-size:.88em}
+table{border-collapse:collapse;width:100%;margin:.6rem 0;font-size:.92rem}
+th,td{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+th{font-weight:600}
+.y{color:var(--yes);font-weight:700}.n{color:var(--no);font-weight:700}
+.prop{background:var(--propbg);border-left:3px solid var(--prop);padding:.6rem .9rem;border-radius:4px;margin:.6rem 0}
+.prop b.tag{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.8rem 1rem}
+.card h3{margin:.1rem 0 .5rem;font-size:1rem}
+pre{background:var(--code);padding:.7rem .9rem;border-radius:5px;overflow:auto;font-size:.84rem;line-height:1.45}
+ol.q li{margin:.5rem 0}ol.q ol{list-style:lower-alpha}
+.mut{color:var(--mut)}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<h1>Planning changes leaving the Machine</h1>
+<p class="lede">LOO-938 concept review, before implementation. Area taken: everything a planning save does after it is written: Linear/Asana's <code>tracker_actions</code> queue, Git's journal and exchange, and the status a person reads. LOO-925 already shipped the Linear half; the plan scopes this Task to the Git half, and this review checks that half against the whole.</p>
+
+<h2>One interaction, walked</h2>
+<p>A person in <code>~/src/loopflow</code> (Linear) runs <code>lf task edit LOO-12 --title X</code>, while a Session in <code>~/src/etude</code> (Git) sits idle.</p>
+<table>
+<tr><th>Step</th><th>Today</th><th>Plan as written</th><th>Plan after this review</th></tr>
+<tr><td>Save in loopflow</td><td>row in <code>tasks</code>, one <code>tracker_actions</code> row, <b>plus</b> journal rows in <code>planning_peer_changes</code>/<code>_observed</code> nobody reads</td><td>no journal rows</td><td>same as plan</td></tr>
+<tr><td>Delivery</td><td>drain after the reply</td><td>same</td><td>same</td></tr>
+<tr><td>etude's idle Session</td><td>publication tick every 1 s: <code>git fetch</code> each time; acquisition every 5 s</td><td>publication tick runs when the global <code>planning</code> revision moved. <b class="n">loopflow's save moves it</b>, so etude fetches anyway</td><td>one 5 s tick; it publishes instead of acquiring only when etude's own destination has unexported changes or an unconfirmed push</td></tr>
+<tr><td>Failure: etude save while offline</td><td>next 1 s tick retries</td><td>retries when revision moves or state is pending</td><td>the save's export leaves changes unrouted or the push unconfirmed; the 5 s tick retries</td></tr>
+<tr><td>Recovery: etude back online</td><td>publishes within 1 s</td><td>within 1 s</td><td>within 5 s</td></tr>
+</table>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<tr><th>What a person knows</th><th>What the code has</th><th></th><th>Where it's wrong</th></tr>
+<tr><td>A repository plans through Linear, Asana or Git (<code>.lf/config.yaml</code>)</td><td><code>PlanningConfig</code>, read at each exchange; <code>TrackerKind</code></td><td class="y">yes</td><td></td></tr>
+<tr><td>(nothing: the person never sees it)</td><td>the Git journal, written for <b>every</b> repository</td><td class="n">no</td><td>A concept the code has that no product concept owns in Linear/Asana repositories. 26,084 of 43,995 journal changes belong to a Linear repository. The plan fixes this.</td></tr>
+<tr><td>"Is this repository on Git?"</td><td>config (ops); <code>planning_destinations</code> (bound once, never removed); proposed <code>repository_plans.planning_tracker</code></td><td class="n">no</td><td>One idea, three answers. Acceptable only if each reader has one answer: the writer and slice 3's cleanup both read <code>planning_tracker</code> where it exists. The migration is the one exception, because SQL can't read config.</td></tr>
+<tr><td>A change is waiting to go out</td><td>Linear: <code>tracker_actions</code> phase <code>pending</code>. Git: journal changes with no <code>planning_peer_routes</code> row for the active destination</td><td class="y">yes</td><td>Two shapes for one idea, and that's fine: Git's outbox is the unrouted journal, and the plan keeps it that way (no <code>tracker='git'</code> rows).</td></tr>
+<tr><td>"Did my change go out?"</td><td>Git publication: <b>two loops</b> (1 s publish, 5 s acquire) plus the after-reply publish</td><td class="n">no</td><td>One action with three owners. The 1 s loop is a retry loop pretending to be delivery. <b>Biggest mismatch</b>, below.</td></tr>
+<tr><td>Lost values, answered with <code>lf repo plan answer</code></td><td><code>TrackerActionStatus</code> over <code>tracker_actions</code> and journal heads</td><td class="y">yes</td><td>Shipped in LOO-925.</td></tr>
+<tr><td>Switching a repository to Git publishes its plan</td><td>proposed: seed (<code>capture</code> every owned record) when bind first records <code>git</code></td><td class="y">yes</td><td>The ordering holds (see counterexample 2).</td></tr>
+</table>
+
+<h2>Biggest mismatch: when Git publishes</h2>
+<div class="cols">
+<div class="card"><h3>Before (existing)</h3>
+<pre>PlanningSync (any non-Linear repo)
+ ├─ every 5 s: acquire        → git fetch
+ └─ every 1 s: publish        → git fetch, export, maybe push
+save → after reply: publish   → git fetch, export, maybe push</pre>
+<p class="mut">About 4,300 fetches an hour from the 1 s loop alone, whether or not anything changed.</p></div>
+<div class="card"><h3>Plan as written (slice 2)</h3>
+<pre>every 1 s: if planning revision moved
+           or publication pending/unconfirmed:
+             publish</pre>
+<p class="mut"><code>planning</code> is one revision for the whole store. Any Linear save, import or tracker acceptance in another repository moves it. On this Machine loopflow is busy all day, so etude's Session still fetches about once a second.</p></div>
+</div>
+<div class="prop"><b class="tag">Proposed.</b> Git's own outbox gates publication, and one loop owns retry:
+<pre>PlanningSync (only when config is Git; decided once at start)
+ └─ every 5 s: if destination has an unrouted owned change
+               or publication_state ≠ confirmed:
+                 publish      (acquires first, as today)
+               else:
+                 acquire
+save → after reply: publish   (unchanged: the normal path)</pre>
+That's one loop instead of two, at most one fetch per 5 s per Session, and no global cursor. Saves still go out as soon as the command has answered. A failed one waits at most 5 s instead of 1 s. The check is an <code>EXISTS</code> over <code>unrouted_changes</code>'s join; slice 2 runs <code>EXPLAIN QUERY PLAN</code> on it against a 10k-Task store.</div>
+
+<h2>Counterexamples tried</h2>
+<ol>
+<li><b>A busy Linear repository beside an idle Git one.</b> This breaks slice 2 as written (above). The proposal holds because the gate belongs to the destination.</li>
+<li><b>Git → Linear → Git (manabot's history).</b> The plan keeps a switched repository's journal and seeds when bind first records <code>git</code>, before acquiring. The kept observed heads match what was last exchanged, so the seed's captures name them as parents and the Linear-era values win causally. That's correct. If the journal were pruned (an option in <code>questions.md</code>), the seed would either race the remote's old heads, giving a lost line on every field, or, if seeded after import, have the remote's stale values silently overwrite Linear's. <b>Pruning switched repositories' journals is unsafe while they could switch back.</b> The question is updated to say so.</li>
+<li><b>Slice 3's "or to no record".</b> Journal rows whose record left the live tables are kept on purpose: the routes table comment says routing belongs to "records removed from the live Work tables". A routed orphan is history a peer holds. Only <b>unrouted</b> orphans are safe to delete: nobody else has them, and export never reaches them again.</li>
+<li><b>Tracker recording on every drain.</b> The drain runs on every save and tick. An unconditional <code>UPDATE</code> would add a write under the shared lock each time. It writes only when the value differs (<code>WHERE planning_tracker IS NOT ?</code>), and bind does the same.</li>
+<li><b>Git repository right after upgrade.</b> <code>planning_tracker</code> is NULL, so saves aren't journaled. The first exchange records <code>git</code> and seeds, and <code>capture</code>'s idempotence picks the saves up. One risk: those saves carry the seed's clock, not the save's. Only etude is affected, once.</li>
+</ol>
+
+<h2>The name</h2>
+<p>The Task promises "one queue". The plan decides that Git stays a replica, and a person still sees one status view (<code>lf repo plan</code>). The concepts agree. The title describes LOO-925's half. The PR title should say what this half does: journal only Git repositories, and publish only when there's something to publish.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Publication gate
+ <ol><li>Git's own outbox plus one 5 s loop (chosen here, written into the plan)</li><li>the global <code>planning</code> revision, 1 s loop (plan as written)</li><li>keep the 1 s loop, gated by the outbox</li></ol></li>
+<li>A failed Git publication retries within
+ <ol><li>5 s (chosen)</li><li>1 s</li></ol></li>
+<li>Switched repositories' journals (manabot 13k, kata, etude-studio)
+ <ol><li>keep, so a switch back stays correct (chosen)</li><li>prune, and accept lost lines or silent overwrite on a switch back</li></ol></li>
+<li>Orphaned journal rows in the cleanup migration
+ <ol><li>delete only unrouted orphans (chosen)</li><li>delete all orphans</li><li>delete none</li></ol></li>
+<li><code>PlanningSync</code> for a non-Git repository
+ <ol><li>don't start it; config is read once at start (chosen)</li><li>start it and read config every tick (today)</li></ol></li>
+</ol>
+</body>
+</html>

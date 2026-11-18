@@ -19,6 +19,24 @@ Stop every server and holder launched for the walkthrough: a private home's
 children. For input and resize checks without a provider login, hold a real
 shell with `lf desktop shell <task> --checkout <path> --id <id> --create` in a PTY.
 
+A private home keeps two SQLite files: `loopflow.db` (state, inputs as
+`captured` `session_events` with their newest ended turn) and `history.db`
+(`session_history`, observations; `turns`, one row per turn with Task, skill,
+Graph, step, model, token and final-message columns). Read them with `?mode=ro` while a writer may be open:
+`immutable=1` skips the WAL and shows a stale file. For an upgrade check, record
+turns with the installed `lf` (`lf session resume --prepare --json`, then
+`lf -b session resume <id> --message …`), copy the home, then open it with the
+branch: `lf session history <id>` is empty until `lf machine prune` or the
+branch server's start-up pass moves the old rows. To make a history write fail,
+hold `BEGIN EXCLUSIVE` on `history.db` from Python. A process's first write
+then waits about 5 s (a 2 s busy timeout, retried by
+SQLite's WAL path) and logs one `recording gap: history.db: …` line; its later
+writes fail at once, at debug. Sample the
+branch `lf` itself (`$LF_BIN …&`), not a shell wrapper's PID. Set `LF_BIN` to
+the branch binary for every turn: hook settings name `LF_BIN`, else the
+installed `lf`, whose hooks write history rows (transitions) into `loopflow.db`.
+`lf machine prune` moves them, which is the upgrade skew, not a branch bug.
+
 # Loopflow's local server
 
 Build `cargo build -p loopflow --bin lf` and use that binary for branch QA.

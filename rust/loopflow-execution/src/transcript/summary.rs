@@ -216,7 +216,6 @@ pub fn summarize(store: &SqliteStore, now: i64) -> Result<RetentionSummary> {
 mod tests {
     use super::*;
     use crate::provider_auth::Provider;
-    use crate::session::SessionEventKind;
     use crate::transcript::session_transcript;
     use std::fs;
     use std::time::{Duration, SystemTime};
@@ -269,30 +268,14 @@ mod tests {
         };
         // It ran in the account's own home, before every launch shared one.
         store.record_account_home_conversation(route, thread, provider);
-        for (kind, payload) in [
-            (SessionEventKind::Started, serde_json::json!({})),
-            (
-                SessionEventKind::Output,
-                serde_json::json!({"text":"Shipped the fix."}),
-            ),
-            (
-                SessionEventKind::Completed,
-                serde_json::json!({"status":"completed"}),
-            ),
-        ] {
-            store
-                .record_session_event(id, &thread.into(), "turn-1", kind, &payload)
-                .unwrap();
-        }
-        store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE session_events SET observed_at=?2 WHERE session_id=?1 AND kind<>'captured'",
-                rusqlite::params![id, at],
-            )
-            .unwrap();
+        store.record_turn_start(id, &thread.into(), "turn-1", at);
+        store.record_turn_completion(
+            id,
+            &thread.into(),
+            "turn-1",
+            at,
+            &serde_json::json!({"status":"completed"}),
+        );
     }
 
     fn written(path: &std::path::Path, body: &str, at: i64) {
@@ -377,10 +360,6 @@ mod tests {
         assert_eq!(conversation.retention.after, Some(NOW - 10 * DAY));
         let note = conversation.retention.note.as_deref().unwrap();
         assert!(note.contains("gone at claude; removed after"), "{note}");
-        assert_eq!(
-            conversation.facts[0].final_answer.as_deref(),
-            Some("Shipped the fix.")
-        );
         assert_eq!(conversation.facts[0].status.as_deref(), Some("completed"));
     }
 }

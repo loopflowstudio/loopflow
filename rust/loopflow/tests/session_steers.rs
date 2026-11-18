@@ -42,7 +42,7 @@ fn launch_startup_proof_through(
         fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
     }
     let provider = bin.join("claude");
-    fs::write(&provider, r#"#!/usr/bin/python3
+    fs::write(&provider, support::claude_stand_in(r#"#!/usr/bin/python3
 import fcntl, hashlib, json, os, pathlib, select, shlex, subprocess, sys
 if '--version' in sys.argv:
     print('fixture')
@@ -93,11 +93,12 @@ assert query['message']['content'][0]['text'].endswith('QUERY_END'), 'incomplete
 assert len(json.dumps(context).encode()) > 131133
 assert query['uuid']
 query['session_id'] = 'startup-native'
+keep_claude_turn(query, 'CORRELATED_STARTUP_ANSWER')
 print(json.dumps(query), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'startup-native'}), flush=True)
 print(json.dumps({'type': 'result', 'uuid': 'answer-id', 'session_id': 'startup-native', 'subtype': 'success', 'is_error': False, 'result': 'CORRELATED_STARTUP_ANSWER'}), flush=True)
 sys.stdin.read()
-"#).unwrap();
+"#)).unwrap();
     fs::set_permissions(provider, fs::Permissions::from_mode(0o755)).unwrap();
     Command::new(env!("CARGO_BIN_EXE_lf"))
         .env_clear()
@@ -156,17 +157,6 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
     let output = launch_startup_proof(&repo, home.path(), Some("INF-123"));
     assert_launched(&output, home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    let (native, answer, turn): (String, String, String) = db
-        .query_row(
-            "SELECT s.provider_thread,json_extract(e.payload,'$.text'),e.provider_turn
-         FROM agent_sessions s JOIN session_events e ON e.session_id=s.id WHERE e.kind='output'",
-            [],
-            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-        )
-        .unwrap();
-    assert_eq!(native, "startup-native");
-    assert_eq!(answer, "CORRELATED_STARTUP_ANSWER");
-    assert!(!turn.is_empty());
     let session: String = db
         .query_row(
             "SELECT id FROM agent_sessions WHERE provider_thread='startup-native'",
@@ -174,6 +164,21 @@ fn claude_startup_preserves_large_combined_seed_and_correlated_answer() {
             |r| r.get(0),
         )
         .unwrap();
+    // The answer is the one Claude kept for the query's turn.
+    let answer = Command::new(env!("CARGO_BIN_EXE_lf"))
+        .env_clear()
+        .env("HOME", home.path())
+        .env("LF_HOME", home.path())
+        .env("CLAUDE_CONFIG_DIR", home.path().join(".claude"))
+        .args(["history", "show", &session, "--final"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(answer.status.success(), "{answer:?}");
+    assert_eq!(
+        String::from_utf8_lossy(&answer.stdout).trim(),
+        "CORRELATED_STARTUP_ANSWER"
+    );
     let receipts = store.session_steers(&session, 0, 32).unwrap();
     assert_eq!(receipts.items[0].steer.id, steer.id);
     // The startup hook claimed it, printed it and stamped it.
@@ -478,6 +483,15 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         serde_json::from_str(declaration["caller"].as_str().unwrap()).unwrap();
     let session = caller["session_id"].as_str().unwrap();
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
+    db.execute(
+        "ATTACH ?1 AS history",
+        [
+            loopflow_storage::history::history_path(&home.path().join("loopflow.db"))
+                .to_string_lossy()
+                .as_ref(),
+        ],
+    )
+    .unwrap();
     loop {
         let native: Option<String> = db
             .query_row(
@@ -501,7 +515,7 @@ while not (home / 'finish').exists() and time.monotonic() < deadline:
         let published: bool = db
             .query_row(
                 "SELECT EXISTS(SELECT 1 FROM session_events WHERE session_id=?1
-                 AND json_extract(payload,'$.evidence.provider_session_id')='handoff-native')",
+                 AND kind='captured' AND provider_thread='handoff-native')",
                 [session],
                 |r| r.get(0),
             )
@@ -737,7 +751,7 @@ clearInterval(alive);
     assert!(answered.status.success());
     let gaps: i64 = db
         .query_row(
-            "SELECT count(*) FROM session_events WHERE session_id=?1
+            "SELECT count(*) FROM history.session_history WHERE session_id=?1
              AND json_extract(payload,'$.source')='store-gap'",
             [session],
             |r| r.get(0),
@@ -754,7 +768,7 @@ clearInterval(alive);
     assert!(!marker.exists(), "the answered hook closes its gap");
     let selected: String = db
         .query_row(
-            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM session_events
+            "SELECT json_extract(payload,'$.transition.from_provider_session') FROM history.session_history
              WHERE session_id=?1 AND json_extract(payload,'$.type')='provider_transition'
              AND json_extract(payload,'$.transition.to_provider_session')='cleared-native'",
             [session],

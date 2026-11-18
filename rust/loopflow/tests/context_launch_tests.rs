@@ -350,7 +350,7 @@ fn codex_startup_failures_preserve_input_and_allow_reconnect() {
             unrelated
         );
         let adopted: i64 = database.query_row(
-            "SELECT count(*) FROM session_events WHERE json_extract(payload,'$.evidence.provider_session_id')='unrelated-native-session'",
+            "SELECT count(*) FROM session_events WHERE kind='captured' AND provider_thread='unrelated-native-session'",
             [], |row| row.get(0),
         ).unwrap();
         assert_eq!(

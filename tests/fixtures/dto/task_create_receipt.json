@@ -44,7 +44,6 @@
       "model": null,
       "cwd": "/src/loopflow",
       "state": "active",
-      "ready_summary": null,
       "open_argv": [
         "lf",
         "session",

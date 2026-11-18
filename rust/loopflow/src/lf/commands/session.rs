@@ -207,12 +207,33 @@ async fn run_async(command: &SessionCommand, cli: &crate::lf::Cli) -> anyhow::Re
             else {
                 bail!("Session {id} was not found");
             };
+            // Turns change once, when they end, so they are a list beside
+            // the observation feed, not entries in it.
+            let turns = store.sqlite.session_turns(&session.id)?;
             let events = store
                 .sqlite
                 .session_history(&session.id, *after, feed.limit)?;
             if feed.json {
-                println!("{}", serde_json::to_string(&events)?);
+                println!(
+                    "{}",
+                    serde_json::to_string(&serde_json::json!({"turns": turns, "events": events}))?
+                );
             } else {
+                for turn in turns {
+                    let usage = turn.usage.as_ref().map(|usage| &usage.usage);
+                    println!(
+                        "turn {} {} {} input={} output={}",
+                        turn.thread,
+                        turn.turn,
+                        turn.status.as_deref().unwrap_or("running"),
+                        usage
+                            .and_then(|usage| usage.total_input_tokens)
+                            .map_or("-".into(), |tokens| tokens.to_string()),
+                        usage
+                            .and_then(|usage| usage.output_tokens)
+                            .map_or("-".into(), |tokens| tokens.to_string()),
+                    );
+                }
                 for event in events {
                     println!(
                         "{} {} {} {}",
@@ -482,6 +503,7 @@ pub(crate) fn subscribe_list(
         headless: filter.headless,
     };
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         args,
         move |store, args| {
             let filter = loopflow_execution::session::SessionFilter {

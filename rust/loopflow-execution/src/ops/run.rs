@@ -1154,7 +1154,6 @@ mod tests {
                 title: "Investigation".into(),
                 title_source: crate::session::TitleSource::Generated,
                 request: None,
-                ready_summary: None,
                 completed_at: None,
                 created_at: 1,
             }

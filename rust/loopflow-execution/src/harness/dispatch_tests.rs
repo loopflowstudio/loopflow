@@ -14,7 +14,6 @@ use tokio_tungstenite::{tungstenite::protocol::Role, tungstenite::Message, WebSo
 
 use super::codex::CodexStream;
 use super::fact_writer::FactWriter;
-use crate::session::SessionEventKind;
 use crate::store::StoreError;
 use loopflow_model::id::LfProcessId;
 
@@ -58,7 +57,7 @@ fn history_and_other_writers_progress_during_stalled_dispatch() {
 
 async fn stalled_dispatch() {
     let home = tempfile::tempdir().unwrap();
-    let path = home.path().join("history.db");
+    let path = home.path().join("store.db");
     let store = crate::store::opening::open_ephemeral(&path).unwrap();
     let sql = rusqlite::Connection::open(&path).unwrap();
     sql.busy_timeout(Duration::from_millis(100)).unwrap();
@@ -122,11 +121,10 @@ async fn stalled_dispatch() {
     .unwrap();
     sender.await.unwrap();
     assert!(store
-        .session_history("conversation", 0, 0)
+        .session_turns("conversation")
         .unwrap()
         .iter()
-        .any(|event| event.kind == SessionEventKind::Started
-            && event.provider_turn.as_deref() == Some("turn")));
+        .any(|turn| turn.started_at.is_some() && turn.turn == "turn"));
 
     let replacement = LfProcessId::new();
     sql.execute(
@@ -163,12 +161,9 @@ async fn stalled_dispatch() {
         .unwrap();
         transferred.send(attachment).unwrap();
     });
-    // Transfer must wait for the native write, but history must not.
+    // Transfer must wait for the native write, but turns must not.
     assert!(transfer.recv_timeout(Duration::from_millis(100)).is_err());
-    assert!(!store
-        .session_history("conversation", 0, 0)
-        .unwrap()
-        .is_empty());
+    assert!(!store.session_turns("conversation").unwrap().is_empty());
     release.send(()).unwrap();
     let replacement = transfer.recv_timeout(Duration::from_secs(2)).unwrap();
     dispatch.join().unwrap();

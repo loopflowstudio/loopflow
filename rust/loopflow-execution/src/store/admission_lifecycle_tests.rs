@@ -553,7 +553,6 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
             title: id.to_string(),
             title_source: crate::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         };
@@ -589,24 +588,14 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     assert_eq!(store.session("orphan").unwrap(), Some(replacement.clone()));
     let elsewhere = open("elsewhere", Some(other_wave));
     let old_runs = store.session_inputs("orphan").unwrap();
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Started,
-            &serde_json::json!({}),
-        )
-        .unwrap();
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Usage,
-            &serde_json::json!({"input": 20}),
-        )
-        .unwrap();
+    store.record_turn_start("orphan", &"thread".into(), "active", 1);
+    store.record_turn_usage(
+        "orphan",
+        &"thread".into(),
+        "active",
+        2,
+        &serde_json::json!({"usage": {"input_tokens": 20}}),
+    );
     let earlier = store.session_history("orphan", 0, 0).unwrap();
     assert!(
         crate::store::sessions::bind_session(&store, "orphan", first.captured, &task_id).is_err()
@@ -630,15 +619,13 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         bound
     );
     // A late observation belongs to the old turn, never the new bind.
-    store
-        .record_session_event(
-            "orphan",
-            &"thread".into(),
-            "active",
-            crate::session::SessionEventKind::Completed,
-            &serde_json::json!({"status": "completed"}),
-        )
-        .unwrap();
+    store.record_turn_completion(
+        "orphan",
+        &"thread".into(),
+        "active",
+        3,
+        &serde_json::json!({"status": "completed"}),
+    );
     // Attribution freezes when the attached LfProcess sends the request.
     let process = loopflow_model::id::LfProcessId::new();
     store
@@ -653,18 +640,12 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
     let attachment =
         attachment::claim_session_attachment(&store, "orphan", None, &process, false).unwrap();
     let origin = store.session_turn_origin("orphan", &attachment).unwrap();
-    store
-        .record_session_turn_origin(&"thread".into(), "future", &origin)
-        .unwrap();
+    store.record_session_turn_origin(&"thread".into(), "future", &origin);
     let events = store.session_history("orphan", 0, 0).unwrap();
-    assert!(events
-        .iter()
-        .filter(|event| event.provider_turn.as_deref() == Some("active"))
-        .all(|event| event.task_id.is_none()));
-    assert_eq!(
-        events.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    let turns = store.session_turns("orphan").unwrap();
+    let turn = |id: &str| turns.iter().find(|turn| turn.turn == id).unwrap();
+    assert_eq!(turn("active").task_id, None);
+    assert_eq!(turn("future").task_id.as_deref(), Some(task_id.as_str()));
     let future = crate::store::sessions::replace_session_input(
         &store,
         replacement.captured,
@@ -682,17 +663,8 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         .session_inputs("orphan")
         .unwrap()
         .contains(first.input_key().unwrap()));
-    let history = store.session_history("orphan", 0, 0).unwrap();
-    assert_eq!(&history[..events.len()], events);
-    assert_eq!(history.len(), events.len() + 1);
-    assert_eq!(
-        history.last().unwrap().kind,
-        crate::session::SessionEventKind::Captured
-    );
-    assert_eq!(
-        history.last().unwrap().task_id.as_deref(),
-        Some(task_id.as_str())
-    );
+    // A new input is Session state, not history.
+    assert_eq!(store.session_history("orphan", 0, 0).unwrap(), events);
     let refused =
         crate::store::sessions::bind_session(&store, "elsewhere", elsewhere.captured, &task_id)
             .unwrap_err();

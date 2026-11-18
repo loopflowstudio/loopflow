@@ -918,7 +918,6 @@ async fn admit(
         title: moved.title.clone(),
         title_source: moved.title_source,
         request: None,
-        ready_summary: None,
         completed_at: None,
         created_at: loopflow_storage::rows::now_unix(),
     };

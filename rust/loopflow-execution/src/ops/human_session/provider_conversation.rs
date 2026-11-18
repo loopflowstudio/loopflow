@@ -133,7 +133,6 @@ pub async fn admit(store: &SharedStore, id: &str, directory: &Path) -> Result<Op
             title: format!("{} {}", conversation.provider, &id[..8]),
             title_source: TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: loopflow_storage::rows::now_unix(),
         })

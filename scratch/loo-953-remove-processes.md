@@ -1,116 +1,88 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, journal stopped; next: slices 4–6)
+## Status (2026-11-18, slices 4–5 built; next: gate)
 
-LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Built,
-in order: slice 2a (Graph runs and steps own their results), the owner and
-carrier slices (activations, CI repairs, Task and ship carriers), the Session
-lifetime and attachment cuts of slice 3, the handoff deletion, the lf-row
-readers, and now the journal stop below. History of each pass, with its
-checks: `git show fbcf0091f2:scratch/loo-953-remove-processes.md`.
+LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
+slice of this PR is built: slice 2a, the owner and carrier slices, the Session
+slices of slice 3, the journal stop, and slices 4–5 below. History of each
+pass, with its checks: `git show be7ccd8712:scratch/loo-953-remove-processes.md`.
+Contract Task: LOO-965 ("Drop the Process table LOO-953 marked leaving").
+Quotes and the OS-scan measurement: `questions.md`.
 
-Next, in order: (3) slices 4–6 below. Slice 4 also does the two cuts in
-"Concept review after the journal stop". Slice 5 tests only the old → new
-bridge. Contract Task: LOO-965 ("Drop the Process table LOO-953 marked
-leaving"). Quotes and the OS-scan measurement: `questions.md`.
+**Slice 4 as built (2026-11-18).**
 
-**Journal stop as built (2026-11-18).** No lf code inserts a Process row;
-only the SQL bridge does, for a released lf.
+- Deleted: `lf process list/top/prune/show` (`top.rs`, `process.rs`) with
+  their `monitor`/`ps` aliases and saved-Graph translations, the
+  `process.list` served read, `ActivitySnapshot` (Rust, Swift, fixture) and
+  Desktop's unused `activity` subscription; `lf session history list`, the
+  Process form of `history show`, Process paging (`ProcessFilter`,
+  `ProcessCursor`, `ProcessPage`, `processes()`, `resolve_process`,
+  `print_process`), `lf_process_ids` and Task Work `processes[]` (Rust,
+  Swift, fixtures, `lf task status` Process lines), `LfProcess.swift`,
+  `process_page.json`, the relocation receipts' writer and readers,
+  `RecordKind::Process`/`GraphProcess*` and `CopyCounts.processes`, doctor's
+  `attribution`/`identity`/`lineage` checks and `DoctorReport.rows`,
+  `open_processes_read_only` (folded into `open_read_only`), the `--process`
+  subject of context explanation, `unfinished_processes_except`,
+  `recorded_process_evidence`.
+- Attaching records `AttachingLf { lf_process_id, holder, terminal }`;
+  `journal::current_holder` replaces `start_record`/`current_start_record`.
+- Owner liveness lives in `process::os_process` beside `OsProcess`:
+  `RecordedProcess::evidence` is the one rule, `step_evidence`,
+  `carrier_evidence` and `session_agent_evidence` the three owner cases.
+  The journal keeps the trace log only.
+- `lf graph list` reads a run whose pid died as `stopped` (storage
+  `graph_inventory` takes the caller's observation).
+- `lf machine doctor` gains `strays` (`OsProcess::environment` returns only
+  `LF_STEER_SESSION`/`LF_PROCESS_ID`; labels name the program, never argv).
+- Orphan reaping stays on lazy recovery (`ops::recovery`), which
+  `lf session list` now triggers; `reap_agent_processes` lost `--dry-run`.
+- `history export` writes Sessions and events only; import skips Process
+  and Graph rows a released exporter wrote.
+- Docs and operate skills name `lf session list`, `lf graph list
+  --processes --state current` and `lf graph show` in place of `lf ps`.
 
-- The journal records no rows and no receipts. `record_end` writes a run's end
-  on the owners it marked (`run_owners`) at its terminal event and opens the
-  store only then; a command owning none writes nothing. Deleted:
-  `record_process_in`/`_within`, `record_hosted_process`,
-  `process_is_recorded`, `open_existing_processes`, `observe_process` (and
-  its three `lf.rs` callers), `parent_is_recorded` (an inherited parent is
-  kept whenever the trace is inherited), the receipt type and every receipt
-  function, `ReceiptCost` (and wt timing's receipt samples),
-  `journal_trace_locator`/`process_receipt_locator`/`process_for_receipt`,
-  `FORGETTABLE` and its tests. `agent_caller()` reads `LF_AGENT_CALLER` before
-  admission, so `lf open` needs no observation. A read admits no Process, so
-  `with_process` creates the context at exit only for a minted Graph step
-  (`LF_EXECUTION_ID` set), which then writes its own end and error.
-- `attach_in` no longer lands the attaching lf's row; the agent row a
-  released reader joins takes its trace from the agent id when its launcher
-  has no row.
-- Synthetic holder rows are gone (`terminal_holder::client::{record, adopt,
-  settle_departed, holder_process}`); nothing read them except `lf ps`.
-- Liveness pass (`sqlite::retention::running_owners` → execution's `prune` →
-  `end_dead_owners`): unended Graph runs and steps, activations, Task and ship
-  carriers with a pid, and Session agents with a pid; dead (or started before
-  boot) ends through `finish_run_in` with no exit and no error, a Session agent
-  as `exited` (headless runs complete). Re-read in the write transaction, so a
-  row changed since observation is left. `close_dead_processes` and
-  `forget_processes` deleted; `RetentionReport.ended_owners` replaces their
-  counts. CI repairs are left out: nothing ends them on a Process end today
-  either. Index `graph_process_steps_unended`.
-- `lf binaries`/doctor/install skew inventory reads `recorded_lfs()` (owner
-  rows with a pid, plus each Session's attached lf) and, for a released lf,
-  unfinished Process rows; deduped by pid.
-- `lf ps`/`top`/`process prune` (slice 4 targets) lost their receipt arms only.
-- Migration: the generated block at the end of `process_rows_on_owners.sql`
-  rebuilds `agent_sessions`, `ci_incidents`, `desktop_shells`,
-  `session_events`, `steer_adapters`, `task_graphs`, `tasks`, `waves` without
-  their `processes` keys, keeping every column, index and trigger
-  (`scratch/rebuild_without_process_keys.py` regenerates it; output matches).
-  `steer_batches` is skipped: it has no writer and leaves with LOO-954.
-  Marks: `-- leaving: processes`, `relocated_task_processes`,
-  `agent_sessions.transport_lf_process_id` → LOO-965. No new → old trigger for
-  Graph lf rows; `process_agent_from_session_*` and
-  `process_terminal_from_session` stay.
-- Cost on a `.backup` copy of the real store (364,671 `session_events`,
-  22,379 Sessions, 1,395 Tasks): `session_events` rebuild 4.3 s,
-  `agent_sessions` 0.3 s, `tasks` 0.09 s.
-- Fixtures: `recorded_graphs` and the Task-run `ran` wait read Graph runs,
-  steps, carriers and ship events (the carrier records no exit code, so a
-  run's code is its shipping's, else its last Graph run's); step `argv`
-  became the compiled `label`.
+**Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
+`record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a
+released Graph runner's end ends its Graph run; a released launcher's
+endpoint reaches `agent_endpoint` on its Session.
 
-Checks (2026-11-18): storage `migration_runner|query_plans|sqlite::{retention,
-processes,sessions,graph_inventory,task_work,durable,steers}|canonical_ids|
-revisions|task_retirement|fixture_tests` → 218 pass after three fixture
-fixes; execution `journal|store|harness|process|ops::{task,graph_process,
-pr_landing,project,human_session,wt_timing}|transport::registry|
-session_record|terminal_holder` → 719 pass after four fixture fixes;
-loopflow `graph_tests|task_graph_launch_tests|explain|world_recipes|
-server::{boundary,wake}|subscription_measurement|commands::{top,binaries,
-machine}|doctor_tests|store_contention|binary(agent_tests)` → 137 pass;
-`task_graph_launch_tests|graph_tests|top` rerun → 86 pass at load 77.
-`completion_preserves_retained_session_input_and_unknown_process_history`
-failed once in a parallel run (`desktop task --json` exited non-zero with no
-stderr, load ~70) and passed alone twice and in the rerun: gate reruns it.
-clippy, fmt, `check_migrations.py`, `schema_page.py --check` → clean.
-Gate/CI: `binary(session_lifecycle_tests)`, `process_ownership_tests`,
-`session_cli_tests`, `work_open_tests`, `binary(two_people)`,
+**Slice 6** is LOO-965. What it removes beyond the marked tables: the
+bridge triggers, `binaries.rs`' released-lf arm (`unfinished_processes`,
+`read_process`, `PROCESS_SELECT`), `canonical_ids`/`query_plans` arms,
+`forget_unread_rows`' `attachment_exit_seq` clear, and the test-support
+`record_process`, `lf_process`, `agent_process`, `processes_since` with the
+`LfProcess`/`AgentProcess`/`ProcessEntry` types they return.
+
+`python3 -I scratch/process_sql_scan.py rust` (2026-11-18): production
+statements naming `processes` are the bridge's, `canonical_ids` preflight,
+`query_plans`, `forget_unread_rows` and `PROCESS_SELECT` (binaries' arm).
+
+Checks (2026-11-18): storage `graph_inventory|processes|task_work|
+repositories|machine_records|canonical_ids|query_plans|migration_runner` →
+163 pass; execution `process|harness::agent_process|store::retention|
+machine_records|rental::recovery|store::task_work|read_stream|ops::context|
+ops::run|journal|observe|store::session_projection|attachment_lifecycle|
+ops::task|ops::human_session|ops::pr_landing` → 314 pass after one fixture
+fix; `graph::` → 87 pass; loopflow `server::{service,subscriptions,schema}|
+doctor|lf::tests|dto_fixtures|cli_discovery|global_commands|
+task_abandonment|graph_discovery_tests|binaries|history|read` → 204 pass
+after fixture fixes; `binary(served_reads)|binary(process_ownership_tests)|
+subscribe::reads_record_no_process` → 22 pass; `documented_commands::` 4,
+`binary(golden_prompt)` 1 (no golden change), bridge tests 2;
+`scripts/test_desktop.sh --filter 'DTOFixtureTests|WorkObservationTransportTests|
+RegistryQueryTests|DesktopHeadlessTests|DesktopLogTests|WorkSelectionTests|
+WorkNavigationTests'` → 156 pass; clippy and fmt clean; server schema
+fixture regenerated. Gate/CI: `binary(session_lifecycle_tests)`,
+`session_cli_tests` (two fixtures still read `store.lf_process` of an lf
+that no longer writes its row), `work_open_tests`, `binary(two_people)`,
 `binary(transport_tests)`, `test(transport::)`, `test(performance_tests::)`,
-`binary(lf)`, `local_planning`.
-
-**Concept review after the journal stop (2026-11-18): fold into slice 4.**
-The journal stop left two row-shaped leftovers, and slice 4 removes both:
-
-- *The attaching lf is described as a Process row.* `attach_in` reads three
-  fields of `LfProcessStart { process: LfProcess, terminal }` (id, pid, OS
-  start). To provide them, `journal::start_record` fills a whole `LfProcess`
-  (command, cwd, via_agent, completed_at…) and `current_start_record` hands it
-  to `attachment::current_start`. Replace it with what attaching records: the
-  holder (`lf_process_id`, `AttachmentHolder { pid, os_started_at }`,
-  `terminal`). The journal exposes that directly. Delete `start_record`,
-  `current_start_record` and `LfProcessStart.process`.
-- *Owner liveness lives in the journal* (`journal/mod.rs:1104–1290`), which is
-  now only the trace log. Nine functions apply one rule: ended → dead; pid and
-  OS start → one OS lookup; pid without OS start → unknown; no pid → dead if
-  started before boot, else unknown. Each owner changes the no-pid case on
-  purpose: a reserved step follows its Graph run, a reserved agent its
-  holder, a carrier with no pid is dead. Move them beside `OsProcess`: one
-  rule plus those three owner cases. `recorded_process_evidence` goes with
-  `lf ps`. `lf_process_evidence` stays only for `binaries.rs`' released-lf
-  arm (LOO-965) and calls the shared rule.
-- After slice 4, no production code builds `LfProcess`, `ProcessEntry` or
-  `AgentProcess`. Each stays only if the released-lf arm, `canonical_ids`,
-  `query_plans` or a fixture still reads it, and goes in LOO-965.
-
-No open product choice. Questions.md's "`lf ps` lists only released-lf
-rows" is settled by deleting `lf ps`.
+`binary(lf)`, `local_planning` (one fixture reads `work["processes"]`),
+`agent_tests`/`native_session` fixtures over `processes_since`, and the
+journal stop's flaky-under-load
+`completion_preserves_retained_session_input_and_unknown_process_history`.
+`check_migrations.py` and `schema_page.py --check` were clean before slice 4,
+which changed no migration.
 
 **Decisions still live** (concept reviews, 2026-11-17/18; detail in git):
 
@@ -278,13 +250,7 @@ receipts and locators, `FORGETTABLE`, `close_dead_processes`,
 `forget_processes`, synthetic holder rows, tree walks (approach 1), the
 `session_owner` reader.
 
-Left for slice 4: `lf top`, `lf ps` call trees (`top.rs` `ActivityReader`),
-`lf process` namespace (`list/top/prune/show`), `lf history list`, history
-`--parent/--caller/--outcome` filters, `lf context --process`,
-`ProcessCursor` export, doctor's `check_lineage`, the
-`relocated_task_processes` writer and readers, Task Work `processes[]` and
-`lf_process_ids`, `process_page` DTO and `LfProcess.swift`, the
-`process_locators_*` triggers' readers. Left for LOO-965: the
+Slice 4's list is deleted (Status). Left for LOO-965: the
 `processes` arms in `canonical_ids` preflight and `query_plans`,
 `binaries.rs`' released-lf arm, `SqliteStore::record_process`
 (test-support) and the fixtures that seed `processes`. Each deletion takes
@@ -304,21 +270,10 @@ two live agents on one Session; a `Legacy*` type.
 
 ## Slices (one PR, after LOO-936)
 
-1–3 and the journal stop are built (Status). Remaining:
-
-4. **Delete `lf ps`, doctor strays, deletions** (CLI, DTOs, Swift, operate
-   skills, docs; the list above). Test: `lf graph list --json` shows a
-   SIGKILLed run ended (the liveness pass is built and tested at store level:
-   `retention_lifecycle_tests`). Still untested: `graph_failure_cause`
-   driving the repeated-failure stop.
-5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
-   statements): an old Graph runner's end on `processes` → its Graph run
-   ended; an old launcher's endpoint update → visible in `lf session list`.
-   No step-discovery test.
-6. **Contract Task** LOO-965 (filed 2026-11-18): after `STAGING_DAYS` (30),
-   export `processes` to JSON lines (`-- exports:`), drop it, the bridge
-   triggers, `relocated_task_processes`, `transport_lf_process_id`, unused
-   locator indexes. The foreign keys already came off in the expand.
+All built (Status); slice 6 is LOO-965, filed 2026-11-18, after
+`STAGING_DAYS` (30): export `processes` to JSON lines (`-- exports:`), drop
+it, the bridge triggers, `relocated_task_processes`,
+`transport_lf_process_id`, unused locator indexes.
 
 ## Acceptance at gate (headless, private `LF_HOME`)
 
@@ -384,6 +339,18 @@ Dropping other dead columns (LOO-935). `lf server stop` keeps its own path.
   timing the owner end write.
 - (2026-11-18) Released receipt files under `runtime/exec-processes/` are left
   on disk; no lf reads them, and LOO-965 can delete the directory.
+- (2026-11-18, slice 4) Orphan reaping stays on lazy recovery rather than
+  moving to the server's liveness pass; `lf session list` triggers it where
+  `lf process` did.
+- (slice 4) Doctor `strays` claims only owner rows, so a released lf still
+  running in the skew window reads as a stray (a warning). macOS hides the
+  environment of platform binaries (`/bin/sleep`, `/bin/zsh`), so the scan
+  cannot see those; providers and node/python children were readable.
+- (slice 4) `ContextExplanation.process` stays, bound only to the running
+  lf (`inspecting_process`); `process.get` and `process.history` keep their
+  wire kinds until the Process-line rename.
+- (slice 4) A copy imported from a released exporter skips its Process and
+  Graph rows instead of failing the give-back.
 
 ## Docs written for this change (describe intended behavior)
 
@@ -394,10 +361,8 @@ Disk, Stray agent processes, Many lf processes), `docs/getting-started.md`,
 `docs/agent-api.md`, `docs/index.md`, `docs/ops.md`, `docs/work.md`,
 `docs/glossary.md`, `docs/security.md`, `docs/lf-reference.md` preamble;
 builtin skills `repo_operate.md`, `task_operate.md`, `wave_operate.md`.
-`docs/dev/*` still describe the Process table; slice 4 updates them with the
-code. These docs predate the 2026-11-17 call to delete `lf ps`: 16 mentions
-in 11 files (`docs/{work,ops,lf-reference,troubleshooting,agent-api,surfaces,getting-started,sessions}.md`
-and the three operate skills; `grep -rn "lf ps" docs rust/loopflow-definitions/src/builtins`)
-still describe a new `lf ps`, and the telemetry.md sample's columns (scope,
-kind, harness or graph, title or step, pid, state, age) have no command to
-belong to. Slice 4 moves them to `lf session list` / `lf graph list`.
+Slice 4 moved every `lf ps`/`lf process` command reference to `lf session
+list`, `lf graph list --processes` and `lf graph show`, and rewrote the
+LfProcess and AgentProcess rows of `docs/dev/reference.md`. Still describing
+Process rows in prose: `docs/dev/reference-models.md` (LfProcess model,
+causal ancestry), `docs/dev/reference-processes.md`; realign owns them.

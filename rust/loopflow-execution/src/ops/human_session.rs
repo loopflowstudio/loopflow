@@ -1137,6 +1137,42 @@ pub async fn open(
             return surface(store, &session).await;
         }
     }
+    // A thread whose transcript is gone cannot resume; the conversation goes
+    // on in a fresh one, seeded with lf's log of it. One request per lost
+    // thread, so a start retried after a crash creates it once.
+    if let (true, Some(thread), Some(provider)) = (
+        resume,
+        provider_session.as_ref(),
+        session.provider.as_deref(),
+    ) {
+        let elsewhere = store
+            .sqlite
+            .session_terminal(&session.id)?
+            .is_some_and(|terminal| crate::transport::current() != Some(&terminal));
+        if !elsewhere
+            && !running()?
+            && crate::transcript::thread_lost(&store.sqlite, provider, &thread.agent_session)?
+        {
+            drop(progress);
+            crate::journal::request::diagnostic(format_args!(
+                "The {provider} transcript of this conversation is gone; continuing on a fresh thread."
+            ));
+            new_thread(
+                store,
+                &session.id,
+                None,
+                true,
+                json,
+                &format!("fresh-thread:{}:{}", session.id, thread.agent_session),
+            )
+            .await?;
+            let session = store
+                .session(&session.id)
+                .await?
+                .ok_or_else(|| session_not_found(&session.id))?;
+            return surface(store, &session).await;
+        }
+    }
     let admitted;
     let session = if resume {
         let id = session.id.clone();
@@ -1549,7 +1585,8 @@ fn switch_agent(session: &mut LfSession, agent: &str) {
 }
 
 /// Start a fresh provider thread on the same Session, on `agent` or its
-/// current provider, seeded with a log of the current thread. The Session
+/// current provider, seeded with a log of the current thread, or its original
+/// request when that thread's transcript is gone. The Session
 /// keeps its name, Work and feedback; the old thread stays in its history.
 /// Without `launch`, the new input waits for its first open.
 pub async fn new_thread(
@@ -1603,11 +1640,18 @@ pub async fn new_thread(
     if let Some(refusal) = run_refusal(&store.sqlite, &session)? {
         bail!(refusal);
     }
-    let threaded = match session.artifact_key.as_deref() {
-        Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
+    let thread = match session.artifact_key.as_deref() {
+        Some(key) => store.sqlite.input_provider_session(key)?,
+        None => None,
+    };
+    let threaded = match thread {
+        Some(thread) => {
+            !crate::transcript::thread_lost(&store.sqlite, &from, &thread.agent_session)?
+        }
         None => false,
     };
-    // A conversation with no provider history carries its original first prompt.
+    // A conversation with no provider history, or whose transcript is gone,
+    // carries its original first prompt.
     let request = if threaded {
         Some(conversation_log::continuation(&store.sqlite, &session)?)
     } else {

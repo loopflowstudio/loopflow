@@ -351,6 +351,11 @@ lf task status LOO-12
 Only a running server starts anything. With none, the line says so:
 `died 12:01 (exit 137) · starts again when the server runs`.
 
+A crash can take the provider's transcript with it, as when the provider was
+killed before saving its first turn. Then the conversation starts again on a
+fresh thread with its original request, whether the server starts it or you
+do with `lf resume`, and the old thread stays in `lf session history`.
+
 A start that cannot happen says why instead of retrying silently, for
 example `last start failed: claude is not installed on this Machine's PATH`.
 `lf machine doctor` reports how many PTYs are left: each work session's

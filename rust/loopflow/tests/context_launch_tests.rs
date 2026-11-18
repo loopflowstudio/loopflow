@@ -1299,10 +1299,30 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     let mut running = Some(server());
     let stop = home.path().join("stop");
     let _release = Release(stop.clone());
+    // Each launch logs the thread it starts or resumes.
+    let threads = home.path().join("threads.log");
     let script = format!(
-        "while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        "prev=; for a in \"$@\"; do case \"$prev\" in --resume|--session-id) echo \"$prev $a\" >> '{}';; esac; prev=\"$a\"; done\n\
+         while [ -d \"$HOME\" ] && [ ! -e '{}' ]; do sleep 0.1; done",
+        threads.display(),
         stop.display()
     );
+    // The first `count` launches, once the provider has logged them.
+    let launches = |count: usize| -> Vec<String> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        loop {
+            let logged: Vec<String> = fs::read_to_string(&threads)
+                .unwrap_or_default()
+                .lines()
+                .map(str::to_owned)
+                .collect();
+            if logged.len() >= count {
+                return logged;
+            }
+            assert!(std::time::Instant::now() < deadline, "{logged:?}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    };
     succeed(
         claude_launch(home.path(), &script)
             .current_dir(repo.path())
@@ -1323,11 +1343,21 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     let db = machine.join("loopflow.db");
     let (first, pid, attempts) = next_task_conversation_agent(&db, home.path(), id, None);
     assert_eq!(attempts, 0, "a first start is not a death");
+    let thread = launches(1)[0]
+        .strip_prefix("--session-id ")
+        .expect("a first start opens a thread")
+        .to_owned();
+    // Claude wrote its transcript, in the home the server's starts use.
+    let transcript = machine.join(format!(".claude/projects/-repo/{thread}.jsonl"));
+    fs::create_dir_all(transcript.parent().unwrap()).unwrap();
+    fs::write(&transcript, "{}\n").unwrap();
 
-    // Killed: it comes back, counted once, and the death is not a quit.
+    // Killed: it comes back on its thread, counted once, and the death is
+    // not a quit.
     succeed(Command::new("/bin/kill").args(["-9", &pid.to_string()]));
     let (second, _, attempts) = next_task_conversation_agent(&db, home.path(), id, Some(&first));
     assert_eq!(attempts, 1);
+    assert_eq!(launches(2)[1..], [format!("--resume {thread}")]);
     let status = || -> serde_json::Value {
         let detail: serde_json::Value = serde_json::from_str(&succeed(
             claude_launch(home.path(), &script)
@@ -1362,10 +1392,15 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
     assert!(!matches!(exit, Some(0 | 130)), "{exit:?}");
 
     // A finished turn resets the count; then the server stops, the holder
-    // dies with it, and the next server starts the conversation once.
+    // dies with it, and the next server starts the conversation once. The
+    // crash took the transcript too: it goes on in a fresh thread.
+    fs::remove_file(&transcript).unwrap();
     rusqlite::Connection::open(&db)
         .unwrap()
-        .execute("UPDATE agent_sessions SET starts_since_turn=0", [])
+        .execute(
+            "UPDATE agent_sessions SET starts_since_turn=0,last_started_at=NULL",
+            [],
+        )
         .unwrap();
     drop(running.take());
     let holder: i64 = rusqlite::Connection::open(&db)
@@ -1385,6 +1420,11 @@ fn a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit() {
         task_conversation_agent(&db, id).map(|(agent, _, attempts)| (agent, attempts)),
         Some((third.clone(), 1)),
         "started once"
+    );
+    let fresh = &launches(3)[2..];
+    assert!(
+        fresh.len() == 1 && fresh[0].starts_with("--session-id ") && !fresh[0].ends_with(&thread),
+        "{fresh:?}"
     );
 
     // Quit: the provider exits 0 and stays down.

@@ -1967,21 +1967,29 @@ sys.exit(code)
     assert_eq!(task.graph()["position"], at("review"));
 }
 
-#[test]
-fn a_task_step_runs_as_a_worker_on_every_harness() {
-    let opencode = include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
+fn opencode_stand_in() -> String {
+    include_str!("../../../loopflow-execution/tests/support/opencode_cli.py")
         .replace("__WAIT__", "False")
         .replace(
             "Path(__file__).resolve().parent.parent",
             "Path(os.environ['LF_HOME'])",
-        );
-    let pi = format!(
+        )
+}
+
+fn pi_stand_in() -> String {
+    format!(
         "#!/usr/bin/python3 -I\n{}",
         include_str!("../../../loopflow-execution/src/harness/testdata/pi_rpc.py").replace(
             "Path.cwd() / \"pi-conversation.jsonl\"",
             "Path(os.environ['LF_HOME']) / (os.environ['LF_CAPTURE_KEY'] + '.jsonl')"
         )
-    );
+    )
+}
+
+#[test]
+fn a_task_step_runs_as_a_worker_on_every_harness() {
+    let opencode = opencode_stand_in();
+    let pi = pi_stand_in();
     for (provider, agent, script, answer) in [
         (
             "opencode",
@@ -2033,6 +2041,37 @@ fn a_task_step_runs_as_a_worker_on_every_harness() {
         assert!(
             String::from_utf8_lossy(&history.stdout).contains(answer),
             "{provider}: {history:?}"
+        );
+    }
+}
+
+/// OpenCode cancels a headless question and lets the model assume an answer;
+/// Pi waits on its dialog. Either way the worker's turn fails with what was asked.
+#[test]
+fn a_question_with_nobody_there_ends_the_step() {
+    for (provider, agent, script) in [
+        ("opencode", "opencode:opencode/fixture", opencode_stand_in()),
+        ("pi", "pi:fixture/model", pi_stand_in()),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        task.repo.create_file(
+            ".lf/graphs/worker.yaml",
+            "- implement\n- interactive: {name: demo, id: review}\n",
+        );
+        task.repo.stage_all();
+        task.repo.commit("Define a worker followed by a review");
+        fs::write(task.home.path().join("ask-question"), "").unwrap();
+
+        let asked = task.task_run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        assert!(!asked.success(), "{provider}: {}", asked.text);
+        let reason = "asked a question with nobody there to answer it: Use the fixture?";
+        assert!(asked.text.contains(reason), "{provider}: {}", asked.text);
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+        let status = task.text_status();
+        assert!(status.contains(reason), "{provider}: {status}");
+        assert!(
+            !status.contains("Fixture completed."),
+            "{provider}: {status}"
         );
     }
 }

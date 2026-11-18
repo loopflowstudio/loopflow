@@ -305,11 +305,18 @@ impl Driver {
             let mut lines = BufReader::new(stdout).lines();
             let outcome: Result<()> = async {
                 while let Some(line) = lines.next_line().await? {
-                    let value: Value = serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
+                    let value: Value =
+                        serde_json::from_str(&line).context("Invalid Pi RPC JSON")?;
                     let mut state = state.lock().expect("Pi state lock poisoned");
                     if value["type"] == "response" {
-                        if let Some(tx) = value["id"].as_str().and_then(|id| state.responses.remove(id)) {
-                            let _ = tx.send(Response { value, turn: state.turn.as_ref().map(|turn| turn.id().to_owned()) });
+                        if let Some(tx) = value["id"]
+                            .as_str()
+                            .and_then(|id| state.responses.remove(id))
+                        {
+                            let _ = tx.send(Response {
+                                value,
+                                turn: state.turn.as_ref().map(|turn| turn.id().to_owned()),
+                            });
                         }
                         continue;
                     }
@@ -321,16 +328,24 @@ impl Driver {
                     }
                     if value["type"] == "extension_ui_request" {
                         // A headless extension dialog requires a person; never silently answer it.
-                        if matches!(value["method"].as_str(), Some("select" | "confirm" | "input" | "editor")) {
-                            bail!("Pi extension requested interactive input; open this Session in Pi to answer it");
+                        if matches!(
+                            value["method"].as_str(),
+                            Some("select" | "confirm" | "input" | "editor")
+                        ) {
+                            let question = [&value["title"], &value["message"]]
+                                .iter()
+                                .filter_map(|text| text.as_str())
+                                .collect::<Vec<_>>()
+                                .join(" ");
+                            bail!(super::common::unanswered_question("Pi", &question));
                         }
                     }
                     if let Some(turn) = state.turn.as_mut() {
                         let decoded = turn.event(&value);
                         let mapped = state.record(decoded)?;
-                        let complete = mapped.iter().any(|e| {
-                            matches!(e, ConversationEvent::TurnCompleted { .. })
-                        });
+                        let complete = mapped
+                            .iter()
+                            .any(|e| matches!(e, ConversationEvent::TurnCompleted { .. }));
                         for event in mapped {
                             let _ = events.send(event);
                         }
@@ -340,7 +355,8 @@ impl Driver {
                     }
                 }
                 bail!("Pi RPC stream closed")
-            }.await;
+            }
+            .await;
             let mut state = state.lock().expect("Pi state lock poisoned");
             state.dead = true;
             state.responses.clear();

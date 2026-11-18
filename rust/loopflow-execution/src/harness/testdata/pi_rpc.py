@@ -17,6 +17,8 @@ file = (
     if "--session" in args
     else Path.cwd() / "pi-conversation.jsonl"
 )
+# A fixture leaves this marker to make any prompt open a dialog.
+ASK = Path(os.environ.get("LF_HOME", ".")) / "ask-question"
 if not file.exists():
     file.write_text('{"type":"session","id":"fixture","version":3}\n')
 
@@ -204,8 +206,15 @@ for line in sys.stdin:
     if text == "invalid":
         print("not-json", flush=True)
         continue
-    if text == "dialog":
-        _emit({"type": "extension_ui_request", "method": "confirm", "id": "dialog"})
+    if text == "dialog" or ASK.exists():
+        _emit(
+            {
+                "type": "extension_ui_request",
+                "method": "confirm",
+                "id": "dialog",
+                "title": "Use the fixture?",
+            }
+        )
         continue
     if text == "extension error":
         _emit({"type": "extension_error", "error": "fixture context delivery failed"})

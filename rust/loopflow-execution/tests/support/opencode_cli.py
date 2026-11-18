@@ -161,6 +161,22 @@ def _run(session, text):
     sessions[session].append(message)
     _save(sessions)
     _line("step_start", session, id="prt_" + uuid.uuid4().hex, messageID=assistant, type="step-start")
+    if (HOME / "ask-question").exists():
+        # `run --auto` cancels the question and lets the model answer anyway.
+        _line(
+            "tool_use",
+            session,
+            id="call_question",
+            messageID=assistant,
+            type="tool",
+            tool="question",
+            state={
+                "status": "error",
+                "input": {"questions": [{"question": "Use the fixture?", "options": []}]},
+                "error": "This non-interactive run cannot ask the user questions,"
+                " so the question was cancelled.",
+            },
+        )
     answer = "Fixture completed."
     # A retried turn carries no contract of its own; the conversation does.
     saved = HOME / f"contract-{session}.json"

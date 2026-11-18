@@ -41,10 +41,10 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 
 10. **How is a worker's question answered?** `docs/orchestration.md` now says:
     the step fails with the question as its reason; answer with
-    `lf steer LOO-12 "…"` and `lf task run` again. Pi's message today says
-    "open this Session in Pi to answer it", which `lf resume` cannot do for a
-    headless Session. Is steer-then-run the answer path, and should the
-    failure reason print that command?
+    `lf steer LOO-12 "…"` and `lf task run` again. The reason on OpenCode and
+    Pi is now "<harness> asked a question with nobody there to answer it:
+    <question>" (Pi's "open this Session in Pi to answer it" is gone). Is
+    steer-then-run the answer path, and should the reason print that command?
 
 11. **The parity table's "no" cells name no Task** for idle steer wake
     (OpenCode, Pi) or Pi limit classification; only LOO-518 exists. File them,
@@ -76,3 +76,22 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 17. **With `agents: [opencode, codex]` and OpenCode missing, a refused Codex
     step's stop advice reads "Nothing is left in its order after codex"**; it
     does not name the entry that was passed over.
+
+18. **What does a headless Claude or Codex do with a question?** The parity
+    table's question row now reads "not shown" for both. No decoder fails a
+    turn on Claude's `AskUserQuestion` or Codex's `requestUserInput`
+    (`codex_decode.rs` only marks the Session as waiting), and no trace of
+    either was recorded. The orchestration doc's sentence ("a headless step
+    whose agent asks a question fails with the question as its reason") is
+    shown for OpenCode and Pi only.
+
+19. **A question is asked three times.** The failed turn is a failed step, so
+    `lf task run` starts it again twice and the model asks again each time
+    (`a_question_with_nobody_there_ends_the_step` takes 72s for that reason).
+    Stopping after the first question needs the retry loop to tell a question
+    from another failure; not built.
+
+20. **Pi's question text is read from `title` and `message`** of its
+    `extension_ui_request`, taken from memory of Pi's RPC shape and the
+    stand-in; no real Pi dialog was recorded. A request with neither gives the
+    reason without a question.

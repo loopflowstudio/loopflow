@@ -14,6 +14,8 @@ pub(super) struct Turn {
     turn: ProviderTurn,
     final_text: String,
     failed: bool,
+    /// The model asked a question; its run is stopped, not left to assume an answer.
+    asked: bool,
     parts: usize,
 }
 
@@ -23,6 +25,7 @@ impl Turn {
             turn,
             final_text: String::new(),
             failed: false,
+            asked: false,
             parts: 0,
         }
     }
@@ -96,11 +99,26 @@ impl Turn {
                 out.push(ProviderFact::Activity(Signal::ToolResolved(tool.into())).into());
                 out.push(
                     ConversationEvent::ItemCompleted {
-                        turn_id: id,
+                        turn_id: id.clone(),
                         item: tool_item(part, tool, status),
                     }
                     .into(),
                 );
+                // `run` cancels a question itself and tells the model to go on
+                // with assumptions; a worker's question ends its turn instead.
+                if part["tool"] == "question" && status != Lifecycle::Completed {
+                    let asked: Vec<&str> = part["state"]["input"]["questions"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|question| question["question"].as_str())
+                        .collect();
+                    self.asked = true;
+                    out.extend(self.fail(&super::common::unanswered_question(
+                        "OpenCode",
+                        &asked.join(" "),
+                    )));
+                }
             }
             Some("error") => {
                 let error = &line["error"];
@@ -113,6 +131,10 @@ impl Turn {
             _ => {}
         }
         out
+    }
+
+    pub fn asked(&self) -> bool {
+        self.asked
     }
 
     /// Fail the turn for `reason`; its first failure is the one reported.
@@ -308,6 +330,35 @@ mod tests {
                 ..
             } if text == "done" && phase == "final"
         )));
+    }
+
+    /// `opencode_run_question.jsonl` is what OpenCode 2.2.1 printed, exiting 0,
+    /// for a prompt that told the model to ask through its question tool.
+    #[test]
+    fn a_recorded_question_fails_the_turn_with_what_was_asked() {
+        let mut turn = turn();
+        let mut decoded: Vec<Decoded> = trace("opencode_run_question.jsonl")
+            .iter()
+            .flat_map(|line| turn.event(line))
+            .collect();
+        assert!(turn.asked());
+        decoded.extend(turn.finish(true, false));
+
+        let errors: Vec<&str> = display(&decoded)
+            .into_iter()
+            .filter_map(|event| match event {
+                ConversationEvent::Error { message, .. } => Some(message.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            errors,
+            ["OpenCode asked a question with nobody there to answer it: Do you prefer red or blue?"]
+        );
+        assert_eq!(
+            fact_lines(&decoded).last().unwrap(),
+            "TurnCompleted ses_trace/turn Failed"
+        );
     }
 
     #[test]

@@ -318,7 +318,10 @@ async fn pi_rejected_prompt_and_malformed_stream_remain_failures() {
 #[tokio::test]
 async fn pi_headless_dialogs_and_extension_failures_do_not_hang_or_succeed() {
     for (input, reason) in [
-        ("dialog", "interactive input"),
+        (
+            "dialog",
+            "Pi asked a question with nobody there to answer it: Use the fixture?",
+        ),
         ("extension error", "context delivery failed"),
     ] {
         let mut config = crate::agent::AgentConfig::default();

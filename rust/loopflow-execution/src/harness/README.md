@@ -84,10 +84,15 @@ row names the test that shows it; "no" is a gap with its owner.
 | hears a steer sent while it runs | yes | yes | yes | yes | same |
 | runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
-| fails the turn, with the question as its reason, when it asks one and nobody is there | yes | yes | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
+| fails the turn, with the question as its reason, when it asks one and nobody is there | not shown | not shown | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |
 | stops on interrupt; its stopped Task Session resumes | yes | yes | yes | yes | `task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes` |
 | moves to the next agent on a usage limit | yes | yes | no: failures unclassified (LOO-518) | no: failures unclassified | `agent::tests::` fallthrough tests |
 | as an idle work session, hears a steer | yes | yes | no: next turn only | no: next turn only | `server::wake::tests::` |
+
+`opencode run --auto` cancels a question itself and tells the model to go on
+with assumptions; lf fails the turn at that tool call and stops the run. Pi
+opens an extension dialog, and lf fails the turn there. What a headless Claude
+or Codex does with a question has not been recorded.
 
 A "no" for OpenCode or Pi means the step stops with the provider's error (limits)
 or the steer waits for the next turn (idle wake); neither loses work.

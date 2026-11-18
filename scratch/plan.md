@@ -18,7 +18,7 @@ checked, and how the next gap is seen.
 | the step's context reaches the provider | same test, read from the stand-in's input |
 | a steer sent while the step runs reaches it | same test |
 | a harness that is not installed is passed over, or named once | `a_step_that_cannot_launch_is_not_started_again` |
-| a question with nobody there ends the turn | slice 3 |
+| a question with nobody there ends the turn | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step`. Claude, Codex: not shown |
 | interrupt stops a worker; a stopped Task Session resumes | slice 4 |
 | a usage limit moves to the next agent | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
 | an idle work session hears a steer | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
@@ -97,9 +97,8 @@ uses Claude or Codex. The OpenCode and Pi Graph tests use `graph … --batch`
 (`LF_GRAPH_STEP=bare`, `graph.rs:851`), which is a batch. The launch matrix never
 sets a boundary, so its OpenCode Worker cell passes by skipping the refusal.
 
-**A headless OpenCode question hangs.** A worker does not answer `form.created`
-(`an_opencode_question_waits_until_it_is_answered`, `harness/fact_writer.rs:634`);
-Pi fails the turn with "open this Session in Pi to answer it" (`harness/pi.rs:323`).
+**Before slices 3 and 5, a headless OpenCode question hung** on the server's
+`form.created`. `opencode run --auto` does not hang: see slice 3.
 
 **Seen on this Machine, 2026-11-18:** OpenCode 2.2.1 lists
 `opencode/gemini-4-carbon`; Pi 1.3.0 lists Anthropic models. `lf task status
@@ -237,8 +236,8 @@ The docs commit the implementation to three things the plan had left open:
   again is the retry.
 - `cmd:` step fails: three attempts, as now.
 - A worker's question with nobody there, on any harness: the turn fails and the
-  reason carries the question and how to answer it, as Pi does now. OpenCode's
-  worker does this on `form.created` instead of waiting.
+  reason carries the question. Shown on OpenCode and Pi; how to answer it is
+  in `docs/orchestration.md`, not in the reason.
 
 ## Exclusions
 
@@ -300,9 +299,27 @@ The docs commit the implementation to three things the plan had left open:
    - A missing agent later in the order is dropped without a record: one
      recovery row per step holds the move that happened, not ones that might.
    - Both tests passed locally, 2026-11-18 (`cargo test -p loopflow --lib`, 104s).
-3. **A worker's question ends the turn** on OpenCode, matching Pi. What
-   `opencode run` prints or does when the model asks a question with `--auto`
-   is unknown; record a real trace first.
+3. **A worker's question ends the turn. Built for OpenCode and Pi.**
+   - Seen on OpenCode 2.2.1 (`harness/testdata/opencode_run_question.jsonl`):
+     `run --auto` does not wait. It prints the `question` tool call as a
+     `tool_use` line with `state.status: "error"` and the error "This
+     non-interactive run cannot ask the user questions, so the question was
+     cancelled. Continue without an answer; make reasonable assumptions and
+     state them.", the model answers anyway, and the run exits 0.
+   - `opencode_decode::Turn` fails the turn at that line with
+     `OpenCode asked a question with nobody there to answer it: <question>`,
+     and the driver's reader kills the run so it does no work on an assumed
+     answer. Pi's dialog failure uses the same sentence
+     (`common::unanswered_question`) with the dialog's `title` and `message`.
+   - `a_question_with_nobody_there_ends_the_step` runs `implement` as a worker
+     on the OpenCode and Pi stand-ins and reads the reason from `lf task run`
+     and `lf task status`. Passed here 2026-11-18, 72s alone
+     (`a_task_step_runs_as_a_worker_on_every_harness` 60s alone). Run together
+     straight after a build the pair took 329s, cause not looked into; nextest
+     kills a test at 300s, so watch both in CI.
+   - Not built: Claude and Codex (no decoder fails a turn on a question, no
+     trace recorded; the table says "not shown"), and stopping the two retries
+     that ask the same question again. `scratch/questions.md` 18 and 19.
 4. **Cancel and resume, on both.** OpenCode's interrupt now stops the run's
    process group and the turn settles `Interrupted`
    (`a_stopped_run_is_interrupted_whatever_it_printed` covers the decoder);

@@ -186,6 +186,10 @@ impl Driver {
                 let mut state = state.lock().expect("OpenCode state lock poisoned");
                 if let Some(turn) = state.begin(&events) {
                     let decoded = turn.event(&value);
+                    if turn.asked() {
+                        // Nobody can answer: end the run before it assumes one.
+                        let _ = child.start_kill();
+                    }
                     state.publish(decoded, &events);
                 }
             }

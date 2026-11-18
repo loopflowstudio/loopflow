@@ -9,8 +9,13 @@ pub fn recover() {
     let reaped = crate::store::database_path_from_env()
         .map_err(anyhow::Error::from)
         .and_then(|database| crate::harness::agent_process::reap_agent_processes(&database));
-    if let Err(error) = reaped {
-        tracing::warn!("AgentProcess settlement: {error}");
+    match reaped {
+        Ok(report) => {
+            for error in report.errors {
+                tracing::warn!("AgentProcess settlement: {error}");
+            }
+        }
+        Err(error) => tracing::warn!("AgentProcess settlement: {error}"),
     }
     if let Err(error) = crate::ops::task::ship::restart_ships() {
         tracing::warn!("ship restart: {error}");

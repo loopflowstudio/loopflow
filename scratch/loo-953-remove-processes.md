@@ -95,6 +95,13 @@ Quotes and the OS-scan measurement: `questions.md`.
   installation proofs need Docker (not running here): gate/CI's
   `task-installation` job.
 
+**Compress after 4c (2026-11-18).** `reap_in` reports counts
+(`settled`, `reaped` pids, `errors`) instead of per-agent action strings only
+tests read; `ops::recovery` logs each reap error to `lf.log` (a failed
+settlement was dropped before). `reap_detached` ends the duplicate on
+`agent_sessions`, not through the `processes` bridge. Check:
+`harness::agent_process::` 15 pass; clippy clean.
+
 **Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
 `record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a
 released Graph runner's end ends its Graph run; a released launcher's
@@ -181,18 +188,10 @@ sqlite3 -readonly ~/.lf/loopflow.db "select count(*) from processes"   # stops g
 lf machine doctor             # "strays": OS processes with LF_* vars no live row claims
 ```
 
-## Readers of `processes` left (scan 2026-11-18: 30 statements)
+## Readers of `processes` left
 
 `python3 -I scratch/process_sql_scan.py rust` (writes `/tmp/loo953/scan.json`;
-create the directory first). Production: the bridge and
-`forget_unread_rows`' `attachment_exit_seq` clear (J, both leave with the
-table); `binaries.rs`' released-lf arm, `canonical_ids` preflight and
-`query_plans` arms (LOO-965); slice-4 deletions: `lf ps`/`top`/`process`
-(`top.rs`, `unfinished_processes_except`, `process_query`, `resolve_process`),
-history (`processes`/`ProcessCursor`), `lf_process_ids`, rental export
-(`machine_records.rs`), relocation (`relocate_repository`,
-`relocated_task_processes` reads in `task_work.rs`), doctor's
-`check_lineage`. Everything else is a fixture.
+create the directory first). Current result: Status, after slice 5.
 
 ## Target records
 

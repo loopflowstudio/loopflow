@@ -495,20 +495,13 @@ fn confirmed_group_death(pid: u32) -> Result<()> {
     Ok(())
 }
 
+/// What one reaping pass did: agents it settled (their end written), headless
+/// providers it stopped, and the failures it left for the next pass.
 #[derive(Debug, Default)]
 pub struct AgentProcessReapReport {
-    pub orphaned: Vec<u32>,
-    pub reaped: u32,
+    pub settled: u32,
+    pub reaped: Vec<u32>,
     pub errors: Vec<String>,
-    pub records: Vec<AgentProcessCleanup>,
-}
-
-/// Exact bookkeeping disposition, including records that remain unresolved.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq, Eq)]
-pub struct AgentProcessCleanup {
-    pub id: loopflow_model::id::AgentProcessId,
-    pub action: String,
-    pub reason: String,
 }
 
 /// Settle dead agents and stop headless providers no live lf holds.
@@ -535,16 +528,10 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
     }
     let mut report = AgentProcessReapReport::default();
     for agent in &agents {
-        let mut record = AgentProcessCleanup {
-            id: agent.id.clone(),
-            action: "retained".into(),
-            reason: "provider identity is unknown; PID absence is not exit evidence".into(),
-        };
         let Some((pid, start)) = agent.pid.zip(agent.os_started_at) else {
             // A reservation never requested a launch. Serialize with launch/takeover,
             // and require the lf holding it to be dead before retiring it.
             if agent.spawn_reserved && holder_dead(agent) {
-                record.reason = "launch never requested and owning LfProcess is dead".into();
                 match attachment::settle_agent_process(store, agent, || {
                     if !holder_dead(agent) {
                         return Err(StoreError::InvalidAuthority(
@@ -553,55 +540,36 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
                     }
                     Ok(())
                 }) {
-                    Ok(true) => record.action = "settled".into(),
-                    Ok(false) => record.reason = "reservation changed during cleanup".into(),
-                    Err(error) => {
-                        record.reason = error.to_string();
-                        report
-                            .errors
-                            .push(format!("AgentProcess {}: {error}", agent.id));
-                    }
+                    Ok(true) => report.settled += 1,
+                    Ok(false) => {}
+                    Err(error) => report
+                        .errors
+                        .push(format!("AgentProcess {}: {error}", agent.id)),
                 }
             }
-            report.records.push(record);
             continue;
         };
+        // PID absence is not exit evidence when the OS cannot be read.
         let observed = match OsProcess::read(pid) {
             Ok(process) => process,
             Err(error) => {
-                record.reason = format!("cannot observe PID {pid}: {error}");
-                report
-                    .errors
-                    .push(format!("AgentProcess {}: {}", agent.id, record.reason));
-                report.records.push(record);
+                report.errors.push(format!(
+                    "AgentProcess {}: cannot observe PID {pid}: {error}",
+                    agent.id
+                ));
                 continue;
             }
         };
-        let evidence = observed
+        let dead = observed
             .as_ref()
-            .map_or(ProcessIdentityEvidence::Dead, |process| {
-                process.evidence(start)
-            });
-        let dead = evidence == ProcessIdentityEvidence::Dead;
+            .is_none_or(|process| process.evidence(start) == ProcessIdentityEvidence::Dead);
         let orphaned = counts[&(pid, start)] == 1
             && !agent.interactive
             && holder_dead(agent)
             && observed
                 .as_ref()
                 .is_some_and(|process| is_agent_process(process, start, agent.provider.as_deref()));
-        if orphaned {
-            report.orphaned.push(pid);
-        }
-        record.reason = if dead {
-            "recorded OS identity is dead"
-        } else if orphaned {
-            "owned headless provider has no live attachment"
-        } else {
-            "live provider or unresolved ownership"
-        }
-        .into();
         if !dead && !orphaned {
-            report.records.push(record);
             continue;
         }
         let result = attachment::settle_agent_process(store, agent, || {
@@ -624,27 +592,16 @@ fn reap_in(store: &SqliteStore) -> StoreResult<AgentProcessReapReport> {
             Ok(())
         });
         match result {
-            Ok(true) => {
-                report.reaped += u32::from(orphaned);
-                record.action = if orphaned { "reaped" } else { "settled" }.into();
-            }
-            Ok(false) => {
-                record.action = "retained".into();
-                record.reason = "attachment changed during cleanup".into();
-                report.records.push(record);
-                continue;
-            }
+            Ok(true) if orphaned => report.reaped.push(pid),
+            Ok(true) => report.settled += 1,
+            Ok(false) => continue,
             Err(error) => {
                 report
                     .errors
                     .push(format!("AgentProcess {}: {error}", agent.id));
-                record.action = "retained".into();
-                record.reason = error.to_string();
-                report.records.push(record);
                 continue;
             }
         }
-        report.records.push(record);
         let session = agent.session_id.as_str();
         let Some(attachment) = store.session_attachment(session)? else {
             continue;
@@ -999,7 +956,7 @@ mod tests {
     }
 
     #[test]
-    fn prune_retires_only_unlaunched_reservations_with_dead_owners() {
+    fn reaping_retires_only_unlaunched_reservations_with_dead_owners() {
         let ledger = crate::journal::TestLedgerGuard::new();
         let _ambient = crate::test_ambient::EnvGuard::new();
         let database = ledger.home().join("loopflow.db");
@@ -1039,22 +996,14 @@ mod tests {
         }
         let applied = super::reap_in(&store).unwrap();
         assert!(applied.errors.is_empty());
-        assert_eq!(
-            applied
-                .records
-                .iter()
-                .filter(|r| r.action == "settled")
-                .count(),
-            1
-        );
+        assert_eq!(applied.settled, 1);
         for (id, retired) in &expected {
             let process = store.agent_process(id).unwrap().unwrap();
             assert_eq!(process.completed_at.is_some(), *retired);
             assert!(process.pid.is_none());
         }
         let retry = super::reap_in(&store).unwrap();
-        assert!(retry.records.iter().all(|r| r.action == "retained"));
-        assert_eq!(retry.records.len(), 3);
+        assert_eq!(retry.settled, 0);
         assert!(store.session("retired").unwrap().is_some());
     }
 
@@ -1101,8 +1050,7 @@ mod tests {
             // No launcher exit receipt: the reaper must observe the OS death.
             let report = super::reap_in(&store).unwrap();
             assert!(report.errors.is_empty());
-            assert!(report.orphaned.is_empty());
-            assert_eq!(report.reaped, 0);
+            assert!(report.reaped.is_empty());
             let process = store
                 .agent_process(&attachment.agent_process_id)
                 .unwrap()
@@ -1468,13 +1416,13 @@ mod tests {
         }
         let conflict = super::reap_in(&store).unwrap();
         assert!(conflict.errors.is_empty());
-        assert_eq!(conflict.reaped, 0);
+        assert!(conflict.reaped.is_empty());
         assert!(child.try_wait().unwrap().is_none());
         // Retire only the fixture's duplicate observation, not its OS process.
         rusqlite::Connection::open(home.path().join("db"))
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=1 WHERE agent_session_id='conflict'",
+                "UPDATE agent_sessions SET agent_ended_at=1, agent_pid=NULL, agent_os_started_at=NULL WHERE id='conflict'",
                 [],
             )
             .unwrap();
@@ -1483,8 +1431,7 @@ mod tests {
         let _ = crate::os_process::terminate_process_group(pid);
         let _ = child.wait();
         assert!(report.errors.is_empty(), "{provider}: {:?}", report.errors);
-        assert_eq!(report.orphaned, [pid], "{provider}");
-        assert_eq!(report.reaped, 1, "{provider}");
+        assert_eq!(report.reaped, [pid], "{provider}");
         assert!(store.agent_processes().unwrap().is_empty());
     }
 }

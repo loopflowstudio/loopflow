@@ -1869,27 +1869,14 @@ struct DetailReads<'a> {
     >,
     /// Each Task Wave's name, which selects its agent; read once per Wave.
     wave_names: HashMap<loopflow_model::id::WaveId, String>,
-    /// Each Task Wave's and repository's checkout with your `lf set` values,
-    /// which select its agent; read once per Wave and repository.
-    personal: HashMap<
-        (
-            Option<loopflow_model::id::WaveId>,
-            loopflow_model::durable::RepositoryId,
-        ),
-        (
-            std::path::PathBuf,
-            loopflow_execution::config::PersonalSettings,
-        ),
-    >,
+    /// Each repository's checkout, where a Task without a worktree resolves
+    /// its agent; read once per repository.
+    repositories: HashMap<loopflow_model::durable::RepositoryId, std::path::PathBuf>,
     /// Each handed-off Task's Auto-Ship progress.
     shipping: HashMap<
         loopflow_model::durable::TaskId,
         loopflow_execution::ops::task::ship::ShippingSnapshot,
     >,
-    /// Agents already resolved in this reading, by the configuration that chose
-    /// them. Checkouts of one repository usually share their files, and resolving
-    /// validates every setting, so each distinct configuration resolves once.
-    agents: std::sync::Mutex<HashMap<String, Option<loopflow_execution::config::Agent>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
         HashMap<loopflow_model::durable::TaskId, loopflow_storage::graph_process::GraphExecution>,
@@ -1924,7 +1911,7 @@ impl<'a> DetailReads<'a> {
             HashMap::<_, (String, Option<loopflow_execution::config::ConfigSource>)>::new();
         let mut selections = HashMap::new();
         let mut wave_names = HashMap::new();
-        let mut personal = HashMap::new();
+        let mut repositories = HashMap::new();
         for task in tasks {
             let selection = match facts.graph_names.get(&task.id) {
                 Some(name) => (name.clone(), None),
@@ -1950,16 +1937,11 @@ impl<'a> DetailReads<'a> {
                 }
             }
             if let std::collections::hash_map::Entry::Vacant(entry) =
-                personal.entry((task.wave_id.clone(), task.repository_id.clone()))
+                repositories.entry(task.repository_id.clone())
             {
-                let repo = loopflow_execution::ops::task::repository_for_task(store, task)?;
-                let wave = task
-                    .wave_id
-                    .as_ref()
-                    .and_then(|id| wave_names.get(id))
-                    .map(String::as_str);
-                let values = loopflow_execution::config::PersonalSettings::read(Some(&repo), wave);
-                entry.insert((repo, values));
+                entry.insert(loopflow_execution::ops::task::repository_for_task(
+                    store, task,
+                )?);
             }
         }
         let mut shipping = HashMap::new();
@@ -1985,47 +1967,11 @@ impl<'a> DetailReads<'a> {
             planning_connections,
             selections,
             wave_names,
-            personal,
+            repositories,
             shipping,
             graphs,
             execution,
-            agents: Default::default(),
         })
-    }
-
-    /// The agent Task work at `checkout` would launch with, resolved once per
-    /// distinct configuration in this reading.
-    fn agent(
-        &self,
-        checkout: &Path,
-        wave: Option<&str>,
-        personal: &loopflow_execution::config::PersonalSettings,
-    ) -> Option<loopflow_execution::config::Agent> {
-        let resolve = || {
-            loopflow_execution::ops::task::resolve_task_agent(checkout, wave, personal, None).ok()
-        };
-        let Ok(layers) =
-            loopflow_execution::config::config_layers_with(Some(checkout), wave, personal)
-        else {
-            return resolve();
-        };
-        // Paths only name where a value came from; the agent depends on the values.
-        let key = serde_json::to_string(
-            &layers
-                .iter()
-                .map(|layer| (&layer.source, &layer.scope, &layer.value))
-                .collect::<Vec<_>>(),
-        )
-        .expect("configuration values serialize");
-        if let Some(agent) = self.agents.lock().expect("agent memo poisoned").get(&key) {
-            return agent.clone();
-        }
-        let agent = resolve();
-        self.agents
-            .lock()
-            .expect("agent memo poisoned")
-            .insert(key, agent.clone());
-        agent
     }
 }
 
@@ -2075,12 +2021,17 @@ async fn snapshot_task_detail(
         .as_ref()
         .and_then(|id| reads.wave_names.get(id))
         .map(String::as_str);
-    let (repo, personal) = reads
-        .personal
-        .get(&(task.wave_id.clone(), task.repository_id.clone()))
-        .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
-    let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
-    let provider = agent.map(|agent| agent.harness.as_str().to_owned());
+    let repo = reads
+        .repositories
+        .get(&task.repository_id)
+        .ok_or_else(|| anyhow!("Task {} has no repository reading", task.id))?;
+    let provider = loopflow_execution::ops::task::resolve_task_agent(
+        task.worktree.as_deref().unwrap_or(repo),
+        wave,
+        None,
+    )
+    .ok()
+    .map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),
@@ -2097,25 +2048,21 @@ async fn snapshot_task_detail(
     let worktree_blocker =
         loopflow_execution::ops::task::task_worktree_blocker_after(task, latest_event)?;
     let launch_refusal = if worktree_blocker.is_none() {
-        loopflow_execution::ops::task::task_process_refusal_after(
-            task,
-            wave,
-            personal,
-            latest_event,
-        )
-        .or_else(|| {
-            matches!(
-                tracker_state.state,
-                loopflow_execution::store::PlanningState::Invalid
-                    | loopflow_execution::store::PlanningState::Removed
-            )
-            .then(|| {
-                format!(
-                    "Task planning has invalidation or removal evidence; run `lf task sync {}`",
-                    task.identifier
+        loopflow_execution::ops::task::task_process_refusal_after(task, wave, latest_event).or_else(
+            || {
+                matches!(
+                    tracker_state.state,
+                    loopflow_execution::store::PlanningState::Invalid
+                        | loopflow_execution::store::PlanningState::Removed
                 )
-            })
-        })
+                .then(|| {
+                    format!(
+                        "Task planning has invalidation or removal evidence; run `lf task sync {}`",
+                        task.identifier
+                    )
+                })
+            },
+        )
     } else {
         None
     };

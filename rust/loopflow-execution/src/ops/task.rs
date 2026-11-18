@@ -2274,25 +2274,28 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 pub fn resolve_task_agent(
     worktree: &Path,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let config =
-        crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    let resolved = crate::config::settings::resolve(&config, skill)?;
-    Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
+    let resolved = crate::config::resolved(Some(worktree), wave)?;
+    let agent = match skill {
+        Some(skill) => crate::config::settings::resolve(&resolved.config, Some(skill))?
+            .config
+            .agent()?
+            .to_owned(),
+        None => resolved.config.agent()?.to_owned(),
+    };
+    Ok(crate::config::Agent::parse(&agent)?)
 }
 
 fn task_configuration_refusal(
     task: &Task,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // A Graph's steps may choose different agents; no general preference is
     // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, wave, personal, skill) {
+    let agent = match resolve_task_agent(worktree, wave, skill) {
         Ok(agent) => agent,
         Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
             return None
@@ -2309,10 +2312,9 @@ fn task_configuration_refusal(
 pub fn task_process_refusal_after(
     task: &Task,
     wave: Option<&str>,
-    personal: &crate::config::PersonalSettings,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, personal, None)
+    task_configuration_refusal(task, wave, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

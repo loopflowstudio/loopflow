@@ -180,6 +180,12 @@ pub enum Derived {
         wave: Option<String>,
         outside: crate::config::settings::Outside,
     },
+    /// The agent of every skill a Wave's settings name.
+    SkillAgents {
+        checkout: PathBuf,
+        wave: String,
+        outside: crate::config::settings::Outside,
+    },
 }
 
 /// The entries and revisions read by one invocation, including bounded workers.
@@ -316,6 +322,17 @@ impl Cache {
     #[cfg(any(test, feature = "test-support"))]
     pub fn refresh_local(&self) {
         self.refresh(Source::Local);
+    }
+
+    /// Observe every fact again now, whatever its interval.
+    #[cfg(test)]
+    pub(crate) fn refresh_all(&self) {
+        for entry in self.entries.lock().unwrap().values() {
+            entry.lock().unwrap().checked = SystemTime::now() - Duration::from_secs(61);
+        }
+        for source in [Source::Local, Source::Git, Source::Github] {
+            self.refresh(source);
+        }
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -636,20 +653,13 @@ pub fn deadline(at: i64) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-    use std::time::{Duration, SystemTime};
-
-    use super::{derived, file_bytes, git, inherit, read_to_string, Cache, Derived, Source};
+    use super::{derived, file_bytes, git, inherit, read_to_string, Cache, Derived};
     use crate::process::os_process::process_identity_evidence as process;
     use crate::store::ProcessIdentityEvidence;
+    use std::sync::Arc;
 
     fn refresh(cache: &Cache) {
-        for entry in cache.entries.lock().unwrap().values() {
-            entry.lock().unwrap().checked = SystemTime::now() - Duration::from_secs(61);
-        }
-        for source in [Source::Local, Source::Git, Source::Github] {
-            cache.refresh(source);
-        }
+        cache.refresh_all();
     }
 
     #[test]

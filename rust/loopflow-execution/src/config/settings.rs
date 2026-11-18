@@ -620,7 +620,7 @@ pub struct Outside {
 
 impl Outside {
     /// A `--setting` override belongs to the command that carries it.
-    pub(super) fn overridden(&self) -> bool {
+    pub(crate) fn overridden(&self) -> bool {
         !self.invocation.is_null()
     }
 }
@@ -643,7 +643,7 @@ pub fn resolve_layers(
     resolve_with(layers, skill, &outside()?)
 }
 
-pub(super) fn resolve_with(
+pub(crate) fn resolve_with(
     layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
     outside: &Outside,

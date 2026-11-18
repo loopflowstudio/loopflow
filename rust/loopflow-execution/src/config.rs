@@ -700,19 +700,26 @@ pub fn resolved(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
-    let outside = settings::outside()?;
+    resolved_with(repo_root, wave, &settings::outside()?)
+}
+
+/// [`resolved`] inside a computation whose key already holds `outside`.
+pub(crate) fn resolved_with(
+    repo_root: Option<&Path>,
+    wave: Option<&str>,
+    outside: &settings::Outside,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
     // A Wave named by ID is found by walking the checkout, which no reading
     // observes: the shared value is kept under the name.
     let wave = selected_wave(repo_root, wave)?;
     let resolve = || {
-        let mut layers = repository_layers(repo_root, wave.as_deref())?;
-        layers.extend(personal_file_layers(
+        let layers = file_layers(
             repo_root,
             wave.as_deref(),
             &outside.home,
             outside.remote.as_deref(),
-        )?);
-        settings::resolve_with(&layers, None, &outside).map(Arc::new)
+        )?;
+        settings::resolve_with(&layers, None, outside).map(Arc::new)
     };
     if outside.overridden() {
         return resolve();
@@ -737,17 +744,6 @@ fn selected_wave(
     }
 }
 
-/// [`load_wave_config`] with your `lf set` values already read, so a reading
-/// of many Tasks reads them once per repository and Wave.
-pub fn load_wave_config_with(
-    repo_root: Option<&Path>,
-    wave: Option<&str>,
-    personal: &PersonalSettings,
-) -> Result<Option<Config>, LoadError> {
-    let layers = config_layers_with(repo_root, wave, personal)?;
-    settings::resolve_layers(&layers, None).map(|resolved| Some(resolved.config))
-}
-
 /// The effective planning transport, resolved once per bounded planning hook.
 pub fn load_planning_transport(repo_root: &Path) -> Result<TrackerConfig, LoadError> {
     Ok(load_config(Some(repo_root))?
@@ -769,30 +765,22 @@ pub fn config_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
-    config_layers_with(repo_root, wave, &PersonalSettings::read(repo_root, wave))
-}
-
-pub fn config_layers_with(
-    repo_root: Option<&Path>,
-    wave: Option<&str>,
-    personal_values: &PersonalSettings,
-) -> Result<Vec<ConfigDeclarations>, LoadError> {
     let wave = selected_wave(repo_root, wave)?;
-    let mut layers = repository_layers(repo_root, wave.as_deref())?;
-    layers.extend(
-        personal_values
-            .0
-            .as_ref()
-            .map_err(|message| LoadError::InvalidGraph(message.clone()))?
-            .clone(),
-    );
-    Ok(layers)
+    file_layers(
+        repo_root,
+        wave.as_deref(),
+        &crate::store::lf_home_dir(),
+        remote::incoming_text().as_deref(),
+    )
 }
 
-/// The checkout's `.lf/config.yaml` and the named Wave's own file.
-fn repository_layers(
+/// The checkout's `.lf/config.yaml`, the named Wave's own file, then your
+/// settings files under `home` and beside the checkout.
+fn file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,
+    home: &Path,
+    remote: Option<&str>,
 ) -> Result<Vec<ConfigDeclarations>, LoadError> {
     let mut layers = Vec::new();
     if let Some(repo_root) = repo_root {
@@ -818,28 +806,8 @@ fn repository_layers(
             }
         }
     }
+    layers.extend(personal_file_layers(repo_root, wave, home, remote)?);
     Ok(layers)
-}
-
-/// Personal file declarations cached for one bounded Work reading.
-#[derive(Debug, Clone)]
-pub struct PersonalSettings(Result<Vec<ConfigDeclarations>, String>);
-
-impl PersonalSettings {
-    pub fn read(repo_root: Option<&Path>, wave: Option<&str>) -> Self {
-        Self(
-            selected_wave(repo_root, wave)
-                .and_then(|wave| {
-                    personal_file_layers(
-                        repo_root,
-                        wave.as_deref(),
-                        &crate::store::lf_home_dir(),
-                        remote::incoming_text().as_deref(),
-                    )
-                })
-                .map_err(|error| error.to_string()),
-        )
-    }
 }
 
 pub(crate) fn private_wave_layers(
@@ -884,8 +852,6 @@ pub(crate) fn private_wave_layers(
     Ok(layers)
 }
 
-/// Your settings files under `home` and beside the checkout, for a Wave
-/// already selected by name.
 fn personal_file_layers(
     repo_root: Option<&Path>,
     wave: Option<&str>,

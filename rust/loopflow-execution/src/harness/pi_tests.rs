@@ -372,6 +372,10 @@ async fn pi_missing_binary_records_a_failed_launch_without_a_live_process() {
 
 #[test]
 fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
+    let _lock = crate::journal::test_env_lock();
+    let _env = crate::test_ambient::EnvGuard::clear(&["LF_BIN"]);
+    // Pi's context extension calls back into this checkout's lf.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("pi.jsonl");
     std::fs::write(&path, "{\"type\":\"session\",\"id\":\"native\"}\n").unwrap();

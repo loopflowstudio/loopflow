@@ -894,22 +894,10 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
             }),
             ..Default::default()
         };
-        // A bare Codex runs as plain `codex` with no turn observer; the
-        // app-server and its turn boundaries belong to Work, beside the server.
-        let _server = (agent == "codex").then(|| {
-            loopflow_test_support::MachineServer::start(
-                loopflow_test_support::lf_binary(),
-                fixture.directory.path(),
-            )
-        });
-        let kind = if agent == "codex" {
-            crate::harness::LaunchKind::WorkSession
-        } else {
-            crate::harness::LaunchKind::Batch
-        };
         let launch = crate::agent::AgentConfig {
             agent: crate::config::Agent::parse(agent).unwrap(),
             cwd: Some(repo.to_path_buf()),
+            task_prompt: "Hold the turn open".into(),
             env: std::collections::BTreeMap::from([
                 ("PATH".into(), path),
                 ("FIXTURE_STARTED".into(), started.display().to_string()),
@@ -922,8 +910,13 @@ fn assert_native_runner_is_quiet_until_its_turn_ends(agent: &str, task_bound: bo
         runtime.block_on(async {
             let running = tokio::task::spawn_blocking(move || {
                 crate::journal::with_test_ledger(database, || {
-                    LINEAR_TEST_CONTEXT
-                        .sync_scope(context, || crate::agent::run_agent(&launch, &process, kind))
+                    LINEAR_TEST_CONTEXT.sync_scope(context, || {
+                        crate::agent::run_agent(
+                            &launch,
+                            &process,
+                            crate::harness::LaunchKind::Batch,
+                        )
+                    })
                 })
             });
             let observed = tokio::time::timeout(std::time::Duration::from_secs(70), async {

@@ -72,14 +72,6 @@ def _client(endpoint: str, home: Path, thread: str) -> None:
         )
         assert json.loads(_message(stream))["id"] == 1
         _send(stream, {"method": "initialized"}, True)
-        if started := os.environ.get("FIXTURE_STARTED"):
-            Path(started).touch()
-            deadline = time.monotonic() + 75
-            while not Path(os.environ["FIXTURE_STOP"]).exists():
-                if time.monotonic() >= deadline:
-                    raise TimeoutError("idle terminal was not released")
-                time.sleep(0.1)
-            return
         _send(
             stream,
             {
@@ -281,6 +273,14 @@ def _server(endpoint: str, home: Path) -> None:
                     method = rpc.get("method")
                     params = rpc.get("params", {})
                     if method is None:
+                        if started := os.environ.get("FIXTURE_STARTED"):
+                            # The turn stays open until its test releases it.
+                            Path(started).touch()
+                            deadline = time.monotonic() + 75
+                            while not Path(os.environ["FIXTURE_STOP"]).exists():
+                                if time.monotonic() >= deadline:
+                                    raise TimeoutError("open turn was not released")
+                                time.sleep(0.1)
                         with lock:
                             (home / "native-approval.json").write_text(json.dumps(rpc["result"]))
                             (home / "native-answer.json").write_text(json.dumps(rpc))

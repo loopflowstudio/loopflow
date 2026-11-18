@@ -254,7 +254,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             )
             .unwrap(),
         0,
-        "cold planning acquisition must not claim the Task"
+        "a cold tracker fetch must not claim the Task"
     );
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);

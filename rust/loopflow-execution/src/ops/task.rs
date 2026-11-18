@@ -1916,7 +1916,7 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
         if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
-            tracing::warn!(%error, "planning acquisition after creation failed");
+            tracing::warn!(%error, "tracker fetch after creation failed");
         }
         super::planning_sync::sync_after_save(
             &store,

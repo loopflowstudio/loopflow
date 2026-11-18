@@ -65,7 +65,7 @@ pub fn repository_path(id: &RepositoryId) -> Result<std::path::PathBuf> {
 /// Routing observes existing records; initialization and schema upgrades belong
 /// to the operation that takes up Work, not destination lookup.
 /// Resolve scoped selectors once, carrying exact IDs to downstream consumers.
-/// Unknown Tasks remain with ordinary repository-scoped planning acquisition.
+/// The command fetches unknown Tasks from the repository’s tracker.
 pub fn resolve_repository_selection(cli: &mut Cli) -> Result<()> {
     if matches!(
         cli.command,

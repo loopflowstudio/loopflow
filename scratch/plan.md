@@ -267,17 +267,10 @@ they are the plan writer and sync.
    the shared explanations use the Task's sync timestamp. A Task that has
    never synced reports null in JSON and unknown in the CLI.
 
-7. **Explanation sentences (next).** Apply the table under "The explanation's
-   sentences say fetch and tracker". Update the assertions that quote them:
-   `rust/loopflow/tests/global_commands.rs:2038,2053,2269` and the message at
-   `rust/loopflow/tests/planning_foreground_tests.rs:257`. Reword the three
-   doc comments that say "planning acquisition"
-   (`rust/loopflow-storage/src/sqlite/children.rs:156,1499`,
-   `rust/loopflow/src/lf/commands/work_route.rs:68`) to tracker fetch / tracker
-   state. Done when
-   `git grep -nE 'planning acquisition|registration/acquisition|Provider freshness|acquired or synchronized' -- rust docs`
-   is empty and the three explain tests in `global_commands.rs` pass. No type,
-   wire key, fixture or SQL changes. Gate follows.
+7. **Explanation sentences (implemented).** Task previews and the post-creation
+   warning use the fetch and tracker wording above. The three focused CLI tests
+   passed, the retired wording grep found no matches in Rust or docs, and
+   `cargo clippy --all-targets -- -D warnings` passed. Gate follows.
 
 ## What goes
 

@@ -124,7 +124,7 @@ impl TaskPlanningExplanation {
         ] {
             lines.extend(values.iter().map(|value| format!("{label}: {value}")));
         }
-        lines.push("Observation only; execution re-reads planning. Nothing was saved, acquired or synchronized.".into());
+        lines.push("Observation only; execution re-reads planning. Nothing was saved, fetched or synchronized.".into());
         lines.join("\n")
     }
 }
@@ -280,7 +280,10 @@ async fn read_planning(
             });
         }
     }
-    report.unavailable.push("Provider freshness, synchronization delivery and concurrent saves are not observed or reserved".into());
+    report.unavailable.push(
+        "Tracker freshness, queued tracker actions and concurrent saves are not read or reserved"
+            .into(),
+    );
     Ok(())
 }
 
@@ -293,10 +296,10 @@ async fn read_saved_task(
     let id = match &resolution.task {
         ContextFact::Bound { value, .. } => loopflow_model::durable::TaskId::parse(value)?,
         ContextFact::Unavailable { reason } => {
-            anyhow::bail!("{reason}; no planning acquisition was performed")
+            anyhow::bail!("{reason}; nothing was fetched from the tracker")
         }
         ContextFact::Unbound => {
-            anyhow::bail!("No saved Task selected; no planning acquisition was performed")
+            anyhow::bail!("No saved Task selected; nothing was fetched from the tracker")
         }
     };
     let task = store
@@ -358,7 +361,9 @@ async fn read_creation(
             report.resolution.wave = ContextFact::Unavailable {
                 reason: error.to_string(),
             };
-            anyhow::bail!("{error}; Wave registration/acquisition was not performed");
+            anyhow::bail!(
+                "{error}; the Wave was not registered and nothing was fetched from the tracker"
+            );
         }
     };
     report.resolution = crate::ops::context::explain_context(

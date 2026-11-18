@@ -164,6 +164,8 @@ Made for review, with what was passed over:
 cargo test -p loopflow --lib task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness
 cargo test -p loopflow --lib task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again
 cargo test -p loopflow --lib task_graph_launch_tests::a_failed_command_step_is_started_again
+cargo test -p loopflow --lib task_graph_launch_tests::a_question_with_nobody_there_ends_the_step
+cargo test -p loopflow-execution --lib harness::opencode_decode::
 cargo test -p loopflow-execution --lib harness::launch_matrix
 ```
 
@@ -320,10 +322,14 @@ The docs commit the implementation to three things the plan had left open:
    - Not built: Claude and Codex (no decoder fails a turn on a question, no
      trace recorded; the table says "not shown"), and stopping the two retries
      that ask the same question again. `scratch/questions.md` 18 and 19.
-4. **Cancel and resume, on both.** OpenCode's interrupt now stops the run's
-   process group and the turn settles `Interrupted`
+4. **Cancel and resume, on both. Next.** OpenCode's interrupt now stops the
+   run's process group and the turn settles `Interrupted`
    (`a_stopped_run_is_interrupted_whatever_it_printed` covers the decoder);
-   no test interrupts a running worker on either harness yet.
+   no test interrupts a running worker on either harness yet. Build
+   `task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes`
+   on the OpenCode and Pi stand-ins: interrupt `implement` mid-turn, see the
+   turn settle `Interrupted`, resume the Task Session and see the same native
+   thread continue. Then fill the README row's cells from what it shows.
 5. **OpenCode launches match Claude and Codex. Built.**
    - Headless (`harness/opencode.rs` `Driver`): each turn is one
      `opencode run --standalone --format json --auto [--model m] --session ses_…`

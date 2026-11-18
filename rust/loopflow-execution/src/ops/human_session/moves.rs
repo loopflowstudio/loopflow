@@ -595,7 +595,7 @@ fn read_file(base: &Path, path: &Path) -> Result<MovedFile> {
     })
 }
 
-/// The Task a move carries: saved here, else acquired from the planning of
+/// The Task a move carries: saved here, else fetched from the tracker of
 /// `main`, the repository it arrives in.
 pub async fn arriving_task(
     store: &SharedStore,
@@ -608,17 +608,24 @@ pub async fn arriving_task(
     }
     let found =
         crate::ops::planning_sync::find_task(store, &main.to_string_lossy(), identifier).await?;
-    let acquired = match found {
+    let arriving = match found {
         Some(task) => task,
-        None => crate::ops::task::fetch_from_tracker(main, identifier).await?,
+        None => {
+            crate::ops::task::fetch_from_tracker(
+                main,
+                identifier,
+                crate::ops::linear::LinearRefresh::Auto,
+            )
+            .await?
+        }
     };
     anyhow::ensure!(
-        acquired.id == *task,
+        arriving.id == *task,
         "{identifier} in {} is Task {}, not the moving Task {task}",
         main.display(),
-        acquired.id
+        arriving.id
     );
-    Ok(acquired)
+    Ok(arriving)
 }
 
 /// Check out the moved branch in a worktree of this repository, admit the

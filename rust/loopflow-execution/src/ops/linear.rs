@@ -839,37 +839,37 @@ pub(crate) async fn fetch_task(
     refresh: LinearRefresh,
 ) -> OpsResult<Task> {
     let read = inspect_task_planning_async(repo, issue, refresh).await?;
-    let evidence = read.issue_state;
-    if evidence.state != PlanningState::Available {
+    let issue_state = read.issue_state;
+    if issue_state.state != PlanningState::Available {
         return Err(OpsError::Message(read.refresh_error.unwrap_or_else(|| {
             format!(
                 "Task {issue:?} planning is {:?}; run `lf task sync {issue}`",
-                evidence.state
+                issue_state.state
             )
         })));
     }
     let team = repository_team_id(repo)?;
-    if let Some(project) = &evidence.project_id {
-        let [initiative] = evidence.initiative_ids.as_slice() else {
+    if let Some(project) = &issue_state.project_id {
+        let [initiative] = issue_state.initiative_ids.as_slice() else {
             return Err(OpsError::Message(format!(
                 "Project {project} has no unambiguous Initiative"
             )));
         };
         wave_for_initiative(repo, initiative)?;
-        if evidence.project_team_ids.as_slice() != [team.as_str()] {
+        if issue_state.project_team_ids.as_slice() != [team.as_str()] {
             return Err(OpsError::Message(format!(
                 "Project {project} must belong to repository Team {team}"
             )));
         }
     }
-    if evidence.team_id.as_deref() != Some(team.as_str()) {
+    if issue_state.team_id.as_deref() != Some(team.as_str()) {
         return Err(OpsError::Message(format!(
             "Task {issue} must belong to repository Team {team}"
         )));
     }
     let store = planning_store().await?;
     let task = store
-        .get_task_by_issue(evidence.issue_id.as_deref().unwrap_or(issue))
+        .get_task_by_issue(issue_state.issue_id.as_deref().unwrap_or(issue))
         .await
         .map_err(|error| OpsError::Message(error.to_string()))?
         .ok_or_else(|| {

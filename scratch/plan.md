@@ -267,6 +267,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - Slice 4: 23 focused event, historical upgrade, schema and documented-command tests passed, plus the issue-fetch and end-to-end Task comment tests. All-target clippy passed. Candidate `lf help wave sync` names the tracker. The architecture HTML matches its source.
 - Slice 5: all-target clippy, 52 Rust DTO fixtures, the server-restart replay test and four documented-command checks passed. A standalone Swift decoder read independent fetch and publication errors and rejected a missing fetch_error. In an isolated Git repository, both CLI versions replayed each other’s Task creation. The candidate reported fetch_error for its ref and printed “tracker writeback: current” after checkout.
 - Slice 6: 53 Rust DTO fixtures, 57 Swift fixture tests and all-target clippy passed. The regenerated server schema matched byte for byte. The candidate explained a new Task in an isolated repository with a bound Task, a null sync time and a printed unknown.
+- Compress after slice 6: one `fetch_from_tracker(repo, issue, refresh)` serves task run, moves and saved-Task lookup; `retained_task_input` fixture reads the `tracker` column (13 planning lookup tests had failed on `i.provider`). 21 planning lookup tests and clippy for execution and test-support passed.
 - full suites — CI at gate
 - Desktop: `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests'` passed after QA renamed `trackerAnswer` → `repoTrackerAnswer`
 

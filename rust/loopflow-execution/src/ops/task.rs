@@ -956,22 +956,27 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
-/// Take a Task this Machine has not saved from the repository's planning.
-pub(crate) async fn fetch_from_tracker(main: &Path, issue: &str) -> OpsResult<Task> {
-    match crate::config::load_config(Some(main))
+/// Fetch a Task this Machine has not saved from the repository's tracker.
+/// The fetch imports the record once; the stored Task owns every later read
+/// and write, including while the tracker is unavailable.
+pub(crate) async fn fetch_from_tracker(
+    repo: &Path,
+    issue: &str,
+    refresh: super::linear::LinearRefresh,
+) -> OpsResult<Task> {
+    match crate::config::load_config(Some(repo))
         .map_err(task_error)?
         .unwrap_or_default()
         .planning_transport()
     {
         crate::config::TrackerConfig::Linear { .. } => {
-            super::linear::fetch_task(main, issue, super::linear::LinearRefresh::Auto).await
+            super::linear::fetch_task(repo, issue, refresh).await
         }
         crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
             "Task {issue:?} not found in selected Git planning"
         ))),
-        remote => Err(task_error(format!(
-            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-            remote.remote_name().unwrap_or("provider")
+        crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in Loopflow planning; Asana Tasks are not fetched yet"
         ))),
     }
 }
@@ -992,10 +997,10 @@ fn prepare_task(
         }
         let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
         let saved = super::planning_sync::find_task(&store, &main.to_string_lossy(), issue).await?;
-        let acquired = saved.is_none();
+        let fetched = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => fetch_from_tracker(&main, issue).await?,
+            None => fetch_from_tracker(&main, issue, super::linear::LinearRefresh::Auto).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -1025,7 +1030,7 @@ fn prepare_task(
             )));
         }
         validate_task_preparation(&store, &task).await?;
-        options.validate_directive((!acquired).then_some(&task))?;
+        options.validate_directive((!fetched).then_some(&task))?;
         options.validate_workspace_name(&task)?;
         if recover_from.is_some() && task.worktree.is_none() {
             return Err(task_error(
@@ -3281,31 +3286,7 @@ pub async fn resolve_saved_task(
     let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
-        None => {
-            // Cold acquisition imports the remote record once. The stored Task owns
-            // every subsequent read and write, including while Linear is unavailable.
-            match crate::config::load_config(Some(repo))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::TrackerConfig::Linear { .. } => {
-                    super::linear::fetch_task(repo, issue, super::linear::LinearRefresh::Force)
-                        .await?
-                }
-                crate::config::TrackerConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )))
-                }
-                remote => {
-                    return Err(task_error(format!(
-                    "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                    remote.remote_name().unwrap_or("provider")
-                )))
-                }
-            }
-        }
+        None => fetch_from_tracker(repo, issue, super::linear::LinearRefresh::Force).await?,
     };
     validate_saved_task_scope(&store, repo, wave, &task).await?;
     Ok((store, task))

@@ -546,6 +546,86 @@ mod tests {
         assert_eq!(unsent(&laptop), 0);
     }
 
+    fn claim(store: &SqliteStore, task: &TaskId) -> loopflow_model::durable::MachineId {
+        let facts = crate::test_fixture::ownership(store, store.task_scope(task).unwrap());
+        store
+            .claim_task_prepared(task, &facts)
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .machine_id
+            .unwrap()
+    }
+
+    fn owner(store: &SqliteStore, task: &TaskId) -> Option<loopflow_model::durable::MachineId> {
+        let (_, ownership) = store.saved_task_ownership(task).unwrap();
+        ownership.owner.and_then(|owner| owner.machine.id)
+    }
+
+    fn interrupted(store: &SqliteStore, task: &TaskId) -> bool {
+        store
+            .task_events_after(task, 0)
+            .unwrap()
+            .iter()
+            .any(|event| matches!(event.kind, crate::work::task::TaskEventKind::Interrupt))
+    }
+
+    #[test]
+    fn of_two_claims_that_never_saw_each_other_the_first_holds_on_both_machines() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        at(1_000);
+        let (_, task) = task(&laptop, "claimed twice");
+        exchange(&laptop, &hub);
+
+        at(2_000);
+        let first = claim(&hub, &task);
+        at(3_000);
+        let second = claim(&laptop, &task);
+        assert_eq!(owner(&laptop, &task), Some(second.clone()));
+        exchange(&laptop, &hub);
+        assert_eq!(owner(&laptop, &task), Some(first.clone()));
+        assert_eq!(owner(&hub, &task), Some(first.clone()));
+        // The run that lost is stopped; the one that holds the Task is not.
+        assert!(interrupted(&laptop, &task));
+        assert!(!interrupted(&hub, &task));
+        // Both entries stay in the log, in one order.
+        let log = |store: &SqliteStore| store.saved_task_ownership(&task).unwrap().1.log;
+        assert_eq!(log(&laptop), log(&hub));
+        assert_eq!(log(&hub).len(), 2);
+
+        // A claim made after seeing the first takes the Task over, as before.
+        at(4_000);
+        assert_eq!(claim(&laptop, &task), second);
+        exchange(&laptop, &hub);
+        assert_eq!(owner(&laptop, &task), Some(second.clone()));
+        let (_, held) = hub.saved_task_ownership(&task).unwrap();
+        assert_eq!(
+            held.superseded_by.and_then(|owner| owner.machine.id),
+            Some(second)
+        );
+        assert!(!interrupted(&hub, &task));
+    }
+
+    #[test]
+    fn the_lower_order_holds_though_a_slow_clock_made_its_claim_later() {
+        let dir = tempfile::tempdir().unwrap();
+        let (laptop, hub) = (machine(&dir, "laptop"), machine(&dir, "hub"));
+        at(1_000);
+        let (_, task) = task(&laptop, "claimed twice");
+        exchange(&laptop, &hub);
+        // The laptop's clock is behind: its claim is made later and sorts first.
+        at(3_000);
+        claim(&hub, &task);
+        at(2_000);
+        let fast = claim(&laptop, &task);
+        exchange(&laptop, &hub);
+        assert_eq!(owner(&laptop, &task), Some(fast.clone()));
+        assert_eq!(owner(&hub, &task), Some(fast));
+        assert!(interrupted(&hub, &task));
+        assert!(!interrupted(&laptop, &task));
+    }
+
     #[test]
     fn the_later_edit_wins_on_both_machines_whichever_arrives_first() {
         let dir = tempfile::tempdir().unwrap();

@@ -82,6 +82,22 @@ CREATE TABLE plan_refs (
     PRIMARY KEY(repo,machine_id)
 ) WITHOUT ROWID;
 
+-- Claims are first-wins: an ownership entry names the entry in effect when it
+-- was written (itself when there was none), and a claim whose writer had not
+-- seen the claim holding the Task loses to it. NULL on entries written before
+-- this, and with Linear or Asana; those never lose.
+ALTER TABLE task_ownership ADD COLUMN seen TEXT;
+DROP TRIGGER task_ownership_append_only;
+CREATE TRIGGER task_ownership_append_only BEFORE UPDATE ON task_ownership
+WHEN NOT (OLD.ordered_at IS NULL AND NEW.ordered_at IS NOT NULL
+    AND NEW.id IS OLD.id AND NEW.task_id IS OLD.task_id AND NEW.kind IS OLD.kind
+    AND NEW.person IS OLD.person AND NEW.machine_id IS OLD.machine_id
+    AND NEW.at IS OLD.at AND NEW.written_here IS OLD.written_here
+    AND NEW.person_key IS OLD.person_key AND NEW.machine_label IS OLD.machine_label
+    AND NEW.writer_machine_id IS OLD.writer_machine_id AND NEW.person_id IS OLD.person_id
+    AND NEW.seen IS OLD.seen)
+BEGIN SELECT RAISE(ABORT, 'Task ownership entries are append-only'); END;
+
 -- The Git planning ref, its peer journal and destinations are gone; released
 -- lf still writes them until the staging window passes.
 -- leaving: git_tracker_changes LOO-938

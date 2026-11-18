@@ -300,6 +300,8 @@ mod tests {
                 machine_label: Some("lee-mbp".into()),
                 writer_machine_id: None,
                 at: 1_792_600_000,
+                order: None,
+                seen: None,
             }],
         }
     }

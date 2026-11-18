@@ -35,3 +35,8 @@ Implement, slice 3, 2026-11-18:
 - `scripts/test.py` and `scripts/macos_inputs.py` needed no change. The runner selects Rust on any `rust/` path and runs nextest over the workspace; the Desktop inputs name wire files, none of which moved. What did need saying is the filter: the crate's tests are not under `harness::`, so gate uses `package(loopflow-harness) | test(harness::)`.
 - `harness_test` times a second edit after an untimed first test build. Without that, the baseline's sample is mostly execution's dev-dependencies compiling once, which no edit loop repeats.
 - `report.py` no longer writes `scratch/measure.html`; the committed page under `results/` is the one to open.
+
+Realign after slice 3, 2026-11-18:
+
+- The measurement landed on the outcome the plan named in advance: an ops edit moved -0.8 s and a storage edit -0.2 s, inside their ranges. Assumed: the crate still ships, for the decoder test build (35.6 s to 1.2 s, 4.76 GiB to 0.32 GiB) and because the Task asks for one representative extraction with its measurement. Ship it, or drop the boundary and file `ops` as the next Task with nothing merged?
+- `origin/main` moved to `a0548bfe28` after the comparison ran; the merge touched storage and `store/session_projection.rs` only and had no conflict. Assumed: the committed results stand without a rerun, since neither revision in the comparison includes #1977.

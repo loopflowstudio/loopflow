@@ -142,32 +142,15 @@ re-exports nothing from it.
 ## Callers and files outside Rust source
 
 - `Cargo.toml` workspace members; execution, application and test-support manifests
-- `scripts/check_architecture.py` and `scripts/check_migrations.py` crate tuples (done, slice 1)
-- Not yet naming the crate: `scripts/test.py` suite reach, `scripts/macos_inputs.py`,
-  `scripts/benchmarks/crate-rebuild/probe.py` member list, `run.py` cases
-- `AGENTS.md` harness rule path, `rust/loopflow-execution/README.md`,
-  `harness/README.md` (its "only harness dispatch" line becomes the two
-  views), `docs/dev/{codebase,execution,reference-code}.md`, a new
-  `rust/loopflow-harness/README.md`
-
-## Docs written ahead of the code
-
-They describe the crate as it will be; slices make them true and slice 3
-corrects whatever the build changed.
-
-- `rust/loopflow-harness/README.md` (new): decoder test loop, `transcript::read`
-  call site, what the crate holds, the `cargo tree` check, fixture locations
-- `rust/loopflow-execution/README.md`, `rust/loopflow-execution/src/harness/README.md`
-  (the two views: `kind.harness()` and `harness::launcher(kind)`)
-- `docs/dev/codebase.md` (territories, source owners, "Add a provider" in two
-  crates), `docs/dev/reference.md`, `docs/dev/reference-code.md`
-- `scripts/testing.md` (focused command, what a decoder edit rebuilds)
-- `AGENTS.md` harness rule path now names `rust/loopflow-harness/**`
-
-Layout the docs commit to: decoders at the crate root
-(`src/claude_decode.rs`), stream fixtures in `src/testdata/`, transcript
-fixtures in `src/transcript/testdata/`, `transcript::read(HarnessKind, &Source)`
-keeping today's signature. `docs/dev/execution.md` needed no edit.
+- `scripts/check_architecture.py` and `scripts/check_migrations.py` crate tuples
+- `scripts/benchmarks/crate-rebuild/run.py` cases. `probe.py`, `scripts/test.py`
+  and `scripts/macos_inputs.py` do not name the crate and need not
+  (`scratch/questions.md`, slice 3).
+- Docs that describe the crate, all corrected against the built code in
+  slice 3: `rust/loopflow-harness/README.md`, `rust/loopflow-execution/README.md`,
+  `rust/loopflow-execution/src/harness/README.md`,
+  `docs/dev/{codebase,reference,reference-code}.md`, `scripts/testing.md`, and
+  the `AGENTS.md` harness rule path.
 
 ## What must keep working
 
@@ -186,17 +169,17 @@ keeping today's signature. `docs/dev/execution.md` needed no edit.
 ```sh
 cargo test -p loopflow-harness
 cargo tree -p loopflow-harness -e normal,dev | grep -cE 'loopflow-(storage|execution)'    # 0
-uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::)'
-uv run python scripts/benchmarks/crate-rebuild/run.py --base 7bb879aff4 --candidate HEAD --sccache <path> --output /tmp/lf-923
+uv run python scripts/test.py --reuse-passing --rust-filter 'package(loopflow-harness) | test(harness::)'
 ```
 
-`run.py` gains two cases. `harness_format` edits a decoder message at each
-revision's own path and requires harness, execution and application misses
-with a storage hit. `harness_test` builds the owner's test binary after that
-edit (`--no-run`) and records its compiler closure and link. The existing
-`execution` and `storage` cases additionally require a harness hit on the
-candidate. The report keeps wall and CPU seconds, peak RSS and closures, as
-LOO-650's did.
+The crate's tests are not under `harness::`, so the filter names the package.
+The rebuild comparison is not rerun at gate: it ran once (slice 3) and its
+results are committed under `scripts/benchmarks/crate-rebuild/results/`.
+Also for gate, none run on this branch: clippy over execution and the
+application, `documented_commands::` (README and docs edits),
+`binary(golden_prompt)`, and `uv run pytest python/tests` if a test imports
+the benchmark scripts. The PR body states that no LOO-921 or LOO-922 number
+existed to compare against.
 
 ## What the evidence says, and what it does not
 
@@ -246,15 +229,18 @@ measured compile share: `ops` above the rest, not another leaf.
 - LOO-921 (cache and test baseline) is idle on an open question and LOO-922
   (fresh-worktree cost) is unstarted. The extraction does not depend on
   either; the comparison against their results does. Choice made for review:
-  build the slices now, measure base against candidate with `run.py`'s private
-  caches, and state in the PR which predecessor numbers did not exist. Before
-  `run.py` runs, `lf task status LOO-921` and `LOO-922` show neither is
-  measuring: one expensive measurement at a time.
+  the slices were built and measured base against candidate with `run.py`'s
+  private caches; the PR states which predecessor numbers did not exist.
+- `origin/main` moved from `7bb879aff4` to `a0548bfe28` (#1977: storage's
+  session reads and `store/session_projection.rs`) and is merged here
+  (`67258eb172`) without conflict. The comparison's base stays `7bb879aff4`;
+  its candidate is `7953d9a7c5`, before the merge.
 - Open PRs editing files that move or split: #1967 (eight `transcript/`
   files, `claude_decode`), #1976 and #1972 (`transcript/raw.rs`,
   `transcript/mod.rs`, `harness/mod.rs`), #1968 (`harness/native_session.rs`).
   Whichever merges first, the other rebases across a rename; this branch takes
-  their content and changes none of their behavior.
+  their content and changes none of their behavior. All four were still open
+  on 2026-11-18 after slice 3.
 
 ## Slices
 
@@ -338,8 +324,6 @@ measured compile share: `ops` above the rest, not another leaf.
      only `transcript::Calls::add` names both.
    - Application imports changed in 6 files; `history_transcript.rs` is the
      only one that needed more than a path.
-   - Rechecked after the slice, 2026-11-18: `origin/main` is still
-     `7bb879aff4`; #1967, #1968, #1972 and #1976 are open.
 3. **Measure and document. Built (`7953d9a7c5`, `c3695d4ebe`, `6926071940`).**
    `run.py` has the `harness_format` and `harness_test` cases and takes each
    edit's expected recompiles from the revision's own crates; `report.py`
@@ -384,10 +368,17 @@ measured compile share: `ops` above the rest, not another leaf.
    - Docs corrected against slices 1 and 2: the crate README, execution's
      harness README, `docs/dev/codebase.md`. `docs/dev/reference*.md` and
      execution's README already matched.
-   - For gate, not run here: clippy over execution and the application,
-     `documented_commands::` (README and docs edits), `binary(golden_prompt)`,
-     `uv run pytest python/tests` for the benchmark scripts if any test
-     imports them. The PR body states that no LOO-921/LOO-922 numbers existed.
+
+All three slices are built. Nothing remains for implement; gate is next.
+
+## Open choice the measurement raised
+
+The crate does what the Outcome says and does not speed up the edits made
+most. Ship it for the decoder test loop (35.6 s to 1.2 s) and the lower
+execution RSS, at the cost of about 2 s on a decoder edit through `lf` and a
+provider recipe across two crates; or drop it and go straight to `ops`. The
+branch ships it: the Task asks for a representative extraction and its
+measurement. Nobody has decided this.
 
 ## Seen in review, not changed
 

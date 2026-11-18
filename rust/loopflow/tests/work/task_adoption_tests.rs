@@ -98,25 +98,25 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             wave_id: wave.id().clone(),
 
             summary: String::new(),
-            linear_id: Some(LinearProjectId::new("project-1").unwrap()),
-            slug: "chapter".into(),
-            name: "Chapter".into(),
+            tracker_id: Some(LinearProjectId::new("project-1").unwrap()),
+            slug: "project".into(),
+            name: "Project".into(),
             status: loopflow_execution::work::project::ProjectStatus::Started,
             description: "Adopt existing work".into(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
             created_at: now,
             updated_at: now,
         };
         let snapshot: crate::test_linear_input::Inventory = serde_json::from_value(json!({
-            "projects": [{"id":"project-1", "slug":"chapter", "name":"Chapter",
+            "projects": [{"id":"project-1", "slug":"project", "name":"Project",
                 "summary":"", "metric_targets":[], "status":"started",
                 "krs":[], "initiative_ids":["initiative-1"], "team_ids":["team-1"]}],
             "items": [{"id":"issue-1", "identifier":"FIX-1", "branch_name":branch, "revision":"2026-09-29T12:00:00Z",
                 "url":null, "name":"A different title", "description":"Existing implementation",
                 "rank":0, "completed":false, "state":"started", "project_id":"project-1",
-                "project":"chapter", "team_id":"team-1", "assignee":null}]
+                "project":"project", "team_id":"team-1", "assignee":null}]
         }))
         .unwrap();
         let imported_id = runtime.block_on(async {
@@ -135,7 +135,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot: historical,
@@ -148,7 +147,6 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                 .seed_inventory(
                     InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative-1".into(),
                         synced_at: now.unix_timestamp(),
                         snapshot,
@@ -356,10 +354,10 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
                     .unwrap();
                 if condition == "removed" {
                     runtime
-                        .block_on(store.observe_pm_issue_change("issue-1", None, true))
+                        .block_on(store.record_tracker_event("issue-1", None, true))
                         .unwrap();
                 }
-                // Acquisition may update shared content and state. Refusing execution
+                // Refresh may update shared content and state. Refusing execution
                 // must preserve the Task as it stands after that observation.
                 let task_before = runtime.block_on(store.get_task(&task.id)).unwrap();
                 let output = run(repo.path(), &["-b", "task", "run", "FIX-1"]);

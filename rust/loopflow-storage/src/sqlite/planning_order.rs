@@ -1,6 +1,6 @@
 //! Rank edits reorder siblings within a Project or the repository's standalone
 //! Tasks. A Project's new order is one `order` action: the desired list, which
-//! its tracker turns into moves against the provider's complete list.
+//! its tracker turns into moves against the tracker's complete list.
 
 use super::planning_write::{self, WriteOrigin};
 use super::tracker_actions::{self, ActionKind, ActionOwner};
@@ -50,7 +50,7 @@ pub(super) fn observed_order(
 ) -> StoreResult<Option<Vec<String>>> {
     let body: Option<String> = conn.query_row(
         "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
-         JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider IN ('linear','asana') WHERE p.id=?1",
+         JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana') WHERE p.id=?1",
         [project.as_str()], |row| row.get(0)).optional()?.flatten();
     body.map(|body| serde_json::from_str(&body).map_err(Into::into))
         .transpose()
@@ -89,10 +89,10 @@ pub(crate) fn observe_in(
         }
     }
     conn.execute(
-        "UPDATE pm_projects SET task_order_json=?4 WHERE repo=?1 AND provider=?2 AND id=?3",
+        "UPDATE tracker_projects SET task_order_json=?4 WHERE repo=?1 AND tracker=?2 AND id=?3",
         params![repo, "linear", external, serde_json::to_string(&observed)?],
     )?;
-    // The provider's complete list answers an attempted order the way the
+    // The tracker's complete list answers an attempted order the way the
     // drain's look would; the newest unconfirmed order is local intent.
     for action in unconfirmed_orders(conn, project)? {
         if action.phase == tracker_actions::ActionPhase::Sent {

@@ -146,7 +146,18 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
     drop(service);
     let service = Service::start(&task);
     let reply = service.connect().request(operation()).unwrap();
-    assert_eq!(receipt(reply.result), saved);
+    let replay = receipt(reply.result);
+    let mut expected = saved.clone();
+    let fields = expected["task"].as_object_mut().unwrap();
+    for (released, current) in [
+        ("linear_id", "tracker_id"),
+        ("pm_snapshot_synced_at", "tracker_synced_at"),
+        ("pm_writeback", "tracker_writeback"),
+    ] {
+        let value = fields.remove(released).expect("released receipt format");
+        assert!(fields.insert(current.into(), value).is_none());
+    }
+    assert_eq!(replay, expected);
     let output = task.run(&[
         "task",
         "create",
@@ -165,7 +176,7 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
     );
     assert_eq!(
         receipt(serde_json::from_slice(&output.stdout).unwrap()),
-        saved
+        replay
     );
     let counts: (i64, i64, i64) = db
         .query_row(

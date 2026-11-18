@@ -22,9 +22,9 @@ use crate::rows::now_unix;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::NewTask;
 use crate::work::task::{
-    CiObservation, GithubObservation, GithubPr, LinearObservationOutcome, LinearWritebackState,
-    PrMergeRequest, PrPhase, PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId,
-    TaskLinearObservation, TaskPr, TaskPrId,
+    CiObservation, GithubObservation, GithubPr, LinearWritebackState, PrMergeRequest, PrPhase,
+    PrPresentation, PrPublication, Task, TaskEvent, TaskEventKind, TaskId, TaskPr, TaskPrId,
+    TaskTrackerCursor, TrackerEventOutcome,
 };
 use crate::{PlanningState, StoreError, StoreResult};
 use loopflow_model::durable::{Author, RepositoryId};
@@ -110,13 +110,13 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         id: input.id.clone(),
 
         revision: 0,
-        linear_id: None,
+        tracker_id: None,
         identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
         title: input.title.clone(),
         description: input.description.clone(),
-        pm_snapshot_synced_at: None,
+        tracker_synced_at: None,
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id,
         repository_id: input.repository_id.clone(),
         project_id: input.project_id.clone(),
@@ -152,8 +152,8 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
 }
 
 /// Git planning carries the Task's branch, so whoever runs it next checks out
-/// the same branch and finds the same PR. Remote providers supply their branch
-/// through planning acquisition. An already-recorded branch writes nothing.
+/// the same branch and finds the same PR. Remote trackers supply their branch
+/// when the Task is fetched. An already-recorded branch writes nothing.
 fn record_task_branch_in(
     tx: &Connection,
     task: &TaskId,
@@ -219,7 +219,7 @@ fn place_task_in(
     if pr.publication.is_some() {
         insert_task_pr(conn, pr)?;
     }
-    seed_task_linear_observation(conn, &task)?;
+    seed_task_tracker_cursor(conn, &task)?;
     insert_task_event_in(
         conn,
         task_id,
@@ -400,12 +400,13 @@ impl SqliteStore {
                 Some((graph, conversation)) => (Some(graph), Some(conversation.id), "admitted"),
                 None => (None, session.map(|s| s.id.clone()), "filed"),
             };
-            let result = serde_json::to_value(crate::sqlite::creation::TaskCreateReceipt {
+            let result = crate::sqlite::creation::TaskCreateReceipt {
                 task: task.clone(),
                 graph,
                 session_id: session_id.clone(),
                 milestone: milestone.into(),
-            })?;
+            }
+            .stored_result()?;
             super::creation::insert_in(
                 &tx,
                 &receipt.identity,
@@ -586,11 +587,11 @@ impl SqliteStore {
         Ok(task)
     }
 
-    pub fn task_acquisition(&self, id: &TaskId) -> StoreResult<crate::TaskAcquisition> {
+    pub fn task_tracker_state(&self, id: &TaskId) -> StoreResult<crate::TrackerState> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let task = task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
-        let result = task_acquisition_in(&tx, &task, true)?;
+        let result = task_tracker_state_in(&tx, &task, true)?;
         tx.commit()?;
         Ok(result)
     }
@@ -978,17 +979,14 @@ impl SqliteStore {
         Ok(outcome)
     }
 
-    pub fn task_linear_observation(
-        &self,
-        task_id: &TaskId,
-    ) -> StoreResult<Option<TaskLinearObservation>> {
+    pub fn task_tracker_cursor(&self, task_id: &TaskId) -> StoreResult<Option<TaskTrackerCursor>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.query_row(
             "SELECT task_id, last_revision, last_title, last_description,
                     last_success_at, degraded_reason, updated_at
              FROM task_linear_observations WHERE task_id=?1",
             params![task_id.as_str()],
-            map_task_linear_observation_row,
+            map_task_tracker_cursor_row,
         )
         .optional()
         .map_err(StoreError::from)
@@ -997,14 +995,14 @@ impl SqliteStore {
     /// Persist one Linear observation as Task direction, atomically. Exactly-once
     /// comments are imported on the first read and deduplicated by revision.
     /// Issue revisions guard definition changes independently of comments.
-    pub fn apply_linear_observation_prepared(
+    pub fn apply_tracker_event_prepared(
         &self,
         task_id: &TaskId,
-        observation: &crate::planning::TrackerObservation,
+        event: &crate::planning::TrackerEvent,
         observed_at: OffsetDateTime,
         planning_connected: bool,
         machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
-    ) -> StoreResult<LinearObservationOutcome> {
+    ) -> StoreResult<TrackerEventOutcome> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let transaction = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -1025,7 +1023,7 @@ impl SqliteStore {
 
         let observed_at = observed_at.unix_timestamp();
         let mut follow_ups_created = Vec::new();
-        for comment in &observation.comments {
+        for comment in &event.comments {
             if !super::task_comments::ingest_task_comment(
                 &transaction,
                 task_id,
@@ -1072,14 +1070,14 @@ impl SqliteStore {
                  ) VALUES (?1, ?2, ?3, ?4, ?5, NULL, ?5)",
                 params![
                     task_id.as_str(),
-                    observation.revision,
-                    observation.title,
-                    observation.description,
+                    event.revision,
+                    event.title,
+                    event.description,
                     observed_at,
                 ],
             )?;
             transaction.commit()?;
-            return Ok(LinearObservationOutcome {
+            return Ok(TrackerEventOutcome {
                 baselined: true,
                 content_steer_applied: false,
                 follow_ups_created,
@@ -1088,9 +1086,9 @@ impl SqliteStore {
 
         // Monotonic guard: an out-of-order response older than what we have
         // carries stale content, so drop it rather than let it revert direction.
-        if observation.revision.as_str() < last_revision.as_str() {
+        if event.revision.as_str() < last_revision.as_str() {
             transaction.commit()?;
-            return Ok(LinearObservationOutcome {
+            return Ok(TrackerEventOutcome {
                 baselined: false,
                 content_steer_applied: false,
                 follow_ups_created,
@@ -1098,12 +1096,12 @@ impl SqliteStore {
         }
 
         let content_steer_applied =
-            last_title != observation.title || last_description != observation.description;
+            last_title != event.title || last_description != event.description;
         if content_steer_applied {
             let text = format!(
                 "The linked planning task was edited; use this current definition.\n\n\
                  Title: {}\n\n{}",
-                observation.title, observation.description,
+                event.title, event.description,
             );
             Self::save_task_steer_in(
                 &transaction,
@@ -1111,7 +1109,7 @@ impl SqliteStore {
                 &Author::User,
                 &text,
                 &format!("task-definition:{task_id}"),
-                &observation.revision,
+                &event.revision,
             )?;
         }
 
@@ -1122,23 +1120,23 @@ impl SqliteStore {
              WHERE task_id=?1",
             params![
                 task_id.as_str(),
-                observation.revision,
-                observation.title,
-                observation.description,
+                event.revision,
+                event.title,
+                event.description,
                 observed_at,
             ],
         )?;
         transaction.commit()?;
-        Ok(LinearObservationOutcome {
+        Ok(TrackerEventOutcome {
             baselined: false,
             content_steer_applied,
             follow_ups_created,
         })
     }
 
-    /// Record that the latest observation failed, without moving the cursor. A
+    /// Record that the latest event failed, without moving the cursor. A
     /// Task with no baseline yet has no row to mark, which is fine — status
-    /// then simply shows no observation.
+    /// then simply shows no event.
     pub fn mark_task_linear_degraded(&self, task_id: &TaskId, reason: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1235,7 +1233,7 @@ impl SqliteStore {
                 &[
                     Edit::ProjectWave(project.wave_id.to_string()),
                     Edit::ProjectLinearId(
-                        project.linear_id.as_ref().map(|id| id.as_str().to_owned()),
+                        project.tracker_id.as_ref().map(|id| id.as_str().to_owned()),
                     ),
                     Edit::ProjectSlug(Some(project.slug.clone())),
                     Edit::ProjectName(Some(project.name.clone())),
@@ -1252,7 +1250,7 @@ impl SqliteStore {
             "UPDATE projects SET pm_snapshot_synced_at=?2,created_at=?3,updated_at=?4 WHERE id=?1",
             params![
                 project.id.as_str(),
-                project.pm_snapshot_synced_at,
+                project.tracker_synced_at,
                 project.created_at.unix_timestamp(),
                 project.updated_at.unix_timestamp()
             ],
@@ -1474,9 +1472,8 @@ fn under_way(conn: &Connection, task: &Task) -> StoreResult<bool> {
 /// Planning ownership remains relevant when finishing already completed work.
 pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> StoreResult<()> {
     require_task_not_deleted(conn, task)?;
-    let acquisition = task_acquisition_in(conn, task, false)?;
     if matches!(
-        acquisition.state,
+        task_tracker_state_in(conn, task, false)?.state,
         PlanningState::Invalid | PlanningState::Removed
     ) {
         return Err(StoreError::InvalidAuthority(format!(
@@ -1489,26 +1486,26 @@ pub(super) fn require_task_planning_identity(conn: &Connection, task: &Task) -> 
 
 // Read only the retained facts that affect admission. Content belongs to Work;
 // an unrelated malformed provider content field cannot erase membership or age.
-fn task_acquisition_in(
+fn task_tracker_state_in(
     conn: &Connection,
     task: &Task,
     allow_pending_membership: bool,
-) -> StoreResult<crate::TaskAcquisition> {
-    task_acquisitions_in(conn, &[task], allow_pending_membership)?
+) -> StoreResult<crate::TrackerState> {
+    tracker_states_in(conn, &[task], allow_pending_membership)?
         .remove(&task.id)
         .ok_or(StoreError::NotFound)
 }
 
-/// Each Task's planning acquisition, in one statement.
-pub(super) fn task_acquisitions_in(
+/// Each Task's tracker state, in one statement.
+pub(super) fn tracker_states_in(
     conn: &Connection,
     tasks: &[&Task],
     allow_pending_membership: bool,
-) -> StoreResult<HashMap<TaskId, crate::TaskAcquisition>> {
+) -> StoreResult<HashMap<TaskId, crate::TrackerState>> {
     let ids = ids_json(tasks.iter().map(|task| task.id.as_str()));
     let linear: std::collections::HashSet<&TaskId> = tasks
         .iter()
-        .filter(|task| task.linear_id.is_some())
+        .filter(|task| task.tracker_id.is_some())
         .map(|task| &task.id)
         .collect();
     let mut statement = conn.prepare(
@@ -1536,12 +1533,12 @@ pub(super) fn task_acquisitions_in(
          t.planning_deleted_at IS NOT NULL OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
-         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider IN ('linear','asana') AND i.id=t.external_issue_id
-         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider IN ('linear','asana')
+         LEFT JOIN tracker_items i ON i.repo=w.repo AND i.tracker IN ('linear','asana') AND i.id=t.external_issue_id
+         LEFT JOIN tracker_projects parent ON parent.repo=w.repo AND parent.tracker IN ('linear','asana')
                                      AND parent.id=p.external_project_id
-         LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
+         LEFT JOIN tracker_projects observed ON observed.repo=i.repo AND observed.tracker=i.tracker
                                        AND observed.id=i.project_id
-         LEFT JOIN pm_issue_changes changes ON changes.issue_id=t.external_issue_id
+         LEFT JOIN tracker_events changes ON changes.issue_id=t.external_issue_id
          WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;
     let rows = statement.query_map(params![ids, allow_pending_membership], |row| {
@@ -1564,7 +1561,13 @@ pub(super) fn task_acquisitions_in(
         } else {
             PlanningState::Unavailable
         };
-        Ok((id, crate::TaskAcquisition { state, observed_at }))
+        Ok((
+            id,
+            crate::TrackerState {
+                state,
+                synced_at: observed_at,
+            },
+        ))
     })
     .collect()
 }
@@ -1601,7 +1604,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
             task.id.as_str(),
             &[
                 Edit::TaskProject(task.project_id.as_ref().map(ToString::to_string)),
-                Edit::TaskLinearId(task.linear_id.as_ref().map(|id| id.as_str().to_owned())),
+                Edit::TaskLinearId(task.tracker_id.as_ref().map(|id| id.as_str().to_owned())),
                 Edit::TaskIdentifier(task.identifier.clone()),
                 Edit::TaskTitle(Some(task.title.clone())),
                 Edit::TaskDescription(Some(task.description.clone())),
@@ -1618,7 +1621,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
         crate::sqlite::planning_write::WriteOrigin::Local,
     )?;
     conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
-        task.id.as_str(),task.pm_snapshot_synced_at,task.workspace_slug,
+        task.id.as_str(),task.tracker_synced_at,task.workspace_slug,
         task.created_at.unix_timestamp(),task.updated_at.unix_timestamp()])?;
     write_task_checkout_in(conn, task)
 }
@@ -1626,7 +1629,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
 /// Seed the Linear observation cursor from the planning directive, in the Task's
 /// creation transaction, so the first observed edit becomes direction rather than
 /// a baseline. The empty revision lets any Linear `updatedAt` advance the cursor.
-fn seed_task_linear_observation(conn: &Connection, task: &Task) -> StoreResult<()> {
+fn seed_task_tracker_cursor(conn: &Connection, task: &Task) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO task_linear_observations (
             task_id, last_revision, last_title, last_description,
@@ -2252,15 +2255,15 @@ fn map_task_columns(
         id,
 
         revision: row.get::<_, i64>(12)? as u64,
-        linear_id: row
+        tracker_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearIssueId::from_raw),
         identifier,
         title: row.get(2)?,
         description: row.get(3)?,
-        pm_snapshot_synced_at: row.get(9)?,
+        tracker_synced_at: row.get(9)?,
 
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
+        tracker_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
@@ -2392,14 +2395,12 @@ pub(super) fn map_task_pr_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskP
     Ok(pr)
 }
 
-fn map_task_linear_observation_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<TaskLinearObservation> {
+fn map_task_tracker_cursor_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TaskTrackerCursor> {
     let last_success_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(4)?)
         .map_err(|error| invalid_column(4, error))?;
     let updated_at = OffsetDateTime::from_unix_timestamp(row.get::<_, i64>(6)?)
         .map_err(|error| invalid_column(6, error))?;
-    Ok(TaskLinearObservation {
+    Ok(TaskTrackerCursor {
         task_id: TaskId::from_raw(row.get::<_, String>(0)?),
         last_revision: row.get(1)?,
         last_title: row.get(2)?,
@@ -2455,7 +2456,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
         id: ProjectId::from_raw(row.get::<_, String>(0)?),
 
         summary: row.get(10)?,
-        linear_id: row
+        tracker_id: row
             .get::<_, Option<String>>(1)?
             .map(LinearProjectId::from_raw),
         slug: row.get(2)?,
@@ -2465,7 +2466,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             .map_err(|error| invalid_column(11, error))?,
         metric_targets: serde_json::from_str(&row.get::<_, String>(12)?)
             .map_err(|error| invalid_column(12, error))?,
-        pm_snapshot_synced_at: row.get(6)?,
+        tracker_synced_at: row.get(6)?,
         status: serde_json::from_value(serde_json::Value::String(row.get(9)?))
             .map_err(|error| invalid_column(9, error))?,
 
@@ -2643,7 +2644,7 @@ impl SqliteStore {
         if let Some(me) = me {
             super::task_ownership::claim_in(&tx, &task.id, me)?;
         }
-        seed_task_linear_observation(&tx, task)?;
+        seed_task_tracker_cursor(&tx, task)?;
         let saved = task_on(&tx, &task.id)?.ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(saved)

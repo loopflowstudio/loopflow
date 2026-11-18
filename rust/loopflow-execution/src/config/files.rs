@@ -847,7 +847,7 @@ mod tests {
             repository: repo.path().to_owned(),
         };
         let declared = crate::engine::config::get(&shared, "linear.team").unwrap();
-        assert_eq!(declared.key, "repo.plan.team");
+        assert_eq!(declared.key, "repo.tracker.linear.team");
         assert_eq!(declared.value, "released");
         crate::engine::config::set(&shared, "planning", "{provider: linear, team: typed}").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
@@ -862,7 +862,7 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .planning_transport(),
-            crate::config::PlanningConfig::Linear {
+            crate::config::TrackerConfig::Linear {
                 team: Some("typed".into())
             }
         );

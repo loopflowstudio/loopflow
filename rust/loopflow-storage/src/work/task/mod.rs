@@ -498,11 +498,13 @@ pub struct Task {
     /// Linear's state type, `completed` once done; the lifecycle is `TaskState`.
     pub state: Option<String>,
     pub completed_at: Option<String>,
-    /// Optional Linear binding, not a second owner of this record.
-    pub linear_id: Option<LinearIssueId>,
-    /// Acquisition time of the retained Linear observation, never a write clock.
-    pub pm_snapshot_synced_at: Option<i64>,
-    pub pm_writeback: LinearWritebackState,
+    /// The record’s ID in the repository's tracker.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<LinearIssueId>,
+    /// Time of the last successful tracker refresh.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
+    pub tracker_writeback: LinearWritebackState,
     /// Read projection from the Project join, validated against the Project on save.
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
@@ -526,8 +528,8 @@ pub struct Task {
 }
 
 impl Task {
-    pub fn linear_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
-        self.linear_id
+    pub fn tracker_id(&self) -> Result<&LinearIssueId, LinearBindingError> {
+        self.tracker_id
             .as_ref()
             .ok_or(LinearBindingError::NoLinearMapping)
     }
@@ -698,7 +700,7 @@ pub struct TaskEvent {
 /// become Task direction — plus the health of the last observation, so
 /// `lf task status` can show stale reads and their degraded reason.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TaskLinearObservation {
+pub struct TaskTrackerCursor {
     pub task_id: TaskId,
     /// Linear issue `updatedAt` last folded in. Monotonic: a read whose revision
     /// is older is dropped as a stale/out-of-order response.
@@ -714,7 +716,7 @@ pub struct TaskLinearObservation {
 
 /// Direction persisted from one observation, without re-reading the store.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct LinearObservationOutcome {
+pub struct TrackerEventOutcome {
     /// The Task had no cursor yet: this observation seeded the baseline and
     /// emitted no content Steer; participant comments are still imported.
     pub baselined: bool,
@@ -747,13 +749,13 @@ mod tests {
             id: TaskId::new(),
 
             revision: 0,
-            linear_id: Some(LinearIssueId::new("issue-1").unwrap()),
+            tracker_id: Some(LinearIssueId::new("issue-1").unwrap()),
             identifier: "INF-123".to_string(),
             title: "Ship it".to_string(),
             description: String::new(),
-            pm_snapshot_synced_at: Some(1),
+            tracker_synced_at: Some(1),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(loopflow_model::id::WaveId::new()),
             project_id: Some(crate::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
@@ -776,13 +778,13 @@ mod tests {
     fn task_content_round_trip_keeps_binding_revision_and_observation_age() {
         let mut task = task();
         task.revision = 17;
-        task.pm_snapshot_synced_at = Some(42);
+        task.tracker_synced_at = Some(42);
         let value = serde_json::to_value(&task).unwrap();
         assert!(value.get("plan").is_none());
         assert_eq!(value["title"], "Ship it");
         assert_eq!(value["revision"], 17);
-        assert_eq!(value["linear_id"], "issue-1");
-        assert_eq!(value["pm_snapshot_synced_at"], 42);
+        assert_eq!(value["tracker_id"], "issue-1");
+        assert_eq!(value["tracker_synced_at"], 42);
         assert_eq!(serde_json::from_value::<Task>(value).unwrap(), task);
     }
 
@@ -795,7 +797,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_pm_writeback_has_a_stable_json_shape() {
+    fn pending_tracker_writeback_has_a_stable_json_shape() {
         let state = LinearWritebackState::Pending {
             operation: LinearWritebackOperation::CompleteTask,
             error: "offline".to_string(),
@@ -1009,9 +1011,9 @@ mod tests {
     }
 
     #[test]
-    fn pending_pm_writeback_is_valid_without_a_controller() {
+    fn pending_tracker_writeback_is_valid_without_a_controller() {
         let mut task = task();
-        task.pm_writeback = LinearWritebackState::Pending {
+        task.tracker_writeback = LinearWritebackState::Pending {
             operation: LinearWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };

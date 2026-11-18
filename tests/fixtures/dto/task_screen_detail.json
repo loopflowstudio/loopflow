@@ -12,14 +12,14 @@
     "sync": {
       "actions": []
     },
-    "linear_id": null,
-    "acquisition": {
+    "tracker_id": null,
+    "tracker_state": {
       "state": "available",
-      "observed_at": null
+      "synced_at": null
     },
     "repo_id": "repo_00000000000040008000000000000001",
     "repo": "/src/loopflow",
-    "project_id": "proj-chapter-current",
+    "project_id": "proj-project-current",
     "wave_id": "wave-1"
   },
   "section": "backlog",

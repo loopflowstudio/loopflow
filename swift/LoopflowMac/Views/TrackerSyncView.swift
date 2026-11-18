@@ -44,6 +44,6 @@ extension View {
 }
 
 extension EnvironmentValues {
-    /// Answers a lost tracker line of a repository: `lf repo plan answer`.
+    /// Answers a lost tracker line of a repository: `lf repo tracker answer`.
     @Entry var answerLost: (@MainActor (_ repo: String, TrackerActionStatus, LostAnswer) -> Void)? = nil
 }

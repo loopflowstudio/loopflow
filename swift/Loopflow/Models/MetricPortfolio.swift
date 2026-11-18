@@ -224,7 +224,7 @@ public struct MetricReading: Decodable, Sendable, Hashable, Identifiable {
 }
 
 public enum MetricContractIssue: Decodable, Sendable, Hashable {
-    case chapterUnavailable(waveId: String, reason: String)
+    case projectUnavailable(waveId: String, reason: String)
     case unresolvedTarget(waveId: String, metricId: String)
     case malformedContract(path: String, message: String)
     case instrumentMismatch(
@@ -252,8 +252,8 @@ public enum MetricContractIssue: Decodable, Sendable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .kind) {
-        case "chapter_unavailable":
-            self = .chapterUnavailable(waveId: try container.decode(String.self, forKey: .waveId), reason: try container.decode(String.self, forKey: .reason))
+        case "project_unavailable":
+            self = .projectUnavailable(waveId: try container.decode(String.self, forKey: .waveId), reason: try container.decode(String.self, forKey: .reason))
         case "unresolved_target":
             self = .unresolvedTarget(waveId: try container.decode(String.self, forKey: .waveId), metricId: try container.decode(String.self, forKey: .metricId))
         case "malformed_contract":

@@ -1,4 +1,4 @@
-//! Markdown ↔ Asana rich text, ported from the provider removed in 43a1f85ce3.
+//! Markdown ↔ Asana rich text, ported from the tracker removed in 43a1f85ce3.
 //!
 //! Asana stores `html_notes` and `html_text` byte for byte, newlines included, so
 //! the conversion is line-faithful: a text line stays a text line, a block element

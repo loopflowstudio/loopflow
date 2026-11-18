@@ -340,8 +340,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -350,7 +350,7 @@
           "due_date": null,
           "id": "task_11111111111111111111111111111111",
           "identifier": "FIX-1",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Started, no checkout",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 1,
@@ -452,8 +452,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -462,7 +462,7 @@
           "due_date": null,
           "id": "task_22222222222222222222222222222222",
           "identifier": "FIX-2",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Idle",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 2,
@@ -535,8 +535,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -545,7 +545,7 @@
           "due_date": null,
           "id": "task_33333333333333333333333333333333",
           "identifier": "FIX-3",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Backlog",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 3,
@@ -626,8 +626,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -636,7 +636,7 @@
           "due_date": null,
           "id": "task_44444444444444444444444444444444",
           "identifier": "FIX-4",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Done",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 4,
@@ -1034,8 +1034,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1044,7 +1044,7 @@
           "due_date": null,
           "id": "task_22222222222222222222222222222222",
           "identifier": "FIX-2",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Idle",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 2,
@@ -1135,8 +1135,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1145,7 +1145,7 @@
           "due_date": null,
           "id": "task_11111111111111111111111111111111",
           "identifier": "FIX-1",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Started, no checkout",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 1,
@@ -1218,8 +1218,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1228,7 +1228,7 @@
           "due_date": null,
           "id": "task_33333333333333333333333333333333",
           "identifier": "FIX-3",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Backlog",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 3,
@@ -1309,8 +1309,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1319,7 +1319,7 @@
           "due_date": null,
           "id": "task_44444444444444444444444444444444",
           "identifier": "FIX-4",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Done",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 4,
@@ -1708,8 +1708,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1718,7 +1718,7 @@
           "due_date": null,
           "id": "task_22222222222222222222222222222222",
           "identifier": "FIX-2",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Idle",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 2,
@@ -1809,8 +1809,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1819,7 +1819,7 @@
           "due_date": null,
           "id": "task_11111111111111111111111111111111",
           "identifier": "FIX-1",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Started, no checkout",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 1,
@@ -1892,8 +1892,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1902,7 +1902,7 @@
           "due_date": null,
           "id": "task_33333333333333333333333333333333",
           "identifier": "FIX-3",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Backlog",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 3,
@@ -1983,8 +1983,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -1993,7 +1993,7 @@
           "due_date": null,
           "id": "task_44444444444444444444444444444444",
           "identifier": "FIX-4",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Done",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 4,
@@ -2393,8 +2393,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -2403,7 +2403,7 @@
           "due_date": null,
           "id": "task_22222222222222222222222222222222",
           "identifier": "FIX-2",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Idle",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 2,
@@ -2494,8 +2494,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -2504,7 +2504,7 @@
           "due_date": null,
           "id": "task_11111111111111111111111111111111",
           "identifier": "FIX-1",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Started, no checkout",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 1,
@@ -2577,8 +2577,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -2587,7 +2587,7 @@
           "due_date": null,
           "id": "task_33333333333333333333333333333333",
           "identifier": "FIX-3",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Backlog",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 3,
@@ -2668,8 +2668,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -2678,7 +2678,7 @@
           "due_date": null,
           "id": "task_44444444444444444444444444444444",
           "identifier": "FIX-4",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Done",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 4,
@@ -3078,8 +3078,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -3088,7 +3088,7 @@
           "due_date": null,
           "id": "task_22222222222222222222222222222222",
           "identifier": "FIX-2",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Idle",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 2,
@@ -3179,8 +3179,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -3189,7 +3189,7 @@
           "due_date": null,
           "id": "task_11111111111111111111111111111111",
           "identifier": "FIX-1",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Started, no checkout",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 1,
@@ -3262,8 +3262,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -3272,7 +3272,7 @@
           "due_date": null,
           "id": "task_33333333333333333333333333333333",
           "identifier": "FIX-3",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Backlog",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 3,
@@ -3353,8 +3353,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": null,
+          "tracker_state": {
+            "synced_at": null,
             "state": "available"
           },
           "assignee": null,
@@ -3363,7 +3363,7 @@
           "due_date": null,
           "id": "task_44444444444444444444444444444444",
           "identifier": "FIX-4",
-          "linear_id": null,
+          "tracker_id": null,
           "name": "Done",
           "project_id": "proj_11111111111111111111111111111111",
           "rank": 4,

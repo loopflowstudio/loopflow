@@ -135,8 +135,10 @@ fn launch(home: &Path, repo: &Path, bin: &Path, measurements: &Path, args: &[&st
     // Each store open still reads the whole schema_migrations ledger, so every
     // release batch adds rows here; the schema itself is read once per process.
     // Each connection also loads the schema of the history.db it attaches,
-    // about 1,100 rows across this launch.
-    assert!(rows < 21_000, "launch read {rows} SQLite rows");
+    // about 1,100 rows across this launch. The tracker_tables expand step keeps
+    // each released tracker table beside its renamed one, with mirror triggers,
+    // until its contract drops them.
+    assert!(rows < 23_000, "launch read {rows} SQLite rows");
     assert!(
         statements < 2_000,
         "launch executed {statements} statements"

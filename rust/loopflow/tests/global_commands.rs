@@ -1762,7 +1762,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
         .unwrap()
         .to_string_lossy()
         .into_owned();
-    assert!(store.peer_planning_status(&repo, None).unwrap().is_empty());
+    assert!(store.git_destinations(&repo, None).unwrap().is_empty());
     assert!(store.list_waves(None).unwrap().is_empty());
     let task: serde_json::Value = serde_json::from_str::<serde_json::Value>(&success(
         command(
@@ -1782,7 +1782,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     .unwrap()["task"]
         .clone();
     let planning_before =
-        serde_json::to_value(store.peer_planning_status(&repo, None).unwrap()).unwrap();
+        serde_json::to_value(store.git_destinations(&repo, None).unwrap()).unwrap();
     let other = loopflow_execution::durable::RepositoryId::new();
     let rebound = command(
         target_home.path(),
@@ -1833,7 +1833,7 @@ fn repository_identity_binding_is_explicit_and_does_not_select_planning() {
     assert!(explained.contains(task["id"].as_str().unwrap()));
     assert!(explained.contains(through_prior.id.as_str()));
     assert_eq!(
-        serde_json::to_value(store.peer_planning_status(&repo, None).unwrap()).unwrap(),
+        serde_json::to_value(store.git_destinations(&repo, None).unwrap()).unwrap(),
         planning_before
     );
 }
@@ -1893,6 +1893,7 @@ fn task_planning_explain_validates_mutations_without_changing_checkpointed_stora
     );
     assert!(text.contains("Intended action: edit description"));
     assert!(text.contains("Effect: Save changed fields"));
+    assert!(text.contains("Nothing was saved, fetched or synchronized."));
     for (args, expected) in [
         (
             vec!["task", "edit", "INF-123", "--explain", "--json"],
@@ -2035,7 +2036,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
     assert!(missing["unavailable"][0]
         .as_str()
         .unwrap()
-        .contains("no planning acquisition"));
+        .contains("nothing was fetched from the tracker"));
     let unregistered = read(&[
         "task",
         "create",
@@ -2050,7 +2051,7 @@ fn task_planning_explain_retains_deletion_and_missing_evidence() {
     assert!(unregistered["unavailable"][0]
         .as_str()
         .unwrap()
-        .contains("registration/acquisition was not performed"));
+        .contains("the Wave was not registered and nothing was fetched from the tracker"));
     let report: loopflow_execution::ops::task::TaskPlanningExplanation =
         serde_json::from_value(unregistered).unwrap();
     assert!(report.render().contains("Project selection unavailable"));
@@ -2266,7 +2267,7 @@ fn task_planning_explain_creation_provenance_follows_resolved_selection() {
         assert_eq!(preview["impediments"], serde_json::json!([]));
         assert_eq!(
             preview["unavailable"],
-            serde_json::json!(["Provider freshness, synchronization delivery and concurrent saves are not observed or reserved"])
+            serde_json::json!(["Tracker freshness, queued tracker actions and concurrent saves are not read or reserved"])
         );
         assert_eq!(preview["resolution"]["repository"]["state"], "bound");
         assert_eq!(

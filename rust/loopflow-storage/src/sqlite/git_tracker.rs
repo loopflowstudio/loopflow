@@ -6,7 +6,7 @@ use super::{
 use crate::planning_destination::PlanningDestination;
 use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
 use crate::work::edit::WorkValue;
-use crate::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal, StoreError, StoreResult};
+use crate::{GitDestination, GitDestinationConflict, PlanningJournal, StoreError, StoreResult};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -15,7 +15,7 @@ fn invalid(error: impl std::fmt::Display) -> StoreError {
 }
 
 impl SqliteStore {
-    pub fn record_peer_fetch(
+    pub fn record_destination_fetch(
         &self,
         repo: &str,
         destination: &str,
@@ -23,35 +23,35 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE planning_destinations SET fetched_revision=?3
+            "UPDATE git_tracker_destinations SET fetched_revision=?3
             WHERE repo=?1 AND id=?2 AND fetched_revision IS NOT ?3",
             params![repo, destination, revision],
         )?;
         Ok(())
     }
-    pub fn record_peer_error(
+    pub fn record_destination_error(
         &self,
         repo: &str,
         destination: &str,
-        acquisition: bool,
+        fetch: bool,
         error: Option<&str>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let column = if acquisition {
-            "acquisition_error"
+        let column = if fetch {
+            "fetch_error"
         } else {
             "publication_error"
         };
         conn.execute(
             &format!(
-                "UPDATE planning_destinations SET {column}=?3
+                "UPDATE git_tracker_destinations SET {column}=?3
                 WHERE repo=?1 AND id=?2 AND {column} IS NOT ?3"
             ),
             params![repo, destination, error],
         )?;
         Ok(())
     }
-    pub fn record_peer_publication(
+    pub fn record_destination_publication(
         &self,
         repo: &str,
         destination: &str,
@@ -61,7 +61,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE planning_destinations SET publication_revision=?3,publication_state=?4,
+            "UPDATE git_tracker_destinations SET publication_revision=?3,publication_state=?4,
                 publication_digest=?5,publication_error=NULL
             WHERE repo=?1 AND id=?2 AND (publication_revision IS NOT ?3
                 OR publication_state IS NOT ?4 OR publication_digest IS NOT ?5
@@ -119,7 +119,7 @@ impl SqliteStore {
             .optional()
             .map_err(Into::into)
     }
-    pub fn bind_peer_planning(
+    pub fn bind_git_destination(
         &self,
         repo: &str,
         destination: &PlanningDestination,
@@ -143,14 +143,14 @@ impl SqliteStore {
         }
         let id = destination.id();
         tx.execute(
-            "INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES(?1,?2,?3,?4)
+            "INSERT INTO git_tracker_destinations(repo,id,endpoint,reference) VALUES(?1,?2,?3,?4)
             ON CONFLICT(repo,id) DO NOTHING",
             params![repo, id, destination.endpoint(), destination.reference()],
         )?;
         tx.commit()?;
         Ok(id)
     }
-    pub fn peer_planning_destination(
+    pub fn git_destination(
         &self,
         repo: &str,
         id: &str,
@@ -158,7 +158,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let row: Option<(String, String)> = conn
             .query_row(
-                "SELECT endpoint,reference FROM planning_destinations WHERE repo=?1 AND id=?2",
+                "SELECT endpoint,reference FROM git_tracker_destinations WHERE repo=?1 AND id=?2",
                 params![repo, id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -168,11 +168,7 @@ impl SqliteStore {
         })
         .transpose()
     }
-    pub fn export_peer_planning(
-        &self,
-        repo: &str,
-        destination: &str,
-    ) -> StoreResult<PlanningSnapshot> {
+    pub fn export_git_plan(&self, repo: &str, destination: &str) -> StoreResult<PlanningSnapshot> {
         // The export reads current ownership, so routing is bookkeeping for later
         // moves: it takes the write lock only when an owned change is unrouted, and
         // decoding happens after the connection is free.
@@ -192,7 +188,7 @@ impl SqliteStore {
         };
         decode_snapshot(rows)
     }
-    pub fn peer_import_current(
+    pub fn git_import_current(
         &self,
         repo: &str,
         destination: &str,
@@ -200,25 +196,25 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
-                AND NOT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            "SELECT EXISTS(SELECT 1 FROM git_tracker_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
+                AND NOT EXISTS(SELECT 1 FROM git_tracker_conflicts WHERE repo=?1 AND active=1)",
             params![repo, destination, revision], |row| row.get(0),
         )?)
     }
 
-    pub fn import_prepared_peer_planning(&self, import: &PeerImport<'_>) -> StoreResult<bool> {
+    pub fn import_prepared_git_plan(&self, import: &GitPlanImport<'_>) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let plan = import.read(&mut conn)?;
         import.write(&mut conn, plan)
     }
 
-    pub fn peer_planning_status(
+    pub fn git_destinations(
         &self,
         repo: &str,
         active: Option<&str>,
-    ) -> StoreResult<Vec<PeerPlanningStatus>> {
+    ) -> StoreResult<Vec<GitDestination>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query=conn.prepare("SELECT d.id,d.reference,d.id IS ?2,d.fetched_revision,d.acquisition_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM planning_destinations d LEFT JOIN planning_peer_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
+        let mut query=conn.prepare("SELECT d.id,d.reference,d.id IS ?2,d.fetched_revision,d.fetch_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM git_tracker_destinations d LEFT JOIN git_tracker_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
         let rows = query.query_map(params![repo, active], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -240,7 +236,7 @@ impl SqliteStore {
                 reference,
                 active,
                 fetched_revision,
-                acquisition_error,
+                fetch_error,
                 publication_revision,
                 publication_state,
                 publication_error,
@@ -251,24 +247,24 @@ impl SqliteStore {
             let pending_local = digest.as_deref() != Some(planning_digest(&snapshot)?.as_str());
             let selected_records = touched_records(&snapshot).len() as u64;
             let mut conflicts = conn.prepare(
-                "SELECT object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1",
+                "SELECT object_id,reason FROM git_tracker_conflicts WHERE repo=?1 AND active=1",
             )?;
             let conflicts = conflicts
                 .query_and_then([repo], |row| -> StoreResult<_> {
-                    Ok(PeerProjectionConflict {
+                    Ok(GitDestinationConflict {
                         target: row.get(0)?,
                         reason: row.get(1)?,
                     })
                 })?
                 .collect::<StoreResult<Vec<_>>>()?;
-            result.push(PeerPlanningStatus {
+            result.push(GitDestination {
                 id,
                 reference,
                 active,
                 selected_records,
                 imported_revision,
                 fetched_revision,
-                acquisition_error,
+                fetch_error,
                 publication_revision,
                 publication_state,
                 publication_error,
@@ -278,14 +274,14 @@ impl SqliteStore {
         }
         Ok(result)
     }
-    pub fn peer_planning_journal(
+    pub fn git_journal(
         &self,
         repo: &str,
         active: Option<&str>,
     ) -> StoreResult<Vec<PlanningJournal>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let destinations = conn
-            .prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?
+            .prepare("SELECT id FROM git_tracker_destinations WHERE repo=?1 ORDER BY id")?
             .query_map([repo], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         destinations
@@ -307,10 +303,10 @@ impl SqliteStore {
     }
 }
 
-/// One peer planning import. Reading and merging the local history takes no
+/// Import one destination’s plan. Reading and merging the local history takes no
 /// write lock; only `write` does, and it plans again only if planning moved.
 #[derive(Debug)]
-pub struct PeerImport<'a> {
+pub struct GitPlanImport<'a> {
     pub inputs: &'a super::repositories::RepositoryRegistration,
     pub repo: &'a str,
     pub destination: &'a str,
@@ -340,7 +336,7 @@ fn planning_revision(conn: &Connection) -> StoreResult<Option<i64>> {
         .optional()?)
 }
 
-impl PeerImport<'_> {
+impl GitPlanImport<'_> {
     /// Plans in a read transaction, which never takes the write lock.
     fn read(&self, conn: &mut Connection) -> StoreResult<ImportPlan> {
         let tx = conn.transaction_with_behavior(TransactionBehavior::Deferred)?;
@@ -353,7 +349,7 @@ impl PeerImport<'_> {
         let (repo, destination) = (self.repo, self.destination);
         let revision = planning_revision(conn)?;
         let in_conflict: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            "SELECT EXISTS(SELECT 1 FROM git_tracker_conflicts WHERE repo=?1 AND active=1)",
             [repo],
             |row| row.get(0),
         )?;
@@ -388,7 +384,7 @@ impl PeerImport<'_> {
     }
 
     fn record_revision(&self, conn: &Connection) -> StoreResult<()> {
-        conn.execute("INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![self.repo,self.destination,self.revision])?;
+        conn.execute("INSERT INTO git_tracker_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![self.repo,self.destination,self.revision])?;
         Ok(())
     }
 
@@ -566,11 +562,11 @@ impl PeerImport<'_> {
         }
 
         tx.execute(
-            "UPDATE planning_peer_conflicts SET active=0 WHERE repo=?1",
+            "UPDATE git_tracker_conflicts SET active=0 WHERE repo=?1",
             [repo],
         )?;
         for ((table, target), reason) in conflicts {
-            tx.execute("INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,table,target,reason])?;
+            tx.execute("INSERT INTO git_tracker_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,table,target,reason])?;
         }
         self.record_revision(&tx)?;
         tx.commit()?;
@@ -599,7 +595,7 @@ fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
 }
 fn require_destination(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {
     if !conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM planning_destinations WHERE repo=?1 AND id=?2)",
+        "SELECT EXISTS(SELECT 1 FROM git_tracker_destinations WHERE repo=?1 AND id=?2)",
         params![repo, destination],
         |r| r.get::<_, bool>(0),
     )? {
@@ -638,9 +634,9 @@ fn unrouted_changes(conn: &Connection, repo: &str, destination: &str) -> StoreRe
         "{OWNED_CHANGES}
         SELECT c.id FROM owned o
             -- Each owned record's history by index, never every record's.
-            CROSS JOIN planning_peer_changes c
+            CROSS JOIN git_tracker_changes c
                 ON c.object_id=o.object_id AND c.record_table=o.record_table
-            WHERE NOT EXISTS(SELECT 1 FROM planning_peer_routes r
+            WHERE NOT EXISTS(SELECT 1 FROM git_tracker_routes r
                 WHERE r.mutation_id=c.id AND r.repo=?1 AND r.destination=?2)"
     ))?;
     let ids = query
@@ -655,7 +651,7 @@ fn route_changes<'a>(
     ids: impl IntoIterator<Item = &'a String>,
 ) -> StoreResult<()> {
     let mut route = conn.prepare_cached(
-        "INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
+        "INSERT OR IGNORE INTO git_tracker_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
     )?;
     for id in ids {
         route.execute(params![id, repo, destination])?;
@@ -674,7 +670,7 @@ fn unseen_in(
     incoming: &PlanningSnapshot,
 ) -> StoreResult<PlanningSnapshot> {
     let mut routed = conn.prepare_cached(
-        "SELECT 1 FROM planning_peer_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
+        "SELECT 1 FROM git_tracker_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
     )?;
     let mut fields = BTreeSet::new();
     for (id, change) in &incoming.changes {
@@ -709,8 +705,8 @@ fn export_rows(
 ) -> StoreResult<Vec<(String, String)>> {
     let mut query = conn.prepare(
         &format!("{OWNED_CHANGES}
-            SELECT c.id,c.mutation FROM planning_peer_changes c
-            WHERE c.id IN (SELECT mutation_id FROM planning_peer_routes WHERE repo=?1 AND destination=?2)
+            SELECT c.id,c.mutation FROM git_tracker_changes c
+            WHERE c.id IN (SELECT mutation_id FROM git_tracker_routes WHERE repo=?1 AND destination=?2)
             OR (?3 AND EXISTS(SELECT 1 FROM owned o WHERE o.record_table=c.record_table AND o.object_id=c.object_id))"),
     )?;
     let rows = query
@@ -735,9 +731,9 @@ fn record_rows(
         .query_row([target], |row| row.get(0))
         .optional()?;
     let mut query = conn.prepare_cached(
-        "SELECT c.id,c.mutation FROM planning_peer_changes c
+        "SELECT c.id,c.mutation FROM git_tracker_changes c
         WHERE c.object_id=?1 AND c.record_table=?2
-            AND (?3 OR EXISTS(SELECT 1 FROM planning_peer_routes r
+            AND (?3 OR EXISTS(SELECT 1 FROM git_tracker_routes r
                 WHERE r.mutation_id=c.id AND r.repo=?4 AND r.destination=?5))",
     )?;
     let rows = query
@@ -769,7 +765,7 @@ fn decode_snapshot(rows: Vec<(String, String)>) -> StoreResult<PlanningSnapshot>
 mod tests {
     use std::collections::BTreeSet;
 
-    use super::PeerImport;
+    use super::GitPlanImport;
     use crate::planning_destination::PlanningDestination;
     use crate::planning_exchange::{PlanningMutation, PlanningSnapshot};
     use crate::query_plans::{assert_no_empty_writes, growing_scans, statements};
@@ -784,7 +780,7 @@ mod tests {
             &format!("refs/loopflow/planning/shared/{name}"),
         )
         .unwrap();
-        store.bind_peer_planning(repo, &route).unwrap()
+        store.bind_git_destination(repo, &route).unwrap()
     }
 
     #[test]
@@ -795,7 +791,7 @@ mod tests {
         let wave = Wave::new(WaveId::new(), "original".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
         let first = destination(&store, "/repo", "first");
-        let original = store.export_peer_planning("/repo", &first).unwrap();
+        let original = store.export_git_plan("/repo", &first).unwrap();
         assert!(!original.changes.is_empty());
 
         let second = destination(&store, "/repo", "second");
@@ -807,14 +803,14 @@ mod tests {
             )
             .unwrap();
         }
-        let current = store.export_peer_planning("/repo", &second).unwrap();
+        let current = store.export_git_plan("/repo", &second).unwrap();
         assert!(current.changes.len() > original.changes.len());
         let revision = store.revisions().unwrap();
-        let statuses = store.peer_planning_status("/repo", Some(&second)).unwrap();
+        let statuses = store.git_destinations("/repo", Some(&second)).unwrap();
         assert_eq!(store.revisions().unwrap(), revision);
         assert!(statuses.iter().find(|s| s.id == second).unwrap().active);
         assert!(!statuses.iter().find(|s| s.id == first).unwrap().active);
-        let journals = store.peer_planning_journal("/repo", Some(&second)).unwrap();
+        let journals = store.git_journal("/repo", Some(&second)).unwrap();
         assert_eq!(
             journals
                 .iter()
@@ -833,7 +829,7 @@ mod tests {
         );
         // Linear selection does not erase Git history or move later edits to old refs.
         assert!(store
-            .peer_planning_status("/repo", None)
+            .git_destinations("/repo", None)
             .unwrap()
             .iter()
             .all(|s| !s.active));
@@ -848,10 +844,7 @@ mod tests {
             )
             .unwrap();
         let moved = destination(&store, "/moved", "moved");
-        assert_eq!(
-            store.export_peer_planning("/moved", &moved).unwrap(),
-            current
-        );
+        assert_eq!(store.export_git_plan("/moved", &moved).unwrap(), current);
         // No live owner remains to reconstruct the original routing from.
         store
             .conn
@@ -861,23 +854,11 @@ mod tests {
             .unwrap();
         drop(store);
         let store = crate::test_fixture::open(&path).unwrap();
-        assert_eq!(
-            store.export_peer_planning("/repo", &first).unwrap(),
-            original
-        );
-        assert_eq!(
-            store.export_peer_planning("/repo", &second).unwrap(),
-            current
-        );
-        assert_eq!(
-            store.export_peer_planning("/moved", &moved).unwrap(),
-            current
-        );
+        assert_eq!(store.export_git_plan("/repo", &first).unwrap(), original);
+        assert_eq!(store.export_git_plan("/repo", &second).unwrap(), current);
+        assert_eq!(store.export_git_plan("/moved", &moved).unwrap(), current);
         let before = store.revisions().unwrap();
-        assert_eq!(
-            store.export_peer_planning("/moved", &moved).unwrap(),
-            current
-        );
+        assert_eq!(store.export_git_plan("/moved", &moved).unwrap(), current);
         assert_eq!(store.revisions().unwrap(), before);
     }
 
@@ -890,7 +871,7 @@ mod tests {
         crate::test_fixture::wave(&author, &wave);
         let project = author.ensure_project(wave.id(), wave.slug()).unwrap();
         let author_route = destination(&author, "/repo", "shared");
-        let original = author.export_peer_planning("/repo", &author_route).unwrap();
+        let original = author.export_git_plan("/repo", &author_route).unwrap();
 
         // The clone registers the authored identity before fetching planning.
         crate::test_fixture::wave(&peer, &wave);
@@ -900,7 +881,7 @@ mod tests {
             peer.selected_project(wave.id()).unwrap().unwrap().id,
             project
         );
-        let returned = peer.export_peer_planning("/repo", &peer_route).unwrap();
+        let returned = peer.export_git_plan("/repo", &peer_route).unwrap();
         crate::test_fixture::import_saved(&author, "/repo", &author_route, "two", &returned)
             .unwrap();
         assert_eq!(
@@ -919,7 +900,7 @@ mod tests {
         crate::test_fixture::wave(&author, &live);
         crate::test_fixture::wave(&author, &removed);
         let route = destination(&author, "/repo", "shared");
-        let before = author.export_peer_planning("/repo", &route).unwrap();
+        let before = author.export_git_plan("/repo", &route).unwrap();
         crate::test_fixture::import_saved(
             &peer,
             "/repo",
@@ -933,7 +914,7 @@ mod tests {
         author
             .retire_waves(&[removed.id().clone()], "removed")
             .unwrap();
-        let after = author.export_peer_planning("/repo", &route).unwrap();
+        let after = author.export_git_plan("/repo", &route).unwrap();
         let retired: Vec<_> = after
             .changes
             .values()
@@ -979,12 +960,9 @@ mod tests {
         for _ in 0..2 {
             crate::test_fixture::import_saved(&store, "/repo", &route, "revision", &incoming)
                 .unwrap();
-            assert_eq!(
-                store.export_peer_planning("/repo", &route).unwrap(),
-                incoming
-            );
+            assert_eq!(store.export_git_plan("/repo", &route).unwrap(), incoming);
         }
-        let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
+        let status = store.git_destinations("/repo", None).unwrap().remove(0);
         assert_eq!(status.conflicts.len(), 1);
         assert_eq!(status.selected_records, 1);
         assert_eq!(
@@ -1001,28 +979,25 @@ mod tests {
                 .conn
                 .lock()
                 .unwrap()
-                .query_row("SELECT count(*) FROM planning_peer_observed", [], |r| r
+                .query_row("SELECT count(*) FROM git_tracker_seen", [], |r| r
                     .get::<_, i64>(0))
                 .unwrap(),
             0
         );
         let unrelated = destination(&store, "/repo", "unrelated");
         assert!(store
-            .export_peer_planning("/repo", &unrelated)
+            .export_git_plan("/repo", &unrelated)
             .unwrap()
             .changes
             .is_empty());
-        assert_eq!(
-            store.export_peer_planning("/repo", &route).unwrap(),
-            incoming
-        );
+        assert_eq!(store.export_git_plan("/repo", &route).unwrap(), incoming);
     }
 
     /// The destination's history with one peer rename of `wave` on top. The
     /// rename's identity sorts first, so a local edit in the same millisecond
     /// still wins the tie.
     fn renamed(store: &SqliteStore, route: &str, wave: &Wave, name: &str) -> PlanningSnapshot {
-        let mut history = store.export_peer_planning("/repo", route).unwrap();
+        let mut history = store.export_git_plan("/repo", route).unwrap();
         let (head, clock) = history
             .heads()
             .find(|(_, change)| {
@@ -1054,7 +1029,7 @@ mod tests {
 
     fn winners(store: &SqliteStore, route: &str) -> Vec<WorkEdit> {
         store
-            .export_peer_planning("/repo", route)
+            .export_git_plan("/repo", route)
             .unwrap()
             .winners()
             .map(|(_, change)| change.edit.clone())
@@ -1080,7 +1055,7 @@ mod tests {
         let (between, route) = peer("between");
         let incoming = renamed(&between, &route, &wave, "remote");
         let inputs = between.repository_registration("/repo").unwrap();
-        let import = PeerImport {
+        let import = GitPlanImport {
             inputs: &inputs,
             repo: "/repo",
             destination: &route,
@@ -1109,14 +1084,14 @@ mod tests {
         let wave = Wave::new(WaveId::new(), "shared".into(), "/repo".into());
         crate::test_fixture::wave(&store, &wave);
         let route = destination(&store, "/repo", "shared");
-        let history = store.export_peer_planning("/repo", &route).unwrap();
+        let history = store.export_git_plan("/repo", &route).unwrap();
         crate::test_fixture::import_saved(&store, "/repo", &route, "one", &history).unwrap();
         let before = store.revisions().unwrap().planning;
         assert_no_empty_writes(&store, || {
             crate::test_fixture::import_saved(&store, "/repo", &route, "two", &history).unwrap()
         });
         assert_eq!(store.revisions().unwrap().planning, before + 1);
-        let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
+        let status = store.git_destinations("/repo", None).unwrap().remove(0);
         assert_eq!(status.imported_revision.as_deref(), Some("two"));
     }
 
@@ -1134,7 +1109,7 @@ mod tests {
         assert_eq!(store.get_wave(wave.id()).unwrap().unwrap().name(), "remote");
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("planning_peer_changes"))
+            .filter(|scan| scan.contains("git_tracker_changes"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

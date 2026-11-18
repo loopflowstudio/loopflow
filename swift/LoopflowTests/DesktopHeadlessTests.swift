@@ -69,12 +69,12 @@ struct DesktopHeadlessTests {
     }
 
     @Test("The repository roadmap reads Git planning through the ordinary query")
-    func roadmapPeerPlanning() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("peer_planning_status.json"))
+    func roadmapGitDestinations() async throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("git_destinations.json"))
         let status = String(decoding: data, as: UTF8.self)
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
-            if args == ["repo", "plan", "--json"], cwd == "/src/loopflow" {
+            if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
                 return "{\"destinations\":\(status)}"
             }
             if args.first == "roadmap" { return roadmap }
@@ -83,9 +83,9 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.peerPlanning.value?.count == 2)
+        #expect(model.gitDestinations.value?.count == 2)
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
-        let statusView = try view.inspect().find(PeerPlanningView.self)
+        let statusView = try view.inspect().find(GitDestinationsView.self)
         #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
 

@@ -1,5 +1,5 @@
 //! What an owner's tracker has yet to confirm and what it won: the open and
-//! lost tracker actions `lf repo plan`, `lf task show` and Desktop read.
+//! lost tracker actions `lf repo tracker`, `lf task show` and Desktop read.
 
 use serde::{Deserialize, Serialize};
 
@@ -48,7 +48,7 @@ impl TrackerActions {
     }
 }
 
-/// A Task's or Project's slice of `lf repo plan`'s actions: what its tracker
+/// A Task's or Project's slice of `lf repo tracker`'s actions: what its tracker
 /// has yet to confirm (open), and each value the tracker won (lost) until it
 /// is answered.
 /// Read-only; these rows never confer execution authority.

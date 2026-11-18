@@ -123,7 +123,7 @@ async fn read_task_run(
         report.unavailable.push("Future checkout is not observed; definitions are read from the local repository before preparation".into());
     }
     // The launch owner's read-only check includes planning validity, current
-    // chapter, completion and cancellation, rather than a status approximation.
+    // project, completion and cancellation, rather than a status approximation.
     if let Err(error) = store.sqlite.require_task_launch(&task.id) {
         match error {
             crate::store::StoreError::InvalidAuthority(_) => {

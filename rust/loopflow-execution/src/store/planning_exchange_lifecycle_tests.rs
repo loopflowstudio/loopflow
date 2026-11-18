@@ -13,8 +13,8 @@ fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
     let path = canonical.to_str().unwrap();
     let route =
         PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test").unwrap();
-    a.bind_peer_planning(path, &route).unwrap();
-    b.bind_peer_planning(path, &route).unwrap();
+    a.bind_git_destination(path, &route).unwrap();
+    b.bind_git_destination(path, &route).unwrap();
     let task = a
         .create_task(&NewTask {
             id: TaskId::new(),
@@ -38,9 +38,8 @@ fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
     let claim = crate::store::ownership::claim_task(&a, &task.id)
         .unwrap()
         .unwrap();
-    let journal = a.export_peer_planning(path, &route.id()).unwrap();
-    crate::store::planning_peers::import_peer_planning(&b, path, &route.id(), "first", &journal)
-        .unwrap();
+    let journal = a.export_git_plan(path, &route.id()).unwrap();
+    crate::store::git_tracker::import_git_plan(&b, path, &route.id(), "first", &journal).unwrap();
     let imported = b.task(&task.id).unwrap().unwrap();
     assert!(imported.project_id.is_none());
     assert_ne!(imported.repository_id, task.repository_id);
@@ -59,8 +58,8 @@ fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
     );
     let project = crate::work::wave::bootstrap::ensure_wave_project(&b, path, "product").unwrap();
     b.move_task(&task.id, None, Some(&project.id)).unwrap();
-    let journal = b.export_peer_planning(path, &route.id()).unwrap();
-    crate::store::planning_peers::import_peer_planning(&a, path, &route.id(), "attached", &journal)
+    let journal = b.export_git_plan(path, &route.id()).unwrap();
+    crate::store::git_tracker::import_git_plan(&a, path, &route.id(), "attached", &journal)
         .unwrap();
     assert_eq!(
         a.task(&task.id).unwrap().unwrap().project_id,
@@ -68,8 +67,8 @@ fn standalone_task_exchange_preserves_membership_comments_and_ownership() {
     );
     a.move_task(&task.id, Some(&project.id), None).unwrap();
     a.delete_task(&task.id).unwrap();
-    let journal = a.export_peer_planning(path, &route.id()).unwrap();
-    crate::store::planning_peers::import_peer_planning(&b, path, &route.id(), "detached", &journal)
+    let journal = a.export_git_plan(path, &route.id()).unwrap();
+    crate::store::git_tracker::import_git_plan(&b, path, &route.id(), "detached", &journal)
         .unwrap();
     assert!(b.task(&task.id).unwrap().unwrap().project_id.is_none());
     assert!(b.list_tasks(None).unwrap().is_empty());

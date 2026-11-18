@@ -86,7 +86,7 @@ impl Machine {
         self.dir.path()
     }
 
-    /// Commit a chapter plan holding Tasks `FIX-1..=count`, as a sync would.
+    /// Commit a Project plan holding Tasks `FIX-1..=count`, as a sync would.
     fn plan(&self, count: usize) {
         let items: Vec<_> = (1..=count)
             .map(|index| {
@@ -109,7 +109,6 @@ impl Machine {
         self.store
             .seed_inventory(&InventoryFixture {
                 wave_id: self.wave.id().clone(),
-                provider: "linear".into(),
                 initiative: "initiative-product".into(),
                 synced_at: time::OffsetDateTime::now_utc().unix_timestamp(),
                 snapshot: serde_json::from_value(payload).unwrap(),
@@ -599,19 +598,19 @@ fn an_offline_comment_reaches_the_open_task_status() {
 }
 
 #[test]
-fn peer_planning_receipts_reach_an_open_watch() {
+fn git_destinations_receipts_reach_an_open_watch() {
     use loopflow_execution::planning_git::PlanningDestination;
-    use loopflow_execution::store::PeerPlanningStatus;
+    use loopflow_execution::store::GitDestination;
 
     let home = Machine::new();
     let subscription = home.subscribe(&["planning", "status"]);
     let repo = home.wave.repo();
-    let read = |accept: &dyn Fn(&[PeerPlanningStatus]) -> bool| {
+    let read = |accept: &dyn Fn(&[GitDestination]) -> bool| {
         let body = subscription.body(Duration::from_secs(10), |body| {
-            serde_json::from_value::<Vec<PeerPlanningStatus>>(body["destinations"].clone())
+            serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone())
                 .is_ok_and(|statuses| accept(&statuses))
         });
-        serde_json::from_value::<Vec<PeerPlanningStatus>>(body["destinations"].clone()).unwrap()
+        serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone()).unwrap()
     };
     assert!(read(&|statuses| statuses.is_empty()).is_empty());
     // Non-Git Work folders still display stored status; foreground acquisition
@@ -621,8 +620,8 @@ fn peer_planning_receipts_reach_an_open_watch() {
         "refs/loopflow/planning/shared/team",
     )
     .unwrap();
-    let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store.export_peer_planning(repo, &id).unwrap();
+    let id = home.store.bind_git_destination(repo, &destination).unwrap();
+    home.store.export_git_plan(repo, &id).unwrap();
     let statuses = read(&|statuses| {
         statuses
             .iter()
@@ -634,7 +633,7 @@ fn peer_planning_receipts_reach_an_open_watch() {
 
     home.raw()
         .execute(
-            "UPDATE planning_destinations SET fetched_revision='fetched',
+            "UPDATE git_tracker_destinations SET fetched_revision='fetched',
          publication_revision='attempted',publication_state='unconfirmed',
          publication_error='reply lost' WHERE id=?1",
             [&id],

@@ -1,5 +1,5 @@
 //! Foreground Git exchange and local-save delivery for the selected transport.
-//! Acquisition and delivery run independently; the common writer alone changes Work.
+//! Inbound and outbound sync run independently; the common writer alone changes Work.
 //! Blocking workers retain their locks through cancellation, commit and readback.
 
 use crate::work::wave::Wave;
@@ -27,7 +27,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 /// Saved Tasks need no network before a read or local save. On a cache miss,
-/// acquire the selected planning destinations once, without allocating execution.
+/// fetch the selected planning destinations once, without allocating execution.
 pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
@@ -42,16 +42,16 @@ pub(crate) async fn find_task(
     if let Some(task) = read().map_err(message)? {
         return Ok(Some(task));
     }
-    if let Err(error) = acquire_repository(store, repo).await {
-        tracing::warn!(%error, "planning acquisition pending; resolving retained Task");
+    if let Err(error) = fetch_repository(store, repo).await {
+        tracing::warn!(%error, "tracker refresh pending; resolving retained Task");
     }
     read().map_err(message)
 }
 
-/// One acquisition per destination, also used before resolving a cold Task.
+/// One fetch per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
-pub async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, Exchange::Acquire).await
+pub async fn fetch_repository(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Fetch).await
 }
 
 /// Publishes unless another process is publishing; that one or the next
@@ -68,7 +68,7 @@ pub async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> 
 
 #[derive(Debug, Clone, Copy)]
 enum Exchange {
-    Acquire,
+    Fetch,
     Publish { wait: bool },
 }
 
@@ -118,9 +118,9 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
             .map_err(message)?
             .unwrap_or_default();
         match config.planning_transport() {
-            crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
-            crate::config::PlanningConfig::Linear { .. }
-            | crate::config::PlanningConfig::Asana { .. } => {
+            crate::config::TrackerConfig::Git { .. } => publish_repository(store, repo).await,
+            crate::config::TrackerConfig::Linear { .. }
+            | crate::config::TrackerConfig::Asana { .. } => {
                 super::tracker::drain::drain_repository(
                     store,
                     repo,
@@ -135,14 +135,14 @@ async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
         crate::journal::request::diagnostic(format_args!(
-            "Saved locally; planning synchronization pending. See `lf repo plan`."
+            "Saved locally; planning synchronization pending. See `lf repo tracker`."
         ));
     }
 }
 
-/// `lf repo plan answer <id>`: answer one lost line of `repo`, whoever owns
+/// `lf repo tracker answer <id>`: answer one lost line of `repo`, whoever owns
 /// it, then make one exchange attempt for that owner. `id` is the line's
-/// action id or the short prefix `lf repo plan` prints.
+/// action id or the short prefix `lf repo tracker` prints.
 pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
     tokio::runtime::Runtime::new()
         .map_err(message)?
@@ -162,7 +162,7 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
                 [line] => line.clone(),
                 [] => {
                     return Err(message(format!(
-                        "{id} is not a lost line in {repo}; `lf repo plan` lists them"
+                        "{id} is not a lost line in {repo}; `lf repo tracker` lists them"
                     )))
                 }
                 _ => return Err(message(format!("{id} names more than one lost line"))),
@@ -190,11 +190,11 @@ pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<Track
 /// Resolve the repository configuration before touching a planning remote.
 /// A Linear outage cannot select Git: routing is configuration, not availability.
 pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Option<String>> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
     let key = match plan {
@@ -204,11 +204,14 @@ pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Opti
     let reference = plan
         .reference(key.as_deref())
         .expect("a personal plan has a provisioned user key");
-    let destination =
+    let Some(destination) =
         crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
-            .map_err(message)?;
+            .map_err(message)?
+    else {
+        return Ok(None);
+    };
     let id = store
-        .bind_peer_planning(repo, &destination)
+        .bind_git_destination(repo, &destination)
         .await
         .map_err(message)?;
     Ok(Some(id))
@@ -218,13 +221,13 @@ pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Opti
 /// planning key, so a personal Git plan reads the same journal on both. A
 /// Machine that already plans under another key refuses: keys never change.
 pub async fn adopt_personal_key(store: &Store, repo: &Path, key: &str) -> OpsResult<()> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(repo))
         .map_err(message)?
         .unwrap_or_default();
     if !matches!(
         config.planning_transport(),
-        PlanningConfig::Git {
+        TrackerConfig::Git {
             plan: GitPlan::Personal,
             ..
         }
@@ -259,21 +262,21 @@ async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
 
 /// Passive status uses configuration, never a persisted copy of its selection.
 /// Retained routes remain readable in a Work folder without a Git checkout.
-pub async fn peer_status(
+pub async fn git_destinations(
     store: &Store,
     repo: &str,
-) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
+) -> OpsResult<Vec<crate::store::GitDestination>> {
     let Some(active) = active_destination(store, repo).await? else {
         return Ok(Vec::new());
     };
     store
-        .peer_planning_status(repo, active.as_deref())
+        .git_destinations(repo, active.as_deref())
         .await
         .map_err(message)
 }
 
-/// `lf planning journal`: each destination's retained changes.
-pub async fn peer_journal(
+/// `lf repo tracker journal`: each destination's retained changes.
+pub async fn git_journal(
     store: &Store,
     repo: &str,
 ) -> OpsResult<Vec<crate::store::PlanningJournal>> {
@@ -281,19 +284,19 @@ pub async fn peer_journal(
         return Ok(Vec::new());
     };
     store
-        .peer_planning_journal(repo, active.as_deref())
+        .git_journal(repo, active.as_deref())
         .await
         .map_err(message)
 }
 
 /// The Git destination this repository plans through: `None` when it does not
-/// plan through Git, `Some(None)` outside a checkout.
+/// plan through Git, `Some(None)` outside a checkout or before its remote exists.
 async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Option<String>>> {
-    use crate::config::{load_config, GitPlan, PlanningConfig};
+    use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(Path::new(repo)))
         .map_err(message)?
         .unwrap_or_default();
-    let PlanningConfig::Git { remote, plan } = config.planning_transport() else {
+    let TrackerConfig::Git { remote, plan } = config.planning_transport() else {
         return Ok(None);
     };
     let key = match plan {
@@ -308,10 +311,11 @@ async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Optio
         reference
             .map(|reference| {
                 crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
-                    .map(|destination| destination.id())
+                    .map(|destination| destination.map(|destination| destination.id()))
                     .map_err(message)
             })
             .transpose()?
+            .flatten()
     } else {
         None
     };
@@ -351,7 +355,7 @@ fn exchange_destination(
 ) -> OpsResult<()> {
     let publish = matches!(exchange, Exchange::Publish { .. });
     // The blocking worker retains effect ownership through status writes, even
-    // if its async waiter is canceled. Acquisition never takes this lock.
+    // if its async waiter is canceled. Refresh never takes this lock.
     let _lock = if let Exchange::Publish { wait } = exchange {
         let path = store
             .home_dir()
@@ -372,7 +376,7 @@ fn exchange_destination(
     };
     let result = (|| {
         let binding = store
-            .peer_planning_destination(repo, id)
+            .git_destination(repo, id)
             .map_err(message)?
             .ok_or_else(|| message("planning destination is missing"))?;
         let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
@@ -380,19 +384,19 @@ fn exchange_destination(
             store.recover_task_filings(repo).map_err(message)?;
             publish_destination(store, repo, id, &git)
         } else {
-            acquire_destination(store, repo, id, &git).map(|_| ())
+            fetch_destination(store, repo, id, &git).map(|_| ())
         }
     })();
-    // Do not persist provider data or credential-bearing destinations in errors.
+    // Do not persist tracker data or credential-bearing destinations in errors.
     let error = result.as_ref().err().map(|_| {
         if publish {
             "Git publication pending; local planning retained"
         } else {
-            "Git acquisition failed; retained import unchanged"
+            "Git fetch failed; retained import unchanged"
         }
     });
     store
-        .record_peer_error(repo, id, !publish, error)
+        .record_destination_error(repo, id, !publish, error)
         .map_err(message)?;
     result
 }
@@ -413,7 +417,7 @@ fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
 
 const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
 
-fn acquire_destination(
+fn fetch_destination(
     store: &SqliteStore,
     repo: &str,
     destination: &str,
@@ -421,7 +425,7 @@ fn acquire_destination(
 ) -> OpsResult<Option<(PlanningRevision, PlanningSnapshot)>> {
     let remote = git.fetch().map_err(message)?;
     store
-        .record_peer_fetch(
+        .record_destination_fetch(
             repo,
             destination,
             remote.as_ref().map(|document| document.revision.as_str()),
@@ -429,7 +433,7 @@ fn acquire_destination(
         .map_err(message)?;
     let imported = if let Some(document) = remote {
         let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
-        crate::store::planning_peers::import_peer_planning(
+        crate::store::git_tracker::import_git_plan(
             store,
             repo,
             destination,
@@ -442,7 +446,7 @@ fn acquire_destination(
         None
     };
     store
-        .record_peer_error(repo, destination, true, None)
+        .record_destination_error(repo, destination, true, None)
         .map_err(message)?;
     Ok(imported)
 }
@@ -453,22 +457,26 @@ fn publish_destination(
     destination: &str,
     git: &PlanningGit,
 ) -> OpsResult<()> {
-    // Always acquire before deciding what to publish, including recovery from a
+    // Always fetch before deciding what to publish, including recovery from a
     // lost push response. Never publish from a stale local Git document alone.
-    let (remote, remote_snapshot) = match acquire_destination(store, repo, destination, git)? {
+    let (remote, remote_snapshot) = match fetch_destination(store, repo, destination, git)? {
         Some((revision, snapshot)) => (Some(revision), snapshot),
         None => (None, PlanningSnapshot::default()),
     };
-    let exported = store
-        .export_peer_planning(repo, destination)
-        .map_err(message)?;
+    let exported = store.export_git_plan(repo, destination).map_err(message)?;
     // Omitted/held objects retain their last shared history, not private local
     // moves. Only today's selected export may add local mutations to the remote.
     let merged = remote_snapshot.merge(&exported).map_err(message)?;
     if let Some(remote) = &remote {
         if merged == remote_snapshot {
             return store
-                .record_peer_publication(repo, destination, remote.as_str(), "confirmed", &exported)
+                .record_destination_publication(
+                    repo,
+                    destination,
+                    remote.as_str(),
+                    "confirmed",
+                    &exported,
+                )
                 .map_err(message);
         }
     } else if merged.changes.is_empty() {
@@ -492,7 +500,7 @@ fn publish_destination(
     // Persist uncertainty before the effect. A crash at any later point recovers
     // by fetching first, not by assuming that a failed response means no push.
     store
-        .record_peer_publication(
+        .record_destination_publication(
             repo,
             destination,
             saved.revision.as_str(),
@@ -506,7 +514,13 @@ fn publish_destination(
         PlanningPublication::Unconfirmed => "unconfirmed",
     };
     store
-        .record_peer_publication(repo, destination, saved.revision.as_str(), state, &exported)
+        .record_destination_publication(
+            repo,
+            destination,
+            saved.revision.as_str(),
+            state,
+            &exported,
+        )
         .map_err(message)
 }
 
@@ -596,8 +610,8 @@ impl PlanningSync {
                     }
                     tokio::select! {
                         _ = stopped => {},
-                        _ = repeat_sync("Git planning acquisition", Duration::from_secs(5), || {
-                            acquire_repository(&store, &repo)
+                        _ = repeat_sync("Git plan fetch", Duration::from_secs(5), || {
+                            fetch_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)
@@ -621,7 +635,7 @@ impl PlanningSync {
 }
 
 // Each branch has its own delay after an attempt. A slow delivery cannot
-// postpone acquisition or cause missed ticks to burst when the request returns.
+// postpone fetches or cause missed ticks to burst when the request returns.
 async fn repeat_sync<F: Future<Output = OpsResult<()>>>(
     operation: &str,
     delay: Duration,
@@ -693,7 +707,7 @@ pub(crate) async fn lock_wave_planning(wave: &Wave) -> OpsResult<Arc<crate::stor
         .truncate(false)
         .open(path.join(format!("{}.lock", wave.id())))
         .map_err(|error| OpsError::Message(error.to_string()))?;
-    // OS ownership releases on crash; provider state makes the next holder a resumer.
+    // The OS releases the lock if the holder exits.
     for _ in 0..300 {
         match fs2::FileExt::try_lock_exclusive(&file) {
             Ok(()) => return Ok(Arc::new(crate::store::PlanningLocks::new(file))),

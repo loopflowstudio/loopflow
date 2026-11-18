@@ -2062,13 +2062,6 @@
           },
           "type": "array"
         },
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "overview": {
           "anyOf": [
             {
@@ -2098,9 +2091,6 @@
         },
         "plan_stale": {
           "type": "boolean"
-        },
-        "plan_state": {
-          "$ref": "#/$defs/PlanningState"
         },
         "project": {
           "anyOf": [
@@ -2141,16 +2131,18 @@
               "type": "null"
             }
           ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
         }
       },
       "required": [
         "sync",
         "task",
         "project",
-        "observed_at",
+        "tracker_state",
         "plan_error",
         "plan_stale",
-        "plan_state",
         "execution",
         "ownership",
         "overview",
@@ -2669,6 +2661,100 @@
         "path",
         "key",
         "inspections"
+      ],
+      "type": "object"
+    },
+    "GitDestination": {
+      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/GitDestinationConflict"
+          },
+          "type": "array"
+        },
+        "fetch_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetched_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imported_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_local": {
+          "type": "boolean"
+        },
+        "publication_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference": {
+          "type": "string"
+        },
+        "selected_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "reference",
+        "active",
+        "selected_records",
+        "imported_revision",
+        "fetched_revision",
+        "fetch_error",
+        "publication_revision",
+        "publication_state",
+        "publication_error",
+        "pending_local",
+        "conflicts"
+      ],
+      "type": "object"
+    },
+    "GitDestinationConflict": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "reason"
       ],
       "type": "object"
     },
@@ -4320,7 +4406,7 @@
         {
           "properties": {
             "kind": {
-              "const": "chapter_unavailable",
+              "const": "project_unavailable",
               "type": "string"
             },
             "reason": {
@@ -5367,100 +5453,6 @@
         }
       ]
     },
-    "PeerPlanningStatus": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
-      "properties": {
-        "acquisition_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "active": {
-          "type": "boolean"
-        },
-        "conflicts": {
-          "items": {
-            "$ref": "#/$defs/PeerProjectionConflict"
-          },
-          "type": "array"
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "acquisition_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "PeerProjectionConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
-      ],
-      "type": "object"
-    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -5530,34 +5522,6 @@
         "state",
         "pr",
         "waiting_on"
-      ],
-      "type": "object"
-    },
-    "PlanStatus": {
-      "description": "What `repo.plan` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
-      "properties": {
-        "actions": {
-          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
-          "items": {
-            "$ref": "#/$defs/TrackerActionStatus"
-          },
-          "type": "array"
-        },
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/PeerPlanningStatus"
-          },
-          "type": "array"
-        },
-        "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "tracker",
-        "destinations",
-        "actions"
       ],
       "type": "object"
     },
@@ -6220,13 +6184,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6236,14 +6193,6 @@
         "name": {
           "type": "string"
         },
-        "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "slug": {
           "type": "string"
         },
@@ -6252,6 +6201,21 @@
         },
         "summary": {
           "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "updated_at": {
           "type": "string"
@@ -6270,8 +6234,8 @@
         "krs",
         "metric_targets",
         "status",
-        "linear_id",
-        "pm_snapshot_synced_at",
+        "tracker_id",
+        "tracker_synced_at",
         "wave_id",
         "created_at",
         "updated_at"
@@ -6406,12 +6370,6 @@
           },
           "type": "array"
         },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "metric_targets": {
           "items": {
             "$ref": "#/$defs/MetricTarget"
@@ -6429,13 +6387,19 @@
         },
         "sync": {
           "$ref": "#/$defs/TrackerSync"
+        },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "sync",
         "current",
         "id",
-        "linear_id",
+        "tracker_id",
         "slug",
         "name",
         "status",
@@ -7680,13 +7644,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> repo plan`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
+          "description": "`lf --cwd <directory> repo tracker`: where the repository's\nplanning is exchanged. Its subscription exchanges it while it runs.",
           "properties": {
             "directory": {
               "type": "string"
             },
             "kind": {
-              "const": "repo.plan",
+              "const": "repo.tracker",
               "type": "string"
             }
           },
@@ -7696,7 +7660,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/PlanStatus"
+            "$ref": "#/$defs/TrackerStatus"
           }
         },
         {
@@ -11822,29 +11786,11 @@
         "identifier": {
           "type": "string"
         },
-        "linear_id": {
-          "description": "Optional Linear binding, not a second owner of this record.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "parent_pr_id": {
           "type": [
             "string",
             "null"
           ]
-        },
-        "pm_snapshot_synced_at": {
-          "description": "Acquisition time of the retained Linear observation, never a write clock.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
         },
         "project_id": {
           "type": [
@@ -11877,6 +11823,24 @@
         },
         "title": {
           "type": "string"
+        },
+        "tracker_id": {
+          "description": "The record’s ID in the repository's tracker.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
         },
         "updated_at": {
           "type": "string"
@@ -11913,9 +11877,9 @@
         "due_date",
         "state",
         "completed_at",
-        "linear_id",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_id",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave_id",
         "repo_id",
         "project_id",
@@ -11926,26 +11890,6 @@
         "parent_pr_id",
         "created_at",
         "updated_at"
-      ],
-      "type": "object"
-    },
-    "TaskAcquisition": {
-      "description": "Acquisition evidence is independent of saved Work and outbound delivery.",
-      "properties": {
-        "observed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "state": {
-          "$ref": "#/$defs/PlanningState"
-        }
-      },
-      "required": [
-        "state",
-        "observed_at"
       ],
       "type": "object"
     },
@@ -12115,7 +12059,7 @@
       "type": "object"
     },
     "TaskCommentAuthor": {
-      "description": "Who wrote a comment. Person attribution survives local saves and provider acquisition;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
+      "description": "Who wrote a comment. Person attribution survives local saves and tracker fetches;\nintegrations are distinct from participant direction. An agent's direction\nis the Session's, written for its requester.",
       "oneOf": [
         {
           "properties": {
@@ -13398,7 +13342,7 @@
           ]
         },
         "person_id": {
-          "description": "The person's `people` id, their planning provider's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
+          "description": "The person's `people` id, their tracker's identity for them.\nAbsent from entries released lf wrote and where the writer knew none.",
           "type": [
             "string",
             "null"
@@ -14102,16 +14046,6 @@
           "$ref": "#/$defs/Observation",
           "description": "Freshness of the PR state against GitHub as of this read. `Degraded`\nmeans a bounded remote read failed and the PR fields are cached, not\nfreshly confirmed."
         },
-        "pm_snapshot_synced_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
-        },
         "pr": {
           "anyOf": [
             {
@@ -14183,6 +14117,16 @@
         "task_id": {
           "type": "string"
         },
+        "tracker_synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
+        },
         "updated_at": {
           "type": "string"
         },
@@ -14212,8 +14156,8 @@
         "task_id",
         "external_project_id",
         "project",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave",
         "project_id",
         "repo_id",
@@ -14281,9 +14225,6 @@
     },
     "TaskSummary": {
       "properties": {
-        "acquisition": {
-          "$ref": "#/$defs/TaskAcquisition"
-        },
         "assignee": {
           "type": [
             "string",
@@ -14310,12 +14251,6 @@
         },
         "identifier": {
           "type": "string"
-        },
-        "linear_id": {
-          "type": [
-            "string",
-            "null"
-          ]
         },
         "name": {
           "type": "string"
@@ -14346,6 +14281,15 @@
         "sync": {
           "$ref": "#/$defs/TrackerSync"
         },
+        "tracker_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tracker_state": {
+          "$ref": "#/$defs/TrackerState"
+        },
         "wave_id": {
           "type": [
             "string",
@@ -14358,10 +14302,10 @@
         "repo",
         "project_id",
         "wave_id",
-        "acquisition",
+        "tracker_state",
         "sync",
         "id",
-        "linear_id",
+        "tracker_id",
         "identifier",
         "name",
         "description",
@@ -14601,8 +14545,56 @@
       ],
       "type": "string"
     },
+    "TrackerState": {
+      "description": "The tracker's last known state for a Task and when it was synced.",
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/PlanningState"
+        },
+        "synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "synced_at"
+      ],
+      "type": "object"
+    },
+    "TrackerStatus": {
+      "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
+      "properties": {
+        "actions": {
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "items": {
+            "$ref": "#/$defs/TrackerActionStatus"
+          },
+          "type": "array"
+        },
+        "destinations": {
+          "items": {
+            "$ref": "#/$defs/GitDestination"
+          },
+          "type": "array"
+        },
+        "tracker": {
+          "description": "`git`, `linear` or `asana`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "tracker",
+        "destinations",
+        "actions"
+      ],
+      "type": "object"
+    },
     "TrackerSync": {
-      "description": "A Task's or Project's slice of `lf repo plan`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
+      "description": "A Task's or Project's slice of `lf repo tracker`'s actions: what its tracker\nhas yet to confirm (open), and each value the tracker won (lost) until it\nis answered.\nRead-only; these rows never confer execution authority.",
       "properties": {
         "actions": {
           "items": {
@@ -15009,11 +15001,6 @@
         "already_removed": {
           "type": "boolean"
         },
-        "chapters": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "completed_tasks": {
           "format": "uint",
           "minimum": 0,
@@ -15067,6 +15054,11 @@
         "preview": {
           "type": "boolean"
         },
+        "projects": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
         "sessions": {
           "format": "uint",
           "minimum": 0,
@@ -15103,7 +15095,7 @@
         "moved",
         "deleted",
         "completed_tasks",
-        "chapters",
+        "projects",
         "sessions",
         "initiatives",
         "has_files",
@@ -16213,7 +16205,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf repo plan answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
+          "description": "`lf repo tracker answer <action> --keep-theirs | --use-mine`: answer one\nlost line of the directory's repository, whoever owns it. Answers the\nline as it stood.",
           "properties": {
             "action": {
               "type": "string"
@@ -16225,7 +16217,7 @@
               "type": "string"
             },
             "kind": {
-              "const": "plan.answer",
+              "const": "repo.tracker.answer",
               "type": "string"
             }
           },
@@ -16957,7 +16949,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
+          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current Project.",
           "examples": [
             {
               "directory": "/repo",

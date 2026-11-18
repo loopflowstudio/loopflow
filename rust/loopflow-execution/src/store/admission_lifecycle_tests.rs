@@ -31,7 +31,7 @@ fn configured_project_admission_preserves_started_continuation() {
         .unwrap()
         .unwrap();
     other.id = ProjectId::new();
-    other.linear_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
+    other.tracker_id = Some(LinearProjectId::new("218967b6-a760-4b7c-9a46-11d9d61a42c2").unwrap());
     other.name = "An unrelated ordinary plan".into();
     store.insert_project(&other).unwrap();
     // Another Started Project does not compete with the configured identity.
@@ -54,13 +54,13 @@ fn configured_project_admission_preserves_started_continuation() {
         &store,
         task.wave_id.as_ref().unwrap(),
         Some("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3"),
-        other.linear_id.as_ref().unwrap().as_str(),
+        other.tracker_id.as_ref().unwrap().as_str(),
         &guard,
     )
     .unwrap();
     let (mut rejected, mut rejected_pr) =
         unregistered_task(&store, &task_id, dir.path().join("rejected"));
-    rejected.linear_id = Some(LinearIssueId::new("third-issue").unwrap());
+    rejected.tracker_id = Some(LinearIssueId::new("third-issue").unwrap());
     rejected.identifier = "PROBE-3".into();
     rejected.workspace_slug = "rejected".into();
     rejected_pr.slug = "rejected".into();

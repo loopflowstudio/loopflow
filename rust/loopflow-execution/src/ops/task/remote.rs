@@ -46,7 +46,7 @@ impl TaskSource {
             commit,
             task_id: task.id,
             identifier: task.identifier,
-            issue_id: task.linear_id.as_ref().map(|id| id.as_str().to_owned()),
+            issue_id: task.tracker_id.as_ref().map(|id| id.as_str().to_owned()),
         }))
     }
 

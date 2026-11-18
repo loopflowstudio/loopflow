@@ -69,13 +69,13 @@ fn project(wave: &Wave) -> Project {
 
         summary: String::new(),
         status: loopflow_execution::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("project-alpha").unwrap()),
+        tracker_id: Some(LinearProjectId::new("project-alpha").unwrap()),
         slug: "architecture".to_string(),
         name: "Architecture".to_string(),
         description: "Keep identity boring.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -100,13 +100,13 @@ fn task(
         id: id.clone(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
+        tracker_id: Some(LinearIssueId::new("issue-alpha").unwrap()),
         identifier: "LOO-127".to_string(),
         title: "Repository-owned Waves".to_string(),
         description: "Preserve Task history through relocation.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repo.join("task-worktree")),
@@ -217,7 +217,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             .seed_inventory(
                 InventoryFixture {
                     wave_id: legacy.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative-infrastructure".into(),
                     synced_at: 1,
                     snapshot: snapshot.clone(),
@@ -259,7 +258,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
             );
         }
         let observation = store
-            .linear_issue_evidence(resolved.repo(), "LOO-2")
+            .linear_issue_state(resolved.repo(), "LOO-2")
             .await
             .unwrap();
         assert_eq!(
@@ -350,7 +349,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: alpha.id().clone(),
-                provider: "linear".to_string(),
                 initiative: "initiative-alpha".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {
@@ -425,7 +423,6 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
         .seed_inventory(
             InventoryFixture {
                 wave_id: occupied.id().clone(),
-                provider: "linear".to_string(),
                 initiative: "initiative-occupied".to_string(),
                 synced_at: 1,
                 snapshot: crate::test_linear_input::Inventory {
@@ -544,7 +541,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT initiative FROM pm_wave_sync WHERE wave_id=?1",
+            "SELECT initiative FROM tracker_wave_sync WHERE wave_id=?1",
             [alpha.id().as_str()],
             |r| r.get::<_, String>(0)
         )

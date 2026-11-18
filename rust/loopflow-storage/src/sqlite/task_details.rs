@@ -5,13 +5,13 @@ use std::collections::{HashMap, HashSet};
 use rusqlite::Connection;
 
 use super::children::{
-    ids_json, map_task_event_row, map_task_pr_row, task_acquisitions_in, TASK_PR_COLUMNS,
+    ids_json, map_task_event_row, map_task_pr_row, tracker_states_in, TASK_PR_COLUMNS,
 };
 use super::SqliteStore;
 use crate::execution::TaskState;
 use crate::planning_sync::TrackerActions;
 use crate::work::task::{Task, TaskEvent, TaskId, TaskPr, TaskPrId};
-use crate::{StoreError, StoreResult, TaskAcquisition};
+use crate::{StoreError, StoreResult, TrackerState};
 use loopflow_model::durable::{RepositoryId, TaskOwner};
 
 /// Durable facts about a set of Tasks, read in one snapshot.
@@ -25,7 +25,7 @@ pub struct TaskDetailFacts {
     pub completion_pending: HashMap<TaskId, String>,
     pub issue_urls: HashMap<TaskId, String>,
     pub owners: HashMap<TaskId, TaskOwner>,
-    pub acquisitions: HashMap<TaskId, TaskAcquisition>,
+    pub tracker_states: HashMap<TaskId, TrackerState>,
     pub latest_events: HashMap<TaskId, TaskEvent>,
     /// The name of the graph each Task took up.
     pub graph_names: HashMap<TaskId, String>,
@@ -86,7 +86,7 @@ impl SqliteStore {
                 |row| Ok((TaskId::from_raw(row.get::<_, String>(0)?), row.get::<_, String>(1)?)),
             )?,
             owners: super::task_ownership::owners_in(&snapshot, &ids)?,
-            acquisitions: task_acquisitions_in(&snapshot, tasks, true)?,
+            tracker_states: tracker_states_in(&snapshot, tasks, true)?,
             latest_events: keyed(
                 &snapshot,
                 "SELECT id, task_id, kind_json, created_at FROM task_events

@@ -1,6 +1,6 @@
 import Foundation
 
-/// A Task's or Project's slice of `lf repo plan`'s actions: what its tracker
+/// A Task's or Project's slice of `lf repo tracker`'s actions: what its tracker
 /// has yet to confirm (open), and each value the tracker won (lost) until it
 /// is answered.
 public struct TrackerSync: Decodable, Sendable, Hashable {

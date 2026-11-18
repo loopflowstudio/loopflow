@@ -530,10 +530,7 @@ fn task_snapshot_reads_its_current_parent_project() {
 
     assert_eq!(snapshot.project.as_deref(), Some("current-project"));
     assert_eq!(snapshot.external_project_id, Some(project_id));
-    assert_eq!(
-        snapshot.pm_snapshot_synced_at,
-        task.task.pm_snapshot_synced_at
-    );
+    assert_eq!(snapshot.tracker_synced_at, task.task.tracker_synced_at);
 }
 
 #[test]

@@ -486,7 +486,7 @@ struct WaveMetricPortfolioPresentation: Equatable {
     let contractIssueCount: Int
     private let unavailableWaves: Set<String>
 
-    var chapterUnavailable: Bool { !unavailableWaves.isEmpty }
+    var projectUnavailable: Bool { !unavailableWaves.isEmpty }
 
     func targetUnavailable(for metric: MetricReading) -> Bool {
         unavailableWaves.contains(metric.identity.waveId)
@@ -501,13 +501,13 @@ struct WaveMetricPortfolioPresentation: Equatable {
         requiresWorkCount = targetedCount - holdingCount
         contractIssueCount = portfolio.contractIssues.count
         unavailableWaves = Set(portfolio.contractIssues.compactMap {
-            if case let .chapterUnavailable(waveId, _) = $0 { return waveId }
+            if case let .projectUnavailable(waveId, _) = $0 { return waveId }
             return nil
         })
     }
 
     var headline: String {
-        if chapterUnavailable { return "Project targets unavailable." }
+        if projectUnavailable { return "Project targets unavailable." }
         if officialCount > 0 && targetedCount == 0 { return "No targets set for this Project." }
         switch (targetedCount, holdingCount) {
         case (0, _):
@@ -663,7 +663,7 @@ private extension MetricUnknownCause {
 private extension MetricContractIssue {
     var summary: String {
         switch self {
-        case let .chapterUnavailable(waveId, reason): return "\(waveId): Project targets unavailable: \(reason)"
+        case let .projectUnavailable(waveId, reason): return "\(waveId): Project targets unavailable: \(reason)"
         case let .unresolvedTarget(waveId, metricId): return "\(waveId)/\(metricId): Project target has no readable instrument contract"
         case let .malformedContract(path, message): return "\(path): \(message)"
         case let .instrumentMismatch(waveId, metricId, contractInstrument, registeredInstrument):

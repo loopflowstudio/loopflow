@@ -318,16 +318,16 @@ impl AsanaClient {
         let claimed = action
             .comment_body()
             .map(|body| super::comment_markdown(&visible_text(body)));
-        let observation = self.observe(&external).await.map_err(message)?;
+        let event = self.fetch_issue(&external).await.map_err(message)?;
         let mut comments = Vec::new();
-        for comment in observation.comments {
+        for comment in event.comments {
             if Some(&comment.body) == claimed.as_ref() {
                 comments.extend(action.subject.clone());
             }
             comments.push(comment.body);
         }
         Ok(Some(Observed {
-            revision: Some(observation.revision),
+            revision: Some(event.revision),
             comments,
             ..Observed::default()
         }))
@@ -419,7 +419,7 @@ async fn accept_mirror(
         .map_err(message)?
         .ok_or_else(|| message("Project is missing"))?
         .wave_id;
-    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &store.sqlite,
         &wave,
         &mirrored.initiative_ids[0],

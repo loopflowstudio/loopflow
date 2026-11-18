@@ -1,7 +1,7 @@
 //! The repository's tracker, selected in `.lf/config.yaml` the way an agent
 //! harness is. A tracker carries the store's queued actions out (`send`), reads
 //! an owner back after a lost reply (`look`), and answers what people changed
-//! there (`changes`, `observe_issue`), always in store words. Linear GraphQL
+//! there (`changes`, `fetch_issue`), always in store words. Linear GraphQL
 //! lives in `linear/actions.rs`, Asana REST in `asana/actions.rs`. The drain
 //! owns pacing; `planning::rules` owns resolution.
 
@@ -10,11 +10,11 @@ pub mod drain;
 use std::path::Path;
 
 use crate::asana::AsanaClient;
-use crate::config::PlanningConfig;
+use crate::config::TrackerConfig;
 use crate::linear::LinearClient;
 use crate::store::Store;
 use loopflow_storage::planning::rules::Observed;
-use loopflow_storage::planning::{TrackerItem, TrackerObservation, TrackerProject};
+use loopflow_storage::planning::{TrackerEvent, TrackerItem, TrackerProject};
 use loopflow_storage::planning_sync::TrackerKind;
 use loopflow_storage::sqlite::tracker_actions::{ActionKind, TrackerAction};
 use loopflow_storage::work::edit::{Disposition, WorkValue};
@@ -28,10 +28,10 @@ pub enum Sent {
         revision: Option<String>,
         remote_id: Option<String>,
     },
-    /// The provider refused before acting (validation, rate limit): safe to
+    /// The tracker refused before acting (validation, rate limit): safe to
     /// send again.
     Rejected(String),
-    /// No reply: the provider may or may not have acted.
+    /// No reply: the tracker may or may not have acted.
     Unknown(String),
     /// The tracker has no form for this action; it retires with the reason.
     Unsupported(String),
@@ -78,7 +78,7 @@ impl From<crate::linear::LinearError> for TrackerError {
 
 /// The repository's planning selection. Unreadable configuration selects none:
 /// routing is configuration, never availability.
-fn transport(repo: &Path) -> Option<PlanningConfig> {
+fn transport(repo: &Path) -> Option<TrackerConfig> {
     crate::config::load_planning_transport(repo).ok()
 }
 
@@ -86,8 +86,8 @@ fn transport(repo: &Path) -> Option<PlanningConfig> {
 /// exchanges its journal instead, so it answers none.
 pub fn queued_tracker(repo: &Path) -> Option<TrackerKind> {
     match transport(repo)? {
-        PlanningConfig::Linear { .. } => Some(TrackerKind::Linear),
-        PlanningConfig::Asana { .. } => Some(TrackerKind::Asana),
+        TrackerConfig::Linear { .. } => Some(TrackerKind::Linear),
+        TrackerConfig::Asana { .. } => Some(TrackerKind::Asana),
         _ => None,
     }
 }
@@ -106,7 +106,7 @@ pub fn repository_scope(repo: &Path) -> OpsResult<String> {
     #[cfg(any(test, feature = "test-support"))]
     SCOPE_READS.with_borrow_mut(|reads| *reads.entry(repo.to_path_buf()).or_default() += 1);
     match transport(repo) {
-        Some(PlanningConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
+        Some(TrackerConfig::Asana { team }) => Ok(crate::asana::team_gid(&team)),
         _ => super::linear::repository_team_id(repo),
     }
 }
@@ -138,7 +138,7 @@ impl Tracker {
     /// Repository-scoped access; Linear validates the repository's Team claim.
     pub(crate) async fn for_repository(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(TrackerConfig::Asana { team }) => asana(repo, &team).await,
             _ => Ok(Self::Linear(super::linear::linear_client(repo).await?)),
         }
     }
@@ -146,7 +146,7 @@ impl Tracker {
     /// Exact-item access for a Task that already names its planning identity.
     pub(crate) async fn for_items(repo: &Path) -> OpsResult<Self> {
         match transport(repo) {
-            Some(PlanningConfig::Asana { team }) => asana(repo, &team).await,
+            Some(TrackerConfig::Asana { team }) => asana(repo, &team).await,
             _ => Ok(Self::Linear(
                 super::linear::issue_client().await?.for_repository(repo),
             )),
@@ -155,7 +155,7 @@ impl Tracker {
 
     /// A send carrying our own id cannot duplicate, so a lost reply repeats
     /// it: Linear comments take the id we give them, and every link reads
-    /// what the provider holds before it adds anything.
+    /// what the tracker holds before it adds anything.
     pub fn idempotent(&self, kind: ActionKind) -> bool {
         match self {
             Self::Linear(_) => matches!(kind, ActionKind::Comment | ActionKind::Link),
@@ -190,8 +190,8 @@ impl Tracker {
         }
     }
 
-    /// Read back the owner an action addresses, accepting what the provider
-    /// holds into the store. `Ok(None)`: the provider has no such object.
+    /// Read back the owner an action addresses, accepting what the tracker
+    /// holds into the store. `Ok(None)`: the tracker has no such object.
     pub async fn look(
         &self,
         store: &Store,
@@ -207,7 +207,7 @@ impl Tracker {
     }
 
     /// Asana comments carry no caller identity, so a Loopflow comment is its
-    /// visible text as the provider reads it back. Linear comments keep their
+    /// visible text as the tracker reads it back. Linear comments keep their
     /// Loopflow ids.
     pub(crate) fn claimed_comment(&self, body: &str) -> Option<String> {
         match self {
@@ -228,7 +228,7 @@ impl Tracker {
         }
     }
 
-    /// Whether the provider positively reports the item deleted: Linear's trash,
+    /// Whether the tracker positively reports the item deleted: Linear's trash,
     /// Asana's missing task. A lookup that merely finds nothing is not evidence.
     pub async fn removed(&self, id: &str) -> TrackerResult<bool> {
         match self {
@@ -243,7 +243,7 @@ impl Tracker {
     }
 
     /// Items in the repository's planning scope changed since `since`: new items
-    /// people created there and edits to known ones, with their observations.
+    /// people created there and edits to known ones, with their events.
     pub async fn changes(
         &self,
         scope: &str,
@@ -251,7 +251,7 @@ impl Tracker {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> TrackerResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
+    ) -> TrackerResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>> {
         let changes = match self {
             Self::Linear(client) => {
                 return Ok(client
@@ -264,14 +264,14 @@ impl Tracker {
         };
         Ok(changes
             .into_iter()
-            .map(|(issue, observation)| (issue, None, observation))
+            .map(|(issue, event)| (issue, None, event))
             .collect())
     }
 
-    pub(crate) async fn observe_issue(&self, id: &str) -> TrackerResult<TrackerObservation> {
+    pub(crate) async fn fetch_issue(&self, id: &str) -> TrackerResult<TrackerEvent> {
         match self {
-            Self::Linear(client) => Ok(client.observe_issue(id).await?),
-            Self::Asana(client) => client.observe(id).await,
+            Self::Linear(client) => Ok(client.fetch_issue(id).await?),
+            Self::Asana(client) => client.fetch_issue(id).await,
             #[cfg(test)]
             Self::Fake(_) => Err(TrackerError::Message("fake tracker".into())),
         }
@@ -294,7 +294,7 @@ async fn asana(repo: &Path, team: &str) -> OpsResult<Tracker> {
 }
 
 /// A comment without Loopflow's hidden `<!-- loopflow-… -->` markers, which
-/// providers without comment IDs would otherwise show.
+/// trackers without comment IDs would otherwise show.
 pub(crate) fn visible_text(body: &str) -> String {
     let mut text = String::new();
     let mut rest = body;
@@ -309,7 +309,7 @@ pub(crate) fn visible_text(body: &str) -> String {
     text.trim().to_string()
 }
 
-// ---- Shared by both trackers: owners and observations in store words ----
+// ---- Shared by both trackers: owners and events in store words ----
 
 pub(crate) fn message(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
@@ -348,13 +348,13 @@ pub(crate) async fn opening_state(
         .unwrap_or_else(|| "unstarted".into()))
 }
 
-/// The uuid a creation carries as the provider id: the owner's own.
+/// The uuid a creation carries as the tracker id: the owner's own.
 pub(crate) fn creation_id(local: &str) -> OpsResult<String> {
     let raw = local.split_once('_').map_or(local, |(_, id)| id);
     Ok(uuid::Uuid::parse_str(raw).map_err(message)?.to_string())
 }
 
-/// The provider id of a bound Task.
+/// The tracker id of a bound Task.
 pub(crate) async fn remote_task(
     store: &Store,
     task: &loopflow_model::durable::TaskId,
@@ -364,10 +364,10 @@ pub(crate) async fn remote_task(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Task is missing"))?;
-    Ok(task.linear_id()?.as_str().to_owned())
+    Ok(task.tracker_id()?.as_str().to_owned())
 }
 
-/// The provider id of a bound Project.
+/// The tracker id of a bound Project.
 pub(crate) async fn remote_project(
     store: &Store,
     project: &loopflow_model::durable::ProjectId,
@@ -377,10 +377,10 @@ pub(crate) async fn remote_project(
         .await
         .map_err(message)?
         .ok_or_else(|| message("Project is missing"))?;
-    Ok(project.linear_id()?.as_str().to_owned())
+    Ok(project.tracker_id()?.as_str().to_owned())
 }
 
-/// What the provider holds for a Task, as the values a Task action compares.
+/// What the tracker holds for a Task, as the values a Task action compares.
 pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed {
     let project = match &item.project_id {
         Some(external) => store
@@ -409,7 +409,7 @@ pub(crate) async fn observed_task(store: &Store, item: &TrackerItem) -> Observed
     }
 }
 
-/// What the provider holds for a Project.
+/// What the tracker holds for a Project.
 pub(crate) fn observed_project(project: &TrackerProject) -> Observed {
     Observed {
         remote_id: Some(project.id.clone()),
@@ -427,9 +427,9 @@ pub(crate) fn observed_project(project: &TrackerProject) -> Observed {
     }
 }
 
-/// Accept a provider's copy of one item into Work. Exact detail can establish
+/// Accept a tracker's copy of one item into Work. Exact detail can establish
 /// the saved Project's association without claiming a complete inventory
-/// refresh; creation, look and acquisition share this path.
+/// refresh; creation, readback and refresh share this path.
 pub(crate) async fn ingest_task(
     store: &Store,
     repo: &Path,
@@ -451,7 +451,7 @@ pub(crate) async fn ingest_task(
             .await
             .map_err(message)?
             .filter(|p| {
-                p.linear_id
+                p.tracker_id
                     .as_ref()
                     .is_some_and(|id| id.as_str() == project.id)
             })
@@ -484,7 +484,7 @@ pub(crate) async fn ingest_task(
             }
         }
     }
-    loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+    loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
         &store.sqlite,
         &repo.to_string_lossy(),
         issue,
@@ -512,7 +512,7 @@ pub(crate) mod fake {
 
     use super::Sent;
 
-    /// A provider that confirms every send and answers looks from `held`.
+    /// A tracker that confirms every send and answers looks from `held`.
     #[derive(Debug)]
     pub struct Fake {
         pub idempotent: Vec<ActionKind>,

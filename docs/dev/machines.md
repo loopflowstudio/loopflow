@@ -66,7 +66,7 @@ need an explicit add before they can receive a login.
 ```bash
 lf session history list                        # Processes recorded on this Machine
 lf process list --json                           # OS-live processes on this Machine
-lf wave status product                 # current plan, Task conditions and Session evidence
+lf wave status product                 # current Project, Task conditions and Session evidence
 
 lf --machine build-home session history list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate
@@ -98,7 +98,7 @@ lf task show LOO-123 --json      # ownership: {owner, superseded_by, log}
 ```
 
 A Task is owned by (person, Machine) or unowned. Its append-only ownership log
-holds `claim` and `unclaim` entries; the later entry wins in provider order, and
+holds `claim` and `unclaim` entries; the later entry wins in tracker order, and
 no current owner is stored beside it. Each entry names its person, the Machine
 it puts the Task on and the Machine that wrote it, so every Machine stores the
 same rows. Moving a Task is a claim by the same person naming another Machine;
@@ -107,7 +107,7 @@ wrote as `handoff` read as such claims. `lf task run` and `lf task checkout`
 claim an unowned Task when they allocate its checkout. Completion, abandonment
 and reopening write no entries; a Done Task shows its last owner as history.
 
-A person is named once, in `people`: by the planning provider's user
+A person is named once, in `people`: by the tracker's user
 (`linear:<user>`, learned when Linear first shows the Task's assignee), else by
 the Git journal's planning user key (`journal:<key>`), with a display name.
 Ownership entries and Machines refer to that row; the Git email names nobody new.
@@ -322,7 +322,7 @@ not restarted.
 
 **Nothing to prepare on mini.** The check before the move clones the repository
 on a Machine that has none and takes the Task in from planning. A personal Git
-plan (`planning: {provider: git, personal: true}`) is read under the laptop's
+plan (`tracker: {git: {personal: true}}`) is read under the laptop's
 planning key, which a Machine without one adopts; a Machine already planning
 under another key fails the check. Authenticate the native provider on mini
 before moving work; a missing login produces the native client's error. Both Machines need an `lf` that

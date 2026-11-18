@@ -7,7 +7,7 @@ on the Machine's own store and Linear. First compare `schema_migrations` in
 `~/.lf/loopflow.db` with `rust/loopflow/src/store/migrations/`: only with
 identical sets can the branch `lf` open the real store without making the
 installed one refuse it. Find held Tasks with a read-only query
-(`task_changes.error`, `tasks.completion_error`, `pm_writeback` in
+(`task_changes.error`, `tasks.completion_error`, `tracker_writeback` in
 `lf task show <issue> --json`). Run the installed `lf task sync <issue>` once to
 see the failure, then the branch binary, from `~/src/loopflow` with `LF_*`
 unset and stdin closed. Each sync sends that Task's queued state and field

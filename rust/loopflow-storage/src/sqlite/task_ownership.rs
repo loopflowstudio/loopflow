@@ -1,6 +1,6 @@
 //! A Task's append-only ownership log and this Machine's reading of it.
 //!
-//! The later entry wins, in provider order. Writes stay within one person's
+//! The later entry wins, in tracker order. Writes stay within one person's
 //! Machines: your Task's next entry is written on its Machine when that is one
 //! of yours, otherwise on your Machine for its Wave. Each entry names the
 //! Machine that wrote it. An entry another Machine wrote never ends this
@@ -35,7 +35,7 @@ fn logs_in(
     conn: &Connection,
     tasks: &[TaskId],
 ) -> StoreResult<HashMap<TaskId, Vec<TaskOwnershipEntry>>> {
-    // Entries the provider has not stamped yet share whole-second `at` values;
+    // Entries the tracker has not stamped yet share whole-second `at` values;
     // insertion order keeps a claim and the move after it in the order they happened.
     let mut statement = conn.prepare(
         "SELECT o.id,o.kind,coalesce(p.name,o.person),o.person_key,o.machine_id,o.machine_label,
@@ -111,7 +111,7 @@ fn holder_after(entry: &TaskOwnershipEntry) -> Option<TaskOwner> {
 struct Reading {
     owner: Option<TaskOwner>,
     superseded_by: Option<TaskOwner>,
-    /// This Machine holds an open claim that the provider order no longer shows,
+    /// This Machine holds an open claim that the tracker order no longer shows,
     /// for a reason other than a later claim.
     reassert: bool,
 }
@@ -177,7 +177,7 @@ fn local_person_in(conn: &Connection) -> StoreResult<Option<String>> {
 }
 
 /// Know `id` as a person, named `name` when one is given. An id outside
-/// the planning providers' forms is not a person and is skipped.
+/// the trackers' forms is not a person and is skipped.
 fn name_person_in(conn: &Connection, id: &str, name: Option<&str>) -> StoreResult<()> {
     conn.execute(
         "INSERT OR IGNORE INTO people(id,name) VALUES(?1,?2)",
@@ -288,7 +288,7 @@ fn is_mine_in(conn: &Connection, me: &OwnershipFacts, holder: &TaskOwner) -> Sto
 
 /// What an ownership write needs from outside the store: you in the Task's
 /// repository (Git `user.email` is your person key), whether the repository
-/// has a remote planning provider, the Machines you registered and your Machine
+/// has a remote tracker, the Machines you registered and your Machine
 /// for the Task's Wave or repository. Reading them spawns `git` and loads
 /// configuration files, so callers read them before they take the write lock.
 #[derive(Debug, Clone)]
@@ -584,7 +584,7 @@ pub(super) fn claim_in(
     .map(Some)
 }
 
-/// Without a remote provider, the planning journal is the provider and an
+/// Without a remote tracker, the planning journal is the tracker and an
 /// entry this Machine takes in is ordered when it does: after every entry it
 /// has seen, whatever their clocks said.
 fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResult<Option<i64>> {
@@ -599,7 +599,7 @@ fn journal_order_in(conn: &Connection, task: &TaskId, remote: bool) -> StoreResu
     )?))
 }
 
-/// The provider's order for an entry its comment carries: the comment's time.
+/// The tracker's order for an entry its comment carries: the comment's time.
 pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
     created_at
         .and_then(|at| {
@@ -609,7 +609,7 @@ pub(super) fn provider_order(created_at: Option<&str>) -> Option<i64> {
 }
 
 /// Parse a marked ownership comment into the log. Repeats are ignored; the
-/// provider's order is stamped once, the first time it is reported.
+/// tracker's order is stamped once, the first time it is reported.
 pub(super) fn ingest_marker_in(
     conn: &Connection,
     task: &TaskId,
@@ -701,7 +701,7 @@ fn notify_superseded_in(
     Ok(())
 }
 
-/// After an inbound observation: an open local claim that the provider order no
+/// After an inbound observation: an open local claim that the tracker order no
 /// longer shows, for a reason other than a later claim, is claimed again.
 pub(super) fn reassert_in(
     conn: &Connection,
@@ -806,7 +806,7 @@ pub(super) fn hand_back_in(
 
 impl SqliteStore {
     /// This Machine belongs to the person `id` names, as their planning
-    /// provider knows them; `name` is how they are shown.
+    /// tracker knows them; `name` is how they are shown.
     pub fn record_local_person(&self, id: &str, name: Option<&str>) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -1122,7 +1122,7 @@ mod tests {
     fn unstamped_entries_in_one_second_keep_their_written_order() {
         let (_dir, store, task) = store_with_unowned_task();
         let conn = store.conn.lock().unwrap();
-        // Linear stamps provider order later; until then a claim and the move
+        // Linear stamps tracker order later; until then a claim and the move
         // after it share a whole-second `at`, and the move's id may sort first.
         // An earlier lf wrote the move as `handoff`, which reads as a claim.
         for (id, kind) in [("own_zzzz", "claim"), ("own_aaaa", "handoff")] {

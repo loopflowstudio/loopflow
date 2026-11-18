@@ -14,7 +14,7 @@ are listed separately. The counts are navigation aids, not quality metrics.
 | CLI and presentation | `rust/loopflow/src/lf/`, `src/bin/` | 31,700 | Clap grammar, command dispatch, status/read models, terminal output |
 | Operational workflows | `rust/loopflow-execution/src/ops/` | 25,800 | Task control, sessions, PR, Git, release, metrics, planning operations |
 | Prompt assembly, Graph runner and provider processes | `rust/loopflow-execution/src/prompt/`, `agent/`, `graph/`, `skills/`, `src/harness/` | 29,300 | Skill/Graph discovery, prompt assembly, provider subprocesses and streams |
-| Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, planning/provider models |
+| Tracked Work | `work/`, `pm/` | — | Wave/Task facts, Task delivery identity, tracker models |
 | Storage and command journal | `store/`, `journal/` | 19,700 | SQLite access, migration runner, durable rows, outer command receipts |
 | Authentication and history | `provider_auth/`, `transcript/` | — | Service authentication, native homes and transcript adoption; native clients own subscription credentials |
 | Shared root modules | top-level `src/*.rs` | 10,400 | Session captures, artifact switching, repository identity, subscriptions |
@@ -40,7 +40,7 @@ kernel locks                 live local exclusion authority
 
 | Owner | Tables | Purpose |
 | --- | --- | --- |
-| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional provider links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
+| Planning | `waves`, `projects`, `project_events`, `tasks`, `task_creation_intents`, `task_comments`, `task_issue_identities`, `task_deletions`, `task_events`, `tracker_actions` | Stored plans and definitions, optional tracker links, stable Work identity, creation records, comments, deletion recovery and the outbound tracker queue |
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
@@ -49,11 +49,11 @@ kernel locks                 live local exclusion authority
 | Task on this Machine | `task_checkouts`, `task_primary_sessions`, `task_ship_events`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one, the Task's conversation here, Auto-Ship approvals and stops (who, when, which process), and each move this Machine sent or received (`sent`, `arrived`) |
 | CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Repository relocation | `relocated_task_processes` | Retains Task membership for Processes whose cwd names a repository directory before it moved on this Machine; separate from moves between Machines |
-| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
-| Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by planning-provider identity |
+| Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and tracker events |
+| Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by tracker identity |
 | Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order and the repository's Task order; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
-| Linear acquisition | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
+| Linear refresh | `tracker_projects`, `tracker_items`, `tracker_wave_projects`, `tracker_wave_sync`, `tracker_events`, `linear_team_checks` | Tracker events, shared attempt freshness and successful team watermark |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Rental | `ondemands`, `pools`, `pool_machines`, `rentals`, `machine_records` | Creation receipts, owned machine commitments with their cost and expiry, admitted rentals with caps and deadlines, and records copied back before a machine is given back; templates, availability and admission limits live in personal configuration |
@@ -88,8 +88,8 @@ payload remains idempotent. Metric names and UUID punctuation retain their bytes
 
 ### External systems
 
-Task and Project rows own saved planning; Linear mappings link optional provider
-observations and pending effects. Local settlement proves no provider delivery;
+Task and Project rows own saved planning; Linear mappings link optional tracker
+events and pending actions. A local save can leave tracker actions pending;
 inbound planning grants no graph movement or Process control. GitHub owns PR
 heads, checks and merge. Git owns commits and worktrees. Model providers own their
 session and usage semantics; local observations do not replace those authorities.

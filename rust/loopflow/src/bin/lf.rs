@@ -16,7 +16,7 @@ use loopflow_execution::context_block::ContextMoment;
 use loopflow_execution::definition::DefinitionKind;
 use loopflow_execution::journal::{self, with_runtime, LfEventFields, LfEventType, LfNode};
 
-use loopflow_execution::ops::project::update_plan;
+use loopflow_execution::ops::project::update_project;
 use loopflow_execution::store::planning_sync::LostAnswer;
 
 #[derive(Clone, Default)]
@@ -670,7 +670,7 @@ impl Drop for EnvGuard {
 
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
-/// the Task's `PM writeback` line sits directly above. Silence means linked.
+/// the Task's `tracker writeback` line sits directly above. Silence means linked.
 fn format_task_pr_line(pr: &loopflow_execution::work::task::TaskPr) -> String {
     let provider = pr
         .github()
@@ -708,7 +708,7 @@ fn print_task_snapshot(
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let pm_writeback = match &snapshot.pm_writeback {
+        let tracker_writeback = match &snapshot.tracker_writeback {
             loopflow_execution::work::task::LinearWritebackState::Current => "current".to_string(),
             loopflow_execution::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
@@ -720,14 +720,14 @@ fn print_task_snapshot(
             snapshot.provider.as_deref().unwrap_or("not selected")
         );
         println!(
-            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
+            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
             snapshot.issue_identifier,
             snapshot.status,
             snapshot.task_id,
             body,
             snapshot.worktree.as_deref().unwrap_or("unplaced"),
             branch,
-            pm_writeback,
+            tracker_writeback,
         );
         if let Some(graph) = &snapshot.work.graph {
             println!("  {}", graph.summary());
@@ -869,13 +869,13 @@ fn print_task_control(
 fn dispatch_repository(cmd: &loopflow::lf::RepoCommand, args: &[String]) -> anyhow::Result<()> {
     use loopflow::lf::RepoCommand;
     match cmd {
-        RepoCommand::Plan {
+        RepoCommand::Tracker {
             cmd,
             json,
             subscribe,
             ..
         } => in_directory_runtime(args, |_| {
-            loopflow::lf::commands::plan::run(cmd.as_ref(), *json, *subscribe)
+            loopflow::lf::commands::tracker::run(cmd.as_ref(), *json, *subscribe)
         }),
         RepoCommand::Path => in_directory_runtime(args, |_| {
             loopflow::lf::commands::work_route::identity(None, None, true, false)
@@ -898,7 +898,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
     use loopflow_execution::ops::project;
 
     match command {
-        WaveCommand::EditPlan {
+        WaveCommand::EditProject {
             target,
             name,
             summary,
@@ -906,7 +906,7 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
         } => {
             let saved = tokio::runtime::Runtime::new()?.block_on(project::edit(
                 repo,
-                target.as_plan_target(),
+                target.as_project_target(),
                 name.as_deref(),
                 summary.as_deref(),
                 description.as_deref(),
@@ -1037,15 +1037,15 @@ fn run_wave_command(repo: &Path, command: &WaveCommand) -> anyhow::Result<()> {
             }
             Ok(())
         }
-        WaveCommand::UpdatePlan { wave, plan } => {
+        WaveCommand::UpdateProject { wave, file } => {
             #[derive(serde::Deserialize)]
             #[serde(deny_unknown_fields)]
             struct Input {
                 krs: Vec<loopflow_execution::work::project::ProjectKR>,
                 metric_targets: Vec<loopflow_execution::work::wave::metrics::MetricTarget>,
             }
-            let input: Input = serde_json::from_slice(&std::fs::read(plan)?)?;
-            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_plan(
+            let input: Input = serde_json::from_slice(&std::fs::read(file)?)?;
+            let (_, sync) = tokio::runtime::Runtime::new()?.block_on(update_project(
                 repo,
                 wave.as_deref(),
                 &input.krs,
@@ -1204,8 +1204,8 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                 loopflow::lf::commands::waves::print_task_detail(status)?;
             } else {
                 println!(
-                    "Planning evidence: {}",
-                    serde_json::to_value(status.planning_state)?
+                    "Tracker state: {}",
+                    serde_json::to_value(status.tracker_state.state)?
                         .as_str()
                         .expect("planning state is a string")
                 );
@@ -1238,10 +1238,10 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
                         );
                     }
                 } else {
-                    println!("No saved Task; retained observations are not Work.");
+                    println!("No saved Task; retained tracker events are not Work.");
                 }
-                if let Some(at) = status.observed_at {
-                    println!("Observed at: {at}");
+                if let Some(at) = status.tracker_state.synced_at {
+                    println!("Synced at: {at}");
                 }
                 if let Some(sync) = &status.sync {
                     for line in sync.lines() {
@@ -1948,7 +1948,7 @@ fn run() -> anyhow::Result<()> {
                         cmd: Some(
                             loopflow::lf::RepoCommand::Release { .. }
                                 | loopflow::lf::RepoCommand::Ci { .. }
-                                | loopflow::lf::RepoCommand::Plan { .. }
+                                | loopflow::lf::RepoCommand::Tracker { .. }
                         ),
                         ..
                     }
@@ -3647,7 +3647,7 @@ mod tests {
     }
 
     /// A degraded Linear writeback is named in the same reading that already
-    /// carries `PM writeback`, so an expired token cannot fail silently forever.
+    /// carries `tracker writeback`, so an expired token cannot fail silently forever.
     #[test]
     fn task_pr_line_names_a_degraded_linear_link() {
         let mut pr = published_pr();

@@ -2,17 +2,17 @@ import Loopflow
 import SwiftUI
 
 /// Displays the common status without turning a receipt into convergence.
-struct PeerPlanningView: View {
-    let reading: Reading<[PeerPlanningStatus]>
+struct GitDestinationsView: View {
+    let reading: Reading<[GitDestination]>
 
     @Environment(\.palette) private var palette
 
     var body: some View {
-        DisclosureGroup("Git planning") {
+        DisclosureGroup("Git tracker") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 if let destinations = reading.value {
                     if !destinations.contains(where: \.active) {
-                        Text("No active Git planning destination")
+                        Text("No active Git tracker destination")
                     }
                     ForEach(destinations) { destination in
                         status(destination)
@@ -27,10 +27,10 @@ struct PeerPlanningView: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .accessibilityIdentifier("peer-planning")
+        .accessibilityIdentifier("git-destinations")
     }
 
-    private func status(_ destination: PeerPlanningStatus) -> some View {
+    private func status(_ destination: GitDestination) -> some View {
         VStack(alignment: .leading, spacing: Spacing.xs) {
             Text(destination.reference)
             Text("Destination: \(destination.id)")
@@ -40,14 +40,14 @@ struct PeerPlanningView: View {
             Text("Publication: \(destination.publicationState ?? "not attempted") (\(destination.publicationRevision ?? "none"))")
             Text("Fetched: \(destination.fetchedRevision ?? "none")")
             Text("Retained import: \(destination.importedRevision ?? "none")")
-            if let error = destination.acquisitionError { Text(error) }
+            if let error = destination.fetchError { Text(error) }
             if let error = destination.publicationError { Text(error) }
             ForEach(destination.conflicts.indices, id: \.self) { index in
                 let conflict = destination.conflicts[index]
                 Text("Held \(conflict.target): \(conflict.reason)")
             }
-            Text("Inspection changes nothing. `lf planning journal` lists retained values; copy one into an ordinary edit to save it again.")
+            Text("Inspection changes nothing. `lf repo tracker journal` lists retained values; copy one into an ordinary edit to save it again.")
         }
-        .accessibilityIdentifier("peer-planning-\(destination.id)")
+        .accessibilityIdentifier("git-destinations-\(destination.id)")
     }
 }

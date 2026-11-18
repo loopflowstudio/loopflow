@@ -813,7 +813,25 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
         || sql.contains("CREATE TABLE delegated_placements (")
         || sql.contains("ALTER TABLE waves ADD COLUMN workflow TEXT;")
     {
+        // Released migrations seed before tracker_tables exists. Give the seed
+        // writer its two journal names for the lifetime of this conversion.
+        conn.execute_batch(
+            "CREATE TEMP VIEW git_tracker_changes AS
+                 SELECT id,record_table,mutation,object_id,field,clock FROM planning_peer_changes;
+             CREATE TEMP TRIGGER seed_change INSTEAD OF INSERT ON git_tracker_changes BEGIN
+                 INSERT INTO planning_peer_changes(id,record_table,mutation)
+                 VALUES(NEW.id,NEW.record_table,NEW.mutation);
+             END;
+             CREATE TEMP VIEW git_tracker_seen AS SELECT id FROM planning_peer_observed;
+             CREATE TEMP TRIGGER seed_seen INSTEAD OF INSERT ON git_tracker_seen BEGIN
+                 INSERT INTO planning_peer_observed(id) VALUES(NEW.id);
+             END;
+             CREATE TEMP TRIGGER seed_forget INSTEAD OF DELETE ON git_tracker_seen BEGIN
+                 DELETE FROM planning_peer_observed WHERE id=OLD.id;
+             END;",
+        )?;
         super::sqlite::planning_write::seed(conn)?;
+        conn.execute_batch("DROP VIEW temp.git_tracker_seen; DROP VIEW temp.git_tracker_changes;")?;
     }
     Ok(())
 }
@@ -6198,7 +6216,7 @@ mod tests {
             .find(|task| task.identifier == "INF-REOPEN")
             .unwrap();
         assert!(matches!(
-            reopen.pm_writeback,
+            reopen.tracker_writeback,
             crate::work::task::LinearWritebackState::Current
         ));
     }

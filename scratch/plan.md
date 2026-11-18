@@ -614,6 +614,48 @@ gate. Every product concept pairs with one code owner. Recorded, not built:
   by that server could not resume it either, so the fresh start is right; only
   the wording overclaims.
 
+## Concept review after the LOO-953 sync (2026-11-18)
+
+`scratch/concept-review.html` (HEAD `89943efba2`). Answers, Jack: "1a",
+"2a", "3 -- i feel like ship is supposed to be a small short hand that maybe
+updates the proposed graph to be auto mode, and has grown into this sprawling
+concept. lets reduce its impact on the overall system and protocol", "4 no
+idea", "5 no idea". 4 and 5 were decided here, for review.
+
+To build in this Task, next implement pass:
+1. **One outlook on the Session (1a).** Rust folds "is it coming back" once:
+   `SessionRecord.outlook {kind: coming_back | waiting_for_you | quit |
+   could_not_start, at, reason, command}`, null while it runs normally.
+   `start` keeps only facts (`attempts`, `last_started_at`); `next_at`,
+   `gave_up` and `failure` move into the outlook (`at`, `waiting_for_you`,
+   `reason`). `SessionFacts::conversation_line` and Swift's
+   `conversationLine` print `outlook`; neither derives. The fold reads
+   "checked out here" and whether a server runs, so a Task checked out
+   elsewhere never reads `coming_back`. Fixtures: `session_memberships.json`
+   one case per kind, `task_detail.json`; Swift decodes with
+   `decode(T?.self)`.
+2. **Could not start (2a).** A conversation whose start failed before any
+   agent ran is `could_not_start` with the reason, never "died" or "closed".
+3. **Who started it (4, decided: a).** The pass's start passes its
+   `recover:<session>:<agent>:<n>` request through the held terminal's argv to
+   `reopen`'s `request_id`; `record_start` skips a `recover:` request.
+   `LF_RECOVERING_SESSION` and `RECOVERING_ENV` are deleted. Passed over:
+   scrubbing the variable from provider launches. It keeps an inherited
+   marker that must be scrubbed on every path; a request is not inherited.
+4. **PTY cause (5, decided: a).** A held-terminal start whose `openpty`
+   fails records "no PTY left: N in use (kern.tty.ptmx_max)", reading usage
+   the way `doctor`'s `ptys` check does (one function, shared). Passed over:
+   dropping the promise from the docs; the docs and the plan's question 1
+   already promise it and the code is small.
+
+Not built here (3): ship is reduced in its own Task. Until then the shared
+`task_graphs.restarts` keeps its two rules (runs wait after 5, ships keep
+restarting); this Task adds nothing to ship. The direction for that Task:
+`lf ship` is shorthand that turns on auto mode for the Task's Graph (stand-ins
+at interactive steps) and runs it; the carrier is always `lf task run`, so
+`restart_ship`, the ship log's carrier and restart rows, and the separate
+restart rule go.
+
 ## Remaining
 
 Left for later steps:

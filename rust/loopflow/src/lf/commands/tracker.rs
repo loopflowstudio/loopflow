@@ -381,6 +381,9 @@ fn print_hub(store: &Store, repo: &str, hub: &loopflow_model::durable::Machine) 
     };
     if sends.is_empty() {
         println!("Plan: {place}. Nothing open.");
+        if let Some((_, error)) = &failing {
+            println!("  {error}");
+        }
         return Ok(());
     }
     println!("Plan: {place}. {} open.", sends.len());

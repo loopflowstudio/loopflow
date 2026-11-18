@@ -172,8 +172,9 @@ impl SqliteStore {
     /// What `repo` has yet to send to its hub, oldest first.
     pub fn open_hub_sends(&self, repo: &str) -> StoreResult<Vec<HubSend>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query =
-            conn.prepare("SELECT seq,edit_json,sent_at FROM hub_sends WHERE repo=?1 ORDER BY seq")?;
+        let mut query = conn.prepare(
+            "SELECT seq,owner_table,edit_json,sent_at FROM hub_sends WHERE repo=?1 ORDER BY seq",
+        )?;
         let sends = query
             .query_and_then([repo], |row| -> StoreResult<HubSend> {
                 Ok(HubSend {

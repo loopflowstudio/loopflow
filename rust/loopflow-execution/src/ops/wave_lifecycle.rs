@@ -1070,6 +1070,14 @@ pub async fn rename(
         }
         operation.planning_done = true;
         recovery::save(&operation, &store)?;
+        super::planning_sync::sync_after_save(
+            &store,
+            &operation.target_repo,
+            &loopflow_storage::sqlite::tracker_actions::ActionOwner::Wave(
+                operation.waves[0].id.clone(),
+            ),
+        )
+        .await;
     }
     let files = recovery::finish_files(&mut operation, &store, &main);
     let initiative = if let Some(provider) = operation.providers.first() {

@@ -64,252 +64,208 @@
 </style>
 </head>
 <body>
+<body>
 <main>
 
-<h1>Settings and skills as a served reader sees them</h1>
-<p class="lede">LOO-978, reviewed before anything is built. The area taken: how
-<code>lf server run</code>, Desktop and <code>--subscribe</code> readers get
-settings and the skill catalog, and <code>observe</code>, the layer that tells
-them an outside fact changed. The plan adds a third thing to that layer, so the
-review covers the layer and not only the two values the Task names.</p>
+<h1>Settings and skills as a served reader sees them, as built</h1>
+<p class="lede">LOO-978 after implement, compress and qa, read against its base
+as if for the first time. The area taken: how <code>lf server run</code>,
+Desktop and <code>--subscribe</code> readers get settings and the skill
+catalog, and <code>observe</code>, the layer that tells them an outside fact
+changed. The branch adds derived values to that layer, so the review covers the
+layer and every value now kept in it, not only the two the Task names.</p>
 <p class="lede">Legend:
-<span class="tag exist">exists today</span>
-<span class="tag prop">proposed</span>
-<span class="tag gone">removed by the plan</span></p>
+<span class="tag exist">built on this branch</span>
+<span class="tag prop">proposed by this review</span>
+<span class="tag gone">removed by the branch</span></p>
 
 <h2>Outcome</h2>
-<p><strong>The plan changed.</strong> The mechanism stays: values computed from
-observed facts, kept with the facts they read. Five things changed in how it is
-built, and three findings larger than this Task are listed below without being
-acted on. No code was changed, nothing was built or timed in this step.</p>
+<p><strong>The plan changed.</strong> The design holds: one closed list of
+shared values, each kept with the facts it read. One rule the design states
+about itself is broken in three places, and one of them leaves a Task showing
+the wrong settings until something else pokes the file. The plan now names the
+three edits and the test; nothing else is asked of implement.</p>
 
 <h2>One interaction, walked</h2>
-<p>Desktop shows a Wave with 40 Tasks. Forty agents are writing, so the store
-revision moves several times a second and each move is a new reading. Someone
-edits <code>.lf/config.yaml</code> to change <code>agent</code>.</p>
-
 <div class="cols">
   <div class="card">
-    <h3>Today, per reading</h3>
+    <h3>Normal: save a settings file in front of Desktop</h3>
     <div class="flow">
-      <div class="step">For each Task: <code>resolve_task_agent</code></div>
+      <div class="step">You run <code>lf set default_agent codex</code></div>
       <div class="arrow">↓</div>
-      <div class="step">Read 3 to 5 config files <small>cached answers from <code>observe</code>, cheap</small></div>
+      <div class="step">Local refresh (1 s) sees <code>config.yaml</code> differ, bumps its revision</div>
       <div class="arrow">↓</div>
-      <div class="step">Parse each file's YAML again</div>
+      <div class="step"><code>Dependencies::changed()</code> is true through the nested <code>Settings</code> dependencies; the subscription reads again</div>
       <div class="arrow">↓</div>
-      <div class="step hot">Validate every leaf of every file: clone the defaults tree, deserialize a whole <code>Config</code>
-        <small><code>validate_value</code>, <code>settings.rs:219</code>. Twice per Task, once more per named skill per Wave.</small></div>
-      <div class="arrow">↓</div>
-      <div class="step">Merge, deserialize the result</div>
+      <div class="step"><code>derived(Settings{…})</code> finds its dependencies changed, resolves once; every other Task in that checkout and Wave gets the same <code>Arc</code></div>
     </div>
-    <p class="note" style="margin-top:10px">Three caches already try to blunt this, each for one reading:
-      <span class="tag gone">PersonalSettings</span>
-      <span class="tag gone">waves.rs personal map</span>
-      <span class="tag gone">waves.rs agents memo</span></p>
+    <p class="note" style="margin-top:10px">qa, same write load: 17 samples in <code>validate_value</code> against the base's 4,261; server CPU 107% against 181%.</p>
   </div>
-  <div class="card prop">
-    <h3>Proposed, per reading</h3>
+  <div class="card">
+    <h3>Failure and recovery: a file that does not parse</h3>
     <div class="flow">
-      <div class="step">For each Task: <code>resolve_task_agent</code></div>
+      <div class="step">The slot holds <code>Err(LoadError)</code>, the variant <code>lf config settings</code> reports</div>
       <div class="arrow">↓</div>
-      <div class="step prop">Ask for <code>Derived::Settings { checkout, wave, outside }</code>
-        <small>unchanged dependencies: return the shared value, one map insert</small></div>
+      <div class="step">Every reading gets that error; the server warns once, on its own stderr</div>
+      <div class="arrow">↓</div>
+      <div class="step">You fix the file; the same revision bump computes the value again</div>
     </div>
-    <p style="margin-top:14px"><strong>After the edit:</strong> within a second the
-      refresh sees the file differs and bumps its revision. The subscription's
-      dependencies report changed, the next reading finds that checkout's slot
-      stale and resolves once. The frame shows the new agent.</p>
-    <p><strong>Failure:</strong> the edit is invalid. The error is the slot's
-      value, with its own variant, so every reading reports the same thing
-      without resolving again.</p>
-    <p><strong>Recovery:</strong> fix the file; the same path resolves once more.</p>
+    <p class="note" style="margin-top:10px">Recovery needs no action beyond the fix. The person in front of Desktop still never sees the warning (below, larger than this Task).</p>
   </div>
 </div>
 
-<h3 style="margin-top:24px">The sample this rests on</h3>
-<p class="note">2026-11-18, lf 0.16.0+8abce99e8, about 40 agents writing, 3 s <code>sample</code> of the server. Not re-measured here.</p>
-<div class="bars">
-  <div>Session projection reads</div><div><div class="bar" style="width:100%"></div></div><div>~2,260</div>
-  <div><code>validate_value</code></div><div><div class="bar hot" style="width:75%"></div></div><div>~1,700</div>
-  <div><code>SkillCatalog</code> walk</div><div><div class="bar hot" style="width:4.2%"></div></div><div>~95</div>
+<h3 style="margin-top:24px">The counterexample that breaks it</h3>
+<div class="card">
+  <p>A repository with no checked-in <code>.lf/config.yaml</code>, and
+  <code>lf set agent claude</code> saved for it (the personal file beside the
+  <em>main</em> checkout). A Task's worktree is gone, or half-made by
+  <code>git worktree add</code>, at the moment a subscription reads.</p>
+  <div class="flow">
+    <div class="step hot"><code>files::private_path</code> asks <code>git::worktree_root</code>, which reads <code>.git</code> with <code>std::fs</code>. It fails, so the personal file is looked for under the <em>worktree</em> path and recorded as a missing file there.</div>
+    <div class="arrow">↓</div>
+    <div class="step hot">The slot's dependencies: three missing files under the worktree, and the global file. Nothing about <code>.git</code>.</div>
+    <div class="arrow">↓</div>
+    <div class="step hot">The worktree appears. None of those answers change. The Task shows the settings of someone who never ran <code>lf set</code>, for as long as a subscription holds the slot.</div>
+  </div>
+  <p class="note" style="margin-top:10px">Before this branch the next reading
+  resolved again and was right. Read from the code, not run. It reaches a
+  display only; launches resolve for themselves. A repository that checks in
+  <code>.lf/config.yaml</code> is not affected: that file appearing is the
+  wake-up.</p>
 </div>
 
 <h2>Do the product's concepts and the code's concepts line up?</h2>
 <table>
-  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong, where it is no</th></tr>
-  <tr>
-    <td>A settings file changed, and the view follows within a second</td>
-    <td><span class="tag exist">Fact</span><span class="tag exist">Dependencies</span><span class="tag exist">Cache</span></td>
-    <td class="v yes">yes</td>
-    <td>One notion of "changed", already shared by Git, files, processes and transcripts.</td>
-  </tr>
-  <tr>
-    <td>The settings in force for a checkout and Wave</td>
-    <td><span class="tag exist">ConfigDeclarations</span><span class="tag exist">Config + setting_layers</span><span class="tag exist">ResolvedSettings</span><span class="tag gone">PersonalSettings</span></td>
-    <td class="v no">no</td>
-    <td>One idea under four names, and none of them is kept: it is recomputed whenever asked. The plan gives it one owner, <span class="tag prop">Derived::Settings</span>, and removes <code>PersonalSettings</code>. <code>Config</code> still carries raw layers so it can be resolved again (see "larger").</td>
-  </tr>
-  <tr>
-    <td>Which of a file's settings are valid</td>
-    <td>Nothing. <code>filter_file_preferences</code> runs inside <code>resolve_layers</code></td>
-    <td class="v no">no</td>
-    <td>An action with no single owner: a fact about one file, worked out again for every resolution and every skill. This is where the 1,700 samples are. The plan caches around it; it does not give it an owner.</td>
-  </tr>
-  <tr>
-    <td>"I passed <code>--setting</code>" / "my shell sets <code>LF_AGENT</code>" / "only codex is installed"</td>
-    <td>Three reads buried in <code>resolve_layers</code>: a thread-local, the environment, a PATH probe</td>
-    <td class="v no">no</td>
-    <td>A concept the person has and the code never names. The kickoff plan listed them in a ten-row audit table and in cache keys by hand. Proposed: <span class="tag prop">Outside</span>, one value that is both the key and the argument.</td>
-  </tr>
-  <tr>
-    <td>The skills available here</td>
-    <td><span class="tag exist">SkillCatalog</span></td>
-    <td class="v part">partly</td>
-    <td>Right type, walked from disk on every call. Proposed: <span class="tag prop">Derived::SkillCatalog</span>, same type, shared.</td>
-  </tr>
-  <tr>
-    <td>A Wave's setup: its graph, agent, per-skill agents</td>
-    <td><span class="tag exist">WaveSetup</span></td>
-    <td class="v part">partly</td>
-    <td>One type for two sources: settings files and store rows. Only the file half can be kept; <span class="tag prop">Derived::WaveSetup</span> holds that half and <code>machine()</code> stays a store read.</td>
-  </tr>
-  <tr>
-    <td>Nothing. Nobody sees a cache</td>
-    <td><span class="tag gone">three per-reading memos</span> then <span class="tag prop">Derived</span> and its slot</td>
-    <td class="v yes">yes, after</td>
-    <td>Three hidden things become one, in the layer that already owns "changed". Its promise to a person is the existing one: the view is at most a second behind the file.</td>
-  </tr>
-  <tr>
-    <td>"That setting is misspelled"</td>
-    <td><code>reader::warn</code> to stderr</td>
-    <td class="v no">no</td>
-    <td>For a served read stderr is the server's log. The person editing the file in front of Desktop is told nothing. Not changed by this Task.</td>
-  </tr>
+  <tr><th>What a person knows</th><th>What the code has</th><th></th><th>What is wrong where it is no</th></tr>
+  <tr><td>My settings for this checkout and Wave</td>
+      <td><span class="tag exist">Derived::Settings</span> <code>config::resolved</code> → <code>Arc&lt;ResolvedSettings&gt;</code></td>
+      <td class="v yes">yes</td><td>One value, one owner. <code>PersonalSettings</code>, <code>load_wave_config_with</code>, <code>config_layers_with</code> and the two <code>waves.rs</code> memos are gone.</td></tr>
+  <tr><td>"The files changed"</td>
+      <td><code>observe</code> revisions, now reached through nested <code>Dependencies</code></td>
+      <td class="v yes">yes</td><td>Still one notion. No watcher, timer or size knob was added.</td></tr>
+  <tr><td>The skills available here</td>
+      <td><span class="tag exist">Derived::SkillCatalog</span> <code>SkillCatalog::load</code> → <code>Arc&lt;SkillCatalog&gt;</code></td>
+      <td class="v yes">yes</td><td>The provider directories moved out of the walk into the key, where they belong.</td></tr>
+  <tr><td>A <code>--setting</code> on one command</td>
+      <td><code>Outside::shared</code>: non-null <code>invocation</code> computes inline</td>
+      <td class="v yes">yes</td><td>One place decides it for all three settings values.</td></tr>
+  <tr><td>My Machine names and aliases (global file)</td>
+      <td><span class="tag exist">Derived::GlobalSettings { home, outside }</span></td>
+      <td class="v part">partly</td><td>One idea under two names: <code>home</code> and <code>outside.home</code>. The computation reads the first; <code>remote::apply_document</code> inside it reads <code>lf_home_dir()</code> and the forwarded profile from the environment again.</td></tr>
+  <tr><td>Which checkout a worktree belongs to</td>
+      <td><code>files::private_path</code> → <code>std::fs</code> on <code>.git</code>, inside the <code>Settings</code> computation</td>
+      <td class="v no">no</td><td>An input the person can change (make or remove a worktree) that no reading tracks. The counterexample above.</td></tr>
+  <tr><td>Each skill's agent in a Wave</td>
+      <td><span class="tag exist">Derived::SkillAgents</span></td>
+      <td class="v yes">yes</td><td>Nests on <code>Settings</code>; its skill loads now nest on <code>SkillCatalog</code>, which closes the gap the plan listed.</td></tr>
+  <tr><td>Nothing: a bare command</td>
+      <td><code>observe::reading</code>, a cache that lasts one call (qa)</td>
+      <td class="v yes">yes</td><td>Three modes now (no reading, a call-length reading, a served reading). The person sees none of them, and the call-length one replaced a hand-rolled memo. The plan's Outcome still said "inline exactly as today"; corrected.</td></tr>
+  <tr><td>What each shared value is</td>
+      <td><code>enum Derived</code> names the identity; the type is <code>Arc&lt;dyn Any&gt;</code>, downcast at the call</td>
+      <td class="v part">partly</td><td>The list says what is cached, not what type. Each variant has exactly one call site, so it holds today; a second caller with another type panics in a served read.</td></tr>
+  <tr><td>A warning about a bad setting</td>
+      <td><code>reader::warn</code> → the server's stderr</td>
+      <td class="v no">no</td><td>Unchanged by the branch, and now said once per edit instead of once per read. Still nobody at Desktop sees it.</td></tr>
 </table>
 
-<h2>The biggest mismatch: a cached computation that can read what nothing tracks</h2>
-<p>A derived value is right only if everything its computation read is either
-an observed fact or part of its key. Read anything else and the value is wrong
-until one of its files happens to change, and it is wrong silently: a Desktop
-row showing the old agent. Today the same mistake heals at the next store
-revision, a fraction of a second later.</p>
-<p>The kickoff plan handled this with a rule in a doc comment and an audit
-table. The audit is good; it is also the kind that the next change to
-<code>resolve_layers</code> invalidates without anyone noticing.</p>
-
+<h2>The biggest mismatch: the key is not yet what the computation read</h2>
+<p>The design's one rule, in <code>AGENTS.md</code> and the server README: a
+computation reads observed facts and its key, nothing else. <code>Outside</code>
+exists so that settings carry that rule in the code. Three reads still go
+around it.</p>
 <div class="cols">
   <div class="card">
-    <h3>Before (kickoff plan)</h3>
-<pre><code>pub fn derived&lt;K, T&gt;(key: K, compute: impl FnOnce() -&gt; T) -&gt; Arc&lt;T&gt;
-
-// settings key, assembled at the call site:
-(repo, wave, lf_home, env_value, sole_harness, remote_env)
-
-// and inside compute, resolve_layers reads them again:
-environment()?          // LF_SETTINGS, LF_AGENT, ...
-invocation_values()     // --setting, thread-local
-default_agent()         // PATH probe</code></pre>
-    <ul>
-      <li>The key and the computation each read the outside world. Nothing ties them.</li>
-      <li>What is cached, and by what, is spread over call sites.</li>
-      <li>A hit copies every dependency into the reading. For the catalog that is several hundred facts per ask.</li>
-      <li>The slot keeps an error's message; <code>LoadError::AgentSelection</code> matches at <code>ops/task.rs:2297</code> and <code>commands/config.rs:268</code> would stop matching.</li>
-    </ul>
+    <h3>Before (as built)</h3>
+<pre><code>// config.rs, inside derived(Settings{…})
+files::private_path(repo)        // std::fs on .git
+// placement.rs
+Derived::GlobalSettings { home, outside }   // outside.home too
+remote::apply_document(&amp;path, &amp;mut value)
+  // reads PROFILE_ENV and lf_home_dir() again</code></pre>
+    <p class="note">Two are harmless today: in a served request the profile is
+    always absent and both homes are the Machine's. They are still the drift
+    the type was built to make unspellable.</p>
   </div>
   <div class="card prop">
-    <h3>After (plan as revised)</h3>
-<pre><code>pub enum Derived {            // beside `enum Fact`
-    Settings { checkout, wave, outside: Outside },
-    WaveSetup { checkout, wave, outside: Outside },
-    SkillCatalog { repo, home, claude, codex },
-}
-pub fn derived&lt;T&gt;(key: Derived, compute: impl FnOnce() -&gt; T) -&gt; Arc&lt;T&gt;
-
-pub struct Outside { environment, invocation,
-                     sole_harness, home, remote }
-fn resolve_with(layers, skill, &amp;Outside)   // reads nothing else</code></pre>
-    <ul>
-      <li><code>Outside</code> is the key and the argument. They cannot drift.</li>
-      <li>Every cached computation and its identity is one list, the way <code>Fact</code> is the list of what is observed.</li>
-      <li>A reading holds a derived value's dependencies by reference. A hit is one insert.</li>
-      <li><code>LoadError</code> derives <code>Clone</code> (every variant is a <code>String</code>); the slot keeps the error.</li>
-      <li>Three values, not five: the Task agent is a field of the settings value, and placement waits for a sample that shows it.</li>
-    </ul>
+    <h3>After (in the plan)</h3>
+<pre><code>// the checkout's .git is a dependency
+observe::exists(&amp;repo.join(".git"));   // in file_layers,
+                                       // before private_path
+// one home, and the profile from the key
+Derived::GlobalSettings { outside }
+resolve_global_settings(&amp;outside)      // outside.home,
+                                       // outside.remote</code></pre>
+    <p class="note">Smaller: one field and one parameter go. If a caller's
+    <code>store.home_dir()</code> can differ from <code>LF_HOME</code>, keep
+    <code>home</code> as the one home and pass it with <code>outside.remote</code>
+    into the profile step instead; either way nothing inside the computation
+    calls <code>incoming()</code> or <code>lf_home_dir()</code>.</p>
   </div>
 </div>
 
 <h3 style="margin-top:24px">Tested on three paths</h3>
 <table>
-  <tr><th>Path</th><th>What happens</th><th>Holds?</th></tr>
-  <tr><td>Normal: 40 Tasks, no file changes, readings several times a second</td>
-      <td>One resolve per checkout and Wave, then hits. Catalog walked once.</td><td class="v yes">yes</td></tr>
-  <tr><td>Failure: invalid <code>.lf/config.yaml</code></td>
-      <td>The <code>Err</code> is the value. Same variant and text on the bare and served paths. Warned once per file change per checkout.</td><td class="v yes">yes</td></tr>
-  <tr><td>Failure: <code>compute</code> panics</td>
-      <td>Kickoff plan held a lock across compute and said nothing; a poisoned slot would fail every later reading. Revised: the slot is left empty.</td><td class="v yes">yes, after</td></tr>
-  <tr><td>Recovery: file fixed</td>
-      <td>Revision bumps, the reading's nested dependencies report changed, one resolve.</td><td class="v yes">yes</td></tr>
-  <tr><td>Counterexample: global config edited with 300 checkouts cached</td>
-      <td>300 resolves at the next readings that ask, once. About what one reading costs today.</td><td class="v yes">yes</td></tr>
-  <tr><td>Counterexample: a later change adds an ambient read inside <code>resolve_with</code></td>
-      <td>Still possible. <code>Outside</code> makes the right place obvious; it does not make the wrong one unspellable. Rust cannot.</td><td class="v part">open</td></tr>
-  <tr><td>Counterexample: a served mutation or launch reads a stale slot</td>
-      <td>Only <code>read_stream.rs:610</code> starts a reading. The kickoff plan cited two more sites; they do not exist.</td><td class="v yes">yes</td></tr>
+  <tr><th>Path</th><th>As built</th><th>With the edits</th></tr>
+  <tr><td>Normal: edit a settings file</td><td>One resolve, every reading woken</td><td>Same</td></tr>
+  <tr><td>Failure: worktree missing at first reading, no checked-in config</td><td class="no">Stale until another settings file changes or the server restarts</td><td class="yes"><code>.git</code> appearing bumps a revision; resolved again against the main checkout</td></tr>
+  <tr><td>Recovery: worktree removed again</td><td>Stays on the last value</td><td>Resolved again; the personal file is looked for under the path, as a bare command does</td></tr>
 </table>
+<p class="note">What would break the edit: a main checkout whose <code>.git</code>
+directory exists before and after while a <em>linked</em> worktree's identity
+changes underneath. <code>exists</code> on the checkout's own <code>.git</code>
+covers a worktree made, removed or made again at one path; it does not cover a
+<code>.git</code> file rewritten to name another repository. That is
+<code>git worktree repair</code> territory and was passed over.</p>
 
 <h2>Considered and passed over</h2>
 <ul>
-  <li><strong>Fix the validator and add no cache.</strong> <code>validate_value</code> is slow because it deserializes a whole <code>Config</code> per leaf. Fixing that would cut each resolve several-fold with no staleness to reason about. It leaves a parse and a merge per Task per reading and does nothing for the catalog walk, so it does not meet the outcome alone. It is listed below because bare <code>lf</code> commands still pay it.</li>
-  <li><strong>Cache one validated file at a time and merge per call.</strong> The cached part would read exactly one file, so no ambient input could reach it, and <code>--setting</code> would need no special case. The merge and final deserialize stay per Task per reading. Safer, slower, and a larger change to a module with pinned semantics.</li>
-  <li><strong>Recompute on every hit in test builds and compare.</strong> Tests mostly read without a cache or with a fresh one, so the check would rarely see a hit.</li>
+  <li><strong>Resolve the private path before <code>derived</code> and key on it.</strong> Correct, and pays a canonicalize and an ancestor walk per Task per reading for a value that changes about never. One observed existence check costs nothing on a hit.</li>
+  <li><strong>Route <code>git::worktree_root</code> through <code>observe</code>.</strong> It has callers in launches and mutations that must not see a cached answer inside a bare reading. Wider than this.</li>
+  <li><strong>Tie each variant to its type</strong> (a trait with an associated value). Removes the downcast panic and adds a trait per value for four call sites.</li>
 </ul>
 
 <h2>Larger than this Task</h2>
 <table>
-  <tr><th>Finding</th><th>What it would take</th></tr>
-  <tr><td>Validity belongs to a file; resolution should be a merge. Today <code>Config.setting_layers</code> keeps raw layers so a resolved value can be resolved again per skill, validating everything each time.</td>
-      <td>A validated-declarations type produced once per layer; <code>resolve_layers</code> splits into validate and merge; <code>ContextBudgets::load</code> and <code>store/placement.rs</code> build validated layers. Then <code>Derived::WaveSetup</code> is unnecessary.</td></tr>
-  <tr><td><code>validate_value</code> clones the defaults tree and deserializes all of <code>Config</code> for each leaf. Every bare <code>lf</code> command pays this; nothing here changes it.</td>
-      <td>Validate a value against its own definition's type, or validate a file's leaves in one deserialize and fall back to per-leaf only to name the bad one.</td></tr>
-  <tr><td>A served read's setting warnings reach only the server's stderr.</td>
-      <td>Warnings become part of the resolved value and of what a reader can show. New behavior.</td></tr>
+  <tr><th>What</th><th>What it would take</th></tr>
+  <tr><td><code>outside()</code> runs before every lookup: it reads the environment and stats each harness name along <code>PATH</code>, once per Task per reading (51 samples in qa, now more than <code>resolve_with</code>).</td>
+      <td>"Which harnesses are installed" is an outside fact like any file. Observed, it becomes a dependency and leaves the key; the environment and home are fixed for a server and could be read once per reading.</td></tr>
+  <tr><td>Validity is a fact about a file; <code>resolve_layers</code> works it out per resolution and per skill, and <code>validate_value</code> deserializes a whole <code>Config</code> per leaf. Bare commands pay it on every invocation.</td>
+      <td>Validate a file once when it is read, resolve as a merge. Its own Task; the cache made it stop mattering for served reads only.</td></tr>
+  <tr><td>A warning found by a served read goes to the server's stderr.</td>
+      <td>Warnings as part of the resolved value, shown where the setting is shown.</td></tr>
+  <tr><td><code>load_wave_config</code> returns <code>Result&lt;Option&lt;Config&gt;&gt;</code> and has never returned <code>None</code>.</td>
+      <td>Drop the <code>Option</code> and the <code>unwrap_or_default</code> at its callers.</td></tr>
 </table>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>What identifies a cached computation?
+  <li>The stale-worktree case:
     <ol>
-      <li class="chosen">A closed <code>enum Derived</code> in <code>observe.rs</code>, beside <code>Fact</code>. (chosen)</li>
-      <li>A generic key per call site, as kickoff had it. <code>observe</code> stays ignorant of settings and skills; the list of what is cached is wherever it is used.</li>
+      <li class="chosen">Observe the checkout's <code>.git</code> inside the settings computation, with a test. (chosen, in the plan)</li>
+      <li>Leave it: it needs a repository without <code>.lf/config.yaml</code> and reaches a display only.</li>
+      <li>Key on the resolved private path instead.</li>
     </ol>
   </li>
-  <li><code>--setting</code> overrides inside a served reading:
+  <li><code>GlobalSettings</code>:
     <ol>
-      <li class="chosen">Compute inline, never enter a slot. (chosen, kept from kickoff)</li>
-      <li>Part of the key like the rest of <code>Outside</code>. No special case; an override gets its own slot for 300 s.</li>
+      <li class="chosen">One home: drop the field, read <code>outside.home</code> and <code>outside.remote</code>. (chosen, in the plan)</li>
+      <li>Keep <code>home</code> as the caller's and drop it from <code>Outside</code> for this variant.</li>
     </ol>
   </li>
-  <li>Machine placement:
+  <li><code>outside()</code> per lookup:
     <ol>
-      <li class="chosen">Derive only if the sample after the catalog slice shows it. (chosen)</li>
-      <li>Derive it now as kickoff planned, a fourth variant.</li>
+      <li class="chosen">Leave it; file "installed harnesses are an observed fact" if the live sample shows it. (chosen, not filed)</li>
+      <li>Do it here.</li>
     </ol>
   </li>
-  <li>Validity per file, resolution as a merge:
+  <li>The value type behind each <code>Derived</code> variant:
     <ol>
-      <li class="chosen">Its own Task after this one; this Task ships the cache. (chosen)</li>
-      <li>Do it here instead of <code>Derived::WaveSetup</code>.</li>
-      <li>Leave it; the cache makes it not matter for served reads.</li>
+      <li class="chosen">Leave the downcast; one call site per variant. (chosen)</li>
+      <li>A typed key per value.</li>
     </ol>
   </li>
-  <li>The per-leaf whole-<code>Config</code> validator:
-    <ol>
-      <li class="chosen">File it separately; it is the bare CLI's cost now. (chosen, not filed by this review)</li>
-      <li>Fix it in this Task's first slice and measure before building the rest.</li>
-    </ol>
-  </li>
-  <li>The live <code>sample</code> under 40-agent load needs this branch as the Machine's server. Who runs it, and before or after merge?</li>
+  <li>The live <code>sample</code> under 40-agent load needs this branch as the Machine's server. Before or after merge?</li>
 </ol>
 
 </main>

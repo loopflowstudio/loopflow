@@ -71,3 +71,13 @@
   by its text.
 - **Left to a person:** the `sample` on the real Machine under 40 agents, and
   Desktop itself. Both QA servers ran in private homes with 30 Tasks.
+
+## Concept review of the built change (2026-11-18)
+
+- **A checkout's `.git` becomes an observed dependency of its settings**, with
+  a test. Passed over: leaving it (needs a repository without
+  `.lf/config.yaml`, reaches a display only), and keying on the resolved
+  private path. The stale case was read from the code, not reproduced.
+- **`GlobalSettings` keeps one home and takes the profile from its key.**
+- **Not built, on the page:** installed harnesses as an observed fact; a typed
+  key per derived value; `load_wave_config`'s `Option`.

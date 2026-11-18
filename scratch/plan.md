@@ -5,9 +5,10 @@
 `lf server run`, Desktop and every `--subscribe` reader stop re-validating
 configuration on each read. Resolved settings and the skill catalog are
 computed once per change to the files they came from; every reading until then
-gets the same shared value. Nothing changes in what any read returns, and bare
-CLI invocations (`lf config settings --explain`, launches, `--setting`) compute
-inline exactly as today.
+gets the same shared value. Nothing changes in what any read returns. A bare
+CLI invocation (`lf config settings --explain`, launches, `--setting`) keeps
+nothing between commands; bare Task details run as one reading for the length
+of the call (`observe::reading`), so Tasks sharing a checkout resolve once.
 
 Seen 2026-11-18 on lf 0.16.0+8abce99e8 with about 40 agents writing: a 3 s
 `sample` of the server put ~1,700 busy samples in `validate_value` and ~95 in
@@ -40,6 +41,7 @@ is kept with the dependencies its computation read.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Derived {
     Settings { checkout: Option<PathBuf>, wave: Option<String>, outside: Outside },
+    GlobalSettings { home: PathBuf, outside: Outside },   // added by qa
     SkillAgents { checkout: PathBuf, wave: String, outside: Outside },
     SkillCatalog { repo: Option<PathBuf>, home: Option<PathBuf>,
                    claude: Option<PathBuf>, codex: Option<PathBuf> },
@@ -120,8 +122,7 @@ callers. Read per call as today; nothing in the sample points at it.
 - Wave named by ID (`files::wave_name` walks `.lf/wave` with `ignore`): resolve
   the name before `derived`; the key holds the name.
 - Main checkout of a worktree (`std::fs` in `git::worktree_root`, under
-  `files::private_path`): fixed for a checkout path; deleting the checkout
-  changes `.lf/config.yaml`, which is a dependency.
+  `files::private_path`): not fixed for a path. See "Left to build".
 - `fs::canonicalize` on skill dirs (`catalog.rs`): symlink retargets show as
   changed `Metadata`/`File`/`Directory` answers for the lexical path.
 - `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `provider_overrides`: resolved to paths
@@ -135,7 +136,7 @@ Everything else on these paths already goes through `observe`
 Launches and mutations are not affected: only the subscription reading has a
 cache, so a stale value could reach a display, never a launched agent.
 
-### What is derived: three values
+### What is derived
 
 1. **Settings for a checkout and Wave.** `config::resolved(repo, wave) ->
    Result<Arc<ResolvedSettings>, LoadError>` is `file_layers` +
@@ -152,9 +153,8 @@ cache, so a stale value could reach a display, never a launched agent.
    one resolve plus one skill load per skill named in any layer. Its
    computation calls `config::resolved_with`, so nesting is used by real
    code. `WaveSetup`'s graph and agent come straight from (1); `machine()`
-   reads the store and stays outside. Known gap in the "key only" rule:
-   `load_skill` reads `HOME` and the provider directories, process-wide in a
-   server, outside this key.
+   reads the store and stays outside. Its skill loads go through
+   `SkillCatalog::load`, so they nest on (3) and its key.
 3. **The skill catalog.** `SkillCatalog::load(repo, home, overrides)` returns
    the shared `Arc<SkillCatalog>`; the walk and each `is_generated` front
    matter parse run once per change under `.lf/skills`, `.claude`, `.agents`,
@@ -270,6 +270,40 @@ After the fixes, same load: 28 samples in `resolve_with`, 17 in
 `validate_value` (base 4,261), server CPU 107% against 181%. `outside()` is 51
 samples; `resolved_placement` is under 10, so placement stays underived.
 
+## Left to build (concept review of the built change, 2026-11-18)
+
+The rule "a computation reads observed facts and its key, nothing else" is
+broken in three places. One implement pass, nothing beyond these:
+
+1. **A checkout's `.git` is a dependency of its settings.** `file_layers`
+   (`rust/loopflow-execution/src/config.rs`) calls `files::private_path`, which
+   reads `.git` through `std::fs` (`git::worktree_root`). A reading that
+   resolves while a Task's worktree is missing or half-made looks for the
+   personal file under the worktree path; when the worktree appears, no
+   observed answer changes, so in a repository with no checked-in
+   `.lf/config.yaml` the Task shows settings without the `lf set` values for
+   as long as a subscription holds the slot. Read from the code, not run.
+   Fix: `observe::exists(&repo.join(".git"))` in the settings computation
+   before `private_path`. Passed over: keying on the resolved private path
+   (a canonicalize and ancestor walk per Task per reading), and routing
+   `git::worktree_root` through `observe` (launches and mutations call it).
+   Not covered, on purpose: a `.git` file rewritten to name another repository.
+2. **`GlobalSettings` has one home.** The key holds `home` and
+   `outside.home`. Keep one: drop the field and read `outside.home`, unless a
+   caller's `store.home_dir()` can differ from `lf_home_dir()`, in which case
+   `home` stays and is the only one the computation uses.
+3. **The global computation takes the forwarded profile from its key.**
+   `remote::apply_document` inside `resolve_global_settings`
+   (`config/placement.rs`) calls `incoming()` and `lf_home_dir()` itself. Pass
+   `outside.remote` and the home in, as `remote::layers` already takes them.
+
+Test, in `read_stream::tests::` or beside
+`readings_share_resolved_settings_until_a_settings_file_changes`: a checkout
+path with no `.lf/config.yaml` and a personal file beside its main checkout;
+a reading through `Cache::capture` before the worktree exists, `git worktree
+add`, `refresh_all`, then `dependencies.changed()` and the next reading shows
+the personal value. It fails on the branch as it stands.
+
 ## Larger than this Task
 
 Left on `scratch/concept-review.html`, not built here:
@@ -281,6 +315,12 @@ Left on `scratch/concept-review.html`, not built here:
   pay that on every invocation and nothing here changes it.
 - A warning about a bad setting, found by a served read, goes to the server's
   stderr. The person editing the file in front of Desktop sees nothing.
+- `outside()` runs before every lookup and stats each harness name along
+  `PATH` (51 samples in qa, more than `resolve_with` now). Installed harnesses
+  as an observed fact would make it a dependency and take it out of the key.
+- A `Derived` variant names a value's identity, not its type; the value is
+  downcast at its one call site.
+- `load_wave_config` returns `Result<Option<Config>>` and never `None`.
 
 ## Docs
 

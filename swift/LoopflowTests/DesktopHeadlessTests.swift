@@ -68,14 +68,12 @@ struct DesktopHeadlessTests {
         #expect(try view.inspect().find(text: "demo · available for review").string() == view.label)
     }
 
-    @Test("The repository roadmap reads Git planning through the ordinary query")
-    func roadmapGitDestinations() async throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("git_destinations.json"))
-        let status = String(decoding: data, as: UTF8.self)
+    @Test("The repository roadmap shows where its plan lives through the ordinary query")
+    func roadmapRepositoryPlan() async throws {
         let roadmap = String(decoding: try Data(contentsOf: fixtures.appendingPathComponent("roadmap_snapshot.json")), as: UTF8.self)
         let model = WorkModel(query: RegistryQuery { args, cwd in
             if args == ["repo", "tracker", "--json"], cwd == "/src/loopflow" {
-                return "{\"destinations\":\(status)}"
+                return #"{"tracker":null,"plan":{"hub":"mini","is_hub":false,"unreachable_since":null,"error":null,"open":[{"owner":"3e1c9a07","field":"title","phase":"queued"}]},"actions":[]}"#
             }
             if args.first == "roadmap" { return roadmap }
             if args.first == "wave" { return "[]" }
@@ -83,10 +81,11 @@ struct DesktopHeadlessTests {
             throw RegistryQueryError("Unexpected command: \(args)")
         }, repoPath: "/src/loopflow")
         await model.refresh()
-        #expect(model.gitDestinations.value?.count == 2)
+        #expect(model.repositoryPlan.value?.plan?.hub == "mini")
         let view = RoadmapView(model: model, onOpenWave: { _ in }, onOpenTask: { _, _ in })
-        let statusView = try view.inspect().find(GitDestinationsView.self)
-        #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
+        let planView = try view.inspect().find(RepositoryPlanView.self)
+        #expect(try planView.find(text: "Plan: hub mini. 1 open.").string() == "Plan: hub mini. 1 open.")
+        #expect(try planView.find(text: "3e1c9a07  title · queued").string() == "3e1c9a07  title · queued")
     }
 
     @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")

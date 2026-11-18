@@ -2664,100 +2664,6 @@
       ],
       "type": "object"
     },
-    "GitDestination": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
-      "properties": {
-        "active": {
-          "type": "boolean"
-        },
-        "conflicts": {
-          "items": {
-            "$ref": "#/$defs/GitDestinationConflict"
-          },
-          "type": "array"
-        },
-        "fetch_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "fetch_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "GitDestinationConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
-      ],
-      "type": "object"
-    },
     "GithubObservation": {
       "description": "The last attempt to refresh one persisted GitHub PR. This metadata lives on\n`TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`\nprocesses without making GitHub the source of truth.",
       "properties": {
@@ -3530,6 +3436,29 @@
         "home",
         "policy",
         "transcripts"
+      ],
+      "type": "object"
+    },
+    "HubOpen": {
+      "description": "One value on its way to the hub: `3e1c9a07  title · queued`.",
+      "properties": {
+        "field": {
+          "description": "The field without its record prefix: `title`, `name`.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.",
+          "type": "string"
+        },
+        "phase": {
+          "description": "`queued`, or `sent` while its answer is outstanding.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "field",
+        "phase"
       ],
       "type": "object"
     },
@@ -5554,6 +5483,52 @@
         "edits",
         "seq",
         "more"
+      ],
+      "type": "object"
+    },
+    "PlanHome": {
+      "description": "The Machine that holds a plan without a tracker.",
+      "properties": {
+        "error": {
+          "description": "Why the last exchange with the hub failed.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hub": {
+          "description": "The hub's name when the plan is on another Machine; `null` when it is\non this one.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "is_hub": {
+          "description": "Whether this Machine is the hub other Machines keep their plan on.",
+          "type": "boolean"
+        },
+        "open": {
+          "description": "Values saved here the hub has yet to confirm, in send order.",
+          "items": {
+            "$ref": "#/$defs/HubOpen"
+          },
+          "type": "array"
+        },
+        "unreachable_since": {
+          "description": "When the hub stopped answering (Unix seconds), while it still does not.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "hub",
+        "is_hub",
+        "unreachable_since",
+        "error",
+        "open"
       ],
       "type": "object"
     },
@@ -14627,9 +14602,8 @@
       "type": "object"
     },
     "TrackerKind": {
-      "description": "Where a planning change goes: Git's journal, or a queued tracker.",
+      "description": "The tracker a queued planning change goes to.",
       "enum": [
-        "git",
         "linear",
         "asana"
       ],
@@ -14656,29 +14630,37 @@
       "type": "object"
     },
     "TrackerStatus": {
-      "description": "What `repo.tracker` answers: the tracker, for Git its destinations with\ntheir import and publication evidence, and every open and lost tracker\naction.",
+      "description": "What `repo.tracker` answers: the tracker, or for a repository without\none where its plan lives, and every open and lost tracker action.",
       "properties": {
         "actions": {
-          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered. On Git, only lost values: Git keeps no queue.",
+          "description": "What the tracker has yet to confirm (open: `queued`, `sent`), in send\norder, and each value it kept over a local one (lost: `conflicted`)\nuntil it is answered.",
           "items": {
             "$ref": "#/$defs/TrackerActionStatus"
           },
           "type": "array"
         },
-        "destinations": {
-          "items": {
-            "$ref": "#/$defs/GitDestination"
-          },
-          "type": "array"
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PlanHome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Where a plan without a tracker lives; `null` with a tracker."
         },
         "tracker": {
-          "description": "`git`, `linear` or `asana`.",
-          "type": "string"
+          "description": "`linear` or `asana`; `null` when the plan is in Loopflow's store.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "tracker",
-        "destinations",
+        "plan",
         "actions"
       ],
       "type": "object"

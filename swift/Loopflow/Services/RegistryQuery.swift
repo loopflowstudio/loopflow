@@ -1040,9 +1040,8 @@ public struct RegistryQuery: Sendable {
             .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
     }
 
-    public func gitDestinations(cwd: String) async throws -> [GitDestination] {
-        struct Status: Decodable { let destinations: [GitDestination] }
-        return try Self.decode(Status.self, from: await serve(.repoTracker(directory: cwd))).destinations
+    public func repositoryPlan(cwd: String) async throws -> RepositoryPlan {
+        try Self.decode(RepositoryPlan.self, from: await serve(.repoTracker(directory: cwd)))
     }
 
     public func localMachineId() async throws -> String {

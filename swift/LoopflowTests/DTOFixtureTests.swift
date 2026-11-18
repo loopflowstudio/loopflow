@@ -452,9 +452,7 @@ struct DTOFixtureTests {
         #expect(sync.actions[2].trackerValue == .string("Linear title"))
         #expect(sync.actions[3].text.contains("linear: null"))
         #expect(sync.actions[1].ownerKind == .project)
-        #expect(sync.actions[5].seq == nil)
-        #expect(sync.actions[5].tracker == .git)
-        #expect(sync.actions[5].text == #"title · conflicted · lost: "Mine" · git: "Peer title""#)
+        #expect(sync.actions.allSatisfy { $0.tracker == .linear })
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TrackerSync.self, from: Data("{}".utf8))
         }
@@ -1002,23 +1000,27 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Git destinations track fetch and publication independently")
-    func gitDestinations() throws {
-        let data = try loadFixtureData("git_destinations.json")
-        let statuses = try JSONDecoder().decode([GitDestination].self, from: data)
-        #expect(statuses[0].fetchError == "remote unavailable")
-        #expect(statuses[0].pendingLocal)
-        #expect(statuses[0].publicationState == "unconfirmed")
-        #expect(statuses[0].importedRevision == "retained-import")
-        #expect(statuses[0].fetchedRevision == "newer-fetch")
-        #expect(statuses[0].conflicts[0].target == "retained-task")
-        #expect(statuses[1].pendingLocal == true)
-        #expect(statuses[1].active)
-        for field in ["conflicts", "pending_local", "fetch_error"] {
-            var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
-            object.removeValue(forKey: field)
+    @Test("A repository plan names its tracker or the Machine that holds it")
+    func repositoryPlan() throws {
+        let entries = try #require(JSONSerialization.jsonObject(with: loadFixtureData("subscribe_frames.json"))
+            as? [[String: Any]])
+        let frame = try #require(entries.first { $0["part"] as? String == "plan_home" }?["frame"] as? [String: Any])
+        let body = try #require(frame["body"] as? [String: Any])
+        let plan = try JSONDecoder().decode(RepositoryPlan.self, from: JSONSerialization.data(withJSONObject: body))
+        #expect(plan.tracker == nil)
+        #expect(plan.plan?.hub == "mini")
+        #expect(plan.plan?.open.first?.phase == "queued")
+        #expect(plan.line.hasPrefix("Plan: hub mini, unreachable since "))
+        #expect(plan.line.hasSuffix(". 1 open."))
+        let linear = #"{"tracker":"linear","plan":null,"actions":[]}"#
+        #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(linear.utf8)).line == "Tracker: linear.")
+        let hub = #"{"tracker":null,"plan":{"hub":null,"is_hub":true,"unreachable_since":null,"error":null,"open":[]}}"#
+        #expect(try JSONDecoder().decode(RepositoryPlan.self, from: Data(hub.utf8)).line == "Plan: this Machine (hub).")
+        for key in ["tracker", "plan"] {
+            var object = body
+            object.removeValue(forKey: key)
             #expect(throws: (any Error).self) {
-                try JSONDecoder().decode(GitDestination.self, from: JSONSerialization.data(withJSONObject: object))
+                try JSONDecoder().decode(RepositoryPlan.self, from: JSONSerialization.data(withJSONObject: object))
             }
         }
     }
@@ -1035,14 +1037,14 @@ struct DTOFixtureTests {
             try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
         }
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
-                                                "activity", "task", "git_destinations"])
+                                                "activity", "task", "plan_home"])
         #expect(frames[0].answers == nil)
         #expect(frames[2].answers == 7)
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
               case .workActivity(let activity?) = frames[4].content,
-              case .gitDestinations(let reading?) = frames[7].content else {
+              case .planHome(let reading?) = frames[7].content else {
             Issue.record("fixture parts changed shape")
             return
         }
@@ -1052,7 +1054,7 @@ struct DTOFixtureTests {
         #expect(!sessions.includesHeadless)
         #expect(activity.scope.task == "LOO-1")
         #expect(reading.repo == "/src/loopflow")
-        #expect(reading.destinations.isEmpty)
+        #expect(reading.plan.plan?.hub == "mini")
         guard case .task(nil) = frames[3].content else {
             Issue.record("a failed reading has no body")
             return

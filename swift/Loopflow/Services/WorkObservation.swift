@@ -73,7 +73,7 @@ public enum WorkRequest: Equatable, Sendable {
 public enum WorkPart: String, CaseIterable, Sendable {
     case task, sessions, planning, selections, activity
     case taskList = "task_list"
-    case gitDestinations = "git_destinations"
+    case planHome = "plan_home"
     case workActivity = "work_activity"
 
     /// The read this part subscriptions for `scope`; nil when the scope shows no such part.
@@ -84,7 +84,7 @@ public enum WorkPart: String, CaseIterable, Sendable {
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
-        case .gitDestinations: return scope.repo.map { .repoTracker(directory: $0) }
+        case .planHome: return scope.repo.map { .repoTracker(directory: $0) }
         case .sessions: return scope.repo.map { .sessionList(directory: $0, headless: scope.headless, after: nil, limit: nil, task: nil) }
         case .task:
             // Without a repository the Task resolves Machine-wide, from no checkout.
@@ -105,9 +105,9 @@ public struct WorkFrame: Sendable {
         public let waves: [WaveSnapshot]
     }
 
-    public struct GitDestinations: Sendable {
+    public struct PlanHomeReading: Sendable {
         public let repo: String
-        public let destinations: [GitDestination]
+        public let plan: RepositoryPlan
     }
 
     public struct Sessions: Sendable {
@@ -139,7 +139,7 @@ public struct WorkFrame: Sendable {
         case selections([WorkViewPlan]?)
         /// The sidebar's started Tasks, as the phone lists them.
         case taskList(WorkViewPlan?)
-        case gitDestinations(GitDestinations?)
+        case planHome(PlanHomeReading?)
         case sessions(Sessions?)
         case task(TaskPart?)
         case workActivity(WorkActivityPart?)
@@ -151,7 +151,7 @@ public struct WorkFrame: Sendable {
             case .planning: WorkPart.planning.rawValue
             case .selections: WorkPart.selections.rawValue
             case .taskList: WorkPart.taskList.rawValue
-            case .gitDestinations: WorkPart.gitDestinations.rawValue
+            case .planHome: WorkPart.planHome.rawValue
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
             case .workActivity: WorkPart.workActivity.rawValue
@@ -228,10 +228,6 @@ public struct WorkFrame: Sendable {
         }
     }
 
-    private struct GitDestinationsReading: Decodable {
-        let destinations: [GitDestination]
-    }
-
     /// Decode one line of `part`'s subscription, read for `scope`.
     public static func decode(part: WorkPart, scope: WorkScope, sequence: Int, line: Data) throws -> WorkFrame {
         func envelope<Body: Decodable>(_: Body.Type) throws -> Envelope<Body> {
@@ -268,10 +264,10 @@ public struct WorkFrame: Sendable {
             let read = try envelope(WorkViewPlan.self)
             return frame(read, .taskList(read.body),
                          wire: Wire(roadmap: nil, waves: nil, sessionPage: nil, taskList: read.body == nil ? nil : line))
-        case .gitDestinations:
-            let read = try envelope(GitDestinationsReading.self)
-            return frame(read, .gitDestinations(read.body.map {
-                GitDestinations(repo: scope.repo ?? "", destinations: $0.destinations)
+        case .planHome:
+            let read = try envelope(RepositoryPlan.self)
+            return frame(read, .planHome(read.body.map {
+                PlanHomeReading(repo: scope.repo ?? "", plan: $0)
             }))
         case .sessions:
             let read = try envelope([SessionRecord].self)

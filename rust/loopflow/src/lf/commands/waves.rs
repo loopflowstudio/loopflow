@@ -1883,7 +1883,7 @@ struct DetailReads<'a> {
     /// Agents already resolved in this reading, by the configuration that chose
     /// them. Checkouts of one repository usually share their files, and resolving
     /// validates every setting, so each distinct configuration resolves once.
-    agents: std::sync::Mutex<HashMap<String, Option<String>>>,
+    agents: std::sync::Mutex<HashMap<String, Option<loopflow_execution::config::Agent>>>,
     /// Each Task's latest Graph and what its execution reads, asked once.
     graphs:
         HashMap<loopflow_model::durable::TaskId, loopflow_execution::graph::process::GraphProcess>,
@@ -1994,7 +1994,7 @@ impl<'a> DetailReads<'a> {
         checkout: &Path,
         wave: Option<&str>,
         personal: &loopflow_execution::config::PersonalSettings,
-    ) -> Option<String> {
+    ) -> Option<loopflow_execution::config::Agent> {
         let resolve = || {
             loopflow_execution::ops::task::resolve_task_agent(checkout, wave, personal, None).ok()
         };
@@ -2074,7 +2074,7 @@ async fn snapshot_task_detail(
         .get(&(task.wave_id.clone(), task.repository_id.clone()))
         .ok_or_else(|| anyhow!("Task {} has no setup reading", task.id))?;
     let agent = reads.agent(task.worktree.as_deref().unwrap_or(repo), wave, personal);
-    let provider = agent.map(|agent| loopflow_execution::config::parse_agent(&agent).0);
+    let provider = agent.map(|agent| agent.harness.as_str().to_owned());
     let runtime = snapshot_task_runtime(&execution, task, status, pending, owner, provider);
     let reference = task_reference(
         facts.issue_urls.get(&task.id).cloned(),

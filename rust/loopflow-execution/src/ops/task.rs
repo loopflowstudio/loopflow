@@ -2183,13 +2183,11 @@ pub fn resolve_task_agent(
     wave: Option<&str>,
     personal: &crate::config::PersonalSettings,
     skill: Option<&crate::graph::Skill>,
-) -> OpsResult<String> {
+) -> OpsResult<crate::config::Agent> {
     let config =
         crate::config::load_wave_config_with(Some(worktree), wave, personal)?.unwrap_or_default();
-    Ok(crate::config::settings::resolve(&config, skill)?
-        .config
-        .agent()?
-        .to_owned())
+    let resolved = crate::config::settings::resolve(&config, skill)?;
+    Ok(crate::config::Agent::parse(resolved.config.agent()?)?)
 }
 
 fn task_configuration_refusal(

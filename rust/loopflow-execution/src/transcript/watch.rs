@@ -21,25 +21,27 @@ use crate::observe::Cache;
 /// that is missing or cannot be watched is logged and left to the reconcile
 /// interval.
 pub fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
-    let opencode = super::home(HarnessKind::OpenCode);
-    [
-        (super::home(HarnessKind::Claude).join("projects"), None),
-        (super::home(HarnessKind::Codex).join("sessions"), None),
-        (super::home(HarnessKind::Pi).join("sessions"), None),
-        (opencode.clone(), Some(super::opencode::store(&opencode))),
-    ]
-    .into_iter()
-    .filter(|(root, _)| root.is_dir())
-    .filter_map(
-        |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
-            Ok(watcher) => Some(watcher),
-            Err(error) => {
-                tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
-                None
-            }
-        },
-    )
-    .collect()
+    HarnessKind::ALL
+        .into_iter()
+        .map(|kind| {
+            let harness = kind.harness();
+            let home = super::home(kind);
+            (
+                harness.transcript_root(&home).0,
+                harness.transcript_watch_store(&home),
+            )
+        })
+        .filter(|(root, _)| root.is_dir())
+        .filter_map(
+            |(root, store)| match watch_root(&root, store, Arc::downgrade(cache)) {
+                Ok(watcher) => Some(watcher),
+                Err(error) => {
+                    tracing::warn!(root = %root.display(), %error, "Could not watch transcripts");
+                    None
+                }
+            },
+        )
+        .collect()
 }
 
 /// Watch `root`; every event under it hints `store` when one is given, else

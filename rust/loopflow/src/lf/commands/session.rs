@@ -805,7 +805,6 @@ async fn resume(
     let store = open_shared_store().await?;
     let cwd = std::env::current_dir()?;
     drop(progress);
-    let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
@@ -821,7 +820,13 @@ async fn resume(
         drop(launch);
         let id = session.id;
         return tokio::task::block_in_place(|| {
-            crate::lf::commands::run::resume(&id, message, cli, named_work)
+            let kind = loopflow_execution::transport::LaunchInput {
+                batch: true,
+                interactive: false,
+                has_prompt: true,
+            }
+            .kind();
+            crate::lf::commands::run::resume(&id, message, cli, kind)
         })
         .map(|()| None);
     }
@@ -834,7 +839,6 @@ async fn resume(
         request_id,
         fork,
         connection.json || cli.json,
-        named_work,
     )
     .await?;
     match opening {
@@ -873,7 +877,6 @@ async fn reopen(
     request_id: Option<&str>,
     fork: bool,
     json: bool,
-    named_work: bool,
 ) -> anyhow::Result<Opening> {
     let id = select(store, directory, target).await?;
     loopflow_execution::ops::human_session::open(
@@ -885,7 +888,6 @@ async fn reopen(
         fork,
         !connection.prepare,
         json,
-        named_work,
     )
     .await
 }
@@ -907,8 +909,7 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                 ..
             } if connection.prepare => {
                 let target = connection.target(cli, id.as_deref())?;
-                let named_work = connection.work_flag(cli).is_some();
-                let mut record = reopen(
+                reopen(
                     &store,
                     directory,
                     target,
@@ -917,16 +918,9 @@ pub(crate) fn prepared(cli: &crate::lf::Cli, directory: &Path) -> anyhow::Result
                     None,
                     *fork,
                     false,
-                    named_work,
                 )
                 .await?
-                .prepared()?;
-                // The opening terminal resumes this Session by id, managed
-                // when the prepare named its Work.
-                if let Some(flag) = connection.work_flag(cli) {
-                    record.open_argv.extend(flag.map(str::to_string));
-                }
-                Ok(record)
+                .prepared()
             }
             SessionCommand::New {
                 id,
@@ -1021,6 +1015,17 @@ async fn restarted(
 }
 
 /// Finish a successful Session connection after its thin relay has returned.
+/// Whether opening a conversation answers with its Session record once the
+/// conversation returns, including one launched in this process.
+pub fn returns_record(command: &SessionCommand, cli: &crate::lf::Cli) -> bool {
+    match command {
+        SessionCommand::Resume { connection, .. } | SessionCommand::New { connection, .. } => {
+            connection.json || cli.json
+        }
+        _ => false,
+    }
+}
+
 pub fn print_returned(id: &str) -> anyhow::Result<()> {
     tokio::runtime::Runtime::new()?.block_on(async {
         let store = open_shared_store().await?;

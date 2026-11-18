@@ -1624,16 +1624,6 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    /// The Task or Wave this command names, as the flag and value that name
-    /// it. Naming one makes the resume managed, as `--task` or `--wave` does
-    /// for a launch, also beside a Session id.
-    pub fn work_flag<'a>(&'a self, cli: &'a Cli) -> Option<[&'a str; 2]> {
-        let task = self.task.as_deref().or(cli.task.as_deref());
-        let wave = self.wave.as_deref().or(cli.wave.as_deref());
-        task.map(|task| ["--task", task])
-            .or_else(|| wave.map(|wave| ["--wave", wave]))
-    }
-
     pub fn target<'a>(
         &'a self,
         cli: &'a Cli,
@@ -4211,7 +4201,6 @@ mod tests {
                 connection.target(&cli, id.as_deref()).unwrap(),
                 loopflow_execution::ops::human_session::SessionTarget::Session("session-id")
             ));
-            assert!(connection.work_flag(&cli).is_some());
         }
         assert!(Cli::try_parse_from([
             "lf", "--wave", "infra", "session", "resume", "--task", "LOO-1",

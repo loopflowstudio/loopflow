@@ -69,7 +69,7 @@ pub(super) fn last_written(store: &Path, id: &str) -> Option<i64> {
 
 /// The conversations last written in `cwd` since `since`, in Unix seconds,
 /// newest first, with when.
-pub(super) fn written_in(store: &Path, cwd: &Path, since: i64) -> Vec<(String, i64)> {
+pub(crate) fn written_in(store: &Path, cwd: &Path, since: i64) -> Vec<(String, i64)> {
     let read = || -> Result<Vec<(String, i64)>> {
         let connection = open(store)?;
         let mut statement = connection.prepare(

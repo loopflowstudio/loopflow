@@ -2826,7 +2826,9 @@ fn execution_boundary_resolves_linked_git_and_control_roots() {
     std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     std::env::set_var("LF_HOME", &control);
 
-    let boundary = checkout_execution_boundary(&worktree, "codex").unwrap();
+    let boundary =
+        checkout_execution_boundary(&worktree, &crate::config::Agent::parse("codex").unwrap())
+            .unwrap();
 
     assert_eq!(boundary.writable_roots.len(), 2);
     assert!(boundary
@@ -2834,7 +2836,11 @@ fn execution_boundary_resolves_linked_git_and_control_roots() {
         .contains(&main.join(".git").canonicalize().unwrap()));
     assert!(boundary.writable_roots.contains(&control));
     assert_eq!(
-        checkout_execution_boundary(&worktree, "pi:fixture/model").unwrap(),
+        checkout_execution_boundary(
+            &worktree,
+            &crate::config::Agent::parse("pi:fixture/model").unwrap()
+        )
+        .unwrap(),
         boundary
     );
 }

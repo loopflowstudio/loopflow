@@ -331,7 +331,7 @@ fn admit_ci_fix(
         }
         drop(lock);
         let context = crate::os_process::execution_context().map_err(repair_error)?;
-        let argv = vec![
+        let mut argv = vec![
             context.lf_bin.to_string_lossy().to_string(),
             "--batch".into(),
             "--output-schema".into(),
@@ -345,14 +345,13 @@ fn admit_ci_fix(
                 &earlier_attempts(&store, &incident.identity)?,
             ),
         ];
-        let work = landing
-            .task_id
-            .as_ref()
-            .map(|id| format!("task:{id}"))
-            .unwrap_or_default();
+        if let Some(task) = &landing.task_id {
+            argv.splice(1..1, ["--task".to_owned(), task.to_string()]);
+        }
         let environment = [
-            (crate::ops::WORK_DECLARATION_ENV, work.as_str()),
+            (crate::ops::WORK_DECLARATION_ENV, ""),
             ("LF_USER_NAME", ""),
+            (crate::journal::GRAPH_STEP_ENV, "worker"),
         ];
         let worker = crate::os_process::detached::start_lf(
             &landing.worktree,

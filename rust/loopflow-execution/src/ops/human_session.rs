@@ -78,6 +78,8 @@ pub struct ConversationLaunch {
     /// The input's prepared capture, which the launch publishes rather than a new one.
     pub prepared_capture: Option<String>,
     pub lock: LaunchLock,
+    /// The kind delegation chose: a detached Work launch stays a work session.
+    pub kind: crate::harness::LaunchKind,
 }
 
 /// A Session launch lock, held until the provider is recorded. Clones share
@@ -555,7 +557,10 @@ pub async fn list(
         selection.limit = 0;
     }
     let on = match &filter.on {
-        Some(raw) => Some(SessionOn::resolve(raw)?),
+        Some(raw) => Some(
+            crate::config::Agent::parse(raw)
+                .map_err(|_| anyhow!("--on requires a harness or harness:model"))?,
+        ),
         None => None,
     };
     let mut sessions = Vec::new();
@@ -591,8 +596,9 @@ pub async fn list(
                 || workspaces.in_task_checkout(Path::new(&session.cwd), &wave_tasks))
     };
     if association_filter {
-        sessions
-            .retain(|session| in_work(session) && on.as_ref().is_none_or(|on| on.selects(session)));
+        sessions.retain(|session| {
+            in_work(session) && on.as_ref().is_none_or(|on| runs_on(on, session))
+        });
         sessions = sessions
             .into_iter()
             .take(if filter.limit == 0 {
@@ -655,25 +661,10 @@ pub fn listed(store: &SharedStore, id: &str) -> Result<Option<SessionRecord>> {
     Ok(Some(session))
 }
 
-/// A native harness, optionally narrowed to one model.
-struct SessionOn {
-    harness: crate::harness::HarnessKind,
-    model: Option<String>,
-}
-
-impl SessionOn {
-    fn resolve(raw: &str) -> Result<Self> {
-        let (harness, model) = crate::config::parse_agent(raw);
-        let harness = crate::harness::HarnessKind::parse(&harness)
-            .ok_or_else(|| anyhow!("--on requires a harness or harness:model"))?;
-        Ok(Self { harness, model })
-    }
-
-    fn selects(&self, session: &SessionRecord) -> bool {
-        let Self { harness, model } = self;
-        session.provider.as_deref() == Some(harness.as_str())
-            && (model.is_none() || *model == session.model)
-    }
+/// Whether `session` ran on the `--on` harness, and on its model when one is named.
+fn runs_on(on: &crate::config::Agent, session: &SessionRecord) -> bool {
+    session.provider.as_deref() == Some(on.harness.as_str())
+        && (on.model.is_none() || on.model == session.model)
 }
 
 /// Passive listing reads record metadata and exact local client receipts only.
@@ -803,6 +794,7 @@ async fn fresh_launch(
     store: &SharedStore,
     session: &LfSession,
     launch_lock: File,
+    kind: crate::harness::LaunchKind,
 ) -> Result<ConversationLaunch> {
     let config =
         crate::agent::resolve_session_config(session, serde_yaml_ng::Value::Null, None, false)?;
@@ -815,13 +807,14 @@ async fn fresh_launch(
     let input = session.input_key()?;
     Ok(ConversationLaunch {
         session_id: session.id.to_string(),
-        agent: config.agent()?.to_owned(),
+        agent: config.agent.to_string(),
         cwd: session.cwd.clone(),
         work,
         skill: session.skill.clone(),
         first_turn: first_turn(session.request.as_deref()).to_owned(),
         prepared_capture: capture_is_prepared(input)?.then(|| input.clone()),
         lock: LaunchLock::new(launch_lock),
+        kind,
     })
 }
 
@@ -873,7 +866,6 @@ pub async fn open(
     fork: bool,
     resume: bool,
     json: bool,
-    named_work: bool,
 ) -> Result<Opening> {
     use SessionResumeIntent::{NewThread, Resume, Start, TakeOver, View};
     crate::agent_input_timing::record("connect_begin", session_id);
@@ -978,12 +970,8 @@ pub async fn open(
         TakeOver | Resume | Start => {}
     }
     let result = surface(store, &session).await?;
-    let Some(launch_lock) = crate::transport::delegate_session(
-        json.then_some(session.id.as_str()),
-        session.interactive.then_some(session.id.as_str()),
-        named_work,
-        launch_lock,
-    )?
+    let Some((kind, launch_lock)) =
+        crate::transport::delegate_session(&session.id, json, session.interactive, launch_lock)?
     else {
         return Ok(Opening::Done(result));
     };
@@ -1001,7 +989,7 @@ pub async fn open(
         ));
     }
     Ok(
-        match open_waiting_locked(store, session, launch_lock, named_work).await? {
+        match open_waiting_locked(store, session, launch_lock, kind).await? {
             Some(launch) => Opening::Launch(launch),
             None => Opening::Done(result),
         },
@@ -1106,10 +1094,10 @@ async fn open_prepared(
     id: &str,
     json: bool,
 ) -> Result<Option<ConversationLaunch>> {
-    if crate::transport::delegate_prepared_session(id, json)? {
-        return Ok(None);
+    match crate::transport::delegate_prepared_session(id, json)? {
+        crate::transport::Delegation::Delegated => Ok(None),
+        crate::transport::Delegation::Here { kind } => open_waiting(store, id, kind).await,
     }
-    open_waiting(store, id, false).await
 }
 
 /// Why `lf resume` refuses a Run (a headless conversation, alone or a Graph
@@ -1159,7 +1147,7 @@ fn departure_here() -> crate::process::Departure {
 async fn open_waiting(
     store: &SharedStore,
     id: &str,
-    named_work: bool,
+    kind: crate::harness::LaunchKind,
 ) -> Result<Option<ConversationLaunch>> {
     crate::agent_input_timing::record("launch_lock_begin", id);
     let lock_id = id.to_string();
@@ -1173,7 +1161,7 @@ async fn open_waiting(
         .await?
         .ok_or_else(|| session_not_found(id))?;
     let session = primary::admit_workspace(store, session).await?;
-    open_waiting_locked(store, session, launch_lock, named_work).await
+    open_waiting_locked(store, session, launch_lock, kind).await
 }
 
 /// `open_waiting` for a Session admitted to its workspace under `launch_lock`.
@@ -1181,7 +1169,7 @@ async fn open_waiting_locked(
     store: &SharedStore,
     session: LfSession,
     launch_lock: File,
-    named_work: bool,
+    kind: crate::harness::LaunchKind,
 ) -> Result<Option<ConversationLaunch>> {
     let id = session.id.clone();
     let mut launch_lock = Some(launch_lock);
@@ -1193,8 +1181,7 @@ async fn open_waiting_locked(
     // An input launches on the provider it recorded, so another harness
     // selected here appends its own instead of reopening native history.
     let handoff = handoff_agent(&session).is_some();
-    if !handoff && resume_native_session(store, session.input_key()?, &mut launch_lock, named_work)?
-    {
+    if !handoff && resume_native_session(store, session.input_key()?, &mut launch_lock, kind)? {
         return Ok(None);
     }
     crate::agent_input_timing::record("fresh_launch_selected", &id);
@@ -1217,6 +1204,7 @@ async fn open_waiting_locked(
         store,
         &session,
         launch_lock.expect("an unresumed Session retains its launch lock"),
+        kind,
     )
     .await
     .map(Some)
@@ -1685,7 +1673,7 @@ pub(crate) fn resume_native_session(
     store: &SharedStore,
     artifact_key: &String,
     launch_lock: &mut Option<File>,
-    named_work: bool,
+    kind: crate::harness::LaunchKind,
 ) -> Result<bool> {
     let Some(session) = store.sqlite.session_for_artifact(artifact_key)? else {
         return Ok(false);
@@ -1696,7 +1684,9 @@ pub(crate) fn resume_native_session(
     let native = NativeSession::of(&session)?;
     let provider_session = store.sqlite.input_provider_session(artifact_key)?;
     if provider_session.is_none() {
-        if native.provider != "codex" {
+        if !crate::harness::HarnessKind::parse(native.provider)
+            .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
+        {
             return Ok(false);
         }
         // A failed Codex bootstrap may have no provider history yet. Reopen its
@@ -1719,7 +1709,7 @@ pub(crate) fn resume_native_session(
         provider_session.as_ref(),
         &BTreeMap::new(),
         launch_lock.take(),
-        named_work,
+        kind,
     )?;
     Ok(true)
 }

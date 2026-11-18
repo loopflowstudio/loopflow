@@ -1781,10 +1781,9 @@ body:has(.home-page), html:has(.home-page) { overflow-x: visible; }
         </header>
 <p>Loopflow records commands, preserves agent conversations, and drives Graphs.
 Process records an lf command and its outcome; LfSession records a conversation; a Graph is one lf process
-and the step processes it starts. An agent runs in one of three places: in the
-command that launched it, in a terminal the Machine server's holder keeps, or
-under a detached Graph process. <a href="#what-runs-on-a-machine">What runs on a Machine</a>
-is the whole process model.</p>
+and the step processes it starts. <a href="#what-runs-on-a-machine">What runs on a Machine</a>
+shows where chats, batches, work sessions and workers run and which processes
+keep them alive.</p>
 <p>This guide specifies the accepted model. The reference owns
 <a href="https://loopflow.studio/architecture/reference-cutover#cutover-status">cutover status</a>, the remaining work
 map and the checked current-source inventory.</p>
@@ -1797,8 +1796,8 @@ lives in <a href="https://loopflow.studio/architecture/reference">Architecture R
 </code></pre>
 <p>That command discovers <code>implement</code>, assembles its context, chooses a provider,
 records its Process, reserves an LfSession, captures the input, then launches the
-provider. It needs no Wave, Task, or server process. The conversation persists
-after that command exits; a later command can connect to the same LfSession.</p>
+provider. It needs no Wave, Task, or server process. The LfSession and its
+history survive the command, so a later command can reopen the conversation.</p>
 <pre tabindex="0"><code class="language-text">request
   |
   v
@@ -1977,75 +1976,63 @@ ps -axo command | grep '^lf '
 <p>Three processes stay up: one Machine server, a holder for each build that
 still has agents, and a Graph process for each running Graph. Every other <code>lf</code>
 is a command that ends.</p>
-<pre tabindex="0"><code class="language-text">your terminal            lf &lt;skill&gt; ──────────────────────────► agent        here
+<pre tabindex="0"><code class="language-text">your terminal            lf &lt;skill&gt; ──────────────────────────► agent        chat
+script or pipe           lf -b &lt;skill&gt; ───────────────────────► agent        batch
 
 your terminal ─ view ─┐
-Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   held
+Desktop pane  ─ view ─┼─► Machine server ─► holder ─► PTY ─► agent or shell   work session or Desktop shell
 phone         ─ view ─┘         │
                                 └─ store, hooks, steers, Work reads and writes
 
-lf task run / lf ship / landing ─► Graph process ─► step lf ─► agent          detached
+lf task run / lf ship ──────────► Graph process ─► step lf ─► agent          worker
         │                                │
         └─ one startup line, then gone   └─ logs/graph-&lt;id&gt;.log
 </code></pre>
-<p>A launch runs in exactly one of three places, chosen once in
-<code>transport::delegate</code>:</p>
+<p>Transport selects one of the <a href="https://loopflow.studio/docs/glossary#loopflows-words">four launch kinds</a>
+before delegation. Managed launches report turns to the Machine server and
+require it at startup.</p>
 <table tabindex="0">
 <thead>
 <tr>
-<th></th>
-<th>Here</th>
-<th>Held</th>
-<th>Detached</th>
+<th>Launch</th>
+<th>Reports turns</th>
+<th>Where the agent runs</th>
+<th>Examples</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>What</td>
-<td><code>lf &lt;skill&gt;</code>, <code>lf graph …</code>, any bare <code>-b</code> or piped run, every headless Graph step</td>
-<td>Task, Wave and repository conversations; Desktop shells; a bare Session a Desktop pane or framed <code>lf --machine</code> view opens</td>
-<td>Graph launches, landing watchers, <code>lf ship</code>, a <code>-b</code> or piped Work command</td>
-</tr>
-<tr>
-<td>Parent of the agent</td>
-<td>The launching <code>lf</code>, in its caller's terminal or pipe</td>
-<td>The holder, on a PTY</td>
-<td>A step <code>lf</code> under the Graph process</td>
-</tr>
-<tr>
-<td>Ends with</td>
-<td>Its caller</td>
-<td>Its agent quitting, or its Task closing</td>
-<td>Its Graph</td>
-</tr>
-<tr>
-<td>Seen through</td>
-<td>The terminal it runs in</td>
-<td>Any number of views, all live</td>
-<td>Its log, <code>lf task status</code>, the Session's history</td>
-</tr>
-<tr>
-<td>Needs the server</td>
+<td>Chat</td>
 <td>No</td>
-<td>Yes; it fails rather than fall back</td>
-<td>To start, no</td>
+<td>In the caller's terminal, which owns its lifetime</td>
+<td><code>lf &lt;skill&gt;</code> at a terminal, including <code>lf research --task LOO-12</code></td>
+</tr>
+<tr>
+<td>Batch</td>
+<td>No</td>
+<td>Headless under the caller, returning output to it</td>
+<td><code>lf -b &lt;skill&gt;</code></td>
+</tr>
+<tr>
+<td>Work session</td>
+<td>Yes</td>
+<td>On a PTY in a holder, independent of its viewers</td>
+<td>Task, Wave and repository conversations, or a conversation opened in a held terminal through Desktop or a framed <code>lf --machine</code> view</td>
+</tr>
+<tr>
+<td>Worker</td>
+<td>Yes</td>
+<td>Headless, with its lifetime set by the step or caller</td>
+<td>Headless steps of <code>lf task run</code> or <code>lf ship</code>, landing's <code>ci-fix</code>, or a Discord Wave answer</td>
 </tr>
 </tbody>
 </table>
-<p>Work decides between Here and the other two, except that a Desktop pane or
-framed <code>lf --machine</code> view holds a bare Session too: a command that names a
-Task or Wave, or reopens a Session bound to one, is Work, and a plain <code>lf</code>
-typed in a Task's checkout is not. A terminal decides between Held and Detached: Work
-someone views is held, Work nobody views is detached. Nothing wraps a headless
-run in a terminal, and nothing hosts a conversation in a process of its own.</p>
-<p>Detached is a place a launch runs. <code>lf session list</code> also prints <code>detached</code>
-as a Session state, meaning a held conversation no view is showing; the two
-are unrelated, and user docs keep the word for the Session state only.</p>
-<p>Hooks follow Work, not the place. A bare agent gets two, which print the
-context block at start and after compaction from files in the checkout. An
-agent launched for a Task or Wave (a held conversation, or a Graph step, which
-<code>lf task run</code> starts with <code>--task</code>) also reports turn and tool boundaries to
-the server and takes steers from it, so its launch starts the server first.</p>
+<p>The checkout, <code>--task</code> and <code>LF_AS</code> supply Task attribution. Usage counts toward
+that Task, and hooks on every launch read the Session's steers from the store,
+including steers for that Task. Chats and batches use the launch's context;
+work sessions and workers also report boundaries so the server can refresh it.</p>
+<p>Desktop Task shells use held terminals too. <code>lf session list</code> shows
+<code>detached</code> when a running conversation has no view.</p>
 <table tabindex="0">
 <thead>
 <tr>
@@ -2094,8 +2081,8 @@ and the server. The holder never opens it.</p>
 starts one now, and nothing sweeps them. <code>lf resume</code> of one, or opening its
 Desktop pane, restarts it: lf ends that process by its verified pid and birth,
 waits for it to exit and resumes the thread from provider history where any
-resume of it would run: held for Work or a Desktop pane, in the terminal for a
-bare <code>lf resume</code>. One it cannot verify, or that does not exit, keeps running
+resume of it would run: in a held terminal for a work session, in the caller's
+terminal for a chat. One it cannot verify, or that does not exit, keeps running
 and the message names its pid.</p>
 <p>The <a href="https://github.com/loopflowstudio/loopflow/blob/main/rust/loopflow-execution/src/transport/README.md">transport README</a> owns the
 holder and view protocols; the

@@ -496,8 +496,7 @@ shell / automation / Loopflow.app
 ```
 
 [What runs on a Machine](index.md#what-runs-on-a-machine) is the process
-model: a launch runs here, held by the Machine server's holder, or detached
-under a Graph process. Wave operations are finite attributed conversations.
+model and its four launch kinds. Wave operations are finite attributed conversations.
 Each Task Graph runs through the common Graph runner. Cron invokes commands on schedule;
 local PR supervision watches and repairs delivery in the invoking process.
 

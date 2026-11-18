@@ -847,7 +847,14 @@ impl RunningGraph<'_> {
             tokio::process::Command::new(loopflow_execution::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
-        command.env(loopflow_execution::journal::GRAPH_STEP_ENV, "1");
+        command.env(
+            loopflow_execution::journal::GRAPH_STEP_ENV,
+            if self.task_run.is_some() {
+                "worker"
+            } else {
+                "bare"
+            },
+        );
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");

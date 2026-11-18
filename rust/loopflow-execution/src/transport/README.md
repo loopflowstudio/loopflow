@@ -10,9 +10,9 @@ ps -axo command | grep '^lf '
 ```
 
 [What runs on a Machine](../../../../docs/dev/index.md#what-runs-on-a-machine)
-is the model: a launch runs here, held or detached, and hooks follow Work, not
-the place. This README owns the holder and view protocols, headless launches,
-exit settlement and Desktop shells.
+is the model: commands choose lifetime independently of Task attribution.
+This README owns the holder and view protocols, headless launches, exit
+settlement and Desktop shells.
 
 ## Held terminals
 
@@ -21,22 +21,29 @@ holder to start the agent on a PTY and keeps everything else: the terminal
 registry, one libghostty-vt terminal per held terminal, views, viewing
 records, queued input, the child's control requests and exit settlement.
 
-`transport::delegate` chooses the place once:
+Transport selects a `LaunchKind` before `delegate` carries it out. Launches
+are bare or managed, with [four launch names](../../../../docs/glossary.md#loopflows-words).
+Only a work session goes to a held terminal; every other kind runs in its
+caller's process.
 
-| Launch | Runs |
-|---|---|
-| `lf task run` or an interactive `lf ship` step at a terminal, `lf resume --task`, a Task's primary conversation, Wave session commands | held |
-| A repository's conversation (`lf resume` in a checkout with no Task), from a terminal or a Desktop pane | held |
-| `lf resume SESSION` of a Session bound to a Task or Wave | held |
-| A bare Session opened through a Desktop pane or a framed `lf --machine` view | held, with the two bare hooks |
-| Desktop Task shells | held, with no hooks |
-| `lf <skill>`, `lf graph …`, `lf -i` at a terminal; a repository conversation recorded before it was managed (no `work_source`) | here, as the terminal's foreground program |
-| A bare `-b` or piped run, every headless Graph step | here, as the caller's child |
-| Graph launches, landing watchers, `lf ship`, a `-b` or piped Work command | [detached](#headless-work) |
+| Command | Launch | Lifetime |
+|---|---|---|
+| Direct `lf`, skill or Graph launch in the caller's terminal or pipe, with or without `--task`, `--wave` or `LF_AS` | chat or batch | its caller or terminal |
+| `lf -b resume <ID> --message TEXT` | batch; a Graph's correction turn inside a Task run is a worker | one turn, then exits |
+| Resume a chat with no message | chat | its terminal |
+| Resume a bound or primary Session, or open a Task, Wave or repository conversation | work session | held interactive terminal, independent of its viewer |
+| Open a conversation in a held terminal through a Desktop pane or framed `lf --machine` view | work session | held interactive terminal, independent of its viewer |
+| Headless steps of `lf task run` or `lf ship`, and the `ci-fix` run landing starts | worker | headless until the step or repair ends |
+| A Discord answer for a Wave | worker | returns the answer to the bridge |
+| Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-A held launch calls `session.start` and becomes a view of the returned
-terminal. With the server unreachable it fails with `Loopflow server is not
-running; run lf server status` and starts nothing in its place. The one launch
+`lf task run` starts no agent itself. `transport::detach_current` reruns it
+detached from its terminal so the Graph outlives the caller; `lf -b task run`
+waits for it.
+
+To open a work session from the CLI, `lf` calls `session.start` and becomes
+a view of the returned terminal. With the server unreachable it fails with
+`Loopflow server is not running; run lf server status`. The one launch
 nobody views, a Task's background conversation, goes unstarted instead and its
 Graph runs on.
 
@@ -45,38 +52,30 @@ foreground program, such as Rex, shows `lf` there, not the agent. Attaching
 never creates: a view of a Session whose terminal is gone says so and offers
 resume.
 
-### Which launches are managed
+### Launch lifetime and Task membership
 
-A launch is managed when it comes through a Task, Wave or repository
-conversation command, including those Desktop opens. `--task` and `--wave` (a
-Task or Wave conversation passes them, and `lf task run` passes `--task` to
-its Graph's agent steps) bind it as `WorkSource::Declared`, and the launch
-carries that as `Holder::Server` (`AgentConfig::holder`). Beside a Session id,
-`--task`/`--wave` make the resume managed and the id still selects: Desktop's
-Task and Wave workspaces prepare with `lf session resume [ID] --task X
---prepare`, and the `open_argv` it gets back is `lf session resume ID --task
-X`. Reopening a recorded conversation by id alone names no Work, so there the
-Session row decides: `SqliteStore::is_bare` is false for `declared` or `bound`
-Work and for a scope's primary conversation.
+A command chooses the launch kind; the checkout, `--task` and `LF_AS` choose which
+Task it belongs to. Every launch belonging to a Task counts toward its usage
+and receives its steers. Work sessions and workers report turn
+boundaries to the Machine server; chats and batches read their steers directly.
 
-A bare `lf` typed inside a Task's checkout stays bare and records the Task as
-its ancestry; its usage and time still count toward the Task. So do a child
-run started by a Session's agent, which that agent steers, and plain `lf
-<skill>`. Desktop adds no mark: an agent started from a Desktop shell is bare.
-Design the bare path for subagents started by a Task's agent, not a person at
-a prompt: nobody watches, the caller waits on the exit and reads the output,
-and the run ends with its parent.
+`delegate` returns either a completed delegation or `Here { kind }`. Direct
+launches outside a held terminal or worker step choose between a chat and a
+batch. `--batch` selects a batch. Otherwise `--interactive`, a terminal or no
+prompt selects a chat. Reopening a Session with no message reads its binding
+and primary scope once before `delegate`. Chats reopen as chats, and bound and
+primary conversations reopen as work sessions. A Desktop pane or a framed
+`lf --machine` viewer is no terminal a chat can own, so a Session it reopens
+is a work session the holder keeps.
+An unreadable store falls back to a work session and logs a recording gap.
 
-### Bare conversations at a terminal
+### Chats at a terminal
 
-Bare conversations typed at a terminal (`lf`, `lf <skill>`, or `lf resume` of
-an unmanaged Session) run as the terminal's foreground process-group leader
-with only the context hooks, and closing the terminal ends them.
-`os_process::foreground` hands the terminal over before exec and takes it back
-after; a provider stopped with Ctrl+Z stops lf too, and `fg` continues both.
-Opening a bare Session somewhere else starts a new process in the same Session
-from the provider's history; a process still open elsewhere is not one `lf`
-stops.
+Chats started with `lf` or a skill run as the terminal's foreground process-group
+leader. Closing the terminal ends them. `os_process::foreground` hands over
+the terminal before exec and takes it back after; Ctrl+Z stops lf with its
+provider and `fg` continues both. `lf resume` reopens a chat in
+its terminal too.
 
 ### Identity
 
@@ -165,9 +164,7 @@ reported as such, never given an invented exit code.
 A Claude launcher hands the server what it would record at exit, then execs
 into the provider, so Claude is the holder's direct child and no `lf -i` waits
 beside it; the server records the provider's exit, settles its capture and
-reports where the conversation moved. Interactive Graph steps keep their
-launcher so each step settles before the Graph continues. A Codex launcher
-does the same into its client, which talks to its app-server directly. The
+reports where the conversation moved. A Codex launcher does the same into its client, which talks to its app-server directly. The
 server's lifetime worker checks that client's attachment every two seconds
 and stops it when the conversation moves; a failed store read leaves it
 running, and the byte-handling loop never waits for that read. OpenCode keeps
@@ -302,10 +299,11 @@ view types: `lf resume` here adds one more view and leaves the others open, and
 a draft typed in one shows in all of them. `lf resume SESSION --json` prints
 the Session record after a successful return, including detaching. Terminal
 traffic does not wait for store reads; the final record is read after relaying
-ends. `lf resume SESSION --prepare --json` returns the one command Desktop
-runs, without opening a socket or starting a provider. Desktop decides from the
-record's actions whether showing a pane reattaches: a held Session offers
-reveal; an ended Session waits for an explicit open.
+ends. When stdout is no terminal it holds only that record, and the terminal's
+output goes to stderr. `lf resume SESSION --prepare --json` returns the one
+command Desktop runs, without opening a socket or starting a provider. Desktop
+decides from the record's actions whether showing a pane reattaches: a held
+Session offers reveal; an ended Session waits for an explicit open.
 
 `lf session rename SESSION 'Resume repair'` updates the attached terminal
 title, including Rex and other terminals that support OSC titles. Reattaching
@@ -506,27 +504,18 @@ ps -axo ppid,command | grep 'graph run'
 # 1 lf --agent claude --task task_… graph run
 ```
 
-Nothing hosts headless work (`os_process::detached`). A bare `-b` or piped
-execution, and every headless Graph step, runs in the caller's process and its
-agent is that process's child, so it ends with its caller and its stdout and
-stderr are the caller's. Work that must outlive its caller (Graph launches,
-landing watchers, `lf ship`, a `-b` or piped Work command) is spawned with
-`setsid`, stdin from `/dev/null` and every inherited descriptor closed except
-release locks and worktree leases. It gets one more pipe, named by
-`LF_LAUNCHER_FD`: the child writes its LfProcess ID there once admitted, and
-`released` when it lets its launcher go. Server launches, landing watchers and
-ship restarts read the ID and append the child's output to
-`logs/detached.log`; a pipe that closes without an ID leaves delivery unknown,
-and nothing is launched again. A `-b` or piped Work command prints the child's
-stdout and stderr as they grow and exits with its status, or with success
-once a Task run or ship lets it go after naming its Graph log. A piped
-`lf session resume` of a Task conversation also passes its stdin on while it
-waits, so piped input reaches the agent. Killing that caller leaves the work
-running.
+Nothing hosts headless work (`os_process::detached`). Batches and direct
+headless Graphs run with their caller. Task Graph workers, landing watchers
+and delivery controllers that must outlive the command use `setsid`, stdin
+from `/dev/null` and closed inherited descriptors except release locks and
+worktree leases. Task steps themselves wait inside their Graph's process tree.
 
-No PTY, view protocol or screen is involved. Hooks, turn recording and
-steers work as they do for any headless run; the child's own process records
-its exit.
+`LF_LAUNCHER_FD` carries the admitted LfProcess ID and a `released` message.
+Server launches, landing watchers and ship restarts record the ID and append
+output to `logs/detached.log`. A pipe closing without an ID leaves delivery
+unknown; nothing launches again on that uncertainty. Workers report turns and
+read Task steers while running without a PTY, viewer or screen. Their own
+process records their exit.
 
 ## Exit and settlement
 
@@ -560,7 +549,7 @@ reopens provider history without starting a turn.
 
 Desktop creates a shell once, on the Task's recorded Machine, in a terminal
 that Machine's holder keeps. The shell is plain: no hooks, no steers, and an
-`lf` typed in it is bare. Its private runtime in `desktop::shells` owns
+`lf` typed in it starts a chat. Its private runtime in `desktop::shells` owns
 execution receipts, startup, reconnect and Close. A Linux Machine runs the
 same server and holder under systemd; no Desktop app is needed there. Machine
 routing carries the same view protocol across SSH. There is no Task shell

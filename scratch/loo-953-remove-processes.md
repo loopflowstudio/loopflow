@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, handoff attach deleted)
+## Status (2026-11-17, lf-row readers converted)
 
 LOO-936 merged as #1965 (`fb14b674c9`) and #1964 with it; synced at
 `ac93e4c0e7`, resolved against the LOO-936 branch history (main's tree
@@ -23,86 +23,80 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 (reserve and handoff write them, settlement clears them, liveness by
 `run_evidence`); `detached::start_lf` returns `Started { id, pid,
 os_started_at }`, so `engine::launch` waits on its child without the store;
-the owner items, carriers, the Session lifetime, the attachment cut and the
-handoff deletion below.
+the owner items, carriers, the Session lifetime, the attachment cut, the
+handoff deletion and the lf-row readers below.
 
-Next, in order (why this order: "Concept review after the Session
-lifetime cut"): (1) the lf-row readers: `task_open_process_pairs` and
-`task_state_sql`'s `open_processes` arm as live Sessions + Graph runs,
-retirement by terminal (Graph runs gain `held_terminal_id`),
-`process_starter`, `run_task_graph`'s parent check (`graph.rs:83`), and the
-Rust readers the SQL scan misses (list under "Inventory"), plus the lf-row
-reads the attachment cut left: `agent_parent` (deleted: the trace rides
-in `AgentCaller`, see "Concept review after the handoff deletion"), `pending_inputs`'
-`attached` join (an input ends when its lf's row does), `native_exit`'s
-launcher end; (2) the expand migration's foreign-key rebuild together with
-stopping the journal writer **and the owner liveness pass** (see "Concept
-review after the carrier slices"); (3) slices 4–6.
-Quotes and the OS-scan measurement: `questions.md`.
+Next, in order: (2) the expand migration's foreign-key rebuild together
+with stopping the journal writer **and the owner liveness pass** (see
+"Concept review after the carrier slices"); (3) slices 4–6. Quotes and the
+OS-scan measurement: `questions.md`.
 
-**Handoff attach deleted (third cut of slice 3).** Per the concept review
-after the attachment cut (79026de79f; every production attach replaced the
-provider, the non-replacing path was test-only):
+**lf-row readers as built (2026-11-17).** No reader outside the journal,
+the bridge and slice-4 deletion targets (`lf ps`/`top`, history, doctor,
+`lf_process_ids`, `check_lineage`, retention) reads an lf row.
 
-- `attach_in`, `attach_session`, `claim_session_attachment` take no
-  `replace_provider`; every attach mints a new agent and token in one
-  `UPDATE`, ending a replaced agent that exited or never spawned. The
-  non-replacing branch and `session_activity`'s token rebinding are gone.
-- `SessionAttachment.provider_lf_process_id` → `launcher_lf_process_id`
-  (serde keeps `provider_lf_process_id`: kept exit records and held hosts
-  carry it). Kept, not dropped: it outlives release (`lf_process_id` is
-  `None` then) and `native_exit`/`transport` name the launcher with it.
-- Fence: `require_current_actor_in` = current `agent_process_id` and
-  attached; `finish` completes on `attached_lf_process_id IS NOT NULL`;
-  `agent_parent` drops the provider == origin filter. The launcher-vs-attached
-  check in `native_provider_attachment` was unreachable and is deleted.
-  `agent_launcher_lf_process_id` stays while `native_exit` ends the launcher.
-- Tests: handoff-only ones deleted (`stale_orphan_observation_cannot_settle_a_transferred_agent`,
-  `native_cleanup_cannot_kill_the_same_agent_after_takeover`,
-  `pi_stale_attachment_cannot_send_or_stop_the_provider`,
-  `a_delayed_codex_start_keeps_request_capture_across_a_b_a_takeover`);
-  the rest keep their non-handoff behaviour on replacement or a single
-  attachment (attachment/steer/program-status/session-exit/runtime close/
-  capture receipt/native move/remote client/opencode and Claude stop,
-  `session_steers` context capability). Docs: `agent-api.md`,
-  `dev/reference-models.md` no longer describe a handoff.
+- Open work is `task_work::OpenWork { Session | Graph }`: an open Session
+  with a started, unended agent, or an unended Graph run, in the Task's work
+  (`task_open_work`; Graph runs by `task_id` or checkout cwd through
+  `task_open_graph_pairs`) or a taskless checkout (`checkout_open_work`,
+  replacing `processes_since(0)` in `pr_landing`). Liveness: `agent_evidence`
+  / `run_evidence`. `task_state_sql`'s arm and `graph_execution_facts`
+  (`open_graphs`; receipts and `receipt_home` gone) read unended Graph runs.
+  The caller's own work (`OwnWork`: this lf, its inherited parent, its agent
+  caller's Session and launcher, Graph runs those are steps of via
+  `graph_of_step`) replaces the lineage walk.
+- Graph runs gain `held_terminal_id` and `caller_session_id`; index
+  `graph_processes_unended`. **Deviation:** the plan's `transport::current()`
+  is only the direct child of the holder, so work typed into a Desktop shell
+  never had it. The holder now also passes `LF_HELD_TERMINAL` (inherited,
+  stripped from detached starts); `transport::held_in()` reads either.
+  Retirement: work is excused when its Session's or Graph run's held
+  terminal is one of the Task's shell or conversation terminals.
+  `terminal_retention` reads Graph runs held in the terminal.
+  `held_terminal_processes` deleted.
+- Starter: `ExecutionStart.caller_session` (journal: the agent caller's
+  Session, else inherited `LF_CALLER_SESSION`); written on Graph runs and
+  ship events (`task_ship_events.caller_session_id`, `ShipStop.session`,
+  `ShipApproval.session`, `TaskShipping.approving_session`); a stop also
+  records the person at admission. `SqliteStore::starter(session, person)`
+  replaces `process_starter`. A route approval (a run reaching `end`)
+  records no Session, so it reads as the person.
+- `AgentCaller.trace_id` (absent → fresh trace, no parent); `agent_parent`
+  deleted. `graph.rs`/`run.rs` read the parent from the journal
+  (`current_parent_lf_process_id`). `in_graph` = step env, or this lf or its
+  parent is a recorded step; `process_under_graph` deleted.
+  `task create --run` waits on `carrier_evidence` and reads the last Graph
+  run's result. `pending_inputs`: an input ends at its launcher's agent end
+  (an earlier launcher's by the next agent's start); index
+  `agent_sessions_agent_ended`. `native_exit` ends the launcher's Graph step
+  (`finish_run(GraphStep)`; a plain 130 carries no error). `run_evidence`
+  reads a run started before boot as Dead.
+- Deleted: `end_earlier_owner`, `owner_running`, `session_owner`,
+  `live_process_pid` (legacy `session serve` owners; no writer),
+  `process_entry_evidence`, `relocated_process_membership` (test-only now).
+  `lf_evidence` is `cfg(test)` for the journal's receipt tests.
 
-Check: storage lib 384/384 except the one handoff test (fixed, rerun
-passes); execution `store|harness|process|session_record|transport::registry_tests|terminal_title|ops::human_session|observe` 609 run, the 10 handoff failures fixed and rerun green;
-loopflow `server::{boundary,wake}`, `subscription_measurement`,
-`public_context_capability_rejects_children_and_replacement`,
-`documented_commands::` pass; `cargo clippy --all-targets -D warnings` clean.
-`binary(session_lifecycle_tests)`, `process_ownership_tests`,
-`session_cli_tests`, `work_open_tests` (callers only dropped the argument) → gate/CI.
+Check: storage `migration_runner|query_plans|sqlite::{sessions,task_work,
+durable,graph_inventory,repositories,processes}|task_retirement|revisions|
+task_summaries` → 198 pass; execution `ops::task::|store::|harness::native_exit`
+→ 293 pass after fixture moves (retirement, history, task tests now seed
+Graph runs and Session agents instead of lf rows); execution `journal|harness|
+process|ops::{graph_process,pr_landing,project,human_session}|transport::registry|
+session_record` → 427 pass except the pre-existing held-write-lock test;
+loopflow `graph_tests|task_graph_launch_tests|explain|world_recipes|
+server::{boundary,wake}|subscription_measurement` → 99 pass (one needed
+`target/debug/lf` built; `interrupting_a_task_with_only_an_open_process…`
+deleted: an lf command in a checkout is no longer open work); clippy clean;
+`schema_page.py` regenerated. `check_migrations.py` fails only on
+`tracker_tables.sql`, new on origin/main since the last sync (rebase).
+Gate/CI: `binary(session_lifecycle_tests)` (its caller fixture now passes the
+launcher's trace), `process_ownership_tests`, `session_cli_tests`,
+`work_open_tests`, `binary(two_people)`, `binary(transport_tests)`,
+`test(performance_tests::)` (new open-work SQL).
 
-**Concept review after the handoff deletion (2026-11-17): next implement direction.**
-
-The expected result holds: no `replace_provider`, no non-replacing branch,
-no `session_activity` rebinding. What the deletion now implies, folded into
-step (1), the lf-row readers:
-
-- **An attachment's lf is its launcher.** Every attach writes
-  `attached_lf_process_id = agent_launcher_lf_process_id`, and release only
-  clears the attached one. Same agent ⇒ same launcher, so
-  `agent_parent`'s attachment read is a no-op: its answer is always
-  `caller.origin_lf_process_id`. The released token stays (it is the
-  compare-and-swap value the next attach passes as `expected`).
-- **`agent_parent` reads nothing.** The agent edge needs only the launcher's
-  trace, which the launcher knows when it writes `LF_AGENT_CALLER`. Put
-  `trace_id` in `AgentCaller` (serde-optional for retained provider
-  environments: an absent trace mints a fresh one, as an unresolved caller
-  does today) and delete `agent_parent`; the journal's agent edge then takes
-  parent and trace from the env. This replaces "convert `agent_parent`'s
-  trace" in step (1) with a deletion.
-- Stale handoff prose fixed at realign (`SteerAdapter`, `record_native_turn`,
-  `lock_session_dispatch`, `native_exit`'s context, `terminal_title`). "Handed-off
-  exit" in `transport`/`native_exit` means the launcher's exit record passed to
-  its host, not an attachment handoff, and stays.
-- `SessionAttachment.lf_process_id: Option` + `launcher_lf_process_id` encode
-  one lf plus "held". Left as is: the column pair goes with slice 6, and the
-  bridge writes released readers' `attached_lf_process_id` from it.
-
-No open product choice.
+Handoff deletion (b1bb70102f): every attach mints a new agent and token;
+`SessionAttachment.launcher_lf_process_id` (serde `provider_lf_process_id`);
+fence = current agent and attached. Handoff-only tests deleted.
 
 **Attachment cut as built (second cut of slice 3).**
 
@@ -480,6 +474,13 @@ Paths under `rust/`.
   runs the new binary. This drives the bridge below.
 
 ## Inventory: 37 production statements naming `processes` (2026-11-17, attachment cut)
+
+Rescan after the lf-row readers (2026-11-17): 28 production statements, every
+one J (journal writer, receipts, locators, retention), D (`lf ps`/history,
+`lf_process_ids`, `canonical_ids` and `query_plans` arms, rental export,
+relocation) or F. The **R** rows below are done; the Rust `lf_process`
+readers left are the journal's and slice-4 targets (`top.rs`, doctor,
+`check_lineage`).
 
 Method: `python3 -I scratch/process_sql_scan.py rust` (55 statements, 15
 joined, 21 writes), test files and fixtures dropped by hand. Composed SQL the

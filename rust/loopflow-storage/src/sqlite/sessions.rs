@@ -843,22 +843,6 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// The `lf session serve` owner an earlier build recorded as hosting the
-    /// Session, while that owner's row says it runs. Only `lf resume` reads
-    /// it, to end the owner before resuming the conversation held.
-    pub fn session_owner(&self, session: &str) -> StoreResult<Option<LfProcessId>> {
-        let canonical = loopflow_model::id::canonical_session(session);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT o.id FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
-                 WHERE s.id=?1 AND s.held_terminal_id IS NULL AND o.completed_at IS NULL",
-                [canonical.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?)
-    }
-
     /// The Session a held terminal runs, for its viewers.
     pub fn terminal_session(&self, terminal: &TerminalId) -> StoreResult<Option<String>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -894,25 +878,15 @@ impl SqliteStore {
         terminal: &TerminalId,
     ) -> StoreResult<Option<TerminalRetention>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A terminal is not a process: the lf processes running in it name it.
-        // A running Graph started inside one, as from a terminal, holds its
-        // steps there. CROSS JOIN seeds the walk from the few Graphs, not
-        // every Process.
+        // A running Graph started inside the terminal, or a Session's Graph
+        // shown in it, holds its steps there.
         Ok(conn.query_row(
             &format!(
-                "WITH RECURSIVE graph_ancestors(id) AS (
-                     SELECT p.parent_lf_process_id FROM graph_processes f
-                         CROSS JOIN processes p ON p.id=f.lf_process_id
-                         WHERE p.completed_at IS NULL
-                     UNION SELECT p.parent_lf_process_id FROM processes p
-                         JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT EXISTS(SELECT 1 FROM processes a WHERE a.held_terminal_id=?1 AND (
-                         a.id IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                         OR (a.completed_at IS NULL
-                             AND a.id IN (SELECT lf_process_id FROM graph_processes))))
+                "SELECT EXISTS(SELECT 1 FROM graph_processes g INDEXED BY graph_processes_unended
+                         WHERE g.held_terminal_id=?1 AND g.ended_at IS NULL)
                      OR EXISTS(SELECT 1 FROM agent_sessions s
-                         JOIN processes g ON g.id={SESSION_GRAPH}
-                         WHERE s.held_terminal_id=?1 AND g.completed_at IS NULL)
+                         JOIN graph_processes g ON g.lf_process_id={SESSION_GRAPH}
+                         WHERE s.held_terminal_id=?1 AND g.ended_at IS NULL)
                      AS running_graph,
                  NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.held_terminal_id=?1 AND s.completed_at IS NULL)
@@ -1176,19 +1150,22 @@ impl SqliteStore {
                     AND o.observed_at>=?5 AND (?6 OR o.kind='manifest')
                 UNION SELECT +captured_event FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND ended_at>=?5 AND +captured_event IS NOT NULL
-                UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='captured'
-                UNION SELECT +ran.captured_event FROM processes exited CROSS JOIN history.turns ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5),
+                UNION SELECT +ran.seq FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN session_events ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.kind='captured'
+                UNION SELECT +ran.captured_event FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5),
             -- Turns no input started: one that started or ended in the window,
-            -- or whose Process completed in it, though it started earlier.
+            -- or whose launcher's agent ended in it, though it started earlier.
             turns(id) AS (
                 SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND started_at>=?5 AND +captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ended_at>=?5 AND +captured_event IS NULL
-                UNION SELECT +ran.id FROM processes exited CROSS JOIN history.turns ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.captured_event IS NULL
+                UNION SELECT +ran.id FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             inputs AS (
@@ -1196,7 +1173,13 @@ impl SqliteStore {
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE i.wave_id END AS wave_id,
-                    CASE WHEN attached.completed_at IS NOT NULL THEN attached.completed_at
+                    -- An input ends when its lf's agent does: the Session's
+                    -- current launcher's at that agent's end, an earlier
+                    -- launcher's by the time the next agent started.
+                    CASE WHEN COALESCE(latest_turn.lf_process_id,i.lf_process_id) IS NOT NULL
+                        AND (s.agent_launcher_lf_process_id IS NOT COALESCE(latest_turn.lf_process_id,i.lf_process_id) OR s.agent_ended_at IS NOT NULL)
+                    THEN CASE WHEN s.agent_launcher_lf_process_id IS COALESCE(latest_turn.lf_process_id,i.lf_process_id)
+                        THEN s.agent_ended_at ELSE s.agent_started_at END
                     WHEN terminal.seq IS NOT NULL AND NOT (
                         json_valid(terminal.payload) AND CASE WHEN json_valid(terminal.payload) THEN
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
@@ -1217,8 +1200,6 @@ impl SqliteStore {
                 LEFT JOIN history.turns latest_turn ON latest_turn.id=(
                     SELECT origin.id FROM history.turns origin WHERE origin.session_id=i.session_id
                     AND origin.captured_event=i.seq ORDER BY origin.id DESC LIMIT 1)
-                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.id IS NULL
-                    THEN i.lf_process_id ELSE latest_turn.lf_process_id END
                 LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN history.session_history terminal ON terminal.session_id=s.id
@@ -1233,10 +1214,12 @@ impl SqliteStore {
                         AND origin.captured_event=i.seq))
                 UNION ALL
                 SELECT NULL,NULL,t.session_id,NULL,COALESCE(t.started_at,t.usage_at,t.ended_at),t.task_id,t.wave_id,
-                    COALESCE(attached.completed_at,t.ended_at),t.provider_thread,t.provider_turn,
+                    COALESCE(CASE WHEN t.lf_process_id IS NULL THEN NULL
+                        WHEN ts.agent_launcher_lf_process_id IS t.lf_process_id THEN ts.agent_ended_at
+                        ELSE ts.agent_started_at END,t.ended_at),t.provider_thread,t.provider_turn,
                     MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
                 FROM turns CROSS JOIN history.turns t ON t.id=turns.id
-                LEFT JOIN processes attached ON attached.id=t.lf_process_id
+                LEFT JOIN agent_sessions ts ON ts.id=t.session_id
                 WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,

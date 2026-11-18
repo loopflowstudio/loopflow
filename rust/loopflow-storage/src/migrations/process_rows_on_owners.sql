@@ -1,5 +1,7 @@
 -- A Graph run and each of its steps record their own lifecycle: when they
 -- started and ended, the OS process they run as while live, and how they ended.
+-- A run also names the held terminal it runs in, which it holds open, and the
+-- Session whose agent started it.
 -- The spawner mints a step's id and writes its row at spawn; the run writes its
 -- end, and the spawner writes it if the run died first. Neither table names a
 -- `processes` row any more, so both are rebuilt without those foreign keys or
@@ -19,13 +21,16 @@ CREATE TABLE graph_processes_owned (
     exit_code INTEGER,
     error TEXT,
     repo TEXT,
-    cwd TEXT
+    cwd TEXT,
+    held_terminal_id TEXT,
+    caller_session_id TEXT
 ) STRICT;
-INSERT INTO graph_processes_owned(lf_process_id,graph,compiled,task_id,started_at,ended_at,pid,os_started_at,exit_code,error,repo,cwd)
+INSERT INTO graph_processes_owned(lf_process_id,graph,compiled,task_id,started_at,ended_at,pid,os_started_at,exit_code,error,repo,cwd,held_terminal_id,caller_session_id)
 SELECT g.lf_process_id,g.graph,g.compiled,g.task_id,e.started_at,e.completed_at,
     CASE WHEN e.completed_at IS NULL THEN e.pid END,
     CASE WHEN e.completed_at IS NULL THEN e.os_started_at END,
-    e.exit_code,e.error,e.repo,e.cwd
+    e.exit_code,e.error,e.repo,e.cwd,e.held_terminal_id,
+    coalesce(e.caller_session_id,(SELECT parent.caller_session_id FROM processes parent WHERE parent.id=e.parent_lf_process_id))
 FROM graph_processes g LEFT JOIN processes e ON e.id=g.lf_process_id;
 
 CREATE TABLE graph_process_steps_owned (
@@ -125,7 +130,14 @@ ALTER TABLE task_ship_events ADD COLUMN os_started_at INTEGER;
 ALTER TABLE task_ship_events ADD COLUMN ended_at INTEGER;
 ALTER TABLE task_ship_events ADD COLUMN exit_code INTEGER;
 ALTER TABLE task_ship_events ADD COLUMN error TEXT;
+-- The Session whose agent approved, carried or stopped it, when one did.
+ALTER TABLE task_ship_events ADD COLUMN caller_session_id TEXT;
 DROP TRIGGER task_ship_events_append_only;
+UPDATE task_ship_events SET caller_session_id=(
+    SELECT coalesce(e.caller_session_id,parent.caller_session_id) FROM processes e
+    LEFT JOIN processes parent ON parent.id=e.parent_lf_process_id
+    WHERE e.id=task_ship_events.lf_process_id)
+WHERE lf_process_id IS NOT NULL;
 UPDATE task_ship_events SET (pid,os_started_at,ended_at,exit_code,error)=(
     SELECT CASE WHEN completed_at IS NULL THEN pid END,
         CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,error
@@ -134,7 +146,7 @@ WHERE kind IN ('approved','carried') AND lf_process_id IS NOT NULL;
 CREATE TRIGGER task_ship_events_launch_is_immutable BEFORE UPDATE ON task_ship_events
 WHEN NEW.id IS NOT OLD.id OR NEW.task_id IS NOT OLD.task_id OR NEW.kind IS NOT OLD.kind
     OR NEW.at IS NOT OLD.at OR NEW.lf_process_id IS NOT OLD.lf_process_id
-    OR NEW.person IS NOT OLD.person
+    OR NEW.person IS NOT OLD.person OR NEW.caller_session_id IS NOT OLD.caller_session_id
 BEGIN
     SELECT RAISE(ABORT,'Task ship events are append-only');
 END;
@@ -142,6 +154,7 @@ CREATE TRIGGER store_revision_task_ship_events_update AFTER UPDATE ON task_ship_
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 
 CREATE INDEX graph_processes_task ON graph_processes(task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX graph_processes_unended ON graph_processes(held_terminal_id) WHERE ended_at IS NULL;
 CREATE INDEX graph_process_steps_graph ON graph_process_steps(graph_lf_process_id, seq);
 
 CREATE TRIGGER store_revision_graph_processes_insert AFTER INSERT ON graph_processes
@@ -196,6 +209,7 @@ END;
 CREATE TRIGGER graph_processes_launch_is_immutable BEFORE UPDATE ON graph_processes
 WHEN NEW.lf_process_id IS NOT OLD.lf_process_id OR NEW.graph IS NOT OLD.graph
     OR NEW.compiled IS NOT OLD.compiled OR NEW.task_id IS NOT OLD.task_id
+    OR NEW.caller_session_id IS NOT OLD.caller_session_id
 BEGIN
     SELECT RAISE(ABORT,'A Graph record is append-only');
 END;
@@ -214,9 +228,9 @@ END;
 CREATE TRIGGER graph_run_start_from_process AFTER INSERT ON graph_processes
 WHEN NEW.started_at IS NULL
 BEGIN
-    UPDATE graph_processes SET (started_at,ended_at,pid,os_started_at,exit_code,error,repo,cwd)=(
+    UPDATE graph_processes SET (started_at,ended_at,pid,os_started_at,exit_code,error,repo,cwd,held_terminal_id)=(
         SELECT started_at,completed_at,CASE WHEN completed_at IS NULL THEN pid END,
-            CASE WHEN completed_at IS NULL THEN os_started_at END,exit_code,error,repo,cwd
+            CASE WHEN completed_at IS NULL THEN os_started_at END,exit_code,error,repo,cwd,held_terminal_id
         FROM processes WHERE id=NEW.lf_process_id)
     WHERE lf_process_id=NEW.lf_process_id;
 END;
@@ -360,6 +374,8 @@ CREATE INDEX agent_sessions_attached ON agent_sessions(attached_lf_process_id)
     WHERE attached_lf_process_id IS NOT NULL;
 CREATE INDEX agent_sessions_unended_agent ON agent_sessions(agent_process_id)
     WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL;
+CREATE INDEX agent_sessions_agent_ended ON agent_sessions(agent_ended_at)
+    WHERE agent_ended_at IS NOT NULL;
 
 -- Bridge, old → new: a released lf writes the agent row and its attachment
 -- on `processes`; these copy them onto the Session. It reserves an agent's

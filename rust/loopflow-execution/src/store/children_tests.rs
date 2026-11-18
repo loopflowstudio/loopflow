@@ -124,6 +124,7 @@ fn task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_fore
         session_id: "editor".into(),
         agent_process_id: Some(first.agent_process_id),
         origin_lf_process_id: process,
+        trace_id: None,
     };
     std::env::set_var(AGENT_CALLER_ENV, serde_json::to_string(&caller).unwrap());
     crate::journal::with_runtime(

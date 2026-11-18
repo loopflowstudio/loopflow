@@ -132,3 +132,10 @@ the same process: `journal::with_process` sets the global `PROCESS_STARTED_AT`,
 so `is_cli_process()` stays true and `with_runtime` skips admission. Each
 passes in its own process (nextest). Fix: run the `with_process` test in an
 isolated child process, as AGENTS.md asks of process-global tests.
+
+## lf-row readers (2026-11-17)
+
+- Call: a route approval (a Task run reaching `end`) records no caller Session, so "Auto-Ship approved by" names the person even when an agent started the run. The Graph run's own `caller_session_id` could supply it; left until someone notices.
+- Call: open work counts only open Sessions (completed Sessions with an unended agent are strays for doctor) and unended Graph runs; an lf command running in a checkout that is neither (e.g. `lf task land`) no longer blocks retirement or landing.
+- Call: a Graph run whose step outlives it no longer holds the Task's work; the step's own Session does if it runs an agent.
+- Call: Desktop shells mark membership with an inherited `LF_HELD_TERMINAL`; a person can unset it in a shell and their work then blocks retirement, as an unknown process would.

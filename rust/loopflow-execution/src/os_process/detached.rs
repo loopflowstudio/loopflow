@@ -371,6 +371,8 @@ const PROCESS_CONTEXT_ENV: &[&str] = &[
     "LF_REVIEW_RUN_RESERVATION",
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_CALLER_SESSION_ENV,
+    crate::transport::WITHIN_ENV,
     crate::work::wave::context::WAVE_ID_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     crate::process::AGENT_CALLER_ENV,

@@ -4,7 +4,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::num::NonZeroU32;
-use std::path::PathBuf;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
@@ -18,7 +17,6 @@ use crate::{StoreError, StoreResult};
 use loopflow_model::durable::TaskId;
 use loopflow_model::id::{LfProcessId, WaveId};
 
-use super::processes::{read_lf_process, PROCESS_SELECT};
 use super::SqliteStore;
 
 fn invalid(error: impl std::fmt::Display) -> StoreError {
@@ -63,7 +61,7 @@ pub(super) fn graphs_in(
 ) -> StoreResult<Vec<GraphExecution>> {
     let graph_processes = conn
         .prepare(&format!(
-            "SELECT {},g.repo,g.cwd,g.graph,g.compiled FROM graph_processes g
+            "SELECT {},g.repo,g.cwd,g.graph,g.compiled,g.caller_session_id FROM graph_processes g
              WHERE ({scope}) ORDER BY g.rowid",
             run_columns("g")
         ))?
@@ -74,6 +72,7 @@ pub(super) fn graphs_in(
                 row.get::<_, Option<String>>("cwd")?,
                 row.get::<_, String>("graph")?,
                 row.get::<_, String>("compiled")?,
+                row.get::<_, Option<loopflow_model::id::LfSessionId>>("caller_session_id")?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -104,12 +103,13 @@ pub(super) fn graphs_in(
     }
     graph_processes
         .into_iter()
-        .map(|(run, repo, cwd, name, compiled)| {
+        .map(|(run, repo, cwd, name, compiled, caller_session)| {
             Ok(GraphExecution {
                 compiled: serde_json::from_str::<CompiledGraph>(&compiled)?,
                 steps: steps.remove(run.id.as_str()).unwrap_or_default(),
                 run,
                 repo,
+                caller_session,
                 cwd,
                 name,
             })
@@ -175,16 +175,13 @@ pub fn entry_of(
 }
 
 /// What a reading of Graphs' execution asks of the store once: the input each
-/// Process captured last, open Graph execution in the selected Tasks' work,
-/// the selected Tasks that never ran their Graph, and the receipt files of
-/// unfinished Processes.
+/// step captured last, unended Graph runs in the selected Tasks' work, and
+/// the selected Tasks that never ran their Graph.
 #[derive(Debug, Default)]
 pub struct GraphExecutionFacts {
-    pub open_processes: HashMap<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>,
+    pub open_graphs: HashMap<TaskId, Vec<Execution>>,
     pub unrun: HashMap<TaskId, UnrunGraph>,
     pub inputs: HashMap<LfProcessId, (String, String, i64)>,
-    pub receipt_home: Option<PathBuf>,
-    pub receipts: HashMap<LfProcessId, String>,
     pub limit_recoveries: HashMap<LfProcessId, AgentLimitRecovery>,
 }
 
@@ -294,22 +291,16 @@ fn process_inputs(
 }
 
 impl SqliteStore {
-    /// Whether `process` runs under a Graph, through any process between.
-    /// A Session served by a transport owner starts without the Graph's
-    /// environment, so its Process ancestry decides until Sessions record
-    /// their own Graph step.
-    pub fn process_under_graph(&self, process: &LfProcessId) -> StoreResult<bool> {
+    /// The Graph run that recorded `step` as one of its steps.
+    pub fn graph_of_step(&self, step: &LfProcessId) -> StoreResult<Option<LfProcessId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn.query_row(
-            "WITH RECURSIVE up(id) AS (
-                 SELECT ?1
-                 UNION
-                 SELECT p.parent_lf_process_id FROM processes p JOIN up ON p.id=up.id
-                 WHERE p.parent_lf_process_id IS NOT NULL)
-             SELECT EXISTS(SELECT 1 FROM up JOIN graph_processes g ON g.lf_process_id=up.id)",
-            [process],
-            |row| row.get(0),
-        )?)
+        Ok(conn
+            .query_row(
+                "SELECT graph_lf_process_id FROM graph_process_steps WHERE lf_process_id=?1",
+                [step],
+                |row| row.get(0),
+            )
+            .optional()?)
     }
 
     pub fn agent_limit_recovery(
@@ -458,7 +449,9 @@ impl SqliteStore {
     }
 
     /// A Graph run's record of itself as it starts: the graph it launched
-    /// with, the Task it started for, and the OS process it runs as.
+    /// with, the Task it started for, the OS process it runs as and the held
+    /// terminal it runs in.
+    #[allow(clippy::too_many_arguments)]
     pub fn record_graph(
         &self,
         graph_process: &LfProcessId,
@@ -467,11 +460,12 @@ impl SqliteStore {
         start: &ExecutionStart,
         repo: Option<&str>,
         cwd: Option<&str>,
+        held_terminal: Option<&loopflow_model::id::TerminalId>,
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at,repo,cwd)
-             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,pid,os_started_at,repo,cwd,held_terminal_id,caller_session_id)
+             VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             params![
                 graph_process,
                 compiled.name,
@@ -482,6 +476,8 @@ impl SqliteStore {
                 start.os_started_at,
                 repo,
                 cwd,
+                held_terminal,
+                start.caller_session.as_ref(),
             ],
         )?;
         Ok(())
@@ -619,8 +615,8 @@ impl SqliteStore {
         Ok(process_inputs(&conn, &[process])?.remove(process))
     }
 
-    /// Execution facts of `graphs`: their latest steps' captured inputs and
-    /// open Graph execution in `tasks`, and the receipts of unfinished Processes.
+    /// Execution facts of `graphs`: their latest steps' captured inputs, and
+    /// unended Graph runs in `tasks`' work.
     pub fn graph_execution_facts<'a>(
         &self,
         graphs: impl IntoIterator<Item = &'a GraphExecution>,
@@ -633,76 +629,27 @@ impl SqliteStore {
             .collect();
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
-        let pairs = super::task_work::task_open_process_pairs(
-            "SELECT value FROM json_each(?1)",
-            "p.kind='lf' AND EXISTS(SELECT 1 FROM graph_processes g WHERE g.lf_process_id IN (p.id,p.parent_lf_process_id))",
-        );
         let ids = super::children::ids_json(tasks.iter().map(|task| task.as_str()));
-        let mut open_processes =
-            HashMap::<TaskId, Vec<(LfProcessId, crate::process::LfProcess)>>::new();
-        let columns = PROCESS_SELECT
-            .strip_suffix(" FROM processes e")
-            .expect("Process select ends with its table");
-        // Keep membership outside the Process lookup: ORDER BY otherwise
-        // persuades SQLite to scan all history through processes_recent.
+        let mut open_graphs = HashMap::<TaskId, Vec<Execution>>::new();
         let mut query = conn.prepare(&format!(
-            "{columns},pairs.task_id,g.lf_process_id FROM ({pairs}) pairs
-             CROSS JOIN processes e ON e.id=pairs.process
-             JOIN graph_processes g ON g.lf_process_id=coalesce(
-                (SELECT own.lf_process_id FROM graph_processes own WHERE own.lf_process_id=e.id),e.parent_lf_process_id)
-             ORDER BY e.started_at DESC,e.id"
+            "SELECT {},pairs.task_id FROM ({}) pairs
+             JOIN graph_processes g ON g.lf_process_id=pairs.graph
+             ORDER BY g.started_at DESC,g.lf_process_id",
+            run_columns("g"),
+            super::task_work::task_open_graph_pairs("SELECT value FROM json_each(?1)")
         ))?;
-        for row in query.query_map([&ids], |row| {
-            Ok((
-                row.get::<_, String>(19)?,
-                row.get::<_, LfProcessId>(20)?,
-                read_lf_process(row)?,
-            ))
-        })? {
-            let (task, graph, process) = row?;
+        for row in query.query_map([&ids], |row| Ok((row.get::<_, String>(7)?, read_run(row)?)))? {
+            let (task, run) = row?;
             let task = TaskId::parse(&task).map_err(invalid)?;
-            open_processes
-                .entry(task)
-                .or_default()
-                .push((graph, process));
+            open_graphs.entry(task).or_default().push(run);
         }
-        // Graph runs and steps carry their own pid; only open execution in
-        // the Tasks' work is still checked through Process receipts.
-        let unfinished = super::children::ids_json(
-            open_processes
-                .values()
-                .flatten()
-                .map(|(_, process)| process.id.as_str()),
-        );
         let inputs = process_inputs(&conn, &steps)?;
         let limit_recoveries = limit_recoveries(&conn, &steps)?;
-        let home = conn
-            .path()
-            .filter(|path| !path.is_empty())
-            .and_then(|path| std::path::Path::new(path).parent())
-            .map(std::path::Path::to_path_buf);
-        let mut receipts = HashMap::new();
-        if home.is_some() {
-            for row in conn
-                .prepare(
-                    "SELECT id,receipt_locator FROM processes
-                     WHERE id IN (SELECT value FROM json_each(?1)) AND receipt_locator IS NOT NULL",
-                )?
-                .query_map([&unfinished], |row| {
-                    Ok((row.get::<_, LfProcessId>(0)?, row.get::<_, String>(1)?))
-                })?
-            {
-                let (id, locator) = row?;
-                receipts.insert(id, locator);
-            }
-        }
         let unrun = unrun_graphs_in(&conn, &ids)?;
         Ok(GraphExecutionFacts {
-            open_processes,
+            open_graphs,
             unrun,
             inputs,
-            receipt_home: home,
-            receipts,
             limit_recoveries,
         })
     }
@@ -789,6 +736,7 @@ impl SqliteStore {
             &start,
             Some(cwd),
             Some(cwd),
+            None,
         )
         .unwrap();
         for (index, (_, outcome)) in steps.iter().enumerate() {

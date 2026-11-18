@@ -75,6 +75,9 @@ pub struct ExecutionStart {
     pub started_at: i64,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
+    /// The Session whose agent started this run, when one did. Owners that
+    /// show who started them (Graph runs, Auto-Ship) record it.
+    pub caller_session: Option<loopflow_model::id::LfSessionId>,
 }
 
 impl ExecutionStart {
@@ -84,6 +87,7 @@ impl ExecutionStart {
             started_at,
             pid: None,
             os_started_at: None,
+            caller_session: None,
         }
     }
 }
@@ -121,6 +125,8 @@ pub struct GraphExecution {
     /// The repository and directory the Graph ran in.
     pub repo: Option<String>,
     pub cwd: Option<String>,
+    /// The Session whose agent started it, when one did.
+    pub caller_session: Option<loopflow_model::id::LfSessionId>,
     pub name: String,
     pub compiled: CompiledGraph,
     /// Steps in launch order. A repeated or corrected step is another entry.

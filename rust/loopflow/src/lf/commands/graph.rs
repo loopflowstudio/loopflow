@@ -80,9 +80,7 @@ pub fn run_task_graph(cli: &Cli, repo: &Path, binding: Option<&WorkBinding>) -> 
     else {
         anyhow::bail!("the Task is not on a run; `lf task run` starts one");
     };
-    let parent = journal::current_lf_process_id()
-        .and_then(|id| store.sqlite.lf_process(&id).ok().flatten())
-        .and_then(|process| process.parent_lf_process_id);
+    let parent = journal::current_parent_lf_process_id();
     anyhow::ensure!(
         parent.as_ref() == Some(&carrier.id),
         "the Task's run is carried by another `lf task run`; read `lf task status`"
@@ -537,6 +535,7 @@ fn execute(
                     .context("a Graph requires a registered Process")?,
                 journal::current_repo().as_deref(),
                 Some(&running.cwd.display().to_string()),
+                loopflow_execution::transport::held_in().as_ref(),
             )
             .context("could not record the Graph; no steps launched")?;
         journal::mark_run_owner(RunOwner::GraphRun);
@@ -838,7 +837,7 @@ impl RunningGraph<'_> {
         let Some(stop) = self.store.sqlite.task_ship_stop(task)? else {
             return Ok(None);
         };
-        let by = loopflow_execution::ops::task::ship::stopper(&self.store.sqlite, self.cwd, &stop)?;
+        let by = loopflow_execution::ops::task::ship::stopper(&self.store.sqlite, &stop)?;
         eprintln!(
             "Waiting at {step}: not approved to merge ({by} stopped shipping). `lf ship` lands it."
         );

@@ -80,7 +80,7 @@ pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadines
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::{AnsweredTurn, CurrentConversation};
 pub use task_details::TaskDetailFacts;
-pub use task_work::TaskShipping;
+pub use task_work::{OpenWork, TaskShipping};
 
 /// A fleet can legitimately queue longer than SQLite's common five-second
 /// default while every process opens and records its first receipt. Durable

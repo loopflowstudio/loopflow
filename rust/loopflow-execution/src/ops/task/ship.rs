@@ -76,32 +76,23 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
 }
 
-/// Who started `process`, read from its ancestry, with the person named as
-/// in `repo`; no process leaves attribution unresolved.
+/// Who started a run: the Session whose agent started it, with the person
+/// named as in `repo`.
 pub fn starter(
     sqlite: &loopflow_storage::sqlite::SqliteStore,
     repo: &std::path::Path,
-    process: Option<&LfProcessId>,
+    session: Option<&loopflow_model::id::LfSessionId>,
 ) -> crate::store::StoreResult<crate::process::Starter> {
-    let Some(process) = process else {
-        return Ok(crate::process::Starter::Person { name: None });
-    };
     let person = crate::config::participant_name_in(repo).ok().flatten();
-    sqlite.process_starter(process, person.as_deref())
+    sqlite.starter(session, person.as_deref())
 }
 
-/// A served stop retains the person at admission, independent of later settings.
+/// A stop names the person as it was at admission, independent of later settings.
 pub fn stopper(
     sqlite: &loopflow_storage::sqlite::SqliteStore,
-    repo: &std::path::Path,
     stop: &loopflow_storage::sqlite::task_work::ShipStop,
 ) -> crate::store::StoreResult<crate::process::Starter> {
-    match stop.by.as_ref() {
-        Some(process) => starter(sqlite, repo, Some(process)),
-        None => Ok(crate::process::Starter::Person {
-            name: stop.person.clone(),
-        }),
-    }
+    sqlite.starter(stop.session.as_ref(), stop.person.as_deref())
 }
 
 /// Whether the run carrying a shipping Task has exited. Unknown evidence is
@@ -306,7 +297,12 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             return Ok(ShipStart::AtEnd { issue });
         }
         let repo = super::repository_for_task(&store, &task)?;
-        let by = starter(&store.sqlite, &repo, Some(&process)).map_err(task_error)?;
+        let by = starter(
+            &store.sqlite,
+            &repo,
+            crate::journal::caller_session_id().as_ref(),
+        )
+        .map_err(task_error)?;
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
@@ -363,17 +359,13 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
         let (note, stopped_by) = match &withdrawal {
             Withdrawal::Stop { process, note } => {
                 let repo = super::repository_for_task(&store, &task)?;
-                let person = if process.is_none() {
-                    crate::config::participant_name_in(&repo).ok().flatten()
-                } else {
-                    None
-                };
                 let stop = loopflow_storage::sqlite::task_work::ShipStop {
                     at: loopflow_storage::rows::now_unix(),
                     by: process.clone(),
-                    person,
+                    person: crate::config::participant_name_in(&repo).ok().flatten(),
+                    session: crate::journal::caller_session_id(),
                 };
-                let by = stopper(&store.sqlite, &repo, &stop).map_err(task_error)?;
+                let by = stopper(&store.sqlite, &stop).map_err(task_error)?;
                 let note = match note {
                     Some(note) => format!("{by}: {note}"),
                     None => by.to_string(),
@@ -673,6 +665,7 @@ mod tests {
         let mut handoff = TaskShipping {
             shipped_at: 5,
             approved_by: None,
+            approving_session: None,
             carrier: None,
             restarts: 0,
         };
@@ -749,6 +742,7 @@ mod tests {
         let handoff = TaskShipping {
             shipped_at: 5,
             approved_by: None,
+            approving_session: None,
             carrier: None,
             restarts: 0,
         };

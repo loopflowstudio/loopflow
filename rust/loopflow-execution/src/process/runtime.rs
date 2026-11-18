@@ -307,8 +307,10 @@ impl LfProcessRuntime {
         {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone().into()))
-                    .expect("caller provenance serializes"),
+                serde_json::to_string(
+                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
+                )
+                .expect("caller provenance serializes"),
             );
         }
         environment

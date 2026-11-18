@@ -311,6 +311,7 @@ mod readiness_tests {
                 started_at: 1,
                 pid: Some(pid),
                 os_started_at: crate::journal::process_started_at(pid).unwrap(),
+                caller_session: None,
             };
             store
                 .record_project_activation(wave.id(), &process, &start)
@@ -331,6 +332,7 @@ mod readiness_tests {
             started_at: 1,
             pid: Some(pid),
             os_started_at: crate::journal::process_started_at(pid).unwrap(),
+            caller_session: None,
         };
         child.kill().unwrap();
         child.wait().unwrap();

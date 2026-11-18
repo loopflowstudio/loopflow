@@ -254,6 +254,9 @@ pub struct AgentCaller {
     pub agent_process_id: Option<AgentProcessId>,
     #[serde(rename = "origin_exec_id")] // Retained provider environments use this format.
     pub origin_lf_process_id: LfProcessId,
+    /// The launcher's trace; the agent's commands join it under the launcher.
+    /// Absent in a retained environment: such a caller starts a fresh trace.
+    pub trace_id: Option<TraceId>,
 }
 
 /// An exact attachment capability, not another process or lifecycle owner.
@@ -270,11 +273,12 @@ pub struct SessionAttachment {
 }
 
 impl SessionAttachment {
-    pub fn caller(&self, session_id: LfSessionId) -> AgentCaller {
+    pub fn caller(&self, session_id: LfSessionId, trace_id: Option<TraceId>) -> AgentCaller {
         AgentCaller {
             session_id,
             agent_process_id: Some(self.agent_process_id.clone()),
             origin_lf_process_id: self.launcher_lf_process_id.clone(),
+            trace_id,
         }
     }
 }

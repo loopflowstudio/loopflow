@@ -129,7 +129,7 @@ pub fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 12] = [
+pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 13] = [
     crate::steer::PROVIDER_CONTEXT_ENV,
     crate::steer::BARE_STEER_ENV,
     crate::steer::STEER_SEEN_ENV,
@@ -139,6 +139,7 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 12] = [
     crate::process::AGENT_CALLER_ENV,
     crate::journal::LF_TRACE_ID_ENV,
     crate::journal::LF_PROCESS_ID_ENV,
+    crate::journal::LF_CALLER_SESSION_ENV,
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_EXECUTION_ID",
     "LF_RUN_DIR",

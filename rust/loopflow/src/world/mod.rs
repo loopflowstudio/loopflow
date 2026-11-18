@@ -785,6 +785,7 @@ impl World {
             &start(&graph),
             graph.repo.as_deref(),
             graph.cwd.as_deref(),
+            None,
         )?;
         for (process, key) in records {
             store.sqlite.record_process(&process)?;

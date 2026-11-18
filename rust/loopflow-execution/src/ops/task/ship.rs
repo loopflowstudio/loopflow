@@ -4,8 +4,10 @@
 //! at each step that merges, waiting there while it is stopped. `lf task hold`
 //! stops it; only `lf ship` turns a stopped mark on again.
 
-use crate::durable::TaskState;
+use crate::durable::{GraphProcessFilter, TaskState};
+use crate::engine::task::TaskRun;
 use crate::ops::error::OpsResult;
+use crate::session::GraphProcessSummaryState;
 use crate::task_graph::{TaskGraphPosition, END};
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::{AutoShip, AutoShipState};
@@ -22,8 +24,9 @@ pub enum ShipStart {
         task: Box<Task>,
         from: Option<String>,
     },
-    /// The Task already stands at `end`.
-    AtEnd { issue: String },
+    /// Nothing new runs: the Task stands at `end`, or its live run carries
+    /// on and stands in from its next interactive step.
+    Reported(TaskRun),
 }
 
 async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
@@ -104,12 +107,14 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
         let graph = crate::store::task_work::task_graph(&store.sqlite, &task.id)
             .map_err(task_error)?
             .ok_or_else(|| task_error(format!("Task {issue} has no graph to ship")))?;
-        let from = match &graph.position {
+        let (from, live) = match &graph.position {
             TaskGraphPosition::At { step } if step == END => {
-                return Ok(ShipStart::AtEnd { issue });
+                return Ok(ShipStart::Reported(TaskRun::Ended { issue }));
             }
-            TaskGraphPosition::At { .. } => graph.waiting_step().map(|step| step.name.clone()),
-            TaskGraphPosition::Run { .. } => None,
+            TaskGraphPosition::At { .. } => {
+                (graph.waiting_step().map(|step| step.name.clone()), None)
+            }
+            TaskGraphPosition::Run { .. } => (None, live_graph_run(&store, &task).await?),
         };
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
             crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
@@ -119,11 +124,40 @@ pub fn ship_on(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsResul
             .sqlite
             .set_task_auto_ship(&task.id, &on, false, note)
             .map_err(task_error)?;
+        if let (Some(graph_process), TaskGraphPosition::Run { at, .. }) = (live, &graph.position) {
+            // The run reads Auto-Ship at each interactive step, so it stands
+            // in from here without being started again.
+            return Ok(ShipStart::Reported(TaskRun::Running {
+                log: Some(crate::process::launch_log::graph_log_path(&graph_process)),
+                issue,
+                run: format!("{} at {at}", graph.name),
+                ships: true,
+                graph_process: LfProcessId::parse(&graph_process).map_err(task_error)?,
+            }));
+        }
         Ok(ShipStart::Run {
             task: Box::new(task),
             from,
         })
     })
+}
+
+/// The Task's Graph process that is running now, if one is.
+async fn live_graph_run(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
+    let filter = GraphProcessFilter {
+        task_id: Some(task.id.clone()),
+        state: Some(GraphProcessSummaryState::Current),
+        ..GraphProcessFilter::default()
+    };
+    let page = store
+        .graph_inventory(&filter, None, std::num::NonZeroU32::MIN)
+        .await
+        .map_err(task_error)?;
+    Ok(page
+        .entries
+        .into_iter()
+        .next()
+        .map(|entry| entry.summary.id))
 }
 
 /// `lf -b task run`: Auto-Ship on unless someone stopped it.

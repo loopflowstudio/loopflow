@@ -273,7 +273,7 @@ impl LaunchInput {
     }
 }
 
-/// `lf task run` leaves its terminal: the Graph it starts outlives the caller,
+/// `lf task run` and `lf ship` leave their terminal: the Graph they start outlives the caller,
 /// and `lf -b task run` waits for it. Returns whether a detached child ran the
 /// command; in a held terminal, an already detached process or a Graph step it
 /// runs here.

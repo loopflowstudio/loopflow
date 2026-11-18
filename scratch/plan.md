@@ -111,8 +111,9 @@ literally.
 - **Task snapshot** (`ops/task/snapshot.rs`, `TaskExecutionSnapshot`):
   `auto_ship: Option<AutoShip>` replaces `ship_approval` and `ship_stop` (both
   `ShipMark`).
-- **`lf task status`** (`bin/lf.rs:744-760`): one line, "Auto-Ship: on, by Maya
-  2h ago" or "Auto-Ship: stopped by Maya 5m ago".
+- **`lf task status`** (`bin/lf.rs:744-760`): one line, "Auto-Ship: on by Maya,
+  Nov 18 09:04" or "Auto-Ship: stopped by Maya, Nov 18 09:10"; a mark that
+  names nobody (backfilled from released rows) drops "by".
 - `task_details.rs:118`, `task_started.rs:39`: `shipped_at` → `auto_ship_at`
   where `auto_ship = 'on'`.
 - **Task summaries** (`sqlite/task_summaries.rs`): `ship_events` counted
@@ -251,7 +252,10 @@ Built:
 - Wire: `TaskSnapshot.auto_ship`; roadmap `shipping` gone (`ship_control`
   says "Auto-Ship is already on"); fixtures, server schema, Swift
   (`TaskExecution.autoShip`, Stop Auto-Ship reads it), dev docs.
-- `lf task status`: "Auto-Ship: on, by X <time>" / "Auto-Ship: stopped by X …".
+- `lf task status`: "Auto-Ship: on by X, <local time>" / "Auto-Ship: stopped by X, …".
+- QA (2026-11-18): `lf ship` now detaches as `lf task run` does, and on a
+  live run reports that run (`ships: true`) instead of the run refusal;
+  `scratch/qa.html`.
 
 Left for gate:
 

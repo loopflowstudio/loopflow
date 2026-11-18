@@ -2706,30 +2706,6 @@ fn task_ship_stands_in_at_the_step_the_task_waits_at() {
 }
 
 #[test]
-fn a_second_ship_refuses_while_a_run_carries_the_task() {
-    let task = shipping_task();
-    // The first ship holds at its stand-in; a second one finds its run live.
-    fs::write(task.home.path().join("hold"), "").unwrap();
-    let mut first = command(
-        task.repo.path(),
-        task.home.path(),
-        &["-b", "--task", "INF-123", "ship"],
-    )
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::null())
-    .spawn()
-    .unwrap();
-    wait_for("the stand-in", || !stand_ins(&task).is_empty());
-    assert_eq!(task.state(), "shipping");
-    let error = refusal(task.run(&["-b", "--task", "INF-123", "ship"]));
-    assert!(error.contains("Task INF-123 is running graph"), "{error}");
-    fs::remove_file(task.home.path().join("hold")).unwrap();
-    assert!(first.wait().unwrap().success());
-    assert_eq!(task.graph()["position"], at("end"));
-    assert_eq!(handoffs(&task).len(), 1);
-}
-
-#[test]
 fn a_bare_ship_stands_in_because_auto_ship_is_on() {
     let task = shipping_task();
     task.task_run_ok(&["task", "run", "INF-123"]);
@@ -2747,6 +2723,39 @@ fn a_bare_ship_stands_in_because_auto_ship_is_on() {
     let status = task.status();
     assert_eq!(status["auto_ship"]["state"], "on", "{status}");
     assert_eq!(status["auto_ship"]["by"]["kind"], "person");
+}
+
+#[test]
+fn a_ship_on_a_running_task_reports_its_run_and_starts_nothing() {
+    let task = shipping_task();
+    fs::write(task.home.path().join("hold"), "").unwrap();
+    let mut first = command(
+        task.repo.path(),
+        task.home.path(),
+        &["-b", "task", "run", "INF-123"],
+    )
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::null())
+    .spawn()
+    .unwrap();
+    wait_for("the stand-in", || !stand_ins(&task).is_empty());
+    let shipped = task.run(&["--task", "INF-123", "ship"]);
+    let text = String::from_utf8_lossy(&shipped.stdout);
+    assert!(
+        shipped.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&shipped.stderr)
+    );
+    assert!(
+        text.contains("at review running as Graph process"),
+        "{text}"
+    );
+    assert!(text.contains("ships:"), "{text}");
+    fs::remove_file(task.home.path().join("hold")).unwrap();
+    assert!(first.wait().unwrap().success());
+    assert_eq!(task.graph()["position"], at("end"));
+    assert_eq!(stand_ins(&task).len(), 1);
 }
 
 #[test]

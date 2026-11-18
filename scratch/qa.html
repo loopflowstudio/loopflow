@@ -1,72 +1,119 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-959 qa: lost threads</title>
+<meta charset="utf-8">
+<title>LOO-968 qa: lf ship is Auto-Ship on plus lf task run</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
 pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
 .ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
-</style></head><body>
-<h1>LOO-959 qa after slice 6: a conversation whose transcript is gone</h1>
-<p>Branch <code>lf</code> at 4f8a1743d plus the fix below, on a private lf-world Machine at
-<code>/tmp/lfq959b</code> with its own <code>lf server run</code> and the world's stand-in
-<code>claude</code>. Tasks a9e364 (Design transcript search) and 85af23 (Second conversation).
-Status lines are <code>lf task status &lt;task&gt; | grep Conversation</code>. The thread a start used is read from
-the provider's argv (<code>--resume</code> means it continued, <code>--session-id</code> means a new thread).</p>
+</style>
+<h1>LOO-968 qa: <code>lf ship</code> is Auto-Ship on plus <code>lf task run</code></h1>
+<p>Branch <code>lf</code> at 3f2a4f7e89 plus the fixes below, on a private lf-world Machine
+(<code>task-review</code> recipe, /tmp/lfq968/r) with its own <code>lf server run</code>, a headless
+<code>claude</code> stand-in that waits on a marker file, and graph <code>qaship</code>:
+implement → interactive human-review → <code>cmd: land</code> → interactive verify. The world's
+<code>gh</code> answers reads only, so <code>land</code> succeeds only on a PR merged by hand; elsewhere it fails,
+which still shows the run got past the Auto-Ship gate. Upgrade checked against the installed
+v0.16.0 in a second home (/tmp/lfq968/u).</p>
 
-<h2>1. Crash lost the transcript, then the provider is killed <span class="ok">works</span></h2>
-<pre>mv …/48024041-….jsonl away; kill -9 &lt;claude&gt;
-23:29:32 died 23:29 (exit 137) · starting again
-23:29:35 running (started again 23:29, attempt 1)
-argv: … --session-id 7161a088-…        (fresh thread, same Session)
-lf resume --task a9e364, type hello → reply 7161a088-…: hello</pre>
-<p>Before slice 6 this start failed five times and gave up. Now the first start comes back.</p>
+<h2>1. Ship a Task whose PR was merged by hand <span class="ok">works</span></h2>
+<pre>lf ship 1545df --graph qaship
+[1/4] implement · [2/4] human-review (stood in) · op: land
+Pull request already merged. Complete the accepted outcome with lf task complete 1545df.
+[4/4] verify (stood in)
+lf task status 1545df → 1545df  done · Graph qaship: at end · Auto-Ship: on by Demo, Nov 18 09:04</pre>
+<p>With <code>ship_settle_merge</code> gone, the land step handles the hand merge, as the plan expected.</p>
 
-<h2>2. Quit stays quit, and a person reopens a lost one <span class="fix">fixed</span></h2>
-<pre>type quit → Conversation: quit 23:30; `lf resume --task a9e364` opens it
-(65 s later, after a pass) still quit
-lf resume --task a9e364
-  The claude transcript of this conversation is gone; continuing on a fresh thread.
-  Started a new claude thread for Design transcript search, seeded with what the claude thread knew.</pre>
-<p>The second line was false: no thread was read, and the new one carries the original request.
-<code>new_thread</code> (<code>ops/human_session.rs</code>) now says so:</p>
-<pre>Started a new claude thread for 85af23 Second conversation, seeded with its original request.</pre>
-<p>The skill was kept: the fresh thread opened with <code>&lt;lf:skill:task-session&gt;</code>.</p>
+<h2>2. <code>lf ship</code> kept its caller until the whole Graph ended <span class="fix">fixed</span></h2>
+<p>Before: <code>lf ship 7ca83c --graph qaship</code> printed the Graph banner and step lines and only
+returned when the run ended (9.8 s on scenario 1, and indefinitely on a long step).
+<code>lf task run</code> on the same Task returned at once with its <code>running as Graph process</code>
+lines. Only <code>task run</code> was detached in <code>bin/lf.rs</code>. Now <code>lf ship</code> detaches the same way:</p>
+<pre>$ time lf ship fcc343
+fcc343 · qaship from land running as Graph process 3ee27962-…
+  ships:  this run may merge the PR; `lf task hold fcc343` stops it
+  follow: lf task status fcc343
+  log:    …/logs/graph-3ee27962-….log
+0.477 total</pre>
 
-<h2>3. Transcript present: a kill still resumes the same thread <span class="ok">works</span></h2>
-<pre>23:33:20 died 23:33 (exit 137) · starting again
-23:33:21 running (started again 23:33, attempt 1)
-argv: --resume 6cb92570-…</pre>
+<h2>3. <code>lf ship</code> on a live run printed an error <span class="fix">fixed</span></h2>
+<p>Before: Auto-Ship turned on, but the command then ran the <code>lf task run</code> refusal:</p>
+<pre>Error: Task adf894 is running graph qaship from start; read `lf task status adf894`, or `lf task interrupt adf894` to stop it</pre>
+<p>Served <code>task.ship</code> got the same error. Now <code>ship_on</code> sees the Task's live Graph process
+and reports it as <code>lf task run</code> would, with <code>ships: true</code>:</p>
+<pre>fcc343 · qaship at implement running as Graph process 41b750aa-…
+  ships:  this run may merge the PR; `lf task hold fcc343` stops it
+served task.ship → {"state":"running","issue":"7ca83c","run":"qaship at implement","ships":true,"graph_process":"3554d929-…",…}</pre>
+<p>Before the fix, adf894 (shipped mid-implement) stood in at human-review and reached <code>land</code>, so
+the run reading the mark at each step worked from the start. Only the reply was wrong.</p>
 
-<h2>4. Simulated reboot, one kept thread and one lost <span class="ok">works</span></h2>
-<p>SIGKILL to the server, holders and providers, binary swapped for the fix, new server.</p>
-<pre>23:33:55 a9e364 closed · starts again 23:34          | 85af23 died 23:33 (no exit recorded) · starting again
-23:33:58 a9e364 died 23:33 (no exit recorded) · …   | 85af23 running (started again 23:33, attempt 1)   --session-id 4620bc22 (fresh)
-23:34:49 a9e364 running (started again 23:34, attempt 2)                                               --resume 6cb92570 (kept)</pre>
-<p>a9e364 waited the 1-minute backoff because it had died once already with no finished turn (scenario 3).
-One provider survived the kill (pid-list split), so its holder's death took it down instead. It reads "no exit
-recorded", which is the same as a reboot.</p>
+<h2>4. Hold mid-run, then <code>-b</code>, then ship <span class="ok">works</span></h2>
+<pre>lf task hold fcc343 --reason '…'      → fcc343 stopped shipping
+(implement finishes)                  → fcc343  active · Graph qaship: at human-review
+lf -b task run fcc343                 → Waiting at land: not approved to merge (Demo stopped shipping). `lf ship` lands it.
+                                        Auto-Ship: stopped by Demo, … · `lf ship fcc343` turns it on
+lf ship fcc343                        → qaship from land running …; land runs (fails on the world's gh)</pre>
+<p>Nothing was killed. The headless step ran to its end. Served <code>task.hold</code> answered
+<code>{"issue":"7ca83c","stopped":true}</code>.</p>
 
-<h2>5. Attaching to a running conversation with no transcript <span class="ok">works</span></h2>
-<pre>lf resume --task 85af23 (running d8b37dbb, no transcript file) → reply d8b37dbb-…: x   (viewed, no new thread)</pre>
+<h2>5. Kill an Auto-Ship run's carrier <span class="ok">works</span></h2>
+<pre>kill -9 -&lt;pgid of lf ship 173404&gt; and its claude
+09:11:16 Run died at implement; the server's next pass carries it again
+09:12:07 running at implement            (carrier: lf task run 173404, parent: lf server run)
+(release)  → stood in at human-review, reached land</pre>
+<p>The killed Graph process still read <code>Current</code> and the Task read <code>shipping</code> while it was
+stopped at land. That lasted until <code>lf machine prune</code> ("ended 2 runs"), which the server runs
+hourly. This comes from the base; see below.</p>
+
+<h2>6. A run with no interactive step ahead <span class="ok">works</span></h2>
+<pre>lf task run b3a9a1 qanoint   → ships: line printed · b3a9a1  moving · no Auto-Ship line</pre>
+
+<h2>7. Runs that keep failing <span class="ok">works</span></h2>
+<pre>The run of qaship from start failed (attempt 2 of 3); starting it again at land.
+the run of qaship from start failed 3 times with the same error; this Task run stops here: Task 7ca83c has no active PR
+7ca83c  idle · Auto-Ship: on by Demo, …</pre>
+
+<h2>8. Upgrade from v0.16.0 <span class="fix">status line fixed</span></h2>
+<p>v0.16 <code>lf ship 7e7045</code>, and <code>lf task hold 25275c</code>, then the branch opened the home.
+The backfill gave 7e7045 <code>auto_ship='on'</code> and cleared <code>shipped_at</code>. Released rows store no
+person, so the mark's starter is <code>{"kind":"person","name":null}</code>. Status printed
+<code>Auto-Ship: on, by attribution unresolved 2026-11-18T17:15:46Z</code>, in UTC, while every other
+line in status uses local time. Now:</p>
+<pre>Auto-Ship: on, Nov 18 09:15            (released mark, nobody named)
+Auto-Ship: on by Demo, Nov 18 09:14
+Auto-Ship: stopped by Demo, Nov 18 09:10 · `lf ship fcc343` turns it on</pre>
+<p>The killed released ship was <em>not</em> carried by the branch's server (5 min watched): its
+carrier lived on <code>task_ship_events</code>. <code>lf task run 7e7045</code> carried it on, stood in at demo,
+and reached <code>done</code>.</p>
+<p>The released lf kept writing to the store after the branch migrated it. A <code>lf ship 25275c</code>
+still running in my shell loop shipped and completed 25275c with <code>shipped_at</code> set again. That
+is expected upgrade skew. It also registered a real launchd job for the temporary home, which I
+booted out.</p>
 
 <h2>What it leaves behind</h2>
-<p>Still two Sessions, one per Task. <code>creation_receipts</code> holds one
-<code>fresh-thread:&lt;session&gt;:&lt;lost thread&gt;</code> per fresh start (5 here), with no duplicates.
-Every server, holder and stand-in was stopped at the end.</p>
+<p>One Graph process per run in <code>lf task status</code>, with no ship process. <code>task_graphs.auto_ship*</code>
+holds the mark. After recovery and prune, no open Graph rows are left. Every server, holder and
+stand-in started for this run was stopped, and the launchd job the released lf registered was
+removed.</p>
 
 <h2>What works now</h2>
-<p>A lost transcript no longer strands a conversation. The pass's restart and a person's resume each go on in a
-fresh thread on the same Session, at the first attempt. Kept threads resume as before, and quit stays quit.</p>
+<p><code>lf ship</code> turns Auto-Ship on and returns what <code>lf task run</code> returns, from the CLI and over
+the socket, whether the Task is unstarted, waiting, stopped at land or running. Hold stops the
+run at its next interactive or merging step and kills nothing. <code>-b</code> respects a stop. Recovery
+carries Auto-Ship runs as <code>lf task run</code>. A hand-merged PR completes through the land step.</p>
 
 <h2>Not reached</h2>
-<p>Real Claude: its SIGTERM exit code (acceptance check 5's quit window) and a real reboot with three Tasks
-need a person's Machine and login. Died carriers and the five-start give-up were not re-run. Slice 6 does not
-touch them, and earlier qa covered them.</p>
+<p>A real merge: the world's <code>gh</code> refuses <code>pr merge</code>, so the only landing seen succeed is
+the already-merged one. The fixture tests cover the fake-gh merge. Desktop's Stop Auto-Ship button
+was not checked, only the served <code>task.hold</code> it sends. Real Claude was not used.</p>
 
 <h2>Still wrong or open, worst first</h2>
-<p><span class="open">The pass's fresh start is silent to a later viewer.</span> The notice goes to the starting
-terminal before the provider draws. Someone who attaches later sees only the new conversation, and status reads
-<code>running (started again …, attempt 1)</code> with nothing about the fresh thread. This is already in
-<code>questions.md</code> (no status line for a fresh thread).</p>
-<p>Transient <code>closed · starts again</code> on the first read after a reboot, before the died line (one read).</p>
-</body></html>
+<ol>
+<li><span class="open">An in-flight released ship is dropped at upgrade.</span> If it dies or halts after the
+migration, nothing carries it, and the Task reads <code>idle</code> with "process left no exit record … launch
+fresh work" until someone runs it. The plan chose this. The questions note says how to reverse it.</li>
+<li><span class="open">A killed Graph process reads <code>Current</code> for up to an hour.</span> Its Task shows
+<code>shipping</code> (or <code>moving</code>) with nothing running. This comes from the base and is in questions.md.</li>
+<li><code>lf task run 7ca83c qaship --from implement</code> printed "qaship from start". The run did start at
+implement, the first step. This label logic is older than the branch and was not changed.</li>
+</ol>

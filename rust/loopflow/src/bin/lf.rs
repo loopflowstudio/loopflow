@@ -732,25 +732,19 @@ fn print_task_snapshot(
         if let Some(graph) = &snapshot.work.graph {
             println!("  {}", graph.summary());
         }
-        let when = |at: i64| {
-            time::OffsetDateTime::from_unix_timestamp(at)
-                .ok()
-                .and_then(|at| {
-                    at.format(&time::format_description::well_known::Rfc3339)
-                        .ok()
-                })
-                .unwrap_or_else(|| at.to_string())
-        };
         if let Some(mark) = &snapshot.auto_ship {
+            use loopflow_storage::process::Starter;
             use loopflow_storage::sqlite::AutoShipState;
+            // A mark an earlier lf wrote may name nobody.
+            let by = match &mark.by {
+                Starter::Person { name: None } => String::new(),
+                by => format!(" by {by}"),
+            };
+            let at = loopflow_execution::output::format_time(mark.at);
             match mark.state {
-                AutoShipState::On => {
-                    println!("  Auto-Ship: on, by {} {}", mark.by, when(mark.at))
-                }
+                AutoShipState::On => println!("  Auto-Ship: on{by}, {at}"),
                 AutoShipState::Stopped => println!(
-                    "  Auto-Ship: stopped by {} {} · `lf ship {}` turns it on",
-                    mark.by,
-                    when(mark.at),
+                    "  Auto-Ship: stopped{by}, {at} · `lf ship {}` turns it on",
                     snapshot.issue_identifier
                 ),
             }
@@ -2597,7 +2591,7 @@ fn dispatch(cli: Cli, args: &[String]) -> anyhow::Result<()> {
         cli.command,
         Some(Commands::Task {
             cmd: TaskCommand::Run { .. }
-        })
+        }) | Some(Commands::Ship { .. })
     ) && loopflow_execution::transport::detach_current()?
     {
         return Ok(());

@@ -277,8 +277,8 @@ lands the PR. `lf ship` turns it on and runs the Task, so it prints what
 
 ```bash
 lf ship LOO-12                      # LOO-12 · code from human-review running as Graph process …
-lf task status LOO-12               # Auto-Ship: on, by Maya 2h ago
-lf task hold LOO-12                 # Auto-Ship: stopped by Maya just now
+lf task status LOO-12               # Auto-Ship: on by Maya, Nov 18 09:04
+lf task hold LOO-12                 # LOO-12 stopped shipping
 ```
 
 The run reads Auto-Ship at each interactive step, not at launch: turn it on

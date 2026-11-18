@@ -37,9 +37,9 @@ caller's process.
 | A Discord answer for a Wave | worker | returns the answer to the bridge |
 | Desktop Task shells | held shell | independent of its viewer, no hooks |
 
-`lf task run` starts no agent itself. `transport::detach_current` reruns it
-detached from its terminal so the Graph outlives the caller; `lf -b task run`
-waits for it.
+`lf task run` and `lf ship` start no agent themselves. `transport::detach_current`
+reruns them detached from their terminal so the Graph outlives the caller;
+`lf -b task run` waits for it.
 
 To open a work session from the CLI, `lf` calls `session.start` and becomes
 a view of the returned terminal. With the server unreachable it fails with

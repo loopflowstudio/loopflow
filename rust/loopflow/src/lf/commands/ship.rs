@@ -8,7 +8,6 @@ use std::path::Path;
 use anyhow::Result;
 
 use crate::lf::Cli;
-use loopflow_execution::engine::task::TaskRun;
 use loopflow_execution::ops::task::ship::{ship_on, ShipStart};
 use loopflow_execution::ops::task::TaskProcessOptions;
 
@@ -23,9 +22,7 @@ pub fn run(
 ) -> Result<()> {
     let (task, from) = match ship_on(issue, graph, reason)? {
         ShipStart::Run { task, from } => (task, from),
-        ShipStart::AtEnd { issue } => {
-            return super::graph::announce_run(&TaskRun::Ended { issue }, json)
-        }
+        ShipStart::Reported(run) => return super::graph::announce_run(&run, json),
     };
     if let Some(step) = &from {
         eprintln!("{}: standing in at {step}", task.identifier);

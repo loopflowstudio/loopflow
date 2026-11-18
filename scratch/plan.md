@@ -538,6 +538,32 @@ Must survive:
 
    Left: acceptance check 5 (SIGTERM to a holder's group), the real reboot (qa).
 
+5. **What the count and the lines promise** (concept review after qa,
+   `scratch/concept-review.html`; choices made for review, questions 1–3).
+   - A person's start resets the restart count. Any start of a Task
+     conversation whose request is not `recover:…` (`lf resume`, Desktop,
+     `session.continue`) sets `starts_since_turn` to 0 and clears
+     `start_failure`, in the same write that records the new agent. qa saw
+     `running (started again 15:39, attempt 3)` after a person's resume, and the
+     next deaths had fewer starts left. `docs/sessions.md` gains the clause.
+     Test: died 4 times, a person resumes, then dies again: the pass starts it
+     (attempt 1), not gives up at 5.
+   - One waker for one schedule. `restart_runs` (`ops/task/ship.rs:666`)
+     returns the soonest `died.next_at()` it skipped; `settle()` passes it up
+     and `Watcher::read` (`server/recovery.rs`) wakes at the earlier of that
+     and the conversations' `next_at`. Test: a died run with a backoff due in
+     5 s is carried within the next second after it, without a store change.
+   - A promise only when someone keeps it. With no server answering
+     (`machine.sock` not accepting), the session line
+     (`lf/commands/session.rs` ~line 465) reads `· starts again when the server
+     runs` instead of `starting again`/`starts again <t>`. The DTO stays as is:
+     this is presentation over `start.next_at`. Test in
+     `lf::commands::session::tests::`.
+
+   Recorded, not built: resuming a conversation with no transcript (killed
+   before its first turn) fails five times; the SIGTERM quit window
+   (`holder_stopping`) waits on real Claude's SIGTERM exit code.
+
 ## Checks
 
 - `cargo test -p loopflow --lib server::recovery::tests::`: 7 pass (implement).

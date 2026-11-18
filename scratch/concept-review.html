@@ -1,117 +1,64 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-959 Concept Review</title>
+<html lang="en"><head><meta charset="utf-8">
+<title>LOO-959 concept review (after qa)</title>
 <style>
-:root{--bg:#fbfaf7;--fg:#1d1c1a;--muted:#6b675f;--line:#e2ded5;--card:#fff;--yes:#1f7a4d;--no:#b3261e;--part:#9a6200;--prop:#2f5fd0;--propbg:#eef3ff;--code:#f1eee7}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#161513;--fg:#ebe7df;--muted:#a19b90;--line:#34312c;--card:#1e1d1a;--yes:#5cc08a;--no:#ff8a80;--part:#e0b050;--prop:#8fb0ff;--propbg:#1c2338;--code:#26241f}}
-:root[data-theme="dark"]{--bg:#161513;--fg:#ebe7df;--muted:#a19b90;--line:#34312c;--card:#1e1d1a;--yes:#5cc08a;--no:#ff8a80;--part:#e0b050;--prop:#8fb0ff;--propbg:#1c2338;--code:#26241f}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-sans-serif,-apple-system,"Segoe UI",sans-serif}
-main{max-width:980px;margin:0 auto;padding:32px 16px 64px}
-h1{font-size:1.7rem;margin:0 0 8px}h2{font-size:1.25rem;margin:40px 0 12px}
-p{margin:8px 0}.muted{color:var(--muted)}
-code{font:0.88em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
-pre{background:var(--code);padding:14px;border-radius:8px;overflow-x:auto;font:13.5px/1.5 ui-monospace,Menlo,monospace;margin:10px 0}
-.table-wrap{overflow-x:auto;border:1px solid var(--line);border-radius:10px;background:var(--card)}
-table{border-collapse:collapse;width:100%;min-width:720px}
-th,td{text-align:left;vertical-align:top;padding:10px 12px;border-bottom:1px solid var(--line);font-size:14.5px}
-th{font-size:13px;color:var(--muted);font-weight:600}
-tr:last-child td{border-bottom:0}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:var(--part);font-weight:600}
-.prop{background:var(--propbg);border-left:3px solid var(--prop);padding:2px 8px;border-radius:4px;display:inline-block;margin-top:4px}
-.legend span{margin-right:16px;font-size:14px}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media (max-width:720px){.cols{grid-template-columns:1fr}}
-.box{border:1px solid var(--line);border-radius:10px;background:var(--card);padding:14px 16px}
-.box.after{border-color:var(--prop)}
-.box h3{margin:0 0 8px;font-size:1rem}
-.callout{border:1px solid var(--line);border-left:4px solid var(--no);background:var(--card);border-radius:8px;padding:12px 16px;margin:12px 0}
-ol.q>li{margin:14px 0}ol.q ol{list-style:lower-alpha;margin-top:4px}
-</style>
-</head>
-<body>
-<main>
-<h1>Do recovery's concepts line up with the code's?</h1>
-<p class="muted">LOO-959 as built, 2026-11-17. This covers slice 1 (commit <code>24f32b1d8d</code>) and slice 2's uncommitted work in the tree. The live <code>implement</code> pass is still writing slice 2. The earlier version of this page reviewed the plan before any code; this one replaces it.</p>
-<p><b>Area taken:</b> what keeps an open Task's work alive on one Machine. That is the Task conversation and the server pass that starts it. It also includes the carrier that keeps the Task moving, and LOO-953's liveness columns, which the pass is meant to read. Slices 3 and 4 (Task runs and surfaces) are not built, so they are reviewed as planned.</p>
-<p class="legend"><span><span class="yes">yes</span> lines up</span><span><span class="part">partly</span></span><span><span class="no">no</span> mismatch</span><span><span class="prop">proposed</span> by this review, not in the code</span></p>
+:root{color-scheme:light dark;--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#e5e5ea;--code:#f5f5f7;--yes:#1a7f37;--no:#cf222e;--prop:#0969da;--propbg:#ddf4ff}
+@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#f2f2f7;--mute:#a1a1a6;--line:#2c2c2e;--code:#232326;--yes:#3fb950;--no:#ff7b72;--prop:#58a6ff;--propbg:#0c2d4a}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2.2rem;border-top:1px solid var(--line);padding-top:1rem}
+code,pre{font:13px ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}code{padding:0 .25rem}pre{padding:.7rem;overflow-x:auto}
+table{border-collapse:collapse;width:100%}td,th{padding:.4rem .55rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
+.prop{border-left:3px solid var(--prop);background:var(--propbg);padding:.5rem .8rem;border-radius:4px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.mute{color:var(--mute)}
+</style></head><body>
+<h1>Do the product's recovery concepts and the code's line up?</h1>
+<p><b>Area taken:</b> everything that keeps a Task's work alive on one Machine: its conversation (primary Session), its run (the carrier of <code>lf task run</code>/<code>lf ship</code>), the server's recovery pass that settles and restarts them, and the lines <code>lf task status</code> and Desktop print about them. Reviewed as built on <code>3479fc1548</code> against base <code>2593c489d7</code>, with <code>scratch/qa.html</code>'s live run. The earlier page (answered "1) a 2) a 3) b") reviewed the plan; this one reviews the result.</p>
 
-<h2>One interaction, with its failure</h2>
-<pre>lf task checkout LOO-x           # prepares the conversation; the pass sees it with no agent and starts it
-                                 #   → agent_sessions.recovery_attempts = 1, recovered_at = now
-# person types; a turn finishes  → steers.rs record_native_turn(yielded) sets recovery_attempts = 0
-kill -9 &lt;claude pid&gt;             # holder records 137; launcher Process row exit_code = 137
-# pass reads (processes revision moved): died, attempts 0 → starts now
-#   request recover:&lt;session&gt;:&lt;agent&gt;:1 · attempts = 1
-# claude crashes on startup five times → 1, 2, 4, 8 min backoff, then recovery_attempts = 5: not selected
-/exit                            # launcher exit 0 → never selected again until lf resume</pre>
-<p>A person knows three things here. <i>My Task has a conversation and it's there</i>. <i>I quit it, and it stays quit</i>. <i>It died, and it came back, or here is the command</i>. The first line above is the surprise: a conversation's first start now runs through "recovery", and counts as recovery attempt 1.</p>
+<h2>One interaction, with its failure and recovery</h2>
+<pre>kill -9 &lt;claude&gt;           Conversation: died 15:31 (exit 137) · starting again
+                           Conversation: running (started again 15:31, attempt 1)
+… dies 3 more times …      attempt 4
+lf resume --task X; /exit  Conversation: quit 15:47; `lf resume --task X` opens it
+lf resume --task X         Conversation: running (started again 15:39, attempt 3)   <span class="no">← the person's resume kept the deaths</span>
+kill -9 &lt;claude&gt; ×2        Conversation: died … · started 5 times; `lf resume …`   <span class="no">← gives up after 2 deaths, not 5</span></pre>
+<p>A person who resumes has vouched for the conversation the same way a finished turn does. The code resets the count only on a finished turn (<code>steers.rs:195</code>), so the person's start inherits the deaths before it.</p>
 
-<h2>Product concepts and code concepts</h2>
-<div class="table-wrap"><table>
-<tr><th>What a person knows or does</th><th>What the code has</th><th>Lines up</th><th>What is wrong</th></tr>
-<tr><td>The Task's conversation</td><td><code>task_primary_sessions</code> → <code>agent_sessions</code></td><td class="yes">yes</td><td>"Conversation" in docs, Session in code: one thing.</td></tr>
-<tr><td>It's there unless I quit it</td><td><code>recoverable_task_conversations</code> + <code>due_task_conversations</code>, now with <code>agent.is_none()</code> (never started); <code>start_in_background</code> deleted in the tree</td><td class="no">no</td><td>One rule, which is good. But it carries the name of the exception: "recovery" covers a conversation's first start too. <b>The biggest mismatch</b>; see below.</td></tr>
-<tr><td>I quit it</td><td>The <b>launcher's</b> <code>processes.exit_code</code> ∈ {0, 130}, through <code>p.parent_lf_process_id</code></td><td class="part">partly</td><td>Per agent generation, as it should be, and needing no new column. The earlier review's <code>agent_stopped_at</code> went away with it. But it reads the <code>processes</code> table LOO-953 removes. Its replacement, <code>agent_sessions.agent_exit_code</code>, doesn't exist on this branch yet, so the query has to be rewritten when 953's slice lands. The plan said to read through <code>session_summary(..).agent_process_evidence</code>; the code joins <code>processes</code> directly.</td></tr>
-<tr><td>It died</td><td>Ended with any other code; ended with no exit; unfinished with a dead OS identity; never started</td><td class="yes">yes</td><td>Shutdown is still open (acceptance check 5): a SIGTERM that a provider turns into exit 0 reads as a quit.</td></tr>
-<tr><td>It came back; it gave up after 5</td><td><code>agent_sessions.recovery_attempts</code>, <code>recovered_at</code>; reset to 0 on <code>yielded</code> in <code>record_native_turn</code></td><td class="part">partly</td><td>What it counts is <i>starts since the last finished turn</i>. The plan noted the reset is unverified, and it has a failure: if a resumed provider reports <code>yielded</code> while starting up, before anyone types, attempts go back to 0 on every start. <code>(0, _) ⇒ waited</code> then restarts a crash-looping conversation <b>immediately, forever</b>, which is the one thing the 5-limit exists to stop. No test breaks the feature this way.</td></tr>
-<tr><td>It could not start, and why</td><td><code>agent_sessions.recovery_failure</code> (text): PATH check before the start, then any start error</td><td class="yes">yes</td><td>Nothing reads it yet: a concept the code has and the person can't see until slice 4.</td></tr>
-<tr><td>Is it running?</td><td><code>SessionState</code>; planned <code>ended {by, exit_code}</code> and <code>recovery {…}</code></td><td class="muted">slice 4</td><td>The plan's shape is right: one state on the Session, nothing added at the Task level.</td></tr>
-<tr><td>My Task is moving</td><td>The carrier: <code>task_graphs.lf_process_id</code> or the ship event's carrier</td><td class="yes">yes</td><td>No change.</td></tr>
-<tr><td>Keep the run going after a death</td><td><code>restart_ships</code> counted by <code>count_ship_restart</code>; planned <code>task_graphs.restarts</code> for moving Tasks</td><td class="part">planned</td><td>"Carrier restarts in a row" would be one idea stored in two places: ship events and a new <code>task_graphs</code> column, with two resets (<code>reset_ship_restarts</code>, plus a new one). Conversations have a third counter, which is fair, because that really is a different thing.</td></tr>
-<tr><td>(nothing)</td><td>Lazy <code>recover()</code> on reads</td><td class="yes">yes, gone</td><td>Renamed <code>settle()</code>. The server pass is its only caller, and the read hook in <code>bin/lf.rs</code> is deleted in the tree.</td></tr>
-</table></div>
+<h2>Concepts, paired</h2>
+<table>
+<tr><th>What a person knows / does</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
+<tr><td>The Task's <b>conversation</b></td><td>primary Session: <code>task_primary_sessions</code>, <code>TaskStatus.conversation</code></td><td class="yes">yes</td><td>One name for the person, one for the code, mapped once in status.</td></tr>
+<tr><td>It <b>died</b> / I <b>quit</b> it</td><td><code>SessionRecord.ended.by</code> from the launcher's exit (0/130 = person)</td><td class="yes">yes</td><td>Open window: a provider that exits 0 on SIGTERM before its holder records reads as quit (qa §9). Real Claude unchecked.</td></tr>
+<tr><td>"<b>starting again</b>" / "starts again 15:41"</td><td><code>start.next_at</code> from <code>next_start_at</code></td><td class="no">no</td><td>The line promises a start the server makes, and prints it with no server running (qa: <code>closed · starting again</code>).</td></tr>
+<tr><td>"<b>started 5 times</b>", then it waits for me</td><td><code>agent_sessions.starts_since_turn</code></td><td class="no">no</td><td>The count means "since a turn"; a person reads "since I last touched it". A person's resume is a start the pass did not make and does not reset it.</td></tr>
+<tr><td>Why it <b>couldn't start</b></td><td><code>start.failure</code> ← <code>agent_sessions.start_failure</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>The run <b>died at implement</b>, carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, the died line on the run</td><td class="no">no (small)</td><td>"One restart schedule" (<code>bef7fbb94b</code>) has two wakers: conversations wake at their <code>next_at</code>, runs wait for the 60 s tick (qa: 25 s late).</td></tr>
+<tr><td>The Machine <b>comes back</b> after a reboot</td><td><code>server/recovery.rs</code> <code>Watcher</code>: first reading settles and starts</td><td class="yes">yes</td><td>One owner; the lazy <code>recover()</code> on reads is gone.</td></tr>
+<tr><td>Nothing to clean by hand</td><td><code>ops::recovery::retain</code> hourly; <code>lf process prune</code> gone</td><td class="yes">yes</td><td>File growth is out of scope (retention Task in <code>questions.md</code>).</td></tr>
+</table>
 
-<h2>The biggest mismatch: "recovery" is the normal path now</h2>
-<p>Slice 2 did what the earlier review asked for: one rule decides what should be running, and the first start goes through it. That was the right move, and it makes the old name wrong. To a person there is no recovery. Their Task has a conversation, and it is there unless they quit it. Every name in the code still describes the exception:</p>
+<h2>Biggest mismatch: what the restart count counts</h2>
 <div class="cols">
-<div class="box"><h3>As built</h3>
-<pre>server/recovery.rs          watcher: settle + start
-RecoverableConversation     includes never-started
-recoverable_task_conversations()
-record_recovery_start()     first start = attempt 1
-agent_sessions
-  .recovery_attempts        starts since a turn
-  .recovered_at             last start
-  .recovery_failure         last start's error
-log: "Task conversation started" (attempt 1)</pre></div>
-<div class="box after"><h3><span class="prop">proposed</span></h3>
-<pre>server/recovery.rs          keeps the name: it settles and restarts
-ConversationToStart         a Session that should run and doesn't
-conversations_to_start()
-record_conversation_start()
-agent_sessions
-  .starts_since_turn        what it counts
-  .last_started_at
-  .start_failure            "no PTY left: 511 in use"
-Session wire: start {attempts, next_at, gave_up, failure}</pre></div>
+<div><b>Before (built)</b><p><code>starts_since_turn</code>: the pass adds one per start; a finished turn sets it to 0. A person's <code>lf resume</code> leaves it. After a quit and resume, the next deaths have fewer starts left, and the "attempt 3" line describes deaths the person already answered.</p></div>
+<div class="prop"><b>Proposed</b><p>The count is the pass's starts since the conversation was last vouched for: a finished turn <i>or a start the pass did not make</i>. A start whose request is not <code>recover:…</code> sets it to 0 and clears <code>last_started_at</code>'s backoff. The column keeps its name; the rule in <code>docs/sessions.md</code> gains one clause.</p></div>
 </div>
-<p>Why it's worth doing now: the three column names go into a migration. Once that migration is on origin/main it can't be changed; renaming later means an expand-and-contract migration. Each name would also appear in the DTO fixtures and in Swift in slice 4. Today it is one find-and-replace on an unmerged branch. The wire name follows: the plan's <code>recovery {attempts, next_at, gave_up, failure}</code> becomes <code>start {…}</code>, and it holds for a first start that fails ("claude is not installed") as well as for a restart.</p>
-<div class="callout"><b>Counterexample to keep:</b> the reset on <code>yielded</code>. The rename doesn't fix it. Before the counter can go back to 0, check whether <code>record_native_turn(yielded=true)</code> fires when a resumed Claude starts, with nobody typing. If it does, reset on a turn that contains a prompt the person submitted (a <code>session_events</code> user turn after <code>last_started_at</code>) and not on the yield. This is the one place where the failure path, not the names, decides whether the feature is safe.</div>
+<p>Counterexample tried: a person who resumes into a conversation that crashes on start. It dies, the pass starts it up to 5 times, then waits for them — the same as a fresh conversation. Nothing loops.</p>
 
-<h2>Smaller, already in the plan's reach</h2>
-<p><b>Quit reads the row being deleted.</b> Fixed on the stack: when LOO-953's Session columns land, <code>recoverable_task_conversations</code> reads <code>s.agent_exit_code</code>, <code>s.agent_ended_at</code> and <code>s.agent_pid</code>, and drops both <code>processes</code> joins. Until then the query is what 953 has to rewrite, and the plan should say so in slice 1's "left" list, not "reads through the seam".</p>
-<p><b>One counter for carrier restarts.</b> LOO-953 gives <code>task_ship_events</code> and <code>task_graphs</code> each their own carrier pid. Slice 3 could count restarts on whichever row names the carrier, with one reset (<code>ship_progressed</code>'s rule) for both. That would replace <code>count_ship_restart</code> rather than sitting beside it.</p>
+<h2>The two smaller ones</h2>
+<div class="prop"><p><b>One waker.</b> <code>restart_runs</code> returns its soonest run <code>next_at</code>, and the watcher waits for the earlier of that and the conversations'. Runs come back on time, like conversations.</p>
+<p><b>A promise only when someone keeps it.</b> With no server answering, status prints <code>died 15:31 (exit 137) · starts again when the server runs</code> (<code>lf::commands::session</code> line 472), not "starting again".</p></div>
+
+<h2>Recorded, not acted on here</h2>
+<ul>
+<li>A resume with no transcript (killed before its first turn) fails five times; a fresh start would serve better. Real Claude: unchecked.</li>
+<li>The SIGTERM quit window and <code>holder_stopping</code>: unbuilt until real Claude is seen exiting 0 on TERM.</li>
+<li>Delivery still waits on LOO-953's Session columns; two reads join <code>processes</code> until then.</li>
+</ul>
 
 <h2>Questions</h2>
-<ol class="q">
-<li>Naming the normal path.
- <ol><li>Rename now, before the migration merges: <code>starts_since_turn</code>, <code>last_started_at</code>, <code>start_failure</code>, and the wire field <code>start {…}</code>.</li>
- <li>Keep "recovery": the first start through the pass is an implementation detail.</li></ol></li>
-<li>What resets the attempt count.
- <ol><li>A turn the person submitted after the last start (proposed).</li>
- <li>Any <code>yielded</code>, as built, once a check shows a resumed provider doesn't yield at startup.</li>
- <li>Never reset: 5 deaths over the conversation's whole life, then <code>lf resume</code>.</li></ol></li>
-<li>Carrier restart counting in slice 3.
- <ol><li>One counter on the carrier's own row, for shipping and moving, replacing <code>count_ship_restart</code>.</li>
- <li>As planned: add <code>task_graphs.restarts</code> beside ship events.</li></ol></li>
-<li>Reading "quit" before LOO-953 lands.
- <ol><li>Leave the <code>processes</code> join, and name it in the plan as the line 953 rewrites.</li>
- <li>Wait for 953's Session columns before merging this Task.</li></ol></li>
+<ol>
+<li>A person's <code>lf resume</code> of a died conversation: (a) resets the restart count (chosen) · (b) keeps it.</li>
+<li>With no server running, the line says: (a) "starts again when the server runs" (chosen) · (b) "starting again" as now · (c) nothing about starting.</li>
+<li>A died conversation with no transcript: (a) leave as is, recorded (chosen) · (b) start it fresh instead of resuming.</li>
 </ol>
-</main>
-</body>
-</html>
+</body></html>

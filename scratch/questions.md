@@ -200,3 +200,10 @@ worker, bare+typing = chat, bare+headless = batch. Slice 4 docs use them.
 - `next_at` with no prior start is the death time (immediate), so a death the
   pass is about to start reads "starting again" even while the pass waits for
   the dying terminal to clear.
+
+## Concept review after qa (2026-11-17, `scratch/concept-review.html`)
+
+Choices made for review, built in slice 5:
+- 1a: a person's `lf resume` of a died conversation resets the restart count.
+- 2a: with no server running, the line says "starts again when the server runs".
+- 3a: a died conversation with no transcript is left as is (recorded only).

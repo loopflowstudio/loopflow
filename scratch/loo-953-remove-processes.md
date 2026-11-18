@@ -32,7 +32,8 @@ lifetime cut"): (1) the lf-row readers: `task_open_process_pairs` and
 retirement by terminal (Graph runs gain `held_terminal_id`),
 `process_starter`, `run_task_graph`'s parent check (`graph.rs:83`), and the
 Rust readers the SQL scan misses (list under "Inventory"), plus the lf-row
-reads the attachment cut left: `agent_parent`'s trace, `pending_inputs`'
+reads the attachment cut left: `agent_parent` (deleted: the trace rides
+in `AgentCaller`, see "Concept review after the handoff deletion"), `pending_inputs`'
 `attached` join (an input ends when its lf's row does), `native_exit`'s
 launcher end; (2) the expand migration's foreign-key rebuild together with
 stopping the journal writer **and the owner liveness pass** (see "Concept
@@ -73,6 +74,34 @@ loopflow `server::{boundary,wake}`, `subscription_measurement`,
 `documented_commands::` pass; `cargo clippy --all-targets -D warnings` clean.
 `binary(session_lifecycle_tests)`, `process_ownership_tests`,
 `session_cli_tests`, `work_open_tests` (callers only dropped the argument) → gate/CI.
+
+**Concept review after the handoff deletion (2026-11-17): next implement direction.**
+
+The expected result holds: no `replace_provider`, no non-replacing branch,
+no `session_activity` rebinding. What the deletion now implies, folded into
+step (1), the lf-row readers:
+
+- **An attachment's lf is its launcher.** Every attach writes
+  `attached_lf_process_id = agent_launcher_lf_process_id`, and release only
+  clears the attached one. Same agent ⇒ same launcher, so
+  `agent_parent`'s attachment read is a no-op: its answer is always
+  `caller.origin_lf_process_id`. The released token stays (it is the
+  compare-and-swap value the next attach passes as `expected`).
+- **`agent_parent` reads nothing.** The agent edge needs only the launcher's
+  trace, which the launcher knows when it writes `LF_AGENT_CALLER`. Put
+  `trace_id` in `AgentCaller` (serde-optional for retained provider
+  environments: an absent trace mints a fresh one, as an unresolved caller
+  does today) and delete `agent_parent`; the journal's agent edge then takes
+  parent and trace from the env. This replaces "convert `agent_parent`'s
+  trace" in step (1) with a deletion.
+- **Stale handoff prose** to fix in the same pass: `SteerAdapter`'s doc
+  (`steer.rs:3`), `record_native_turn`'s doc (`steers.rs:169`),
+  `native_exit`'s "handed-off launcher is not recorded" context.
+- `SessionAttachment.lf_process_id: Option` + `launcher_lf_process_id` encode
+  one lf plus "held". Left as is: the column pair goes with slice 6, and the
+  bridge writes released readers' `attached_lf_process_id` from it.
+
+No open product choice.
 
 **Attachment cut as built (second cut of slice 3).**
 

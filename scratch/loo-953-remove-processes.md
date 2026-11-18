@@ -2,8 +2,9 @@
 
 ## Status (2026-11-18, slices 4, 4b, 4c and 5 built; concept review after 4c: nothing to change; next: gate)
 
-Realign 2026-11-18: `grep -rn -e '--processes' rust docs swift` and a grep
-for `process.get`/`process.history` return nothing; 4b stands as built.
+Realign 2026-11-18 (after 4c): `installation_tests.rs` reads no
+`processes`; `journal::admit_process` warns `trace log unavailable`; no
+`--processes`, `process.get` or `process.history` in rust, docs or swift.
 
 LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
 slice of this PR is built: slice 2a, the owner and carrier slices, the Session

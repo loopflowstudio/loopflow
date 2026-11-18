@@ -269,7 +269,7 @@ fn a_move_among_equal_ranks_lands_where_the_board_shows_its_target() {
 }
 
 #[test]
-fn a_task_move_changes_its_rank_in_every_plan_and_stays_within_its_project() {
+fn a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_joins_it() {
     let (_dir, store, repo) = fixture();
     let (one, two, three, four, five) = (
         "task_11111111111111111111111111111111",

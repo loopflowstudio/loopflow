@@ -6,8 +6,8 @@
   keeping a board-only manual order as client screen state (like
   `work_pane_layouts` moving to Desktop files). Also dropped: the board's
   "waiting Tasks first" tiebreak, since a drag must visibly land where it was
-  dropped. A Move onto a Task in another Project has no rank meaning; it
-  answers "nothing changed" with the reason.
+  dropped. A Move onto a Task in another Project moves it there (answer 2
+  below).
 - **`task_prs.branch/base_commit/parent_pr_id`** stay: trigger-copied from
   `task_checkouts` while a PR is open, and the only record once it merges and
   the checkout is gone. Could become "the PR's branch" only, with open PRs
@@ -49,7 +49,7 @@
   the exchanged key did not, because the Git journal and released peers
   require it (DTOs carry no defaults). Chosen: derive it from the state on
   read, honour it only when no state is given. Removing it needs a release
-  that accepts its absence first; not filed, belongs with LOO-877's drop.
+  that accepts its absence first; recorded on LOO-877.
 - **Sync trigger for `planning_completed`.** Chosen over "stop writing":
   released lf on the same store reads the boolean for status, ownership and
   retirement, and existing retirement triggers fire on it. Passed over:
@@ -84,10 +84,6 @@
   old mark first; LOO-877 makes it unique. Cost in the window: a released lf process
   still running after the migration fails `primary_scope()` ("unsupported
   primary scope") on a Task primary until it exits.
-- **Wire `task_primary` stays** for now, beside `primary_scope`, which now says
-  `"task"` too. Dropping it means touching ~80 Swift and fixture sites; it is a
-  projection, not a stored copy.
-
 ## Concept review answers (human review, 2026-11-18)
 
 "1 (a) 2(a) 3(a) 4(a)", against scratch/concept-review.html's questions:
@@ -98,6 +94,9 @@
    suffices.
 4. `Disposition.planning_completed` on the wire: file the release that
    accepts its absence with LOO-877.
+
+Applied: 1 and 2 in `a3639aa8f2`; 3 and 4 are recorded on LOO-934's and
+LOO-877's Tasks.
 
 - **A move takes any of the repository's Projects** (from answer 2). Dropping
   on another Project's Task moves it there, then ranks it; `lf task move`

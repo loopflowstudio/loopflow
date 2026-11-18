@@ -123,7 +123,8 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 
 | Member | Verdict | Why |
 |---|---|---|
-| `task_checkouts`, `task_primary_sessions`, `task_ship_events` | keep | LOO-874's homes |
+| `task_checkouts`, `task_ship_events` | keep | LOO-874's homes |
+| `task_primary_sessions` | **leaving** | a Task's primary is `agent_sessions.primary_scope='task'`, as a repository's and a Wave's are; three triggers mirror the table for released lf until LOO-877 |
 | `task_prs.branch/base_commit/parent_pr_id` | keep for now | trigger-copied from `task_checkouts` and enforced equal (`task_machine_local.sql:105-140`); PR delivery reads them for merged PRs too, where the checkout is gone. Not a free duplicate; questions.md |
 | `pr_landings.worktree` | keep | a landing is supervised on one Machine (`supervisor_machine_id`) and may have no Task (`lf land` in any checkout). Execution table already |
 | `agent_sessions.task_id` | keep, backfill | the only Session→Task link |
@@ -133,7 +134,7 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 ## Source of truth after the change
 
 - Task (shared): `tasks`. Observed provider Task: `pm_items`. Queue: `tracker_actions` (LOO-925/938).
-- Checkout here: `task_checkouts`. Primary conversation here: `task_primary_sessions`. Auto-Ship: `task_ship_events`.
+- Checkout here: `task_checkouts`. Primary conversation: `agent_sessions.primary_scope='task'`. Auto-Ship: `task_ship_events`.
 - A Session's Task: `agent_sessions.task_id`. A Graph run's Task: `graph_processes.task_id`.
 - Order: `tasks.planning_rank` (desired), `pm_items.rank` (observed).
 
@@ -196,8 +197,8 @@ cp ~/.lf/loopflow.db /tmp/lf937.db && LF_HOME=… lf task status LOO-937 --json 
 ```
 
 Report before/after in the PR: tables, columns, store size, `pub fn` count in
-`loopflow-storage` (900 now), SQL call sites outside it (`rg` count, method
-stated).
+`loopflow-storage` (900 at kickoff), SQL call sites outside it (`rg` count,
+method stated).
 
 ## Absent and error states
 
@@ -233,6 +234,8 @@ primary-key read of the calling Session.
 - `task_orders` and `commit_task_order`/`task_order_inputs`/`task_order_in`,
   `TaskOrder` key's manual position.
 - `pm_projects.task_order_json` reads/writes.
+- `task_primary_sessions` as the home of a Task's primary, and `task_primary`
+  on the Session wire record (Swift derives `taskPrimary` from `primary_scope`).
 
 Survives: every Task's title, description, state, rank, URL, branch,
 every Process/Session association, conflict answers.
@@ -299,9 +302,12 @@ every Process/Session association, conflict answers.
    tiebreak is gone. A tile Move is `SqliteStore::reorder_task(task, to)`:
    `planning_order::move_in` gives the Task `to`'s position among its siblings
    through `reorder_in`, so it is an `order` action for a tracker Project; a
-   Move across Projects is `InvalidData` with the reason, which `lf desktop`
+   Move onto another Project's Task moves the Task into that Project at that
+   place (a Project change, then an order;
+   `a_task_move_changes_its_rank_in_every_plan_and_a_drop_in_another_project_joins_it`).
+   Across repositories it is `InvalidData` with the reason, which `lf desktop`
    reports as an argument error and Desktop shows after re-reading
-   (`aMoveOntoAnotherProjectsTaskReturnsTheRowAndSaysWhy`). The execution
+   (`aRefusedMoveReturnsTheRowAndSaysWhy`). The execution
    `reorder_task`, `commit_task_order`, `task_order_inputs`, `task_order_in`
    and the `task_orders` JSON validation are gone. `observed_order` reads the
    Project's `tracker_items` by rank; `observe_in` stops writing a list, and
@@ -317,49 +323,70 @@ every Process/Session association, conflict answers.
    planning label"; slice 3 made that one fact, so the phase and its entry in
    `tests/fixtures/dto/task_concepts.json` are gone (Swift reads phases by name).
 
-## Docs (written ahead of the code)
+5. **A Task's primary on its own row.** *Built (`task_facts_once.sql`, commits
+   "Mark a Task's primary conversation on its own row" and "Drop task_primary
+   from the Session record").* `agent_sessions.primary_scope='task'` is the
+   mark; index `agent_sessions_primary_task` is plain, because
+   `check_migrations.py` refuses a new unique index while older writers run,
+   so every write clears the old mark first. `task_primary_sessions` is
+   leaving, kept in step by `task_primary_sessions_mark_insert`,
+   `task_primary_sessions_mark_update` and `agent_sessions_task_primary_row`.
+   In the window a released lf process still running after the migration
+   fails `primary_scope()` ("unsupported primary scope") on a Task primary
+   until it exits.
 
-`swift/README.md` (Working order, conversation membership, sidebar drag),
-`docs/surfaces.md` (drag changes rank), `docs/dev/reference-code.md` and
-`docs/dev/reference.md` (`processes.task_id`; `relocated_task_processes` and
-`task_orders` gone). `rust/loopflow-storage/SCHEMA.md` regenerates from the
-migration (`scripts/schema_page.py`) once slice 1 writes it.
+## Docs
 
-Chosen (questions.md): Tasks with no Project sit after every Project.
+Match the code: `swift/README.md` (Working order, standalone Tasks last, drag
+changes rank, conversation membership), `docs/surfaces.md`,
+`docs/dev/reference.md`, `docs/dev/reference-models.md` (primary scope),
+`rust/loopflow-storage/SCHEMA.md` (generated by `scripts/schema_page.py`).
 
-Mismatch A (human review): a Task's primary is now
-`agent_sessions.primary_scope='task'`; `task_primary_sessions` leaves with
-LOO-877, mirrored by triggers until then. See questions.md. LOO-877 also
-drops `task_primary_sessions_mark_insert`, `task_primary_sessions_mark_update`
-and `agent_sessions_task_primary_row`, and makes `agent_sessions_primary_task`
-unique.
+## For LOO-877 (recorded on that Task, 2026-11-18)
+
+Drop `task_primary_sessions` with its three mirror triggers and make
+`agent_sessions_primary_task` unique; drop `task_orders`,
+`tracker_projects.task_order_json`, `pm_projects.task_order_json`,
+`tasks.planning_completed` with `tasks_completed_follows_state_{insert,update}`,
+`tasks.planning_provider_revision`, `projects.planning_provider_revision`;
+ship the release whose peer protocol accepts a `Disposition` without
+`planning_completed`, then stop sending it.
 
 ## Next: gate
 
-Main after #1974 is merged and the Process half is gone (slice 1). Focused
-tests pass in storage and execution; gate runs the suites listed under
-"Acceptance check at gate" plus `session_lifecycle_tests`, `two_people`,
-`performance_tests::`, `session_cli_tests::`, `world_recipes::`,
-`documented_commands::` and the Swift DTO fixtures.
+Every slice is built and pushed (PR #1973, head `02ba29cceb`, which merges
+main through #1977). Nothing remains for implement.
 
-Known before this pass (clean `LF_*` env, also failing at `600e0f9495`): both
-`adoption::tests`, `input_replacement_retains_workspace_and_task_membership`,
-`screen_reads_are_compact_passive_and_match_cli`, two `work_open_tests`. Both
-`adoption::tests` are fixed (a conversation open in a checkout a Task takes is
-its work); the rest were not rerun after the merge. Order-dependent (pass alone):
+Run on that head (2026-11-18, clean `LF_*`):
+`cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`
+— 10 passed. Not run since the merges of #1974 and #1977: every other suite.
+CI on the PR has only run `macos-inputs` and `scratch-clear`; the rest show
+skipped.
+
+Gate runs, beside CI: the acceptance check above, `session_lifecycle_tests`,
+`two_people`, `performance_tests::`, `session_cli_tests::`, `world_recipes::`,
+`documented_commands::`, the Swift DTO fixtures and `DashboardWorkspaceTests`.
+
+Seen failing before the #1974 merge, also at `600e0f9495`, not rerun since
+(clean `LF_*` env):
+`input_replacement_retains_workspace_and_task_membership`,
+`screen_reads_are_compact_passive_and_match_cli`, two `work_open_tests`.
+Order-dependent then (pass alone):
 `resuming_an_ended_conversation_launches_its_provider_as_the_session`,
 `task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_foreign_capture`,
 `a_task_run_takes_its_waves_agent_without_flags`. Unconfirmed:
 `served_wave_lifecycle_matches_cli_and_keeps_the_same_wave` ("server did not
 start" under load ~70-84; fresh-store migration took 11-41s against a 20s
-deadline). In zsh, clear `LF_*` inline:
-`env $(env | grep '^LF_' | cut -d= -f1 | sed 's/^/-u /') cargo test …`.
+deadline). A test that fails on this branch and passes on main is this
+Task's to fix at gate.
 
-Then gate. Every slice is built; the acceptance check above and the gate
-list in slice 1 remain.
+The three upgrade tests in `task_work::` each take over 60 s (65 s for the
+ten): the cost is replaying to the current schema, not this migration's
+backfill (0.19 s for 22,342 live Sessions).
 
-Concept review of the built change (2026-11-18, `scratch/concept-review.html`):
-three mismatches. At human review all three were answered (questions.md):
-the Task's primary moved onto `primary_scope='task'` with wire `task_primary`
-dropped; a Working-board drop onto another Project's Task moves the Task
-there; the branch's three homes go to LOO-934.
+Open, for a person (questions.md): an open Session in a checkout a Task takes
+joins the Task; a Graph run there does not. Whether they should differ.
+
+Concept review (2026-11-18, `scratch/concept-review.html`) and its four
+answers are in questions.md; all four are applied or handed on (LOO-877,
+LOO-934).

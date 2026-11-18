@@ -41,3 +41,23 @@ well as `LF_*` when the caller is itself a Claude session. When replacing a copi
 `lf` that a server is running, `rm` it first: copying over the file in place
 makes macOS SIGKILL the next exec (exit 137, no output).
 Name the PTY driver anything but `pty.py`: it shadows the stdlib module.
+
+# A provider's real spent limit
+
+While a native login is out of quota the real refusal is free to use: a
+disposable repository with `agents: [codex, claude:haiku]`, a one-step Graph
+(`- step: say`, a skill named differently from the Graph) and the branch's
+`lf -b graph <graph>` with only `LF_HOME` private prints
+`codex: provider usage limit; continuing on claude:haiku` and Claude answers.
+`agent_limit_recoveries.reason` holds the provider's typed reason. The
+`lf task status` line "<step> went on under <agent> after: …" shows only while
+the step runs, so give the skill something slow (a backgrounded `sleep 50`)
+and poll. `agents: [codex]` or `-a codex` prints "Waiting until …" and waits;
+killing that `lf -b graph` leaves its `lf --batch … skill <name>` child
+waiting, so stop the child too. A Task launch also opens a Task conversation
+on the first agent: find `codex` processes by their checkout cwd and stop them
+with the home's `lf holder run`. For Codex's own failure lines, speak JSON-RPC
+to `codex app-server` over stdio (`initialize`, `initialized`, `thread/start`,
+`turn/start`) and read with blocking `readline`: `select` on a buffered pipe
+misses `turn/completed`. An empty `CODEX_HOME` gives a 401
+`httpConnectionFailed`, not `unauthorized`.

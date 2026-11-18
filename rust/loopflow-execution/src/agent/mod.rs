@@ -807,6 +807,20 @@ pub enum AgentFailure {
     CredentialInvalidated,
 }
 
+impl AgentFailure {
+    /// The failure a harness decoder's error code states. `None` for a code
+    /// that names no cause (`codex_error`); the provider's words decide then.
+    pub(crate) fn from_code(code: &str) -> Option<Self> {
+        match code {
+            "provider_rate_limited" => Some(Self::UsageLimit),
+            "provider_model_unavailable" => Some(Self::ModelUnavailable),
+            "provider_credential_invalidated" => Some(Self::CredentialInvalidated),
+            "provider_capacity" => Some(Self::Capacity),
+            _ => None,
+        }
+    }
+}
+
 /// Build `thread/start` params for Codex app-server sessions. `headless` runs
 /// get Loopflow's permission floor; attended Sessions keep Codex's own.
 pub fn build_codex_thread_start_params(
@@ -1241,8 +1255,15 @@ fn _classify_agent_failure(result: &AgentProcessResult) -> Option<AgentFailure> 
     _find_provider_error(result, classify_retryable_agent_failure)
 }
 
+/// A provider's line as the phrase lists read it: lowercase, with typographic
+/// apostrophes (Codex writes "You\u{2019}ve") as ASCII.
+fn _provider_words(line: &str) -> String {
+    line.to_ascii_lowercase()
+        .replace(['\u{2018}', '\u{2019}'], "'")
+}
+
 fn _model_unavailable(text: &str) -> Option<()> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     let names_model = text.contains("model")
         || crate::config::CLAUDE_MODEL_FAMILIES
             .iter()
@@ -1261,9 +1282,8 @@ fn _model_unavailable(text: &str) -> Option<()> {
 }
 
 pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     (text.contains("token_invalidated")
-        || text.contains("refresh_token_invalidated")
         || text.contains("refresh token was revoked")
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))
@@ -1280,7 +1300,7 @@ fn _find_provider_error<T>(
 }
 
 pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailure> {
-    let text = text.to_ascii_lowercase();
+    let text = _provider_words(text);
     if text.contains("at capacity")
         || text.contains("capacity temporarily unavailable")
         || text.contains("capacity issue")
@@ -1317,13 +1337,11 @@ pub(crate) fn classify_retryable_agent_failure(text: &str) -> Option<AgentFailur
     }
 }
 
-/// A provider's line saying the account's quota is spent, from a step's stderr
-/// or the line a native Claude displayed. Claude's openers are its own list of
-/// usage-limit messages; its capacity, per-model and seat-type lines name no
-/// spent window.
-fn subscription_limit_text(line: &str) -> Option<()> {
-    // Codex writes `You’ve`.
-    let text = line.to_ascii_lowercase().replace('’', "'");
+/// A provider's line saying the account's quota is spent, for a failure the
+/// provider gave no type. Claude's openers are its own list of usage-limit
+/// messages; its capacity, per-model and seat-type lines name no spent window.
+pub(crate) fn subscription_limit_text(line: &str) -> Option<()> {
+    let text = _provider_words(line);
     (text.contains("you've hit your")
         || text.contains("you've reached your")
         || text.contains("you're out of usage credits")
@@ -2035,6 +2053,16 @@ trust_level = "trusted"
         ] {
             assert!(subscription_limit_text(line).is_some(), "{line}");
         }
+    }
+
+    /// LOO-974's `implement` step, 2026-11-18, as the step's stderr held it.
+    #[test]
+    fn codex_usage_limit_with_a_typographic_apostrophe_is_a_usage_limit() {
+        let line = "codex_error: You\u{2019}ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.";
+        assert_eq!(
+            _classify_agent_failure(&failed_result(line)),
+            Some(AgentFailure::UsageLimit)
+        );
     }
 
     #[test]

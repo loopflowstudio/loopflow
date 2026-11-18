@@ -663,19 +663,29 @@ pub fn died_run(
 /// Task's ship process that exited (`lf --task ISSUE ship`), and a moving
 /// Task's `lf task run` that died (`lf task run ISSUE`, which stops at the next
 /// interactive step as before). Unassigned, moved and finished Tasks wait.
-pub(crate) fn restart_runs() -> OpsResult<()> {
+/// Returns when the soonest run still waiting its backoff comes due.
+pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
     block_on_task(async {
         let store = task_store().await?;
         let now = loopflow_storage::rows::now_unix();
+        let mut soonest: Option<i64> = None;
+        let mut wait = |due: i64| soonest = Some(soonest.map_or(due, |at| at.min(due)));
         for (id, shipping) in store.sqlite.local_shipping_tasks().map_err(task_error)? {
-            restart_ship(&store, &id, &shipping, now).await?;
+            if let Some(due) = restart_ship(&store, &id, &shipping, now).await? {
+                wait(due);
+            }
         }
         for id in store.sqlite.local_task_runs().map_err(task_error)? {
             let Some(died) = died_run(&store.sqlite, &id).map_err(task_error)? else {
                 continue;
             };
-            if died.next_at().is_none_or(|due| due > now) {
-                continue;
+            match died.next_at() {
+                None => continue,
+                Some(due) if due > now => {
+                    wait(due);
+                    continue;
+                }
+                Some(_) => {}
             }
             let Some((task, worktree, _)) = continuable(&store, &id, now).await? else {
                 continue;
@@ -694,7 +704,7 @@ pub(crate) fn restart_runs() -> OpsResult<()> {
                 died.at
             );
         }
-        Ok(())
+        Ok(soonest)
     })
 }
 
@@ -730,15 +740,16 @@ async fn continuable(
 
 /// Start `lf --task ISSUE ship` again when its ship process has exited. After
 /// a failure the restart waits, longer each time in a row; a process that
-/// ended without failing (killed, interrupted) restarts at once.
+/// ended without failing (killed, interrupted) restarts at once. Returns when
+/// a restart still waiting its backoff comes due.
 async fn restart_ship(
     store: &SharedStore,
     id: &loopflow_storage::work::task::TaskId,
     shipping: &TaskShipping,
     now: i64,
-) -> OpsResult<()> {
+) -> OpsResult<Option<i64>> {
     if carrier_evidence(&store.sqlite, shipping) != ProcessIdentityEvidence::Dead {
-        return Ok(());
+        return Ok(None);
     }
     // A run another `lf task run` carries, such as one a move continued
     // on this Machine, ships once it stops.
@@ -746,17 +757,18 @@ async fn restart_ship(
         .map_err(task_error)?
         .is_some_and(|graph| matches!(graph.position, TaskGraphPosition::Run { running: true, .. }))
     {
-        return Ok(());
+        return Ok(None);
     }
     let failure = carrier_failure(&store.sqlite, shipping).map_err(task_error)?;
-    if failure
+    if let Some(due) = failure
         .as_ref()
-        .is_some_and(|(failed_at, _)| restart_due(shipping, *failed_at) > now)
+        .map(|(failed_at, _)| restart_due(shipping, *failed_at))
+        .filter(|due| *due > now)
     {
-        return Ok(());
+        return Ok(Some(due));
     }
     let Some((task, worktree, agent)) = continuable(store, id, now).await? else {
-        return Ok(());
+        return Ok(None);
     };
     if failure.is_some() {
         let seen = store.sqlite.task_run_restarts(id).map_err(task_error)?;
@@ -765,7 +777,7 @@ async fn restart_ship(
             .count_task_run_restart(id, None, &seen)
             .map_err(task_error)?
         {
-            return Ok(());
+            return Ok(None);
         }
     }
     restart_lf_in(
@@ -774,7 +786,7 @@ async fn restart_ship(
         &["--task", &task.identifier, "ship"],
     )?;
     tracing::info!("restarted the ship process for {}", task.identifier);
-    Ok(())
+    Ok(None)
 }
 
 #[cfg(test)]

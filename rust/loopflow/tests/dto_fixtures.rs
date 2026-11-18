@@ -405,13 +405,13 @@ fn task_detail_says_each_fact_once() {
     )
     .unwrap()
     .unix_timestamp();
-    let line = conversation.conversation_line("LOO-2", next);
+    let line = conversation.conversation_line("LOO-2", next, true);
     assert!(
         line.starts_with("died ") && line.ends_with("(exit 137) · starting again"),
         "{line}"
     );
     assert!(conversation
-        .conversation_line("LOO-2", next - 1)
+        .conversation_line("LOO-2", next - 1, true)
         .contains("· starts again "));
     assert_eq!(
         serde_json::to_value(&detail).unwrap(),

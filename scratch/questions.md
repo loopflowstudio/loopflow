@@ -207,3 +207,11 @@ Choices made for review, built in slice 5:
 - 1a: a person's `lf resume` of a died conversation resets the restart count.
 - 2a: with no server running, the line says "starts again when the server runs".
 - 3a: a died conversation with no transcript is left as is (recorded only).
+
+Slice 5 (implement):
+- The reset is in `lf session resume`, keyed off `LF_RECOVERING_SESSION`, not
+  in the attach write: the pass and a person both start through the same
+  command. A headless agent that sets that variable by hand would keep the
+  count; nothing else does.
+- The run waker covers ship backoffs too (`restart_ship`), not only died runs.
+  Limit waits (`limit_recovery`) still wake on the minute tick.

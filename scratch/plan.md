@@ -560,6 +560,20 @@ Must survive:
      this is presentation over `start.next_at`. Test in
      `lf::commands::session::tests::`.
 
+   Built: the pass's start runs with `LF_RECOVERING_SESSION=<session>`
+   (`ops::recovery::RECOVERING_ENV`); `lf session resume` calls
+   `ops::recovery::record_start`, which resets the count
+   (`reset_conversation_starts`) unless that names this Session. Not the same
+   write as the attach: every start, the pass's included, attaches through
+   `lf session resume`, and only the launcher knows who asked. A `--prepare`
+   counts as a person's. `restart_runs` returns ship and died-run backoffs;
+   `Watcher` keeps `conversations_due` and `runs_due`, and a reading settles
+   when a run came due even inside the 10 s throttle. `conversation_line`
+   takes `server_runs` (a connect to `machine.sock`). Tests:
+   `server::recovery::tests::a_persons_start_counts_the_passs_starts_from_zero`,
+   `…::a_runs_backoff_wakes_the_watcher_and_settles` (Watcher-level, not a
+   live carrier), `lf::commands::session::tests::with_no_server_a_died_conversation_waits_for_one`.
+
    Recorded, not built: resuming a conversation with no transcript (killed
    before its first turn) fails five times; the SIGTERM quit window
    (`holder_stopping`) waits on real Claude's SIGTERM exit code.
@@ -601,6 +615,8 @@ Must survive:
   `server::recovery::tests::` (7), `human_session::tests::a_task_conversation…`,
   `dto_fixtures::` (52), `lf::commands::session::tests::`,
   `context_launch_tests::a_killed_task_conversation` pass; clippy clean.
+- Slice 5 (implement): `server::recovery::tests::` (9), `lf::commands::session::tests::` (2),
+  `dto_fixtures::` + `documented_commands::` (56); clippy on storage, execution, loopflow clean.
 - A real reboot with three Tasks (a person runs it).
 
 ## Docs

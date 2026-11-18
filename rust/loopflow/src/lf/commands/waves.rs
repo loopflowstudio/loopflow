@@ -1103,8 +1103,12 @@ pub fn task_conversation_line(
         return Ok(None);
     };
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    Ok(task_conversation(&std::sync::Arc::new(store), task)?
-        .map(|facts| facts.conversation_line(identifier, now)))
+    let Some(facts) = task_conversation(&std::sync::Arc::new(store), task)? else {
+        return Ok(None);
+    };
+    let server_runs = crate::server::socket_path()
+        .is_ok_and(|socket| std::os::unix::net::UnixStream::connect(socket).is_ok());
+    Ok(Some(facts.conversation_line(identifier, now, server_runs)))
 }
 
 /// The open Tasks `query` selects, read from the store's filter rather than

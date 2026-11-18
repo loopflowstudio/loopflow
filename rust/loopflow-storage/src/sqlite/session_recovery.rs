@@ -96,6 +96,16 @@ impl SqliteStore {
             .optional()?)
     }
 
+    /// A person started `session` again: the pass's starts count from zero.
+    pub fn reset_conversation_starts(&self, session: &LfSessionId) -> StoreResult<()> {
+        self.conn.lock().expect("store mutex poisoned").execute(
+            "UPDATE agent_sessions SET starts_since_turn=0,start_failure=NULL
+             WHERE id=?1 AND (starts_since_turn>0 OR start_failure IS NOT NULL)",
+            [session.as_str()],
+        )?;
+        Ok(())
+    }
+
     /// Why the last start of `session` failed, or `None` once one succeeded.
     pub fn record_start_failure(
         &self,

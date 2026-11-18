@@ -424,8 +424,9 @@ impl SessionFacts {
     }
 
     /// `lf task status`'s line for the Task's conversation: running, died and
-    /// coming back, or quit, with the command that opens it.
-    pub fn conversation_line(&self, task: &str, now: i64) -> String {
+    /// coming back, or quit, with the command that opens it. Only a running
+    /// server (`server_runs`) starts a died conversation again.
+    pub fn conversation_line(&self, task: &str, now: i64, server_runs: bool) -> String {
         let resume = format!("`lf resume --task {task}` opens it");
         let running = matches!(self.state, SessionState::Active | SessionState::Detached);
         let start = self.start.as_ref();
@@ -464,6 +465,8 @@ impl SessionFacts {
         };
         let mut line = if start.gave_up {
             format!("{ending} · started {} times; {resume}", start.attempts)
+        } else if !server_runs {
+            format!("{ending} · starts again when the server runs")
         } else {
             match start.next_at.as_deref() {
                 Some(at) if seconds(at).is_some_and(|at| at > now) => {
@@ -875,6 +878,7 @@ async fn resume(
     let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
+        loopflow_execution::ops::recovery::record_start(&store.sqlite, &id.as_str().into())?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -954,6 +958,7 @@ async fn reopen(
         .await;
     }
     let id = select(store, directory, target).await?;
+    loopflow_execution::ops::recovery::record_start(&store.sqlite, &id.as_str().into())?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,
@@ -1289,18 +1294,18 @@ mod tests {
     #[test]
     fn the_conversation_line_says_running_quit_or_how_it_comes_back() {
         assert_eq!(
-            conversation(SessionState::Active, None, None).conversation_line("LOO-9", 0),
+            conversation(SessionState::Active, None, None).conversation_line("LOO-9", 0, true),
             "running"
         );
         assert!(conversation(SessionState::Active, None, starts(1, false))
-            .conversation_line("LOO-9", 0)
+            .conversation_line("LOO-9", 0, true)
             .starts_with("running (started again "));
         let quit = conversation(
             SessionState::Closed,
             end(SessionEndedBy::Person, Some(0)),
             None,
         )
-        .conversation_line("LOO-9", 0);
+        .conversation_line("LOO-9", 0, true);
         assert!(quit.starts_with("quit "), "{quit}");
         assert!(
             quit.ends_with("; `lf resume --task LOO-9` opens it"),
@@ -1311,12 +1316,30 @@ mod tests {
             end(SessionEndedBy::Died, None),
             starts(5, true),
         )
-        .conversation_line("LOO-9", 0);
+        .conversation_line("LOO-9", 0, true);
         assert!(
             gave_up.ends_with(
                 "(no exit recorded) · started 5 times; `lf resume --task LOO-9` opens it"
             ),
             "{gave_up}"
+        );
+    }
+
+    /// A died conversation promises a start only while a server runs to make it.
+    #[test]
+    fn with_no_server_a_died_conversation_waits_for_one() {
+        let died = conversation(
+            SessionState::Closed,
+            end(SessionEndedBy::Died, Some(137)),
+            starts(1, false),
+        );
+        assert!(died
+            .conversation_line("LOO-9", 0, true)
+            .ends_with("(exit 137) · starting again"));
+        let line = died.conversation_line("LOO-9", 0, false);
+        assert!(
+            line.ends_with("(exit 137) · starts again when the server runs"),
+            "{line}"
         );
     }
 }

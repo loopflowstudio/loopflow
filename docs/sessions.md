@@ -339,13 +339,17 @@ After a reboot the server brings work back one start at a time, the most
 recently active Task first. The first start after a death is immediate; each
 later one waits a minute, doubling to 30 minutes if it keeps dying. After 5
 starts with no finished turn or step, lf stops trying and says which command
-continues:
+continues. When you start it again yourself (`lf resume`, Desktop, the phone),
+those 5 starts count from zero.
 
 ```bash
 lf task status LOO-12
 # Conversation: died 09:14 (exit 1) · started 5 times; `lf resume --task LOO-12` opens it
 # Run died 5 times at implement; `lf task run LOO-12` starts it again
 ```
+
+Only a running server starts anything. With none, the line says so:
+`died 12:01 (exit 137) · starts again when the server runs`.
 
 A start that cannot happen says why instead of retrying silently, for
 example `last start failed: claude is not installed on this Machine's PATH`.

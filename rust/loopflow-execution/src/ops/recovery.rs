@@ -7,13 +7,15 @@
 //! still needed. [`due_task_conversations`] names the Task
 //! conversations to start, and [`launch_failure`] what would stop one.
 
+use loopflow_model::id::LfSessionId;
 use loopflow_storage::sqlite::session_recovery::ConversationToStart;
 use loopflow_storage::sqlite::SqliteStore;
 
 use crate::journal::ProcessIdentityEvidence;
 
-/// Settle this Machine's work. Failures are logged; the next pass tries again.
-pub fn settle() {
+/// Settle this Machine's work, and say when the soonest Task run waiting its
+/// restart backoff comes due. Failures are logged; the next pass tries again.
+pub fn settle() -> Option<i64> {
     match crate::harness::agent_process::settle_agent_processes() {
         Ok(report) => {
             for error in report.errors {
@@ -22,15 +24,17 @@ pub fn settle() {
         }
         Err(error) => tracing::warn!("AgentProcess settlement: {error}"),
     }
-    if let Err(error) = crate::ops::task::ship::restart_runs() {
-        tracing::warn!("run restart: {error}");
-    }
+    let runs_due = crate::ops::task::ship::restart_runs()
+        .inspect_err(|error| tracing::warn!("run restart: {error}"))
+        .ok()
+        .flatten();
     if let Err(error) = crate::ops::task::limit_recovery::restart_waiting_runs() {
         tracing::warn!("limit recovery: {error}");
     }
     if let Err(error) = crate::rental::recovery::check() {
         tracing::warn!("Rentals: {error:#}");
     }
+    runs_due
 }
 
 /// Close Processes whose OS process is gone, forget finished ones nothing
@@ -55,6 +59,20 @@ pub fn retain() {
     if let Err(error) = crate::journal::remove_dead_process_receipts_at(&home) {
         tracing::warn!(%error, "dead Process receipts");
     }
+}
+
+/// Names the Session the recovery pass is starting, in the environment of the
+/// `lf session resume` it runs. Any other start of a Session is a person's.
+pub const RECOVERING_ENV: &str = "LF_RECOVERING_SESSION";
+
+/// A person started `session` (`lf resume`, Desktop, the phone), unless this
+/// process is the pass's own start of it: the pass's count of starts after a
+/// death begins again, and an earlier start's failure is forgotten.
+pub fn record_start(store: &SqliteStore, session: &LfSessionId) -> crate::store::StoreResult<()> {
+    if std::env::var(RECOVERING_ENV).is_ok_and(|recovering| *session == recovering) {
+        return Ok(());
+    }
+    store.reset_conversation_starts(session)
 }
 
 /// Why starting `conversation` would fail before any provider runs: its

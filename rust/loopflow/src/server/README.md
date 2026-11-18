@@ -43,13 +43,13 @@ lf task status LOO-12   # Conversation: running (started again 12:01, attempt 1)
 ```
 
 A watcher thread (`recovery.rs`) reads the store when its planning, Session or
-process revisions move, when a conversation's backoff comes due, and at least
-once a minute. The server writes nothing on the way down; every fact
+process revisions move, when a conversation's or a run's backoff comes due,
+and at least once a minute. The server writes nothing on the way down; every fact
 the pass needs is written before it is needed (`meta.json`, the holder's
 `exit.json`, Session and Graph-run rows with pid and OS start time). Its
 first reading after start is the restart and reboot case. Each reading:
 
-1. **Settles**, at most every 10 seconds: reaps orphan agents, releases
+1. **Settles**, at most every 10 seconds or when a run's backoff came due: reaps orphan agents, releases
    AgentProcess ancestry whose parent was never recorded, carries Task runs
    (step 3), continues limit waits and checks rentals
    (`ops::recovery::settle`). Reads never do this.
@@ -64,7 +64,9 @@ first reading after start is the restart and reboot case. Each reading:
    provider across server restarts. `lf task run`, `lf ship` and
    `lf task checkout` only prepare the Session; this pass starts it. That
    first start counts only if it fails, so the first death after it comes
-   back at once; its terminal holds later passes off.
+   back at once; its terminal holds later passes off. The pass's start runs
+   with `LF_RECOVERING_SESSION=<session>`; any other `lf session resume` of it
+   is a person's, and sets the count to zero and clears `start_failure`.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
    checkpoint. A carrier that exits on its own writes an outcome on its

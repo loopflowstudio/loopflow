@@ -59,22 +59,39 @@ fn watch(terminals: &Registry) {
 
 /// The watcher's store, what it read last and when, when it last settled
 /// and retained, and when the pass must read again though nothing moved: a
-/// due conversation's terminal was still ending, or a backoff comes due.
+/// due conversation's terminal was still ending, or a conversation's or a
+/// run's backoff comes due.
 #[derive(Default)]
 struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
     retained: Option<SystemTime>,
-    wake: Option<SystemTime>,
+    conversations_due: Option<SystemTime>,
+    runs_due: Option<SystemTime>,
 }
 
 impl Watcher {
+    /// When to read again though nothing moved.
+    fn wake(&self) -> Option<SystemTime> {
+        match (self.conversations_due, self.runs_due) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
+
     /// How long to wait for a change before reading anyway.
     fn wait(&self, now: SystemTime) -> Duration {
-        self.wake.map_or(UNREAD, |at| {
+        self.wake().map_or(UNREAD, |at| {
             at.duration_since(now).unwrap_or(Duration::ZERO).min(UNREAD)
         })
+    }
+
+    /// Whether this reading settles: [`SETTLE_EVERY`] passed, or a run's
+    /// backoff came due. Settling answers when the next run comes due, always
+    /// later, so a due run never settles twice.
+    fn settles(&self, now: SystemTime) -> bool {
+        due(self.settled, now, SETTLE_EVERY) || self.runs_due.is_some_and(|at| at <= now)
     }
 
     /// Run the pass if the revisions moved, a minute passed or a wake came
@@ -103,13 +120,13 @@ impl Watcher {
                 == (revisions.planning, revisions.sessions, revisions.processes)
                 && now.duration_since(at).is_ok_and(|waited| waited < UNREAD)
         });
-        if unchanged && self.wake.is_none_or(|at| now < at) {
+        if unchanged && self.wake().is_none_or(|at| now < at) {
             return;
         }
         self.seen = Some((revisions, now));
-        if due(self.settled, now, SETTLE_EVERY) {
+        if self.settles(now) {
             self.settled = Some(now);
-            loopflow_execution::ops::recovery::settle();
+            self.runs_due = loopflow_execution::ops::recovery::settle().map(time_at);
         }
         let held = |session: &LfSessionId| {
             terminals.session_terminal(session).is_some()
@@ -119,18 +136,20 @@ impl Watcher {
             if let Some(failure) = loopflow_execution::ops::recovery::launch_failure(conversation) {
                 anyhow::bail!(failure);
             }
-            let start = super::service::continuing(conversation.session.clone(), request, 0, 0)
+            let mut start = super::service::continuing(conversation.session.clone(), request, 0, 0)
                 .map_err(|error| anyhow::anyhow!("{}", error.message))?;
+            start.env.push((
+                loopflow_execution::ops::recovery::RECOVERING_ENV.into(),
+                conversation.session.to_string(),
+            ));
             terminals.start(start)?;
             pace(store, conversation);
             Ok(())
         };
         match recover_conversations(store, unix(now), held, start) {
-            Ok(wake) => {
-                self.wake = wake.map(|at| SystemTime::UNIX_EPOCH + Duration::from_secs(at as u64))
-            }
+            Ok(wake) => self.conversations_due = wake.map(time_at),
             Err(error) => {
-                self.wake = None;
+                self.conversations_due = None;
                 tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
             }
         }
@@ -163,6 +182,10 @@ fn pace(store: &SqliteStore, conversation: &ConversationToStart) {
 /// Whether `every` has passed since `last`, or it never ran.
 fn due(last: Option<SystemTime>, now: SystemTime, every: Duration) -> bool {
     last.is_none_or(|at| now.duration_since(at).is_ok_and(|since| since >= every))
+}
+
+fn time_at(unix: i64) -> SystemTime {
+    SystemTime::UNIX_EPOCH + Duration::from_secs(unix.max(0) as u64)
 }
 
 fn unix(at: SystemTime) -> i64 {
@@ -224,7 +247,9 @@ fn recover_conversations(
 mod tests {
     use std::cell::RefCell;
 
-    use super::recover_conversations;
+    use std::time::{Duration, SystemTime};
+
+    use super::{recover_conversations, Watcher};
     use loopflow_execution::process::attachment;
     use loopflow_model::durable::TaskId;
     use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId};
@@ -510,6 +535,58 @@ mod tests {
         .unwrap();
         assert_eq!(fixture.attempts(), (1, Some(NOW)));
         assert!(fixture.pass(NOW + 30, false).is_empty());
+    }
+
+    #[test]
+    fn a_persons_start_counts_the_passs_starts_from_zero() {
+        let fixture = fixture();
+        fixture.exited(137);
+        {
+            let conn = fixture.store.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE agent_sessions SET starts_since_turn=4,last_started_at=?2,
+                    start_failure='no PTY left' WHERE id=?1",
+                params![fixture.session.as_str(), NOW - 3600],
+            )
+            .unwrap();
+        }
+        // `lf resume` by a person; the pass's own resume names its Session.
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        std::env::set_var(
+            loopflow_execution::ops::recovery::RECOVERING_ENV,
+            fixture.session.as_str(),
+        );
+        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session).unwrap();
+        std::env::remove_var(loopflow_execution::ops::recovery::RECOVERING_ENV);
+        assert_eq!(
+            fixture.attempts().0,
+            4,
+            "the pass's start is not a person's"
+        );
+        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session).unwrap();
+        assert_eq!(fixture.failure(), None);
+        // It dies again: the pass starts it as attempt 1, not out of starts.
+        assert_eq!(
+            fixture.pass(NOW, false),
+            [format!("recover:{}:{}:1", fixture.session, fixture.agent)]
+        );
+    }
+
+    /// A run's backoff wakes the watcher when it comes due, with nothing
+    /// written to the store, and that reading settles though one just did.
+    #[test]
+    fn a_runs_backoff_wakes_the_watcher_and_settles() {
+        let now = SystemTime::now();
+        let watcher = Watcher {
+            settled: Some(now),
+            runs_due: Some(now + Duration::from_secs(5)),
+            conversations_due: Some(now + Duration::from_secs(40)),
+            ..Watcher::default()
+        };
+        assert_eq!(watcher.wait(now), Duration::from_secs(5));
+        assert!(!watcher.settles(now + Duration::from_secs(4)));
+        assert!(watcher.settles(now + Duration::from_secs(5)));
+        assert_eq!(Watcher::default().wait(now), super::UNREAD);
     }
 
     #[test]

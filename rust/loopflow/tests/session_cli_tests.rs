@@ -21,7 +21,6 @@ fn command(home: &std::path::Path, args: &[&str]) -> Command {
         .env_remove("LF_TRACE_ID")
         .env_remove("LF_PROCESS_ID")
         .env_remove("LF_GRAPH_ID")
-        .env_remove("LF_HUMAN_SESSION")
         .env_remove("LF_WAVE_ID")
         .env_remove("LF_TERMINAL_ID")
         .env_remove("LF_TERMINAL_TTY")
@@ -149,7 +148,6 @@ fn development_session_handoff_keeps_its_binary_and_home() {
             "LF_RUN_DIR",
             "LF_TRACE_ID",
             "LF_PROCESS_ID",
-            "LF_HUMAN_SESSION",
             "LF_GRAPH_ID",
         ] {
             command.env_remove(name);
@@ -318,28 +316,6 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
         )
         .unwrap();
         std::fs::set_permissions(&provider, std::fs::Permissions::from_mode(0o755)).unwrap();
-        if !resume {
-            let rejected = bin.join("rejecting-lf");
-            std::fs::write(
-                &rejected,
-                "#!/bin/sh\necho 'fixture launcher rejected invocation' >&2\nexit 2\n",
-            )
-            .unwrap();
-            std::fs::set_permissions(&rejected, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let failed = command(home.path(), &["session", "resume", id])
-                .env("LF_BIN", &rejected)
-                .output()
-                .unwrap();
-            assert_eq!(failed.status.code(), Some(2));
-            let error = String::from_utf8_lossy(&failed.stderr);
-            // Connect becomes the launcher, preserving its error and pending input.
-            assert!(
-                error.contains("fixture launcher rejected invocation"),
-                "{error}"
-            );
-            assert!(dir.join("prepared").exists());
-            assert!(!error.contains("Local proof"), "prompt leaked: {error}");
-        }
         let evidence = home.path().join("resumed");
         let mut first = command(home.path(), &["session", "resume", id])
             .env(

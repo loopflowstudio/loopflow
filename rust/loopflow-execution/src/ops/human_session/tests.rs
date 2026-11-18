@@ -132,8 +132,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
                 crate::session::Holder::Caller,
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, false, false).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, false, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -775,6 +775,8 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert!(first.open_argv.ends_with(&["--start-if-free".into()]));
         assert!(first.actions.iter().any(|action| {
@@ -827,6 +829,8 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(retry(&refused), retry(&listed));
         // The click prepares the launch that `open_waiting` gives a new attempt.
@@ -834,12 +838,16 @@ fn automatic_start_prepares_new_history_but_never_replays_consumed_input() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
+            None,
             false,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert!(!prepared.open_argv.contains(&"--start-if-free".into()));
         let after = store.session(&record.id).await.unwrap().unwrap();
@@ -873,6 +881,8 @@ fn reveal_requires_history_and_never_publishes_a_first_turn() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert!(prepared.open_argv.ends_with(&["--reveal-existing".into()]));
         let action = prepared
@@ -948,6 +958,8 @@ fn recovery_refresh_follows_current_holder_and_history() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert!(!prepared
             .actions
@@ -993,6 +1005,8 @@ fn recovery_refresh_follows_current_holder_and_history() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(reveal.actions, refreshed.actions);
         assert_eq!(
@@ -1063,6 +1077,8 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         let refreshed = listed_session(&store, &record.id);
         assert_eq!(prepared.actions, refreshed.actions);
@@ -1098,6 +1114,8 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         let refreshed = listed_session(&store, &next.id);
         assert_eq!(prepared.actions, refreshed.actions);
@@ -1266,7 +1284,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
@@ -1389,7 +1408,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Publication succeeded but the result was not recorded before exit.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
@@ -1416,10 +1436,12 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
             .unwrap();
         let first = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let retry = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(first.captured, retry.captured);
         assert_eq!(first.request, retry.request);
         assert!(store
@@ -1492,6 +1514,8 @@ async fn a_held_task_conversation_without_a_view_offers_attach() {
         false,
     )
     .await
+    .unwrap()
+    .prepared()
     .unwrap();
     assert!(prepared
         .actions

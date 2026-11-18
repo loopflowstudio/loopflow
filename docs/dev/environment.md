@@ -38,7 +38,6 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LF_AS` | `--as` | Run and Task commands | Declares the Work a command contributes to; resolved against the registry. |
 | `LF_GRAPH_ID` | Graph process, for each agent step | The step's agent and skills | Names the Graph a step serves: its Graph process's id. Steps of one Graph share notes under it; `lf` reads nothing from it. |
 | `LF_WAVE_ID` | Wave and Task launches | Wave resolution | Default Wave for a child command. |
-| `LF_HUMAN_SESSION`, `LF_PREPARED_CAPTURE` | Conversation launch | `ops::human_session`, removed on use | Identify the prepared conversation a new terminal opens. |
 | `LF_INSTALL_SWITCH` | Published install | `installation` | One-shot capability; must equal the id of the switch receipt in progress. |
 | `LF_EXPECTED_MACHINE_ID` | `lf --machine` | `lf machine`, the remote preamble | Refuses a Machine-addressed command that reached a different Machine. |
 | `LF_TERMINAL_ID`, `LF_TERMINAL_TTY` | Desktop's terminal | Session capture | Attach a Session to the terminal showing it. |
@@ -83,7 +82,8 @@ Session shells scrub transient credentials.
 `LF_DB_PATH`, `LF_CONTROL_BIN`, `LF_CONTROL_HOME`, `LF_CONTROL_DB_PATH`,
 `LF_RUN_CONTEXT`, `LF_TASK_ORIGIN`, `LF_PARENT_RUN_ID`, `LF_RUN_LEASE`,
 `LF_WORKTREE_WRITER_ID`, `LF_SSH_TARGET`, `LF_AGENT_INVOCATION_ID`,
-`LF_INSTALL_PROMOTE_HOP`, `LF_HUMAN_SESSION_RUN_BIND`,
+`LF_INSTALL_PROMOTE_HOP`, `LF_HUMAN_SESSION`, `LF_HUMAN_SESSION_RUN`,
+`LF_HUMAN_SESSION_RUN_BIND`,
 `LF_EXTERNAL_TERMINAL`, the `LF_TASK_*` and `LF_PROJECT_*` lease trio, and the
 `LF_LINEAR_*`, `LF_GITHUB_WEBHOOK_*` and `LF_LFD_ALLOW_NON_LOOPBACK` daemon
 settings. Nothing reads them. An older running lf may still export some of

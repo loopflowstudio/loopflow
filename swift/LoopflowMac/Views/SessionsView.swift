@@ -1645,7 +1645,9 @@ struct SessionsContentView: View {
 
     private var mainPane: some View {
         ZStack {
-            if navigation.showsSelection {
+            if let starting = navigation.startingTask {
+                StartingTaskView(model: model, starting: starting)
+            } else if navigation.showsSelection {
                 DashboardView(model: model, workspaces: workspaces, sessions: store)
             } else if let key = workspaces.selectedWork {
                 VStack(spacing: 0) {
@@ -2017,6 +2019,16 @@ private struct SidebarDivider: View {
 #endif
 
 extension SessionsWorkspace {
+    /// A Work created in this window has no saved layout: it starts saving
+    /// edits without reading one.
+    func startNewLayout(query: RegistryQuery, repoPath: String?) {
+        guard persistenceQuery == nil, let repoPath else { return }
+        persistenceQuery = query
+        persistenceRepo = repoPath
+        persistenceLoaded = true
+        observePaneIntent()
+    }
+
     func startPersistence(query: RegistryQuery, repoPath: String?) {
         guard persistenceQuery == nil, let repoPath else { return }
         persistenceQuery = query

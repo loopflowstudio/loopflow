@@ -302,7 +302,7 @@ async fn projectless_task_adopts_repository_ownership() {
             let mut foreign = record.item;
             foreign.team_id = Some("foreign-team".into());
             foreign.name = "Foreign update".into();
-            assert!(crate::ops::planning_delivery::ingest_task(
+            assert!(crate::ops::tracker::ingest_task(
                 &fixture.store,
                 &repo,
                 &foreign,

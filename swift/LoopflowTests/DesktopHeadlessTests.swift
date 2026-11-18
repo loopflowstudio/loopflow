@@ -89,18 +89,34 @@ struct DesktopHeadlessTests {
         #expect(try statusView.find(text: "Local changes pending").string() == "Local changes pending")
     }
 
-    @Test("Planning sync shows saves, uncertainty and retained losing edits, then clears settled work")
-    func planningSync() throws {
-        let data = try Data(contentsOf: fixtures.appendingPathComponent("planning_sync.json"))
-        let sync = try JSONDecoder().decode(PlanningSyncStatus.self, from: data)
-        let view = PlanningSyncView(sync: sync)
-        for change in sync.changes {
-            #expect(try view.inspect().find(text: change.text).string() == change.text)
+    @Test("Tracker sync shows queued, sent and conflicted actions, then clears confirmed work")
+    func trackerSync() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("tracker_sync.json"))
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: data)
+        let view = TrackerSyncView(sync: sync, repo: "/r")
+        for action in sync.actions {
+            #expect(try view.inspect().find(text: action.text).string() == action.text)
         }
-        for connected in [true, false] {
-            let settled = try JSONDecoder().decode(PlanningSyncStatus.self, from: Data("{\"connected\":\(connected),\"changes\":[]}".utf8))
-            #expect(try PlanningSyncView(sync: settled).inspect().findAll(ViewType.Text.self).isEmpty)
-        }
+        #expect(try view.inspect().findAll(ViewType.Button.self).isEmpty)
+        let confirmed = try JSONDecoder().decode(TrackerSync.self, from: Data("{\"actions\":[]}".utf8))
+        #expect(try TrackerSyncView(sync: confirmed, repo: "/r").inspect().findAll(ViewType.Text.self).isEmpty)
+    }
+
+    @Test("A lost line, a Task's or a Project's, offers Keep theirs and Use mine")
+    func trackerSyncAnswers() throws {
+        let data = try Data(contentsOf: fixtures.appendingPathComponent("tracker_sync.json"))
+        let sync = try JSONDecoder().decode(TrackerSync.self, from: data)
+        let lost = try #require(sync.actions.first { $0.phase == .conflicted })
+        var answers: [(String, String, LostAnswer)] = []
+        let view = TrackerSyncView(sync: sync, repo: "/r")
+            .environment(\.answerLost) { repo, action, answer in answers.append((repo, action.id, answer)) }
+        let buttons = try view.inspect().findAll(ViewType.Button.self)
+        #expect(buttons.count == 2 * sync.actions.filter { $0.phase == .conflicted }.count)
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-keep-theirs-\(lost.id)").button().tap()
+        try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-use-mine-\(lost.id)").button().tap()
+        #expect(answers.map(\.0) == ["/r", "/r"])
+        #expect(answers.map(\.1) == [lost.id, lost.id])
+        #expect(answers.map(\.2) == [.keepTheirs, .useMine])
     }
 
     @Test("A builtin Workflow offers Customize beside its interactive steps")
@@ -604,9 +620,10 @@ struct DesktopHeadlessTests {
         var tasks = try #require(saved["tasks"] as? [String: Any])
         var items = try #require(tasks["items"] as? [[String: Any]])
         var planning = try #require(items[0]["task"] as? [String: Any])
-        planning["sync"] = ["connected": true, "changes": [[
-            "id": "pending-title", "field": "title", "state": "pending",
-            "local_value": "Saved title", "linear_value": NSNull(), "error": NSNull(),
+        planning["sync"] = ["actions": [[
+            "id": "pending-title", "seq": 1, "owner_kind": "task", "owner_id": "task", "kind": "field",
+            "change": "title", "subject": "task_title", "phase": "queued", "tracker": "linear",
+            "error": NSNull(), "local_value": "Saved title", "tracker_value": NSNull(),
         ]]]
         items[0]["task"] = planning
         tasks["items"] = items
@@ -630,8 +647,8 @@ struct DesktopHeadlessTests {
         #expect(title == "Product")
         let task = try #require(roadmap.waves.first?.tasks.items.first)
         model.select(.task(id: task.id))
-        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "planning-sync-pending-title").text().string()
-        #expect(pending == "Saved locally; pending planning sync · title")
+        let pending = try view.inspect().find(viewWithAccessibilityIdentifier: "tracker-sync-pending-title").text().string()
+        #expect(pending == "title · queued")
         #expect(throws: (any Error).self) {
             try view.inspect().find(viewWithAccessibilityIdentifier: "loopflow-work-loading")
         }

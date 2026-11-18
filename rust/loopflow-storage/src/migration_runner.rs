@@ -786,13 +786,11 @@ pub(crate) fn convert_released_data(conn: &rusqlite::Connection, sql: &str) -> S
     if sql.contains("CREATE TABLE planning_peer_changes (") {
         convert_project_content(conn)?;
         let mut query = conn.prepare(
-            "SELECT export_json FROM project_transitions WHERE export_json IS NOT NULL
-            UNION ALL SELECT export_json FROM task_creation_intents WHERE export_json IS NOT NULL",
+            "SELECT json_extract(export_json,'$.baseline') FROM project_transitions WHERE export_json IS NOT NULL
+            UNION ALL SELECT json_extract(export_json,'$.baseline') FROM task_creation_intents WHERE export_json IS NOT NULL",
         )?;
         for row in query.query_map([], |row| row.get::<_, String>(0))? {
-            let export: super::sqlite::planning_export::PlanningExport =
-                serde_json::from_str(&row?)?;
-            for value in export.baseline {
+            for value in serde_json::from_str::<Vec<crate::work::edit::WorkValue>>(&row?)? {
                 value.validate()?;
             }
         }
@@ -834,7 +832,7 @@ fn convert_project_content(conn: &rusqlite::Connection) -> StoreResult<()> {
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (id, body) in rows {
-        let document = crate::linear_records::project_document::parse_project_document(&body)
+        let document = crate::planning::project_document::parse_project_document(&body)
             .map_err(|error| StoreError::InvalidData(format!("Project {id}: {error}")))?;
         conn.execute(
             "UPDATE projects SET description=?2,krs=?3,metric_targets=?4 WHERE id=?1",
@@ -2579,14 +2577,16 @@ mod tests {
             .unwrap(),
             1
         );
-        let pending: (String, i64, i64) = conn
+        // The pending completion reaches the tracker queue still unconfirmed.
+        let pending: (String, String) = conn
             .query_row(
-                "SELECT target,attempted,settled FROM task_state_deliveries WHERE task_id='single'",
+                "SELECT json_extract(value_json,'$.value.planning_state'),phase FROM tracker_actions
+                 WHERE task_id='single' AND kind='state'",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap();
-        assert_eq!(pending, ("completed".into(), 1, 0));
+        assert_eq!(pending, ("completed".into(), "sent".into()));
         // Released `ship_it` dropped positions short of `end`; their next run
         // takes up a Graph without retaining that earlier execution.
         let execution: i64 = conn
@@ -5920,8 +5920,7 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        let content =
-            crate::linear_records::project_document::parse_project_document(&text).unwrap();
+        let content = crate::planning::project_document::parse_project_document(&text).unwrap();
         assert_eq!(serde_json::to_value(content.krs).unwrap(), project["krs"]);
         assert_eq!(
             serde_json::to_value(content.metric_targets).unwrap(),

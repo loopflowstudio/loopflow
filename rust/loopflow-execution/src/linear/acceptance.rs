@@ -12,8 +12,8 @@ pub(crate) async fn accept_linear_inventory(
     store: &Store,
     wave: WaveId,
     initiative: String,
-    projects: Vec<crate::linear::LinearProject>,
-    issues: Vec<crate::linear::LinearIssue>,
+    projects: Vec<loopflow_storage::planning::TrackerProject>,
+    issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
     acquisition: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
@@ -27,7 +27,7 @@ pub(crate) async fn reconcile_linear_project_teams(
     store: &Store,
     wave: &WaveId,
     initiative: &str,
-    project: crate::linear::LinearProject,
+    project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
     acquisition: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
@@ -42,8 +42,8 @@ pub(crate) async fn reconcile_linear_project_teams(
 pub(crate) async fn accept_linear_issue(
     store: &Store,
     repo: &str,
-    issue: crate::linear::LinearIssue,
-    project: Option<crate::linear::LinearProject>,
+    issue: loopflow_storage::planning::TrackerItem,
+    project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
     acquisition: Option<Arc<PlanningLocks>>,
@@ -62,6 +62,7 @@ pub(crate) async fn accept_linear_issue(
             confirmed_wave
                 .as_ref()
                 .map(|(wave, initiative)| (wave, initiative.as_str())),
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
     })
     .await
@@ -106,7 +107,13 @@ mod tests {
         issue.project_id = Some("unknown-project".into());
         issue.revision = Some("2026-10-17T01:00:00Z".into());
         loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
-            &store, "/repo", &issue, None, 43, None,
+            &store,
+            "/repo",
+            &issue,
+            None,
+            43,
+            None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(
@@ -142,7 +149,13 @@ mod tests {
         issue.project_id = None;
         issue.revision = Some("2026-10-17T02:00:00Z".into());
         loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
-            &store, "/repo", &issue, None, 44, None,
+            &store,
+            "/repo",
+            &issue,
+            None,
+            44,
+            None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         let detached = store.task(&original.id).unwrap().unwrap();
@@ -510,6 +523,7 @@ mod tests {
             Some(&project),
             43,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(teams(), serde_json::to_string(&project.team_ids).unwrap());
@@ -525,6 +539,7 @@ mod tests {
             Some(&project),
             44,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap_err()
         .to_string();
@@ -543,6 +558,7 @@ mod tests {
             Some(&project),
             45,
             None,
+            loopflow_storage::planning_sync::TrackerKind::Linear,
         )
         .unwrap();
         assert_eq!(state(), PlanningState::Available);

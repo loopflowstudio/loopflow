@@ -1604,8 +1604,8 @@ final class WorkModel {
     /// A saved Project or Task change has not reached its planning provider.
     private var planningPending: Bool {
         visibleRoadmaps.contains { roadmap in
-            roadmap.projects.items.contains { $0.sync.changes.contains { $0.state == .pending } }
-                || roadmap.tasks.items.contains { $0.task.sync.changes.contains { $0.state == .pending } }
+            roadmap.projects.items.contains { $0.sync.actions.contains { $0.phase == .queued } }
+                || roadmap.tasks.items.contains { $0.task.sync.actions.contains { $0.phase == .queued } }
         }
     }
 
@@ -2812,6 +2812,15 @@ final class WorkModel {
         } else {
             change(task, .unassign(task: issue), .taskUnassign(directory: directory(task), issue: issue), "unassigned")
         }
+    }
+
+    /// Answer a value a tracker kept over a local one, whoever owns the line.
+    func answerLost(repo: String, action: TrackerActionStatus, answer: LostAnswer) {
+        let name = answer == .keepTheirs ? "Keep theirs" : "Use mine"
+        pendingChanges.request(name, subject: action.id,
+                               write: .planAnswer(directory: WaveOrigin.resolve(repo), action: action.id, answer: answer),
+                               notices: navigation.notices,
+                               answered: { [weak self] in try? await self?.confirmWorkUpdate() })
     }
 
     func moveTask(_ task: RoadmapTask, toWave wave: String?) {

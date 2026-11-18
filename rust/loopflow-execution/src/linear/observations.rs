@@ -1,2 +1,2 @@
 //! Retained Linear revision syntax.
-pub use loopflow_storage::linear_records::revision_nanos;
+pub use loopflow_storage::planning::revision_nanos;

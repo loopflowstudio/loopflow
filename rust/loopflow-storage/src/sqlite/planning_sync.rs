@@ -1,30 +1,40 @@
-//! Project and Task delivery presentation comes from the existing receipts.
-use std::collections::HashMap;
+//! What a Project or Task has waiting for its tracker, and what the tracker
+//! won: open and lost tracker actions, the losing heads Git's journal keeps,
+//! and a person's answer to a lost value.
+use std::collections::{BTreeMap, HashMap};
 
-use rusqlite::{Connection, Row};
-use serde_json::Value;
+use rusqlite::Connection;
 
 use super::children::ids_json;
-use super::SqliteStore;
-use crate::planning_sync::{PlanningSyncChange, PlanningSyncReceipts, PlanningSyncState};
+use super::tracker_actions::{change_word, read_action, ActionKind, ActionPhase, COLUMNS, IN_REPO};
+use super::{planning_write, SqliteStore};
+use crate::planning_exchange::{winning_heads, PlanningMutation};
+use crate::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerActions, TrackerKind,
+};
+use crate::work::edit::{WorkEdit, WorkValue};
 use crate::StoreResult;
 use loopflow_model::durable::{ProjectId, TaskId};
 
+// An action shows while queued or sent, and while conflicted: a value that
+// lost stays until it is answered (`answer_lost`, a later save, or the
+// tracker changing that field again). A creation for an owner already bound
+// waits only to be resolved.
+const SHOWN: &str = "NOT (e.kind='create' AND (EXISTS(SELECT 1 FROM tasks t WHERE t.id=e.task_id AND t.external_issue_id IS NOT NULL)
+        OR EXISTS(SELECT 1 FROM projects p WHERE p.id=e.project_id AND p.external_project_id IS NOT NULL)))";
+
 impl SqliteStore {
-    pub fn task_planning_receipts(&self, task: &TaskId) -> StoreResult<PlanningSyncReceipts> {
+    pub fn task_tracker_actions(&self, task: &TaskId) -> StoreResult<TrackerActions> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
-        let status = task_planning_receipts_in(&tx, std::slice::from_ref(task))?
+        let actions = task_tracker_actions_in(&tx, std::slice::from_ref(task))?
             .remove(task)
             .ok_or(crate::StoreError::NotFound)?;
         tx.commit()?;
-        Ok(status)
+        Ok(actions)
     }
 
-    pub fn project_planning_receipts(
-        &self,
-        project: &ProjectId,
-    ) -> StoreResult<PlanningSyncReceipts> {
+    pub fn project_tracker_actions(&self, project: &ProjectId) -> StoreResult<TrackerActions> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let repo: String = tx.query_row(
@@ -33,25 +43,154 @@ impl SqliteStore {
             |row| row.get(0),
         )?;
         let ids = ids_json([project.as_str()]);
-        let mut changes = fields(&tx, "project", &ids, false)?;
-        append(&tx, &mut changes,
-            "SELECT c.successor_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),c.local_plan_json),c.export_attempted OR c.export_link_attempted,c.export_error,NULL,p.id
-             FROM project_transitions c JOIN projects p ON p.id=c.successor_id
-             WHERE p.id IN (SELECT value FROM json_each(?1)) AND p.external_project_id IS NULL AND c.local_plan_json IS NOT NULL",
-            &ids)?;
+        let mut actions = owned_actions(&tx, "project_id", &ids, false)?
+            .remove(project.as_str())
+            .unwrap_or_default();
+        actions.extend(
+            git_conflicts(&tx, &ids)?
+                .remove(project.as_str())
+                .unwrap_or_default(),
+        );
         tx.commit()?;
-        Ok(PlanningSyncReceipts {
-            repo,
-            changes: changes.into_iter().map(|(_, change)| change).collect(),
-        })
+        Ok(TrackerActions { repo, actions })
+    }
+
+    /// What `lf repo plan` lists: on Linear and Asana every open and lost
+    /// action in send order; on Git each value its journal lost.
+    pub fn repository_tracker_actions(
+        &self,
+        repo: &str,
+        tracker: TrackerKind,
+    ) -> StoreResult<Vec<TrackerActionStatus>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        if tracker == TrackerKind::Git {
+            let tx = conn.savepoint()?;
+            let ids: Vec<String> = tx
+                .prepare(
+                    "SELECT t.id FROM tasks t JOIN repository_plans r ON r.id=t.repository_id WHERE r.repo=?1
+                     UNION ALL SELECT p.id FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1",
+                )?
+                .query_map([repo], |row| row.get(0))?
+                .collect::<rusqlite::Result<_>>()?;
+            let mut lost: Vec<_> = git_conflicts(&tx, &ids_json(ids.iter().map(String::as_str)))?
+                .into_values()
+                .flatten()
+                .collect();
+            tx.commit()?;
+            lost.sort_by(|a, b| (&a.owner_id, &a.subject).cmp(&(&b.owner_id, &b.subject)));
+            return Ok(lost);
+        }
+        // Two arms so each reads its own partial index.
+        let mut query = conn.prepare(&format!(
+            "SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase IN ('queued','sent') AND {IN_REPO} AND {SHOWN}
+             UNION ALL
+             SELECT {COLUMNS} FROM tracker_actions e WHERE e.phase='conflicted' AND {IN_REPO} AND {SHOWN}
+             ORDER BY 1"
+        ))?;
+        let rows = query.query_and_then([repo], read_action)?;
+        let mut actions = Vec::new();
+        for row in rows {
+            if let Ok(action) = row? {
+                actions.push(action.status());
+            }
+        }
+        Ok(actions)
+    }
+
+    /// Answer lost lines, whoever owns them: keep the tracker's value, or
+    /// save the local one again, which queues it (Git records either as the
+    /// field's merge). A line answered meanwhile is left as it is.
+    pub fn answer_lost(
+        &self,
+        lines: &[TrackerActionStatus],
+        answer: LostAnswer,
+    ) -> StoreResult<()> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        for line in lines {
+            match line.tracker {
+                TrackerKind::Git => answer_git(&tx, &line.id, answer)?,
+                _ => answer_queued(&tx, &line.id, answer)?,
+            }
+        }
+        tx.commit()?;
+        Ok(())
     }
 }
 
-/// Each Task's receipts, in one statement per kind across all repositories.
-pub(super) fn task_planning_receipts_in(
+fn answer_queued(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
+    let reason = match answer {
+        LostAnswer::KeepTheirs => "kept the tracker's value",
+        LostAnswer::UseMine => {
+            let Some(action) = conn
+                .prepare(&format!(
+                    "SELECT {COLUMNS} FROM tracker_actions e WHERE e.id=?1 AND e.phase='conflicted'"
+                ))?
+                .query_and_then([id], read_action)?
+                .next()
+                .transpose()?
+            else {
+                return Ok(());
+            };
+            let action = action.map_err(|_| crate::StoreError::NotFound)?;
+            let change = serde_json::from_value::<WorkValue>(action.value).map_err(|_| {
+                crate::StoreError::InvalidData(format!(
+                    "a lost {} cannot be saved again; make the change again",
+                    action.kind.as_str()
+                ))
+            })?;
+            planning_write::local(
+                conn,
+                &[WorkEdit {
+                    target: action.owner.id().to_owned(),
+                    change,
+                }],
+            )?;
+            "answered by a later save"
+        }
+    };
+    conn.execute(
+        "UPDATE tracker_actions SET phase='retired',error=?2 WHERE id=?1 AND phase='conflicted'",
+        rusqlite::params![id, reason],
+    )?;
+    Ok(())
+}
+
+/// Git keeps the field's competing heads; the answer is a save of the chosen
+/// value that names all of them as parents.
+fn answer_git(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
+    let mutation: String = conn.query_row(
+        "SELECT mutation FROM planning_peer_changes WHERE id=?1",
+        [id],
+        |row| row.get(0),
+    )?;
+    let lost = serde_json::from_str::<PlanningMutation>(&mutation)?.edit;
+    let edit = match answer {
+        LostAnswer::UseMine => {
+            planning_write::local(conn, std::slice::from_ref(&lost))?;
+            lost
+        }
+        LostAnswer::KeepTheirs => {
+            let table = planning_write::table(&lost.change);
+            let change = planning_write::read(conn, table, &lost.target)?
+                .into_iter()
+                .find(|value| value.field() == lost.change.field())
+                .ok_or(crate::StoreError::NotFound)?;
+            WorkEdit {
+                target: lost.target,
+                change,
+            }
+        }
+    };
+    planning_write::settle(conn, &edit)
+}
+
+/// Each Task's open and lost tracker actions, in one statement per kind
+/// across all repositories.
+pub(super) fn task_tracker_actions_in(
     conn: &Connection,
     tasks: &[TaskId],
-) -> StoreResult<HashMap<TaskId, PlanningSyncReceipts>> {
+) -> StoreResult<HashMap<TaskId, TrackerActions>> {
     let ids = ids_json(tasks.iter().map(TaskId::as_str));
     let mut statement = conn.prepare(
         "SELECT t.id,w.repo,p.id FROM tasks t JOIN repository_plans w ON w.id=t.repository_id
@@ -72,114 +211,120 @@ pub(super) fn task_planning_receipts_in(
             .iter()
             .filter_map(|(_, _, project)| project.as_deref()),
     );
-    let mut task_fields = by_owner(fields(conn, "task", &task_ids, false)?);
-    let project_fields = by_owner(fields(conn, "project", &project_ids, true)?);
-    let mut receipts = Vec::new();
-    append(conn, &mut receipts,
-            "SELECT d.id,'state',json_quote(d.target),d.attempted,d.error,
-                CASE WHEN d.conflict_json IS NOT NULL THEN json_quote(json_extract(d.conflict_json,'$.state')) END,d.task_id
-             FROM task_state_deliveries d WHERE d.task_id IN (SELECT value FROM json_each(?1)) AND
-             (d.conflict_json IS NOT NULL OR (d.settled=0 AND
-                (d.attempted=1 OR d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=d.task_id)))) ORDER BY d.seq",
-            &task_ids)?;
-    append(conn, &mut receipts,
-            "SELECT d.comment_id,'comment',d.comment_json,0,d.error,d.conflicting_comment_json,c.task_id
-             FROM task_comments c JOIN task_comment_deliveries d ON d.comment_id=c.id
-             WHERE c.task_id IN (SELECT value FROM json_each(?1)) AND (d.conflicting_comment_json IS NOT NULL OR (d.acknowledged=0))
-             ORDER BY c.created_at,c.id", &task_ids)?;
-    append(conn, &mut receipts,
-            "SELECT c.task_id,'creation',COALESCE(json_extract(c.export_json,'$.input'),json_object('title',c.title,'description',c.description)),
-                c.export_attempted,c.export_error,NULL,c.task_id FROM task_creation_intents c
-             JOIN tasks t ON t.id=c.task_id WHERE c.task_id IN (SELECT value FROM json_each(?1)) AND t.external_issue_id IS NULL
-             AND (t.planning_deleted_at IS NULL OR c.export_attempted=1)", &task_ids)?;
-    let mut receipts = by_owner(receipts);
-    let mut statuses = HashMap::new();
+    let mut task_actions = owned_actions(conn, "task_id", &task_ids, false)?;
+    let mut task_conflicts = git_conflicts(conn, &task_ids)?;
+    let project_actions = owned_actions(conn, "project_id", &project_ids, true)?;
+    let mut open = HashMap::new();
     for (task, repo, project) in owners {
-        let mut changes = task_fields.remove(&task).unwrap_or_default();
-        if let Some(changes_in_project) = project
+        let mut actions = task_actions.remove(&task).unwrap_or_default();
+        if let Some(order) = project
             .as_ref()
-            .and_then(|project| project_fields.get(project))
+            .and_then(|project| project_actions.get(project))
         {
-            changes.extend(changes_in_project.iter().cloned());
+            actions.extend(order.iter().cloned());
         }
-        changes.extend(receipts.remove(&task).unwrap_or_default());
-        statuses.insert(
-            TaskId::from_raw(task),
-            PlanningSyncReceipts { repo, changes },
-        );
+        actions.extend(task_conflicts.remove(&task).unwrap_or_default());
+        open.insert(TaskId::from_raw(task), TrackerActions { repo, actions });
     }
-    Ok(statuses)
+    Ok(open)
 }
 
-fn by_owner(
-    changes: Vec<(String, PlanningSyncChange)>,
-) -> HashMap<String, Vec<PlanningSyncChange>> {
-    let mut owners = HashMap::<_, Vec<_>>::new();
-    for (owner, change) in changes {
-        owners.entry(owner).or_default().push(change);
-    }
-    owners
-}
-
-/// Field changes of every owner in `ids` (a JSON array), each with its owner.
-fn fields(
+/// Open and lost actions of every owner in `ids` (a JSON array), by owner id.
+fn owned_actions(
     conn: &Connection,
     owner: &str,
     ids: &str,
     order_only: bool,
-) -> StoreResult<Vec<(String, PlanningSyncChange)>> {
-    let mut changes = Vec::new();
-    let filter = if order_only {
-        "AND c.field='task_order'"
-    } else {
-        ""
-    };
-    append(conn, &mut changes, &format!(
-        "SELECT c.id,c.field,
-            CASE WHEN c.field IN ('deleted','task_order') THEN c.value_json ELSE json_quote(json_extract(c.value_json,'$.value')) END,c.attempted,c.error,
-            CASE WHEN c.conflict_json IS NOT NULL THEN CASE WHEN c.field IN ('deleted','task_order') THEN json_quote(json_extract(c.conflict_json,'$.value')) ELSE json_quote(json_extract(c.conflict_json,'$.value.value')) END END,
-            c.{owner}_id
-         FROM {owner}_changes c WHERE c.{owner}_id IN (SELECT value FROM json_each(?1)) {filter} AND
-         (c.conflict_json IS NOT NULL OR (c.acknowledged=0 AND
-            (c.attempted=1 OR c.seq=(SELECT max(seq) FROM {owner}_changes WHERE {owner}_id=c.{owner}_id AND field=c.field))))
-         ORDER BY c.seq"), ids)?;
-    Ok(changes)
-}
-
-/// Rows of `sql` (owner in column 6) bound to `ids`.
-fn append(
-    conn: &Connection,
-    changes: &mut Vec<(String, PlanningSyncChange)>,
-    sql: &str,
-    ids: &str,
-) -> StoreResult<()> {
-    let mut query = conn.prepare(sql)?;
-    for change in query.query_and_then([ids], |row| {
-        Ok::<_, crate::StoreError>((row.get::<_, String>(6)?, read_change(row)?))
-    })? {
-        changes.push(change?);
+) -> StoreResult<HashMap<String, Vec<TrackerActionStatus>>> {
+    let filter = if order_only { "AND e.kind='order'" } else { "" };
+    let mut query = conn.prepare(&format!(
+        "SELECT {COLUMNS} FROM tracker_actions e
+         WHERE e.{owner} IN (SELECT value FROM json_each(?1)) {filter}
+         AND e.phase IN ('queued','sent','conflicted') AND {SHOWN} ORDER BY e.seq"
+    ))?;
+    let mut owners = HashMap::<_, Vec<_>>::new();
+    for row in query.query_and_then([ids], read_action)? {
+        if let Ok(action) = row? {
+            owners
+                .entry(action.owner.id().to_owned())
+                .or_default()
+                .push(action.status());
+        }
     }
-    Ok(())
+    Ok(owners)
 }
 
-fn read_change(row: &Row<'_>) -> StoreResult<PlanningSyncChange> {
-    let local: String = row.get(2)?;
-    let attempted: bool = row.get(3)?;
-    let remote: Option<String> = row.get(5)?;
-    Ok(PlanningSyncChange {
-        id: row.get(0)?,
-        field: row.get(1)?,
-        state: if remote.is_some() {
-            PlanningSyncState::AdoptedLinear
-        } else if attempted {
-            PlanningSyncState::Uncertain
-        } else {
-            PlanningSyncState::Pending
-        },
-        local_value: serde_json::from_str(&local)?,
-        linear_value: remote
-            .map(|v| serde_json::from_str::<Value>(&v))
-            .transpose()?,
-        error: row.get(4)?,
-    })
+/// Git keeps a field's concurrent values as competing heads of its journal;
+/// every head but the winner is a value that lost, shown until a later save of
+/// the field names all of them as parents.
+fn git_conflicts(
+    conn: &Connection,
+    ids: &str,
+) -> StoreResult<HashMap<String, Vec<TrackerActionStatus>>> {
+    let mut query = conn.prepare(
+        "SELECT c.record_table,c.id,c.mutation FROM planning_peer_changes c
+         WHERE c.object_id IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(
+             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+             WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
+    )?;
+    let mut heads = Vec::new();
+    for row in query.query_map([ids], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })? {
+        let (table, id, mutation) = row?;
+        heads.push((
+            table,
+            id,
+            serde_json::from_str::<PlanningMutation>(&mutation)?,
+        ));
+    }
+    let winners: BTreeMap<_, _> = winning_heads(
+        heads
+            .iter()
+            .map(|(_, id, mutation)| (id.as_str(), mutation)),
+    )
+    .map(|(id, mutation)| (mutation.edit.key(), (id, mutation)))
+    .collect();
+    let mut conflicts = HashMap::<_, Vec<_>>::new();
+    for (table, id, mutation) in &heads {
+        let (winner, won) = winners[&mutation.edit.key()];
+        if winner == id {
+            continue;
+        }
+        let kind = ActionKind::of(&mutation.edit.change).unwrap_or(ActionKind::Field);
+        let shown = |mutation: &PlanningMutation| -> StoreResult<serde_json::Value> {
+            let value = mutation.edit.change.value()?;
+            Ok(match kind {
+                ActionKind::State => value["planning_state"].clone(),
+                _ => value,
+            })
+        };
+        let field = mutation.edit.change.field();
+        let local_value = shown(mutation)?;
+        conflicts
+            .entry(mutation.edit.target.clone())
+            .or_default()
+            .push(TrackerActionStatus {
+                id: id.clone(),
+                seq: None,
+                owner_kind: match table.as_str() {
+                    "projects" => ActionOwnerKind::Project,
+                    _ => ActionOwnerKind::Task,
+                },
+                owner_id: mutation.edit.target.clone(),
+                kind,
+                change: change_word(kind, Some(field), local_value.as_str()),
+                subject: Some(field.to_owned()),
+                phase: ActionPhase::Conflicted,
+                tracker: TrackerKind::Git,
+                error: None,
+                local_value,
+                tracker_value: Some(shown(won)?),
+            });
+    }
+    Ok(conflicts)
 }

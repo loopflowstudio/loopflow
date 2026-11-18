@@ -17,7 +17,7 @@ use rusqlite::{params, params_from_iter, Connection, OptionalExtension, Transact
 use time::OffsetDateTime;
 
 use crate::execution::TaskState;
-use crate::linear_records::{LinearIssueId, LinearProjectId};
+use crate::planning::{LinearIssueId, LinearProjectId};
 use crate::rows::now_unix;
 use crate::work::project::{Project, ProjectEvent, ProjectEventKind, ProjectId};
 use crate::work::task::NewTask;
@@ -529,7 +529,7 @@ impl SqliteStore {
             "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
             params![task.id.as_str()],
         )?;
-        super::task_state_delivery::queue_in(&transaction, &task.id, "completed")?;
+        super::task_state::decide_in(&transaction, &task.id, "completed")?;
         insert_task_event_in(
             &transaction,
             &task.id,
@@ -567,7 +567,7 @@ impl SqliteStore {
                 "UPDATE tasks SET completion_request=NULL,completion_error=NULL WHERE id=?1",
                 [id.as_str()],
             )?;
-            super::task_state_delivery::queue_in(&tx, id, "unstarted")?;
+            super::task_state::decide_in(&tx, id, "unstarted")?;
             // Reopening withdraws Auto-Ship: the approval ended with the Task.
             super::task_work::unship_in(&tx, id)?;
             insert_task_event_in(
@@ -1010,7 +1010,7 @@ impl SqliteStore {
     pub fn apply_linear_observation_prepared(
         &self,
         task_id: &TaskId,
-        observation: &crate::linear_records::LinearIssueObservation,
+        observation: &crate::planning::TrackerObservation,
         observed_at: OffsetDateTime,
         planning_connected: bool,
         machine_names: &std::collections::HashMap<loopflow_model::durable::MachineId, String>,
@@ -1256,6 +1256,7 @@ impl SqliteStore {
                     Edit::MetricTargets(project.metric_targets.clone()),
                 ],
             ),
+            crate::sqlite::planning_write::WriteOrigin::Local,
         )?;
         transaction.execute(
             "UPDATE projects SET pm_snapshot_synced_at=?2,created_at=?3,updated_at=?4 WHERE id=?1",
@@ -1459,8 +1460,7 @@ pub(super) fn require_task_planning(conn: &Connection, task: &Task) -> StoreResu
         |row| row.get(0),
     )?;
     // Upstream cancellation stops a Task that hasn't set out; one under way keeps going.
-    if crate::linear_records::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)?
-    {
+    if crate::planning::terminal_reason(state.as_deref()).is_some() && !under_way(conn, task)? {
         return Err(StoreError::InvalidAuthority(
             "terminal planning state cannot start work; its execution history is preserved".into(),
         ));
@@ -1530,9 +1530,8 @@ pub(super) fn task_acquisitions_in(
              -- A pending membership move is sent last, so it wins over the
              -- observed Project and its team until delivery.
              (NOT (?2 AND EXISTS(
-                 SELECT 1 FROM task_changes c WHERE c.task_id=t.id AND c.field='task_project'
-                 AND c.acknowledged=0 AND c.conflict_json IS NULL
-                 AND c.seq=(SELECT max(seq) FROM task_changes WHERE task_id=t.id AND field=c.field)))
+                 SELECT 1 FROM tracker_actions e WHERE e.task_id=t.id AND e.subject='task_project'
+                 AND e.kind='field' AND e.phase IN ('queued','sent')))
               AND (i.project_id IS NOT p.external_project_id
                    OR CASE WHEN p.id IS NOT NULL AND i.team_id IS NOT NULL THEN
                           NOT EXISTS(SELECT 1 FROM json_each(p.planning_teams) WHERE value=i.team_id)
@@ -1550,8 +1549,8 @@ pub(super) fn task_acquisitions_in(
          OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
-         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider='linear' AND i.id=t.external_issue_id
-         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider='linear'
+         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider IN ('linear','asana') AND i.id=t.external_issue_id
+         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider IN ('linear','asana')
                                      AND parent.id=p.external_project_id
          LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
                                        AND observed.id=i.project_id
@@ -1635,6 +1634,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
                 }),
             ],
         ),
+        crate::sqlite::planning_write::WriteOrigin::Local,
     )?;
     conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
         task.id.as_str(),task.pm_snapshot_synced_at,task.workspace_slug,
@@ -1817,11 +1817,11 @@ const TASK_COLUMNS: &str = "SELECT t.id,t.external_issue_id,
     p.wave_id, c.worktree, t.workspace_slug,
     t.created_at, t.updated_at, t.pm_snapshot_synced_at,
     COALESCE((SELECT json_object('state','pending','operation',
-        CASE d.target WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
-        'error',COALESCE(d.error,'Saved locally; pending planning synchronization'))
-        FROM task_state_deliveries d WHERE d.task_id=t.id AND d.settled=0
-            AND t.external_issue_id IS NOT NULL
-            AND d.seq=(SELECT max(seq) FROM task_state_deliveries WHERE task_id=t.id)),
+        CASE json_extract(e.value_json,'$.value.planning_state') WHEN 'completed' THEN 'complete_task' WHEN 'canceled' THEN 'cancel_task' ELSE 'reopen_task' END,
+        'error',COALESCE(e.error,'Saved locally; pending planning synchronization'))
+        FROM tracker_actions e WHERE e.task_id=t.id AND e.subject IS NULL AND e.kind='state'
+            AND e.phase IN ('queued','sent') AND t.external_issue_id IS NOT NULL
+        ORDER BY e.seq DESC LIMIT 1),
         json_object('state','current')),
     t.project_id, t.planning_revision, COALESCE(c.branch,''), COALESCE(c.base_commit,''), c.parent_pr_id,
     t.planning_rank,t.planning_assignee,t.planning_due_date,COALESCE(t.planning_state,CASE WHEN t.planning_completed=1 THEN 'completed' END),t.planning_completed_at,t.repository_id
@@ -1874,9 +1874,10 @@ fn ingest_linear_comment(
     )?;
     let id = comment_id.split_once('@').map_or(comment_id, |(id, _)| id);
     let own_echo: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN task_comment_deliveries d
-         ON d.comment_id=c.id WHERE c.id=?1 AND c.task_id=?2 AND d.acknowledged=1 AND d.conflicting_comment_json IS NULL
-         AND json_extract(d.comment_json,'$.body')=c.body)",
+        "SELECT EXISTS(SELECT 1 FROM task_comments c JOIN tracker_actions e
+         ON e.task_id=c.task_id AND e.subject=c.id AND e.kind='comment' WHERE c.id=?1 AND c.task_id=?2
+         AND e.phase='confirmed'
+         AND json_extract(e.value_json,'$.value.body')=c.body)",
         params![id, task_id], |row| row.get(0),
     )?;
     if inserted == 1 && !own_echo {
@@ -2046,8 +2047,8 @@ fn task_candidates_in(
          JOIN repository_plans w ON w.id=t.repository_id
          WHERE (t.id=?1 OR t.external_issue_id=?3 OR t.issue_identifier=?4
             OR substr(t.id, 6, length(?2))=?2
-            OR EXISTS(SELECT 1 FROM task_creation_intents c WHERE c.task_id=t.id
-                AND json_extract(c.export_json,'$.id')=?3))
+            -- A Task created here is sent with its own uuid as the provider id.
+            OR substr(t.id,6)=replace(lower(?3),'-',''))
          ORDER BY t.id",
     )?;
     let tasks = statement

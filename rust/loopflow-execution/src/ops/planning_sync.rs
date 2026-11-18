@@ -12,7 +12,13 @@ use std::time::Duration;
 
 use crate::planning_git::{PlanningGit, PlanningPublication, PlanningRevision};
 use crate::store::{open_store, sqlite::SqliteStore, StorageConfig, Store};
+use loopflow_model::durable::{ProjectId, TaskId};
+use loopflow_model::id::WaveId;
 use loopflow_storage::planning_exchange::PlanningSnapshot;
+use loopflow_storage::planning_sync::{
+    ActionOwnerKind, LostAnswer, TrackerActionStatus, TrackerKind,
+};
+use loopflow_storage::sqlite::tracker_actions::{ActionOwner, ActionPhase};
 
 use super::{OpsError, OpsResult};
 
@@ -66,20 +72,21 @@ enum Exchange {
     Publish { wait: bool },
 }
 
-/// A short command saves first, then makes one exchange attempt. A served
-/// command answers first and the attempt runs after its reply; pending exports
-/// are durable rows, so a server that stops before it runs loses nothing.
-/// Failure leaves its successful local mutation and durable pending state intact.
-pub(crate) async fn sync_after_save(store: &Store, repo: &str) {
-    let deferred = repo.to_owned();
+/// A short command saves first, then makes one exchange attempt with the owner
+/// it saved ahead of older work. A served command answers first and the attempt
+/// runs after its reply; queued actions are durable rows, so a server that
+/// stops before it runs loses nothing. Failure leaves its successful local
+/// mutation and durable pending state intact.
+pub(crate) async fn sync_after_save(store: &Store, repo: &str, saved: &ActionOwner) {
+    let (deferred, owner) = (repo.to_owned(), saved.clone());
     if crate::journal::request::after_reply(move || {
-        after_reply(|store| async move { sync_saved(&store, &deferred).await })
+        after_reply(|store| async move { sync_saved(&store, &deferred, &owner).await })
     })
     .is_none()
     {
         return;
     }
-    sync_saved(store, repo).await
+    sync_saved(store, repo, saved).await
 }
 
 /// Run `sync` on the Machine's store once a served command has answered.
@@ -105,7 +112,7 @@ where
     }
 }
 
-async fn sync_saved(store: &Store, repo: &str) {
+async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
         let config = crate::config::load_config(Some(Path::new(repo)))
             .map_err(message)?
@@ -113,17 +120,14 @@ async fn sync_saved(store: &Store, repo: &str) {
         match config.planning_transport() {
             crate::config::PlanningConfig::Git { .. } => publish_repository(store, repo).await,
             crate::config::PlanningConfig::Linear { .. }
-            | crate::config::PlanningConfig::Asana { .. }
-            | crate::config::PlanningConfig::Notion { .. } => {
-                // Export attempts have individual deadlines. A shared deadline
-                // lets older pending work starve the Task that was just saved.
-                super::planning_export::sync_repository_exports(store, repo).await?;
-                let (fields, deliveries) = tokio::join!(
-                    super::planning_delivery::sync_repository_fields(store, repo),
-                    super::linear_observe::sync_repository_deliveries(store, repo)
-                );
-                fields?;
-                deliveries?;
+            | crate::config::PlanningConfig::Asana { .. } => {
+                super::tracker::drain::drain_repository(
+                    store,
+                    repo,
+                    super::tracker::drain::Scope::First(saved),
+                    super::tracker::drain::Bound::PASS,
+                )
+                .await?;
                 Ok(())
             }
         }
@@ -131,9 +135,56 @@ async fn sync_saved(store: &Store, repo: &str) {
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");
         crate::journal::request::diagnostic(format_args!(
-            "Saved locally; planning synchronization pending. See `lf planning status`."
+            "Saved locally; planning synchronization pending. See `lf repo plan`."
         ));
     }
+}
+
+/// `lf repo plan answer <id>`: answer one lost line of `repo`, whoever owns
+/// it, then make one exchange attempt for that owner. `id` is the line's
+/// action id or the short prefix `lf repo plan` prints.
+pub fn answer_lost(repo: &Path, id: &str, answer: LostAnswer) -> OpsResult<TrackerActionStatus> {
+    tokio::runtime::Runtime::new()
+        .map_err(message)?
+        .block_on(async {
+            let store = planning_store().await?;
+            let main = crate::git::worktrees::main_repo_root(repo).map_err(message)?;
+            let repo = main.to_string_lossy();
+            let tracker = super::tracker::queued_tracker(&main).unwrap_or(TrackerKind::Git);
+            let lost: Vec<_> = store
+                .sqlite
+                .repository_tracker_actions(&repo, tracker)
+                .map_err(message)?
+                .into_iter()
+                .filter(|line| line.phase == ActionPhase::Conflicted && line.id.starts_with(id))
+                .collect();
+            let line = match lost.as_slice() {
+                [line] => line.clone(),
+                [] => {
+                    return Err(message(format!(
+                        "{id} is not a lost line in {repo}; `lf repo plan` lists them"
+                    )))
+                }
+                _ => return Err(message(format!("{id} names more than one lost line"))),
+            };
+            store
+                .sqlite
+                .answer_lost(std::slice::from_ref(&line), answer)
+                .map_err(message)?;
+            let owner = match line.owner_kind {
+                ActionOwnerKind::Task => {
+                    Some(ActionOwner::Task(TaskId::from_raw(line.owner_id.clone())))
+                }
+                ActionOwnerKind::Project => Some(ActionOwner::Project(ProjectId::from_raw(
+                    line.owner_id.clone(),
+                ))),
+                _ => WaveId::parse(&line.owner_id).ok().map(ActionOwner::Wave),
+            };
+            if let Some(owner) = owner {
+                sync_after_save(&store, &repo, &owner).await;
+            }
+            Ok(line)
+        })
 }
 
 /// Resolve the repository configuration before touching a planning remote.
@@ -310,7 +361,7 @@ fn exchange_destination(
         let lock = if wait {
             wait_for_publication(&path)?
         } else {
-            super::planning_delivery::lock_delivery(&path)?
+            super::tracker::drain::lock_delivery(&path)?
         };
         let Some(lock) = lock else {
             return Ok(());
@@ -350,7 +401,7 @@ fn exchange_destination(
 fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
     let deadline = std::time::Instant::now() + PUBLICATION_WAIT;
     loop {
-        if let Some(lock) = super::planning_delivery::lock_delivery(path)? {
+        if let Some(lock) = super::tracker::drain::lock_delivery(path)? {
             return Ok(Some(lock));
         }
         if std::time::Instant::now() >= deadline {
@@ -473,7 +524,7 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
     let repo = crate::repository::discover(directory)
         .map_err(message)?
         .to_string();
-    if !super::planning_client::connected(&repo) {
+    if !super::tracker::connected(&repo) {
         return Ok(());
     }
     tokio::runtime::Builder::new_current_thread()
@@ -482,9 +533,9 @@ fn sync_directory(directory: &Path, refresh: bool) -> OpsResult<()> {
         .block_on(async {
             let store = planning_store().await?;
             if refresh {
-                super::linear_observe::refresh_repository(&store, &repo).await;
+                super::tracker_events::refresh_repository(&store, &repo).await;
             } else {
-                super::linear_observe::sync_repository(&store, &repo).await;
+                super::tracker_events::sync_repository(&store, &repo).await;
             }
             Ok(())
         })
@@ -506,7 +557,7 @@ impl PlanningSync {
         let repo = crate::repository::discover(directory)
             .map_err(message)?
             .to_string();
-        if super::planning_client::connected(&repo) {
+        if super::tracker::connected(&repo) {
             return Ok(Self {
                 stop: None,
                 thread: None,

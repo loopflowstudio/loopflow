@@ -326,10 +326,6 @@ pub enum PlanningConfig {
     Asana {
         team: String,
     },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion {
-        team: String,
-    },
 }
 
 /// Which ref on the planning remote carries this repository's plan.
@@ -379,8 +375,6 @@ enum RawPlanningConfig {
     /// The Asana team's gid or URL. Tasks live in the team project named
     /// after the repository; Wave Projects are Asana projects in the team.
     Asana { team: String },
-    /// The Notion page's ID or URL. It holds the Tasks and Projects databases.
-    Notion { team: String },
 }
 
 impl TryFrom<RawPlanningConfig> for PlanningConfig {
@@ -395,7 +389,6 @@ impl TryFrom<RawPlanningConfig> for PlanningConfig {
             } => (remote, shared, personal),
             RawPlanningConfig::Linear { team } => return Ok(Self::Linear { team }),
             RawPlanningConfig::Asana { team } => return Ok(Self::Asana { team }),
-            RawPlanningConfig::Notion { team } => return Ok(Self::Notion { team }),
         };
         let plan = match (shared, personal) {
             (Some(name), true) => {
@@ -427,7 +420,6 @@ impl From<PlanningConfig> for RawPlanningConfig {
             }
             PlanningConfig::Linear { team } => Self::Linear { team },
             PlanningConfig::Asana { team } => Self::Asana { team },
-            PlanningConfig::Notion { team } => Self::Notion { team },
         }
     }
 }
@@ -443,7 +435,6 @@ impl PlanningConfig {
             Self::Git { .. } => None,
             Self::Linear { .. } => Some("Linear"),
             Self::Asana { .. } => Some("Asana"),
-            Self::Notion { .. } => Some("Notion"),
         }
     }
 }

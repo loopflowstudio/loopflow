@@ -358,7 +358,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
         )
         .unwrap();
         // A later delivery pass and observation neither repost nor echo it.
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -367,7 +367,7 @@ fn asana_status_title_and_comments_write_back_to_the_mirrored_task() {
             .unwrap()
             .unwrap();
         runtime
-            .block_on(crate::ops::linear_observe::refresh_task_comments(
+            .block_on(crate::ops::tracker_events::refresh_task_comments(
                 &fixture.store,
                 &task,
             ))
@@ -400,7 +400,7 @@ fn asana_outage_keeps_the_local_save_and_publishes_once_on_retry() {
         assert!(saved.linear_id.is_none());
 
         runtime.block_on(state.lock()).offline = false;
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -432,7 +432,7 @@ fn asana_comments_and_edits_by_people_become_task_direction() {
             .unwrap();
         let refresh = || {
             runtime
-                .block_on(crate::ops::linear_observe::refresh_task_comments(
+                .block_on(crate::ops::tracker_events::refresh_task_comments(
                     &fixture.store,
                     &task,
                 ))
@@ -494,7 +494,7 @@ fn asana_tasks_coworkers_create_become_tasks() {
                 }),
             );
         });
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));
@@ -531,7 +531,7 @@ fn asana_tasks_coworkers_delete_leave_the_plan() {
             .unwrap()
             .unwrap();
         runtime
-            .block_on(crate::ops::linear_observe::refresh_task_comments(
+            .block_on(crate::ops::tracker_events::refresh_task_comments(
                 &fixture.store,
                 &task,
             ))
@@ -602,7 +602,7 @@ fn asana_wave_projects_become_team_projects_holding_their_tasks() {
         assert_eq!(members, [&repository["gid"], &wave_project["gid"]]);
 
         // Read back, the Task keeps its Project.
-        runtime.block_on(crate::ops::linear_observe::sync_repository(
+        runtime.block_on(crate::ops::tracker_events::sync_repository(
             &fixture.store,
             repo.to_str().unwrap(),
         ));

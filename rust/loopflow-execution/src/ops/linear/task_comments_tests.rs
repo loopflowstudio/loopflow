@@ -74,7 +74,7 @@ async fn graphql(
         json!({"issue": {"id":"issue-uuid","identifier":"FIX-7","url":null,"title":"Comments",
             "description":"","completedAt": null, "dueDate": null, "prioritySortOrder":0.0,"sortOrder":0.0, "updatedAt":"2026-09-29T12:00:00.123Z","assignee":null,
             "state":{"type":"unstarted"},"team":{"id":"team-1"},
-            "project":{"id":"project-1","name":"Chapter","description":"","content":"workflow: feature",
+            "project":{"id":"project-1","name":"Project","description":"","content":"workflow: feature",
                 "status":{"type":"started"},
                 "initiatives":{"nodes":[{"id":"initiative-1"}]},"teams":{"nodes":[{"id":"team-1"}]}}}})
     } else if query.contains("mutation SyncComment") {
@@ -109,7 +109,7 @@ async fn graphql(
         json!({"comment":comment})
     } else if query.contains("query IssueTrash") {
         json!({"issue": {"id": vars["id"], "updatedAt": "2026-09-24T12:00:00Z", "trashed": false}})
-    } else if query.contains("query IssueObservation") {
+    } else if query.contains("query IssueEvent") {
         assert_eq!(
             vars["id"], "issue-uuid",
             "read uses the resolved provider UUID"
@@ -385,7 +385,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
-            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
+            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().tracker_writeback,
                 loopflow_storage::work::task::LinearWritebackState::Pending {
                     operation: loopflow_storage::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));

@@ -294,12 +294,12 @@ build the current CLI and take its path from Cargo’s artifact output:
 
 ```sh
 cargo test -p loopflow --lib local_planning
-cargo test -p loopflow-execution --lib linear::acceptance
-cargo test -p loopflow-storage --lib sqlite::linear_acceptance
+cargo test -p loopflow-execution --lib linear::events
+cargo test -p loopflow-storage --lib sqlite::linear_events
 ```
 
-Application lifecycle checks stay in `linear::acceptance`; supplied-fact SQL
-checks live in `store::sqlite::linear_acceptance`.
+Application lifecycle checks stay in `linear::events`; supplied-fact SQL
+checks live in `store::sqlite::linear_events`.
 
 CI and the disposable installation runner supply their prepared candidate through
 `LOOPFLOW_TEST_LF`, avoiding Cargo calls in each test process. Only set this to
@@ -398,7 +398,7 @@ synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
-Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
+Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
 `planning_setup_tests` proves configuration selection and personal-key recovery.
 `planning_foreground_tests` exercises disposable custom refs through public CLI and

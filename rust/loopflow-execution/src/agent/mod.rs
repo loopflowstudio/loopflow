@@ -129,7 +129,13 @@ pub fn checkout_execution_boundary(
     Ok(AgentExecutionBoundary { writable_roots })
 }
 
-pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 12] = [
+/// What a conversation sets in its own shells, lf's markers and its
+/// provider's. A conversation lf starts sets its own; it never inherits the
+/// caller's. An inherited `CLAUDE_CODE_CHILD_SESSION` turns off Claude's
+/// transcript; an inherited `CODEX_SANDBOX` hands a nested Codex its parent's
+/// sandbox. Settings a person chooses (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+/// credentials) are not markers and pass through.
+pub(crate) const CALLER_SESSION_ENV: &[&str] = &[
     crate::steer::PROVIDER_CONTEXT_ENV,
     crate::steer::BARE_STEER_ENV,
     crate::steer::STEER_SEEN_ENV,
@@ -142,7 +148,38 @@ pub(crate) const EXECUTION_IDENTITY_ENV: [&str; 12] = [
     crate::session_record::CAPTURE_KEY_ENV,
     "LF_RUN_ID",
     "LF_RUN_DIR",
+    // Claude Code
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_CHILD_NOTES_DIR",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+    "AI_AGENT",
+    // Codex
+    "CODEX_CI",
+    "CODEX_SANDBOX",
+    "CODEX_SANDBOX_NETWORK_DISABLED",
+    "CODEX_SESSION_ID",
+    "CODEX_THREAD_ID",
+    "CODEX_TOOL_CALL_ID",
+    "CODEX_VERSION",
+    "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS",
 ];
+
+/// Start `command` as a new conversation rather than the caller's child. Run
+/// it before applying the new conversation's environment, which sets lf's
+/// markers afresh.
+pub(crate) fn remove_caller_session_env(command: &mut std::process::Command) {
+    for name in CALLER_SESSION_ENV {
+        command.env_remove(name);
+    }
+}
 
 #[derive(Clone)]
 pub struct AgentConfig {
@@ -957,8 +994,8 @@ fn run_admitted_agent(
         None
     };
     let mut process = process.clone();
-    for name in EXECUTION_IDENTITY_ENV {
-        launch.env.remove(name);
+    for name in CALLER_SESSION_ENV {
+        launch.env.remove(*name);
     }
     if let Some(runtime) = &implicit_runtime {
         process.runtime = Some(runtime.clone());
@@ -2406,9 +2443,9 @@ trust_level = "trusted"
             due_date: None,
             state: None,
             completed_at: None,
-            linear_id: None,
-            pm_snapshot_synced_at: None,
-            pm_writeback: crate::work::task::LinearWritebackState::Current,
+            tracker_id: None,
+            tracker_synced_at: None,
+            tracker_writeback: crate::work::task::LinearWritebackState::Current,
             wave_id: None,
             repository_id: crate::durable::RepositoryId::new(),
             project_id: None,

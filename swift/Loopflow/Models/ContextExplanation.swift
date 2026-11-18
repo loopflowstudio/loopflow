@@ -45,12 +45,42 @@ public struct ContextExplanation: Codable, Equatable, Sendable {
     public let task: ContextFact
     public let session: ContextFact
     public let process: ContextFact
-    public let planningObservedAt: Int64?
+    public let trackerSyncedAt: Int64?
 
     enum CodingKeys: String, CodingKey {
         case observedAt = "observed_at", repositoryPath = "repository_path"
-        case executionMachine = "execution_machine", planningObservedAt = "planning_observed_at"
+        case executionMachine = "execution_machine", trackerSyncedAt = "tracker_synced_at"
         case machine, repository, checkout, wave, task, session, process
+    }
+
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        observedAt = try values.decode(Int64.self, forKey: .observedAt)
+        machine = try values.decode(ContextFact.self, forKey: .machine)
+        repository = try values.decode(ContextFact.self, forKey: .repository)
+        repositoryPath = try values.decode(ContextFact.self, forKey: .repositoryPath)
+        checkout = try values.decode(ContextFact.self, forKey: .checkout)
+        executionMachine = try values.decode(ContextFact.self, forKey: .executionMachine)
+        wave = try values.decode(ContextFact.self, forKey: .wave)
+        task = try values.decode(ContextFact.self, forKey: .task)
+        session = try values.decode(ContextFact.self, forKey: .session)
+        process = try values.decode(ContextFact.self, forKey: .process)
+        trackerSyncedAt = try values.decode(Int64?.self, forKey: .trackerSyncedAt)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(observedAt, forKey: .observedAt)
+        try values.encode(machine, forKey: .machine)
+        try values.encode(repository, forKey: .repository)
+        try values.encode(repositoryPath, forKey: .repositoryPath)
+        try values.encode(checkout, forKey: .checkout)
+        try values.encode(executionMachine, forKey: .executionMachine)
+        try values.encode(wave, forKey: .wave)
+        try values.encode(task, forKey: .task)
+        try values.encode(session, forKey: .session)
+        try values.encode(process, forKey: .process)
+        try values.encode(trackerSyncedAt, forKey: .trackerSyncedAt)
     }
 }
 

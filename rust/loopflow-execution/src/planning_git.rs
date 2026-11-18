@@ -44,14 +44,22 @@ pub use loopflow_storage::planning_destination::{PlanningDestination, PlanningGi
 type Result<T> = std::result::Result<T, PlanningGitError>;
 
 /// Resolve an explicitly chosen alias once, without contacting its remote.
+/// `None` when the checkout has no such remote yet: its plan stays local.
 /// Separate fetch/push endpoints would make readback an invalid receipt.
 pub fn resolve_destination(
     repo: &Path,
     remote: &str,
     reference: &str,
-) -> Result<PlanningDestination> {
+) -> Result<Option<PlanningDestination>> {
     if remote.is_empty() || remote.starts_with('-') {
         return Err(PlanningGitError::Invalid("select a planning Git remote"));
+    }
+    let remotes = git(repo, "list remotes", &["remote"], &[])?.success("list remotes")?;
+    if !String::from_utf8_lossy(&remotes)
+        .lines()
+        .any(|name| name == remote)
+    {
+        return Ok(None);
     }
     let read = |push: bool| -> Result<String> {
         let mut args = vec!["remote", "get-url", "--all"];
@@ -83,7 +91,7 @@ pub fn resolve_destination(
             .to_string_lossy()
             .into_owned();
     }
-    PlanningDestination::new(&endpoint, reference)
+    PlanningDestination::new(&endpoint, reference).map(Some)
 }
 
 /// Construction uses only the saved binding, never the current remote alias.

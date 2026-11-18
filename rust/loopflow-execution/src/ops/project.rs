@@ -29,7 +29,7 @@ pub fn current_project(store: &Store, wave: &Wave) -> OpsResult<Project> {
     Ok(project)
 }
 
-/// Select an existing non-terminal Project as the Wave's shared current plan.
+/// Select an existing non-terminal Project as the Wave's current Project.
 pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResult<Project> {
     let store = super::planning_sync::planning_store().await?;
     let wave = crate::work::wave::context::resolve_managed_wave(
@@ -47,7 +47,7 @@ pub async fn bind_project(repo: &Path, name: &str, project_id: &str) -> OpsResul
         .map_err(project_error)
 }
 
-pub async fn update_plan(
+pub async fn update_project(
     repo: &Path,
     wave: Option<&str>,
     krs: &[loopflow_storage::work::project::ProjectKR],
@@ -65,7 +65,7 @@ pub async fn update_plan(
     .map_err(project_error)?;
     let _acquisition = super::planning_sync::lock_wave_planning(&wave).await?;
     let project = current_project(&store, &wave)?;
-    super::metrics::validate_chapter_targets(&wave, metric_targets).map_err(project_error)?;
+    super::metrics::validate_project_targets(&wave, metric_targets).map_err(project_error)?;
     store
         .sqlite
         .update_project_content(&project.id, krs, metric_targets)
@@ -115,7 +115,7 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
         .collect();
     if let Some(project) = projects.iter().find(|project| {
         project
-            .linear_id
+            .tracker_id
             .as_ref()
             .is_some_and(|id| id.as_str() == loopflow_model::id::canonical_uuid(selector))
     }) {
@@ -133,18 +133,22 @@ async fn resolve_project(store: &Store, repo: &Path, selector: &str) -> OpsResul
     Ok(project)
 }
 
-/// Current chapter selection and exact historical lookup are distinct addresses.
+/// Current Project selection and exact historical lookup are distinct addresses.
 #[derive(Debug, Clone, Copy)]
-pub enum PlanTarget<'a> {
+pub enum ProjectTarget<'a> {
     Wave(Option<&'a str>),
     Project(&'a str),
 }
 
 /// Resolve on the operation's store; never ensure a Project or start work.
-async fn resolve_plan(store: &Store, repo: &Path, target: PlanTarget<'_>) -> OpsResult<Project> {
+async fn resolve_project_target(
+    store: &Store,
+    repo: &Path,
+    target: ProjectTarget<'_>,
+) -> OpsResult<Project> {
     let selector = match target {
-        PlanTarget::Project(project) => return resolve_project(store, repo, project).await,
-        PlanTarget::Wave(wave) => wave,
+        ProjectTarget::Project(project) => return resolve_project(store, repo, project).await,
+        ProjectTarget::Wave(wave) => wave,
     };
     let wave = crate::work::wave::context::resolve_managed_wave(
         Some(store),
@@ -187,18 +191,18 @@ async fn graph_wave(store: &Store, repo: &Path, wave: Option<&str>) -> OpsResult
 
 pub async fn edit(
     repo: &Path,
-    target: PlanTarget<'_>,
+    target: ProjectTarget<'_>,
     name: Option<&str>,
     summary: Option<&str>,
     description: Option<&str>,
 ) -> OpsResult<(Project, TrackerSync)> {
     if name.is_none() && summary.is_none() && description.is_none() {
         return Err(project_error(
-            "wave edit-plan requires --name, --summary or --description",
+            "wave edit-project requires --name, --summary or --description",
         ));
     }
     let store = super::planning_sync::planning_store().await?;
-    let project = resolve_plan(&store, repo, target).await?;
+    let project = resolve_project_target(&store, repo, target).await?;
     let wave = store
         .get_wave(&project.wave_id)
         .await

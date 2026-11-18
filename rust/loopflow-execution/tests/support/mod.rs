@@ -539,7 +539,7 @@ fn register_task_fixture(
 
         summary: String::new(),
         status: loopflow::work::project::ProjectStatus::Started,
-        linear_id: Some(
+        tracker_id: Some(
             LinearProjectId::new(format!("project-{}", WaveId::new())).expect("project id"),
         ),
         slug: "task-pr-tests".to_string(),
@@ -547,7 +547,7 @@ fn register_task_fixture(
         description: "Keep Task PR transitions durable.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -562,13 +562,13 @@ fn register_task_fixture(
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
+        tracker_id: Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id")),
         identifier: "INF-123".to_string(),
         title: "Prove Task PR transitions".to_string(),
         description: "Exercise the persisted lifecycle.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(worktree.to_path_buf()),
@@ -664,7 +664,7 @@ pub fn register_sibling_task(
     let now = OffsetDateTime::now_utc();
     let mut task = registered.task.clone();
     task.id = TaskId::new();
-    task.linear_id =
+    task.tracker_id =
         Some(LinearIssueId::new(format!("issue-{}", WaveId::new())).expect("issue id"));
     task.identifier = identifier.to_string();
     task.title = format!("Sibling {identifier}");

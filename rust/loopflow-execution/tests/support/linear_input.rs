@@ -17,7 +17,6 @@ pub struct Inventory {
 #[derive(Debug, Clone, PartialEq)]
 pub struct InventoryFixture {
     pub wave_id: WaveId,
-    pub provider: String,
     pub initiative: String,
     pub synced_at: i64,
     pub snapshot: Inventory,
@@ -41,7 +40,7 @@ pub trait SeedLinear {
     async fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: IssueFixture,
         confirmed: Option<(WaveId, String)>,
         locks: Option<Arc<PlanningLocks>>,
@@ -53,8 +52,7 @@ impl SeedLinear for Store {
         input: InventoryFixture,
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
-        assert_eq!(input.provider, "linear");
-        loopflow::linear::acceptance::accept_linear_inventory(
+        loopflow::linear::events::accept_linear_inventory(
             self,
             input.wave_id,
             input.initiative,
@@ -68,13 +66,13 @@ impl SeedLinear for Store {
     async fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: IssueFixture,
         confirmed: Option<(WaveId, String)>,
         locks: Option<Arc<PlanningLocks>>,
     ) -> StoreResult<()> {
-        assert_eq!(provider, "linear");
-        loopflow::linear::acceptance::accept_linear_issue(
+        assert_eq!(tracker, "linear");
+        loopflow::linear::events::accept_linear_issue(
             self,
             repo,
             input.item,
@@ -91,15 +89,14 @@ pub trait SeedLinearSqlite {
     fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: &IssueFixture,
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()>;
 }
 impl SeedLinearSqlite for SqliteStore {
     fn seed_inventory(&self, input: &InventoryFixture) -> StoreResult<()> {
-        assert_eq!(input.provider, "linear");
-        loopflow::store::sqlite::linear_acceptance::accept_linear_inventory_in(
+        loopflow::store::sqlite::linear_events::accept_linear_inventory_in(
             self,
             &input.wave_id,
             &input.initiative,
@@ -111,12 +108,12 @@ impl SeedLinearSqlite for SqliteStore {
     fn seed_issue(
         &self,
         repo: &str,
-        provider: &str,
+        tracker: &str,
         input: &IssueFixture,
         confirmed: Option<(&WaveId, &str)>,
     ) -> StoreResult<()> {
-        assert_eq!(provider, "linear");
-        loopflow::store::sqlite::linear_acceptance::accept_linear_issue_in(
+        assert_eq!(tracker, "linear");
+        loopflow::store::sqlite::linear_events::accept_linear_issue_in(
             self,
             repo,
             &input.item,

@@ -194,12 +194,12 @@ lf task list --subscribe                          # a JSON line each time the li
 it answers instantly and offline.
 
 `--subscribe` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf session history`, `lf repo plan`, `lf process list` and the
+`lf session list`, `lf session history`, `lf repo tracker`, `lf process list` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to
 change what it reads, or `{"id": 2}` to ask for a fresh reading; the next line
-answers that id. It stops when stdin closes. `lf repo plan --subscribe` also
+answers that id. It stops when stdin closes. `lf repo tracker --subscribe` also
 keeps the repository's planning exchanged while it runs.
 
 A Graph that stopped or crashed stays as history; nothing resumes it. Read
@@ -221,7 +221,7 @@ until you complete it. Publishing, landing and CI repair are covered in
 ## Share the plan
 
 ```bash
-lf repo plan                 # which plan this repository reads, and what's pending
+lf repo tracker                    # which tracker this repository uses, and what's pending
 lf task claim LOO-12               # take it; the earlier owner's Sessions are told
 lf task unassign LOO-12            # nobody owns it; Linear shows no assignee; history intact
 ```
@@ -239,15 +239,15 @@ A different ref, or a plan only you see:
 
 ```yaml
 # .lf/config.yaml
-planning:
-  provider: git
-  shared: team        # refs/loopflow/planning/shared/team
-  # personal: true    # refs/loopflow/planning/users/<key>; see `lf repo plan key`
+tracker:
+  git:
+    shared: team        # refs/loopflow/planning/shared/team
+    # personal: true    # refs/loopflow/planning/users/<key>; see `lf repo tracker key`
 ```
 
 Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins; the other
-value shows as lost on its Task and in `lf repo plan` until you answer it.
+value shows as lost on its Task and in `lf repo tracker` until you answer it.
 
 ### Linear or Asana
 
@@ -258,9 +258,9 @@ lf wave plan connect --all --team-key LOO       # Linear: one Team per repositor
 
 ```yaml
 # .lf/config.yaml, for Asana
-planning:
-  provider: asana
-  team: "<team-gid-or-url>"        # the Asana team holding this repository's project
+tracker:
+  asana:
+    team: "<team-gid-or-url>"      # the Asana team holding this repository's project
 ```
 
 Each Task is one item in the tracker, and the tracker is where coworkers work:
@@ -279,23 +279,22 @@ Each Task is one item in the tracker, and the tracker is where coworkers work:
 | open, land or abandon its PR | a link to the PR and its state |
 
 Linear and Asana behave the same way. In Linear, a Wave is an Initiative and
-its planning is a Linear Project; in Asana, a Wave's planning is a team
-project.
+its current Project is a Linear Project; in Asana, it is a team project.
 
-Every change saves on this machine first and joins one queue of deliveries to
+Every change saves on this machine first and joins one queue of actions for
 the tracker, sent in the order you made them. Each `lf` command sends a short
 batch from the queue, so a long backlog drains over several commands without
 using up the tracker's request allowance. Offline, commands still save and the
 queue waits:
 
 ```text
-$ lf repo plan
+$ lf repo tracker
 Tracker: linear. 3 open · 1 lost.
   LOO-412            title · queued · Offline
   LOO-412            comment · queued · Offline
   LOO-398            complete · sent, waiting for linear to confirm
   LOO-377  9f2c41d0  title · conflicted · lost: "Offline rename" · linear: "Renamed in Linear"
-Answer a lost line: lf repo plan answer <id> --keep-theirs, or --use-mine.
+Answer a lost line: lf repo tracker answer <id> --keep-theirs, or --use-mine.
 ```
 
 When a send failed, the line ends with why: offline, signed out, or the
@@ -309,12 +308,15 @@ now.
 When a coworker changed the same field in the tracker before your edit
 arrived, the tracker's value wins and your edit is lost, not open: nothing is
 left to send. The line shows both values, on the Task or Project, until you
-answer it. `lf repo plan answer 9f2c41d0 --keep-theirs` closes it;
+answer it. `lf repo tracker answer 9f2c41d0 --keep-theirs` closes it;
 `--use-mine` saves yours again and sends it; so does editing that field.
 Desktop's Keep and Use mine buttons on the line do the same, and
 `lf task sync LOO-377 --keep-theirs` answers every line a Task lost. It also closes on its own when a
 coworker changes that field again in the tracker. On Git, a value the journal
 lost shows the same way, as `git`.
+
+A checkout with no `origin` yet keeps its Git plan on this Machine; the first
+save after `git remote add origin` publishes everything since.
 
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
@@ -455,7 +457,7 @@ released lf still reads (LOO-640 removes that).
 
 ```bash
 lf wave plan billing --json                     # its Tasks, KRs and metric targets
-lf wave update-plan --wave billing --plan plan.json
+lf wave update-project --wave billing --file project.json
 ```
 
 ```json
@@ -463,8 +465,8 @@ lf wave update-plan --wave billing --plan plan.json
 ```
 
 The goal names who benefits; KRs prove it, observably, across a window. A
-Wave's planning holds its Tasks, KRs and metric targets. `lf wave update-plan`
-replaces the plan in place, and started Tasks keep their worktree and PR
+Wave's current Project holds its Tasks, KRs and metric targets.
+`lf wave update-project` replaces its KRs and targets in place, and started Tasks keep their worktree and PR
 wherever they are.
 
 ### Nested Waves
@@ -521,8 +523,8 @@ Linear or Asana it looks for every change sent without an answer and resends
 what the tracker lacks; on Git it exchanges the planning ref. Between syncs,
 every `lf` command sends one short batch. It prints what is still open (a
 change queued or sent) and what was lost to the tracker's value, until you
-answer it with `--keep-theirs` or `--use-mine`. `lf repo plan` lists the same
-lines for the whole repository, and `lf repo plan answer <id>` answers one.
+answer it with `--keep-theirs` or `--use-mine`. `lf repo tracker` lists the same
+lines for the whole repository, and `lf repo tracker answer <id>` answers one.
 `lf wave sync` refreshes from the tracker first; a Wave with no Initiative skips
 the refresh and still succeeds.
 

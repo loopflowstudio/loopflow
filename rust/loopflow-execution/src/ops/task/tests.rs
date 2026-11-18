@@ -321,7 +321,6 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
             .block_on(fixture.store.seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: fixture.task.wave_id.clone().unwrap(),
-                    provider: "linear".into(),
                     initiative: snapshot.projects[0].initiative_ids[0].clone(),
                     synced_at: 7,
                     snapshot,
@@ -356,7 +355,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         {
             assert_eq!(task.title, "Accepted after resolution");
             assert_eq!(task.description, "Preserve this direction");
-            assert_eq!(task.pm_snapshot_synced_at, Some(7));
+            assert_eq!(task.tracker_synced_at, Some(7));
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
             assert_eq!(
                 runtime.block_on(fixture.store.get_task(&task.id)).unwrap(),
@@ -753,13 +752,13 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
 
         summary: String::new(),
         status: loopflow_storage::work::project::ProjectStatus::Started,
-        linear_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
+        tracker_id: Some(LinearProjectId::new("999bdbdd-c045-41a6-8ffc-a97c4a40b0b3").unwrap()),
         slug: "task-recovery".to_string(),
         name: "Task recovery".to_string(),
         description: "Keep automatic Task recovery bounded.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -771,13 +770,13 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         id: TaskId::new(),
 
         revision: 0,
-        linear_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
+        tracker_id: Some(LinearIssueId::new(format!("{identifier}-issue")).unwrap()),
         identifier: identifier.to_string(),
         title: "Task recovery fixture".to_string(),
         description: String::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
+        tracker_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repository),
@@ -819,7 +818,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         &store.sqlite,
         wave.id(),
         None,
-        project.linear_id.as_ref().unwrap().as_str(),
+        project.tracker_id.as_ref().unwrap().as_str(),
         &crate::store::PlanningLocks::new(tempfile::tempfile().unwrap()),
     )
     .unwrap();
@@ -909,7 +908,7 @@ fn task_checkout_machine_survives_without_lifecycle_reconciliation() {
                 fixture.task.id.as_str(),
                 &fixture.task.id.as_str()[5..9],
                 &fixture.task.id.as_str()[..9],
-                fixture.task.linear_id.as_ref().unwrap().as_str(),
+                fixture.task.tracker_id.as_ref().unwrap().as_str(),
             ] {
                 let file = super::task_file(issue, "scratch/note.md", false).unwrap();
                 assert_eq!(file.content.as_deref(), Some("local note\n"));
@@ -1943,7 +1942,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
         .unwrap();
     let mut parent_task = fixture.task.clone();
     parent_task.id = TaskId::new();
-    parent_task.linear_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
+    parent_task.tracker_id = Some(LinearIssueId::new("stack-parent-issue").unwrap());
     parent_task.identifier = "STACK-2".into();
     parent_task.worktree = Some(repo.path().join("parent"));
     parent_task.workspace_slug = "stack-parent".into();
@@ -2009,7 +2008,7 @@ async fn stacking_is_idempotent_and_preserves_history() {
     let mut next_task = parent_task.clone();
     next_task.id = TaskId::new();
     next_task.identifier = "STACK-3".into();
-    next_task.linear_id = None;
+    next_task.tracker_id = None;
     next_task.branch = "test/next-parent".into();
     next_task.workspace_slug = "next-parent".into();
     next_task.worktree = Some(repo.path().join("next-parent"));

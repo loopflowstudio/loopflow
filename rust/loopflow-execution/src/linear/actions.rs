@@ -80,7 +80,7 @@ impl LinearClient {
                 kind.as_str()
             ))),
         };
-        // An error before the mutating request left the provider untouched.
+        // An error before the mutating request left the tracker untouched.
         sent.unwrap_or_else(|error| Sent::Rejected(error.to_string()))
     }
 
@@ -257,7 +257,7 @@ impl LinearClient {
         let external = remote_project(store, project).await?;
         // Prose, KRs and targets share the Project's one content document.
         let (_, content) = self
-            .project_content_observation(&external)
+            .fetch_project_content(&external)
             .await
             .map_err(message)?;
         let input = self
@@ -615,10 +615,10 @@ impl LinearClient {
 
     async fn look_comments(&self, store: &Store, task: &TaskId) -> OpsResult<Option<Observed>> {
         let external = remote_task(store, task).await?;
-        let observation = self.observe_issue(&external).await.map_err(message)?;
+        let event = self.fetch_issue(&external).await.map_err(message)?;
         Ok(Some(Observed {
-            revision: Some(observation.revision),
-            comments: observation
+            revision: Some(event.revision),
+            comments: event
                 .comments
                 .into_iter()
                 .map(|comment| comment.id)
@@ -635,7 +635,7 @@ impl LinearClient {
     ) -> OpsResult<Option<Observed>> {
         let external = remote_project(store, project).await?;
         let (observed, _) = self
-            .project_content_observation(&external)
+            .fetch_project_content(&external)
             .await
             .map_err(message)?;
         let (wave, initiative) = project_scope(store, repo, project).await?;
@@ -654,7 +654,7 @@ impl LinearClient {
         let external = remote_project(store, project).await?;
         let issues = self.ordered_items(&external).await.map_err(message)?;
         let items: Vec<_> = issues.iter().map(|issue| issue.item.clone()).collect();
-        let complete = loopflow_storage::sqlite::linear_acceptance::accept_linear_project_order_in(
+        let complete = loopflow_storage::sqlite::linear_events::accept_linear_project_order_in(
             &store.sqlite,
             &repo.to_string_lossy(),
             &external,
@@ -732,7 +732,7 @@ fn accept_project(
     initiative: &str,
     project: &TrackerProject,
 ) -> OpsResult<()> {
-    loopflow_storage::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_storage::sqlite::linear_events::accept_linear_project_in(
         &store.sqlite,
         wave,
         initiative,

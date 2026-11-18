@@ -68,6 +68,7 @@ impl NativeClient {
             .map(Ok)
             .unwrap_or_else(std::env::current_dir)?;
         let mut process = Command::new(program);
+        crate::agent::remove_caller_session_env(&mut process);
         process
             .current_dir(cwd)
             .env_remove("LOOPFLOW_DIRECTIVE_FILE")

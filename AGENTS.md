@@ -146,8 +146,8 @@ reduction. The best fix makes the system smaller.
 
 Waves hold durable objectives, memory, cadence and budget under
 `.lf/wave/<name>/`; top-level `wave/` is ordinary content. A Wave's current
-plan is its In Progress Linear Project, which holds Tasks, KRs and targets;
-"Chapter" is just that Project's shared name. A Task belongs to a repository
+Project is its In Progress Linear Project, which holds Tasks, KRs and targets.
+Linear, Asana or a Git ref is the repository's tracker. A Task belongs to a repository
 and optionally a Project.
 
 A Task takes up one Graph on its first `lf task run` (its own, else the Wave's
@@ -265,7 +265,7 @@ plan, code and memory and keeps open findings with the work.
 - Edit it in place until it merges; `build.rs` orders it by origin/main's first-parent history. Once on origin/main it is immutable: fix forward.
 - Destructive change is staged: a new migration is additive against origin/main's schema, or a contract (`-- expand: <migration>`, `-- exports: <where>`) that drops only what its expand step superseded once that step has been on origin/main for the window `check_migrations.py` measures (`STAGING_DAYS`), exporting the data first. A rebuild that keeps every column is additive. CI measures; nothing at runtime refuses.
 - When code stops using a table or column, mark it in that Task's migration (`-- leaving: <table>[.<column>] <Task ID>`); the drop date counts from that merge, and `scripts/due_removals.py` lists what is due. `rust/loopflow-storage/SCHEMA.md` maps every table to its concept and shows what is leaving.
-- Test the merged frontier against the finished migration, not the steps between.
+- Test the merged frontier against the finished migration, not the steps between. Historical fixtures that call current storage APIs after seeding use `upgrade_from_migration` to reach the current schema first.
 - Tables read by Work projections use `store_revision_<table>_<insert|update|delete>` triggers to advance their domain in `store_revisions` inside the write. An observation stamp is a reading time, not a change: planning update triggers compare every other column and count a stamp only when it goes NULL ↔ value (`planning_update_triggers_compare_every_column`); a new column joins its table's `WHEN` clause.
 - Runtime migration preflights recognize draft markers inside release batches and keep external lock guards through commit or rollback. Upgrade fixtures start before the whole release batch.
 - Seed a released schema from SQL under `rust/loopflow-storage/tests/fixtures/migrations/`; test sources name only current columns.

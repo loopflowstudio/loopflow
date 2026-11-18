@@ -137,12 +137,12 @@ impl SqliteStore {
             "repository_plans",
             "waves",
             "agent_sessions",
-            "planning_destinations",
-            "planning_peer_routes",
-            "planning_peer_imports",
-            "planning_peer_conflicts",
-            "pm_projects",
-            "pm_items",
+            "git_tracker_destinations",
+            "git_tracker_routes",
+            "git_tracker_imports",
+            "git_tracker_conflicts",
+            "tracker_projects",
+            "tracker_items",
         ] {
             tx.execute(
                 &format!("UPDATE {table} SET repo=?2 WHERE repo=?1"),

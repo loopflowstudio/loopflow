@@ -1335,7 +1335,7 @@ impl SharedPlan {
                 .unwrap();
         for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
             store
-                .bind_peer_planning(path.to_str().unwrap(), &destination)
+                .bind_git_destination(path.to_str().unwrap(), &destination)
                 .unwrap();
         }
         Self {
@@ -1352,9 +1352,9 @@ impl SharedPlan {
     fn to_local(&self) {
         let journal = self
             .remote
-            .export_peer_planning(self.remote_path.to_str().unwrap(), &self.destination.id())
+            .export_git_plan(self.remote_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        loopflow_execution::store::planning_peers::import_peer_planning(
+        loopflow_execution::store::git_tracker::import_git_plan(
             &self.local,
             self.local_path.to_str().unwrap(),
             &self.destination.id(),
@@ -1367,9 +1367,9 @@ impl SharedPlan {
     fn to_remote(&self) {
         let journal = self
             .local
-            .export_peer_planning(self.local_path.to_str().unwrap(), &self.destination.id())
+            .export_git_plan(self.local_path.to_str().unwrap(), &self.destination.id())
             .unwrap();
-        loopflow_execution::store::planning_peers::import_peer_planning(
+        loopflow_execution::store::git_tracker::import_git_plan(
             &self.remote,
             self.remote_path.to_str().unwrap(),
             &self.destination.id(),
@@ -2918,7 +2918,7 @@ fn task_move_hands_nothing_off_when_mini_cannot_receive_it() {
     };
 
     // Mini answers, but its planning has never heard of the Task.
-    refused("not found in selected Git planning");
+    refused("not found in the Git tracker");
     unchanged();
 
     // Mini does not answer at all.

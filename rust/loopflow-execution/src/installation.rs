@@ -2005,7 +2005,7 @@ mod tests {
         let root = directory.path().join("authority");
         let published = selection(directory.path(), "published", InstallSource::Published);
         let development = selection(directory.path(), "development", InstallSource::Development);
-        fs::write(&development.store, b"retained chapter and Task history").unwrap();
+        fs::write(&development.store, b"retained project and Task history").unwrap();
         let mut receipt = switch(
             published.clone(),
             development.clone(),

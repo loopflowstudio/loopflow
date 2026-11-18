@@ -147,7 +147,7 @@ class Handler(BaseHTTPRequestHandler):
             data = {"projects": _page([project])}
         elif "query IssueOwnership" in query:
             data = {"issue": issue}
-        elif "query IssueObservation" in query or "query IssueComments" in query:
+        elif "query IssueEvent" in query or "query IssueComments" in query:
             data = {
                 "issue": {
                     **issue,
@@ -359,7 +359,7 @@ def _exercise(fixture: dict, env: dict, server: ThreadingHTTPServer, mode: str) 
             assert graph.wait(timeout=30) == 0, (root / "graph.log").read_text()
             assert caught_up(), "Graph boundaries did not acquire and settle pending planning"
         else:
-            # Acquisition and uncertain-write settlement may need separate refreshes.
+            # Refresh and uncertain-write settlement may need separate refreshes.
             refresh_until(caught_up, "planning refresh did not catch up after reconnect")
         assert db.execute("SELECT * FROM task_graphs ORDER BY task_id").fetchall() == task_graphs
         assert db.execute("SELECT id,task_id,branch,base_commit FROM task_prs").fetchall() == prs

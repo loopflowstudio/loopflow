@@ -1,6 +1,6 @@
 //! The outbound tracker queue: one row per change a tracker carries, in the
 //! store's words. Writers enqueue inside their own transaction; the drain reads
-//! unconfirmed rows in `seq` order and records what the provider answered.
+//! unconfirmed rows in `seq` order and records what the tracker answered.
 
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde_json::Value;
@@ -178,7 +178,7 @@ pub struct TrackerAction {
     pub subject: Option<String>,
     pub kind: ActionKind,
     pub value: Value,
-    /// `{revision, value}` as the provider held it at enqueue.
+    /// `{revision, value}` as the tracker held it at enqueue.
     pub base: Option<Value>,
     pub conflict: Option<Value>,
     pub phase: ActionPhase,
@@ -226,7 +226,7 @@ impl TrackerAction {
         self.value["value"]["body"].as_str()
     }
 
-    /// The action as a person reads it in `lf repo plan` and on its Task.
+    /// The action as a person reads it in `lf repo tracker` and on its Task.
     pub fn status(&self) -> TrackerActionStatus {
         // A field or state action holds a `WorkValue` (`{field, value}`); a
         // conflict holds `{revision, value}` around one.
@@ -288,7 +288,7 @@ pub enum Resolution {
         revision: Option<String>,
         remote_id: Option<String>,
     },
-    /// The provider's value won: `remote` is `{revision, value}` as it held
+    /// The tracker's value won: `remote` is `{revision, value}` as it held
     /// it; the action keeps the local value that lost.
     Conflicted {
         remote: Value,
@@ -366,7 +366,7 @@ pub(crate) fn owner_tracker(
     let bound: Option<Option<String>> = match owner {
         ActionOwner::Task(id) => conn
             .query_row(
-                "SELECT (SELECT o.provider FROM pm_items o JOIN repository_plans r ON r.repo=o.repo
+                "SELECT (SELECT o.tracker FROM tracker_items o JOIN repository_plans r ON r.repo=o.repo
                     WHERE r.id=t.repository_id AND o.id=t.external_issue_id LIMIT 1)
                  FROM tasks t WHERE t.id=?1 AND t.external_issue_id IS NOT NULL",
                 [id.as_str()],
@@ -375,7 +375,7 @@ pub(crate) fn owner_tracker(
             .optional()?,
         ActionOwner::Project(id) => conn
             .query_row(
-                "SELECT (SELECT o.provider FROM pm_projects o JOIN waves w ON w.repo=o.repo
+                "SELECT (SELECT o.tracker FROM tracker_projects o JOIN waves w ON w.repo=o.repo
                     WHERE w.id=p.wave_id AND o.id=p.external_project_id LIMIT 1)
                  FROM projects p WHERE p.id=?1 AND p.external_project_id IS NOT NULL",
                 [id.as_str()],
@@ -508,17 +508,17 @@ fn withdraw_unsent(conn: &Connection, owner: &ActionOwner) -> StoreResult<bool> 
     Ok(unsent)
 }
 
-/// The owner's provider observation, joined from its binding.
+/// The owner's tracker observation, joined from its binding.
 fn observation_source(owner: &ActionOwner) -> Option<&'static str> {
     match owner {
         ActionOwner::Task(_) => Some(
             "tasks t JOIN repository_plans w ON w.id=t.repository_id
-             JOIN pm_items o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=t.external_issue_id
+             JOIN tracker_items o ON o.repo=w.repo AND o.tracker IN ('linear','asana') AND o.id=t.external_issue_id
              WHERE t.id=?1",
         ),
         ActionOwner::Project(_) => Some(
             "projects p JOIN waves w ON w.id=p.wave_id
-             JOIN pm_projects o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=p.external_project_id
+             JOIN tracker_projects o ON o.repo=w.repo AND o.tracker IN ('linear','asana') AND o.id=p.external_project_id
              WHERE p.id=?1",
         ),
         ActionOwner::Wave(_) => None,
@@ -761,7 +761,7 @@ pub(crate) fn queued_changes_in(
     Ok(changes)
 }
 
-/// Acceptance of the provider's copy of `owner` at `revision`, before it is
+/// Acceptance of the tracker's copy of `owner` at `revision`, before it is
 /// written: sent actions the copy answers resolve (the rule the drain
 /// uses), unsent values rebase onto it, and every unconfirmed value replaces the
 /// observed one in `edits`, so the write keeps local intent until it resolves.
@@ -834,7 +834,7 @@ pub(crate) fn reconcile_in(
             .as_ref()
             .and_then(|base| serde_json::from_value::<WorkValue>(base["value"].clone()).ok());
         if action.phase == ActionPhase::Queued && base.as_ref() != Some(edit) {
-            // The unsent value now replaces what the provider holds.
+            // The unsent value now replaces what the tracker holds.
             conn.execute(
                 "UPDATE tracker_actions SET base_json=?2 WHERE id=?1",
                 params![
@@ -995,7 +995,7 @@ pub(crate) fn retain_filing_create_in(
     )?;
     conn.execute(
         "UPDATE tracker_actions SET phase='sent',sent_at=?2,
-         error='Historical creation outcome is unknown; awaiting exact provider readback'
+         error='Historical creation outcome is unknown; awaiting exact tracker readback'
          WHERE id=?1",
         params![id, now_unix()],
     )?;
@@ -1227,7 +1227,7 @@ impl SqliteStore {
         )? == 1)
     }
 
-    /// A request the provider rejected before acting leaves the action unsent.
+    /// A request the tracker rejected before acting leaves the action unsent.
     pub fn reject_tracker_action(&self, id: &str, error: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
@@ -1248,7 +1248,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Part of a multi-request action landed: what the provider now holds is
+    /// Part of a multi-request action landed: what the tracker now holds is
     /// the base the rest of it, or a lost reply, is judged against.
     pub fn rebase_tracker_action(&self, id: &str, base: &Value) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
@@ -1259,7 +1259,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Record a look in the provider for a sent action's lost reply.
+    /// Record a look in the tracker for a sent action's lost reply.
     pub fn look_tracker_action(&self, id: &str, at: i64) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(

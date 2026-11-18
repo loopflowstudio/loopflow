@@ -438,7 +438,7 @@ fn stored_fields_preserve_order_assignment_and_project_summary() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             "--project",
             project,
             "--name",
@@ -665,7 +665,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
     let created = lf(repo.path(), home.path(), &args)["task"].clone();
     let identity = created["id"].as_str().unwrap().to_owned();
     loopflow_execution::durable::TaskId::parse(&identity).unwrap();
-    assert!(created["linear_id"].is_null());
+    assert!(created["tracker_id"].is_null());
     assert_eq!(created["title"], "Fix parser");
     assert_eq!(created["description"], "Keep quoted input");
     let other = lf(
@@ -761,10 +761,10 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         home.path(),
         &[
             "wave",
-            "update-plan",
+            "update-project",
             "-w",
             "inbox",
-            "--plan",
+            "--file",
             plan_file.to_str().unwrap(),
         ],
     );
@@ -844,7 +844,7 @@ fn public_local_planning_survives_restart_with_generated_identity() {
         &["desktop", "task", other_id, "--json"],
     );
     assert_eq!(retained["execution"]["status"], "abandoned");
-    assert_eq!(retained["plan_state"], "removed");
+    assert_eq!(retained["tracker_state"]["state"], "removed");
     assert_eq!(
         retained["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"
@@ -1052,7 +1052,7 @@ fn project_creation_binding_and_activation_save_offline() {
         let projects = store.list_projects(Some(wave.id())).unwrap();
         assert_eq!(projects.len(), 1);
         let id = projects[0].id.clone();
-        assert!(projects[0].linear_id.is_none());
+        assert!(projects[0].tracker_id.is_none());
         assert!(store.list_tasks(Some(wave.id())).unwrap().is_empty());
         let db = rusqlite::Connection::open(&path).unwrap();
         let intent: String = db
@@ -1072,7 +1072,7 @@ fn project_creation_binding_and_activation_save_offline() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1147,7 +1147,7 @@ fn project_creation_binding_and_activation_save_offline() {
                     "initiative_ids": ["initiative"], "team_ids": ["fixture-team"]
                 }))
                 .unwrap();
-                loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+                loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                     &store,
                     wave.id(),
                     "initiative",
@@ -1266,7 +1266,6 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: "initiative".into(),
                 synced_at: 17,
                 snapshot: crate::test_linear_input::Inventory {
@@ -1313,7 +1312,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     home.path(),
                     &[
                         "wave",
-                        "edit-plan",
+                        "edit-project",
                         "--project",
                         projects[1].id.as_str(),
                         "--name",
@@ -1336,7 +1335,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     ],
                 );
                 // Missing provider inventory is not a missing saved due date or Task.
-                conn.execute("DELETE FROM pm_items", []).unwrap();
+                conn.execute("DELETE FROM tracker_items", []).unwrap();
             }
             let status = lf(
                 repo.path(),
@@ -1349,7 +1348,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                 assert_eq!(rows.len(), 1);
                 let task = &rows[0]["task"];
                 assert_eq!(task["id"], saved.id.as_str());
-                assert_eq!(task["linear_id"], "linear-task");
+                assert_eq!(task["tracker_id"], "linear-task");
                 assert_eq!(
                     task["name"],
                     if edited {
@@ -1371,7 +1370,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             assert_eq!(retained.worktree, saved.worktree);
             assert_eq!(retained.branch, saved.branch);
             assert_eq!(retained.base_commit, saved.base_commit);
-            assert_eq!(retained.pm_snapshot_synced_at, saved.pm_snapshot_synced_at);
+            assert_eq!(retained.tracker_synced_at, saved.tracker_synced_at);
             {
                 let rows = &status["projects"]["items"];
                 let rows = rows.as_array().unwrap();
@@ -1379,8 +1378,8 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                 for (row, project) in rows.iter().zip(&projects) {
                     assert_eq!(row["id"], project.id.as_str());
                     assert_eq!(
-                        row["linear_id"],
-                        project.linear_id.as_ref().unwrap().as_str()
+                        row["tracker_id"],
+                        project.tracker_id.as_ref().unwrap().as_str()
                     );
                     assert!(row.get("work_id").is_none());
                     assert!(row["sync"].is_object());
@@ -1434,7 +1433,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+        loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1466,7 +1465,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         // Exact identities still resolve when another Project's name/slug shadows them.
         let mut shadow = store.project(&id).unwrap().unwrap();
         shadow.id = loopflow_execution::durable::ProjectId::new();
-        shadow.linear_id = None;
+        shadow.tracker_id = None;
         shadow.name = id.to_string();
         shadow.slug = project.id.clone();
         store.insert_project(&shadow).unwrap();
@@ -1476,7 +1475,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1499,7 +1498,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         drop(writer);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["project"]["linear_id"],
+            saved["project"]["tracker_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
@@ -1527,7 +1526,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             home.path(),
             &[
                 "wave",
-                "edit-plan",
+                "edit-project",
                 "--project",
                 id.as_str(),
                 "--name",
@@ -1548,7 +1547,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             incoming.name = "Remote name".into();
             incoming.revision = Some("2026-10-08T11:00:00Z".into());
             incoming.krs[0].holds = true;
-            loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1561,7 +1560,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             // The unsent rename is sent last and wins; unsaved fields follow Linear.
             assert_eq!(read["project"]["name"], "Saved");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
-            assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
+            assert_eq!(read["project"]["tracker_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
                 .query_row(
@@ -1582,7 +1581,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             // A provider edit matching the save neither settles nor duplicates it.
             incoming.name = "Saved".into();
             incoming.revision = Some("2026-10-08T12:00:00Z".into());
-            loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1603,10 +1602,10 @@ fn project_edits_save_offline_in_both_connection_modes() {
         std::fs::write(&plan_file, serde_json::to_vec(&content).unwrap()).unwrap();
         let args = [
             "wave",
-            "update-plan",
+            "update-project",
             "--wave",
             "product",
-            "--plan",
+            "--file",
             plan_file.to_str().unwrap(),
         ];
         let output = command(repo.path(), home.path(), &args).output().unwrap();
@@ -1623,7 +1622,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
         assert_eq!(saved["project"]["krs"], content["krs"]);
         assert_eq!(saved["project"]["id"], id.as_str());
         assert_eq!(
-            saved["project"]["linear_id"],
+            saved["project"]["tracker_id"],
             if mapped {
                 serde_json::json!(project.id)
             } else {
@@ -1644,7 +1643,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             let mut incoming = project.clone();
             incoming.revision = Some("2026-10-08T13:00:00Z".into());
             incoming.krs[0].text = "Keep the concurrent provider plan".into();
-            loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+            loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                 &store,
                 wave.id(),
                 "initiative",
@@ -1712,7 +1711,7 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             initiative_ids: vec!["initiative".into()],
             team_ids: vec!["fixture-team".into()],
         };
-        loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+        loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
             &store,
             wave.id(),
             "initiative",
@@ -1809,7 +1808,6 @@ fn task_creation_and_edits_save_offline_in_both_connection_modes() {
             store
                 .seed_inventory(&InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 18,
                     snapshot: snapshot.clone(),
@@ -2064,7 +2062,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             if mapped {
                 // Bind through the writer so foreground Git exchange sees the same
                 // identity as SQLite, rather than restoring a pre-binding journal.
-                project.linear_id =
+                project.tracker_id =
                     Some(loopflow_execution::linear::LinearProjectId::new(name).unwrap());
                 store.insert_project(&project).unwrap();
                 let observed = loopflow_storage::planning::TrackerProject {
@@ -2080,7 +2078,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                     team_ids: vec!["fixture-team".into()],
                     revision: None,
                 };
-                loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+                loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
                     &store,
                     wave.id(),
                     name,
@@ -2135,7 +2133,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             .unwrap()
         };
         let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
         assert!(!command(repo.path(), home.path(), &args)
             .output()
             .unwrap()
@@ -2232,7 +2230,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
                 Some(projects[1].id.clone())
             );
             assert_eq!(
-                store.task_acquisition(&task.id).unwrap().state,
+                store.task_tracker_state(&task.id).unwrap().state,
                 loopflow_execution::store::PlanningState::Available
             );
         }
@@ -2483,10 +2481,10 @@ fn deletion_saves_offline_and_retains_execution_and_retry_identity() {
         let removed = store.task(&task_id).unwrap().unwrap();
         assert_eq!(store.work_status(&work).unwrap(), execution);
         assert_eq!(removed.worktree, before.worktree);
-        assert_eq!(removed.linear_id, before.linear_id);
+        assert_eq!(removed.tracker_id, before.tracker_id);
         assert_eq!(removed.revision, before.revision + 1);
         let status = lf(repo.path(), home.path(), &["desktop", "task", id, "--json"]);
-        assert_eq!(status["plan_state"], "removed");
+        assert_eq!(status["tracker_state"]["state"], "removed");
         assert!(store.list_tasks(None).unwrap().is_empty());
         drop(store);
         let reopened =
@@ -2705,7 +2703,7 @@ fn wave_sync_without_an_initiative_shows_local_planning() {
 }
 
 #[test]
-fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
+fn wave_planning_reads_current_and_historical_projects_without_starting_work() {
     let repo = TestRepo::new();
     let home = tempfile::tempdir().unwrap();
     let created = lf(
@@ -2733,7 +2731,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     let mut historical = current.clone();
     historical.id = loopflow_execution::durable::ProjectId::new();
     historical.slug = "earlier".into();
-    historical.name = "Earlier chapter".into();
+    historical.name = "Earlier project".into();
     historical.status = loopflow_execution::work::project::ProjectStatus::Completed;
     historical.krs = vec![loopflow_execution::work::project::ProjectKR {
         text: "Historical proof remains".into(),
@@ -2768,7 +2766,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     assert_eq!(old["krs"][0]["text"], "Historical proof remains");
     let text = lf(repo.path(), home.path(), &["wave", "show", wave.slug()]);
     let text = text.as_str().unwrap();
-    assert!(text.contains("Earlier chapter"));
+    assert!(text.contains("Earlier project"));
     assert!(text.contains("Historical proof remains"));
     assert!(text.contains("Unstarted proof"));
     let selected = lf(
@@ -2824,10 +2822,10 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             wave.slug(),
             "--name",
-            "Current chapter",
+            "Current project",
         ],
     );
     lf(
@@ -2835,7 +2833,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
         home.path(),
         &[
             "wave",
-            "edit-plan",
+            "edit-project",
             "--project",
             historical.id.as_str(),
             "--summary",
@@ -2844,7 +2842,7 @@ fn wave_planning_reads_current_and_historical_chapters_without_starting_work() {
     );
     assert_eq!(
         store.project(&current.id).unwrap().unwrap().name,
-        "Current chapter"
+        "Current project"
     );
     assert_eq!(
         store.project(&historical.id).unwrap().unwrap().name,
@@ -3015,7 +3013,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         .project(task.project_id.as_ref().unwrap())
         .unwrap()
         .unwrap();
-    project.linear_id =
+    project.tracker_id =
         Some(loopflow_execution::linear::LinearProjectId::new("provider-project").unwrap());
     store.insert_project(&project).unwrap();
     let observed: loopflow_storage::planning::TrackerProject = serde_json::from_value(json!({
@@ -3023,7 +3021,7 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         "summary":"", "description":"Saved Project prose", "status":"started",
         "krs":[], "metric_targets":[], "initiative_ids":["initiative"], "team_ids":["team"], "revision":null
     })).unwrap();
-    loopflow_execution::store::sqlite::linear_acceptance::accept_linear_project_in(
+    loopflow_execution::store::sqlite::linear_events::accept_linear_project_in(
         &store,
         task.wave_id.as_ref().unwrap(),
         "initiative",
@@ -3087,17 +3085,17 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let initial = read();
     for (state, statement) in [
         ("available", "SELECT 1"),
-        ("invalid", "UPDATE pm_items SET needs_refresh=1"),
-        ("available", "UPDATE pm_items SET needs_refresh=0"),
+        ("invalid", "UPDATE tracker_items SET needs_refresh=1"),
+        ("available", "UPDATE tracker_items SET needs_refresh=0"),
         (
             "invalid",
-            "UPDATE pm_items SET project_id='another-project',claimed_project_id='another-project'",
+            "UPDATE tracker_items SET project_id='another-project',claimed_project_id='another-project'",
         ),
     ] {
         db.execute_batch(statement).unwrap();
         let status = read();
-        assert_eq!(status["plan_state"], state);
-        assert_eq!(status["observed_at"], 17);
+        assert_eq!(status["tracker_state"]["state"], state);
+        assert_eq!(status["tracker_state"]["synced_at"], 17);
         assert_eq!(status["task"]["id"], id.as_str());
         assert_eq!(status["task"]["title"], "Saved locally");
         assert_eq!(status["task"]["description"], "Saved Task prose");
@@ -3115,8 +3113,8 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
         );
         let summary = &wave["tasks"]["items"][0]["task"];
         assert_eq!(
-            summary["acquisition"],
-            json!({"state":state,"observed_at":17})
+            summary["tracker_state"],
+            json!({"state":state,"synced_at":17})
         );
         assert_eq!(summary["due_date"], "2026-10-20");
         if state == "invalid" {
@@ -3128,13 +3126,13 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     }
     // A pending membership save explains the difference without replacing content.
     db.execute("INSERT INTO tracker_actions(id,task_id,subject,kind,value_json,phase,tracker) VALUES('00000000-0000-4000-8000-0000000000aa',?1,'task_project','field',?2,'queued','linear')", rusqlite::params![id.as_str(),serde_json::to_string(&WorkValue::TaskProject(saved.project_id.as_ref().map(ToString::to_string))).unwrap()]).unwrap();
-    assert_eq!(read()["plan_state"], "available");
+    assert_eq!(read()["tracker_state"]["state"], "available");
     store
-        .observe_pm_issue_change("provider-task", None, true)
+        .record_tracker_event("provider-task", None, true)
         .unwrap();
     let removed = read();
-    assert_eq!(removed["plan_state"], "removed");
-    assert_eq!(removed["observed_at"], 17);
+    assert_eq!(removed["tracker_state"]["state"], "removed");
+    assert_eq!(removed["tracker_state"]["synced_at"], 17);
     assert_eq!(removed["execution"]["work"], initial["execution"]["work"]);
     assert_eq!(
         removed["execution"]["execution"],

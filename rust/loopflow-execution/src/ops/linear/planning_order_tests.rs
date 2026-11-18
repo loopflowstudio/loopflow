@@ -70,7 +70,7 @@ fn local_order(store: &Store, tasks: &[Task]) -> Vec<String> {
     ordered.sort_by_key(|item| item.rank);
     ordered
         .into_iter()
-        .map(|i| i.linear_id.unwrap().as_str().to_owned())
+        .map(|i| i.tracker_id.unwrap().as_str().to_owned())
         .collect()
 }
 

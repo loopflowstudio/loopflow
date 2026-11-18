@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 use loopflow_execution::planning_git::{PlanningDestination, PlanningGit, PlanningPublication};
 use loopflow_execution::store::{
-    open_ephemeral_store, PeerPlanningStatus, PlanningJournal, StorageConfig, Store,
+    open_ephemeral_store, GitDestination, PlanningJournal, StorageConfig, Store,
 };
 use loopflow_test_support::TestRepo;
 use rusqlite::{params, Connection};
@@ -126,9 +126,9 @@ fn status(
     store: &Store,
     repo: &str,
     binding: &PlanningDestination,
-) -> PeerPlanningStatus {
+) -> GitDestination {
     runtime
-        .block_on(store.peer_planning_status(repo, Some(&binding.id())))
+        .block_on(store.git_destinations(repo, Some(&binding.id())))
         .unwrap()
         .remove(0)
 }
@@ -203,17 +203,18 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         "origin",
         "refs/loopflow/planning/shared/fixture",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     runtime.block_on(async {
         fixture
             .store
-            .bind_peer_planning(source_key, &binding)
+            .bind_git_destination(source_key, &binding)
             .await
             .unwrap();
         worker
-            .bind_peer_planning(target_key, &binding)
+            .bind_git_destination(target_key, &binding)
             .await
             .unwrap();
     });
@@ -253,7 +254,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
             )
             .unwrap(),
         0,
-        "cold planning acquisition must not claim the Task"
+        "a cold tracker fetch must not claim the Task"
     );
     let third = create(&target, right.path(), "task-pr-tests");
     assert_ne!(first, third);
@@ -347,7 +348,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
     );
     wait_for(|| {
         status(&runtime, &worker, target_key, &binding)
-            .acquisition_error
+            .fetch_error
             .is_some()
     });
     assert!(status(&runtime, &worker, target_key, &binding).pending_local);
@@ -363,7 +364,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         .unwrap();
     fs2::FileExt::lock_exclusive(&effect_lock).unwrap();
     fs::rename(&disconnected, remote).unwrap();
-    // Acquisition must proceed even while this machine cannot publish.
+    // Refresh must proceed even while this machine cannot publish.
     wait_for(|| {
         runtime
             .block_on(fixture.store.get_task(&fixture.task.id))
@@ -507,9 +508,10 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
         "origin",
         "refs/loopflow/planning/shared/invalid",
     )
+    .unwrap()
     .unwrap();
     runtime
-        .block_on(store.bind_peer_planning(repo_key, &binding))
+        .block_on(store.bind_git_destination(repo_key, &binding))
         .unwrap();
     configure(repo.path(), &binding);
     let git = PlanningGit::new(repo.path(), &binding).unwrap();
@@ -521,7 +523,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
     let refresh = Refresh::start(&repo_path, home.path());
     wait_for(|| {
         status(&runtime, &store, repo_key, &binding)
-            .acquisition_error
+            .fetch_error
             .is_some()
     });
     let status = status(&runtime, &store, repo_key, &binding);
@@ -632,6 +634,7 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         "origin",
         "refs/loopflow/planning/shared/taskless",
     )
+    .unwrap()
     .unwrap();
     configure(&source_path, &binding);
     configure(&target_path, &binding);
@@ -646,8 +649,8 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
     let mut source_agent = Agent::start(&source_path, left.path(), true);
     let mut target_agent = Agent::start(&target_path, right.path(), false);
     runtime.block_on(async {
-        a.bind_peer_planning(source_key, &binding).await.unwrap();
-        b.bind_peer_planning(target_key, &binding).await.unwrap();
+        a.bind_git_destination(source_key, &binding).await.unwrap();
+        b.bind_git_destination(target_key, &binding).await.unwrap();
     });
     let id = create(&source_path, left.path(), "");
     let task_id = id.parse().unwrap();
@@ -723,19 +726,20 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         "origin",
         "refs/loopflow/planning/shared/fixture",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
     let source_key = source.to_str().unwrap();
     let target_key = target.to_str().unwrap();
     source_store
-        .bind_peer_planning(source_key, &binding)
+        .bind_git_destination(source_key, &binding)
         .unwrap();
-    worker.bind_peer_planning(target_key, &binding).unwrap();
+    worker.bind_git_destination(target_key, &binding).unwrap();
     let snapshot = source_store
-        .export_peer_planning(source_key, &binding.id())
+        .export_git_plan(source_key, &binding.id())
         .unwrap();
-    loopflow_execution::store::planning_peers::import_peer_planning(
+    loopflow_execution::store::git_tracker::import_git_plan(
         &worker,
         target_key,
         &binding.id(),
@@ -743,7 +747,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         &snapshot,
     )
     .unwrap();
-    assert!(worker.peer_planning_status(target_key, None).unwrap()[0]
+    assert!(worker.git_destinations(target_key, None).unwrap()[0]
         .conflicts
         .is_empty());
     let wave_id = fixture.task.wave_id.as_ref().unwrap().as_str();
@@ -838,7 +842,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         &["planning", "status", "--json"],
     ))
     .unwrap();
-    let destinations: Vec<PeerPlanningStatus> =
+    let destinations: Vec<GitDestination> =
         serde_json::from_value(status["destinations"].clone()).unwrap();
     let active = destinations
         .iter()
@@ -856,7 +860,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         .unwrap();
     let store = loopflow_execution::store::open_sqlite(&home.path().join("loopflow.db")).unwrap();
     let journal = store
-        .export_peer_planning(source.to_str().unwrap(), &active.id)
+        .export_git_plan(source.to_str().unwrap(), &active.id)
         .unwrap();
     assert_eq!(journaled.changes, journal.changes);
     let (old_id, old) = journaled
@@ -886,7 +890,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     assert!(text.contains("candidate, not confirmed]: \"Later title\""));
     assert_eq!(
         store
-            .export_peer_planning(source.to_str().unwrap(), &active.id)
+            .export_git_plan(source.to_str().unwrap(), &active.id)
             .unwrap(),
         journal
     );
@@ -901,6 +905,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         "origin",
         "refs/loopflow/planning/shared/other",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &other);
     let switched: serde_json::Value = serde_json::from_str(&run(
@@ -909,7 +914,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         &["planning", "status", "--json"],
     ))
     .unwrap();
-    let switched: Vec<PeerPlanningStatus> =
+    let switched: Vec<GitDestination> =
         serde_json::from_value(switched["destinations"].clone()).unwrap();
     assert_eq!(switched.iter().find(|d| d.active).unwrap().id, other.id());
     let retained = switched.iter().find(|d| d.id == active.id).unwrap();
@@ -938,7 +943,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     // or overwrite the bytes needed for repair. Work frames carry that read error.
     let conn = Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "UPDATE planning_peer_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
+        "UPDATE git_tracker_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
         [current_id],
     )
     .unwrap();
@@ -951,7 +956,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing planning predecessor"));
     let retained: String = conn
         .query_row(
-            "SELECT mutation -> '$.parents' FROM planning_peer_changes WHERE id=?1",
+            "SELECT mutation -> '$.parents' FROM git_tracker_changes WHERE id=?1",
             [current_id],
             |row| row.get(0),
         )
@@ -1073,7 +1078,7 @@ fn personal_plan_moves_to_shared_default_with_identity() {
         &["planning", "status", "--json"],
     ))
     .unwrap();
-    let destinations: Vec<PeerPlanningStatus> =
+    let destinations: Vec<GitDestination> =
         serde_json::from_value(status["destinations"].clone()).unwrap();
     let active = destinations.iter().find(|d| d.active).unwrap();
     assert_eq!(active.reference, "refs/loopflow/planning/shared/main");

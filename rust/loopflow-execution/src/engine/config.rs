@@ -134,6 +134,11 @@ fn declaration(
 ) -> Result<Declaration> {
     anyhow::ensure!(!(value.is_some() && unset), "choose a value or unset");
     let destination = destination.resolve()?;
+    let spelled: Vec<_> = key.split('.').collect();
+    if let Some(fields) = crate::config::keys::tracker_path(&spelled) {
+        crate::config::settings::validate_scope("planning", destination.source, destination.scope)?;
+        return tracker_declaration(&destination.path, fields, value, unset);
+    }
     let key = &crate::config::keys::typed_key(key);
     crate::config::settings::validate_scope(key, destination.source, destination.scope)?;
     if let ("graph", Some(value), Some(repository)) =
@@ -154,6 +159,43 @@ fn declaration(
         _ => crate::config::keys::Root::General,
     };
     file_value(&destination.path, &parts, key, value, unset, root)
+}
+
+fn tracker_declaration(
+    path: &Path,
+    fields: &[&str],
+    value: Option<&str>,
+    unset: bool,
+) -> Result<Declaration> {
+    use crate::config::{files, keys};
+    anyhow::ensure!(
+        crate::config::catalog::tracker_field(fields),
+        "unknown tracker setting {}",
+        fields.join(".")
+    );
+    if value.is_some() || unset {
+        files::update(path, |document| {
+            keys::gather(document, &["planning"], keys::Root::General);
+            keys::edit_tracker(
+                document,
+                fields,
+                value.map(serde_yaml_ng::from_str).transpose()?,
+            )
+        })?;
+    }
+    let tracker = keys::tracker_value(&files::read(path)?);
+    Ok(Declaration {
+        path: path.into(),
+        key: [&["repo", "tracker"][..], fields].concat().join("."),
+        value: fields
+            .iter()
+            .try_fold(&tracker, |node, field| node.get(*field))
+            .cloned()
+            .unwrap_or(Value::Null),
+        lifecycle: crate::config::catalog::definition("planning")
+            .expect("tracker is catalogued")
+            .lifecycle,
+    })
 }
 
 /// `parts` is the typed path; the file holds it at its canonical spelling,
@@ -178,9 +220,15 @@ fn file_value(
         .try_fold(&document, |value, part| value.get(*part))
         .cloned()
         .unwrap_or(Value::Null);
+    let canonical = match parts {
+        ["planning", field] if *field != "provider" => document["planning"]["provider"]
+            .as_str()
+            .map(|tag| format!("repo.tracker.{tag}.{field}")),
+        _ => None,
+    };
     Ok(Declaration {
         path: path.to_owned(),
-        key: crate::config::keys::canonical(parts, root).join("."),
+        key: canonical.unwrap_or_else(|| crate::config::keys::canonical(parts, root).join(".")),
         value,
         lifecycle: crate::config::catalog::definition(
             &crate::config::settings::preference_path(key)?.join("."),

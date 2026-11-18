@@ -318,10 +318,6 @@ mod tests {
             "export-memory",
             "update-wave",
             "record-learnings",
-            "start-chapter",
-            "review-chapter",
-            "wave/start-chapter",
-            "wave/review-chapter",
             "wave-report",
             "testing-audit",
         ] {

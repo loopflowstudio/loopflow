@@ -1,11 +1,11 @@
-//! Asana delivery and observation. Work owns local content; this adapter owns provider facts.
+//! Asana requests, actions and events.
 //!
 //! Every task Loopflow exports carries its Loopflow UUID as the OAuth app's
 //! `external.gid`, and every request addresses it as `external:<uuid>`. The
 //! Task's planning identity stays the one Loopflow assigned, exactly as Linear
 //! accepts a caller-supplied issue ID, so a lost creation reply is resolved by
 //! lookup rather than a second create. Asana returns the shared planning
-//! observations, so acceptance, receipts and steering stay one path.
+//! events, so both trackers share the same action queue and steering code.
 //! Descriptions and comments travel as Asana rich text (see [`rich_text`]).
 //!
 //! The repository's planning scope is an Asana team, like a Linear Team. Every
@@ -26,7 +26,7 @@ use tokio::sync::OnceCell;
 
 use crate::linear::local_identifier;
 use crate::ops::tracker::{TrackerError, TrackerResult};
-use loopflow_storage::planning::{TrackerComment, TrackerItem, TrackerObservation};
+use loopflow_storage::planning::{TrackerComment, TrackerEvent, TrackerItem};
 
 const ASANA_BASE_URL: &str = "https://app.asana.com/api/1.0";
 const TASK_FIELDS: &str = "gid,external,name,html_notes,completed,completed_at,modified_at,permalink_url,due_on,assignee.gid,memberships.project.gid";
@@ -239,7 +239,7 @@ impl AsanaClient {
         {
             Ok(task) => Ok(Some(self.issue(id, task).await?)),
             Err(AsanaFailure::NotFound) => Ok(None),
-            Err(AsanaFailure::Provider(error)) => Err(error),
+            Err(AsanaFailure::Tracker(error)) => Err(error),
         }
     }
 
@@ -286,21 +286,21 @@ impl AsanaClient {
         Ok(())
     }
 
-    pub async fn observe(&self, id: &str) -> TrackerResult<TrackerObservation> {
+    pub async fn fetch_issue(&self, id: &str) -> TrackerResult<TrackerEvent> {
         let task: Task = self
             .send(Method::GET, &format!("/tasks/external:{id}"), None)
             .await?;
-        self.observation(task).await
+        self.issue_event(task).await
     }
 
-    async fn observation(&self, task: Task) -> TrackerResult<TrackerObservation> {
+    async fn issue_event(&self, task: Task) -> TrackerResult<TrackerEvent> {
         let mut comments = self.comments(&task.gid).await?;
         comments.sort_by(|left, right| {
             left.revision
                 .cmp(&right.revision)
                 .then(left.id.cmp(&right.id))
         });
-        Ok(TrackerObservation {
+        Ok(TrackerEvent {
             revision: task.modified_at,
             title: task.name,
             description: rich_text::to_markdown(&task.html_notes),
@@ -309,7 +309,7 @@ impl AsanaClient {
     }
 
     /// Tasks in the repository project modified in `since..`, with their
-    /// observations. A task someone created in Asana has no Loopflow identity
+    /// events. A task someone created in Asana has no Loopflow identity
     /// yet; it takes one derived from its gid, so every machine claims the same
     /// one. Completed tasks Loopflow never tracked, and `finished` ones, are skipped.
     pub async fn changes(
@@ -317,7 +317,7 @@ impl AsanaClient {
         since: Option<&str>,
         live: &[String],
         finished: &[String],
-    ) -> TrackerResult<Vec<(TrackerItem, TrackerObservation)>> {
+    ) -> TrackerResult<Vec<(TrackerItem, TrackerEvent)>> {
         let mut path = format!("/projects/{}/tasks", self.project().await?);
         if let Some(since) = since {
             path.push_str(&format!("?modified_since={since}"));
@@ -341,8 +341,8 @@ impl AsanaClient {
                     )
                     .await?;
             }
-            let observation = self.observation(task.clone()).await?;
-            changes.push((self.issue(&id, task).await?, observation));
+            let event = self.issue_event(task.clone()).await?;
+            changes.push((self.issue(&id, task).await?, event));
         }
         Ok(changes)
     }
@@ -516,12 +516,12 @@ impl AsanaClient {
 #[derive(Debug)]
 enum AsanaFailure {
     NotFound,
-    Provider(TrackerError),
+    Tracker(TrackerError),
 }
 
 impl From<TrackerError> for AsanaFailure {
     fn from(error: TrackerError) -> Self {
-        Self::Provider(error)
+        Self::Tracker(error)
     }
 }
 
@@ -529,7 +529,7 @@ impl From<AsanaFailure> for TrackerError {
     fn from(failure: AsanaFailure) -> Self {
         match failure {
             AsanaFailure::NotFound => message("Asana task is unavailable"),
-            AsanaFailure::Provider(error) => error,
+            AsanaFailure::Tracker(error) => error,
         }
     }
 }

@@ -377,7 +377,7 @@ fn lifecycle(world: &World) -> Result<()> {
 
 fn density(world: &World) -> Result<()> {
     const PHRASES: [&str; 4] = [
-        "Retry and publish the chapter safely",
+        "Retry and publish the project safely",
         "Understand running work",
         "A calmer desktop workspace",
         "Keep Task observation read-only",
@@ -459,7 +459,7 @@ const BACKLOG: &[(&str, &str)] = &[
     ),
     (
         "Archive stale backlog ideas",
-        "Ideas older than a chapter clutter the backlog but shouldn't be lost.\n\n\
+        "Ideas older than a project clutter the backlog but shouldn't be lost.\n\n\
          Offer an Archived section, collapsed by default, and a one-click way \
          back. Archiving never deletes a Task.",
     ),
@@ -564,7 +564,7 @@ fn wave_backlog(world: &World) -> Result<()> {
         let done = world.task(
             Some("desktop"),
             title,
-            "Small polish from the last chapter.",
+            "Small polish from the last project.",
         )?;
         let done = world.checkout(&done)?;
         world.task_run(&done, "pursue", days, 12, Outcome::Succeeded)?;
@@ -892,7 +892,7 @@ fn wave_lifecycle(world: &World) -> Result<()> {
         ("Retire the old release script", 20.0),
         ("Move fixtures to worlds", 12.0),
     ] {
-        let done = world.task(Some("archive"), title, "Finished last chapter.")?;
+        let done = world.task(Some("archive"), title, "Finished last project.")?;
         let done = world.checkout(&done)?;
         world.task_run(&done, "pursue", days, 15, Outcome::Succeeded)?;
         world.complete(&done, "Landed", days)?;

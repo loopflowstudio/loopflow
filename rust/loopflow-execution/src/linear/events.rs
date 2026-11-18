@@ -1,10 +1,10 @@
-//! Attribute asynchronous Linear acceptance to the application request.
+//! Apply Linear events within the originating request.
 
 use crate::store::{run_planning_write, PlanningLocks, Store, StoreResult};
 use loopflow_model::id::WaveId;
 use std::sync::Arc;
 
-use loopflow_storage::sqlite::linear_acceptance::{
+use loopflow_storage::sqlite::linear_events::{
     accept_linear_inventory_in, accept_linear_issue_in, reconcile_linear_project_teams_in,
 };
 
@@ -15,9 +15,9 @@ pub(crate) async fn accept_linear_inventory(
     projects: Vec<loopflow_storage::planning::TrackerProject>,
     issues: Vec<loopflow_storage::planning::TrackerItem>,
     observed_at: i64,
-    acquisition: Option<Arc<PlanningLocks>>,
+    locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
-    run_planning_write(&store.sqlite, acquisition, move |store| {
+    run_planning_write(&store.sqlite, locks, move |store| {
         accept_linear_inventory_in(&store, &wave, &initiative, &projects, &issues, observed_at)
     })
     .await
@@ -29,11 +29,11 @@ pub(crate) async fn reconcile_linear_project_teams(
     initiative: &str,
     project: loopflow_storage::planning::TrackerProject,
     observed_at: i64,
-    acquisition: Arc<PlanningLocks>,
+    locks: Arc<PlanningLocks>,
 ) -> StoreResult<()> {
     let wave = wave.clone();
     let initiative = initiative.to_string();
-    run_planning_write(&store.sqlite, Some(acquisition), move |store| {
+    run_planning_write(&store.sqlite, Some(locks), move |store| {
         reconcile_linear_project_teams_in(&store, &wave, &initiative, &project, observed_at)
     })
     .await
@@ -46,10 +46,10 @@ pub(crate) async fn accept_linear_issue(
     project: Option<loopflow_storage::planning::TrackerProject>,
     observed_at: i64,
     confirmed_wave: Option<(WaveId, String)>,
-    acquisition: Option<Arc<PlanningLocks>>,
+    locks: Option<Arc<PlanningLocks>>,
 ) -> StoreResult<()> {
     let repo = repo.to_string();
-    run_planning_write(&store.sqlite, acquisition, move |store| {
+    run_planning_write(&store.sqlite, locks, move |store| {
         if store.repository_id(&repo)?.is_none() {
             crate::repository::location::ensure_repository(&store, &repo)?;
         }
@@ -96,7 +96,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: snapshot.projects[0].initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
@@ -106,7 +105,7 @@ mod tests {
         // Unmapped Project evidence cannot manufacture a standalone Task.
         issue.project_id = Some("unknown-project".into());
         issue.revision = Some("2026-10-17T01:00:00Z".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -121,7 +120,7 @@ mod tests {
             original.project_id
         );
         assert_eq!(
-            store.task_acquisition(&original.id).unwrap().state,
+            store.task_tracker_state(&original.id).unwrap().state,
             PlanningState::Invalid
         );
         // An omitted field in retained historical evidence remains unknown.
@@ -130,15 +129,12 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE pm_items SET project_id=NULL,claimed_project_id=NULL,project_id_observed=0",
+                "UPDATE tracker_items SET project_id=NULL,claimed_project_id=NULL,project_id_observed=0",
                 [],
             )
             .unwrap();
         assert_eq!(
-            store
-                .linear_issue_evidence("/repo", &issue.id)
-                .unwrap()
-                .state,
+            store.linear_issue_state("/repo", &issue.id).unwrap().state,
             PlanningState::Invalid
         );
         assert_eq!(
@@ -148,7 +144,7 @@ mod tests {
         // A complete, newer observation explicitly clearing Project detaches it.
         issue.project_id = None;
         issue.revision = Some("2026-10-17T02:00:00Z".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -163,13 +159,13 @@ mod tests {
         assert!(detached.wave_id.is_none());
         assert_eq!(detached.repository_id, original.repository_id);
         assert_eq!(
-            store.task_acquisition(&original.id).unwrap().state,
+            store.task_tracker_state(&original.id).unwrap().state,
             PlanningState::Available
         );
     }
 
     #[test]
-    fn task_admission_reads_released_evidence_without_reconstructing_provider_content() {
+    fn task_admission_reads_released_evidence_without_reconstructing_tracker_content() {
         use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
         use loopflow_storage::work::project::ProjectId;
         use loopflow_storage::work::task::TaskId;
@@ -238,10 +234,10 @@ mod tests {
                 Some(std::path::Path::new("/retained/checkout"))
             );
             assert!(store.task_by_issue("OTHER-2").unwrap().is_none());
-            let acquisition = store.task_acquisition(&task).unwrap();
-            assert_eq!(acquisition.state, expected, "{sql}");
+            let state = store.task_tracker_state(&task).unwrap();
+            assert_eq!(state.state, expected, "{sql}");
             assert_eq!(
-                acquisition.observed_at,
+                state.synced_at,
                 (!sql.contains("DELETE FROM pm_items")).then_some(42),
                 "{sql}"
             );
@@ -253,7 +249,7 @@ mod tests {
             assert_eq!(store.task(&task).unwrap().unwrap(), saved);
             let conn = store.conn.lock().unwrap();
             let after: Vec<(String, String, i64)> = conn
-                .prepare("SELECT 'issue:'||id,json_array(team_id,claimed_project_id,needs_refresh),observed_at FROM pm_items UNION ALL SELECT 'project:'||id,json_array(json(team_ids),archived,membership_unresolved),observed_at FROM pm_projects ORDER BY 1")
+                .prepare("SELECT 'issue:'||id,json_array(team_id,claimed_project_id,needs_refresh),observed_at FROM tracker_items UNION ALL SELECT 'project:'||id,json_array(json(team_ids),archived,membership_unresolved),observed_at FROM tracker_projects ORDER BY 1")
                 .unwrap()
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .unwrap()
@@ -284,7 +280,6 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
@@ -301,36 +296,36 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             // Foreign evidence blocks its Task, not the repository inventory.
-            conn.execute("UPDATE pm_items SET team_id='foreign'", [])
+            conn.execute("UPDATE tracker_items SET team_id='foreign'", [])
                 .unwrap();
         }
         validate().unwrap();
         assert!(store.validate_task_planning(&task).is_err());
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_projects SET team_ids='[\"foreign\"]'", [])
+            conn.execute("UPDATE tracker_projects SET team_ids='[\"foreign\"]'", [])
                 .unwrap();
         }
         validate().unwrap();
         assert!(store.validate_task_planning(&task).is_err());
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_items SET needs_refresh=1", [])
+            conn.execute("UPDATE tracker_items SET needs_refresh=1", [])
                 .unwrap();
         }
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_items SET needs_refresh=0", [])
+            conn.execute("UPDATE tracker_items SET needs_refresh=0", [])
                 .unwrap();
-            conn.execute("UPDATE pm_projects SET membership_unresolved=1", [])
+            conn.execute("UPDATE tracker_projects SET membership_unresolved=1", [])
                 .unwrap();
         }
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET membership_unresolved=0,archived=1",
+                "UPDATE tracker_projects SET membership_unresolved=0,archived=1",
                 [],
             )
             .unwrap();
@@ -339,7 +334,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET archived=0,initiative_ids='[\"removed\"]'",
+                "UPDATE tracker_projects SET archived=0,initiative_ids='[\"removed\"]'",
                 [],
             )
             .unwrap();
@@ -348,7 +343,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET initiative_ids=?1",
+                "UPDATE tracker_projects SET initiative_ids=?1",
                 [serde_json::to_string(&project.initiative_ids).unwrap()],
             )
             .unwrap();
@@ -357,7 +352,7 @@ mod tests {
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
         let conn = store.conn.lock().unwrap();
         let ages: (i64, i64) = conn.query_row(
-            "SELECT p.observed_at,i.observed_at FROM pm_projects p JOIN pm_items i ON i.project_id=p.id",
+            "SELECT p.observed_at,i.observed_at FROM tracker_projects p JOIN tracker_items i ON i.project_id=p.id",
             [], |row| Ok((row.get(0)?,row.get(1)?)),
         ).unwrap();
         assert_eq!(ages, (42, 42));
@@ -381,7 +376,6 @@ mod tests {
         snapshot.items.truncate(1);
         let mut row = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative,
             synced_at: 42,
             snapshot,
@@ -392,7 +386,7 @@ mod tests {
         assert!(task.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(task.title, item.name);
-        assert_eq!(task.pm_snapshot_synced_at, Some(42));
+        assert_eq!(task.tracker_synced_at, Some(42));
         store.seed_inventory(&row).unwrap();
         assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
         row.synced_at = 43;
@@ -403,7 +397,7 @@ mod tests {
             store.task_by_issue("MOVED-42").unwrap().unwrap().id,
             task.id
         );
-        // A detail acquisition refreshes content, never the order observed by a list.
+        // A detail event refreshes content, never the order observed by a list.
         let mut detail = row.snapshot.items[0].clone();
         detail.name = "Updated on another machine".into();
         detail.rank = 99;
@@ -422,7 +416,7 @@ mod tests {
             .unwrap();
         let refreshed = store.task(&task.id).unwrap().unwrap();
         assert_eq!(refreshed.title, detail.name);
-        assert_eq!(refreshed.pm_snapshot_synced_at, Some(44));
+        assert_eq!(refreshed.tracker_synced_at, Some(44));
         assert!(refreshed.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(
@@ -433,24 +427,24 @@ mod tests {
         store.seed_inventory(&row).unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap().title, detail.name);
         assert_eq!(
-            store.task_acquisition(&task.id).unwrap().observed_at,
+            store.task_tracker_state(&task.id).unwrap().synced_at,
             Some(44)
         );
         store
-            .observe_pm_issue_change(&detail.id, Some("2099-01-03T00:00:00Z"), false)
+            .record_tracker_event(&detail.id, Some("2099-01-03T00:00:00Z"), false)
             .unwrap();
         store.seed_inventory(&row).unwrap();
         assert_eq!(
-            store.task_acquisition(&task.id).unwrap(),
-            crate::store::TaskAcquisition {
+            store.task_tracker_state(&task.id).unwrap(),
+            crate::store::TrackerState {
                 state: PlanningState::Invalid,
-                observed_at: Some(44),
+                synced_at: Some(44),
             }
         );
         assert!(store.validate_task_planning(&refreshed).is_err());
         assert_eq!(store.task(&task.id).unwrap().unwrap(), refreshed);
         store
-            .observe_pm_issue_change(&row.snapshot.items[0].id, None, true)
+            .record_tracker_event(&row.snapshot.items[0].id, None, true)
             .unwrap();
         store.seed_inventory(&row).unwrap();
         assert_eq!(
@@ -491,26 +485,27 @@ mod tests {
         store
             .seed_inventory(&crate::test_linear_input::InventoryFixture {
                 wave_id: wave.id().clone(),
-                provider: "linear".into(),
                 initiative: project.initiative_ids[0].clone(),
                 synced_at: 42,
                 snapshot,
             })
             .unwrap();
         let task = store.task_by_issue(&issue.id).unwrap().unwrap();
-        let state = || store.task_acquisition(&task.id).unwrap().state;
+        let state = || store.task_tracker_state(&task.id).unwrap().state;
         let teams = || -> String {
             store
                 .conn
                 .lock()
                 .unwrap()
-                .query_row("SELECT team_ids FROM pm_projects", [], |row| row.get(0))
+                .query_row("SELECT team_ids FROM tracker_projects", [], |row| {
+                    row.get(0)
+                })
                 .unwrap()
         };
 
         // Linear adds a Team without moving the Project's `updatedAt`.
         project.team_ids.push("another-team".into());
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -526,7 +521,7 @@ mod tests {
         // An Initiative move is held, and released once Linear moves it back.
         let initiative = project.initiative_ids[0].clone();
         project.initiative_ids = vec!["another-initiative".into()];
-        let error = loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        let error = loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,
@@ -545,7 +540,7 @@ mod tests {
         );
         assert_eq!(state(), PlanningState::Invalid);
         project.initiative_ids = vec![initiative];
-        loopflow_storage::sqlite::linear_acceptance::accept_linear_issue_in(
+        loopflow_storage::sqlite::linear_events::accept_linear_issue_in(
             &store,
             "/repo",
             &issue,

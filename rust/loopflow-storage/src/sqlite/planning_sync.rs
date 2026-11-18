@@ -55,7 +55,7 @@ impl SqliteStore {
         Ok(TrackerActions { repo, actions })
     }
 
-    /// What `lf repo plan` lists: on Linear and Asana every open and lost
+    /// What `lf repo tracker` lists: on Linear and Asana every open and lost
     /// action in send order; on Git each value its journal lost.
     pub fn repository_tracker_actions(
         &self,
@@ -160,7 +160,7 @@ fn answer_queued(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult
 /// value that names all of them as parents.
 fn answer_git(conn: &Connection, id: &str, answer: LostAnswer) -> StoreResult<()> {
     let mutation: String = conn.query_row(
-        "SELECT mutation FROM planning_peer_changes WHERE id=?1",
+        "SELECT mutation FROM git_tracker_changes WHERE id=?1",
         [id],
         |row| row.get(0),
     )?;
@@ -262,9 +262,9 @@ fn git_conflicts(
     ids: &str,
 ) -> StoreResult<HashMap<String, Vec<TrackerActionStatus>>> {
     let mut query = conn.prepare(
-        "SELECT c.record_table,c.id,c.mutation FROM planning_peer_changes c
+        "SELECT c.record_table,c.id,c.mutation FROM git_tracker_changes c
          WHERE c.object_id IN (SELECT value FROM json_each(?1)) AND NOT EXISTS(
-             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+             SELECT 1 FROM git_tracker_changes child,json_each(child.mutation,'$.parents') parent
              WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
     )?;
     let mut heads = Vec::new();

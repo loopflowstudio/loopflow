@@ -45,6 +45,28 @@ drops it too, so sessions a person opens by hand inherit none of it.
 | `LOOPFLOW_DIRECTIVE_FILE` | Shell integration, agent launch with a relay | `lf` commands that ask the parent shell to act | Removed for agents unless a scoped relay is supplied. |
 | `LOOPFLOW_GRAPH_NAME` | Graph process | Skill prose | Names the running Graph for the agent. |
 
+## The caller's session
+
+A conversation sets markers in its own shells: lf's process context above and
+its provider's own. Every provider lf starts (Claude, Codex, OpenCode, Pi, in
+chats, batches, work sessions and workers) drops the caller's, by name, from
+one list (`CALLER_SESSION_ENV`), before applying the new conversation's.
+
+| Set by | Removed |
+|---|---|
+| lf | the process-context variables above |
+| Claude Code | `CLAUDECODE`, `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CODE_SESSION_ATTENDED`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_CODE_MESSAGING_SOCKET`, `CLAUDE_CODE_MESSAGING_TOKEN`, `CLAUDE_CODE_CHILD_NOTES_DIR`, `CLAUDE_PID`, `CLAUDE_EFFORT`, `AI_AGENT` |
+| Codex | `CODEX_CI`, `CODEX_SANDBOX`, `CODEX_SANDBOX_NETWORK_DISABLED`, `CODEX_SESSION_ID`, `CODEX_THREAD_ID`, `CODEX_TOOL_CALL_ID`, `CODEX_VERSION`, `CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS` |
+
+An inherited `CLAUDE_CODE_CHILD_SESSION` turns off an interactive Claude's
+transcript (`-p` runs keep theirs), so the Session couldn't be resumed; an
+inherited `CODEX_SANDBOX` gives a nested Codex its parent's sandbox. Settings a person chooses pass through:
+`CLAUDE_CONFIG_DIR`, `CLAUDE_CODE_OAUTH_TOKEN`, `CLAUDE_CODE_USE_*`,
+`ANTHROPIC_*`, `CODEX_HOME`, `CODEX_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_*`,
+and the `NO_COLOR`, `PAGER` and locale values Codex also sets. lf's hooks
+still read `CLAUDE_CODE_MESSAGING_SOCKET`: they run inside the new provider,
+which sets its own.
+
 ## Native authentication and forwarded credentials
 
 Native clients own login selection. Explicit `forward.env` and `forward.files`
@@ -56,7 +78,7 @@ Session shells scrub transient credentials.
 |---|---|
 | `LF_SETTINGS` | User-supplied YAML preference mapping; below explicit CLI and above database/files. Inherited by child commands and forwarded remotely. Never include credentials. |
 | `LF_AGENT_OVERRIDE` | User-supplied agent preference inherited by children and remote commands. Explicit CLI wins; Loopflow never exports a CLI or resolved default through this variable. Cleared for independent Session shells. Contains no credential. |
-| `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional provider issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
+| `LF_TASK_SOURCE` | One SSH invocation's saved Task ID, identifier, optional tracker issue ID, branch and required commit. Contains no planning payload, local paths or execution authority. |
 | `LF_DISCORD_TOKEN` | Chat bridge token; removed before any provider child. |
 | `LF_CREDENTIAL_SOCKET` | Local service credential broker. |
 | `GH_TOKEN`, `OPENCODE_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CODEX_ACCESS_TOKEN`, `OPENAI_API_KEY` | Provider credentials, applied per program. Exported API-key variables are removed from Claude and Codex launches. |

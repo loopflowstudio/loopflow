@@ -72,7 +72,7 @@
         "state": "ok",
         "items": [
           {
-            "id": "proj-chapter-current",
+            "id": "proj-project-current",
             "slug": "loopflow-api",
             "name": "current",
             "status": "started",
@@ -95,14 +95,14 @@
             "sync": {
               "actions": []
             },
-            "linear_id": "project-1"
+            "tracker_id": "project-1"
           }
         ],
         "truncated": false
       },
       "project_readiness": {
         "state": "ready",
-        "project_id": "proj-chapter-current",
+        "project_id": "proj-project-current",
         "observed_at": null,
         "pending_successor": null,
         "activation": null
@@ -166,14 +166,14 @@
           "sync": {
             "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -425,14 +425,14 @@
           "sync": {
             "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -718,14 +718,14 @@
           "sync": {
             "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {
@@ -794,14 +794,14 @@
           "sync": {
             "actions": []
           },
-          "linear_id": null,
-          "acquisition": {
+          "tracker_id": null,
+          "tracker_state": {
             "state": "available",
-            "observed_at": null
+            "synced_at": null
           },
           "repo_id": "repo_00000000000040008000000000000001",
           "repo": "/src/loopflow",
-          "project_id": "proj-chapter-current",
+          "project_id": "proj-project-current",
           "wave_id": "wave-1"
         },
         "reference": {

@@ -51,7 +51,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Live exclusion | Kernel-held locks and fenced database mutations |
 | Selected executable and installation progress | Installation receipts |
 
-A Machine owns its local store and payloads. Planning providers and GitHub hold their shared records;
+A Machine owns its local store and payloads. Trackers and GitHub hold their shared records;
 a local snapshot cannot authorize a provider mutation when a fresh observation
 is required. An identifier joins evidence without transferring authority.
 The [checked inventory](reference.md#complete-ownership-map)
@@ -309,10 +309,9 @@ those lines by binary.
 ## Planning and external transitions
 
 A Wave's selected Project holds its Tasks, KRs and targets. Project rows own saved
-planning, with optional provider bindings and separate delivery observations.
-“Chapter” names that plan rather than another runtime object. Local changes save
-before provider delivery; observed provider conflicts follow the planning writer's
-rules. Replanning preserves started Tasks and their worktree, PR and execution;
+planning, with optional tracker bindings and separate tracker events. Local
+changes save before their tracker actions send; conflicts a tracker reports follow
+the planning writer's rules. Replanning preserves started Tasks and their worktree, PR and execution;
 competing current provider Projects require reconciliation.
 
 No transaction spans SQLite, payload files, Git, Linear, GitHub and provider

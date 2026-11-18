@@ -101,10 +101,7 @@ pub fn resolve_session_config(
     let mut needs_execution_boundary = false;
     if let Some(request) = request {
         if !importing
-            && config
-                .agent
-                .harness
-                .harness()
+            && crate::harness::launcher(config.agent.harness)
                 .capabilities()
                 .initial_prompt_on_resume
         {

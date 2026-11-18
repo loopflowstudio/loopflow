@@ -114,7 +114,7 @@ impl Tally {
             };
         }
         let id = message["id"].as_str().unwrap_or_default();
-        let reported = loopflow_harness::claude::usage(&message["usage"]);
+        let reported = crate::claude::usage(&message["usage"]);
         let tokens = [
             reported.input_tokens,
             reported.cache_read_tokens,

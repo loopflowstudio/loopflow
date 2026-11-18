@@ -52,7 +52,7 @@ Each harness is one unit struct (`loopflow_harness::Claude`, `Codex`,
 
 ```rust
 kind.harness()            // &dyn loopflow_harness::Harness: what the client writes, and where
-harness::launcher(kind)   // &dyn Launcher: the above, plus launching and anything that reads the store
+harness::launcher(kind)   // &dyn Launcher: the above, plus launching and anything that reads the store or the process table
 ```
 
 `Launcher` has `Harness` as its supertrait, so `Launch.harness` answers both.

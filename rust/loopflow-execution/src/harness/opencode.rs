@@ -22,6 +22,7 @@ use loopflow_harness::fact::Decoded;
 use loopflow_harness::opencode_decode::{
     sanitize_error_message, OpenCodeDecoder, ReaderState, Snapshot,
 };
+use loopflow_harness::Harness;
 use loopflow_model::chat::types::{ConversationEvent, FailureEvidence};
 use loopflow_model::id::AgentSessionId;
 
@@ -804,7 +805,7 @@ fn build_turn_content(content: &str, config: &AgentConfig, first_turn: bool) -> 
 
 fn opencode_model(config: &AgentConfig) -> Option<(String, String)> {
     let agent = &config.agent;
-    if agent.harness != super::HarnessKind::OpenCode {
+    if agent.harness != loopflow_harness::HarnessKind::OpenCode {
         return None;
     }
     let variant = agent.model.as_deref()?;
@@ -920,7 +921,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &crate::agent::AgentConfig::default(),
                 &owner,
             ),
@@ -1109,7 +1110,7 @@ mod tests {
         let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -1139,7 +1140,7 @@ mod tests {
         let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::OpenCode,
+                loopflow_harness::HarnessKind::OpenCode,
                 &config,
                 &recording,
             ),
@@ -1236,36 +1237,7 @@ fn environment(
     Ok(environment)
 }
 
-#[derive(Debug)]
-pub struct OpenCode;
-
-impl super::Harness for OpenCode {
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY"]
-    }
-    fn api_key_env(&self) -> &'static [&'static str] {
-        &["OPENCODE_API_KEY", "MOONSHOT_API_KEY"]
-    }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        super::command_program(command, "opencode")
-            && command.split_whitespace().any(|arg| arg == "serve")
-    }
-    fn transcript_watch_store(&self, home: &std::path::Path) -> Option<std::path::PathBuf> {
-        Some(crate::transcript::opencode::store(home))
-    }
-    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
-        (home.to_path_buf(), 0)
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::opencode::read
-    }
-    fn transcript_home(&self) -> std::path::PathBuf {
-        std::env::var_os("XDG_DATA_HOME")
-            .filter(|value| !value.is_empty())
-            .map(std::path::PathBuf::from)
-            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".local/share"))
-            .join("opencode")
-    }
+impl super::Launcher for loopflow_harness::OpenCode {
     fn locate_transcript(
         &self,
         _store: &loopflow_storage::sqlite::SqliteStore,
@@ -1273,10 +1245,10 @@ impl super::Harness for OpenCode {
         _cwd: &std::path::Path,
     ) -> Result<crate::transcript::Located> {
         let home = self.transcript_home();
-        let store = crate::transcript::opencode::store(&home);
+        let store = loopflow_harness::transcript::opencode::store(&home);
         Ok(if store.is_file() {
             crate::transcript::Located::Found {
-                source: crate::transcript::Source::OpenCode {
+                source: loopflow_harness::transcript::Source::OpenCode {
                     store,
                     id: id.to_string(),
                 },
@@ -1292,14 +1264,14 @@ impl super::Harness for OpenCode {
         cwd: &std::path::Path,
         since: i64,
         _owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
-        let store = crate::transcript::opencode::store(home);
-        crate::transcript::opencode::written_in(&store, cwd, since)
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
+        let store = loopflow_harness::transcript::opencode::store(home);
+        loopflow_harness::transcript::opencode::written_in(&store, cwd, since)
             .into_iter()
             .map(|(id, at)| {
                 (
                     id.clone(),
-                    crate::transcript::Source::OpenCode {
+                    loopflow_harness::transcript::Source::OpenCode {
                         store: store.clone(),
                         id,
                     },
@@ -1307,9 +1279,6 @@ impl super::Harness for OpenCode {
                 )
             })
             .collect()
-    }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::OpenCode
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -1337,10 +1306,6 @@ impl super::Harness for OpenCode {
         approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
         Box::new(Driver::new(launch, events, approval))
-    }
-    fn validate_model(&self, model: &str) -> Result<()> {
-        anyhow::ensure!(is_supported_opencode_model_variant(model), "unsupported OpenCode model '{}': supported variants are 'opencode/*' (excluding claude/codex families) and 'moonshotai/kimi*'", model);
-        Ok(())
     }
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
@@ -1439,20 +1404,4 @@ fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::Nati
     client.thread = Some(id);
     client.companion = Some(companion);
     Ok(client)
-}
-
-fn is_supported_opencode_model_variant(variant: &str) -> bool {
-    let variant = variant.trim().to_ascii_lowercase();
-    let Some((provider, model_id)) = variant.split_once('/') else {
-        return false;
-    };
-    if model_id.is_empty() {
-        return false;
-    }
-
-    match provider {
-        "moonshotai" => model_id.starts_with("kimi"),
-        "opencode" => !model_id.contains("claude") && !model_id.contains("codex"),
-        _ => false,
-    }
 }

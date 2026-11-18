@@ -341,7 +341,7 @@ fn the_card_for_a_raw_conversation_carries_its_turn() {
     assert_eq!(card.session.id.as_str(), "provider-id");
     assert_eq!(
         card.session.turn.unwrap().state,
-        loopflow_execution::transcript::live::TurnState::Running
+        loopflow_harness::transcript::live::TurnState::Running
     );
     assert_eq!(card.liveness, SessionLiveness::Live);
     assert_eq!(card.control_holder, None);

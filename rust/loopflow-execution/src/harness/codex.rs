@@ -16,10 +16,8 @@
 use crate::harness::LaunchKind;
 use crate::harness::Recording;
 use crate::process::attachment;
-use crate::transcript::json_lines;
 use loopflow_model::id::AgentSessionId;
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::path::Path;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -1305,7 +1303,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Codex,
+                loopflow_harness::HarnessKind::Codex,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(home.path()),
             ),
@@ -1349,7 +1347,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Codex,
+                loopflow_harness::HarnessKind::Codex,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1464,7 +1462,7 @@ mod tests {
         let (events, event_rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Codex,
+                loopflow_harness::HarnessKind::Codex,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1659,7 +1657,7 @@ mod tests {
         let (events, _event_rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Codex,
+                loopflow_harness::HarnessKind::Codex,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1700,31 +1698,7 @@ mod tests {
     }
 }
 
-fn codex_input_times(path: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
-    let mut times = BTreeMap::<String, i64>::new();
-    for row in json_lines(path) {
-        let Some(id) = row["session_id"].as_str().filter(|id| wanted.contains(id)) else {
-            continue;
-        };
-        let Some(at) = row["ts"]
-            .as_i64()
-            .filter(|at| *at >= 0)
-            .and_then(|at| at.checked_mul(1000))
-        else {
-            continue;
-        };
-        times
-            .entry(id.to_string())
-            .and_modify(|saved| *saved = (*saved).max(at))
-            .or_insert(at);
-    }
-    times
-}
-
-#[derive(Debug)]
-pub struct Codex;
-
-impl super::Harness for Codex {
+impl super::Launcher for loopflow_harness::Codex {
     fn validate_agent_process_close(
         &self,
         store: &loopflow_storage::sqlite::SqliteStore,
@@ -1741,42 +1715,12 @@ impl super::Harness for Codex {
         super::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
             .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
     }
-    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
-        codex_input_times(&home.join("history.jsonl"), wanted)
-    }
 
-    fn sign_in_advice(&self) -> &'static str {
-        "run `codex login`"
-    }
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["CODEX_ACCESS_TOKEN", "OPENAI_API_KEY"]
-    }
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         Some(crate::provider_auth::Provider::Codex)
     }
-    fn recognizes_driver(&self, command: &str) -> bool {
-        super::command_program(command, "codex")
-            && command.split_whitespace().any(|arg| arg == "app-server")
-            && command.split_whitespace().any(|arg| arg == "--listen")
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::codex::read
-    }
-    fn transcript_id<'a>(&self, name: &'a str) -> Option<&'a str> {
-        let rest = name.strip_suffix(".jsonl")?.strip_prefix("rollout-")?;
-        let at = rest.len().checked_sub(36)?;
-        rest.is_char_boundary(at)
-            .then(|| &rest[at..])
-            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
-    }
-    fn transcript_root(&self, home: &std::path::Path) -> (std::path::PathBuf, usize) {
-        (home.join("sessions"), 3)
-    }
     fn terminal_error(&self, code: &str) -> bool {
         matches!(code, "codex_disconnected" | "codex_dispatch_rejected")
-    }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Codex
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -1802,9 +1746,6 @@ impl super::Harness for Codex {
         approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
         Box::new(Driver::new(launch, events, approval))
-    }
-    fn title_args(&self, _name: &str) -> Vec<String> {
-        vec!["-c".into(), "tui.terminal_title=[]".into()]
     }
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
         let (mut args, input) = launch.terminal_input()?;

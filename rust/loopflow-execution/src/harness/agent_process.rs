@@ -432,10 +432,9 @@ pub(crate) fn close_session_agent_process(store: &SqliteStore, session: &str) ->
     if let Some(kind) = agent
         .provider
         .as_deref()
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
     {
-        kind.harness()
-            .validate_agent_process_close(store, session, &agent.id)?;
+        crate::harness::launcher(kind).validate_agent_process_close(store, session, &agent.id)?;
     }
     close_agent_process(pid, started)
         .map_err(|error| StoreError::InvalidAuthority(error.to_string()))?;
@@ -636,7 +635,7 @@ fn is_agent_process(process: &OsProcess, started_at: i64, provider: Option<&str>
         return false;
     }
     provider
-        .and_then(super::HarnessKind::parse)
+        .and_then(loopflow_harness::HarnessKind::parse)
         .is_some_and(|kind| kind.harness().recognizes_driver(&process.command))
 }
 

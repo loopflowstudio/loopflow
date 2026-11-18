@@ -1,8 +1,6 @@
 use crate::harness::LaunchKind;
 use crate::process::OsProcess;
-use crate::transcript::is_user_input;
-use crate::transcript::json_lines;
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -622,7 +620,7 @@ mod activity_tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -702,7 +700,7 @@ mod tests {
             );
             let mut harness = Driver::new(
                 &crate::harness::launch_for_test(
-                    crate::harness::HarnessKind::Claude,
+                    loopflow_harness::HarnessKind::Claude,
                     &config,
                     &recording,
                 ),
@@ -813,7 +811,7 @@ mod tests {
                 );
                 let mut harness = Driver::new(
                     &crate::harness::launch_for_test(
-                        crate::harness::HarnessKind::Claude,
+                        loopflow_harness::HarnessKind::Claude,
                         &config,
                         &recording,
                     ),
@@ -938,7 +936,7 @@ mod tests {
         let (config, recording) = (config, recording);
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -972,7 +970,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &crate::agent::AgentConfig::default(),
                 &crate::harness::admit_for_test(tempfile::tempdir().unwrap().path()),
             ),
@@ -1103,7 +1101,7 @@ done
         let (config, recording) = claude.attach("first");
         let mut first = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -1126,7 +1124,7 @@ done
                 thread: &agent_session,
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             )
@@ -1172,7 +1170,7 @@ done
         let (config, admitted) = claude.attach("step");
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &admitted,
             ),
@@ -1216,7 +1214,7 @@ cat > /dev/null
         let (config, admitted) = claude.attach("step");
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &admitted,
             ),
@@ -1280,7 +1278,7 @@ cat > /dev/null
         let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -1324,7 +1322,7 @@ cat > /dev/null
         let recording = super::super::admit_for_test(_ledger.home());
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &config,
                 &recording,
             ),
@@ -1363,22 +1361,6 @@ cat > /dev/null
     }
 }
 
-fn claude_input_time(path: &Path, id: &str) -> Option<i64> {
-    json_lines(path)
-        .filter_map(|row| {
-            if row["sessionId"].as_str() != Some(id) || !is_user_input(&row) {
-                return None;
-            }
-            let at = time::OffsetDateTime::parse(
-                row["timestamp"].as_str()?,
-                &time::format_description::well_known::Rfc3339,
-            )
-            .ok()?;
-            i64::try_from(at.unix_timestamp_nanos() / 1_000_000).ok()
-        })
-        .max()
-}
-
 /// The conversation each live Claude process has open, from the
 /// `sessions/<pid>.json` Claude keeps in its home and rewrites when `/clear`
 /// or `/resume` changes it. Claude versions before 2.1.318 may keep none.
@@ -1410,38 +1392,13 @@ fn conversation_owners(home: &Path, by_pid: &HashMap<u32, &OsProcess>) -> HashMa
         .collect()
 }
 
-#[derive(Debug)]
-pub struct Claude;
-
-impl super::Harness for Claude {
-    fn human_input_times(&self, home: &Path, wanted: &BTreeSet<&str>) -> BTreeMap<String, i64> {
-        wanted
-            .iter()
-            .filter_map(|id| {
-                let path = crate::transcript::transcript(self.kind(), home, id)?;
-                Some(((*id).to_owned(), claude_input_time(&path, id)?))
-            })
-            .collect()
-    }
+impl super::Launcher for loopflow_harness::Claude {
     fn conversation_owners(
         &self,
         home: &Path,
         processes: &HashMap<u32, &OsProcess>,
     ) -> HashMap<u32, String> {
         conversation_owners(home, processes)
-    }
-    fn transcript_completion_detail(
-        &self,
-        turn: &crate::transcript::Turn,
-        detail: &mut serde_json::Value,
-    ) {
-        detail["result_id"] = serde_json::Value::Null;
-        detail["subtype"] = serde_json::Value::Null;
-        detail["errors"] = if turn.receipt.errors.is_empty() {
-            serde_json::Value::Null
-        } else {
-            turn.receipt.errors.clone().into()
-        };
     }
 
     fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
@@ -1462,53 +1419,8 @@ impl super::Harness for Claude {
                     .is_some_and(|dir| dir.file_name().is_some_and(|name| name == "claude"))
         })
     }
-    fn model_rungs(&self) -> &'static [&'static str] {
-        &crate::config::CLAUDE_MODEL_RUNGS
-    }
-    fn sign_in_advice(&self) -> &'static str {
-        "run `claude`, then /login"
-    }
-    fn provider_env(&self) -> &'static [&'static str] {
-        &["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
-    }
     fn provider(&self) -> Option<crate::provider_auth::Provider> {
         Some(crate::provider_auth::Provider::Claude)
-    }
-    fn transcript_reader(&self) -> fn(&[serde_json::Value]) -> Vec<crate::transcript::Turn> {
-        crate::transcript::claude::read
-    }
-    fn transcript_id<'a>(&self, name: &'a str) -> Option<&'a str> {
-        name.strip_suffix(".jsonl")
-    }
-    fn direct_transcript(
-        &self,
-        home: &std::path::Path,
-        cwd: &std::path::Path,
-        id: &str,
-    ) -> Option<std::path::PathBuf> {
-        Some(crate::transcript::live::claude_project(home, cwd).join(format!("{id}.jsonl")))
-    }
-    fn transcript_siblings(&self) -> bool {
-        true
-    }
-    fn expiry_policy(&self, home: Option<&std::path::Path>) -> crate::transcript::ExpiryPolicy {
-        let settings = home.map(|home| home.join("settings.json"));
-        let days = settings
-            .as_deref()
-            .and_then(|path| std::fs::read(path).ok())
-            .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
-            .and_then(|value| value["cleanupPeriodDays"].as_u64())
-            .and_then(|days| u32::try_from(days).ok());
-        match days {
-            Some(days) => crate::transcript::ExpiryPolicy::ClaudeCleanup {
-                days,
-                settings: settings.map(|path| path.display().to_string()),
-            },
-            None => crate::transcript::ExpiryPolicy::ClaudeCleanup {
-                days: 30,
-                settings: None,
-            },
-        }
     }
     fn recent_transcripts(
         &self,
@@ -1516,21 +1428,18 @@ impl super::Harness for Claude {
         cwd: &std::path::Path,
         since: i64,
         owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, crate::transcript::Source, i64)> {
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
         crate::transcript::raw::unowned(
             crate::transcript::raw::in_directory(
-                &crate::transcript::live::claude_project(home, cwd),
+                &loopflow_harness::transcript::live::claude_project(home, cwd),
                 |path| Some(path.file_stem()?.to_str()?.to_owned()),
             )
             .into_iter()
             .filter(|(_, _, at)| *at >= since)
-            .map(|(id, path, at)| (id, crate::transcript::Source::File(path), at))
+            .map(|(id, path, at)| (id, loopflow_harness::transcript::Source::File(path), at))
             .collect(),
             owned,
         )
-    }
-    fn kind(&self) -> super::HarnessKind {
-        super::HarnessKind::Claude
     }
     fn capabilities(&self) -> super::Capabilities {
         super::Capabilities {
@@ -1558,9 +1467,6 @@ impl super::Harness for Claude {
         _approval: super::ApprovalPolicy,
     ) -> Box<dyn super::Driver> {
         Box::new(Driver::new(launch, events))
-    }
-    fn title_args(&self, name: &str) -> Vec<String> {
-        vec!["--name".into(), name.into()]
     }
 
     fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {

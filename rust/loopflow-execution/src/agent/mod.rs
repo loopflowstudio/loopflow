@@ -107,7 +107,10 @@ pub fn checkout_execution_boundary(
     agent: &Agent,
 ) -> anyhow::Result<AgentExecutionBoundary> {
     let harness = agent.harness;
-    if !harness.harness().capabilities().supports_execution_boundary {
+    if !crate::harness::launcher(harness)
+        .capabilities()
+        .supports_execution_boundary
+    {
         return Err(anyhow::anyhow!(format!(
             "Agent execution unavailable: agent {agent:?} uses harness {harness:?}, which does not support a managed execution boundary; select codex, claude, or pi"
         )));
@@ -269,7 +272,7 @@ impl AgentConfig {
 impl Default for AgentConfig {
     fn default() -> Self {
         Self::new(Agent {
-            harness: crate::harness::HarnessKind::Codex,
+            harness: loopflow_harness::HarnessKind::Codex,
             model: None,
         })
     }
@@ -371,7 +374,7 @@ fn _record_stop(provider: &str, reason: &str, advice: &str) {
 
 /// The provider revoked the login: no model of it can go on until someone
 /// signs in again.
-fn _sign_in_advice(kind: crate::harness::HarnessKind) -> String {
+fn _sign_in_advice(kind: loopflow_harness::HarnessKind) -> String {
     let provider = kind.as_str();
     let sign_in = kind.harness().sign_in_advice();
     format!("The {provider} login was revoked; sign in again on this Machine: {sign_in}")
@@ -389,7 +392,7 @@ fn _limit_stop_advice(provider: &str, launch: &AgentConfig, rungs: &[Agent]) -> 
                 .join(", ")
         );
     }
-    let another = crate::harness::HarnessKind::ALL
+    let another = loopflow_harness::HarnessKind::ALL
         .into_iter()
         .find(|kind| kind.as_str() != provider)
         .expect("more than one harness")
@@ -973,7 +976,7 @@ fn run_admitted_agent(
     kind: crate::harness::LaunchKind,
 ) -> Result<AgentProcessResult, CoreError> {
     let mut launch = launch.clone();
-    let capabilities = launch.agent.harness.harness().capabilities();
+    let capabilities = crate::harness::launcher(launch.agent.harness).capabilities();
     if launch.max_turns.is_some() && !capabilities.turn_limit {
         eprintln!("warning: Loopflow turn limits are supported only by Claude; this provider will run without a turn limit");
     }
@@ -1060,10 +1063,7 @@ fn _run_with_retries(
         let provider = attempt.agent.harness.as_str();
         let mut result = run(&attempt, launched)?;
         launched = true;
-        if !attempt
-            .agent
-            .harness
-            .harness()
+        if !crate::harness::launcher(attempt.agent.harness)
             .capabilities()
             .classifies_failures
         {
@@ -1444,7 +1444,7 @@ fn _run_harness_once(
     .map_err(|error| CoreError::ExecutionFailed(error.to_string()))?;
     let value = crate::harness::Launch {
         config: &config,
-        harness: launch.agent.harness.harness(),
+        harness: crate::harness::launcher(launch.agent.harness),
         kind,
         recording: &recording,
         start: crate::harness::Start::from_thread(launch.resume_token.as_ref()),
@@ -1454,9 +1454,9 @@ fn _run_harness_once(
 }
 
 /// What to tell someone whose agent CLI is missing.
-pub fn missing_agent_message(kind: crate::harness::HarnessKind) -> String {
+pub fn missing_agent_message(kind: loopflow_harness::HarnessKind) -> String {
     let cli = kind.as_str();
-    let hint = kind.harness().capabilities().install_hint;
+    let hint = crate::harness::launcher(kind).capabilities().install_hint;
     format!("'{cli}' is not installed. {hint}")
 }
 
@@ -2167,7 +2167,7 @@ trust_level = "trusted"
                 thread: launch.resume_token.as_ref().unwrap(),
             },
             ..crate::harness::launch_for_test(
-                crate::harness::HarnessKind::Claude,
+                loopflow_harness::HarnessKind::Claude,
                 &launch,
                 &admitted,
             )

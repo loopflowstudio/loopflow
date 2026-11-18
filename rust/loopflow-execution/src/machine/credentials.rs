@@ -488,7 +488,7 @@ fn opencode_export(home: Option<&Path>, host: &str) -> Result<Vec<serde_json::Va
         .map_err(|_| anyhow!("OpenCode returned an unreadable credential export"))?;
     Ok(entries
         .into_iter()
-        .filter(|entry| entry["integrationID"] == crate::harness::HarnessKind::OpenCode.as_str())
+        .filter(|entry| entry["integrationID"] == loopflow_harness::HarnessKind::OpenCode.as_str())
         .collect())
 }
 

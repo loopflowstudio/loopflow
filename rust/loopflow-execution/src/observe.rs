@@ -22,7 +22,10 @@ enum Fact {
     Deadline(i64),
     Clock,
     /// A conversation's current turn from its transcript's end.
-    Turn(crate::harness::HarnessKind, crate::transcript::Source),
+    Turn(
+        loopflow_harness::HarnessKind,
+        loopflow_harness::transcript::Source,
+    ),
     /// Conversations open on this Machine that Loopflow never launched.
     RawConversations,
 }
@@ -53,7 +56,7 @@ enum Answer {
     Bool(bool),
     Time(i64),
     Process(Result<Option<OsProcess>, Failure>),
-    Turn(Option<crate::transcript::live::CurrentTurn>),
+    Turn(Option<loopflow_harness::transcript::live::CurrentTurn>),
     Raw(Vec<crate::transcript::raw::RawDirectory>),
 }
 
@@ -145,9 +148,9 @@ impl Fact {
             Self::Deadline(at) => {
                 Answer::Bool(time::OffsetDateTime::now_utc().unix_timestamp() >= *at)
             }
-            Self::Turn(harness, source) => {
-                Answer::Turn(crate::transcript::live::read_current(*harness, source))
-            }
+            Self::Turn(harness, source) => Answer::Turn(
+                loopflow_harness::transcript::live::read_current(*harness, source),
+            ),
             Self::RawConversations => Answer::Raw(crate::transcript::raw::discover()),
         }
     }
@@ -458,17 +461,17 @@ pub fn process(pid: u32) -> io::Result<Option<OsProcess>> {
 
 /// The current or last turn of a conversation's transcript.
 pub(crate) fn transcript_turn(
-    harness: crate::harness::HarnessKind,
-    source: &crate::transcript::Source,
-) -> Option<crate::transcript::live::SessionTurn> {
+    harness: loopflow_harness::HarnessKind,
+    source: &loopflow_harness::transcript::Source,
+) -> Option<loopflow_harness::transcript::live::SessionTurn> {
     transcript_current(harness, source).map(|reading| reading.turn)
 }
 
 pub(crate) fn transcript_current(
-    harness: crate::harness::HarnessKind,
-    source: &crate::transcript::Source,
-) -> Option<crate::transcript::live::CurrentTurn> {
-    use crate::transcript::Source;
+    harness: loopflow_harness::HarnessKind,
+    source: &loopflow_harness::transcript::Source,
+) -> Option<loopflow_harness::transcript::live::CurrentTurn> {
+    use loopflow_harness::transcript::Source;
     let source = match source {
         Source::File(path) => Source::File(absolute(path)),
         Source::OpenCode { store, id } => Source::OpenCode {

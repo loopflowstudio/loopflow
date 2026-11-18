@@ -440,7 +440,7 @@ pub struct SessionRecord {
     pub terminal_ids: Vec<String>,
     /// Its current or last turn while it is live; `null` when nothing says.
     #[serde(deserialize_with = "Option::deserialize")]
-    pub turn: Option<crate::transcript::live::SessionTurn>,
+    pub turn: Option<loopflow_harness::transcript::live::SessionTurn>,
     /// A conversation open here that Loopflow never launched; `id` is the
     /// provider's conversation ID and no Session records it.
     pub raw: bool,
@@ -1624,9 +1624,11 @@ pub(crate) fn resume_native_session(
     let native = NativeSession::of(&session)?;
     let provider_session = store.sqlite.input_provider_session(artifact_key)?;
     if provider_session.is_none() {
-        if !crate::harness::HarnessKind::parse(native.provider)
-            .is_some_and(|kind| kind.harness().capabilities().initial_prompt_on_resume)
-        {
+        if !loopflow_harness::HarnessKind::parse(native.provider).is_some_and(|kind| {
+            crate::harness::launcher(kind)
+                .capabilities()
+                .initial_prompt_on_resume
+        }) {
             return Ok(false);
         }
         // A failed Codex bootstrap may have no provider history yet. Reopen its

@@ -18,17 +18,17 @@ History: `scratch/plan-ownership-history.md`. Concept review (2026-11-18):
 
 ## The design in one paragraph
 
-The hub holds the plan in the store's own words. A Machine that is not the
-hub saves locally as today and queues each changed value, as a `WorkEdit`
-(target + `WorkValue`), in `tracker_actions` with `tracker = 'hub'`; the drain
-sends a repository's open edits in one `plan.apply` and the hub writes them
-with the same typed writer. Inbound, `plan.changes` returns the `WorkEdit`s of
-owners changed since a watermark, and the Machine writes them as an import.
-No translation, no `decide`, no tracker identity binding: both ends share
-every id and field. On the hub Machine the store *is* the plan and nothing is
-queued. The Git planning ref, the peer journal, field causality, destinations
-and the per-Session exchange are deleted. `lf repo tracker` shows the queue
-the same way for the hub as for Linear: "hub mini · 3 open".
+The hub holds the plan in the store's own words. A Machine whose plan is on a
+hub saves locally as before and queues each changed value, a `WorkEdit`
+(target + `WorkValue`), in `hub_sends`; an exchange sends a repository's open
+values in `plan.apply` and the hub writes them with the same typed writer.
+Inbound, `plan.changes` returns the `WorkEdit`s of owners changed since a
+watermark, and the Machine writes them as an import. No translation, no
+`decide`, no tracker identity binding: both ends share every id and field. On
+the hub Machine the store *is* the plan and nothing is queued. The Git
+planning ref, the peer journal, field causality, destinations and the
+per-Session exchange go in slice 2. `lf repo tracker` reads
+`Plan: hub mini. 3 open.`
 
 ## Concept review changes (2026-11-18, made for review)
 
@@ -84,10 +84,6 @@ and Asana, local saves queued as tracker actions, inbound through
   edits, origin)` takes `WorkEdit`s; `WriteOrigin::Import` writes without
   queueing or echo (today's Git import uses it); `ensure_record` creates
   missing Waves, Projects, Tasks and comments from their edits.
-- **The queue exists.** `tracker_actions` already has phases (`queued`,
-  `sent`, `confirmed`, `retired`), coalescing per (owner, subject), an owner
-  kind for Waves, and `lf repo tracker`'s open count. The drain
-  (`ops/tracker/drain.rs`) owns pacing.
 - **"Git-planned" is the default, not a choice.** `TrackerConfig::Git` is what
   a repository with no `tracker:` key gets (`config.rs:315`, `GitPlan::Shared`
   default). etude has no `tracker:` key. So the new rule needs no repository
@@ -113,48 +109,29 @@ hub, is authoritative for its own plan. *Made for review:* a Machine-level
 setting rather than a repository `tracker: hub` key, because who the hub is
 depends on the person's Machines, not the repository.
 
-### Hub operations (server protocol, new revision)
+### What exists (slice 1, 2026-11-18)
 
-- `plan.apply { repository, edits: [{ action_id, edit: WorkEdit }] }` →
-  `{ applied: [action_id], seq }`. One request per drain pass per
-  repository. The hub writes all edits in one transaction with
-  `WriteOrigin::Local` and no queueing. Repeating a request is harmless.
-- `plan.changes { repository, since: Option<seq> }` →
-  `{ edits: [WorkEdit], seq }`: every current value of each owner (Wave,
-  Project, Task, comment) changed after `since`, read with
-  `planning_write::read`. `since: None` is the full plan.
-
-The hub keeps `plan_changes(repo, owner_table, owner_id, seq)`, one row per
-owner, `seq` a store-wide increasing integer set by the writer in the write's
-transaction for every repository it is authoritative for. Index
-`(repo, seq)`. No per-field rows, no action ids.
-
-### Non-hub Machine
-
-- Local writes: unchanged rows. Where the writer calls `enqueue_local` today,
-  a repository whose plan is on a hub queues every changed `WorkEdit` as a
-  `tracker_actions` row: `tracker = 'hub'`, `kind = 'field'`, `subject` =
-  the field (a comment's subject is its id), owner from the table, Waves
-  included. Coalescing keeps the newest unsent value per (owner, subject).
-- Drain: `ops/tracker/drain.rs` sends a repository's open hub rows in one
-  `plan.apply`; `applied` ids → `confirmed`; no reply → stay `sent` and go
-  again next pass. A hub sender beside the `Tracker` dispatch, not a variant.
-- Inbound: `refresh` at the existing boundaries (before Graph steps, after
-  agent turns, when commands show planning; Desktop / `--subscribe` clock)
-  calls `plan.changes(since)` with the watermark in a per-repository row,
-  and writes the edits with `WriteOrigin::Import`, skipping any (owner,
-  field) with an open hub row (the local value is still on its way).
-- Hub unreachable: rows stay open; `lf repo tracker` says "hub mini
-  unreachable since 14:02 · 3 open"; reads show the local store. Never an
-  empty plan, never a fallback to Git.
-- Version skew: #1956's errors, unchanged ("mini runs lf 0.15.2 … update it
-  with `ssh -- 'mini' 'lf install'`").
-
-### Hub Machine
-
-Writes go straight to its store and bump `plan_changes`; nothing is queued.
-It needs the repository registered (`work_route::repository_path`); a
-missing one answers with the command that adds it.
+- `lf machine hub <machine>` / `--clear` / bare writes the `hub:` key in
+  `~/.lf/config.yaml`; `lf machine list` marks it. `ops/plan_hub.rs::hub`
+  resolves it (`None` when unset or when the hub is this Machine).
+- Migration `plan_hub.sql`: `plan_changes` (one row per owner, `seq` only
+  grows, seeded with every owner so any Machine can become a hub),
+  `hub_plans` (per repository: hub id, watermark `seq`, NULL = first contact,
+  last error), `hub_sends` (newest unsent value per (target, field)).
+  `sqlite/plan_hub.rs` owns them.
+- `planning_write::write_record` calls `plan_hub::saved` for every owner it
+  changes: bumps `plan_changes`, and when a `hub_plans` row exists, queues the
+  changed values (a created record whole).
+- Server protocol revision 9 (`PLAN_REVISION`; Swift `ServerProtocol.revision`
+  9): `plan.changes { repository, since }` → `{ edits, seq, more }`, paged
+  under half a control message; `plan.apply { repository, edits }` → `{}`,
+  written in one transaction, safe to repeat.
+- `plan_hub::exchange`: read every page first, import (skipping fields with
+  an open send), then send grouped by owner. Called from
+  `planning_sync::exchange_repository`, i.e. at every Git exchange boundary;
+  a publish-only boundary with nothing open asks the hub nothing.
+- `lf repo tracker` prints `Plan: hub mini[, unreachable since …]. N open.`
+  with each open send; a Wave rename syncs after its save.
 
 ## User-visible outcome
 
@@ -189,12 +166,7 @@ sent again and applied once.
 
 ## Affected surfaces
 
-- `sqlite/planning_write.rs` (hub enqueue beside `enqueue_local`,
-  `plan_changes` bump), `sqlite/tracker_actions.rs` (`TrackerKind::Hub`,
-  owner tracker for hub repositories), `ops/tracker/drain.rs` (hub sender).
-- New migration: `plan_changes`, the per-repository watermark, `-- leaving:`
-  for every `git_tracker_*` table and the `planning_peer_*` /
-  `planning_destinations` copies, `planning_user` if nothing else reads it.
+- `plan_hub.sql` gains the `-- leaving:` marks (slice 2).
 - Server protocol + `tests/fixtures/dto/server_schema.json`, Swift
   `ServerProtocol`, Pi extension, `server_connection.js` (revision bump only).
 - `lf repo tracker` / `TrackerActionStatus`: hub reachability line replaces
@@ -235,7 +207,7 @@ sent again and applied once.
 - PR #1971 and LOO-899 / LOO-868 patches go with the code they patched.
 
 Survives: every Wave, Project, Task and comment id and value, ownership
-entries; the `tracker_actions` queue; Machine-local Sessions, Processes,
+entries; the Linear/Asana `tracker_actions` queue; Machine-local Sessions, Processes,
 checkouts, reservations (Infrastructure Wave memory "Plan ownership").
 
 ## Cutover for etude
@@ -257,37 +229,22 @@ origin, inert; deleting it is one hand-run
 - Several people on one hub: arrival order, no admission beyond SSH-as-owner,
   as #1956.
 
-## Slices
-
-Slice 1 built (2026-11-18, headless): `lf machine hub` / `--clear` /
-bare (the `hub:` key in `~/.lf/config.yaml`), `lf machine list` marks it;
-migration `plan_hub.sql` (`plan_changes`, `hub_plans`, `hub_sends`);
-`sqlite/plan_hub.rs`; the writer records each owner's change and queues
-local saves (a created record whole); `ops/plan_hub.rs` exchange and hub
-answers; `plan.changes` / `plan.apply` at protocol revision 9 (Swift
-`ServerProtocol.revision` 9); every Git exchange boundary
-(`planning_sync::exchange_repository`) goes to the hub when one is set;
-`lf repo tracker` prints `Plan: hub mini[, unreachable since …]. N open.`;
-a Wave rename now syncs after its save. Checked with storage tests
-(`plan_hub::`) and the two-home run below.
-
-What slice 1 taught, and changed from the shape above:
+## What slice 1 taught
 
 - **`hub_sends` is its own table, not `tracker_actions` rows.**
   `tracker_actions.tracker` is `CHECK(tracker IN ('linear','asana'))`: a
   `hub` row needs a table rebuild (with its canonical-identity triggers), and
   a released lf's `TrackerKind::parse` fails on it. Concept review point 1
-  (the hub is not a tracker) says the same. One row per (target, field),
-  replaced on save; a confirmed send deletes its rows.
-- **The watermark row is the switch.** A `hub_plans` row for the repository
-  is what makes the writer queue; `seq IS NULL` is first contact. The row is
-  made at the first exchange, so saves before it reach the hub through first
-  contact, not as queued rows.
+  says the same. A confirmed send deletes its rows.
+- **The watermark row is the switch.** A `hub_plans` row makes the writer
+  queue; it is made at the first exchange, so saves before it reach the hub
+  through first contact.
 - **A clone on the hub mints its own repository identity.** The hub needs
   `lf config repo --bind <id>` in its clone; the error names it.
-  `docs/work.md` said "run any `lf` command in it once"; corrected.
 - **Sends group by owner,** so a record the hub lacks arrives with every
-  value `ensure_record` needs, in batches under half a control message.
+  value `ensure_record` needs.
+- The open-row skip held: whole-owner imports did not fight local edits in
+  the two-home run, so the inbound shape stands.
 - Two-home run (stand-in `ssh`, `/tmp` homes): a Task made before the hub was
   set reached mini by first contact; `lf task create` and `lf task edit`
   sent at once; with mini down, `lf repo tracker` read `Plan: hub mini,
@@ -297,34 +254,34 @@ What slice 1 taught, and changed from the shape above:
   reached mini at once. A swapped hub binary answered "Loopflow server uses
   another executable".
 
-Left for slice 1's gate or slice 2:
+## What remains: slice 2, delete Git
 
-- Reads come only at the existing Git boundaries (`lf task sync`, a cold Task
-  lookup, a foreground provider's loop, `lf wave status --sync`). `docs/work.md`
-  says "Each `lf` command sends what is open and reads what changed on the
-  hub"; sends hold, reads don't.
-- `lf task sync` prints `synchronized`; the docs show `nothing open`.
-- `lf repo tracker --json` (`TrackerStatus`, Desktop's DTO) still reports Git
-  destinations with a hub set; slice 2 changes it with Desktop's line.
-- No hub Machine shows `Plan: this Machine (hub)` yet: without a hub the Git
-  status prints, until slice 2.
-- A foreground provider's loop opens `ssh … lf server connect` every 5 s to
-  read; LOO-861's persistent connection replaces it.
-- The plan's Rust integration test over the `lf server connect` pipe is not
-  written; the exchange's sequence and the repeated apply are covered at the
-  store, the carrier by the two-home run.
+1. **Give the hub exchange its own call sites.** Today it rides
+   `planning_sync::exchange_repository`, which goes with Git. Reads come only
+   at the Git boundaries (`lf task sync`, a cold Task lookup, a foreground
+   provider's loop, `lf wave status --sync`); `docs/work.md` says "Each `lf`
+   command sends what is open and reads what changed on the hub". Sends hold
+   that; reads must too.
+2. **Delete everything in "What goes"**, with `-- leaving:` marks in
+   `plan_hub.sql` for every `git_tracker_*` table and the `planning_peer_*` /
+   `planning_destinations` copies (and `planning_user` if nothing else reads
+   it). `WriteOrigin::Import` then means only "the hub's value".
+3. **`lf repo tracker --json` / `TrackerStatus` and Desktop's tracker line**
+   report the hub (they still report Git destinations with a hub set);
+   `Plan: this Machine (hub)` on the hub, which today prints the Git status.
+4. **`lf task sync` output**: prints `<id>: synchronized`
+   (`ops/task.rs:2640`); `docs/work.md:245` shows `nothing open`.
+5. **`.lf/config.yaml` `tracker: { git: … }`**: parsed as "no tracker",
+   marked with a removal Task filed in this change.
+6. **Docs** in "Affected surfaces" that still describe Git.
+7. **Rust integration test** of the acceptance sequence with the carrier
+   mocked at the `lf server connect` pipe, including a lost `plan.apply`
+   reply sent again (store tests cover the sequence; the two-home run covered
+   the carrier).
+8. **etude cutover against mini** (below), by hand.
 
-1. **The hub holds the plan.** `lf machine hub`, hub rows in
-   `tracker_actions` for every `WorkEdit`, `plan.apply`, `plan_changes`,
-   `plan.changes`, the drain's hub sender, inbound import with the
-   open-row skip, first contact. Shows: a Task created on home B, a title
-   edited there, and a Wave renamed, all appear on home A; an edit made with
-   A's server stopped arrives when it restarts. This slice can prove the plan
-   wrong: if importing whole-owner snapshots fights local edits in ways the
-   open-row skip doesn't cover, the inbound shape changes before anything is
-   deleted.
-2. **Delete Git.** Everything in "What goes", the migration's `-- leaving:`
-   marks, docs, Desktop's tracker line. Run the etude cutover against mini.
+Known and left: a foreground provider's loop opens `ssh … lf server connect`
+every 5 s to read; LOO-861's persistent connection replaces it.
 
 Checks: focused Rust tests per slice; `lf repo tracker` on etude before and
 after cutover (gate, by hand); Desktop view tests for the tracker line (CI).

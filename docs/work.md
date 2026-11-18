@@ -315,6 +315,9 @@ Desktop's Keep and Use mine buttons on the line do the same, and
 coworker changes that field again in the tracker. On Git, a value the journal
 lost shows the same way, as `git`.
 
+A checkout with no `origin` yet keeps its Git plan on this Machine; the first
+save after `git remote add origin` publishes everything since.
+
 A Wave not yet connected to an Initiative has nothing to exchange. Its Tasks
 stay local and `lf wave sync` shows them without asking Linear, until
 `lf wave plan connect billing` connects one:
@@ -454,7 +457,7 @@ released lf still reads (LOO-640 removes that).
 
 ```bash
 lf wave plan billing --json                     # its Tasks, KRs and metric targets
-lf wave update-project --wave billing --file plan.json
+lf wave update-project --wave billing --file project.json
 ```
 
 ```json

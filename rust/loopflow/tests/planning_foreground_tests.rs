@@ -203,6 +203,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         "origin",
         "refs/loopflow/planning/shared/fixture",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
@@ -507,6 +508,7 @@ fn fetched_invalid_document_does_not_claim_import_or_publication() {
         "origin",
         "refs/loopflow/planning/shared/invalid",
     )
+    .unwrap()
     .unwrap();
     runtime
         .block_on(store.bind_peer_planning(repo_key, &binding))
@@ -632,6 +634,7 @@ fn taskless_terminal_and_headless_sessions_keep_planning_live() {
         "origin",
         "refs/loopflow/planning/shared/taskless",
     )
+    .unwrap()
     .unwrap();
     configure(&source_path, &binding);
     configure(&target_path, &binding);
@@ -723,6 +726,7 @@ fn public_wave_reads_imported_planning_without_placing_or_changing_execution() {
         "origin",
         "refs/loopflow/planning/shared/fixture",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &binding);
     configure(&target, &binding);
@@ -901,6 +905,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
         "origin",
         "refs/loopflow/planning/shared/other",
     )
+    .unwrap()
     .unwrap();
     configure(&source, &other);
     let switched: serde_json::Value = serde_json::from_str(&run(

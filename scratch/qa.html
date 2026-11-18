@@ -1,0 +1,53 @@
+<!doctype html><html><head><meta charset="utf-8"><title>LOO-955 QA — one tracker vocabulary</title>
+<style>body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}h2{margin-top:2em;border-bottom:1px solid #ddd}
+.ok{color:#176b2c}.fix{color:#9a5b00}.bad{color:#a11}td,th{padding:.3em .6em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}</style></head><body>
+<h1>LOO-955 QA: one tracker vocabulary</h1>
+<p>Branch <code>lf</code> (ba5424201 + QA fixes), private <code>HOME</code>/<code>LF_HOME</code> under <code>/tmp/lf-qa-955</code>, fresh Git repositories, installed <code>lf 0.16.0+e66b21801</code> for the returning-user path.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td>First visit, no remote</td><td><code>lf repo tracker</code> in a fresh <code>git init</code></td><td class="fix">Failed: <code>planning Git resolve destination failed (exit Some(2)); local planning is retained</code>. <code>lf task create</code> then said “See <code>lf repo tracker</code>”, which failed. Same in released <code>lf repo plan</code>. <b>Fixed</b>, see below.</td></tr>
+<tr><td>Renamed commands</td><td><code>lf repo plan</code>, <code>lf wave edit-plan</code>, <code>update-project --plan</code>, help for all</td><td class="ok">Old spellings refused, with clap's “similar subcommand exists: 'edit-project'”. Help says tracker and Project.</td></tr>
+<tr><td>Config, both spellings</td><td><code>tracker: {linear: {team}}</code> then released <code>planning: {provider: linear}</code> + <code>linear: {team}</code></td><td class="ok">Both: <code>Tracker: linear. Nothing open.</code>; <code>config get --shared repo.tracker</code> prints <code>linear: {team: …}</code> for both.</td></tr>
+<tr><td>Dotted edits</td><td><code>config set --shared repo.tracker.linear.team T2</code>, then <code>repo.tracker git</code>, then <code>repo.tracker.asana.team '1209'</code></td><td class="ok">Each replaces the block in the released shape (<code>planning: {provider: …}</code>), never merges two tags. Unquoted <code>1209</code> is refused as an integer (YAML).</td></tr>
+<tr><td>Wave Project edits</td><td><code>wave edit-project product --name "2026-11 — customer work"</code>; <code>update-project --file</code> good, bad JSON, missing <code>holds</code></td><td class="ok">Name and KR show in <code>wave status</code>, <code>wave show</code>, <code>wave plan</code>. Bad input gives serde's line/column error.</td></tr>
+<tr><td>Task wire</td><td><code>task create --json</code>, <code>task show --json</code></td><td class="ok"><code>tracker_id</code> and <code>tracker_state {state, synced_at}</code>; no <code>linear_id</code>/<code>acquisition</code>.</td></tr>
+<tr><td>Returning user</td><td>Installed lf creates a Linear-configured Task; branch opens the home; installed creates another</td><td>Branch lists the first as <code>create · queued</code> with the origin reason; installed lf still reads and writes after migration. The second released Task never appears as an action: installed lf predates #1957 and writes <code>task_changes</code>. That skew belongs to main, not this branch.</td></tr>
+<tr><td>Desktop's route</td><td>Private server, <code>hello</code>, <code>repo.tracker</code> and <code>repo.plan</code> over the socket</td><td class="ok"><code>repo.tracker</code> answers <code>{tracker:"git", destinations:[…], actions:[]}</code>; <code>repo.plan</code>: “this server has no operation <code>repo.plan</code>; update the selected installation”.</td></tr>
+</table>
+
+<h2>Fixed</h2>
+<p><b>No remote yet.</b> <code>planning_git::resolve_destination</code> now returns <code>None</code> when the checkout has no such remote, so the Git plan stays local. Status, journal and every save work, and the first save after <code>git remote add origin</code> publishes both Tasks:</p>
+<pre>$ lf repo tracker
+Tracker: git. Saves stay on this Machine until its remote takes them.
+$ lf task create --title 'First task'
+First task · 78a48e
+$ git remote add origin ../origin3.git &amp;&amp; git push -q origin main
+$ lf task create --title 'Second task'
+$ lf repo tracker
+cbdf8851…  refs/loopflow/planning/shared/main (configured)  2 records
+  Publication: confirmed (651e8ff9…)</pre>
+<p>New test <code>planning_git_tests::checkout_without_the_remote_has_no_destination</code>; <code>docs/work.md</code> says it.</p>
+<p><b>Words.</b> <code>lf wave status</code> help said “current plan”; now “current Project” (also <code>wave.plan.bind</code>'s schema description, <code>docs/dev/machines.md</code>, <code>docs/agent-api.md</code>). The <code>update-project</code> examples read <code>--file plan.json</code>; now <code>project.json</code>.</p>
+
+<h2>Checks</h2>
+<pre>cargo test -p loopflow --test integration planning_git_tests::         10 passed
+cargo test -p loopflow --test integration planning_foreground_tests::   6 passed
+cargo test -p loopflow --test integration documented_commands::        4 passed
+cargo test -p loopflow --lib server::schema::                          8 passed
+cargo clippy -p loopflow -p loopflow-execution --all-targets -D warnings  clean</pre>
+
+<h2>Not reached</h2>
+<ul><li>Desktop UI: not built or opened; its served route was checked over the socket. <code>swift test --filter DTOFixtureTests</code> stays at gate.</li>
+<li>Live Linear/Asana exchange: no stand-in in a shipped binary, and the Machine's real store wasn't touched.</li></ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>The plan's Modules renames aren't done: <code>planning_git.rs</code>, <code>planning_peers.rs</code>, <code>peer_records.rs</code>, <code>PeerPlanning*.swift</code>. Git destination status still sends <code>acquisition_error</code> on the wire (Swift and fixture too), against the event vocabulary.</li>
+<li><code>pm_writeback</code> and <code>pm_snapshot_synced_at</code> stay on Task JSON. That follows the decision to keep the columns, but people still see them.</li>
+<li>Outside this change: <code>lf config set</code> prints <code>saved; DomainAction</code> (Debug output), and a rejected tracker value says <code>invalid graph: planning: …</code>.</li>
+<li><code>lf repo</code> help says “where it exchanges planning”, and <code>lf wave</code> help says “identity and planning”. Both are acceptable but use the old wording.</li>
+</ol>
+</body></html>

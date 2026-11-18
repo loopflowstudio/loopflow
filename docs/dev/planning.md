@@ -6,7 +6,7 @@ lf task status INF-124 --json
 lf checkout INF-124
 lf --task INF-124 research "write scratch/runtime.md"
 lf task run INF-124
-lf wave update-project --wave product --file scratch/product-plan.json
+lf wave update-project --wave product --file scratch/product-project.json
 ```
 
 Wave → Task is the navigation hierarchy. A Wave keeps its objective, memory,
@@ -392,7 +392,7 @@ its terminal outcome and error. Swift retains command transport feedback only.
 
 ```bash
 lf wave edit-project product --name "2026-10 — customer work"
-lf wave update-project --wave product --file scratch/product-plan.json
+lf wave update-project --wave product --file scratch/product-project.json
 lf wave plan bind product <Project UUID>     # select another existing Project
 ```
 

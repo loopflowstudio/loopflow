@@ -2027,7 +2027,7 @@ pub enum WaveCommand {
         #[arg(long)]
         all: bool,
     },
-    /// Show one Wave's current plan, Task details, and execution evidence.
+    /// Show one Wave's current Project, Task details, and execution evidence.
     Status {
         /// Wave name (default: the ambient wave)
         wave: Option<String>,

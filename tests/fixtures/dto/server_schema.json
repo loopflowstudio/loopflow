@@ -17346,7 +17346,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current plan.",
+          "description": "`lf wave plan bind <wave> <project> --json`: the tracker Project\nbound as the Wave's current Project.",
           "examples": [
             {
               "directory": "/repo",

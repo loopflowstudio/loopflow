@@ -300,7 +300,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         Status::Git(destinations, lost) => (destinations, lost),
     };
     if !destinations.iter().any(|d| d.active) {
-        println!("Tracker: git (configured remote; local saves wait when unavailable)");
+        println!("Tracker: git. Saves stay on this Machine until its remote takes them.");
     }
     for destination in destinations {
         println!(

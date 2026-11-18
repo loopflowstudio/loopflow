@@ -33,7 +33,7 @@ Each child gets a fresh goal, not a slice of the parent's prose:
    ```bash
    lf wave create <wave>/<child>                    # registers it and commits its files on main
    lf wave plan connect <wave>/<child>              # links its Linear Initiative
-   lf wave update-project --wave <wave>/<child> --file <plan.json>   # {"metric_targets":[],"krs":[]}
+   lf wave update-project --wave <wave>/<child> --file <project.json>   # {"metric_targets":[],"krs":[]}
    lf task create --wave <wave>/<child> --title "…" --notes "…"
    ```
    Write each child's `GOAL.md`, `MEMORY.md` and `metrics/*.md` in its

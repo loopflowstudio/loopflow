@@ -66,7 +66,7 @@ need an explicit add before they can receive a login.
 ```bash
 lf session history list                        # Processes recorded on this Machine
 lf process list --json                           # OS-live processes on this Machine
-lf wave status product                 # current plan, Task conditions and Session evidence
+lf wave status product                 # current Project, Task conditions and Session evidence
 
 lf --machine build-home session history list   # run the same reader on build-home
 lf --machine build-home --wave product wave-operate

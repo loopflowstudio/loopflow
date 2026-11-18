@@ -455,7 +455,7 @@ writes! {
     },
 
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project
-    /// bound as the Wave's current plan.
+    /// bound as the Wave's current Project.
     #[serde(rename = "wave.plan.bind")]
     WavePlanBind {
         directory: PathBuf,

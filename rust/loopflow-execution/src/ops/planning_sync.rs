@@ -204,9 +204,12 @@ pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Opti
     let reference = plan
         .reference(key.as_deref())
         .expect("a personal plan has a provisioned user key");
-    let destination =
+    let Some(destination) =
         crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
-            .map_err(message)?;
+            .map_err(message)?
+    else {
+        return Ok(None);
+    };
     let id = store
         .bind_peer_planning(repo, &destination)
         .await
@@ -287,7 +290,7 @@ pub async fn peer_journal(
 }
 
 /// The Git destination this repository plans through: `None` when it does not
-/// plan through Git, `Some(None)` outside a checkout.
+/// plan through Git, `Some(None)` outside a checkout or before its remote exists.
 async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Option<String>>> {
     use crate::config::{load_config, GitPlan, TrackerConfig};
     let config = load_config(Some(Path::new(repo)))
@@ -308,10 +311,11 @@ async fn active_destination(store: &Store, repo: &str) -> OpsResult<Option<Optio
         reference
             .map(|reference| {
                 crate::planning_git::resolve_destination(Path::new(repo), &remote, &reference)
-                    .map(|destination| destination.id())
+                    .map(|destination| destination.map(|destination| destination.id()))
                     .map_err(message)
             })
             .transpose()?
+            .flatten()
     } else {
         None
     };

@@ -28,8 +28,7 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         WorkValue::WaveName(_)
         | WorkValue::WaveParent(_)
         | WorkValue::WaveRetired(_)
-        | WorkValue::WaveProject(_)
-        | WorkValue::HistoricalWaveWorkflow(_) => "waves",
+        | WorkValue::WaveProject(_) => "waves",
         WorkValue::ProjectWave(_)
         | WorkValue::ProjectLinearId(_)
         | WorkValue::ProjectSlug(_)
@@ -40,7 +39,6 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::ProjectRank(_)
         | WorkValue::ProjectInitiatives(_)
         | WorkValue::ProjectTeams(_)
-        | WorkValue::HistoricalProjectWorkflow(_)
         | WorkValue::Krs(_)
         | WorkValue::MetricTargets(_) => "projects",
         WorkValue::TaskProject(_)
@@ -50,14 +48,12 @@ pub(crate) fn table(value: &WorkValue) -> &'static str {
         | WorkValue::TaskDescription(_)
         | WorkValue::TaskRank(_)
         | WorkValue::TaskAssignee(_)
-        | WorkValue::HistoricalTaskPaused(_)
         | WorkValue::TaskShippedAt(_)
         | WorkValue::TaskDueDate(_)
         | WorkValue::TaskDeletedAt(_)
         | WorkValue::TaskUrl(_)
         | WorkValue::TaskBranch(_)
         | WorkValue::TaskTeam(_)
-        | WorkValue::HistoricalTaskRegressedIn(_)
         | WorkValue::Disposition(_) => "tasks",
         WorkValue::CommentTask(_) | WorkValue::CommentContent(_) => "task_comments",
     }
@@ -69,7 +65,6 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::WaveParent(_) => "parent_wave_id",
         WorkValue::WaveRetired(_) => "retired_at",
         WorkValue::WaveProject(_) => "current_project_id",
-        WorkValue::HistoricalWaveWorkflow(_) => "workflow",
         WorkValue::ProjectWave(_) => "wave_id",
         WorkValue::ProjectLinearId(_) => "external_project_id",
         WorkValue::ProjectSlug(_) => "project_slug",
@@ -87,16 +82,13 @@ fn column(value: &WorkValue) -> &'static str {
         WorkValue::TaskDescription(_) => "issue_description",
         WorkValue::TaskRank(_) => "planning_rank",
         WorkValue::TaskAssignee(_) => "planning_assignee",
-        WorkValue::HistoricalTaskPaused(_) => "paused",
         WorkValue::TaskShippedAt(_) => "shipped_at",
         WorkValue::TaskDueDate(_) => "planning_due_date",
         WorkValue::TaskDeletedAt(_) => "planning_deleted_at",
         WorkValue::TaskUrl(_) => "planning_url",
         WorkValue::TaskBranch(_) => "planning_branch_name",
         WorkValue::TaskTeam(_) => "planning_team_id",
-        WorkValue::HistoricalTaskRegressedIn(_) => "regressed_in",
         WorkValue::CommentTask(_) => "task_id",
-        WorkValue::HistoricalProjectWorkflow(_) => "workflow",
         WorkValue::Krs(_) => "krs",
         WorkValue::MetricTargets(_) => "metric_targets",
         WorkValue::Disposition(_) => "disposition",
@@ -105,7 +97,7 @@ fn column(value: &WorkValue) -> &'static str {
 }
 
 pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<WorkValue>> {
-    let mut values = match table {
+    let values = match table {
         "waves" => read_record(conn, "SELECT name,parent_wave_id,current_project_id,retired_at FROM waves WHERE id=?1", id, |row| {
                     let retired: Option<i64> = row.get(3)?;
                     let project: Option<String> = row.get(2)?;
@@ -140,7 +132,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                         WorkValue::MetricTargets(serde_json::from_str(&row.get::<_, String>(11)?)?),
                     ])
         }),
-        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at FROM tasks WHERE id=?1", id, |row| {
+        "tasks" => read_record(conn, "SELECT project_id,external_issue_id,issue_identifier,issue_title,issue_description,planning_rank,planning_assignee,planning_due_date,planning_deleted_at,planning_url,planning_branch_name,planning_team_id,planning_state,planning_completed,planning_completed_at,shipped_at FROM tasks WHERE id=?1", id, |row| {
                     Ok(vec![
                         WorkValue::TaskProject(row.get(0)?),
                         WorkValue::TaskLinearId(row.get(1)?),
@@ -159,6 +151,7 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
                             planning_completed: row.get(13)?,
                             planning_completed_at: row.get(14)?,
                         }),
+                        WorkValue::TaskShippedAt(row.get(15)?),
                     ])
         }),
         "task_comments" => read_record(conn, "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1", id, |row| {
@@ -173,43 +166,10 @@ pub(crate) fn read(conn: &Connection, table: &str, id: &str) -> StoreResult<Vec<
         }),
         _ => Err(StoreError::InvalidData("unknown Work table".into())),
     }?;
-    // Historical migrations seed their journal before later Task columns exist.
-    if table == "tasks" {
-        if let Some(paused) = optional_task_column(conn, id, "paused")? {
-            values.push(WorkValue::HistoricalTaskPaused(paused));
-        }
-        if let Some(shipped_at) = optional_task_column(conn, id, "shipped_at")? {
-            values.push(WorkValue::TaskShippedAt(shipped_at));
-        }
-        if let Some(regressed_in) = optional_task_column(conn, id, "regressed_in")? {
-            values.push(WorkValue::HistoricalTaskRegressedIn(regressed_in));
-        }
-    }
     for value in &values {
         value.validate()?;
     }
     Ok(values)
-}
-
-/// A `tasks` column's value, or `None` before the migration that adds it.
-fn optional_task_column<T: rusqlite::types::FromSql>(
-    conn: &Connection,
-    id: &str,
-    column: &str,
-) -> StoreResult<Option<T>> {
-    let exists: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tasks') WHERE name=?1)",
-        [column],
-        |row| row.get(0),
-    )?;
-    if !exists {
-        return Ok(None);
-    }
-    Ok(Some(conn.query_row(
-        &format!("SELECT {column} FROM tasks WHERE id=?1"),
-        [id],
-        |row| row.get(0),
-    )?))
 }
 
 fn read_record(
@@ -238,12 +198,6 @@ fn write_record(
     let mut changes = Vec::new();
     for edit in edits {
         let edit = &edit.change;
-        if matches!(
-            edit,
-            WorkValue::HistoricalProjectWorkflow(_) | WorkValue::HistoricalWaveWorkflow(_)
-        ) {
-            continue;
-        }
         edit.validate()?;
         if let WorkValue::WaveProject(Some(project)) = edit {
             let owner: Option<String> = conn

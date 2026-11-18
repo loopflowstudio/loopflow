@@ -27,7 +27,6 @@ pub struct HubPlan {
     pub error: Option<String>,
     /// When the hub stopped answering, while it still doesn't.
     pub failing_since: Option<i64>,
-    pub reached_at: Option<i64>,
 }
 
 /// A value saved here that the hub has not confirmed.
@@ -38,6 +37,26 @@ pub struct HubSend {
     pub owner_table: String,
     pub edit: WorkEdit,
     pub sent_at: Option<i64>,
+}
+
+impl HubSend {
+    /// The field without its record prefix: `title`, `name`.
+    pub fn field(&self) -> &'static str {
+        let field = self.edit.change.field();
+        ["task_", "wave_", "project_", "comment_"]
+            .iter()
+            .find_map(|prefix| field.strip_prefix(prefix))
+            .unwrap_or(field)
+    }
+
+    /// `queued`, or `sent` while its answer is outstanding.
+    pub fn phase(&self) -> &'static str {
+        if self.sent_at.is_some() {
+            "sent"
+        } else {
+            "queued"
+        }
+    }
 }
 
 /// Owners changed after a watermark, as every current value of each.
@@ -125,7 +144,7 @@ fn queue(
 fn hub_plan_in(conn: &Connection, repo: &str) -> StoreResult<Option<HubPlan>> {
     Ok(conn
         .query_row(
-            "SELECT hub_machine_id,seq,error,failing_since,reached_at FROM hub_plans WHERE repo=?1",
+            "SELECT hub_machine_id,seq,error,failing_since FROM hub_plans WHERE repo=?1",
             [repo],
             |row| {
                 Ok(HubPlan {
@@ -133,7 +152,6 @@ fn hub_plan_in(conn: &Connection, repo: &str) -> StoreResult<Option<HubPlan>> {
                     seq: row.get(1)?,
                     error: row.get(2)?,
                     failing_since: row.get(3)?,
-                    reached_at: row.get(4)?,
                 })
             },
         )
@@ -157,7 +175,7 @@ impl SqliteStore {
         conn.execute(
             "INSERT INTO hub_plans(repo,hub_machine_id) VALUES(?1,?2)
              ON CONFLICT(repo) DO UPDATE SET hub_machine_id=excluded.hub_machine_id,seq=NULL,
-                error=NULL,failing_since=NULL,reached_at=NULL",
+                error=NULL,failing_since=NULL",
             params![repo, hub],
         )?;
         hub_plan_in(&conn, repo)?.ok_or(StoreError::NotFound)
@@ -222,8 +240,8 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         match error {
             None => conn.execute(
-                "UPDATE hub_plans SET error=NULL,failing_since=NULL,reached_at=?2 WHERE repo=?1",
-                params![repo, now_unix()],
+                "UPDATE hub_plans SET error=NULL,failing_since=NULL WHERE repo=?1",
+                [repo],
             )?,
             Some(error) => conn.execute(
                 "UPDATE hub_plans SET error=?2,failing_since=COALESCE(failing_since,?3) WHERE repo=?1",

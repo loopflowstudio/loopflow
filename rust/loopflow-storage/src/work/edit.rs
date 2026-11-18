@@ -95,21 +95,13 @@ work_values! {
     (TaskDescription, "task_description", Option<String>),
     (TaskRank, "task_rank", u32),
     (TaskAssignee, "task_assignee", Option<String>),
-    // Released peers recorded a Task hold here; nothing reads it.
-    (HistoricalTaskPaused, "task_paused", bool),
     (TaskShippedAt, "task_shipped_at", Option<i64>),
     (TaskDueDate, "task_due_date", Option<String>),
     (TaskDeletedAt, "task_deleted_at", Option<i64>),
     (TaskUrl, "task_url", Option<String>),
     (TaskBranch, "task_branch", Option<String>),
     (TaskTeam, "task_team", Option<String>),
-    // Regressions are GitHub issues. Stored journal rows and released peers still carry
-    // this field, so it round-trips unread until LOO-730 deletes the rows and column.
-    (HistoricalTaskRegressedIn, "task_regressed_in", Option<String>),
     (CommentTask, "comment_task", String),
-    (HistoricalProjectWorkflow, "workflow", String),
-    // Released peers recorded the Wave default here; it lives in the Wave config.yaml.
-    (HistoricalWaveWorkflow, "wave_workflow", Option<String>),
     (Krs, "krs", Vec<crate::work::project::ProjectKR>),
     (MetricTargets, "metric_targets", Vec<crate::metric::MetricTarget>),
     (Disposition, "disposition", Disposition),

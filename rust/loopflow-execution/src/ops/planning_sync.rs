@@ -84,24 +84,19 @@ where
 
 async fn sync_saved(store: &Store, repo: &str, saved: &ActionOwner) {
     let attempt = async {
-        let config = crate::config::load_config(Some(Path::new(repo)))
-            .map_err(message)?
-            .unwrap_or_default();
-        match config.planning_transport() {
-            None => super::plan_hub::sync(store, repo, true)
+        if !super::tracker::connected(repo) {
+            return super::plan_hub::sync(store, repo, true)
                 .await
-                .map_err(message),
-            Some(_) => {
-                super::tracker::drain::drain_repository(
-                    store,
-                    repo,
-                    super::tracker::drain::Scope::First(saved),
-                    super::tracker::drain::Bound::PASS,
-                )
-                .await?;
-                Ok(())
-            }
+                .map_err(message);
         }
+        super::tracker::drain::drain_repository(
+            store,
+            repo,
+            super::tracker::drain::Scope::First(saved),
+            super::tracker::drain::Bound::PASS,
+        )
+        .await?;
+        Ok(())
     };
     if let Err(error) = attempt.await {
         tracing::debug!(%error, "planning synchronization pending after local save");

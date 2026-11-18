@@ -2644,18 +2644,7 @@ async fn hub_synced(store: &Store, repo: &str, task: &Task) -> OpsResult<String>
         .map_err(task_error)?
         .into_iter()
         .filter(|send| send.edit.target == task.id.as_str())
-        .map(|send| {
-            let field = send.edit.change.field();
-            format!(
-                "{} · {}",
-                field.strip_prefix("task_").unwrap_or(field),
-                if send.sent_at.is_some() {
-                    "sent"
-                } else {
-                    "queued"
-                }
-            )
-        })
+        .map(|send| format!("{} · {}", send.field(), send.phase()))
         .collect::<Vec<_>>();
     Ok(open_lines(&task.identifier, &open))
 }

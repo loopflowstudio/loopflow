@@ -33,8 +33,7 @@ CREATE TABLE hub_plans (
     hub_machine_id TEXT NOT NULL,
     seq INTEGER,
     error TEXT,
-    failing_since INTEGER,
-    reached_at INTEGER
+    failing_since INTEGER
 );
 
 -- `hub_sends`: each value saved here that the hub has not confirmed, newest
@@ -65,12 +64,10 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 
 CREATE TRIGGER store_revision_hub_plans_insert AFTER INSERT ON hub_plans
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
--- Reaching the hub again is a reading time, not a change: only NULL <-> value counts.
 CREATE TRIGGER store_revision_hub_plans_update AFTER UPDATE ON hub_plans
 WHEN NEW.repo IS NOT OLD.repo OR NEW.hub_machine_id IS NOT OLD.hub_machine_id OR
     NEW.seq IS NOT OLD.seq OR NEW.error IS NOT OLD.error OR
-    NEW.failing_since IS NOT OLD.failing_since OR
-    (NEW.reached_at IS NULL) IS NOT (OLD.reached_at IS NULL)
+    NEW.failing_since IS NOT OLD.failing_since
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
 CREATE TRIGGER store_revision_hub_plans_delete AFTER DELETE ON hub_plans
 BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; END;
@@ -90,3 +87,5 @@ BEGIN UPDATE store_revisions SET revision=revision+1 WHERE domain='planning'; EN
 -- leaving: planning_peer_observed LOO-938
 -- leaving: planning_peer_routes LOO-938
 -- leaving: planning_user LOO-938
+-- A Task hold was a Git journal value; nothing reads the column.
+-- leaving: tasks.paused LOO-938

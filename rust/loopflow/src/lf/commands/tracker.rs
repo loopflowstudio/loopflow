@@ -242,21 +242,10 @@ fn plan_home(store: &Store, repo: &str) -> Result<PlanHome> {
         .open_hub_sends(repo)?
         .iter()
         .map(|send| {
-            // `task_title` reads `title` under its Task.
-            let field = send.edit.change.field();
-            let field = ["task_", "wave_", "project_", "comment_"]
-                .iter()
-                .find_map(|prefix| field.strip_prefix(prefix))
-                .unwrap_or(field);
             Ok(HubOpen {
                 owner: hub_owner_name(store, send)?,
-                field: field.to_owned(),
-                phase: if send.sent_at.is_some() {
-                    "sent"
-                } else {
-                    "queued"
-                }
-                .to_owned(),
+                field: send.field().to_owned(),
+                phase: send.phase().to_owned(),
             })
         })
         .collect::<Result<Vec<_>>>()?;

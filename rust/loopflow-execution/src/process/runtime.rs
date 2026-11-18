@@ -504,8 +504,7 @@ pub fn resume_session_agent_process(
     session: &str,
     lf_process_id: &loopflow_model::id::LfProcessId,
 ) -> StoreResult<crate::process::SessionAttachment> {
-    let expected = store.session_attachment(session)?;
-    attachment::resume_session_attachment(store, session, expected.as_ref(), lf_process_id, || {
+    attachment::resume_session_attachment(store, session, lf_process_id, || {
         crate::harness::agent_process::close_session_agent_process(store, session)
     })
 }
@@ -952,14 +951,12 @@ mod tests {
         let agent = store.agent_process(&attached.agent_process_id).unwrap();
         let history = store.session_history("resume", 0, 0).unwrap();
         let resumer = store.test_lf_process();
-        assert!(attachment::resume_session_attachment(
-            &store,
-            "resume",
-            Some(&attached),
-            &resumer,
-            || { panic!("unknown owner cannot authorize closing its agent") }
-        )
-        .is_err());
+        assert!(
+            attachment::resume_session_attachment(&store, "resume", &resumer, || {
+                panic!("unknown owner cannot authorize closing its agent")
+            })
+            .is_err()
+        );
         let mut next = session.clone();
         next.artifact_key = Some(crate::session_record::new_artifact_key());
         next.input_published = false;
@@ -1163,38 +1160,32 @@ mod tests {
         let (finished, finishing) = std::sync::mpsc::channel();
         let resumer = store.test_lf_process();
         std::thread::scope(|scope| {
-            let next = attachment::resume_session_attachment(
-                &store,
-                "resume",
-                Some(&detached),
-                &resumer,
-                || {
-                    let store = &store;
-                    let expected = &detached;
-                    scope.spawn(move || {
-                        started.send(()).unwrap();
-                        let result = attachment::claim_session_attachment(
-                            store,
-                            "resume",
-                            Some(expected),
-                            &LfProcessId::new(),
-                            false,
-                        );
-                        finished.send(result).unwrap();
-                    });
-                    starting.recv().unwrap();
-                    assert!(matches!(
-                        finishing.recv_timeout(std::time::Duration::from_millis(100)),
-                        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
-                    ));
-                    // Other SQLite reads/writes remain available during provider I/O.
-                    assert_eq!(
-                        store.session_attachment("resume").unwrap(),
-                        Some(detached.clone())
+            let next = attachment::resume_session_attachment(&store, "resume", &resumer, || {
+                let store = &store;
+                let expected = &detached;
+                scope.spawn(move || {
+                    started.send(()).unwrap();
+                    let result = attachment::claim_session_attachment(
+                        store,
+                        "resume",
+                        Some(expected),
+                        &LfProcessId::new(),
+                        false,
                     );
-                    Ok(true)
-                },
-            )
+                    finished.send(result).unwrap();
+                });
+                starting.recv().unwrap();
+                assert!(matches!(
+                    finishing.recv_timeout(std::time::Duration::from_millis(100)),
+                    Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+                ));
+                // Other SQLite reads/writes remain available during provider I/O.
+                assert_eq!(
+                    store.session_attachment("resume").unwrap(),
+                    Some(detached.clone())
+                );
+                Ok(true)
+            })
             .unwrap();
             assert!(finishing
                 .recv_timeout(std::time::Duration::from_secs(5))

@@ -243,6 +243,22 @@ def _start_hooks(args: list[str]) -> None:
                 stdout=subprocess.DEVNULL,
                 check=True,
             )
+    return thread
+
+
+def _record_rollout(home: Path, args: list[str], thread: str) -> None:
+    """A bare first prompt leaves a rollout an app-server can resume."""
+    if "resume" in args or "--" not in args or args[-1] == "--":
+        return
+    prompt = args[args.index("--") + 1]
+    (home / "native-thread").write_text(thread)
+    turn = {
+        "id": "turn-0",
+        "status": "completed",
+        "items": [{"id": "user-0", "type": "userMessage",
+                   "content": [{"type": "text", "text": prompt}]}],
+    }
+    (home / "native-turns.json").write_text(json.dumps([turn]))
 
 
 def _server(endpoint: str, home: Path) -> None:
@@ -442,7 +458,7 @@ def main() -> None:
         if (home / "fail-terminal").exists():
             raise SystemExit(24)
         print("\n".join(args), flush=True)
-        _start_hooks(args)
+        _record_rollout(home, args, _start_hooks(args))
         with (home / "launched").open("a") as file:
             file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
 

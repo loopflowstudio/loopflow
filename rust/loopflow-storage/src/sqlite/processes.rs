@@ -1569,6 +1569,21 @@ impl SqliteStore {
         })
     }
 
+    /// Take over whatever attachment the Session has once its fence is held. A
+    /// previous provider's exit may still be settling; reading the attachment
+    /// before the fence would race that settlement.
+    pub fn begin_session_resume(&self, session: &str) -> StoreResult<SessionTransfer<'_>> {
+        let session = loopflow_model::id::canonical_session(session);
+        let dispatch = self.lock_session_attachment(&session)?;
+        let expected = self.session_attachment(&session)?;
+        Ok(SessionTransfer {
+            store: self,
+            session,
+            expected,
+            _dispatch: dispatch,
+        })
+    }
+
     /// Reserve the next OS process for the same invocation after an observed
     /// exit. An uncertain spawn cannot be retried by overwriting its identity.
     pub fn prepare_agent_process(

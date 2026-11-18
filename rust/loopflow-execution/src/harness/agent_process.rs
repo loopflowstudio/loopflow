@@ -882,15 +882,10 @@ mod tests {
         let before = events(&sql);
         let resumer = store.test_lf_process();
 
-        let stuck = store.session_attachment(&session).unwrap();
-        assert!(attachment::resume_session_attachment(
-            &store,
-            &session,
-            stuck.as_ref(),
-            &resumer,
-            || Ok(false)
-        )
-        .is_err());
+        assert!(
+            attachment::resume_session_attachment(&store, &session, &resumer, || Ok(false))
+                .is_err()
+        );
         let check = lineage(&store);
         assert!(
             check.detail.contains("`lf monitor prune` repairs"),
@@ -917,7 +912,7 @@ mod tests {
         // The Session resumes through the ordinary claim with native history intact.
         assert_eq!(store.session_attachment(&session).unwrap(), None);
         let resumed =
-            attachment::resume_session_attachment(&store, &session, None, &resumer, || Ok(false))
+            attachment::resume_session_attachment(&store, &session, &resumer, || Ok(false))
                 .unwrap();
         assert_ne!(resumed.agent_process_id, agent);
         let thread: Option<String> = sql

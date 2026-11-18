@@ -65,6 +65,9 @@ pub struct TaskDetail {
     /// abandoned; `null` while it never has.
     #[serde(deserialize_with = "Option::deserialize")]
     pub summary: Option<loopflow_storage::sqlite::task_summaries::TaskSummary>,
+    /// The Task this one is stacked on; `null` when it builds on the default branch.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
 }
 
 /// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.

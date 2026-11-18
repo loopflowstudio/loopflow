@@ -572,7 +572,8 @@
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -1636,7 +1637,8 @@
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {
@@ -2635,7 +2637,8 @@
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG",
         "started_by": null,
         "ship_approval": null,
-        "ship_stop": null
+        "ship_stop": null,
+        "stack_parent": null
       },
       "graph_processes": [
         {

@@ -15,14 +15,14 @@ use loopflow_model::id::AgentSessionId;
 
 /// One provider turn in its native conversation.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ProviderTurn {
+pub struct ProviderTurn {
     pub thread: AgentSessionId,
     pub turn: String,
 }
 
 /// What a provider's stream says about a conversation's availability.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum Signal {
+pub enum Signal {
     /// The provider is producing a turn.
     Working,
     /// A new native turn began; earlier preview text no longer describes it.
@@ -46,7 +46,7 @@ pub(crate) enum Signal {
 
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
-pub(crate) enum ProviderFact {
+pub enum ProviderFact {
     /// The provider named the native conversation this stream continues.
     SessionObserved(AgentSessionId),
     /// The provider reported that a native turn began.
@@ -92,14 +92,14 @@ pub(crate) enum ProviderFact {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum Decoded {
+pub enum Decoded {
     Fact(ProviderFact),
     Display(ConversationEvent),
 }
 
 impl Decoded {
     #[cfg(test)]
-    pub(crate) fn fact(&self) -> Option<&ProviderFact> {
+    pub fn fact(&self) -> Option<&ProviderFact> {
         match self {
             Self::Fact(fact) => Some(fact),
             Self::Display(_) => None,
@@ -127,11 +127,11 @@ pub fn activity(signals: impl IntoIterator<Item = Signal>) -> Vec<Decoded> {
         .collect()
 }
 
-/// A recorded native trace under `harness/testdata/`, one JSON value per line.
-#[cfg(test)]
+/// A recorded native trace under `src/testdata/`, one JSON value per line.
+#[cfg(any(test, feature = "test-support"))]
 pub fn trace(file: &str) -> Vec<Value> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/harness/testdata")
+        .join("src/testdata")
         .join(file);
     std::fs::read_to_string(path)
         .unwrap()
@@ -143,7 +143,7 @@ pub fn trace(file: &str) -> Vec<Value> {
 
 /// The facts in `decoded`, one short line each, for asserting a sequence.
 #[cfg(test)]
-pub(crate) fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
+pub fn fact_lines(decoded: &[Decoded]) -> Vec<String> {
     let turn = |turn: &ProviderTurn| format!("{}/{}", turn.thread.as_str(), turn.turn);
     decoded
         .iter()

@@ -5,11 +5,11 @@ use std::time::Duration;
 use serde_json::json;
 use tokio::sync::mpsc;
 
-use super::fact::{Decoded, ProviderTurn};
 use super::pi::Driver as PiDriver;
-use super::pi_decode::Turn;
 use super::{Driver, SendCurrentOutcome};
 use crate::agent::AgentConfig;
+use loopflow_harness::fact::{Decoded, ProviderTurn};
+use loopflow_harness::pi_decode::Turn;
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 
 async fn completed(rx: &mut mpsc::UnboundedReceiver<ConversationEvent>) -> Vec<ConversationEvent> {

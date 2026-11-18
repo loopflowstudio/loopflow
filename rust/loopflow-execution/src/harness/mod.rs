@@ -1,12 +1,10 @@
 pub mod agent_process;
 pub mod claude;
-mod claude_decode;
 pub(crate) mod claude_trust;
 #[cfg(unix)]
 pub mod codex;
 #[cfg(unix)]
 pub mod codex_connection;
-mod codex_decode;
 mod codex_rpc;
 mod common;
 #[cfg(test)]
@@ -16,17 +14,13 @@ mod dispatch;
 #[cfg(all(test, unix))]
 mod dispatch_tests;
 pub mod drive;
-pub(crate) mod fact;
 mod fact_writer;
 #[cfg(all(test, unix))]
 mod launch_matrix;
-mod lf_tag;
 pub(crate) mod native_exit;
 pub mod native_session;
 pub mod opencode;
-mod opencode_decode;
 pub mod pi;
-mod pi_decode;
 pub mod task_updates;
 
 use anyhow::Result;

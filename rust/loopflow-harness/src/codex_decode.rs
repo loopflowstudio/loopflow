@@ -6,22 +6,22 @@ use std::collections::{HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
-use crate::harness::lf_tag::LfTagParser;
+use crate::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::lf_tag::LfTagParser;
 use loopflow_model::chat::types::{
     ConversationEvent, ConversationItem, FileEdit, ItemDelta, Lifecycle, TurnUsage,
 };
 use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ItemPhase {
+enum ItemPhase {
     Started,
     Completed,
 }
 
 /// Turn id from notification params: item/turn-scoped notifications carry a
 /// top-level `turnId`; turn/started and turn/completed nest it as `turn.id`.
-pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
+fn extract_turn_id(params: &Value) -> Option<String> {
     params
         .get("turnId")
         .and_then(Value::as_str)
@@ -36,7 +36,7 @@ pub(super) fn extract_turn_id(params: &Value) -> Option<String> {
 
 /// Vendor thread id from a `thread/started` notification's params or a
 /// `thread/start` response's result — both nest it as `thread.id`.
-pub(super) fn extract_thread_id(value: &Value) -> Option<AgentSessionId> {
+fn extract_thread_id(value: &Value) -> Option<AgentSessionId> {
     value
         .get("thread")
         .and_then(|t| t.get("id"))
@@ -45,7 +45,7 @@ pub(super) fn extract_thread_id(value: &Value) -> Option<AgentSessionId> {
 }
 
 /// TurnStatus from turn/completed params: completed | interrupted | failed.
-pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
+fn map_turn_status(params: &Value) -> Lifecycle {
     match params
         .pointer("/turn/status")
         .and_then(Value::as_str)
@@ -60,7 +60,7 @@ pub(super) fn map_turn_status(params: &Value) -> Lifecycle {
 /// Usage from thread/tokenUsage/updated params. `total` is cumulative for the
 /// thread; the wave pipeline is turn-grained, so the latest snapshot before
 /// turn/completed is what gets reported for the turn.
-pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
+fn map_token_usage(params: &Value) -> TurnUsage {
     let total = params.pointer("/tokenUsage/total");
     let last = params.pointer("/tokenUsage/last");
     let field = |key: &str| total.and_then(|t| t.get(key)).and_then(Value::as_u64);
@@ -83,7 +83,7 @@ pub(super) fn map_token_usage(params: &Value) -> TurnUsage {
     }
 }
 
-pub(super) fn map_item_id(params: &Value) -> String {
+fn map_item_id(params: &Value) -> String {
     params
         .pointer("/item/id")
         .and_then(Value::as_str)
@@ -92,14 +92,14 @@ pub(super) fn map_item_id(params: &Value) -> String {
         .to_string()
 }
 
-pub(super) fn map_item_type(params: &Value) -> &str {
+fn map_item_type(params: &Value) -> &str {
     params
         .pointer("/item/type")
         .and_then(Value::as_str)
         .unwrap_or("unknown")
 }
 
-pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
+fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
     let id = map_item_id(params);
     let item_type = map_item_type(params);
     let item = params.get("item").unwrap_or(params);
@@ -172,7 +172,7 @@ pub(super) fn build_item(params: &Value, phase: ItemPhase) -> ConversationItem {
     }
 }
 
-pub(super) fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> {
+fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> {
     let content = delta_content(params)?;
     match method {
         "item/commandExecution/outputDelta" | "item/fileChange/outputDelta" => {
@@ -184,7 +184,7 @@ pub(super) fn map_item_delta(method: &str, params: &Value) -> Option<ItemDelta> 
 }
 
 /// Streaming text: every 0.142.5 delta notification carries a `delta` field.
-pub(super) fn delta_content(params: &Value) -> Option<String> {
+fn delta_content(params: &Value) -> Option<String> {
     params
         .get("delta")
         .and_then(Value::as_str)
@@ -300,7 +300,7 @@ fn parse_file_changes(item: &Value) -> Vec<FileEdit> {
 /// with its reply establishes that this client's request started it. Resumed
 /// history does not establish it.
 #[derive(Debug, Default)]
-pub(super) struct CodexDecoder {
+pub struct CodexDecoder {
     sequence: u64,
     /// The turn current availability describes; late events for earlier
     /// turns still enter history but cannot replace it.
@@ -335,13 +335,13 @@ impl Turn {
 }
 
 /// The request id whose origin Loopflow freezes before sending `rpc`.
-pub(super) fn turn_request(rpc: &Value) -> Option<String> {
+pub fn turn_request(rpc: &Value) -> Option<String> {
     (rpc["method"] == "turn/start" && !rpc["id"].is_null()).then(|| rpc["id"].to_string())
 }
 
 impl CodexDecoder {
     /// A client message on its way to the server.
-    pub(super) fn outbound(&mut self, rpc: &Value) -> Vec<Decoded> {
+    pub fn outbound(&mut self, rpc: &Value) -> Vec<Decoded> {
         let mut out = fact::activity(signals(rpc, true));
         if let Some(request) = turn_request(rpc) {
             self.active_turn = None;
@@ -354,7 +354,7 @@ impl CodexDecoder {
 
     /// A turn already in progress when this connection resumed its thread;
     /// turn-less notifications report under it.
-    pub(super) fn resume_turn(&mut self, turn: Option<String>) {
+    pub fn resume_turn(&mut self, turn: Option<String>) {
         self.display.current_turn = turn;
     }
 
@@ -950,7 +950,7 @@ fn retain_higher_context_pressure(latest: &mut TurnUsage, previous: &TurnUsage) 
 
 /// The display error for a JSON-RPC error response
 /// (`{"error":{"code":-32600,"message":..},"id":N}`) no caller awaits.
-pub(super) fn rpc_error(error: &Value) -> ConversationEvent {
+pub fn rpc_error(error: &Value) -> ConversationEvent {
     let code = error
         .get("code")
         .and_then(Value::as_i64)

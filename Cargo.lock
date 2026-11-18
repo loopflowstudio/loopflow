@@ -1698,6 +1698,7 @@ dependencies = [
  "jsonschema",
  "libc",
  "loopflow-definitions",
+ "loopflow-harness",
  "loopflow-model",
  "loopflow-storage",
  "loopflow-terminal",
@@ -1726,6 +1727,18 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "yaml-edit",
+]
+
+[[package]]
+name = "loopflow-harness"
+version = "0.16.0"
+dependencies = [
+ "anyhow",
+ "loopflow-model",
+ "regex",
+ "serde_json",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

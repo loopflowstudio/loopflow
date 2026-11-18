@@ -15,13 +15,13 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn};
 use super::fact_writer::FactWriter;
-use super::pi_decode::Turn;
 use super::Recording;
 use super::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::agent::AgentConfig;
 use crate::steer::NativeBoundary;
+use loopflow_harness::fact::{Decoded, ProviderFact, ProviderTurn};
+use loopflow_harness::pi_decode::{self, Turn};
 use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
@@ -603,7 +603,7 @@ pub fn observe_native(
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
             return Ok(());
         }
-        let decoded = super::pi_decode::native(&thread, value)
+        let decoded = pi_decode::native(&thread, value)
             .map_err(|e| crate::store::StoreError::InvalidData(e.to_string()))?;
         writer.record(&decoded)
     })?;

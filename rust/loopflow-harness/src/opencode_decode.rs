@@ -5,14 +5,15 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use regex::Regex;
 use serde_json::{json, Value};
 
-use super::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::fact::{self, Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, FileEdit, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
 #[derive(Debug)]
-pub(super) struct OpenCodeDecoder {
+pub struct OpenCodeDecoder {
     thread: AgentSessionId,
     display: ReaderState,
     requests: BTreeMap<String, Request>,
@@ -176,7 +177,7 @@ impl OpenCodeDecoder {
                 if status != Lifecycle::Completed {
                     lifecycle.push(ConversationEvent::Error {
                         code: "opencode_error".into(),
-                        message: super::opencode::sanitize_error_message(
+                        message: sanitize_error_message(
                             error["message"]
                                 .as_str()
                                 .unwrap_or("OpenCode execution failed"),
@@ -252,7 +253,7 @@ fn signals(event: &Value, thread: &str) -> Vec<Signal> {
 }
 
 #[derive(Debug)]
-pub(super) struct ReaderState {
+pub struct ReaderState {
     session_id: AgentSessionId,
     tools: HashMap<String, ToolLifecycle>,
     text: HashMap<String, String>,
@@ -278,16 +279,16 @@ impl ReaderState {
     pub fn model(&self) -> Option<&str> {
         self.model.as_deref()
     }
-    pub(super) fn last_event_type(&self) -> Option<&str> {
+    pub fn last_event_type(&self) -> Option<&str> {
         self.last_event_type.as_deref()
     }
-    pub(super) fn last_event_seq(&self) -> Option<u64> {
+    pub fn last_event_seq(&self) -> Option<u64> {
         self.last_event_seq
     }
-    pub(super) fn turn_is_open(&self) -> bool {
+    pub fn turn_is_open(&self) -> bool {
         self.turn_open
     }
-    pub(super) fn turn_has_content(&self) -> bool {
+    pub fn turn_has_content(&self) -> bool {
         self.turn_substantive
     }
     fn observe_event(&mut self, event: &Value) {
@@ -497,12 +498,46 @@ fn command_args(command: &Value) -> Vec<String> {
     Vec::new()
 }
 
+/// Redact credential material from an error string before it enters the
+/// durable evidence channel. Strips `Authorization` header values, `Bearer`
+/// tokens, and common token query parameters. The opencode `/event` URL is
+/// `http://127.0.0.1:<port>/event` (no credentials), but a chained/upstream
+/// error or redirect could carry auth material in its Display.
+pub fn sanitize_error_message(message: &str) -> String {
+    let mut out = message.to_string();
+    // Bearer first so `Authorization: Bearer <token>` is caught by both the
+    // bearer pattern and the authorization-header pattern. The bearer pattern
+    // stops at whitespace or a comma so the trailing comma that delimits the
+    // authorization-header value survives as a stop boundary for the next
+    // pattern — otherwise `Bearer <tok>, token=abc123` lets the authorization
+    // regex eat through `token=abc123` before the param redaction runs.
+    let redactions: [(Regex, &str); 3] = [
+        (
+            Regex::new(r"(?i)bearer\s+[^,\s]+").expect("valid credential pattern"),
+            "bearer [redacted]",
+        ),
+        (
+            Regex::new(r"(?i)authorization:\s*[^\n,]+").expect("valid credential pattern"),
+            "authorization: [redacted]",
+        ),
+        (
+            Regex::new(r"(?i)(token|key|access_token|api_key)=\S+")
+                .expect("valid credential pattern"),
+            "$1=[redacted]",
+        ),
+    ];
+    for (re, replacement) in &redactions {
+        out = re.replace_all(&out, *replacement).to_string();
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::{json, Value};
 
-    use super::{OpenCodeDecoder, Signal};
-    use crate::harness::fact::{self, Decoded, ProviderFact};
+    use super::{sanitize_error_message, OpenCodeDecoder, Signal};
+    use crate::fact::{self, Decoded, ProviderFact};
     use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 
     /// Server events carry availability only; turns come from snapshots. A
@@ -686,5 +721,34 @@ mod tests {
             ),
             [Signal::InputRequested("q".into())]
         );
+    }
+
+    #[test]
+    fn sanitize_error_message_redacts_credentials() {
+        let input = "request to https://api.example.com/v1/chat?api_key=sk-secret123 failed: \
+                     Authorization: Bearer super-secret-token, token=abc123";
+        let sanitized = sanitize_error_message(input);
+        assert!(
+            !sanitized.contains("sk-secret123"),
+            "api_key leaked: {sanitized}"
+        );
+        assert!(
+            !sanitized.contains("super-secret-token"),
+            "bearer token leaked: {sanitized}"
+        );
+        assert!(
+            !sanitized.contains("abc123"),
+            "token param leaked: {sanitized}"
+        );
+        assert!(sanitized.contains("api_key=[redacted]"));
+        assert!(sanitized.contains("authorization: [redacted]"));
+        assert!(sanitized.contains("token=[redacted]"));
+    }
+
+    #[test]
+    fn sanitize_error_message_preserves_non_credential_text() {
+        let input = "chunk stream ended (reqwest: EOF)";
+        let sanitized = sanitize_error_message(input);
+        assert_eq!(sanitized, input);
     }
 }

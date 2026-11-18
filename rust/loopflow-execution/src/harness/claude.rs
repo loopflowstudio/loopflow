@@ -16,33 +16,15 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use crate::agent::AgentConfig;
-use crate::harness::claude_decode::ClaudeDecoder;
 use crate::harness::common::TurnInProgressGuard;
-use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::{FactWriter, RequestOrigins};
 use crate::harness::Recording;
 use crate::harness::{Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::provider_auth::Provider;
-use loopflow_model::chat::types::{ConversationEvent, Lifecycle, TurnUsage};
+use loopflow_harness::claude_decode::ClaudeDecoder;
+use loopflow_harness::fact::{Decoded, ProviderFact};
+use loopflow_model::chat::types::{ConversationEvent, Lifecycle};
 use loopflow_model::id::AgentSessionId;
-
-/// Claude's token fields, shared by live stream and saved transcript decoding.
-pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
-    let tokens = |key: &str| value.get(key).and_then(serde_json::Value::as_u64);
-    let input_tokens = tokens("input_tokens");
-    let cache_read_tokens = tokens("cache_read_input_tokens");
-    let cache_write_tokens = tokens("cache_creation_input_tokens");
-    TurnUsage {
-        input_tokens,
-        total_input_tokens: input_tokens
-            .map(|input| input + cache_read_tokens.unwrap_or(0) + cache_write_tokens.unwrap_or(0)),
-        cache_read_tokens,
-        cache_write_tokens,
-        output_tokens: tokens("output_tokens"),
-        reasoning_tokens: tokens("reasoning_tokens"),
-        ..TurnUsage::default()
-    }
-}
 
 /// One persistent `claude -p --input-format stream-json` process drives every
 /// turn of a run. `send_input` writes the seed message; the process stays alive

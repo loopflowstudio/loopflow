@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use anyhow::Result;
 use serde_json::{json, Value};
 
-use super::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
+use crate::fact::{Decoded, ProviderFact, ProviderTurn, Signal};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle, TurnUsage};
 use loopflow_model::id::AgentSessionId;
 

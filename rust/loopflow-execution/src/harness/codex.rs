@@ -35,15 +35,15 @@ use tokio::task::JoinHandle;
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::{build_codex_thread_start_params, AgentConfig};
-use crate::harness::codex_decode::{self, CodexDecoder};
 use crate::harness::common::spawn_stderr_logger;
-use crate::harness::fact::{Decoded, ProviderFact};
 use crate::harness::fact_writer::FactWriter;
 use crate::harness::{ApprovalPolicy, Driver as StreamDriver, HarnessError, SendCurrentOutcome};
 use crate::os_process::{
     agent_process_lifeline_path, hold_agent_process_lifeline, kill_process_group,
 };
 use crate::provider_auth::Provider;
+use loopflow_harness::codex_decode::{self, CodexDecoder};
+use loopflow_harness::fact::{Decoded, ProviderFact};
 use loopflow_model::chat::types::ConversationEvent;
 
 fn build_thread_request(

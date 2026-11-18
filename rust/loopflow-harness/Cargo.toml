@@ -1,0 +1,18 @@
+[package]
+name = "loopflow-harness"
+publish = false
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+# Lets execution's fixtures replay the recorded traces under `src/testdata/`.
+test-support = []
+
+[dependencies]
+loopflow-model = { path = "../loopflow-model" }
+anyhow = "1"
+regex = "1"
+serde_json = "1.0"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }

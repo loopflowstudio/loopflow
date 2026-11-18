@@ -1,25 +1,19 @@
 use crate::process::attachment;
-use std::fs;
-use std::path::Path;
 
 use serde_json::{json, Value};
 
-use super::claude_decode::ClaudeDecoder;
-use super::codex_decode::{rpc_error, CodexDecoder};
-use super::fact::{Decoded, ProviderFact};
 use super::fact_writer::FactWriter;
-use super::opencode_decode::{OpenCodeDecoder, Snapshot};
+use loopflow_harness::claude_decode::ClaudeDecoder;
+use loopflow_harness::codex_decode::{rpc_error, CodexDecoder};
+use loopflow_harness::fact::{self, Decoded, ProviderFact};
+use loopflow_harness::opencode_decode::{OpenCodeDecoder, Snapshot};
 use loopflow_model::chat::types::{ConversationEvent, ConversationItem, Lifecycle};
 use loopflow_model::id::AgentSessionId;
 
 fn read_trace_lines(file_name: &str) -> Vec<String> {
-    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("src/harness/testdata")
-        .join(file_name);
-    fs::read_to_string(path)
-        .expect("trace file should exist")
-        .lines()
-        .map(ToString::to_string)
+    fact::trace(file_name)
+        .iter()
+        .map(Value::to_string)
         .collect()
 }
 

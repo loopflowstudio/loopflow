@@ -164,8 +164,7 @@ lf task run LOO-12 --json          # the same, answering {state, graph_process, 
 ```
 
 A batch runs its agent as a child and waits for it. Work commands (a Graph,
-`lf -b task run`, a landing watcher,
-`lf ship`) run in a process of their own that outlives the command that
+`lf task run` or `lf ship`, a landing watcher) run in a process of their own that outlives the command that
 started it, writing the log the command names; `lf -b task run` prints that log as it grows and exits with the
 Graph. Nothing hosts either: no server, no holder.
 
@@ -173,7 +172,7 @@ Graph. Nothing hosts either: no server, no holder.
 |---|---|
 | Processes | the `lf` running the work and the agent it started; a Graph's runner, and each step's agent beneath it |
 | Output | `lf -b <skill>` prints to its caller; a Graph writes `~/.lf/logs/graph-<process>.log` |
-| The caller exits or is killed | `lf -b <skill>` ends with it, like any child process; a Graph, landing watcher or `lf ship` keeps running and its log has the rest |
+| The caller exits or is killed | `lf -b <skill>` ends with it, like any child process; a Graph or landing watcher keeps running and its log has the rest |
 | The start is never acknowledged | the command says delivery is unknown and starts nothing again; `lf task status` shows whether it ran |
 | Steers | reach a Graph's steps and `lf -b <skill>` run for a Task through that Task |
 

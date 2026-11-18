@@ -242,7 +242,7 @@ lf task run LOO-12 feature          # runs up to explore and stops; the Task wai
 lf task run LOO-12                  # after you're done there: on to human-review
 lf task run LOO-12 --from explore   # back to choosing what to build
 lf -b task run LOO-12               # the rest, straight through to a merged PR
-lf ship LOO-12                      # the same, returning once the Task is shipping
+lf ship LOO-12                      # turn Auto-Ship on, then exactly `lf task run LOO-12`
 ```
 
 At `human-review` you read one page, `scratch/human-review.html`, built from
@@ -267,22 +267,46 @@ lf task run LOO-12 --from gate      # when gate's work must be redone
 `--from` takes a step's id, its Skill, or the Graph it was composed from;
 starting from an interactive step only puts the Task there. After the last step
 the Task reaches `end`, which requests completion.
-`lf ship` or any run into `end` hands the Task to Auto-Ship, which may land its
-PR. Other Graphs in the Task's worktree never move it. There is no approve command: give feedback in the
-Task's conversation, which knows its step and how to go on. `lf task hold`
-withdraws Auto-Ship, and the stop stands: a later run into `end` no longer
-approves it, and a run that reaches a merging step (`lf land`, `lf pr arm`,
-`pr-land`) waits there instead. Only `lf ship` lifts the stop. A ship whose run
-fails the same way on every attempt withdraws it too, recording the error in the
-Task's history; that is no stop, and `lf ship` or a fixed run resumes it.
+
+### Auto-Ship
+
+Auto-Ship is one mark on the Task's Graph: on, stopped, or never set. While it
+is on, the Task's run stands in for you at each interactive step it reaches and
+lands the PR. `lf ship` turns it on and runs the Task, so it prints what
+`lf task run` prints and leaves one Graph process:
+
+```bash
+lf ship LOO-12                      # LOO-12 · code from human-review running as Graph process …
+lf task status LOO-12               # Auto-Ship: on, by Maya 2h ago
+lf task hold LOO-12                 # Auto-Ship: stopped by Maya just now
+```
+
+The run reads Auto-Ship at each interactive step, not at launch: turn it on
+while `build` runs and the run stands in at `human-review` when it gets there.
+`lf task hold`, or Desktop's **Stop Auto-Ship**, kills nothing. The run carries on to its next interactive step and
+waits there, or reaches a merging step (`lf land`, `lf pr arm`, `pr-land`) and
+stops with "not approved to merge (Maya stopped shipping). `lf ship` lands it."
+The stop stands:
+`lf -b task run` turns Auto-Ship on unless it is stopped, and only `lf ship`
+lifts a stop. Other Graphs in the Task's worktree never move it. There is no
+approve command: give feedback in the Task's conversation, which knows its step
+and how to go on.
+
+Auto-Ship decides who takes the interactive steps; it is not what lets a PR
+merge. Any run that reaches a merging step lands unless Auto-Ship is stopped:
+`lf task run` after `human-review` goes through `deliver`, and `auto`, which has
+no interactive step, lands without Auto-Ship ever being on. `lf task run` says
+so on its `ships:` line. A failing run leaves Auto-Ship alone: the Task stops at
+the failed step, and the next `lf task run` stands in again. A PR merged by hand
+is met by the run's own landing step, which sees the merge and goes on.
 
 | Task state | When |
 |---|---|
 | `unstarted` | no checkout yet |
-| `idle` | a checkout, nothing running, not at an interactive step |
+| `idle` | a checkout, nothing running, not at an interactive step (or Auto-Ship on, waiting for the next run) |
 | `active` | at an interactive step, in its Task Session |
-| `moving` | a run carries it, with an interactive step ahead |
-| `shipping` | a run carries it and nothing ahead stops it |
+| `moving` | a run carries it and Auto-Ship is not on |
+| `shipping` | a run carries it and Auto-Ship is on |
 | `done` · `abandoned` | completed, dropped |
 
 Builtins are `feature` (explore, then plan, build, human-review, deliver, verify), `code`

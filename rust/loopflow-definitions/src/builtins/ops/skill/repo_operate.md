@@ -50,9 +50,10 @@ to another conversation is not operating. Follow each intervention to its
 result. Never start a competing Graph process.
 
 `lf task run <issue>` continues a Task to its next interactive step. `lf -b
-task run`, `lf ship`, and any run with no interactive step left ahead approve
-Auto-Ship and may merge the PR: only when asked to ship or land, and never to
-re-ship a Task someone stopped. When a Task of yours is heading the wrong way,
+task run` and `lf ship` turn Auto-Ship on, so the run stands in at interactive
+steps and may merge the PR; a run with no interactive step left ahead may merge
+it too. Use them only when asked to ship or land, and never `lf ship` a Task
+someone stopped. When a Task of yours is heading the wrong way,
 `lf task interrupt <issue>` stops it; discuss the new direction in its
 conversation.
 

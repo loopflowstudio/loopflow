@@ -29,11 +29,13 @@ Nothing repairs its PR until a waited landing does.
 To go from review-ready to merged in one step, ship the Task:
 
 ```bash
-lf ship LOO-12               # remaining steps, then deliver: reflect, gate, land --wait-and-fix
+lf ship LOO-12               # Auto-Ship on, then the remaining steps: reflect, gate, land --wait-and-fix
 ```
 
-A PR merged while shipping sends the Task to its graph's last interactive step
-(`verify` in `code`): check it on `main`, then finish or fix forward as a new PR.
+`lf ship` turns [Auto-Ship](orchestration.md#auto-ship) on and runs the Task, so
+its run stands in for you at `human-review` and `verify`. A PR someone merges
+by hand meanwhile is met by the landing step, which sees the merge and goes on
+to `verify`.
 
 Running `lf land` again after new commits prepares the Task's next PR; the earlier
 one stays in its history. Auto-merge uses the repository's allowed merge method
@@ -120,16 +122,16 @@ directory), name that step in your agent guide. Gate does it before publishing.
 ### When CI fails
 
 ```bash
-lf ship                        # a Task: the remaining steps, then land and repair until merge
+lf ship                        # a Task: Auto-Ship on, the remaining steps, land and repair until merge
 lf land --wait-and-fix         # this PR: land and repair in the foreground
 lf repo ci --since 7d    # how each failure was detected, repaired and landed
 ```
 
 The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
-person removes that request, and returns on merge or closure. A shipping Task
-whose ship process died starts again from the Machine server's recovery
-pass, within a minute. After bare `lf land` returns, nothing
+person removes that request, and returns on merge or closure. A Task run
+that died, shipping or not, starts again as `lf task run` from the Machine server's recovery pass,
+within a minute, up to five times before it waits for you. After bare `lf land` returns, nothing
 repairs its PR.
 
 `lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.
@@ -405,7 +407,7 @@ retain service authentication through `lf account`. See
 | `lf pr publish` / `lf pr open` | Ready PR, printed / draft PR, opened |
 | `lf pr abandon [BRANCH]` | Close the PR, remove the worktree, delete the branch |
 | `lf pr reconcile` | Check recorded landings once; recover a Task's missing PR |
-| `lf ship [ISSUE]` / `lf task hold ISSUE` | Run a Task's remaining steps to merge, repairing CI / withdraw that approval |
+| `lf ship [ISSUE]` / `lf task hold ISSUE` | Turn Auto-Ship on and run the Task / stop Auto-Ship at its next interactive or merging step |
 | `lf repo ci [--since 7d]` | Report CI incidents and their repairs |
 | `lf repo release run\|check\|status\|notes\|bump\|tag\|publish` | Release stages, together or one at a time |
 | `lf commit`, `lf sync`, `lf wt create\|switch\|list\|prune\|delete` | Git, with Task and stack awareness |

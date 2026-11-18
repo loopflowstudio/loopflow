@@ -168,7 +168,7 @@ checkout is adopted. Closed or headless Sessions cannot become primary.
 lf steer LOO-12 "keep the retry budget at 3"   # reaches its agents at their next step or turn
 lf task status LOO-12 --json                        # the thread: your steers, teammates', the agents' reports
 lf task interrupt LOO-12                          # stop its running Graph
-lf task unassign LOO-12                           # nobody owns it: ship and CI repair stop; live processes finish
+lf task unassign LOO-12                           # nobody owns it: CI repair stops; live processes finish
 ```
 
 A steer saves locally first, then reaches every Session working on the Task at

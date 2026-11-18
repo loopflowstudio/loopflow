@@ -284,3 +284,15 @@ stops).
   writing Auto-Ship and shows `moving`. Passed over: keeping the write so it
   shows `shipping`/Autonomous, a stored label for a fact the Graph already
   answers.
+
+## Docs (write-docs, 2026-11-18)
+
+Written in place: `docs/orchestration.md` (new `### Auto-Ship` section, state
+table), `docs/ops.md`, `docs/getting-started.md`, `docs/sessions.md`,
+`docs/troubleshooting.md`, `docs/work.md`, `docs/telemetry.md`, and the
+Auto-Ship line in `task_operate.md`, `repo_operate.md`, `wave_operate.md`,
+`launch-plan.md`. Slice 4's doc list is down to `docs/dev/*`, `server/README.md`
+and the iOS README.
+
+`lf ship --stop` doesn't exist on main; the docs use `lf task hold` as the one
+stop. The plan's `--stop` mentions mean `lf task hold`.

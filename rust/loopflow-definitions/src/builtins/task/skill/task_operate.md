@@ -44,9 +44,10 @@ liveness is not permission. A run listed in status is not a live process: its
    fix the cause if you can, and retry with `--reason "<what changed>"` only
    when something changed. Never relaunch to get past a blocker.
 
-   `lf -b task run`, `lf ship`, and any run with no interactive step left ahead
-   approve Auto-Ship and may merge the PR. Use them only when asked to ship or
-   land. After shipping is stopped, only a requested `lf ship` approves again.
+   `lf -b task run` and `lf ship` turn Auto-Ship on: the run stands in at the
+   interactive steps and may merge the PR. A run with no interactive step left
+   ahead may merge it too. Use them only when asked to ship or land. After
+   Auto-Ship is stopped, only a requested `lf ship` turns it on again.
 
 4. **Stay with it.** A launch is progress, not the stopping point. Reread
    status after each action, wait for real changes without tight polling,
@@ -55,7 +56,7 @@ liveness is not permission. A run listed in status is not a live process: its
    for anyone: `lf sync`, resolve, verify, push.
 
 5. **Finish merged work.** Merging doesn't complete a Task. After a verified
-   merge with no live ship Graph, when the outcome holds, run
+   merge with no live Graph, when the outcome holds, run
    `lf task complete <issue>` and reread status. It is safe to repeat; retry
    it alone, never by rerunning gate or steps that succeeded.
 

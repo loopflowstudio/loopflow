@@ -1,7 +1,7 @@
-# usage: . env.sh <new|old>
+# usage: . env.sh <new|old|prev>   (prev: the branch build before the second implement pass)
 TAG=$1
 ROOT=/tmp/lf-qa-978/$TAG
-if [ "$TAG" = new ]; then BIN=/tmp/lf-qa-978/bin/lf-new; else BIN=$(whence -p lf); fi
+if [ "$TAG" = old ]; then BIN=$(whence -p lf); else BIN=/tmp/lf-qa-978/bin/lf-$TAG; fi
 for v in $(env | grep '^LF_' | cut -d= -f1); do unset $v; done
 unset CLAUDE_CODE_CHILD_SESSION
 export HOME=$ROOT/home LF_HOME=$ROOT/home/.lf LF_BIN=$BIN

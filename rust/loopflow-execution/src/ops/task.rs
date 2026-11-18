@@ -2274,12 +2274,15 @@ fn truncate_task_title(value: &str, max_chars: usize) -> String {
 }
 
 /// Current launch preferences at the Task checkout, with no saved Task agent.
+/// Your own settings are found from `repository`, so they hold for a Task
+/// whose checkout is gone.
 pub fn resolve_task_agent(
     worktree: &Path,
+    repository: &Path,
     wave: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> OpsResult<crate::config::Agent> {
-    let shared = crate::config::resolved(Some(worktree), wave)?;
+    let shared = crate::config::resolved_for_task(worktree, repository, wave)?;
     let Some(skill) = skill else {
         return Ok(crate::config::Agent::parse(shared.config.agent()?)?);
     };
@@ -2289,13 +2292,14 @@ pub fn resolve_task_agent(
 
 fn task_configuration_refusal(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
     skill: Option<&crate::graph::Skill>,
 ) -> Option<String> {
     let worktree = task.worktree.as_deref()?;
     // A Graph's steps may choose different agents; no general preference is
     // required to inspect or start the Graph. Each launch resolves its own choice.
-    let agent = match resolve_task_agent(worktree, wave, skill) {
+    let agent = match resolve_task_agent(worktree, repository, wave, skill) {
         Ok(agent) => agent,
         Err(OpsError::Load(crate::error::LoadError::AgentSelection)) if skill.is_none() => {
             return None
@@ -2311,10 +2315,11 @@ fn task_configuration_refusal(
 /// non-resumable failure as its latest event.
 pub fn task_process_refusal_after(
     task: &Task,
+    repository: &Path,
     wave: Option<&str>,
     latest: Option<&loopflow_storage::work::task::TaskEvent>,
 ) -> Option<String> {
-    task_configuration_refusal(task, wave, None)
+    task_configuration_refusal(task, repository, wave, None)
         .or_else(|| task_event_process_refusal(latest).map(str::to_string))
 }
 

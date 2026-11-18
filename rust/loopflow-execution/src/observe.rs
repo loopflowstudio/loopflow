@@ -174,9 +174,11 @@ type SharedEntry = Arc<Mutex<Entry>>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Derived {
-    /// Settings resolved for work in a checkout and Wave.
+    /// Settings resolved for work in a checkout and Wave; `repository` is
+    /// the checkout the person's own file is found from.
     Settings {
         checkout: Option<PathBuf>,
+        repository: Option<PathBuf>,
         wave: Option<String>,
         outside: crate::config::settings::Outside,
     },
@@ -901,6 +903,7 @@ mod tests {
     fn key(checkout: &str) -> Derived {
         Derived::Settings {
             checkout: Some(checkout.into()),
+            repository: None,
             wave: None,
             outside: crate::config::settings::outside().unwrap(),
         }

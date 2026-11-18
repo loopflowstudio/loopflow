@@ -45,7 +45,8 @@ pub async fn read_wave_setup(
     checkout: &Path,
 ) -> anyhow::Result<WaveSetup> {
     let outside = crate::config::settings::outside()?;
-    let resolved = crate::config::resolved_with(Some(checkout), Some(wave.slug()), &outside)?;
+    let resolved =
+        crate::config::resolved_with(Some(checkout), Some(checkout), Some(wave.slug()), &outside)?;
     Ok(WaveSetup {
         graph: effective_setting(&resolved, "graph"),
         agent: effective_setting(&resolved, "agent"),
@@ -75,7 +76,8 @@ fn resolve_skill_agents(
     wave: &str,
     outside: &Outside,
 ) -> Result<BTreeMap<String, SetupValue>, LoadError> {
-    let resolved = crate::config::resolved_with(Some(checkout), Some(wave), outside)?;
+    let resolved =
+        crate::config::resolved_with(Some(checkout), Some(checkout), Some(wave), outside)?;
     let layers = resolved
         .config
         .setting_layers

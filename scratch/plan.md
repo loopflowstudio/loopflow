@@ -40,7 +40,8 @@ is kept with the dependencies its computation read.
 /// of one computation: everything it reads that is not an observed fact.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Derived {
-    Settings { checkout: Option<PathBuf>, wave: Option<String>, outside: Outside },
+    Settings { checkout: Option<PathBuf>, repository: Option<PathBuf>,   // whose personal file; added by qa
+               wave: Option<String>, outside: Outside },
     GlobalSettings { outside: Outside },   // added by qa; home is outside.home
     SkillAgents { checkout: PathBuf, wave: String, outside: Outside },
     SkillCatalog { repo: Option<PathBuf>, home: Option<PathBuf>,
@@ -270,6 +271,31 @@ shared values, and the bare CLI had become slower. All three are fixed:
 After the fixes, same load: 28 samples in `resolve_with`, 17 in
 `validate_value` (base 4,261), server CPU 107% against 181%. `outside()` is 51
 samples; `resolved_placement` is under 10, so placement stays underived.
+
+## What the second qa run changed (2026-11-18)
+
+A Task whose checkout is gone lost the person's own settings: after
+`git worktree remove`, the installed `lf` still reported the Task's provider
+from `lf.config.local.yaml` in the main checkout, and the branch reported
+none. The base found that file from the Task's repository; the branch found it
+from the worktree, which works only while the worktree exists.
+
+`config::resolved_for_task(checkout, repository, wave)` takes checked-in files
+from the checkout and the personal file from the repository;
+`Derived::Settings` holds both paths. `resolve_task_agent` and
+`task_process_refusal_after` take the repository. `config::resolved` passes
+the checkout for both, so the `.git` dependency still covers its callers.
+
+Same load after the fix: 31 samples in `resolve_with`, 12 in `validate_value`
+(base 4,915), server CPU 104% against 189%. Bare `lf wave status`, `lf wave
+show`, `lf task list`: 142, 84, 129 ms against the base's 151, 103, 134. The
+branch server on a home the installed `lf` made answers as the base does.
+
+Checks run by this step, all passing:
+
+- `cargo test -p loopflow-execution --lib -- ops::task::tests:: read_stream::tests:: config:: work::wave::setup::`: 147 passed, with the new `read_stream::tests::personal_settings_reach_a_task_whose_checkout_is_gone`.
+- `cargo test -p loopflow --lib lf::commands::waves::` (21) and `--test integration wave_setup_tests::` (8).
+- `cargo clippy --all-targets -- -D warnings`: clean.
 
 ## Built from the concept review (2026-11-18)
 

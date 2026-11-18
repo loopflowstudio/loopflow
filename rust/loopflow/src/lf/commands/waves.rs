@@ -2040,6 +2040,7 @@ async fn snapshot_task_detail(
         .ok_or_else(|| anyhow!("Task {} has no repository reading", task.id))?;
     let provider = loopflow_execution::ops::task::resolve_task_agent(
         task.worktree.as_deref().unwrap_or(repo),
+        repo,
         wave,
         None,
     )
@@ -2061,8 +2062,8 @@ async fn snapshot_task_detail(
     let worktree_blocker =
         loopflow_execution::ops::task::task_worktree_blocker_after(task, latest_event)?;
     let launch_refusal = if worktree_blocker.is_none() {
-        loopflow_execution::ops::task::task_process_refusal_after(task, wave, latest_event).or_else(
-            || {
+        loopflow_execution::ops::task::task_process_refusal_after(task, repo, wave, latest_event)
+            .or_else(|| {
                 matches!(
                     tracker_state.state,
                     loopflow_execution::store::PlanningState::Invalid
@@ -2074,8 +2075,7 @@ async fn snapshot_task_detail(
                         task.identifier
                     )
                 })
-            },
-        )
+            })
     } else {
         None
     };

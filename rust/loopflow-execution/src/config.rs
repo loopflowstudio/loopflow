@@ -700,12 +700,29 @@ pub fn resolved(
     repo_root: Option<&Path>,
     wave: Option<&str>,
 ) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
-    resolved_with(repo_root, wave, &settings::outside()?)
+    resolved_with(repo_root, repo_root, wave, &settings::outside()?)
+}
+
+/// [`resolved`] for a Task: checked-in files come from its checkout, your own
+/// file from its repository, which is there before the checkout and after it.
+pub fn resolved_for_task(
+    checkout: &Path,
+    repository: &Path,
+    wave: Option<&str>,
+) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
+    resolved_with(
+        Some(checkout),
+        Some(repository),
+        wave,
+        &settings::outside()?,
+    )
 }
 
 /// [`resolved`] inside a computation whose key already holds `outside`.
+/// `repository` is the checkout your settings file is found from.
 pub(crate) fn resolved_with(
     repo_root: Option<&Path>,
+    repository: Option<&Path>,
     wave: Option<&str>,
     outside: &settings::Outside,
 ) -> Result<Arc<settings::ResolvedSettings>, LoadError> {
@@ -714,12 +731,14 @@ pub(crate) fn resolved_with(
     let wave = selected_wave(repo_root, wave)?;
     let key = crate::observe::Derived::Settings {
         checkout: repo_root.map(Path::to_owned),
+        repository: repository.map(Path::to_owned),
         wave: wave.clone(),
         outside: outside.clone(),
     };
     outside.shared(key, || {
         let layers = file_layers(
             repo_root,
+            repository,
             wave.as_deref(),
             &outside.home,
             outside.remote.as_deref(),
@@ -764,6 +783,7 @@ pub fn config_layers(
     let wave = selected_wave(repo_root, wave)?;
     file_layers(
         repo_root,
+        repo_root,
         wave.as_deref(),
         &crate::store::lf_home_dir(),
         remote::incoming_text().as_deref(),
@@ -771,9 +791,10 @@ pub fn config_layers(
 }
 
 /// The checkout's `.lf/config.yaml`, the named Wave's own file, then your
-/// settings files under `home` and beside the checkout.
+/// settings files under `home` and beside `repository`.
 fn file_layers(
     repo_root: Option<&Path>,
+    repository: Option<&Path>,
     wave: Option<&str>,
     home: &Path,
     remote: Option<&str>,
@@ -802,7 +823,7 @@ fn file_layers(
             }
         }
     }
-    layers.extend(personal_file_layers(repo_root, wave, home, remote)?);
+    layers.extend(personal_file_layers(repository, wave, home, remote)?);
     Ok(layers)
 }
 

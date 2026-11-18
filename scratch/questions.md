@@ -92,3 +92,14 @@
   global document. Same answer wherever the two homes agree.
 - **The `.git` observation sits on the local path only.** `remote::layers`
   also calls `private_path`; a served request never has a forwarded profile.
+
+## QA, second run (2026-11-18)
+
+- **A Task's personal settings are found from its repository, not its
+  worktree**, as on the installed `lf`. Passed over: falling back to the
+  repository for every layer when the worktree is gone, which would add the
+  main checkout's checked-in settings where the base shows none.
+- **`Derived::Settings` gained `repository`** instead of a fifth variant: it
+  is the same computation with one more input.
+- **Not reached:** a store home that differs from `LF_HOME`, and a forwarded
+  remote profile. Neither has a route from a private Machine's socket.

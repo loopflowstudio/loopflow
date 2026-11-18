@@ -1151,6 +1151,26 @@ mod tests {
     }
 
     #[test]
+    fn personal_settings_reach_a_task_whose_checkout_is_gone() {
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = loopflow_test_support::TestRepo::new();
+        std::fs::write(
+            repo.path().join(crate::config::files::PRIVATE_FILE),
+            "agent: pi\n",
+        )
+        .unwrap();
+        let removed = home.path().join("removed");
+
+        let agent =
+            crate::ops::task::resolve_task_agent(&removed, repo.path(), None, None).unwrap();
+
+        assert_eq!(agent.harness.as_str(), "pi");
+    }
+
+    #[test]
     fn a_failing_read_waits_longer_before_each_retry() {
         let read_on = Instant::now();
         let due =

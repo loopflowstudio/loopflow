@@ -146,5 +146,18 @@ frame of each stack that names it: `grep -c` counts lines, not samples. Rust
 v0 symbols are mangled; match `settings14validate_value`, not
 `settings::validate_value`. File warnings go to the server's stderr.
 
+Remove and re-add a Task's worktree (`git worktree remove --force`, then
+`git worktree add <path> <branch>`) as one of the changes: most recorded Tasks
+have no checkout left, and a read that locates a file from the worktree goes
+wrong only then. A second repository with nothing under `.lf` in Git, one Task
+adopted into a worktree and `lf config set agent …` as its only setting shows
+it in `task.get` at `execution.provider` (a subscription frame holds the same
+object under `body`).
+
+To see what a later commit changed, keep the earlier branch binary as a third
+tag beside base and branch. For a returning Machine, stop the base server,
+link a new tag's directory to the base's (`ln -s old ret`) and start the
+branch binary there.
+
 Stop the servers by the PID you recorded, after checking its `LF_HOME` with
 `ps eww -p <pid>`: other worktrees run their own `lf server run`.

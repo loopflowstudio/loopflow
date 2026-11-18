@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, slices 4, 4b and 5 built; next: gate)
+## Status (2026-11-18, slices 4, 4b and 5 built; next: slice 4c, then gate)
 
 LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
 slice of this PR is built: slice 2a, the owner and carrier slices, the Session
@@ -62,7 +62,7 @@ Quotes and the OS-scan measurement: `questions.md`.
   `inspection_starts_no_work`, and the `processes` half of `served_reads`'
   `changes()`; `store_revisions` still catches a read that writes.
 - Remaining user-visible Process wording: the admission notice `Process
-  history unavailable…` (`journal::admit_process`).
+  history unavailable…` (`journal::admit_process`); slice 4c moves it.
 - Follow-up Task at gate: `GraphProcess*` → `GraphRun*`,
   `work.graph_processes`, `graph_process.rs` (42 files, Rust and Swift).
 
@@ -73,6 +73,28 @@ the agent-attributed commands from `processes`. Steps record no command now,
 so the proof needs other evidence that the step ran the replacement binary
 (launcher-written, like the cwd evidence the Rex fixtures use). It runs only
 in `scripts/test_task_installation.py` (CI).
+
+**Slice 4c (concept review after 4b, 2026-11-18): next implement.**
+
+1. The installation proof is CI's `task-installation` job
+   (`.github/workflows/ci.yml:306`), so the branch fails CI until it is
+   rewritten. Read the owner rows' own columns: `graph_processes` for
+   `graph='entry-proof'` with `caller_session_id` = the Session (replaces the
+   `via_agent` Process read) and its `graph_process_steps` with
+   `exit_code=0` (2). Binary identity needs no recorded command: the prior
+   install is the failing binary and the provider's `LF_BIN` is
+   `/missing/old/lf`, so a step that exits 0 ran the replacement. Delete the
+   `processes` reads and the "Reads record no Process" comment.
+2. `journal::admit_process`' `eprintln!("Process history unavailable…")` is
+   the last user-facing Process name, and it prints on a person's terminal
+   for a store lf could not open. Under the recording-gap rule and the quiet
+   terminal it becomes a `warn!` in `logs/lf.log` naming the trace log
+   (`"trace log unavailable: …"`); stderr stays clean. The two
+   `process_ownership_tests` assertions that the string is absent keep
+   passing; check one still fails if the line goes back to stderr, else
+   delete them as wiring.
+3. Checks: the installation proof via `scripts/test_task_installation.py`
+   if Docker is here, else gate/CI; `binary(process_ownership_tests)`.
 
 **Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
 `record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a

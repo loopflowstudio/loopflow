@@ -131,14 +131,16 @@ fn explicit_home_ignores_retired_control_home_pins() {
         "proof",
     )
     .unwrap();
-    for args in [vec!["machine", "rename", "proof", "renamed"]] {
-        let output = command(home.path(), home.path(), &args)
-            .env("LF_RUN_DIR", source.path().join("runs/parent"))
-            .env("LF_CAPTURE_KEY", "run_parent")
-            .output()
-            .unwrap();
-        success(output);
-    }
+    let output = command(
+        home.path(),
+        home.path(),
+        &["machine", "rename", "proof", "renamed"],
+    )
+    .env("LF_RUN_DIR", source.path().join("runs/parent"))
+    .env("LF_CAPTURE_KEY", "run_parent")
+    .output()
+    .unwrap();
+    success(output);
     let config: serde_yaml_ng::Value =
         serde_yaml_ng::from_str(&fs::read_to_string(home.path().join(".lf/config.yaml")).unwrap())
             .unwrap();

@@ -168,7 +168,7 @@ fn strays(database: &Path) -> Result<Vec<OsProcess>> {
     let exempt: HashSet<u32> = ancestry(std::process::id()).collect();
     let mut claimed = HashSet::new();
     if database.exists() {
-        let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
             database,
             loopflow_execution::store::token_key::encryption_key,
         )?;

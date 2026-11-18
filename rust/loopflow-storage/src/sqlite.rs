@@ -716,21 +716,8 @@ impl SqliteStore {
         Ok(Self::with_history(conn, token_key, Some(path)))
     }
 
-    /// Open only the Process rows without schema or token writes.
-    /// Observability commands use this when a source build may be older than
-    /// the machine's release-owned database.
-    pub fn open_processes_read_only(
-        path: &Path,
-        token_key: token_crypto::TokenKeySource,
-    ) -> StoreResult<Self> {
-        let store = Self::open_read_only(path, token_key)?;
-        {
-            let conn = store.conn.lock().expect("store mutex poisoned");
-            validate_process_schema(&conn)?;
-        }
-        Ok(store)
-    }
-
+    /// Open without schema or token writes: readers use this when a source
+    /// build may be older or newer than the Machine's database.
     pub fn open_read_only(
         path: &Path,
         token_key: token_crypto::TokenKeySource,
@@ -906,13 +893,6 @@ fn validate_wave_parent(
             ));
         }
     }
-    Ok(())
-}
-
-fn validate_process_schema(conn: &Connection) -> StoreResult<()> {
-    conn.prepare(
-        "SELECT id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,pid FROM processes LIMIT 0",
-    )?;
     Ok(())
 }
 

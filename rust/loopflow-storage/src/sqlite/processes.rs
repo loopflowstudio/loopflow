@@ -1856,3 +1856,151 @@ mod attachment_tests {
         assert!(store.agent_processes().unwrap().is_empty());
     }
 }
+
+/// A released lf still running after install writes only `processes`; the
+/// expand migration's bridge copies what it writes onto the owner rows this
+/// lf reads. The statements below are 0.16.0's, verbatim.
+#[cfg(test)]
+mod bridge_tests {
+    use rusqlite::params;
+
+    use super::SessionCaller;
+    use loopflow_model::id::{LfProcessId, TraceId};
+
+    /// 0.16.0 `record_process_in`: a command's start, and later its end.
+    const RELEASED_RECORD_PROCESS: &str =
+        "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+            via_agent,caller_session_id,caller_agent_process_id,completed_at,outcome,exit_code,signal,error,pid,os_started_at,
+            held_terminal_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18)
+         ON CONFLICT(id) DO UPDATE SET completed_at=excluded.completed_at,
+            outcome=excluded.outcome,exit_code=excluded.exit_code,signal=excluded.signal,error=excluded.error
+         WHERE processes.completed_at IS NULL AND excluded.completed_at IS NOT NULL";
+    /// 0.16.0 `record_graph`.
+    const RELEASED_RECORD_GRAPH: &str =
+        "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,?2,?3,?4)";
+    /// 0.16.0 `record_agent_endpoint`.
+    const RELEASED_RECORD_ENDPOINT: &str = "UPDATE processes SET endpoint=?2 WHERE id=?1";
+
+    #[allow(clippy::too_many_arguments)]
+    fn record_process(
+        conn: &rusqlite::Connection,
+        id: &LfProcessId,
+        trace: &TraceId,
+        started_at: i64,
+        completed_at: Option<i64>,
+        outcome: Option<&str>,
+        exit_code: Option<i32>,
+        error: Option<&str>,
+    ) {
+        conn.execute(
+            RELEASED_RECORD_PROCESS,
+            params![
+                id,
+                trace,
+                None::<String>,
+                r#"["lf","graph","code"]"#,
+                "/repo",
+                "/repo",
+                started_at,
+                false,
+                None::<String>,
+                None::<String>,
+                completed_at,
+                outcome,
+                exit_code,
+                None::<String>,
+                error,
+                4242,
+                started_at,
+                None::<String>,
+            ],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn a_released_graph_runners_end_ends_its_graph_run() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        let conn = store.conn.lock().unwrap();
+        let run = LfProcessId::new();
+        let trace = TraceId::new();
+        record_process(&conn, &run, &trace, 100, None, None, None, None);
+        conn.execute(
+            RELEASED_RECORD_GRAPH,
+            params![run, "code", "{}", None::<String>],
+        )
+        .unwrap();
+        let row = |conn: &rusqlite::Connection| {
+            conn.query_row(
+                "SELECT started_at,ended_at,pid,exit_code,error FROM graph_processes
+                 WHERE lf_process_id=?1",
+                [&run],
+                |row| {
+                    Ok((
+                        row.get::<_, Option<i64>>(0)?,
+                        row.get::<_, Option<i64>>(1)?,
+                        row.get::<_, Option<u32>>(2)?,
+                        row.get::<_, Option<i32>>(3)?,
+                        row.get::<_, Option<String>>(4)?,
+                    ))
+                },
+            )
+            .unwrap()
+        };
+        assert_eq!(row(&conn), (Some(100), None, Some(4242), None, None));
+        record_process(
+            &conn,
+            &run,
+            &trace,
+            100,
+            Some(160),
+            Some("failed"),
+            Some(1),
+            Some("gate failed"),
+        );
+        assert_eq!(
+            row(&conn),
+            (
+                Some(100),
+                Some(160),
+                None,
+                Some(1),
+                Some("gate failed".into())
+            )
+        );
+    }
+
+    #[test]
+    fn a_released_launchers_endpoint_reaches_its_session() {
+        let home = tempfile::tempdir().unwrap();
+        let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
+        store.test_session("conversation", &crate::session_record::new_artifact_key());
+        let attachment = store
+            .attach_session(
+                "conversation",
+                None,
+                &store.test_lf_process(),
+                None,
+                &SessionCaller {
+                    agent: None,
+                    capture_key: None,
+                },
+            )
+            .unwrap();
+        store
+            .conn
+            .lock()
+            .unwrap()
+            .execute(
+                RELEASED_RECORD_ENDPOINT,
+                params![attachment.agent_process_id, "ws://127.0.0.1:4500"],
+            )
+            .unwrap();
+        assert_eq!(
+            store.agent_endpoint(&attachment.agent_process_id).unwrap(),
+            Some("ws://127.0.0.1:4500".into())
+        );
+    }
+}

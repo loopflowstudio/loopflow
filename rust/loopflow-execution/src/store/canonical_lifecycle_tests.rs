@@ -94,8 +94,7 @@ fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
         .try_lock_exclusive()
         .is_err());
     let store =
-        SqliteStore::open_processes_read_only(&store, crate::store::token_key::encryption_key)
-            .unwrap();
+        SqliteStore::open_read_only(&store, crate::store::token_key::encryption_key).unwrap();
     let claim = store.session_attachment(&session).unwrap().unwrap();
     assert_eq!(claim, original_claim);
     assert_eq!(claim.token.as_str(), token);
@@ -369,7 +368,6 @@ fn canonical_ids_commands_read_the_upgraded_work_and_native_history() {
         ],
         vec!["session", "history", SESSION, "--json"],
         vec!["history", "show", SESSION, "--json"],
-        vec!["history", "show", PROCESS, "--json"],
     ] {
         let output = lf(&args);
         assert!(

@@ -112,7 +112,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         .ok();
     let processes = if database.exists() {
         live_lf_processes(
-            &SqliteStore::open_processes_read_only(
+            &SqliteStore::open_read_only(
                 &database,
                 loopflow_execution::store::token_key::encryption_key,
             )?,

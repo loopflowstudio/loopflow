@@ -28,7 +28,7 @@ fn read_only_store() -> Result<Option<SqliteStore>> {
     if !database.exists() {
         return Ok(None);
     }
-    Ok(Some(SqliteStore::open_processes_read_only(
+    Ok(Some(SqliteStore::open_read_only(
         &database,
         loopflow_execution::store::token_key::encryption_key,
     )?))

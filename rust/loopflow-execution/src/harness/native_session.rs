@@ -207,7 +207,7 @@ pub fn resume_session_with_env(
 
 pub(crate) fn require_provider_session_process(dir: &Path) -> Result<()> {
     let input = crate::session_record::input_id_from_dir(dir)?;
-    let store = SqliteStore::open_processes_read_only(
+    let store = SqliteStore::open_read_only(
         &crate::store::database_path_from_env()?,
         crate::store::token_key::encryption_key,
     )?;

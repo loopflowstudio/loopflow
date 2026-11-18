@@ -1217,7 +1217,8 @@ fn connection_session(home: &Path, cwd: &Path) -> loopflow_execution::session::L
 }
 
 fn connection_history(db: &rusqlite::Connection, session: &loopflow_execution::session::LfSession) {
-    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload) VALUES(?1,'observed',?2,1,?3)",
+    db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
+        SELECT id,'observed',?2,1,?3,current_capture FROM agent_sessions WHERE id=?1",
         rusqlite::params![session.id, format!("{}:provider-session:proof", session.artifact_key.as_ref().unwrap()),
         serde_json::json!({"source":"provider-session:proof","evidence":{"schema_version":1,"provider_session_id":"native-proof","account_id":null}}).to_string()]).unwrap();
 }

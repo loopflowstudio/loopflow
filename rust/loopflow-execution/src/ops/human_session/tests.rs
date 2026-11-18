@@ -891,6 +891,8 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
     )
     .unwrap();
     std::fs::set_permissions(&claude, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // The launch records the CLI it would hand children; never the Machine's.
+    std::env::set_var("LF_BIN", std::env::current_exe().unwrap());
     let path = std::env::var_os("PATH").unwrap_or_default();
     std::env::set_var(
         "PATH",

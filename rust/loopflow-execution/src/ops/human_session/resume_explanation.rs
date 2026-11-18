@@ -255,6 +255,6 @@ async fn read_resume(
         );
     }
     report.state = Some(super::session_state(&metadata));
-    report.opening = super::opening(intent, &metadata);
+    report.opening = super::session_action(&metadata);
     Ok(())
 }

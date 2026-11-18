@@ -289,7 +289,7 @@ fn boundary_launch_and_resume_remain_openable_while_provider_waits() {
             )
             .unwrap();
             db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-                SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
+                SELECT id,'observed',?2||':provider-session:fixture',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id','ses_resume-proof','account_id',NULL)),current_capture
                 FROM agent_sessions WHERE id=?1", [id,run_id]).unwrap();
             std::fs::remove_file(dir.join("manifest.json")).unwrap();
         }
@@ -1685,7 +1685,7 @@ fn record_native(home: &std::path::Path, id: &str, input: &str, native: &str) {
     )
     .unwrap();
     db.execute("INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-        SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
+        SELECT id,'observed',?2||':provider-session:fixture',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture
         FROM agent_sessions WHERE id=?1", [id,input,native]).unwrap();
 }
 

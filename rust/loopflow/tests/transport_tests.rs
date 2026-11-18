@@ -327,8 +327,7 @@ read -r answer < /dev/tty
         }
     }
 }
-/// The revision of what follows the held-terminal entrance's answer.
-const HELD_REVISION: u32 = 3;
+const HELD_REVISION: u32 = loopflow_execution::transport::registry::REVISION;
 const REPLY: u8 = 0x01;
 const SNAPSHOT: u8 = 0x02;
 const OUT: u8 = 0x03;
@@ -996,7 +995,7 @@ fn prepared_thread_json(command: &str, fork: bool, source_provider: &str) {
     .unwrap();
     sql.execute(
         "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload,captured_event)
-         SELECT id,'observed',?2||':fixture-native',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
+         SELECT id,'observed',?2||':provider-session:fixture',created_at,json_object('input_id',?2,'source','provider-session:fixture','evidence',json_object('schema_version',1,'provider_session_id',?3,'account_id',NULL)),current_capture FROM agent_sessions WHERE id=?1",
         [source_id, &input, &native],
     ).unwrap();
     let transcript = if source_provider == "codex" {

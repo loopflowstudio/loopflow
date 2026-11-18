@@ -146,6 +146,25 @@ re-exports nothing from it.
   views), `docs/dev/{codebase,execution,reference-code}.md`, a new
   `rust/loopflow-harness/README.md`
 
+## Docs written ahead of the code
+
+They describe the crate as it will be; slices make them true and slice 3
+corrects whatever the build changed.
+
+- `rust/loopflow-harness/README.md` (new): decoder test loop, `transcript::read`
+  call site, what the crate holds, the `cargo tree` check, fixture locations
+- `rust/loopflow-execution/README.md`, `rust/loopflow-execution/src/harness/README.md`
+  (the two views: `kind.harness()` and `harness::launcher(kind)`)
+- `docs/dev/codebase.md` (territories, source owners, "Add a provider" in two
+  crates), `docs/dev/reference.md`, `docs/dev/reference-code.md`
+- `scripts/testing.md` (focused command, what a decoder edit rebuilds)
+- `AGENTS.md` harness rule path now names `rust/loopflow-harness/**`
+
+Layout the docs commit to: decoders at the crate root
+(`src/claude_decode.rs`), stream fixtures in `src/testdata/`, transcript
+fixtures in `src/transcript/testdata/`, `transcript::read(HarnessKind, &Source)`
+keeping today's signature. `docs/dev/execution.md` needed no edit.
+
 ## What must keep working
 
 - Native provider conversations and hooks: the launch matrix and

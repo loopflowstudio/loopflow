@@ -24,7 +24,9 @@ The Rust application owns Clap, server dispatch and compiled build identity.
 [`loopflow-execution`](../../rust/loopflow-execution/README.md) owns the shared
 operations, provider conversations, native lifetimes and tracker fetches above
 synchronous storage. Model, definitions, storage and terminal state remain
-separate private libraries. Command-only edits leave execution reusable; the
+separate private libraries, and so does
+[`loopflow-harness`](../../rust/loopflow-harness/README.md): what each native
+client writes, beside storage and below execution. Command-only edits leave execution reusable; the
 application supplies its running identity and command semantics at their edges.
 
 This page owns the checked current-source inventory and indexes the

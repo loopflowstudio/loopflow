@@ -12,3 +12,8 @@ Concept review, 2026-11-18 (`scratch/concept-review.html` has these numbered):
 - Named `loopflow-harness`, not `loopflow-providers`: `Provider` already means the credentialed service and the rental host in code.
 - One struct per harness; `harness::Launcher: loopflow_harness::Harness` in execution. `Capabilities` stays with `Launcher`.
 - Line counts for the moved half (about 7k) are from `wc -l` on whole files plus an estimate for the split `mod.rs` and `live.rs`; no build was run in this review.
+
+Write-docs, 2026-11-18:
+
+- `AGENTS.md`'s "never a middleman" rule now also covers `rust/loopflow-harness/**`. Assumed: a decoder sits in the headless stream path, so the rule follows it. The transcript readers are passive; should the rule name only the decoders?
+- "Add a provider" is now two implementations in two crates (`Harness`, then `Launcher`) where it was one file. Is a five-step recipe across two crates an acceptable cost for the format-only test loop, which 6 of 215 PRs would have used?

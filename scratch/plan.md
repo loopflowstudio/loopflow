@@ -372,9 +372,34 @@ every Process/Session association, conflict answers.
    `pm_snapshot_synced_at` (inventory rows above say why). Also repaired:
    four `admission_lifecycle_tests` expected a Session to stay taskless after
    its checkout was placed; slice 1's adoption gives it the Task.
-4. **One order.** Working board sorts by rank; tile Move calls `reorder_in`;
-   `task_orders` and `task_order_json` leave. Swift Working board test
-   updated.
+4. **One order.** *Built (`process_task.sql`, commit "One Task order").
+   `cargo nextest run -p loopflow-storage --lib`: 391 passed under the guard,
+   which now refuses `task_orders` and `tracker_projects.task_order_json`
+   (`leaving_members_are_unreadable`). Swift `DashboardWorkspaceTests`: 15
+   passed headless.* `task_orders`, `tracker_projects.task_order_json` and its
+   released mirror `pm_projects.task_order_json` are leaving. The Working
+   board and the roadmap sort by `TaskOrder::key`: Project rank, Project, Task
+   rank, id; Tasks with no Project last (README says so). The "waiting first"
+   tiebreak is gone. A tile Move is `SqliteStore::reorder_task(task, to)`:
+   `planning_order::move_in` gives the Task `to`'s position among its siblings
+   through `reorder_in`, so it is an `order` action for a tracker Project; a
+   Move across Projects is `InvalidData` with the reason, which `lf desktop`
+   reports as an argument error and Desktop shows after re-reading
+   (`aMoveOntoAnotherProjectsTaskReturnsTheRowAndSaysWhy`). The execution
+   `reorder_task`, `commit_task_order`, `task_order_inputs`, `task_order_in`
+   and the `task_orders` JSON validation are gone. `observed_order` reads the
+   Project's `tracker_items` by rank; `observe_in` stops writing a list, and
+   its omission check compares against that derived order.
+   Learned: `tracker_projects` is the live table and `pm_projects` a
+   two-way trigger mirror for released lf, so the plan's
+   `pm_projects.task_order_json` is really `tracker_projects.task_order_json`.
+   Released lf on the same store still writes its own list on each Linear
+   observation and reads it back; between its observations the list it reads
+   can be stale (questions.md). Also repaired:
+   `task_concepts_share_lifecycle_activity_membership_and_order` had a phase
+   setting `planning_state='completed'` with the boolean still 0, "a conflicting
+   planning label"; slice 3 made that one fact, so the phase and its entry in
+   `tests/fixtures/dto/task_concepts.json` are gone (Swift reads phases by name).
 
 ## Docs (written ahead of the code)
 
@@ -384,6 +409,7 @@ every Process/Session association, conflict answers.
 `task_orders` gone). `rust/loopflow-storage/SCHEMA.md` regenerates from the
 migration (`scripts/schema_page.py`) once slice 1 writes it.
 
-Open: where do Tasks with no Project sit in the Working sidebar, before every
-Project, after, or by their own rank interleaved? The README says "Tasks follow
-their Project's rank, then their own" and leaves it unsaid.
+Chosen (questions.md): Tasks with no Project sit after every Project.
+
+Next: gate. Every slice is built; the acceptance check above and the gate
+list in slice 1 remain.

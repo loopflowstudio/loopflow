@@ -60,7 +60,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `pm_issue_changes`: issue_id, revision_ns, removed
 - `pm_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `pm_project_name_cutover` — **leaving → LOO-954, unused_store_members**: repo, provider, id, body, observed_at, archived, membership_unresolved, converted_at
-- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, ~~task_order_json~~ (leaving → LOO-877, process_task), revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
 - `pm_wave_projects`: wave_id, project_id, position
 - `pm_wave_sync`: wave_id, provider, initiative, synced_at
 - `project_binding_imports` — **leaving → LOO-954, unused_store_members**: wave_id, original_yaml, imported_at
@@ -68,7 +68,7 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `project_transitions`: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 - `tracker_events`: issue_id, revision_ns, removed
 - `tracker_items`: repo, tracker, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
-- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `tracker_projects`: repo, tracker, id, observed_at, archived, membership_unresolved, ~~task_order_json~~ (leaving → LOO-877, process_task), revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
 - `tracker_wave_projects`: wave_id, project_id, position
 - `tracker_wave_sync`: wave_id, tracker, initiative, synced_at
 
@@ -183,4 +183,4 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## Not in the ownership map
 
 - `relocated_task_processes` — **leaving → LOO-877, process_task**: task_id, process_id
-- `task_orders`: repository_id, task_ids_json
+- `task_orders` — **leaving → LOO-877, process_task**: repository_id, task_ids_json

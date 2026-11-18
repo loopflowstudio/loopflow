@@ -62,3 +62,18 @@
   released lf on the same store reads the boolean for status, ownership and
   retirement, and existing retirement triggers fire on it. Passed over:
   rewriting those triggers onto `planning_state` now; the contract can.
+- **Tasks with no Project on the Working board** sit after every Project.
+  Passed over: before every Project, or interleaved by their own rank (ranks
+  of standalone Tasks and of Projects are separate sequences, so interleaving
+  has no meaning).
+- **Released lf's order list during the window.** This build stops writing
+  `tracker_projects.task_order_json`; released lf on the same store keeps
+  writing it on each Linear observation and reads it for its omission check
+  and an order action's base. Between its own observations that list can lag
+  a rank this build accepted. Chosen: accept it (it repairs itself on the next
+  observation). Passed over: a trigger rebuilding the list from
+  `tracker_items` ranks.
+- **Moving a done Task.** `reorder_task` ranks any undeleted Task, done ones
+  included; the board offers only Working tiles, and `lf desktop dashboard
+  move working-tasks/...` with a done Task now changes its rank instead of
+  refusing.

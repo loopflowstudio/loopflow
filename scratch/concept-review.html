@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-923 concept review: harness formats as a crate</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #fbfaf7; --fg: #1d1c1a; --muted: #625f58; --line: #d9d5cc;
+    --card: #ffffff; --yes: #1f6f43; --no: #a3341f; --new: #0b5cad;
+    --newbg: #e8f1fb; --nobg: #fbebe7; --yesbg: #e6f3ec; --code: #f1eee7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17171a; --fg: #ebe9e4; --muted: #a5a199; --line: #37363b;
+      --card: #1f1f23; --yes: #6fcf97; --no: #f0907c; --new: #7db8f5;
+      --newbg: #17293c; --nobg: #3a1f1a; --yesbg: #17301f; --code: #26262b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+    font: 16px/1.55 -apple-system, "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1020px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 28px; line-height: 1.2; margin: 0 0 10px; }
+  h2 { font-size: 20px; margin: 44px 0 12px; }
+  h3 { font-size: 16px; margin: 0 0 8px; }
+  p { margin: 0 0 12px; max-width: 76ch; }
+  .lede { font-size: 18px; }
+  .muted { color: var(--muted); }
+  code, pre { font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+  code { background: var(--code); padding: 1px 5px; border-radius: 4px; }
+  pre { background: var(--code); padding: 14px 16px; border-radius: 8px; overflow-x: auto; margin: 0 0 12px; }
+  pre code { background: none; padding: 0; }
+  table { width: 100%; border-collapse: collapse; margin: 0 0 12px; background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; font-size: 14px; }
+  tr:last-child td { border-bottom: 0; }
+  .tag { display: inline-block; font-size: 13px; font-weight: 600; padding: 1px 9px; border-radius: 999px; white-space: nowrap; }
+  .yes { color: var(--yes); background: var(--yesbg); }
+  .no { color: var(--no); background: var(--nobg); }
+  .new { color: var(--new); background: var(--newbg); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .two { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 16px; }
+  .card.proposed { border-color: var(--new); border-style: dashed; }
+  ol.q > li { margin-bottom: 18px; }
+  ol.q ol { list-style: lower-alpha; margin-top: 6px; }
+  .bar { display: flex; height: 26px; border-radius: 6px; overflow: hidden; border: 1px solid var(--line); margin: 6px 0 4px; font-size: 12px; }
+  .bar span { display: flex; align-items: center; justify-content: center; white-space: nowrap; overflow: hidden; }
+  .b-s { background: #8a7fb8; color: #fff; } .b-h { background: var(--new); color: #fff; }
+  .b-e { background: #b98a3c; color: #fff; } .b-a { background: #5d8f6a; color: #fff; }
+  .b-skip { background: transparent; color: var(--muted); border-left: 1px dashed var(--line); }
+  .legend { font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+
+<h1>LOO-923: do the harness concepts and the crate line up?</h1>
+<p class="lede">The area taken: everything Loopflow knows about a native client (Claude Code, Codex,
+OpenCode, Pi), which today is <code>harness/</code> and <code>transcript/</code> inside
+<code>loopflow-execution</code>, and the plan to move part of it to a new crate. Reviewed before
+any code is written, against base <code>7bb879aff4</code>.</p>
+<p class="muted">The plan in <code>scratch/plan.md</code> has been rewritten to the proposal on this page.
+Dashed blue marks what is proposed; everything else exists today. No code changed and no build was run.</p>
+
+<h2>One interaction: Claude changes a transcript row</h2>
+<p>Claude Code ships a release that writes token usage under a new key. A person sees a Session whose
+turn shows no usage. They open the reader, fix one function, and run its test.</p>
+<table>
+  <tr><th style="width:22%"></th><th>Today</th><th>Kickoff plan</th><th>This review</th></tr>
+  <tr><td>File edited</td><td><code>execution/src/transcript/claude.rs</code></td><td><code>providers/src/transcript/claude.rs</code></td><td><code>harness/src/transcript/claude.rs</code></td></tr>
+  <tr><td>Test build compiles</td><td>execution's whole test binary (~115k lines)</td><td>providers (~15k lines)</td><td>harness (~7k lines)</td></tr>
+  <tr><td>Failure: the fix also needs <code>FactWriter</code></td><td>same build</td><td>execution rebuilds too</td><td>execution rebuilds too</td></tr>
+  <tr><td>Later, someone edits a migration</td><td>storage, execution, application</td><td>storage, <b>providers</b>, execution, application</td><td>storage, execution, application; harness is a cache hit</td></tr>
+</table>
+<p>The failure row matters: by the plan's own count 17 of the 23 PRs that touch format files also touch
+launch files, so the short loop reaches 6 of 215 PRs whole. It reaches more single edits than that, since a
+rebuild happens per edit and not per PR.</p>
+
+<h2>Product concepts against code concepts</h2>
+<table>
+  <tr><th style="width:24%">A person knows</th><th style="width:30%">Code today</th><th style="width:8%">Lines up</th><th>What is wrong, and the proposal</th></tr>
+  <tr>
+    <td>A harness: one of four AI coding tools. The glossary gives "harness" and "provider" as the same word.</td>
+    <td><code>HarnessKind</code>; also <code>storage::provider::Provider</code> (GitHub, Claude, Codex, OpenCodeZen, Linear, Asana, Doppler) and <code>rental::Provider</code> (Daytona, Modal, Runpod, Aws)</td>
+    <td><span class="tag no">no</span></td>
+    <td>One name for three ideas. A crate called <code>loopflow-providers</code> would be the third "provider" and would not hold Linear or GitHub. <span class="tag new">proposed</span> <code>loopflow-harness</code>, the code's own word.</td>
+  </tr>
+  <tr>
+    <td>What the client writes: a live stream, and transcript files in its own home</td>
+    <td>Decoders in <code>harness/*_decode.rs</code>; readers in <code>transcript/{claude,codex,opencode,pi}.rs</code>; file layout as 14 methods on <code>Harness</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>One idea in three places. These files import only <code>loopflow_model</code> and <code>rusqlite</code>. <span class="tag new">proposed</span> they are the crate.</td>
+  </tr>
+  <tr>
+    <td>A Session's conversation: its turns, its final answer, how long the provider keeps it</td>
+    <td><code>transcript/{session,answer,facts,summary,watch,raw}.rs</code>, each taking a <code>SqliteStore</code>, the process table or <code>observe::Cache</code></td>
+    <td><span class="tag no">no</span></td>
+    <td>One name, <code>transcript</code>, for two ideas: what a file says, and what Loopflow recorded about a Session. <code>facts::record_session</code> writes store rows. The kickoff plan moved both together. <span class="tag new">proposed</span> this half stays in execution under the same paths.</td>
+  </tr>
+  <tr>
+    <td>Launching a harness as a chat, batch, work session or worker</td>
+    <td><code>Harness::open</code>, <code>driver</code>, <code>capabilities</code>, <code>Launch</code>, <code>LaunchKind</code></td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Stays. <code>Capabilities</code> is read only by launch, prompt and skill code and names <code>SkillDialect</code>, so it stays with launching; the kickoff plan had it moving.</td>
+  </tr>
+  <tr>
+    <td>"Claude" is one thing</td>
+    <td><code>harness::claude::Claude</code>, one struct, one trait with 30 methods</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>Worth keeping through the split. <span class="tag new">proposed</span> the struct moves to the crate; execution implements <code>Launcher: Harness</code> on it. One Claude, two views.</td>
+  </tr>
+  <tr>
+    <td>Nothing: a person never sees a crate</td>
+    <td>The chain model → storage → execution → application</td>
+    <td><span class="tag yes">yes</span></td>
+    <td>The crate is felt only as how long a test takes. The measurement is the product here.</td>
+  </tr>
+</table>
+
+<h2>The biggest mismatch: "sibling" that sits in the chain</h2>
+<p>The Task asks for "siblings consumed by orchestration over a longer downstream chain". The kickoff plan
+called the new crate "beside storage" and then had it name <code>loopflow_storage</code> types and open test
+stores, which puts it after storage. The cause is the <code>transcript</code> module holding two ideas.</p>
+
+<div class="two">
+  <div class="card">
+    <h3>Kickoff plan</h3>
+<pre><code>model ─ storage ─ providers ─ execution ─ application</code></pre>
+    <p>All of <code>transcript/</code> moves, about 15k lines. Seven upward references to resolve, including
+    passing the store into <code>adopt_native</code> and a storage test feature for the crate's tests.</p>
+    <p class="legend">A storage edit recompiles:</p>
+    <div class="bar"><span class="b-s" style="flex:3">storage</span><span class="b-h" style="flex:1.5">providers</span><span class="b-e" style="flex:8">execution</span><span class="b-a" style="flex:4">application</span></div>
+  </div>
+  <div class="card proposed">
+    <h3>Proposed <span class="tag new">proposed</span></h3>
+<pre><code>model ┬ storage ┬ execution ─ application
+      └ harness ┘</code></pre>
+    <p>Only what never opens Loopflow's store moves, about 7k lines. Six references to resolve, none of them
+    a store handle. Gate check: <code>cargo tree -p loopflow-harness</code> shows neither storage nor execution.</p>
+    <p class="legend">A storage edit recompiles:</p>
+    <div class="bar"><span class="b-s" style="flex:3">storage</span><span class="b-skip" style="flex:0.8">hit</span><span class="b-e" style="flex:8.7">execution</span><span class="b-a" style="flex:4">application</span></div>
+  </div>
+</div>
+<p class="muted">Bars are a sketch of which crates compile, not measured widths. The only measured numbers
+are LOO-650's: application edit 27.4 s, execution edit 57.5 s, storage edit 65.5 s.</p>
+
+<p>The rule that keeps it true as the work meets surprises: a function that takes a <code>SqliteStore</code>,
+an <code>OsProcess</code> or <code>observe::Cache</code> stays in execution and calls down. The crate never
+gains a dependency to keep a file whole.</p>
+
+<h3>Tested on three paths</h3>
+<table>
+  <tr><th style="width:26%">Path</th><th>What happens</th></tr>
+  <tr><td>Normal: fix a decoder</td><td><code>cargo test -p loopflow-harness claude_decode</code> compiles model and harness.</td></tr>
+  <tr><td>Failure: a transcript is gone because its account home was removed</td><td><code>Located::Gone(Gap::AccountHomeRemoved)</code> is decided by the store, so <code>locate</code>, <code>Gap</code> and <code>Located</code> stay in execution; the crate only answers "is there a file for this id in this home".</td></tr>
+  <tr><td>Recovery: resume a conversation recorded in an old isolated home</td><td><code>adopt_native</code> stays in execution with its store; it calls the crate's <code>transcript</code> and <code>copy_between</code>. Unchanged behavior, and the kickoff plan's "pass the store in" row is gone.</td></tr>
+  <tr><td>Counterexample: OpenCode keeps conversations in SQLite</td><td>That is the client's own file, opened with <code>rusqlite</code> directly. It needs no Loopflow store and moves.</td></tr>
+  <tr><td>Counterexample: the trait's default <code>transcript_home</code> goes through storage's <code>Provider</code></td><td>Claude and Codex each name their home variable and directory in the crate; execution's <code>native_home(provider)</code> calls them.</td></tr>
+</table>
+
+<h2>What is larger than this work</h2>
+<div class="card">
+  <h3>This extraction cannot move the typical edit much, by the plan's own arithmetic</h3>
+  <p>A crate placed below execution saves every other edit only its own compile share: for 7k of 115k
+  lines, a second or two of 57.5 s. The kickoff plan predicted "a few seconds" for 15k. Code placed
+  <em>above</em> the rest saves its own edits everything beneath it. <code>ops</code> is in 110 of 184 grouped
+  execution PRs and 34 alone; as the crate above the rest it would spare an ops edit about 20 s of 57.5 s.</p>
+  <p>It was passed over because the Task prefers siblings to a longer chain, and because 17 lower modules
+  reference <code>ops</code> (42 references; <code>engine</code> and <code>machine</code> another 78). Untangling
+  those is its own Task. The plan now says so plainly and names <code>ops</code> as what follows if this
+  crate's measured drop is inside noise.</p>
+</div>
+<div class="card" style="margin-top:16px">
+  <h3>Three things are called Provider</h3>
+  <p>Credentialed service, rental host, and (in prose) the AI client. Renaming is outside this Task.
+  It would take a rename of <code>rental::Provider</code> and a decision on whether the glossary keeps
+  "provider" as a synonym for harness.</p>
+</div>
+
+<h2>Questions</h2>
+<ol class="q">
+  <li>Is a one-crate-longer chain acceptable for the biggest per-edit saving?
+    <ol>
+      <li>No. Siblings only; <code>ops</code> stays in execution. (What the plan does now.)</li>
+      <li>Yes, after this Task's numbers are in: <code>ops</code> above the rest is the next Task.</li>
+      <li>Yes, and first: stop this extraction and start with <code>ops</code>.</li>
+    </ol>
+  </li>
+  <li>The crate's dependency on storage.
+    <ol>
+      <li>None. Store-joined transcript code stays in execution; the crate is about 7k lines. (Chosen.)</li>
+      <li>Allowed. All of <code>transcript/</code> moves, about 15k lines, and the crate sits after storage.</li>
+    </ol>
+  </li>
+  <li>The crate's name.
+    <ol>
+      <li><code>loopflow-harness</code>. (Chosen.)</li>
+      <li><code>loopflow-providers</code>, and <code>Provider</code> gets sorted out separately.</li>
+    </ol>
+  </li>
+  <li>How a harness is represented once it is split.
+    <ol>
+      <li>One struct per harness in the crate; <code>Launcher: Harness</code> implemented on it in execution. (Chosen.)</li>
+      <li>Two unrelated traits, <code>Harness</code> and <code>Launcher</code>, each with its own lookup.</li>
+    </ol>
+  </li>
+  <li>The Task comment of 2026-11-16 says "Begin substantive implementation only after those measured
+  outcomes are available." LOO-921 is idle and LOO-922 unstarted.
+    <ol>
+      <li>Proceed and compare when they exist. (Assumed.)</li>
+      <li>Hold LOO-923 until both have numbers.</li>
+    </ol>
+  </li>
+</ol>
+
+</main>
+</body>
+</html>

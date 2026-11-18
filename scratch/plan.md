@@ -1,19 +1,30 @@
-# LOO-923: provider formats leave execution as the first sibling crate
+# LOO-923: harness formats leave execution as a sibling of storage
 
 ## Outcome
 
-`loopflow-providers` is a new private path crate beside storage: what each
-native client (Claude, Codex, OpenCode, Pi) writes and where. It holds the
-stream decoders, the provider facts they produce, transcript readers and the
-harness identity. `loopflow-execution` keeps launching and recording and
-consumes it.
+`loopflow-harness` is a new private path crate that depends on
+`loopflow-model` and nothing else in the workspace. It answers one question:
+what does each native client (Claude, Codex, OpenCode, Pi) write, and where?
+It holds the stream decoders and the facts they produce, the transcript
+readers and the `Turn` they produce, where each client keeps its files, and
+the harness identity.
 
-Two things change for whoever edits Rust here:
+`loopflow-execution` keeps everything Loopflow does with a harness: launching
+it, recording it, and joining its transcripts to Sessions in the store.
 
-- Fixing a decoder or transcript reader compiles and tests one small crate.
-  `cargo test -p loopflow-providers` never builds execution or the application.
-- Every other execution edit stops recompiling that code, and execution's test
-  binary stops carrying its tests.
+```
+before   model ─ storage ─ execution ─ application
+after    model ┬ storage ┬ execution ─ application
+               └ harness ┘
+```
+
+What changes for whoever edits Rust here:
+
+- Fixing a decoder or a transcript reader compiles and tests one small crate.
+  `cargo test -p loopflow-harness` builds neither storage, execution nor the
+  application.
+- A storage edit and every other execution edit stop recompiling that code,
+  and execution's test binary stops carrying its tests.
 
 No behavior, wire shape, saved data or migration byte changes.
 
@@ -21,101 +32,109 @@ No behavior, wire shape, saved data or migration byte changes.
 
 ```sh
 # a provider changed its output: fix the decoder, run its tests
-$EDITOR rust/loopflow-providers/src/claude_decode.rs
-cargo test -p loopflow-providers claude_decode      # one workspace crate compiles
-cargo tree -p loopflow-providers -e normal,dev | grep -c loopflow-execution   # 0
+$EDITOR rust/loopflow-harness/src/claude_decode.rs
+cargo test -p loopflow-harness claude_decode
+cargo tree -p loopflow-harness -e normal,dev | grep -cE 'loopflow-(storage|execution)'   # 0
 open scripts/benchmarks/crate-rebuild/results/loo-923.html
 ```
 
-The results page shows base `7bb879aff4` against the branch for five paired
-cohorts: an ops edit hits the providers cache, a decoder edit misses providers,
+The results page shows base `7bb879aff4` against the branch: a storage edit
+and an ops edit both hit the harness cache, a decoder edit misses harness,
 execution and the application and hits storage, and the owner's test build.
 
-## Why this cut
+## The concepts
 
-Findings, with how to get them again:
+| A person knows | In code after this Task |
+|---|---|
+| A harness: Claude Code, Codex, OpenCode or Pi | `loopflow_harness::HarnessKind` and one unit struct per harness (`Claude`, `Codex`, `OpenCode`, `Pi`) |
+| What that client writes: its live stream and its transcript files | `loopflow_harness::Harness`, implemented once per struct; the decoders; `transcript::{Turn, Source, read, scan}` |
+| Launching and driving it | `loopflow_execution::harness::Launcher: loopflow_harness::Harness`, implemented on the same four structs |
+| A Session's conversation, its answer, how long it is kept | `loopflow_execution::transcript`, which joins the store to `loopflow_harness::transcript` |
 
-- **Execution is one cycle.** 50 of 64 top-level modules (112k of ~115k
-  production lines) form a single strongly connected component by `crate::`
-  references; at a threshold of more than five references per edge, 20 modules
-  and 92k lines still do. No sibling exists today; every extraction starts by
-  removing upward references. (Module graph over `rust/loopflow-execution/src`,
-  test modules cut at `#[cfg(test)] mod tests`.)
-- **PRs are whole-feature journeys.** `cochange.py --count 300` at `7bb879aff4`,
-  minus the three split PRs and two rename PRs (#1969, #1643), leaves 228 PRs
-  with production Rust churn, 215 of them in today's execution code. Given a
-  PR touches any execution group, it also touches the application 77–97% of the
-  time and storage 58–96%. No two execution groups co-change above 71% except
-  with `ops`, so the history argues for no merger of candidates and shows no
-  hidden shared concept between them.
-- **`ops` is the consumer, not a sibling.** It is in 110 of 184 grouped
-  execution PRs, 34 of them with no other execution group. Making it a crate
-  downstream of the rest would spare an ops-only edit about 70% of execution's
-  ~30 s compile, and it is passed over: it lengthens the chain
-  (storage → execution → operations → application), 17 lower modules reference
-  `ops` (42 references, `engine` and `machine` another 78), and as siblings
-  leave, what remains of execution converges on `ops` plus the runtime anyway.
-- **Siblings skipped by most edits.** Share of execution PRs that leave each
-  candidate untouched: git/repository 89%, trackers 86%, transport 73%,
-  config/graph/skills/prompt 71%, harness and friends 63%.
-- **Inside the harness there are two things.** Format files (decoders, facts,
-  `transcript/`) change in 23 of 215 execution PRs; launch files in 51. 17 of
-  the 23 format PRs also touch launch, but only 17 of the 51 launch PRs touch
-  format. Format is the stable lower half that launch reads. One trait,
-  `Harness`, carries both today: `open`/`driver` beside `transcript_root`,
-  `provider_env`, `model_rungs`. `transcript/` calls `.harness()` 24 times for
-  format facts only. That trait is the missing concept split.
-- **The decoders are already leaves.** `claude_decode`, `codex_decode`,
-  `opencode_decode`, `pi_decode`, `fact` and `lf_tag` (4.4k lines with tests)
-  reference nothing else in the crate.
-- **Timings to beat** (LOO-650, `results/loo-650.json`, one Cargo job,
-  `incremental = false`): application edit 27.4 s, execution edit 57.5 s,
-  storage edit 65.5 s; peak RSS 3.4 GiB when execution compiles. A crate is the
-  whole unit of rebuild and of cache.
+Three choices made for review:
 
-Predictions the measurement checks, not results: the ops-edit build drops from
-57.5 s by providers' compile share (a few seconds); a decoder-edit build costs
-about what an execution edit costs now; the owner's test build falls from
-execution's full test binary to a crate of roughly 15k lines.
+1. **The crate has no storage dependency.** The line through `transcript/` is
+   "does it open Loopflow's store". Reading a file into `Turn`s does not;
+   finding which account home a Session ran in, recording a Session's turns,
+   the final answer of an input and the retention summary do. Passed over:
+   moving all of `transcript/` and depending on storage. That makes the crate
+   one more link in the chain (storage → harness → execution), a storage edit
+   (the slowest measured case, 65.5 s) recompiles it, and "what the client
+   wrote" would carry `record_session`, which writes store rows. The cost of
+   the choice: the crate is about 7k lines, not 15k, so its share of an
+   execution compile is smaller.
+2. **It is named `loopflow-harness`, not `loopflow-providers`.** `Provider`
+   already names two other things in code: the credentialed service
+   (`loopflow_storage::provider::Provider`: GitHub, Claude, Codex,
+   OpenCodeZen, Linear, Asana, Doppler) and the rental host
+   (`rental::Provider`). The code's word for the client is `HarnessKind`.
+3. **One struct per harness, two traits.** `Launcher` has `Harness` as its
+   supertrait and is implemented in execution on the crate's structs, so
+   `Launch.harness` stays one field that answers both kinds of question.
+   `kind.harness()` returns the format view; `harness::launcher(kind)` the
+   launching one. Passed over: two unrelated traits on two sets of structs,
+   which would give each harness two identities.
 
-## What moves
+## Where each thing goes
 
-Into `rust/loopflow-providers/src/`, with their unit tests and
-`harness/testdata`:
+Into `rust/loopflow-harness/src/`, with unit tests and testdata:
 
-- `harness/{claude,codex,opencode,pi}_decode.rs`, `fact.rs`, `lf_tag.rs`
-- `transcript/` (see rows 2, 4 and 5 below for the three files with upward
-  references)
-- `HarnessKind`, `Capabilities` and the format half of `Harness`: identity,
-  provider, env names, model rungs, sign-in advice, recognition, and every
-  `transcript_*` and expiry method
+- `harness/{claude,codex,opencode,pi}_decode.rs`, `fact.rs`, `lf_tag.rs`,
+  `harness/testdata`
+- `transcript/{claude,codex,opencode,pi}.rs` (the readers; OpenCode's opens
+  the client's own SQLite file with `rusqlite`, not Loopflow's store)
+- From `transcript/mod.rs`: `Turn`, `Receipt`, `TurnItem`, `Request`,
+  `RequestSource`, `Source`, `Indexed`, `ExpiryPolicy`, `read`, `transcript`,
+  `find`, `scan`, `copy_between`, `recorded_cwd`, `json_lines`, `modified`,
+  the time helpers and the row folding (`Calls`, `Turns`)
+- From `transcript/live.rs`: `TurnState`, `TurnUsage`, `SessionTurn`,
+  `read_current`, `claude_project`, `MARKERS`
+- `HarnessKind` (`parse`, `as_str`, `ALL`, `harness()`), the four unit
+  structs, and trait `Harness` with: `kind`, `recognizes_driver`,
+  `recognizes` (taking the command string), `title_args`, `model_rungs`,
+  `sign_in_advice`, `provider_env`, `api_key_env`, `transcript_home`,
+  `transcript_reader`, `transcript_id`, `transcript_root`,
+  `transcript_watch_store`, `direct_transcript`, `transcript_siblings`,
+  `expiry_policy`, `transcript_markers`, `human_input_times`,
+  `transcript_completion_detail`, `validate_model`
+- `harness::claude::usage`, which `transcript/claude.rs` calls
 
-Execution keeps `open`, `driver` and `validate_agent_process_close`, the four
-launch implementations, `fact_writer`, `native_session`, `native_exit`,
-`context`, `agent_process`, `task_updates`, `conformance_tests` (it drives
-decoders through `FactWriter` against a store) and the launch matrix.
+Stays in execution:
 
-Choice made for review: the format trait keeps the name `Harness` in
-providers, and execution's launch half becomes `harness::Launcher` reached by
-`harness::launcher(kind)`. Passed over: renaming the format half and keeping
-`Harness` for launch, which rewrites more call sites for no gain.
+- `harness::Launcher` with `capabilities`, `open`, `driver`,
+  `validate_agent_process_close`, `provider`, `locate_transcript`,
+  `transcript_retention`, `recent_transcripts`, `conversation_owners`,
+  `terminal_error`. `Capabilities` stays with it: every reader is launch,
+  prompt or skill code, and it names `skills::catalog::SkillDialect`.
+- `HarnessKind::from_provider` and `HarnessKind::provider` become
+  `harness::from_provider` and `Launcher::provider`; they name storage's
+  `Provider`.
+- `transcript/{answer,facts,session,summary,watch,raw}.rs` and, in
+  `transcript/mod.rs`, `adopt_native`, `conversation_home`, `locate`, `Gap`,
+  `Located`, `native_home`; `live::locate`. They keep their paths under
+  `loopflow_execution::transcript`, so the application's imports of
+  `transcript::{answer,facts,summary,watch,live}` change only for the moved
+  types.
+- The four launch implementations, `fact_writer`, `native_session`,
+  `native_exit`, `context`, `agent_process`, `task_updates`,
+  `conformance_tests` (it drives decoders through `FactWriter` against a
+  store), the launch matrix, `provider_auth`, `observe`.
+
+The rule when a file turns out to need both: the function that takes a
+`SqliteStore`, an `OsProcess` or `observe::Cache` stays in execution and calls
+down. The crate never gains a dependency to keep a file whole, and execution
+re-exports nothing from it.
 
 ## Upward references to remove
 
 | # | Reference | Resolution |
 |---|-----------|------------|
-| 1 | `HarnessKind::harness()` returns the launch implementation (≈60 callers in execution, 4 in the application) | Format callers keep `kind.harness()`, now resolved in providers; the callers that launch use `harness::launcher(kind)` |
-| 2 | `transcript::adopt_native` opens the store from the environment (`transcript/mod.rs:183`) | Takes the store from its two callers (`harness/claude.rs`, `harness/codex.rs`) |
-| 3 | `transcript/claude.rs:117` calls `harness::claude::usage` | `usage` moves with the Claude format |
-| 4 | `process::OsProcess` in `Harness::recognizes`, `conversation_owners` and `transcript/raw.rs` | Recognition takes the command it reads; if `raw.rs` needs the process table itself it stays in execution beside `observe` |
-| 5 | `transcript/watch.rs` uses `observe::Cache` | Stays in execution; `observe` reads providers, never the reverse |
-| 6 | `crate::store::{ProviderAccountId, StoreError, …}` re-exports | Named from `loopflow_storage` directly |
-| 7 | Tests open stores with execution's `store::opening::open_ephemeral` | `loopflow_storage::test_fixture::open` through storage's `test-support` dev feature |
-| 8 | `pub(crate)` items execution still reads (`fact`, decoders) | `pub` in providers; execution's `harness` re-exports nothing |
-
-Not in this Task: `provider_auth` (its `Provider` already lives in storage; the
-service holds tracker credentials too, needs the async store, and #1968 is
-editing it), the launch implementations, `observe`.
+| 1 | `HarnessKind::harness()` returns the launch implementation (≈60 callers in execution, 4 in the application) | Format callers keep `kind.harness()`; callers that need capabilities or launch use `harness::launcher(kind)` |
+| 2 | `transcript/claude.rs:117` calls `harness::claude::usage` | `usage` moves with the reader |
+| 3 | `Harness::recognizes(&process::OsProcess)` | Takes the command it reads |
+| 4 | `Harness::transcript_home` default goes through storage's `Provider` and `transcript::native_home` | Claude and Codex name their own home variable and directory in the crate; `native_home(provider)` in execution calls them |
+| 5 | Trait methods that take the store, the process table or storage's `Provider` | On `Launcher` (list above) |
+| 6 | `pub(crate)` items execution still reads (`fact`, decoders, `find`, `json_lines`) | `pub` in the crate |
 
 ## Callers and files outside Rust source
 
@@ -123,8 +142,9 @@ editing it), the launch implementations, `observe`.
 - `scripts/check_architecture.py:258` and `scripts/check_migrations.py:188` crate tuples; `scripts/test.py` suite reach; `scripts/macos_inputs.py`
 - `scripts/benchmarks/crate-rebuild/probe.py` member list; `run.py` cases
 - `AGENTS.md` harness rule path, `rust/loopflow-execution/README.md`,
-  `harness/README.md`, `docs/dev/{codebase,execution,reference-code}.md`,
-  a new `rust/loopflow-providers/README.md`
+  `harness/README.md` (its "only harness dispatch" line becomes the two
+  views), `docs/dev/{codebase,execution,reference-code}.md`, a new
+  `rust/loopflow-harness/README.md`
 
 ## What must keep working
 
@@ -134,63 +154,112 @@ editing it), the launch implementations, `observe`.
   move; compilation alone misses runtime script paths.
 - Served and remote commands, process identity, Desktop and iOS inputs
   (`swift/ios.yml` reads `rust/loopflow-execution/tests/fixtures/dto/server`,
-  which does not move).
+  which does not move). `Turn` and its parts keep their serde shape.
 - A second build with no edit stays fresh.
 - `loopflow-storage` and every migration file are untouched.
 
 ## Acceptance check at gate
 
 ```sh
-cargo test -p loopflow-providers
-cargo tree -p loopflow-providers -e normal,dev | grep -c loopflow-execution    # 0
+cargo test -p loopflow-harness
+cargo tree -p loopflow-harness -e normal,dev | grep -cE 'loopflow-(storage|execution)'    # 0
 uv run python scripts/test.py --reuse-passing --rust-filter 'test(harness::)'
 uv run python scripts/benchmarks/crate-rebuild/run.py --base 7bb879aff4 --candidate HEAD --sccache <path> --output /tmp/lf-923
 ```
 
-`run.py` gains two cases. `provider_format` edits a decoder message at each
-revision's own path and requires providers, execution and application misses
-with a storage hit. `provider_test` builds the owner's test binary after that
+`run.py` gains two cases. `harness_format` edits a decoder message at each
+revision's own path and requires harness, execution and application misses
+with a storage hit. `harness_test` builds the owner's test binary after that
 edit (`--no-run`) and records its compiler closure and link. The existing
-`execution` case additionally requires a providers hit on the candidate. The
-report keeps wall and CPU seconds, peak RSS and closures, as LOO-650's did.
+`execution` and `storage` cases additionally require a harness hit on the
+candidate. The report keeps wall and CPU seconds, peak RSS and closures, as
+LOO-650's did.
+
+## What the evidence says, and what it does not
+
+How to get each number again is in parentheses.
+
+- **Execution is one cycle.** 50 of 64 top-level modules (112k of ~115k
+  production lines) form a single strongly connected component by `crate::`
+  references. No sibling exists today; every extraction starts by removing
+  upward references. (Module graph over `rust/loopflow-execution/src`, test
+  modules cut at `#[cfg(test)] mod tests`.)
+- **PRs are whole-feature journeys.** 228 PRs with production Rust churn, 215
+  in today's execution code. A PR that touches any execution group also
+  touches the application 77–97% of the time and storage 58–96%. No two
+  execution groups co-change above 71% except with `ops`.
+  (`cochange.py --count 300` at `7bb879aff4`, minus the three split PRs and
+  rename PRs #1969 and #1643.)
+- **Inside the harness there are two things.** Format files change in 23 of
+  215 execution PRs, launch files in 51; 17 of the 23 also touch launch, 17 of
+  the 51 touch format. One trait carries both today.
+- **The format files are already leaves.** The decoders, `fact`, `lf_tag` and
+  the four transcript readers import `loopflow_model` and `rusqlite` only.
+- **Timings to beat** (LOO-650, `results/loo-650.json`, one Cargo job,
+  `incremental = false`): application edit 27.4 s, execution edit 57.5 s,
+  storage edit 65.5 s; peak RSS 3.4 GiB when execution compiles.
+
+What this extraction can and cannot buy, by the same numbers:
+
+- A crate below execution saves every other edit only that crate's compile
+  share. For about 7k of 115k lines that is a second or two of 57.5 s.
+- The "one small crate" loop reaches a PR only while it stays inside format
+  files: 6 of 215 PRs. The other 17 format PRs also rebuild execution.
+- The edit that pays most is the one made most. `ops` is in 110 of 184
+  grouped execution PRs, 34 alone; as a crate above the rest it would spare an
+  ops edit about 20 s of 57.5 s. It is not this Task's first extraction
+  because the Task prefers siblings to a longer chain and 17 lower modules
+  reference `ops` (42 references; `engine` and `machine` another 78). It is
+  question 1 on the review page.
+
+So this Task's first PR is the representative extraction the Task asks for,
+and its measurement decides what follows. If the ops-edit and storage-edit
+drops are inside run-to-run noise (LOO-650's range was under 1 s), siblings
+this size are not worth their boundary, and the next Task is chosen by
+measured compile share: `ops` above the rest, not another leaf.
 
 ## Sequencing and overlap
 
 - LOO-921 (cache and test baseline) is idle on an open question and LOO-922
-  (fresh-worktree cost) is unstarted. The extraction does not depend on either;
-  the comparison against their results does. Choice made for review: build the
-  slices now, measure base against candidate with `run.py`'s private caches,
-  and state in the PR which predecessor numbers did not exist. Before `run.py`
-  runs, `lf task status LOO-921` and `LOO-922` show neither is measuring: one
-  expensive measurement at a time.
-- Open PRs editing the files that move: #1967 (eight `transcript/` files,
-  `claude_decode`), #1976 and #1972 (`transcript/raw.rs`, `transcript/mod.rs`,
-  `harness/mod.rs`), #1968 (`harness/native_session.rs`). Whichever merges
-  first, the other rebases across a rename; this branch takes their content and
-  changes none of their behavior.
+  (fresh-worktree cost) is unstarted. The extraction does not depend on
+  either; the comparison against their results does. Choice made for review:
+  build the slices now, measure base against candidate with `run.py`'s private
+  caches, and state in the PR which predecessor numbers did not exist. Before
+  `run.py` runs, `lf task status LOO-921` and `LOO-922` show neither is
+  measuring: one expensive measurement at a time.
+- Open PRs editing files that move or split: #1967 (eight `transcript/`
+  files, `claude_decode`), #1976 and #1972 (`transcript/raw.rs`,
+  `transcript/mod.rs`, `harness/mod.rs`), #1968 (`harness/native_session.rs`).
+  Whichever merges first, the other rebases across a rename; this branch takes
+  their content and changes none of their behavior.
 
 ## Slices
 
-1. **Spike: the leaves.** Create the crate with the four decoders, `fact`,
-   `lf_tag`, their tests and `testdata`; execution depends on it; the old files
-   are gone. Run `cargo test -p loopflow-providers`, execution's
-   `harness::conformance_tests` (the mixed fixture: decoders across the crate
-   line into `FactWriter` and a store) and one application launch test. Time
-   the owner's test build before and after with a single message edit. This is
-   the slice that can prove the plan wrong: it shows whether a sibling's test
-   loop is as short as predicted, how much surface must become `pub`, and
-   whether mixed fixtures compile without a shim.
-2. **Split the trait, move transcripts.** `HarnessKind` and the format half of
-   `Harness` move; execution gets `Launcher`; rows 1–7 of the table are
-   resolved; `transcript/` moves.
+1. **Spike: the leaves.** Create `loopflow-harness` with the four decoders,
+   `fact`, `lf_tag`, their tests and `testdata`; execution depends on it; the
+   old files are gone. Run `cargo test -p loopflow-harness`, the `cargo tree`
+   check, execution's `harness::conformance_tests` (the mixed fixture:
+   decoders across the crate line into `FactWriter` and a store) and one
+   application launch test. Time the owner's test build before and after with
+   a single message edit. This is the slice that can prove the plan wrong: it
+   shows whether a sibling's test loop is as short as predicted, how much
+   surface must become `pub`, and whether mixed fixtures compile without a
+   shim.
+2. **Split the trait, move the readers.** `HarnessKind`, the unit structs and
+   `Harness` move; execution gets `Launcher: Harness`; the table's rows are
+   resolved; the transcript readers and the store-free half of
+   `transcript/mod.rs` and `live.rs` move. Run the launch matrix and one
+   application resume test.
 3. **Measure and document.** `run.py` cases, `results/loo-923.html`, scripts,
    READMEs and `AGENTS.md` paths.
 
 ## After this Task
 
-Ranked by the same evidence, each its own linked Task once this one's
-measurements say what a sibling of this size buys:
+Each its own linked Task, ordered by this Task's measurement and not by this
+list:
 
+- `ops` as the crate above the rest of execution, if question 1 is answered
+  yes or the sibling drop is inside noise.
 - Trackers: `linear`, `asana`, `ops/linear`. 86% of execution PRs skip them;
   about 11 upward references outside `ops/linear`.
 - Definition resolution into `loopflow-definitions`: `config`, `graph`,
@@ -198,8 +267,6 @@ measurements say what a sibling of this size buys:
   references, `config → store` first.
 - Git and repository facts. 89% skip; blocked on `observe`, which reads
   transcripts.
-- Provider logins and the launch half, joining `loopflow-providers`.
-
-If the measured drop on the ops edit is inside run-to-run noise (LOO-650's
-range was under 1 s), siblings this size are not worth their boundary and the
-next Task is chosen by measured compile share, not by this list.
+- Harness logins and the launch half. They need the store, so they join
+  `loopflow-harness` only if that crate is to depend on storage; otherwise
+  they are a crate of their own between storage and execution.

@@ -288,7 +288,11 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         };
         let first = if served_first { adopt() } else { cli() };
         let second = if served_first { cli() } else { adopt() };
-        assert_eq!(without_revision(first.clone()), without_revision(second));
+        // The answer's row stamps when it was read.
+        assert_eq!(
+            without_clock(without_revision(first.clone())),
+            without_clock(without_revision(second))
+        );
         let first = &first["task"];
         assert_eq!(first["title"], "Keep the conversation");
         assert!(first["project_id"].is_null());

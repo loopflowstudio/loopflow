@@ -80,8 +80,7 @@ writes! {
         run: bool,
     } => super::task_create::TaskCreated;
     { request_id, title, request, wave, graph, session, run, .. } => {
-    // The server lets planning exchange finish after the answer: dropping
-    // `after` detaches it.
+    // Served, planning exchange starts once the answer is written.
     let created = loopflow_execution::engine::creation::create(
         request_id,
         loopflow_execution::engine::creation::TaskCreation {

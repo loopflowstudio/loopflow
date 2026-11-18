@@ -89,8 +89,8 @@ pub fn step<T>(name: &'static str, run: impl FnOnce() -> T) -> T {
 }
 
 /// A created Task's receipt and, for a conversation-admitting `run`, its
-/// primary conversation's record read when answering, with the planning
-/// exchange still running after the answer. The application adds the Task's
+/// primary conversation's record read when answering, and the planning
+/// exchange its caller runs after answering. The application adds the Task's
 /// row to make `task.create`'s answer.
 #[derive(Debug)]
 pub struct Created {
@@ -124,30 +124,20 @@ fn answered(
 }
 
 /// Planning exchange and the assignee check following an answer, under the
-/// creation request's attribution. A caller that exits joins it; dropping it
-/// lets it finish on its own, as the server does.
-#[derive(Debug)]
-pub struct After {
-    runtime: Option<tokio::runtime::Runtime>,
-    handle: Option<tokio::task::JoinHandle<()>>,
-}
+/// creation request's attribution. A served answer hands it to the server,
+/// which starts it once the answer is written; a CLI caller runs it after
+/// printing.
+pub struct After(Box<dyn FnOnce() + Send>);
 
 impl After {
-    pub fn join(mut self) {
-        let (Some(runtime), Some(handle)) = (self.runtime.take(), self.handle.take()) else {
-            return;
-        };
-        if runtime.block_on(handle).is_err() {
-            tracing::warn!("planning sync after creation panicked");
-        }
+    pub fn run(self) {
+        (self.0)()
     }
 }
 
-impl Drop for After {
-    fn drop(&mut self) {
-        if let Some(runtime) = self.runtime.take() {
-            runtime.shutdown_background();
-        }
+impl std::fmt::Debug for After {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("After")
     }
 }
 
@@ -224,7 +214,7 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     match recorded.disposition {
         RecoveryDisposition::Inspect => return Err(unknown(&recorded).into()),
         RecoveryDisposition::Complete if filed && admits => {
-            return start_conversation(id, &input, &store, runtime, receipt)
+            return start_conversation(id, &input, &store, &runtime, receipt)
         }
         RecoveryDisposition::Complete => return answered(&store, &runtime, receipt),
         RecoveryDisposition::Continue if !admits => {}
@@ -269,7 +259,7 @@ fn start_conversation(
     id: &str,
     input: &TaskCreation,
     store: &crate::store::SharedStore,
-    runtime: tokio::runtime::Runtime,
+    runtime: &tokio::runtime::Runtime,
     receipt: TaskCreateReceipt,
 ) -> Result<Created> {
     let task = receipt.task.clone();
@@ -297,20 +287,16 @@ fn start_conversation(
             }
         }
     });
-    let mut created = answered(store, &runtime, receipt)?;
+    let mut created = answered(store, runtime, receipt)?;
     let main = crate::git::worktrees::main_repo_root(&input.directory)?;
-    let handle = {
-        let _runtime = runtime.enter();
-        crate::journal::request::spawn_blocking(move || {
-            step("sync_planning", || {
-                crate::ops::task::sync_admitted(&main, &task.id)
-            })
+    let span = tracing::Span::current();
+    let sync = move || {
+        let _creation = span.enter();
+        step("sync_planning", || {
+            crate::ops::task::sync_admitted(&main, &task.id)
         })
     };
-    created.after = Some(After {
-        runtime: Some(runtime),
-        handle: Some(handle),
-    });
+    created.after = crate::journal::request::after_reply(sync).map(|sync| After(Box::new(sync)));
     Ok(created)
 }
 

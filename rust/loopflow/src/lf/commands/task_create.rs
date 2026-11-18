@@ -181,7 +181,7 @@ pub fn create(
     }
     // Planning exchange runs after the answer; this process waits for it.
     if let Some(after) = after {
-        after.join();
+        after.run();
     }
     Ok(())
 }

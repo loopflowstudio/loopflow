@@ -262,8 +262,16 @@ Left for gate:
   `task_ship_stop_sticks_through_a_headless_relaunch`,
   `a_ship_whose_run_fails_the_same_way_stops_and_keeps_auto_ship_on`,
   `a_ship_meets_a_hand_merged_pr_at_its_landing_step`.
-- Swift suites (`DTOFixtureTests|DesktopHeadlessTests|TaskConceptTests|WorkModelTests|ServerProtocolTests`)
-  were edited, not run here.
+- Checks run here (2026-11-18): storage `task_work::`, `task_summaries::`,
+  `query_plans::` pass; execution runner/ship/lifecycle/engine/wire pass;
+  `task_graph_launch_tests::` ship, stop, batch and restart rows (78) pass;
+  `dto_fixtures::`, `server::schema::`, `write::tests::`, `served_reads`,
+  `documented_commands::` pass; clippy clean. Swift
+  `DTOFixtureTests|DesktopHeadlessTests|ServerProtocolTests|WorkModelTests|TaskConceptTests`:
+  all edited tests pass.
+- Not from this branch, seen on the LOO-959 base: `world_recipes::one_task_waits_at_human_review_after_planning_and_building`
+  (status now has a `conversation` key, 33ab7ff469), and three Swift
+  "Work observation stream" tests failing on `WorkPart(rawValue: "activity")`.
 - `docs/dev/index.html` regeneration if the website check asks.
 
 ## Exclusions

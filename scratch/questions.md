@@ -146,3 +146,9 @@ isolated child process, as AGENTS.md asks of process-global tests.
 - Call: a read-only Graph step (`graph show …`) admits no Process, so it once wrote its end only through `observe_process`; `with_process` now creates the context at exit when `LF_EXECUTION_ID` is set, and nothing else.
 - Call: the CI repair arm stays out of the liveness pass; no Process end ever ended an incident's repair, and readers check its pid inline.
 - Open for slice 4: `lf ps` lists only released-lf rows and bridged agent rows now, since nothing else writes Process rows.
+
+## Slice 4b names (2026-11-18, headless)
+
+- `lf session history show` is served as `session.history.get`, not the
+  planned `session.history`: that kind already serves `lf session history`.
+  Reversible; `session.show` was the other candidate.

@@ -1,10 +1,10 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-18, slices 4–5 built; next: slice 4b names, then gate)
+## Status (2026-11-18, slices 4, 4b and 5 built; next: gate)
 
 LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
 slice of this PR is built: slice 2a, the owner and carrier slices, the Session
-slices of slice 3, the journal stop, and slices 4–5 below. History of each
+slices of slice 3, the journal stop, and slices 4, 4b and 5 below. History of each
 pass, with its checks: `git show be7ccd8712:scratch/loo-953-remove-processes.md`.
 Contract Task: LOO-965 ("Drop the Process table LOO-953 marked leaving").
 Quotes and the OS-scan measurement: `questions.md`.
@@ -40,36 +40,39 @@ Quotes and the OS-scan measurement: `questions.md`.
 - `history export` writes Sessions and events only; import skips Process
   and Graph rows a released exporter wrote.
 - Docs and operate skills name `lf session list`, `lf graph list
-  --processes --state current` and `lf graph show` in place of `lf ps`.
+  --runs --state current` and `lf graph show` in place of `lf ps`.
 
-**Slice 4b (concept review after slice 4, 2026-11-18): name what replaced
-`lf ps` for what it lists.** Slice 4 made `lf graph list --processes` the
-documented "what ran" command (docs, `repo_operate`, `task_operate`), so the
-deleted concept is now the name people type. The "Process-line slice" the
-rename was waiting for was slice 4 itself; nothing else will carry it.
+**Slice 4b as built (2026-11-18): user-facing names lose Process.**
 
-- `lf graph list --processes` → `--runs` ("Graph runs instead of reusable
-  templates"; `lf task runs` already uses the word). Delete `--processes`,
-  no alias. Follow it through `navigation.rs`' "require --processes" error,
-  `task_row.rs`, `ops::task`, `task_work.rs`, the 12 doc/skill lines, and
-  fixtures (`graph_discovery_tests`, `world_recipes`, `graph_tests`,
-  `task_graph_launch_tests`). `task_operate.md:22`'s
-  `lf graph show <graph-id> --processes` drops the flag (`graph show`
-  accepts a run id).
-- Read kinds: `process.get` (= `lf graph show <id>`) → `graph.run.get`;
-  `process.history` (= `lf session history show`) → `session.history`.
-  Rust `Read`, Swift `RegistryQuery.swift`, `server/README.md`,
-  `server_schema.json` in one change; Desktop and lf ship together.
-- The user-visible "Process" wording that remains: the admission notice
-  `Process history unavailable: no compatible process ledger for this
-  process` (`journal::admit_process`, asserted in
-  `process_ownership_tests.rs:173,216`) and test comments saying a read
-  "records no Process" (`served_reads.rs`, `process_ownership_tests.rs`,
-  `retirement_tests.rs`). Production comments were corrected at realign.
-- Stays for a follow-up Task (file it at gate): the type and DTO rename
-  `GraphProcess*` → `GraphExecution*`/`GraphRun*`, `work.graph_processes`,
-  `graph_process.rs` (42 files, Rust and Swift). Internal names; nobody
-  types them.
+- `lf graph list --runs` replaces `--processes` (no alias) through
+  navigation, `lf task runs`, the `task.runs` read, docs, operate skills and
+  fixtures; `lf graph show <id>` never took the flag, and fixtures stop
+  passing it.
+- Read kinds: `process.get` → `graph.run.get` (`Read::GraphRunGet`, Swift
+  `.graphRunGet`); `process.history` → `session.history.get`
+  (`Read::SessionHistoryGet`, Swift `.sessionHistoryGet`,
+  `RegistryQuery.sessionHistoryText(id:)`). `session.history` was already
+  `lf session history`, so the plan's name collided.
+- Desktop's step "Read process history" button is deleted with its
+  `historyQuery` plumbing: it asked Session history for a step's
+  `lf_process_id`, a form slice 4 removed, so it always failed.
+- Assertions counting `processes` rows (which no lf writes) are deleted:
+  `install_preflight_records_no_process` (and its `test_task_installation.py`
+  entry), the counts in `early_commands_exit…`, the release check,
+  `inspection_starts_no_work`, and the `processes` half of `served_reads`'
+  `changes()`; `store_revisions` still catches a read that writes.
+- Remaining user-visible Process wording: the admission notice `Process
+  history unavailable…` (`journal::admit_process`).
+- Follow-up Task at gate: `GraphProcess*` → `GraphRun*`,
+  `work.graph_processes`, `graph_process.rs` (42 files, Rust and Swift).
+
+**Broken by slice 4, found in 4b, not fixed:** the ignored installation proof
+`running_provider_uses_updated_install_for_commands_hooks_and_graph`
+(`os_process/installation_tests.rs:146-172`) reads each step's `command` and
+the agent-attributed commands from `processes`. Steps record no command now,
+so the proof needs other evidence that the step ran the replacement binary
+(launcher-written, like the cwd evidence the Rex fixtures use). It runs only
+in `scripts/test_task_installation.py` (CI).
 
 **Slice 5 as built.** `sqlite::processes::bridge_tests` drives 0.16.0's
 `record_process_in`, `record_graph` and `record_agent_endpoint` SQL: a
@@ -111,6 +114,17 @@ journal stop's flaky-under-load
 `completion_preserves_retained_session_input_and_unknown_process_history`.
 `check_migrations.py` and `schema_page.py --check` were clean before slice 4,
 which changed no migration.
+
+Checks for 4b (2026-11-18): `server::schema|lf::tests|read::tests` 51,
+`documented_commands|graph_discovery_tests|dto_fixtures|world_recipes|
+cli_discovery` 104, `binary(served_reads)|binary(process_ownership_tests)` 21,
+Desktop `RegistryQueryTests|DesktopHeadlessTests|DTOFixtureTests|
+ServerProtocolTests` 114 pass; schema fixture regenerated; clippy, fmt clean.
+`graph_tests::|task_graph_launch_tests::` (82) failed 3 then 1 under
+parallel load, a different test each run (`a_held_command_stops…`,
+`interactive_graph_keeps_input…`, `running_graphs_belong…`,
+`task_create_run_starts_the_graph…`: "Task run ended: Graph … running");
+each passes alone. None reads the renamed flag; flaky, for gate.
 
 **Decisions still live** (concept reviews, 2026-11-17/18; detail in git):
 

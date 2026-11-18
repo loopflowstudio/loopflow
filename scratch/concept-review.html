@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LOO-977 concept review: why a turn failed</title>
+<title>LOO-977 concept review: why a turn failed, as built</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -32,7 +32,6 @@
   th, td { text-align: left; vertical-align: top; padding: 10px 12px; border-bottom: 1px solid var(--line); }
   th { font-weight: 600; font-size: 14px; }
   tr:last-child td { border-bottom: 0; }
-  td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .yes { color: var(--yes); font-weight: 600; }
   .no { color: var(--no); font-weight: 600; }
   .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -43,7 +42,6 @@
   .tag.new { border-color: var(--new); color: var(--new); }
   .flow { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 0; }
   .step { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--bg); font-size: 14px; }
-  .step.drop { background: var(--nobg); border-color: var(--no); }
   .step.add { background: var(--newbg); border: 1px dashed var(--new); }
   .arrow { color: var(--muted); text-align: center; font-size: 13px; line-height: 1; }
   .big { border-left: 4px solid var(--no); padding: 4px 0 4px 16px; margin: 16px 0; }
@@ -55,169 +53,145 @@
 <body>
 <main>
 
-<h1>Why a turn failed</h1>
-<p class="lede">LOO-977 asks for a curly apostrophe in one phrase list. The area reviewed is the whole route a provider's failure takes: what the provider says, what the harness decoder keeps, what the recovery loop acts on, and what a person reads in <code>lf task status</code>. The apostrophe is one sentence on that route; the question is whether the route should be reading sentences.</p>
+<h1>Why a turn failed, as built</h1>
+<p class="lede">The area: the route a provider's refusal takes through a headless Graph step, from what the provider says to what a person reads in <code>lf task status</code>, with the whole LOO-977 change in it (base <code>7bb879aff4</code>, head <code>48dd78f7d0</code>). The first review of this area, before anything was built, is in <code>04c1da6e50</code>; this page replaces it.</p>
 
 <h2>One interaction, walked</h2>
-<p>A Graph has <code>agents: [codex:gpt-6.2-astra, claude:fable]</code>. The Codex account runs out during <code>implement</code>.</p>
-<div class="cols">
-  <div class="card">
-    <h3>What a person expects</h3>
-    <p>The step goes on under Claude. Status says it moved, and why, in Codex's own words. Nothing to do.</p>
-  </div>
-  <div class="card">
-    <h3>What happened on 2026-11-18</h3>
-    <p>The step exited 1 and the Graph stopped. Recovery was <code>lf task run</code> by hand, into the same refusal, until the account reset.</p>
+<p><code>agents: [codex:gpt-6.2-astra, claude:fable]</code>; the Codex account runs out during <code>implement</code>.</p>
+<div class="card">
+  <div class="flow">
+    <div class="step">Codex: <code>error { message: "You’ve hit your usage limit. …", codexErrorInfo: "usageLimitExceeded" }</code></div>
+    <div class="arrow">↓</div>
+    <div class="step"><code>codex_decode.rs::error_code</code> → event code <code>provider_rate_limited</code></div>
+    <div class="arrow">↓</div>
+    <div class="step"><code>drive.rs</code>: <code>AgentFailure::from_code</code> → <code>failure: UsageLimit</code>, kept because the exit is non-zero</div>
+    <div class="arrow">↓</div>
+    <div class="step"><code>_run_with_retries</code> moves to <code>claude:fable</code>; the terminal prints <code>codex: provider usage limit; continuing on claude:fable</code></div>
+    <div class="arrow">↓</div>
+    <div class="step"><code>retry_agent_process</code> replaces the AgentProcess and writes the Session's provider and model</div>
+    <div class="arrow">↓</div>
+    <div class="step">Status: <code>implement went on under claude after: provider_rate_limited: You’ve hit your usage limit. …</code></div>
   </div>
 </div>
-<p>What Codex wrote for that turn, from <code>~/.codex/sessions/2026/11/18/</code>:</p>
-<pre>"error":{"message":"You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.","codex_error_info":"usage_limit_exceeded"}</pre>
-<p>Codex named the cause. lf kept the sentence, threw away the name, and then failed to recognise the sentence.</p>
+<p><b>Failure:</b> the sentence arrives with no type. The code stays <code>codex_error</code>; <code>subscription_limit_text</code> reads it through <code>_provider_words</code> (lowercase, ’ → ') and gives the same failure.</p>
+<p><b>Recovery:</b> nothing left in the order. The step waits 5, 15, 30, 60 minutes, starting the order again each time, then stops with advice; <code>lf task run</code> starts again at the step. Unchanged.</p>
+<p class="muted">Seen in qa on a real spent Codex account: the move, the status line, a steer reaching the step on Claude. Not reached: <code>unauthorized</code>, <code>serverOverloaded</code>, the untyped sentence (unit tests only).</p>
 
 <h2>Do the concepts line up?</h2>
 <table>
   <tr><th style="width:24%">A person knows</th><th style="width:34%">The code has</th><th style="width:8%"></th><th>What is wrong</th></tr>
   <tr>
     <td>The agent order: try Codex, then Claude</td>
-    <td><code>AgentConfig.agent</code> + <code>fallback_agents</code>, the rungs in <code>_run_with_retries</code></td>
+    <td><code>AgentConfig.agent</code> + <code>fallback_agents</code>; <code>_fallthrough_rungs</code></td>
     <td class="yes">yes</td><td></td>
   </tr>
   <tr>
-    <td>Why the step failed: out of quota, model gone, signed out, provider busy</td>
-    <td><code>AgentFailure</code> (7 kinds)</td>
-    <td class="yes">yes</td><td>The type is right. How a failure gets into it is the next two rows.</td>
+    <td>Why the step failed</td>
+    <td><code>AgentFailure</code></td>
+    <td class="yes">yes</td><td></td>
   </tr>
   <tr>
-    <td>What the provider said</td>
-    <td>Codex: <code>codexErrorInfo</code> on the error, dropped in <code>codex_decode.rs</code>; every error leaves as <code>codex_error</code>.<br>Claude: <code>rate_limit_event</code>, kept as <code>provider_rate_limited</code>.</td>
-    <td class="no">no</td><td>One idea, kept for one provider and discarded for the other.</td>
+    <td>What the provider said went wrong</td>
+    <td><code>codexErrorInfo</code> → <code>error_code</code> → <code>AgentFailure::from_code</code>; Claude's <code>rate_limit_event</code> through the same lookup</td>
+    <td class="yes">yes</td><td>Was no. One reader per provider, one table from code to failure. Phrase lists run only when no type came.</td>
   </tr>
   <tr>
-    <td class="muted">(nothing; a person never sees this)</td>
-    <td>Four phrase lists over stderr in <code>agent/mod.rs</code>, plus a fifth copy in <code>ops/release.rs</code></td>
-    <td class="no">no</td><td>A concept the code has and the person doesn't: English sentences as the protocol. One action, "decide why it failed", with two owners for Codex (decoder and phrase list) and a third in release.</td>
+    <td>Which agent the step is running on now</td>
+    <td><code>agent_sessions.provider</code>, <code>.model</code></td>
+    <td class="yes">yes</td><td>Was no, and nobody had seen it: the row kept <code>codex</code> after the move. Two writers now (launch, and <code>record_session_agent</code> on retry), the second in its own transaction after the AgentProcess is replaced. See 3 below.</td>
+  </tr>
+  <tr>
+    <td>"It moved to Claude because…" in status</td>
+    <td><code>agent_limit_recoveries.reason</code> = the step's stderr = <code>{event code}: {provider's message}</code></td>
+    <td class="no">no</td><td>The first word a person reads is a decoder's event code. The same failure has a plain name one line up, on the terminal: <code>codex: provider usage limit</code>. The biggest mismatch left.</td>
+  </tr>
+  <tr>
+    <td>"Agents move on when one runs out"</td>
+    <td><code>wait_for_capacity</code>: true only for a headless Graph step</td>
+    <td class="no">no</td><td>The stop advice answers from the config (<code>fallback_agents</code>) and not from the order the run could walk. Headless work outside a Graph, with <code>agents: [codex, claude:haiku]</code>, is told to "add another agent to <code>agents</code>". Older than this branch; Codex's limit reaches it now.</td>
+  </tr>
+  <tr>
+    <td>"Codex isn't signed in"</td>
+    <td><code>unauthorized</code> (revoked) → <code>CredentialInvalidated</code>; <code>{"httpConnectionFailed":{"httpStatusCode":401}}</code> (never signed in) → <code>codex_error</code></td>
+    <td class="no">no</td><td>One idea to a person, two outcomes: a revoked login moves to the next provider, a missing one stops the step.</td>
   </tr>
   <tr>
     <td class="muted">(nothing)</td>
     <td><code>ConversationEvent::Error.code: String</code></td>
-    <td class="no">no</td><td>One name for two ideas: who reported (<code>codex_error</code>, <code>claude_exit</code>) and what happened (<code>provider_rate_limited</code>). <code>drive.rs</code> compares it to one literal. Larger than this work; see question 4.</td>
-  </tr>
-  <tr>
-    <td>"It moved to Claude because…" in status</td>
-    <td><code>agent_limit_recoveries.reason</code>: the stderr line + <code>; continuing on claude</code></td>
-    <td class="yes">yes</td><td>The provider's words are the right thing to show. They should be shown, not parsed.</td>
+    <td class="no">no</td><td>One name for two ideas: who reported (<code>codex_error</code>, <code>claude_exit</code>) and what happened (<code>provider_rate_limited</code>). The first row marked no is this, showing through.</td>
   </tr>
 </table>
 
 <h2>The biggest mismatch</h2>
 <div class="big">
-  <p>Codex states the cause of every failed turn as a typed value. lf discards it at the decoder and guesses it back from the sentence. The sentence is the part Codex changes.</p>
+  <p>The branch made the cause a typed value everywhere inside, and then the one place a person reads it shows the wire spelling. <code>docs/troubleshooting.md</code> now carries a table teaching five event codes, one of which (<code>provider_rate_limited</code>) means "usage spent" while Codex's own <code>rateLimitExceeded</code> is something else and untyped.</p>
 </div>
-<p>Every typed failure in this Machine's Codex rollouts, 2026-10-06 to 2026-11-18:</p>
-<table>
-  <tr><th>Codex's type</th><th>Turns</th><th>Its sentence</th><th>lf's phrase lists today</th></tr>
-  <tr><td><code>usage_limit_exceeded</code></td><td class="num">507</td><td>You’ve hit your usage limit. … <span class="muted">(always U+2019; two URLs; with and without "Upgrade to Pro")</span></td><td class="no">miss</td></tr>
-  <tr><td><code>model_not_found</code></td><td class="num">98</td><td>The 'gpt-6.1-astra' model is not supported when using Codex with a ChatGPT account.</td><td class="no">miss</td></tr>
-  <tr><td><code>server_overloaded</code></td><td class="num">70</td><td>Selected model is at capacity. Please try a different model.</td><td class="yes">Capacity</td></tr>
-  <tr><td><code>unauthorized</code></td><td class="num">37</td><td>Your access token could not be refreshed because …</td><td class="yes">CredentialInvalidated</td></tr>
-  <tr><td><code>other</code></td><td class="num">12</td><td>workspace routing discovery failed; stream disconnected …</td><td class="muted">varies</td></tr>
-</table>
-<p class="muted">Counts include interactive Codex sessions, not only lf steps. They show what Codex emits, not how many Graphs stopped.</p>
-<p>Two of the four kinds are missed by wording today. Fixing the apostrophe repairs one of them until the sentence changes again.</p>
-
-<h2>Before and after</h2>
 <div class="cols">
   <div class="card">
-    <h3>Existing</h3>
-    <div class="flow">
-      <div class="step">Codex: <code>error { message, codexErrorInfo: "usageLimitExceeded" }</code></div>
-      <div class="arrow">↓</div>
-      <div class="step drop"><code>codex_decode.rs</code> keeps <code>message</code>, emits code <code>codex_error</code></div>
-      <div class="arrow">↓</div>
-      <div class="step"><code>drive.rs</code>: is the code <code>provider_rate_limited</code>? No. <code>failure: None</code></div>
-      <div class="arrow">↓</div>
-      <div class="step drop"><code>subscription_limit_text</code>: does stderr contain <code>you've hit your</code> (U+0027)? No.</div>
-      <div class="arrow">↓</div>
-      <div class="step">Plain failure. Graph stops.</div>
-    </div>
+    <h3>Built</h3>
+    <pre>implement went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (…) or try again at 3:36 PM.</pre>
+    <p>Names the provider it moved to, not the one that refused. The reader learns <code>provider_rate_limited</code>, <code>provider_model_unavailable</code>, <code>provider_credential_invalidated</code>, <code>provider_capacity</code>, <code>codex_error</code>.</p>
   </div>
   <div class="card proposed">
-    <h3>Proposed <span class="tag new">not built</span></h3>
-    <div class="flow">
-      <div class="step">Codex: <code>error { message, codexErrorInfo: "usageLimitExceeded" }</code></div>
-      <div class="arrow">↓</div>
-      <div class="step add"><code>codex_decode.rs</code> reads <code>codexErrorInfo</code>, emits code <code>provider_rate_limited</code></div>
-      <div class="arrow">↓</div>
-      <div class="step add"><code>drive.rs</code>: one code → <code>AgentFailure</code> lookup, shared with Claude. <code>failure: UsageLimit</code></div>
-      <div class="arrow">↓</div>
-      <div class="step">Recovery loop moves to <code>claude:fable</code>; reason keeps Codex's sentence.</div>
-      <div class="arrow">↓</div>
-      <div class="step add">Phrase lists run only when no type came, over text folded once (lowercase, ’ → ')</div>
-    </div>
+    <h3>Simpler <span class="tag new">not built</span></h3>
+    <pre>implement went on under claude after: codex usage limit: You’ve hit your usage limit. Upgrade to Pro (…) or try again at 3:36 PM.</pre>
+    <p>The refusing agent, <code>AgentFailure</code>'s own words, then the provider's sentence. The docs table loses its code column.</p>
   </div>
 </div>
+<p><b>Recommendation: not in this change.</b> The reason is the step's stderr, and stderr is <code>{code}: {message}</code> because the text classifiers, <code>release.rs</code> and a wide set of tests read that shape. Building the line from the failure and the message means <code>AgentProcessResult</code> carries the provider's message beside <code>failure</code>, which is the first half of the typed-error work below. Before this branch the same slot read <code>codex_error:</code>; the kind of word shown has not changed, only which one. Passed over: stripping the code prefix in <code>_failure_reason</code>, which parses lf's own stderr to undo what <code>drive.rs</code> just wrote.</p>
 
-<h3 style="margin-top:24px">The proposed table <span class="tag new">not built</span></h3>
-<table class="proposed">
-  <tr><th><code>codexErrorInfo</code></th><th>Event code</th><th><code>AgentFailure</code></th><th>What the step does</th></tr>
-  <tr><td><code>usageLimitExceeded</code></td><td><code>provider_rate_limited</code> <span class="tag">exists</span></td><td>UsageLimit</td><td>next agent, else timed waits</td></tr>
-  <tr><td><code>modelNotFound</code></td><td><code>provider_model_unavailable</code></td><td>ModelUnavailable</td><td>next agent, else stop with advice</td></tr>
-  <tr><td><code>unauthorized</code></td><td><code>provider_credential_invalidated</code></td><td>CredentialInvalidated</td><td>next other provider, else sign-in advice</td></tr>
-  <tr><td><code>serverOverloaded</code></td><td><code>provider_capacity</code></td><td>Capacity</td><td>retry with backoff</td></tr>
-  <tr><td>null, an object variant, anything else</td><td><code>codex_error</code> <span class="tag">exists</span></td><td>whatever the words say</td><td>as today</td></tr>
-</table>
+<h2>Smaller, in the order they would bite</h2>
+<ol>
+  <li><b>Stop advice outside a Graph.</b> <code>_limit_stop_advice</code> tests <code>launch.fallback_agents</code>; it is handed <code>rungs</code>, the order the run could walk, and <code>rungs.len() == 1</code> is the true case. What it takes: a third wording for "only Graph steps move", or letting other headless work walk the order (<code>docs/config.md</code> says it "stops at once").</li>
+  <li><b>A missing Codex login.</b> One more row in <code>error_code</code>, reading an object variant: <code>httpConnectionFailed</code> with 401 → <code>provider_credential_invalidated</code>. It is new behavior on evidence from one qa run with an empty <code>CODEX_HOME</code>.</li>
+  <li><b>The Session's agent is written after the replace, not with it.</b> <code>replace_session_agent_process</code> commits, then <code>record_session_agent</code> opens a second transaction. A store failure between them leaves the new AgentProcess under the old provider (the state that failed the demo) and the runtime holding the old attachment. What it takes: <code>transfer.replace_agent</code> takes the provider and model, and <code>record_session_agent</code> goes.</li>
+  <li><b><code>release.rs</code> still reads words.</b> <code>CommandError</code> carries no <code>AgentFailure</code>. It now shares <code>subscription_limit_text</code> and has no list of its own.</li>
+  <li>From qa, outside this area: a stopped <code>lf -b graph</code> leaves its step waiting out the limit; a failed Codex step prints a second <code>Error:</code> line of raw JSON.</li>
+</ol>
 
-<h2>Tested against three paths</h2>
+<h2>Counterexamples kept</h2>
 <table>
-  <tr><th style="width:22%">Path</th><th>Result</th></tr>
-  <tr><td>Normal: limit with a fallback</td><td>Typed at the decoder; moves on. Does not depend on the sentence.</td></tr>
-  <tr><td>Failure: Codex sends the sentence with <code>codexErrorInfo: null</code></td><td>Code stays <code>codex_error</code>; the folded phrase list catches it. This is why the apostrophe fix stays in the plan.</td></tr>
-  <tr><td>Failure: a typed error on a turn Codex then finishes</td><td>Exit 0, no failure. The existing rule at <code>drive.rs:116</code> carries over.</td></tr>
-  <tr><td>Recovery: no fallback left</td><td>Unchanged: timed waits, then stop with advice; <code>lf task run</code> starts again at the step.</td></tr>
-  <tr><td>Counterexample: a typo'd model in config</td><td><code>modelNotFound</code> now moves to the next agent where the Graph used to stop. The move is recorded, but a person may not notice the first agent never runs. Kept open as question 2.</td></tr>
-  <tr><td>Counterexample: app-server JSON differs from the rollout record</td><td>The rollouts are snake_case core events; lf reads the camelCase app-server protocol, where <code>generate-ts</code> lists the same enum. No app-server payload of a real limit was captured. The fold covers the gap; the first slice's test shows it either way.</td></tr>
+  <tr><th style="width:30%">Case</th><th>Result</th></tr>
+  <tr><td>A typed error on a turn Codex then finishes</td><td>Exit 0, no failure (<code>failure.filter(|_| exit_code != 0)</code>).</td></tr>
+  <tr><td><code>willRetry: true</code></td><td>No terminal error, whatever the info says.</td></tr>
+  <tr><td>A misspelled model in <code>agents</code></td><td>Moves on quietly where the Graph used to stop. Recorded in <code>agent_limit_recoveries</code> and documented in <code>docs/config.md</code>; a person finds out by reading status. Question 2.</td></tr>
+  <tr><td>Claude spent, moving to Codex</td><td>Same code path and the same Session write; no test or qa run drives that direction.</td></tr>
 </table>
 
-<h2>What changed in the plan</h2>
-<ul>
-  <li>The typed read moved from an optional second slice to the first, and from one kind to four.</li>
-  <li>"Not confirmed: that the failure carried <code>usageLimitExceeded</code>" is gone. It did; the record is quoted above.</li>
-  <li>The demo was wrong. <code>task_graph_launch_tests.rs:2031</code> inserts the reason string into <code>agent_limit_recoveries</code> and never classifies it, so swapping its apostrophe would have shown nothing. The demo is now a scripted Codex app-server in <code>agent_tests.rs</code> that fails with the recorded error and finishes under Claude.</li>
-  <li><code>drive.rs</code>'s <code>limited</code> flag goes; a stale doc comment on <code>subscription_limit_text</code> goes.</li>
-</ul>
-
-<h2>Larger than this work</h2>
-<ul>
-  <li><code>ops/release.rs</code> classifies a failed agent by reading its words again, because <code>CommandError</code> carries no <code>AgentFailure</code>. Carrying the type through would delete that classifier's quota and credential lists.</li>
-  <li><code>Error.code</code> as a typed field instead of a string with two meanings is a wire change mirrored in Swift, with its fixtures.</li>
-  <li>Once Codex is typed, the phrase lists serve Claude's headless path and untyped Codex errors. Which phrases are still reachable can't be told from this Machine's records alone.</li>
-</ul>
+<h2>Outcome of this pass</h2>
+<p>Nothing to change in the code. The built route is the planned one and nothing of the replaced one is left: <code>drive.rs</code>'s <code>limited</code> flag, the per-classifier lowercasing and <code>release.rs</code>'s phrase list are gone. <code>scratch/plan.md</code> gained the findings above under "After the build".</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>How much of Codex's type to read?
+  <li>The reason a person reads in status:
     <ol>
-      <li>All four observed kinds <span class="tag new">chosen for review</span></li>
-      <li>Only <code>usageLimitExceeded</code>; the rest stay with the phrase lists</li>
-      <li>None; ship the apostrophe fold alone, as the brief says</li>
+      <li>Leave <code>provider_rate_limited: …</code> and the docs table <span class="tag new">chosen for review</span></li>
+      <li>File a Task: <code>codex usage limit: …</code>, built from the failure and the provider's message</li>
     </ol>
   </li>
   <li>When Codex says the model doesn't exist:
     <ol>
-      <li>Move to the next agent, like any unavailable model <span class="tag new">chosen for review</span></li>
-      <li>Stop the Graph; a model that doesn't exist is a config mistake to fix</li>
+      <li>Move to the next agent <span class="tag new">built</span></li>
+      <li>Stop the Graph; a model that doesn't exist is a config mistake</li>
     </ol>
   </li>
-  <li>Keep the apostrophe fold once the type is read?
+  <li>Headless work outside a Graph, refused with other agents configured:
     <ol>
-      <li>Keep it, as the fallback for an untyped sentence <span class="tag new">chosen for review</span></li>
-      <li>Drop it; the type is the fix and one fewer thing reads sentences</li>
+      <li>Reword the advice to say only Graph steps move</li>
+      <li>Let it walk the order too</li>
+      <li>Leave it <span class="tag new">as built</span></li>
     </ol>
   </li>
-  <li>The string <code>code</code> on error events:
+  <li>A Codex that was never signed in:
     <ol>
-      <li>Leave it; add the three new <code>provider_*</code> codes <span class="tag new">chosen for review</span></li>
-      <li>File a Task for a typed failure field on the wire event</li>
+      <li>Treat the 401 as a login failure and move to the next provider</li>
+      <li>Keep stopping the step <span class="tag new">as built</span></li>
+    </ol>
+  </li>
+  <li>The Session's agent on retry:
+    <ol>
+      <li>Fold it into the AgentProcess replacement, one transaction</li>
+      <li>Keep the second write <span class="tag new">as built</span></li>
     </ol>
   </li>
 </ol>

@@ -211,3 +211,22 @@ Open, found while writing them:
 - Confirmed in code: a typed `provider_capacity` takes the same retry branch
   of `_run_with_retries` as the text-classified one. No test drives it end to
   end.
+
+## After the build (concept review, 2026-11-18)
+
+The built route is the designed one; no code change follows from the review.
+`scratch/concept-review.html` has the page. Left as built, each larger than
+this change or new behavior:
+
+- The status reason's first word is a decoder event code. The simpler line is
+  `codex usage limit: <provider's message>`, built from `AgentFailure` and the
+  message; it needs `AgentProcessResult` to carry the message, since the
+  reason is the step's stderr today.
+- `_limit_stop_advice` tests `launch.fallback_agents`, not the `rungs` it is
+  handed, so headless work outside a Graph is told to add an agent it already
+  has.
+- `{"httpConnectionFailed":{"httpStatusCode":401}}` (never signed in) stays
+  `codex_error` while `unauthorized` moves on.
+- `record_session_agent` is a second transaction after
+  `replace_session_agent_process`; `transfer.replace_agent` taking the
+  provider and model would make it one.

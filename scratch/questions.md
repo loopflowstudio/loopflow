@@ -95,3 +95,21 @@
 - **Wire `task_primary` stays** for now, beside `primary_scope`, which now says
   `"task"` too. Dropping it means touching ~80 Swift and fixture sites; it is a
   projection, not a stored copy.
+
+## Concept review answers (human review, 2026-11-18)
+
+"1 (a) 2(a) 3(a) 4(a)", against scratch/concept-review.html's questions:
+1. Wire `task_primary`: drop it in this PR.
+2. Cross-Project drop on the Working board: moves the Task into that Project
+   at that position.
+3. The branch's three homes: LOO-934 decides whether one "the Task's branch"
+   suffices.
+4. `Disposition.planning_completed` on the wire: file the release that
+   accepts its absence with LOO-877.
+
+- **A move takes any of the repository's Projects** (from answer 2). Dropping
+  on another Project's Task moves it there, then ranks it; `lf task move`
+  shares the path. The Wave's-configured-Project check stays on creation only:
+  a board shows older Projects' Tasks, and refusing a drop into one would read
+  as "ensure the Wave before starting new work". Passed over: keeping the check
+  for `lf task move` alone, which gives one action two rules.

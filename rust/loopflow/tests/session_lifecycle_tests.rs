@@ -1367,7 +1367,6 @@ fn a_task_primary_is_one_of_its_own_conversations() {
     assert_eq!(chosen["id"], sole.as_str());
     // Its row is marked for its Task, and it stays a member of that Task.
     assert_eq!(chosen["primary_scope"], "task");
-    assert_eq!(chosen["task_primary"], true);
     assert_eq!(members("Inf-123"), std::slice::from_ref(&sole));
     for args in [
         vec!["resume", "--task", "inf-123", "--prepare", "--json"],
@@ -1407,7 +1406,7 @@ fn a_task_primary_is_one_of_its_own_conversations() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|session| session["task_primary"] == true)
+        .filter(|session| session["primary_scope"] == "task")
         .map(|session| session["id"].as_str().unwrap().to_string())
         .collect();
     assert_eq!(marked, std::slice::from_ref(&later));

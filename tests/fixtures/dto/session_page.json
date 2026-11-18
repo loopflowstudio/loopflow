@@ -45,7 +45,6 @@
       "workspace": null,
       "primary_scope": null,
       "availability": "available",
-      "task_primary": false,
       "program_status": {
         "seen": true,
         "records": [

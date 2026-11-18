@@ -376,7 +376,6 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         a.primary_scope,
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
-        a.primary_scope IS 'task',
         (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
@@ -436,10 +435,10 @@ fn read_summary(
             }
             None => None,
         };
-        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(30)?;
+        let agent_process_id: Option<loopflow_model::id::AgentProcessId> = row.get(29)?;
         let agent_process_evidence = projection.evidence(agent_process_id.as_ref());
         let live = agent_process_evidence == crate::ProcessIdentityEvidence::Live;
-        let unviewed: bool = row.get(33)?;
+        let unviewed: bool = row.get(32)?;
         let task_identifier = task_id
             .as_ref()
             .map(|id| super::children::cached_short_task_id(conn, labels, id))
@@ -447,30 +446,29 @@ fn read_summary(
             .flatten();
         Ok(crate::session::SessionSummary {
             transition: super::provider_transitions::latest_in(conn, &row.get::<_, String>(0)?)?,
-            has_provider_history: row.get(35)?,
+            has_provider_history: row.get(34)?,
             preview: row
-                .get::<_, Option<String>>(32)?
+                .get::<_, Option<String>>(31)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
             terminal_id: row
-                .get::<_, Option<String>>(31)?
+                .get::<_, Option<String>>(30)?
                 .filter(|_| live && !unviewed),
             unviewed,
-            held: live && row.get(36)?,
+            held: live && row.get(35)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
             primary_scope: row.get(25)?,
             agent_process_evidence,
             available: live && row.get(26)?,
             program_status: row
-                .get::<_, Option<String>>(29)?
+                .get::<_, Option<String>>(28)?
                 .map(|json| serde_json::from_str(&json))
                 .transpose()?
                 .filter(|_| live),
             agent_process_id,
             task_terminal: row.get(27)?,
-            task_primary: row.get(28)?,
             captured: row.get(15)?,
             id: row.get(0)?,
             artifact_key: row
@@ -489,7 +487,7 @@ fn read_summary(
             skill: row.get(10)?,
             provider: row.get(11)?,
             account: row
-                .get::<_, Option<String>>(34)?
+                .get::<_, Option<String>>(33)?
                 .map(|id| crate::ProviderAccountId::parse(&id))
                 .transpose()
                 .map_err(invalid)?,

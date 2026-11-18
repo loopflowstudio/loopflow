@@ -217,7 +217,7 @@ fn served_binding_moves_the_conversation_to_the_task_checkout() {
     });
     assert_eq!(bound["id"], session["id"]);
     assert_eq!(bound["cwd"], destination.to_str().unwrap());
-    assert_eq!(bound["task_primary"], true);
+    assert_eq!(bound["primary_scope"], "task");
     assert_eq!(processes(&home.path().join("loopflow.db")), before);
 }
 
@@ -310,7 +310,7 @@ fn served_session_adoption_matches_cli_without_new_execution() {
         assert_eq!(bound["id"], session["id"]);
         assert_eq!(bound["cwd"], session["cwd"]);
         assert_eq!(bound["agent_process_id"], session["agent_process_id"]);
-        assert_eq!(bound["task_primary"], true);
+        assert_eq!(bound["primary_scope"], "task");
         assert_eq!(bound["work"]["id"], first["id"]);
         assert_eq!(bound["task_ids"], serde_json::json!([first["id"]]));
         let connection = rusqlite::Connection::open(&database).unwrap();

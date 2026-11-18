@@ -234,7 +234,6 @@ fn summary_fixture() -> crate::session::SessionSummary {
         unviewed: false,
         held: false,
         task_terminal: false,
-        task_primary: false,
         task_ids: vec![task.clone()],
         captured: Some(1),
         id: "metadata".into(),

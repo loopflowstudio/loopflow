@@ -44,7 +44,10 @@ fn session_inventory_distinguishes_primary_sessions_from_unassigned_tasks() {
             .unwrap();
     assert_eq!(rows.len(), 2);
     for row in rows {
-        assert_eq!(row.task_primary, row.id.as_str() == "primary");
+        assert_eq!(
+            row.primary_scope.as_deref() == Some("task"),
+            row.id.as_str() == "primary"
+        );
     }
 }
 

@@ -36,7 +36,7 @@ struct TerminalPaneLayoutTests {
             .deletingLastPathComponent().deletingLastPathComponent()
             .appendingPathComponent("tests/fixtures/dto/session.json")
         var json = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixture)) as? [String: Any])
-        json["task_primary"] = true
+        json["primary_scope"] = "task"
         let sessions = workspace.sessionStore(repoPath: "/repo", query: query)
         json["id"] = first.id
         let record = try JSONDecoder().decode(SessionRecord.self, from: JSONSerialization.data(withJSONObject: json))

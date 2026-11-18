@@ -136,8 +136,8 @@ Task's conversation list and breadcrumb Session picker use the same membership.
 
 Drag a Task in the sidebar to change its rank. It is the same order `lf task
 list` and Linear show, so the move reaches a connected tracker like any other planning edit.
-Ranks order Tasks within one Project, so dropping a Task among another Project's
-Tasks leaves it where it was and says why. Ordinary repository and Wave lists, boards and Task pickers
+Dropping a Task among another Project's Tasks moves it into that Project at that
+place, which reaches the tracker as a Project change and an order. Ordinary repository and Wave lists, boards and Task pickers
 follow rank. Filtering or opening a Task leaves the order intact. Saved Dashboard
 arrangements, search results and Done's completion-date ordering keep their own
 order.

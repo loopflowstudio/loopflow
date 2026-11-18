@@ -94,7 +94,7 @@ struct DashboardWorkspaceTests {
         #expect(model.workingTaskMembers.map(\.work.id) == model.workingTaskIDs)
     }
 
-    @Test func aMoveOntoAnotherProjectsTaskReturnsTheRowAndSaysWhy() async throws {
+    @Test func aRefusedMoveReturnsTheRowAndSaysWhy() async throws {
         let ids = ["task_a", "task_b"]
         var json = try #require(JSONSerialization.jsonObject(with: loadFixtureData("view_plan.json")) as? [String: Any])
         json["dashboard_id"] = NSNull()
@@ -104,7 +104,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = ids.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
         json["resolution"] = resolution
         let plan = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
-        let reason = "FIX-2 and FIX-1 are in different Projects, and ranks order Tasks within one Project; nothing changed."
+        let reason = "FIX-2 and FIX-1 are in different repositories; nothing changed."
         let query = RegistryQuery { args, _ in
             switch args {
             case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a"]: throw RegistryQueryError(reason)

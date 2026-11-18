@@ -37,7 +37,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -91,7 +90,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -143,7 +141,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -197,7 +194,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -249,7 +245,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -711,7 +706,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -765,7 +759,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -817,7 +810,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -871,7 +863,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -923,7 +914,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1394,7 +1384,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1448,7 +1437,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1500,7 +1488,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1554,7 +1541,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -1606,7 +1592,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2068,7 +2053,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2122,7 +2106,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2174,7 +2157,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2228,7 +2210,6 @@
         "task_ids": [
           "task_22222222222222222222222222222222"
         ],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",
@@ -2280,7 +2261,6 @@
         "raw": false,
         "state": "unknown",
         "task_ids": [],
-        "task_primary": false,
         "terminal_ids": [],
         "title": "Retained",
         "title_source": "human",

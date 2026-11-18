@@ -35,22 +35,28 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
     Ok(())
 }
 
-/// `task` takes `target`'s place among its Project's Tasks, or among the
-/// repository's standalone Tasks. Rank has no meaning across Projects.
+/// `task` takes `target`'s place among `target`'s Project's Tasks, or among
+/// the repository's standalone Tasks, moving into that Project first.
 pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {
-    let apart = if task.repository_id != target.repository_id {
-        Some("repositories")
-    } else if task.project_id != target.project_id {
-        Some("Projects")
-    } else {
-        None
-    };
-    if let Some(apart) = apart {
+    if task.repository_id != target.repository_id {
         return Err(StoreError::InvalidData(format!(
-            "{} and {} are in different {apart}, and ranks order Tasks within one Project; nothing changed.",
+            "{} and {} are in different repositories; nothing changed.",
             task.identifier, target.identifier
         )));
     }
+    let moved;
+    let task = if task.project_id == target.project_id {
+        task
+    } else {
+        super::task_content::move_task_in(
+            conn,
+            &task.id,
+            task.project_id.as_ref(),
+            target.project_id.as_ref(),
+        )?;
+        moved = super::children::task_on(conn, &task.id)?.ok_or(StoreError::NotFound)?;
+        &moved
+    };
     let position = siblings_in(conn, task)?
         .iter()
         .position(|id| id == target.id.as_str())

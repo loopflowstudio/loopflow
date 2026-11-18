@@ -2077,7 +2077,7 @@ fn edit_tiles(
                     .reorder_task(&task(member), &task(to))
                     .map_err(|error| match error {
                         loopflow_execution::store::StoreError::NotFound => absent(member),
-                        // Tasks in different Projects have no shared rank.
+                        // Tasks in different repositories share no order.
                         loopflow_execution::store::StoreError::InvalidData(reason) => {
                             DesktopError::Argument(reason).into()
                         }

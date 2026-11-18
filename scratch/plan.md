@@ -422,8 +422,7 @@ Next: gate. Every slice is built; the acceptance check above and the gate
 list in slice 1 remain.
 
 Concept review of the built change (2026-11-18, `scratch/concept-review.html`):
-nothing to change in this Task. Larger than it, recorded on the page: a Task's
-primary conversation is a table while a Repository's or Wave's is
-`agent_sessions.primary_scope` (LOO-932's to fold); a Working-board drop onto
-another Project's Task refuses rather than moving the Task; the branch's three
-homes (LOO-934).
+three mismatches. At human review all three were answered (questions.md):
+the Task's primary moved onto `primary_scope='task'` with wire `task_primary`
+dropped; a Working-board drop onto another Project's Task moves the Task
+there; the branch's three homes go to LOO-934.

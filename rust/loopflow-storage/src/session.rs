@@ -347,8 +347,6 @@ pub struct SessionSummary {
     /// None for a conversation Loopflow never attached to.
     pub agent_process_id: Option<loopflow_model::id::AgentProcessId>,
     pub task_terminal: bool,
-    /// Its Task names it as the Task's primary conversation.
-    pub task_primary: bool,
     pub task_ids: Vec<TaskId>,
     pub captured: Option<i64>,
     pub id: LfSessionId,

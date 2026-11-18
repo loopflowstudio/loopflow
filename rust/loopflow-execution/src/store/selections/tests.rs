@@ -344,20 +344,12 @@ fn a_task_move_changes_its_rank_in_every_plan_and_stays_within_its_project() {
         ))
         .unwrap();
     assert_eq!(working(), [five, three, two, one]);
-    // Rank has no meaning across Projects: nothing is written, and the
-    // answer says why.
-    let revisions = store.revisions().unwrap();
-    let refused = store
-        .reorder_task(&id(five), &id(one))
-        .unwrap_err()
-        .to_string();
-    assert!(
-        refused.contains("FIX-5 and FIX-1 are in different Projects"),
-        "{refused}"
+    // Dropped among another Project's Tasks, it joins that Project there.
+    assert_eq!(
+        store.reorder_task(&id(five), &id(one)).unwrap(),
+        [three, two, five, one, four]
     );
-    assert!(refused.contains("nothing changed"), "{refused}");
-    assert_eq!(store.revisions().unwrap(), revisions);
-    assert_eq!(working(), [five, three, two, one]);
+    assert_eq!(working(), [three, two, five, one]);
 }
 
 #[test]

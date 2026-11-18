@@ -195,7 +195,7 @@ private actor ControlsSource {
             #expect(!args.contains("--run"))
             record["work"] = ["kind": "task", "id": "task-exact"]
             record["task_ids"] = ["task-exact"]
-            record["task_primary"] = true
+            record["primary_scope"] = "task"
             return #"{"task":{"id":"task-exact","identifier":"INF-123","title":"Conversation"},"graph":null,"session_id":null,"milestone":"filed"}"#
         }
         if args.contains("--dry-run") {
@@ -206,7 +206,7 @@ private actor ControlsSource {
         if reject { reject = false; throw RegistryQueryError("Session changed before binding") }
         record["work"] = ["kind": "task", "id": "task-exact"]
         record["task_ids"] = ["task-exact"]
-        record["task_primary"] = true
+        record["primary_scope"] = "task"
         record["cwd"] = "/src/delivery"
         record["wave_id"] = "wave-exact"
         return String(decoding: try JSONSerialization.data(withJSONObject: record), as: UTF8.self)

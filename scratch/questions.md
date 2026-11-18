@@ -1,9 +1,11 @@
 # LOO-966 open questions
 
-- Should `lf sync <another Task's branch>` on an unstacked Task record the stack
-  (and retarget the PR), rather than only hinting? It matches what the person
-  did, but syncing onto a sibling to borrow a fix would then restack the PR.
-  Plan: hint only.
+- `lf sync <another open Task>` now stacks (records, retargets, syncs);
+  concept review reversed kickoff's "hint only". Reversible: if borrowing a
+  sibling's fix without a stack matters, put the hint back.
+- Should publish notice a branch that holds another open Task's unmerged head
+  (a raw `git merge`) and name `lf sync <Task>`? Plan: no; Git is not a stack
+  record.
 - Should `lf pr publish` adopt a PR base that names another open Task's branch
   into the record? Would have healed LOO-959 by itself; lets GitHub edits rewrite
   lf's record. Plan: report, don't adopt.

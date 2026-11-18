@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LOO-966 concept review: one stack parent</title>
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1d1b;--mut:#66635c;--line:#dedad1;--card:#fff;--yes:#2f7d4f;--no:#b3412e;--prop:#2d5fa8;--propbg:#eaf1fb;--code:#f1eee7}
+@media (prefers-color-scheme:dark){:root{--bg:#161614;--fg:#e9e6df;--mut:#a29e95;--line:#34322e;--card:#1e1d1b;--yes:#6cc28d;--no:#ef8a74;--prop:#8db4f0;--propbg:#1c2738;--code:#26241f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.55 ui-serif,Georgia,serif}
+main{max-width:920px;margin:0 auto;padding:48px 24px 96px}
+h1{font-size:30px;line-height:1.2;margin:0 0 8px}
+h2{font-size:21px;margin:48px 0 12px}
+p{margin:0 0 14px}
+code{font:13.5px ui-monospace,Menlo,monospace;background:var(--code);padding:1px 5px;border-radius:4px}
+.lede{color:var(--mut);font-size:18px}
+table{width:100%;border-collapse:collapse;font-size:14.5px;margin:8px 0 6px}
+th,td{text-align:left;vertical-align:top;padding:9px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600}
+.yes{color:var(--yes);font-weight:700}.no{color:var(--no);font-weight:700}
+.prop{border-left:3px solid var(--prop);background:var(--propbg);padding:12px 16px;border-radius:0 6px 6px 0;margin:12px 0}
+.tag{display:inline-block;font:600 12px ui-sans-serif,system-ui;padding:1px 7px;border-radius:9px;border:1px solid currentColor;margin-right:6px}
+.tag.p{color:var(--prop)}.tag.e{color:var(--mut)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.card h3{margin:0 0 8px;font-size:16px}
+pre{font:13px/1.5 ui-monospace,Menlo,monospace;background:var(--code);padding:12px 14px;border-radius:6px;overflow-x:auto;margin:8px 0}
+.dim{color:var(--mut)}
+ol.q li{margin-bottom:12px}
+ol.q ol{list-style:lower-alpha;margin-top:4px}
+</style>
+</head>
+<body>
+<main>
+<h1>A stacked Task's parent: one record, one verb</h1>
+<p class="lede">Area taken: stacking as a whole — how a Task comes to build on another, every command that reads or moves that fact (<code>lf checkout --stack-on</code>, <code>lf sync</code>, <code>lf pr publish</code>, <code>lf task status</code>, Desktop), and the PR base on GitHub. Not only the publish path, because LOO-959 went wrong before publish ever ran.</p>
+
+<h2>What happened, in one interaction</h2>
+<p>LOO-959 was created unstacked. A steer said "you can stack onto 953 i guess", then "Stay stacked on 953: when they land on its branch, sync onto it". The agent did what those words say with the tools at hand:</p>
+<pre><span class="dim"># what the agent ran</span>
+git merge jack/loo-953-…          <span class="dim"># Git now depends on LOO-953; record says main</span>
+gh pr edit 1972 --base jack/loo-953-…
+lf pr publish                     <span class="dim"># record wins: base back to main, silently</span>
+lf sync                           <span class="dim"># record wins: "Synced onto main."</span>
+lf sync jack/loo-953-…            <span class="dim"># merges; record untouched</span></pre>
+<p>Four places said something about the stack — Git history, the GitHub base, <code>task_checkouts.parent_pr_id</code>, and the person's head — and only one of them is what lf reads. The command that changes it, <code>lf checkout LOO-959 --stack-on LOO-953</code>, exists. Nobody reached for it because "checkout" is not the word for "build on that Task now", and its own message said the PR was unchanged.</p>
+
+<h2>Do the concepts line up?</h2>
+<table>
+<thead><tr><th>Person knows</th><th>Code has</th><th></th><th>What's wrong</th></tr></thead>
+<tbody>
+<tr><td>"LOO-959 is stacked on LOO-953"</td><td><code>task_checkouts.parent_pr_id</code> → a <code>task_prs</code> row</td><td class="yes">yes</td><td>The parent is a PR row, not a Task, so a restarted parent keeps its identity. Fine — but status prints <code>stacked on pr_f3052042…</code>. Plan fixes the display.</td></tr>
+<tr><td>"stack it on that Task"</td><td><code>lf checkout X --stack-on P</code> / <code>lf task run --stack-on</code> → <code>stack_existing_task</code></td><td class="no">no</td><td>An action with two spellings people don't use and one they do (<code>lf sync P</code>) that bypasses the record. <b>Biggest mismatch</b> — below.</td></tr>
+<tr><td>"sync onto it"</td><td><code>lf sync &lt;onto&gt;</code></td><td class="no">no</td><td>One name, two ideas: on an unstacked Task it merges any ref and records nothing; on a stacked Task any non-default target is refused.</td></tr>
+<tr><td>"the PR targets the parent"</td><td>GitHub base, written by <code>create_pr</code>, <code>update_pr</code> (every update), <code>retarget_pr</code></td><td class="no">no</td><td>Three writers; <code>update_pr</code> overwrites on every publish. Plan: only <code>retarget_pr</code> moves an existing PR's base.</td></tr>
+<tr><td>"detach it"</td><td><code>lf sync main</code> → <code>record_stack_sync(clear_parent)</code> + retarget</td><td class="yes">yes</td><td>One verb, one owner, moves record and PR together. The model the rest should copy.</td></tr>
+<tr><td>"parent landed"</td><td><code>merge_commit</code> on the parent row; <code>task_stack</code> yields <code>parent_branch: None</code></td><td class="yes">yes</td><td>Derived, not stored. Unchanged.</td></tr>
+<tr><td>(never sees)</td><td>placement copied onto <code>task_prs</code> by <code>task_checkout_to_pr_*</code> triggers, guarded by <code>task_pr_placement_*</code></td><td class="no">no</td><td>One fact in two columns. Triggers keep them equal, so it can't cause this bug. Larger than this work: a staged contract to drop the PR row's copy.</td></tr>
+<tr><td>"which parent is this?" in Desktop</td><td>nothing on the wire but <code>parent_pr_id</code></td><td class="no">no</td><td>Plan adds <code>stack_parent {identifier, branch, pr_number|null}</code>.</td></tr>
+</tbody>
+</table>
+
+<h2>The biggest mismatch: the verb</h2>
+<p>Merging another Task's unmerged branch makes the child depend on it. That is true in Git whatever anyone intended. The kickoff plan kept <code>lf sync &lt;branch&gt;</code> as a plain merge plus a hint naming <code>lf checkout … --stack-on</code> — so the person still has to learn a second command to make lf agree with what Git already says.</p>
+<div class="cols">
+<div class="card"><h3><span class="tag e">kickoff plan</span></h3>
+<pre>lf sync jack/loo-953-…
+<span class="dim">Merging origin/jack/loo-953-…
+LOO-959 is not stacked on LOO-953, so its PR
+still targets main. Stack it:
+  lf task checkout LOO-959 --stack-on LOO-953</span>
+lf task checkout LOO-959 --stack-on LOO-953
+<span class="dim">PR #1972 now targets jack/loo-953-…</span></pre>
+<p class="dim">Two commands; between them, Git and the record disagree. Stacked Tasks still refuse <code>lf sync Q</code>.</p></div>
+<div class="card"><h3><span class="tag p">proposed</span></h3>
+<pre>lf sync LOO-953
+<span class="dim">LOO-959 stacks on LOO-953 (jack/loo-953-…).
+PR #1972 now targets jack/loo-953-….
+Merging origin/jack/loo-953-…
+Synced onto jack/loo-953-….</span>
+lf sync main        <span class="dim"># undo: detach, PR back to main</span></pre>
+<p class="dim"><code>lf sync &lt;open Task&gt;</code> = <code>lf checkout self --stack-on Task</code> + <code>lf sync</code>. One composition, existing pieces.</p></div>
+</div>
+
+<div class="prop"><span class="tag p">proposed</span> <b>Choice made for review.</b> <code>lf sync</code> becomes the stack verb: no target follows the record, the default branch detaches, another open Task (by ID or branch) stacks onto it. The refusal on stacked Tasks goes — a precondition removed, not added. Plain refs and merged Tasks merge as today. Passed over: hint-only (leaves LOO-959's state reachable), and restacking by raw merge (would carry the old parent's commits; going through <code>stack_existing_task</code> recomputes the fork).</div>
+
+<h3>Tested against three paths</h3>
+<table>
+<tr><th>Normal</th><td>Unstacked child, <code>lf sync INF-123</code>: parent file present, status <code>stacked on INF-123</code>, <code>pr edit --base parent</code>. Two publishes later the base is still the parent; neither sends <code>--base</code>.</td></tr>
+<tr><th>Failure</th><td>Merge conflicts the resolver can't finish: the record already names the parent and <code>base_commit</code> stays the old fork — the same state <code>--stack-on</code> leaves today before its sync. The next <code>lf sync</code> retries onto the parent. No gh login: record written, error names <code>gh pr edit N --base …</code>; publish later reports the disagreement instead of fixing it silently.</td></tr>
+<tr><th>Recovery</th><td>"I only wanted to borrow a fix": <code>lf sync main</code> detaches using the recorded fork. Counterexample kept open: someone who wants the sibling's commits to ship inside their own PR. That is rare and the PR would be lying about its diff; question 1 covers it.</td></tr>
+</table>
+
+<h2>Publish, with the verb in place</h2>
+<p>With a stack always recorded by lf's own verbs, publish disagreements only come from outside: a hand <code>gh pr edit</code> or an unrecorded <code>git merge</code>. Publish keeps the PR's base and prints both, naming <code>lf sync LOO-953</code> to record and <code>gh pr edit 1972 --base main</code> to follow the record. Unchanged from the plan apart from that command.</p>
+
+<h2>What the plan now says</h2>
+<p><code>scratch/plan.md</code> gained: the "<code>lf sync &lt;Task&gt;</code> stacks" design section, two passed-over entries, fixture step 6, the refusal under "What goes", slice 2 renamed, <code>pr_number</code> nullable, teaching that names <code>lf sync &lt;ID&gt;</code>, and a "Larger than this work" note on the duplicated placement columns. Slice order is unchanged: publish keeps the base first, then the verb.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li><code>lf sync &lt;open Task&gt;</code> stacks.
+  <ol><li>Yes, as proposed.</li><li>No — merge and hint (kickoff plan).</li><li>Yes, but ask first when the Task is unstacked and the PR is published.</li></ol></li>
+<li>Publish when the PR's base disagrees with the record.
+  <ol><li>Keep the PR's base and print both (plan).</li><li>Follow the record and print what moved.</li></ol></li>
+<li>A raw <code>git merge</code> of an open Task's branch.
+  <ol><li>Leave it; teaching names <code>lf sync &lt;ID&gt;</code>.</li><li>Publish notices the unmerged head and names <code>lf sync &lt;ID&gt;</code>.</li></ol></li>
+<li>Placement stored on both <code>task_checkouts</code> and <code>task_prs</code>.
+  <ol><li>File a Task for the staged contract.</li><li>Leave it; triggers keep it honest.</li></ol></li>
+<li>The wire Task's raw <code>parent_pr_id</code> once <code>stack_parent</code> exists.
+  <ol><li>Keep both for now (plan).</li><li>Drop <code>parent_pr_id</code> from the wire in this Task.</li></ol></li>
+</ol>
+</main>
+</body>
+</html>

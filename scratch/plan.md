@@ -65,32 +65,65 @@ no migration.
   - anything else: leaves the base, publishes title and body, and prints one
     line naming both and the command for each direction, e.g.
     `PR #1972 targets jack/loo-953-… (LOO-953), but LOO-959 records no stack
-    parent. Kept the PR's base. Record it: lf task checkout LOO-959 --stack-on
-    LOO-953. Follow the record: gh pr edit 1972 --base main`.
-    When the PR's base is not a Task's branch the first command is left out.
+    parent. Kept the PR's base. Record it: lf sync LOO-953. Follow the
+    record: gh pr edit 1972 --base main`.
+    When the PR's base is not an open Task's branch the first command is left
+    out.
   The range check (`require_non_task_pr_range_nonempty`) keeps using the
   record's base.
 
 `update_pr` loses its `base` argument. The base moves only through
 `retarget_pr`.
 
-**`lf sync <ref>`** on an unstacked Task, where `<ref>` is another open Task's
-branch, merges as today and then prints the same hint: "LOO-959 is not stacked
-on LOO-953, so its PR still targets main. Stack it: lf task checkout LOO-959
---stack-on LOO-953." No record change (see `scratch/questions.md`).
+**`lf sync <Task>` stacks** (choice made at concept review; see "Passed
+over"). When `<onto>` names another open Task, by identifier (`LOO-953`) or by
+its branch, `lf sync` is `lf checkout <self> --stack-on <Task>` followed by
+`lf sync`: `stack_existing_task` records the parent (and recomputes the fork
+when a different parent was recorded) and retargets the open PR, then the
+ordinary stacked sync follows the record. This holds for an unstacked Task and
+for one stacked on another parent, so the refusal "use the default branch to
+detach this Task, or omit the target to sync its parent"
+(`ops/sync_execution.rs:80`) goes. `lf sync main` still detaches; `lf sync`
+with no target follows the record; `<onto>` that is not an open Task's branch
+(a plain ref, or a Task whose PR merged) merges as today with no record change.
+Recording before the merge matches `--stack-on` today: `base_commit` stays the
+last fork until the sync succeeds, and a failed sync leaves the record on the
+new parent, which the next `lf sync` retries.
+
+Why: merging another Task's unmerged branch makes the child depend on it,
+whatever the intent. Today that dependency is real in Git and absent from the
+record, which is exactly LOO-959. The steer used this verb: "when they land on
+its branch, sync onto it". The undo is one command: `lf sync main`.
 
 **Reading the parent.** `lf task status` prints `stacked on LOO-953 (#1974,
 jack/loo-953-…)` instead of the row id. `lf task status --json` and Desktop get
 the same fact as a required nullable wire field on the Task (`stack_parent:
 {identifier, branch, pr_number} | null`), with round-trip fixtures in Rust and
-Swift. Desktop shows "Stacked on LOO-953" beside the PR line.
+Swift. `pr_number` is null while the parent is unpublished (stacking records
+an unpublished parent PR row). Desktop shows "Stacked on LOO-953" beside the
+PR line. The wire Task's raw `parent_pr_id` stays for now; nothing a person
+reads shows it.
 
-**Teaching.** The `loopflow` builtin skill's Task block gains one line:
-stack an existing Task with `lf task checkout <ID> --stack-on <parent>`; never
-`git merge` a parent or `gh pr edit --base`. `docs/agent-api.md`'s
-`--stack-on` paragraph says the same for placed Tasks.
+**Teaching.** The `loopflow` builtin skill's Task block gains one line: to
+build on another open Task, `lf sync <its ID>`; `lf sync main` undoes it;
+never `git merge` a Task's branch or `gh pr edit --base`. `docs/agent-api.md`'s
+`--stack-on` paragraph and `docs/work.md` say the same, and the `onto` help in
+`rust/loopflow/src/lf/mod.rs` reads "Branch or Task to sync onto; another
+open Task stacks this one on it, the default branch detaches".
 
 ### Passed over
+
+- `lf sync <Task branch>` only hinting (the kickoff plan). It leaves the
+  dependency in Git and out of the record, the state LOO-959 was in, and
+  needs a second command to fix it. The case against stacking, syncing a
+  sibling to borrow a fix, still makes the child depend on unmerged work; a
+  stack says so, and `lf sync main` takes it back out.
+- Restacking through sync with a merge that keeps the old parent's commits.
+  Going through `stack_existing_task` recomputes the fork, so the stacked sync
+  carries only child work onto the new parent.
+- Detecting a raw `git merge` of a Task's branch at publish (the branch holds
+  another open Task's unmerged head). It would catch LOO-959's first step, but
+  it reads Git as a fourth record of the stack. Left as a question.
 
 - Publish adopting the PR's base into the record when it names a Task's
   branch. It would have self-healed LOO-959, but it lets a GitHub edit (or
@@ -116,6 +149,10 @@ The fixture from the brief, in `rust/loopflow/tests/sync_tests.rs`, using the
    record.
 5. Stacking an already-published child retargets its PR (`pr edit --base
    parent` in the log).
+6. A second, unstacked published child INF-125 runs `lf sync INF-123`: the
+   parent's file is present, `lf task status INF-125` prints `stacked on
+   INF-123`, the stand-in logged `pr edit … --base parent`, and a following
+   `lf sync main` detaches it (record cleared, `pr edit … --base main`).
 
 Run: `cargo test -p loopflow --test integration sync_tests::` with `LF_*` unset
 and `< /dev/null`.
@@ -144,6 +181,8 @@ and `< /dev/null`.
 - `format_task_pr_line`'s raw `pr_…` id in favour of the parent's identifier.
 - `task_pr_range_tests.rs:842` asserts `--base main` on "pr edit or pr
   create"; it narrows to create.
+- Sync's refusal of an explicit non-default target on a stacked Task, and any
+  test asserting it.
 
 ## Slices
 
@@ -152,16 +191,26 @@ and `< /dev/null`.
    `base_ref_name`; update compares, retargets only for a merged recorded
    parent, else prints the line. Fixture steps 1, 2 and 4. Shows: two
    publishes, base stays on the parent, and a disagreement prints both.
-2. **Stacking moves the PR; sync hints.** `stack_existing_task` retargets an
-   open PR; `lf sync <Task branch>` on an unstacked Task prints the hint.
-   Fixture steps 3 and 5.
+2. **Stacking moves the PR; `lf sync <Task>` stacks.** `stack_existing_task`
+   retargets an open PR; sync resolves `<onto>` to an open Task (identifier,
+   then branch via `task_checkouts_branch`) and calls it before the stacked
+   sync. Fixture steps 3, 5 and 6.
 3. **The parent is readable.** Status line by identifier; `stack_parent` wire
    field through `TaskRow`, the Desktop Task DTO and fixtures; Desktop label.
 4. **Teach it.** `loopflow` builtin skill line and `docs/agent-api.md`.
+
+## Larger than this work (on the page, not planned)
+
+Placement (`branch`, `base_commit`, `parent_pr_id`) is stored on both
+`task_checkouts` and the current `task_prs` row, copied by
+`task_checkout_to_pr_*` triggers and guarded by `task_pr_placement_*`
+("Task PR placement differs from Task"). They cannot disagree today, so this
+Task leaves them; folding the PR row's copy away is a staged contract.
 
 ## Demo
 
 In LOO-959's worktree: `lf task status LOO-959` prints `stacked on LOO-953
 (#1974, …)`; `lf pr publish` updates #1972 and its base stays on LOO-953's
 branch (`gh pr view 1972 --json baseRefName`); `lf sync` prints "Merging
-origin/jack/loo-953-…".
+origin/jack/loo-953-…". In the fixture, `lf sync INF-123` in an unstacked
+child stacks it and moves its PR in one command.

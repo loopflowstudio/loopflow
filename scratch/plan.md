@@ -97,7 +97,8 @@ Into `rust/loopflow-harness/src/`, with unit tests and testdata:
   `transcript_watch_store`, `direct_transcript`, `transcript_siblings`,
   `expiry_policy`, `transcript_markers`, `human_input_times`,
   `transcript_completion_detail`, `validate_model`
-- `harness::claude::usage`, which `transcript/claude.rs` calls
+- `harness::claude::usage`, which `transcript/claude.rs` calls (done, slice 1:
+  `loopflow_harness::claude::usage`)
 
 Stays in execution:
 
@@ -130,7 +131,7 @@ re-exports nothing from it.
 | # | Reference | Resolution |
 |---|-----------|------------|
 | 1 | `HarnessKind::harness()` returns the launch implementation (≈60 callers in execution, 4 in the application) | Format callers keep `kind.harness()`; callers that need capabilities or launch use `harness::launcher(kind)` |
-| 2 | `transcript/claude.rs:117` calls `harness::claude::usage` | `usage` moves with the reader |
+| 2 | `transcript/claude.rs:117` calls `harness::claude::usage` | Done in slice 1: `usage` is in the crate, ahead of the reader |
 | 3 | `Harness::recognizes(&process::OsProcess)` | Takes the command it reads |
 | 4 | `Harness::transcript_home` default goes through storage's `Provider` and `transcript::native_home` | Claude and Codex name their own home variable and directory in the crate; `native_home(provider)` in execution calls them |
 | 5 | Trait methods that take the store, the process table or storage's `Provider` | On `Launcher` (list above) |
@@ -293,7 +294,19 @@ measured compile share: `ops` above the rest, not another leaf.
    `Harness` move; execution gets `Launcher: Harness`; the table's rows are
    resolved; the transcript readers and the store-free half of
    `transcript/mod.rs` and `live.rs` move. Run the launch matrix and one
-   application resume test.
+   application resume test. Inherited from slice 1 and a read of the code,
+   2026-11-18:
+   - Rows 1 and 3-6 of the table are open; row 2 is done.
+   - The crate gains `rusqlite` (OpenCode's reader) and `schemars`:
+     `live::SessionTurn`, `TurnState` and `TurnUsage` derive `JsonSchema`.
+   - Two types are named `TurnUsage`: `loopflow_model::chat::types::TurnUsage`
+     (optional fields, what decoders and `claude::usage` produce) and
+     `transcript::live::TurnUsage` (three plain counts, a wire type). Once
+     both are reachable from one crate, the live one needs a name that says
+     what it is, or to be folded into the model's. Renaming keeps the wire
+     shape; folding changes it, so folding is a question, not this slice.
+   - `main` has not moved past `7bb879aff4` and #1967, #1968, #1972 and #1976
+     are still open, so the rename conflicts are all still ahead.
 3. **Measure and document.** `run.py` cases, `results/loo-923.html`, scripts,
    READMEs and `AGENTS.md` paths.
 

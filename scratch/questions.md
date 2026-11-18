@@ -17,3 +17,7 @@ Write-docs, 2026-11-18:
 
 - `AGENTS.md`'s "never a middleman" rule now also covers `rust/loopflow-harness/**`. Assumed: a decoder sits in the headless stream path, so the rule follows it. The transcript readers are passive; should the rule name only the decoders?
 - "Add a provider" is now two implementations in two crates (`Harness`, then `Launcher`) where it was one file. Is a five-step recipe across two crates an acceptable cost for the format-only test loop, which 6 of 215 PRs would have used?
+
+Realign, 2026-11-18:
+
+- `transcript::live::TurnUsage` and `loopflow_model::chat::types::TurnUsage` are two types with one name. Slice 2 puts both within reach of `loopflow-harness`. Assumed: the live one keeps its wire shape and its fields; whether it should become the model's type is not decided here.

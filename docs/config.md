@@ -67,8 +67,27 @@ move, with or without a Task.
 
 ```bash
 lf task status MTG-328
-#   compress went on under claude after: codex_error: You've hit your usage limit
+#   compress went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.
 ```
+
+The first word is the cause the provider stated and the rest is its own
+message. The stated cause decides the move, so a reworded message still moves
+on; [Rate limits](troubleshooting.md#rate-limits) lists the causes.
+
+A model the account can't use counts as unavailable, and so does a model name
+that doesn't exist:
+
+```yaml
+agents: [codex:gpt-6.1-astra, claude]
+```
+
+```bash
+lf task status MTG-328
+#   compress went on under claude after: provider_model_unavailable: The 'gpt-6.1-astra' model is not supported when using Codex with a ChatGPT account.
+```
+
+A misspelled entry moves on the same way, so read that line when work runs
+somewhere you didn't expect.
 
 | Setting | Compress tries | Everything else tries |
 | --- | --- | --- |

@@ -300,18 +300,19 @@ pub(crate) fn stop_session_agent(
     };
     // Already-dead providers have no observed interruption outcome. Preserve that
     // uncertainty instead of attributing their death to this Move request.
+    // When its own exit settled it first, stop whatever the Session holds now.
     if agent_evidence(store, &agent.process.id) == ProcessIdentityEvidence::Dead {
-        anyhow::ensure!(
-            attachment::settle_agent_process(store, &agent, || {
-                if agent_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
-                    return Err(StoreError::InvalidAuthority(
-                        "AgentProcess death changed".into(),
-                    ));
-                }
-                Ok(())
-            })?,
-            "Session attachment changed before observing death"
-        );
+        let settled = attachment::settle_agent_process(store, &agent, || {
+            if agent_evidence(store, &agent.process.id) != ProcessIdentityEvidence::Dead {
+                return Err(StoreError::InvalidAuthority(
+                    "AgentProcess death changed".into(),
+                ));
+            }
+            Ok(())
+        })?;
+        if !settled {
+            return stop_session_agent(store, session, departure);
+        }
         return Ok(());
     }
     let stop = || -> Result<()> {

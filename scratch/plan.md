@@ -850,8 +850,8 @@ retention; fixture servers and holders left running).
   `query_plans::`, `migration` (158); execution `ship::tests::`, `retention_`,
   `ops::human_session::tests::`, `store::task_work` (57); `server::recovery::tests::` (9),
   `task_graph_launch_tests::a_task_run_whose_carrier_died`, `…::a_killed_graph`;
-  clippy `--all-targets` and fmt clean. Gate: `context_launch_tests::a_killed_task_conversation`
-  (not rerun after these fixes), `binary(served_reads)` (migration changed).
+  `context_launch_tests::a_killed_task_conversation` (1); clippy `--all-targets` and fmt
+  clean. Gate: `binary(served_reads)` (migration changed).
 
 - Compress after slice 7: `count_task_run_restart` takes the seen count (a ship uses the
   one it already read); one outlook constructor in `session_ending`; `select` records a

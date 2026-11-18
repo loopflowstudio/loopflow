@@ -15,6 +15,38 @@ a stand-in <code>ssh</code> runs the remote command under the target's homes and
 (<code>.lf/qa/machine-moves.md</code>). Personal git plan on a local bare origin, Graph <code>qa-normal</code> (<code>- cmd: help</code>).
 The Task was placed on mini with the real <code>lf task move b2d979 --machine mini</code> (8.6 s, "Arrived on mini").</p>
 
+
+<h2>Round 2: one-shot reads at <code>e8c4f29428</code></h2>
+<p>Same two homes in <code>/tmp/lfqa10</code>, returning with round 1's data (Task <code>b2d979</code> recorded on the laptop as running on mini).
+Both homes' <code>lf</code> swapped to a fresh <code>cargo build -p loopflow --bin lf</code> (<code>0.16.0+e8c4f2942</code>); mini's server started by hand, then by <code>server connect</code>.
+Before the read, mini renamed the Task (<code>lf task update b2d979 --title 'Renamed on mini at QA4'</code>); the laptop's copy still says "Held on mini, renamed".</p>
+<table>
+<tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>
+<tr><td class="ok">Human status</td><td><code>lf task status b2d979</code> on the laptop</td><td>1.7 s, exit 0, one <code>exec 'lf' 'server' 'connect'</code> ssh:
+<pre>Renamed on mini at QA4 · b2d979
+Runs on mini; read from its server.
+State: done · done
+Graph: qa-normal · end
+Graph process d3eb7dc1-… · qa-normal · help</pre></td></tr>
+<tr><td class="ok">JSON and <code>--select</code></td><td><code>--json</code>; <code>--json --select task.title</code>; a bogus <code>--select nope.field</code>; the full <code>task_…</code> ID</td><td>Mini's whole <code>task.status</code> body; <code>{"task":{"title":"Renamed on mini at QA4"}}</code>; <code>{}</code> exit 0, the same as for a local Task (<code>e50c59</code>); the full ID routes too.</td></tr>
+<tr><td class="ok">Mini unreachable</td><td>stand-in ssh exits 255</td><td>Human and <code>--json</code> both fail in 1.8 s, exit 1: <code>machine "mini": unreachable: run `ssh -o ControlPath=none -- 'mini'` …</code>. No fallback to the laptop's copy. <code>lf task list</code> still answers locally.</td></tr>
+<tr><td class="ok">Mini's server stopped</td><td>killed it, repeated the read</td><td>Answered in 1.8 s; <code>server connect</code> registered <code>com.loopflow.server.f16d3a9f…</code> and started it.</td></tr>
+<tr><td class="ok">Two at once</td><td>two <code>--json --select</code> reads in parallel</td><td>Both answered, different selections, exit 0.</td></tr>
+<tr><td class="ok">Desktop's route</td><td>desktop-kind hello on the laptop's socket, <code>task.status</code> for <code>b2d979</code> and local <code>e50c59</code>, <code>sender: null</code></td><td><code>b2d979</code>: one ssh, mini's title and state. Its stdin carried <code>"operation":{"kind":"task.status","issue":"task_b2d9…","directory":"/private/tmp/lfqa10/laptop/repo"}</code> with the laptop's <code>sender</code>; mini answered from its own checkout. <code>e50c59</code>: no ssh.</td></tr>
+<tr><td class="ok">Desktop's route, mini down</td><td>same request, stand-in ssh exits 255</td><td><code>{"type":"error","code":"unavailable","message":"machine \"mini\": unreachable: …"}</code></td></tr>
+<tr><td class="ok">Subscribe (regression)</td><td><code>lf task status b2d979 --subscribe --select task.title</code>, stdin closed</td><td>One reading from mini, exit 0 in 1.8 s.</td></tr>
+<tr><td class="ok">Left behind</td><td><code>ps</code>, <code>launchctl list</code></td><td>Mini's label booted out, laptop server killed; no <code>lfqa10</code> process; stale fifos from round 1 removed.</td></tr>
+</table>
+<p>Nothing broke this round; no code changed.</p>
+<h3>Still wrong, round 2 (worst first)</h3>
+<ol>
+<li>The remote human view differs from the local one (no planning line, owner or sessions; "State: done · done" repeats the state as its reason). The plan already merges the two renderings in PR 3.</li>
+<li>For a Task on another Machine, <code>lf task status</code> fails outright when that Machine is unreachable, where it used to show the local copy. That is the design (reads go where the Task runs) and the error names the fix, but it is a change people will notice offline.</li>
+<li>Round 1's open items still stand: remote <code>--subscribe</code> ignores stdin checkpoints; <code>selection.profile</code> carries the laptop's paths.</li>
+</ol>
+<p>Not reached: real SSH (loopback sshd suite, CI); Swift's <code>task.status</code> through Desktop's window (Swift suites at gate).</p>
+
+<h2>Round 1</h2>
 <h2>Scenarios</h2>
 <table>
 <tr><th>Scenario</th><th>What I did</th><th>What I saw</th></tr>

@@ -35,7 +35,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
         }
         let process = LfProcessId::new();
         db.execute(
-            "INSERT INTO processes(id,trace_id,cwd,started_at,task_id) VALUES(?1,?1,?2,?3,(SELECT task_id FROM task_checkouts WHERE ?2=rtrim(worktree,'/') OR instr(?2,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
+            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,?3)",
             params![
                 process.as_str(),
                 repo.path().to_str().unwrap(),
@@ -71,10 +71,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
             .block_on(store.session("retained-session"))
             .unwrap()
             .unwrap();
-        let unresolved = runtime
-            .block_on(store.lf_process(&process))
-            .unwrap()
-            .unwrap();
+        let unresolved = store.sqlite.lf_process(&process).unwrap().unwrap();
         let authored = repo.path().join("unfinished.txt");
         std::fs::write(&authored, "Retain unfinished work\n").unwrap();
         registered.pr.publication = Some(PrPublication {
@@ -142,10 +139,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 .unwrap();
             assert!(abandoned);
             assert_eq!(
-                runtime
-                    .block_on(store.lf_process(&process))
-                    .unwrap()
-                    .unwrap(),
+                store.sqlite.lf_process(&process).unwrap().unwrap(),
                 unresolved
             );
             assert_eq!(

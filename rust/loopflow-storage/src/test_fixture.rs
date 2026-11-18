@@ -122,7 +122,6 @@ pub fn steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter) {
             "session",
             None,
             &process,
-            false,
             None,
             &crate::sqlite::SessionCaller {
                 agent: None,
@@ -167,7 +166,7 @@ pub fn native_steer() -> (tempfile::TempDir, SqliteStore, SteerAdapter, Terminal
     {
         let conn = store.conn.lock().unwrap();
         conn.execute(
-            "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+            "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
             [&adapter.agent_process_id],
         )
         .unwrap();
@@ -379,36 +378,6 @@ pub fn unowned_task() -> (tempfile::TempDir, SqliteStore, TaskId) {
     (dir, store, task.id)
 }
 
-/// An lf Process started through the production insert, so it records its
-/// Task the way a real launch does.
-pub fn start_process(
-    conn: &rusqlite::Connection,
-    cwd: Option<&str>,
-    parent: Option<&LfProcessId>,
-) -> LfProcessId {
-    let process = crate::process::LfProcess {
-        id: LfProcessId::new(),
-        pid: None,
-        os_started_at: None,
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: parent.cloned(),
-        via_agent: None,
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: None,
-        repo: None,
-        cwd: cwd.map(str::to_owned),
-        started_at: 1,
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    };
-    crate::sqlite::record_process_in(conn, &process, None).unwrap();
-    process.id
-}
-
 pub fn process(store: &SqliteStore, number: u32, started_at: i64) -> LfProcessId {
     let id = LfProcessId::parse(&format!("00000000-0000-0000-0000-{number:012x}")).unwrap();
     store
@@ -479,7 +448,6 @@ pub fn record_captured_start(store: &SqliteStore, session: &str, turn: &str) {
                     session,
                     None,
                     &process,
-                    false,
                     None,
                     &crate::sqlite::SessionCaller {
                         agent: None,

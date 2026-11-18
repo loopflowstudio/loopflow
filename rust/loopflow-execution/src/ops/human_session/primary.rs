@@ -236,9 +236,22 @@ async fn hold(
     Ok(true)
 }
 
+/// Attached, held, or with its agent running wherever it was started.
 fn opened(store: &SharedStore, session: &str) -> Result<bool> {
-    Ok(store.sqlite.session_attachment(session)?.is_some()
-        || store.sqlite.session_terminal(session)?.is_some())
+    if store.sqlite.session_attachment(session)?.is_some()
+        || store.sqlite.session_terminal(session)?.is_some()
+    {
+        return Ok(true);
+    }
+    let summary = session_projection::session_summary(
+        &store.sqlite,
+        session,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
+    Ok(summary.is_some_and(|summary| {
+        summary.agent_process_id.is_some()
+            && summary.agent_process_evidence != crate::store::ProcessIdentityEvidence::Dead
+    }))
 }
 
 pub(crate) async fn task_conversation(
@@ -314,7 +327,7 @@ pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<
     )?;
     if summary.as_ref().is_some_and(|summary| {
         summary.agent_process_id.is_some()
-            && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+            && summary.agent_process_evidence != crate::store::ProcessIdentityEvidence::Dead
     }) {
         return Ok(session);
     }

@@ -139,7 +139,7 @@ async fn task_fixture(identifier: &str) -> TaskFixture {
 
 #[test]
 fn task_decision_preserves_unknown_history_and_live_process_protection() {
-    let ledger = crate::journal::TestLedgerGuard::new();
+    let _ledger = crate::journal::TestLedgerGuard::new();
     let runtime = tokio::runtime::Runtime::new().unwrap();
     let repo = loopflow_test_support::TestRepo::new();
     let fixture = runtime.block_on(task_fixture_at("ACCEPT-HISTORY", repo.path().into()));
@@ -165,26 +165,26 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             [fixture.task.id.as_str()],
         )
         .unwrap();
-    let process = crate::process::LfProcess {
-        os_started_at: None,
-        id: loopflow_model::id::LfProcessId::new(),
-        pid: None,
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: None,
-        via_agent: None,
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: Some("historical diagnostic".into()),
-        repo: None,
-        cwd: Some(repo.path().to_string_lossy().into_owned()),
-        started_at: time::OffsetDateTime::now_utc().unix_timestamp(),
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    };
-    fixture.store.sqlite.record_process(&process).unwrap();
+    // A Graph run in the checkout that recorded no OS process: its liveness is unknown.
+    let graph = loopflow_model::id::LfProcessId::new();
+    fixture
+        .store
+        .sqlite
+        .record_graph(
+            &graph,
+            &loopflow_storage::graph::CompiledGraph {
+                name: "historical".into(),
+                steps: vec![],
+            },
+            None,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(
+                time::OffsetDateTime::now_utc().unix_timestamp(),
+            ),
+            None,
+            Some(&repo.path().to_string_lossy()),
+            None,
+        )
+        .unwrap();
     let session = fixture.store.sqlite.test_session(
         "reserved-session",
         &crate::session_record::new_artifact_key(),
@@ -205,14 +205,14 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
         .record_turn_start(&session.id, &"thread".into(), "turn", 1);
     let before = fixture.store.sqlite.session(&session.id).unwrap();
     // A reserved input and an unanswered turn are history; only the
-    // Process with unknown evidence blocks.
+    // Graph run with unknown evidence blocks.
     let blockers = crate::ops::task_execution::task_execution_blockers(
         &fixture.store.sqlite,
         &fixture.task.id,
     )
     .unwrap();
     assert_eq!(blockers.len(), 1, "{blockers:?}");
-    assert!(blockers[0].contains(&format!("lf history show {}", process.id)));
+    assert!(blockers[0].contains(&format!("lf history show {graph}")));
     let gate = runtime
         .block_on(super::task_completion_refusal(
             &fixture.store,
@@ -222,19 +222,20 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
     assert!(gate.is_none(), "{:?}", gate);
 
     // Exact live identity does not change the decision or confer stop authority.
-    let root = ledger.home().join(crate::journal::PROCESS_RECEIPT_ROOT);
-    std::fs::create_dir_all(&root).unwrap();
     let pid = std::process::id();
-    let receipt = crate::journal::ProcessReceipt {
-        schema_version: 1,
-        trace_id: process.trace_id.to_string(),
-        lf_process_id: process.id.to_string(),
-        pid,
-        started_at: crate::journal::process_started_at(pid).unwrap().unwrap(),
-    };
-    let receipt_path = root.join(format!("{}.json", process.id));
-    let receipt_bytes = serde_json::to_vec(&receipt).unwrap();
-    std::fs::write(&receipt_path, &receipt_bytes).unwrap();
+    rusqlite::Connection::open(&fixture.database_path)
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET pid=?2,os_started_at=?3 WHERE lf_process_id=?1",
+            rusqlite::params![
+                graph,
+                pid,
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap()
+            ],
+        )
+        .unwrap();
     assert!(runtime
         .block_on(super::task_completion_refusal(
             &fixture.store,
@@ -267,12 +268,11 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             .unwrap(),
         WorkStatus::Done
     );
-    assert_eq!(
-        fixture.store.sqlite.lf_process(&process.id).unwrap(),
-        Some(process)
-    );
+    assert!(fixture.store.sqlite.graphs_at(repo.path()).unwrap()[0]
+        .run
+        .ended_at
+        .is_none());
     assert_eq!(fixture.store.sqlite.session(&session.id).unwrap(), before);
-    assert_eq!(std::fs::read(receipt_path).unwrap(), receipt_bytes);
     assert!(crate::ops::task_execution::task_execution_blockers(
         &fixture.store.sqlite,
         &fixture.task.id,
@@ -522,15 +522,21 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
         .unwrap();
 
     // Use this process's identity without launching a provider or a watcher.
+    let live = rusqlite::params![
+        std::process::id(),
+        crate::process::os_process::process_started_at(std::process::id())
+            .unwrap()
+            .unwrap(),
+        graph
+    ];
     conn.execute(
-        "UPDATE processes SET pid=?1,os_started_at=?2 WHERE id=?3 OR parent_lf_process_id=?3",
-        rusqlite::params![
-            std::process::id(),
-            crate::journal::process_started_at(std::process::id())
-                .unwrap()
-                .unwrap(),
-            graph
-        ],
+        "UPDATE graph_processes SET pid=?1,os_started_at=?2 WHERE lf_process_id=?3",
+        live,
+    )
+    .unwrap();
+    conn.execute(
+        "UPDATE graph_process_steps SET pid=?1,os_started_at=?2 WHERE graph_lf_process_id=?3",
+        live,
     )
     .unwrap();
     let assert_running = |state| {
@@ -572,22 +578,18 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
     };
     assert_running(crate::ops::task_execution::TaskExecutionState::Running);
     conn.execute(
-        "UPDATE processes SET pid=NULL,os_started_at=NULL WHERE id=?1 OR parent_lf_process_id=?1",
+        "UPDATE graph_processes SET pid=NULL,os_started_at=NULL WHERE lf_process_id=?1",
         [&graph],
     )
     .unwrap();
     assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
-    // An exited owner does not hide its still-open step.
+    // The Graph run's end is the end of its execution in the Task's work; a
+    // step still running is a Session of its own.
     conn.execute(
-        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE id=?1",
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=130 WHERE lf_process_id=?1",
         [&graph],
     )
     .unwrap();
-    assert_running(crate::ops::task_execution::TaskExecutionState::Unknown);
-    conn.execute(
-        "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE parent_lf_process_id=?1",
-        [&graph],
-    ).unwrap();
     let snapshot = runtime
         .block_on(super::snapshot::read_task_snapshot(
             &fixture.store,
@@ -645,42 +647,31 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
         .any(|reason| reason.contains(live.as_str())));
     let conn = rusqlite::Connection::open(&fixture.database_path).unwrap();
     conn.execute(
-            "UPDATE processes SET completed_at=started_at,outcome='interrupted' WHERE completed_at IS NULL",
-            [],
-        )
-        .unwrap();
+        "UPDATE graph_processes SET ended_at=started_at,exit_code=130 WHERE ended_at IS NULL",
+        [],
+    )
+    .unwrap();
     assert!(blockers().is_empty());
 
     // A reboot proves stale execution exited without settling the Graph.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let process = crate::process::LfProcess {
-        os_started_at: None,
-        id: loopflow_model::id::LfProcessId::new(),
-        pid: None,
-        trace_id: loopflow_model::id::TraceId::new(),
-        parent_lf_process_id: None,
-        via_agent: None,
-        caller_session_id: None,
-        caller_agent_process_id: None,
-        command: Some("implement".into()),
-        repo: None,
-        cwd: Some(
-            fixture
-                .task
-                .worktree
-                .as_ref()
-                .unwrap()
-                .to_string_lossy()
-                .into_owned(),
-        ),
-        started_at: now - 100,
-        completed_at: None,
-        outcome: None,
-        exit_code: None,
-        signal: None,
-        error: None,
-    };
-    fixture.store.sqlite.record_process(&process).unwrap();
+    let stale = loopflow_model::id::LfProcessId::new();
+    fixture
+        .store
+        .sqlite
+        .record_graph(
+            &stale,
+            &loopflow_storage::graph::CompiledGraph {
+                name: "code".into(),
+                steps: vec![],
+            },
+            None,
+            &loopflow_storage::graph_process::ExecutionStart::reserved(now - 100),
+            None,
+            Some(&worktree),
+            None,
+        )
+        .unwrap();
     let session = fixture
         .store
         .sqlite
@@ -705,19 +696,15 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
             rusqlite::params![session.id, now - 100],
         )
         .unwrap();
-    crate::journal::set_test_machine_booted_at(Some(now - 200));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 200));
     let unresolved = blockers();
-    crate::journal::set_test_machine_booted_at(Some(now - 50));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 50));
     let after_boot = blockers();
-    crate::journal::set_test_machine_booted_at(None);
+    crate::process::os_process::set_test_machine_booted_at(None);
     // The stalled Session's unanswered turn is history, not execution.
     assert_eq!(unresolved.len(), 1, "{unresolved:?}");
-    assert!(unresolved[0].contains(process.id.as_str()));
+    assert!(unresolved[0].contains(stale.as_str()));
     assert!(after_boot.is_empty(), "{after_boot:?}");
-    assert_eq!(
-        fixture.store.sqlite.lf_process(&process.id).unwrap(),
-        Some(process)
-    );
     assert_eq!(
         fixture
             .store

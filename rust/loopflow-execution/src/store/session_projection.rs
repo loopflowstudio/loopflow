@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::journal::{agent_process_evidence, process_identity_evidence, ProcessIdentityEvidence};
+use crate::process::os_process::session_agent_evidence;
+use crate::process::RecordedProcess;
+use crate::store::ProcessIdentityEvidence;
 use crate::store::StoreResult;
 use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
@@ -17,21 +19,43 @@ impl Reading {
     pub fn acquire(store: &SqliteStore, mut now: i64, session: Option<&str>) -> StoreResult<Self> {
         let inputs = store.session_projection_inputs(now, session)?;
         let mut evidence = HashMap::new();
+        let mut holders = HashMap::new();
         let mut live = Vec::new();
         for identity in &inputs.identities {
-            let observed = agent_process_evidence(
-                identity.completed_at,
-                identity.pid,
-                identity.os_started_at,
-                Some(identity.started_at),
-                process_identity_evidence,
+            let observed = session_agent_evidence(
+                RecordedProcess {
+                    ended: identity.completed_at.is_some(),
+                    pid: identity.pid,
+                    os_started_at: identity.os_started_at,
+                    started_at: Some(identity.started_at),
+                },
+                identity.holder.as_ref(),
             );
             // Summary IDs canonicalize UUID case; SQL still matches saved bytes.
             evidence.insert(identity.id.to_ascii_lowercase(), observed);
+            holders.insert(
+                identity.id.to_ascii_lowercase(),
+                identity
+                    .holder
+                    .as_ref()
+                    .map_or(ProcessIdentityEvidence::Dead, |holder| {
+                        RecordedProcess::from(holder).evidence()
+                    }),
+            );
             if observed == ProcessIdentityEvidence::Live {
                 live.push(identity.id.clone());
             }
         }
+        let graph_results = inputs
+            .graph_runs
+            .iter()
+            .map(|run| {
+                (
+                    run.id.to_string(),
+                    crate::process::os_process::observed_result(run),
+                )
+            })
+            .collect();
         if crate::observe::active() {
             for deadline in &inputs.deadlines {
                 if !crate::observe::deadline(*deadline) {
@@ -48,6 +72,8 @@ impl Reading {
                 now,
                 live_agents,
                 evidence,
+                holders,
+                graph_results,
             },
         })
     }
@@ -145,21 +171,18 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let pid = std::process::id();
-        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let started = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         for (id, identity) in [
             ("a-dead", Some(started + 60)),
             ("b-unknown", None),
             ("c-live", Some(started)),
         ] {
             store.test_session(id, &crate::session_record::new_artifact_key());
-            let attachment = attachment::claim_session_attachment(
-                &store,
-                id,
-                None,
-                &store.test_lf_process(),
-                true,
-            )
-            .unwrap();
+            let attachment =
+                attachment::claim_session_attachment(&store, id, None, &store.test_lf_process())
+                    .unwrap();
             if let Some(started) = identity {
                 store
                     .record_agent_process_identity(id, &attachment, pid, started)
@@ -210,26 +233,73 @@ mod tests {
     }
 
     #[test]
-    fn a_changed_identity_restarts_acquisition_before_projection() {
+    fn a_session_reads_its_agent_lifetime_from_its_own_row() {
         let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("db");
-        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("session", &crate::session_record::new_artifact_key());
-        let attachment = attachment::claim_session_attachment(
-            &store,
-            "session",
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
+        let attachment =
+            attachment::claim_session_attachment(&store, "session", None, &store.test_lf_process())
+                .unwrap();
+        let lifetime = || -> (Option<u32>, bool, bool) {
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .query_row(
+                    "SELECT agent_pid,agent_started_at IS NOT NULL,agent_ended_at IS NOT NULL
+                     FROM agent_sessions WHERE id='session'",
+                    [],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                )
+                .unwrap()
+        };
+        let evidence = || {
+            crate::store::session_projection::session_summary(&store, "session", 500)
+                .unwrap()
+                .unwrap()
+                .agent_process_evidence
+        };
+        // Reserved: started, no OS process yet, so liveness is unconfirmed.
+        assert_eq!(lifetime(), (None, true, false));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Unknown);
         let pid = std::process::id();
         store
             .record_agent_process_identity(
                 "session",
                 &attachment,
                 pid,
-                crate::journal::process_started_at(pid).unwrap().unwrap(),
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(lifetime(), (Some(pid), true, false));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Live);
+        store
+            .record_agent_process_exit("session", &attachment, true)
+            .unwrap();
+        assert_eq!(lifetime(), (None, true, true));
+        assert_eq!(evidence(), crate::store::ProcessIdentityEvidence::Dead);
+    }
+
+    #[test]
+    fn a_changed_identity_restarts_acquisition_before_projection() {
+        let home = tempfile::tempdir().unwrap();
+        let path = home.path().join("db");
+        let store = crate::store::opening::open_ephemeral(&path).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let attachment =
+            attachment::claim_session_attachment(&store, "session", None, &store.test_lf_process())
+                .unwrap();
+        let pid = std::process::id();
+        store
+            .record_agent_process_identity(
+                "session",
+                &attachment,
+                pid,
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap(),
             )
             .unwrap();
         store
@@ -273,7 +343,7 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         store.test_session("live", &crate::session_record::new_artifact_key());
-        attachment::claim_session_attachment(&store, "live", None, &store.test_lf_process(), true)
+        attachment::claim_session_attachment(&store, "live", None, &store.test_lf_process())
             .unwrap();
         let read = || {
             let reading = super::Reading::acquire(&store, 500, None).unwrap();
@@ -291,7 +361,7 @@ mod tests {
         assert_eq!(before.len(), after.len());
         assert_eq!(
             after.iter().filter(|sql| sql.starts_with("SELECT")).count(),
-            4
+            6
         );
         let scans = growing_scans(&store, &after);
         assert!(scans.is_empty(), "{scans:?}");

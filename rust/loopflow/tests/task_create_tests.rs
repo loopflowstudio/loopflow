@@ -70,8 +70,9 @@ impl Drop for Service {
         while let Ok(db) = rusqlite::Connection::open(self.home.join("loopflow.db")) {
             let running: i64 = db
                 .query_row(
-                    "SELECT count(*) FROM processes WHERE completed_at IS NULL
-                     AND command != '[\"lf\",\"holder\",\"run\"]'",
+                    "SELECT (SELECT count(*) FROM graph_processes WHERE ended_at IS NULL)
+                        + (SELECT count(*) FROM task_graphs WHERE run_pid IS NOT NULL)
+                        + (SELECT count(*) FROM task_ship_events WHERE pid IS NOT NULL)",
                     [],
                     |row| row.get(0),
                 )
@@ -571,28 +572,11 @@ fn task_create_runs_its_provider_in_the_held_session_resume() {
         String::from_utf8_lossy(&output.stderr)
     );
     let answer: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
-    let session = answer["session_id"].as_str().unwrap();
+    assert!(answer["session_id"].is_string(), "{answer}");
     // A held provider replaces the process that launched it.
     let line = task.provider_parent();
     let (_, parent) = line.split_once(' ').unwrap();
     assert!(parent.contains("holder run"), "{line}");
-    // Its PID has one LfProcess: the held `session resume`, no exec'd `lf -i`.
-    let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
-    let launchers: Vec<String> = db
-        .prepare(
-            "SELECT p.command FROM processes a JOIN processes p ON p.pid=a.pid AND p.kind='lf'
-             WHERE a.kind='agent' AND a.agent_session_id=?1",
-        )
-        .unwrap()
-        .query_map([session], |row| row.get(0))
-        .unwrap()
-        .map(Result::unwrap)
-        .collect();
-    assert_eq!(launchers.len(), 1, "{launchers:?}");
-    assert!(
-        launchers[0].contains(&format!("\"session\",\"resume\",\"{session}\"")),
-        "{launchers:?}"
-    );
     task.wait_for_graph_start();
     task.wait_for_graphs();
 }
@@ -777,8 +761,7 @@ impl CreationFixture {
         loop {
             let active: i64 = db
                 .query_row(
-                    "SELECT count(*) FROM graph_processes g
-                JOIN processes p ON p.id=g.lf_process_id WHERE p.completed_at IS NULL",
+                    "SELECT count(*) FROM graph_processes WHERE ended_at IS NULL",
                     [],
                     |row| row.get(0),
                 )

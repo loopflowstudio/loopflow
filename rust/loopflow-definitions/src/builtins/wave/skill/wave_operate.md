@@ -42,7 +42,7 @@ An unreadable owner makes the Task unknown: report it and leave it.
 
 | Disposition | When, and what to do |
 | --- | --- |
-| moving | A live Graph process is running. Leave it alone. An open conversation is not a Graph process. |
+| moving | A live Graph run. Leave it alone. An open conversation is not a Graph run. |
 | acted | This pass continued, repaired or delivered it with an `lf` command, then reread status and saw the change. |
 | available | A review, demo, choice or merge click is ready, with its conversation link or PR. Never complete or approve it for them. |
 | dependency or capacity | Waiting on a named Task, PR, running check, account or limit. |
@@ -52,9 +52,9 @@ An unreadable owner makes the Task unknown: report it and leave it.
 "Ready" and "needs reconciliation" are not dispositions. Take the first row
 that fits:
 
-- **Look for a live Graph first.** Check every Graph and unfinished Process in
-  `lf task status <issue> --json` against `lf process list`. A live process
-  makes the Task moving, whoever launched it.
+- **Look for a live Graph first.** In `lf task status <issue> --json`, a
+  position with `running` true is a live run, read from its own pid. A live
+  run makes the Task moving, whoever launched it.
 - **Repair before reporting a blocker.** Read the failed step's log and what
   it changed, fix the cause if you can, and relaunch what remains with
   `lf task run <issue-id> --reason "<what changed>"`. A stopped Graph is

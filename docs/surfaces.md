@@ -201,10 +201,9 @@ until stdin closes.
 ```bash
 lf wave show --all --subscribe --json         # every Wave's plan and Tasks
 lf task list --subscribe --json               # open Tasks, as your sidebar would list them
-lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph processes and thread
+lf task status LOO-12 --subscribe --json      # one Task with its conversations, Graph runs and thread
 lf session list --subscribe --json            # conversations, with which ones are available for you
 lf session history --since 7d --subscribe --json   # what Sessions did, tagged with their Task and Wave
-lf process list --subscribe --json                      # live lf call trees
 lf repo tracker --subscribe --json            # planning sync; keeps it exchanged while it runs
 lf desktop view list --subscribe --json           # every plan a repository window shows
 ```
@@ -231,7 +230,7 @@ of never-started work; `selection_states` supplies the same lifecycle, board
 section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
 on. `lf task status <issue> --json` prints one
-Task as a row, each fact once, with its Sessions, Graph processes and
+Task as a row, each fact once, with its Sessions, Graph runs and
 thread.
 
 A Session record:

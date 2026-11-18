@@ -18,7 +18,9 @@ lf capture-tasks                             # talk it through; the Session file
 A Task adopts existing work or gets its own worktree beside your repository, its own branch and at
 most one pull request. A stacked Task forks from its parent's branch on origin,
 pushing it when absent or when an unpublished parent is ahead; `lf sync`
-carries the child through the parent's updates and squash merge.
+carries the child through the parent's updates and squash merge. To stack a
+Task that already exists, run `lf sync LOO-12` in its worktree; `lf sync main`
+takes it back off.
 
 `lf task run`, `lf ship`, and an explicit `lf task checkout` start the Task's
 conversation in the background when an agent is configured and installed.
@@ -194,7 +196,7 @@ lf task list --subscribe                          # a JSON line each time the li
 it answers instantly and offline.
 
 `--subscribe` also works on `lf task status <id>`, `lf wave show`, `lf wave status`,
-`lf session list`, `lf session history`, `lf repo tracker`, `lf process list` and the
+`lf session list`, `lf session history`, `lf repo tracker` and the
 `lf desktop` reads, always with `--json`. Each line is
 `{"answers", "unavailable", "body"}`, where `body` is
 what `--json` prints. Write `{"id": 1, "args": {"query": "parser"}}` to stdin to

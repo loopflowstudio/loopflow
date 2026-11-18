@@ -1,28 +1,10 @@
--- A Process records the Task it belongs to once, when it is written: the Task
--- its launch names, else the deepest checkout holding its directory, else its
--- caller's, else its parent's. Membership then reads this column instead of
--- matching paths, so a moved repository or a reused checkout path changes no
--- Task's Processes.
-ALTER TABLE processes ADD COLUMN task_id TEXT;
-CREATE INDEX processes_task ON processes(task_id) WHERE task_id IS NOT NULL;
-
--- Relocation receipts are the only membership a path cannot recover.
-UPDATE processes SET task_id=r.task_id
-FROM relocated_task_processes r WHERE r.process_id=processes.id;
-
--- Existing rows take their Task in the Machine server's maintenance pass, a
--- batch per write transaction: resolving every row here would hold the write
--- lock for tens of seconds at upgrade. Released lf keeps inserting rows without
--- a Task until it exits; the same pass reaches them past this cursor. The
--- table goes once no released lf writes Processes without a Task.
-CREATE TABLE process_task_backfill (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    after_rowid INTEGER NOT NULL
-);
-INSERT INTO process_task_backfill(id, after_rowid) VALUES(1, 0);
-
--- A Session records its Task the same way, at creation: the Task it names,
--- else the deepest checkout holding its directory. A Task's primary
+-- A Task's work is its Sessions and its Graph runs. Each records its Task
+-- once, when it starts: the Task it names, else the deepest checkout holding
+-- its directory on this Machine, else the Task of the Session that started
+-- it. Membership reads that column and never matches a path, so a moved
+-- repository or a reused checkout path changes no Task's work.
+--
+-- Sessions written before this rule take it here. A Task's primary
 -- conversation names its Task even when it was chosen by path.
 UPDATE agent_sessions SET task_id=chosen.task_id, wave_id=chosen.wave_id
 FROM (SELECT tps.session_id, tps.task_id, p.wave_id FROM task_primary_sessions tps
@@ -48,12 +30,35 @@ FROM (SELECT s.id, (WITH RECURSIVE up(path) AS (
 JOIN tasks t ON t.id=inside.task_id LEFT JOIN projects p ON p.id=t.project_id
 WHERE inside.id=agent_sessions.id;
 
--- A Task's Auto-Ship carrier is a `task_ship_events` row since
--- task_machine_local copied it there. The leaving column's reference would
--- otherwise keep the carrier's Process from ever being forgotten.
-UPDATE tasks SET ship_lf_process_id=NULL WHERE ship_lf_process_id IS NOT NULL;
-
--- leaving: relocated_task_processes LOO-877
+-- Graph runs that named no Task take theirs by the same rule. A run names its
+-- Task once: one that started with none may take the Task that adopts the
+-- checkout it runs in, and a recorded Task never changes.
+DROP TRIGGER graph_processes_launch_is_immutable;
+CREATE TEMP TABLE graph_run_tasks AS
+SELECT g.lf_process_id AS run, coalesce(
+    (WITH RECURSIVE up(path) AS (
+        SELECT rtrim(g.cwd,'/') WHERE g.cwd IS NOT NULL
+        UNION ALL
+        SELECT rtrim(rtrim(path,replace(path,'/','')),'/') FROM up WHERE path!='')
+     SELECT c.task_id FROM up CROSS JOIN task_checkouts c INDEXED BY task_checkouts_root
+        ON rtrim(c.worktree,'/')=up.path
+     WHERE up.path!='' OR substr(g.cwd,1,1)='/' OR g.cwd=''
+     ORDER BY length(up.path) DESC, c.task_id LIMIT 1),
+    (SELECT s.task_id FROM agent_sessions s
+     WHERE s.id=g.caller_session_id AND s.primary_scope IS NULL)) AS task_id
+FROM graph_processes g WHERE g.task_id IS NULL;
+UPDATE graph_processes SET task_id=found.task_id
+FROM graph_run_tasks found
+WHERE found.run=graph_processes.lf_process_id AND found.task_id IS NOT NULL;
+DROP TABLE graph_run_tasks;
+CREATE TRIGGER graph_processes_launch_is_immutable BEFORE UPDATE ON graph_processes
+WHEN NEW.lf_process_id IS NOT OLD.lf_process_id OR NEW.graph IS NOT OLD.graph
+    OR NEW.compiled IS NOT OLD.compiled
+    OR (OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id)
+    OR NEW.caller_session_id IS NOT OLD.caller_session_id
+BEGIN
+    SELECT RAISE(ABORT,'A Graph record is append-only');
+END;
 
 -- A Task is completed when its state says so. Released lf still reads the old
 -- boolean (and the retirement triggers fire on it), so it follows the state
@@ -105,30 +110,23 @@ CREATE TABLE agent_sessions_task_primary (
     skill TEXT,
     provider TEXT,
     model TEXT,
-    primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave', 'task')),
-    agent_process_id TEXT REFERENCES processes(id),
-    transport_lf_process_id TEXT REFERENCES processes(id),
-    fence_locator TEXT,
-    moved_to_machine_id TEXT,
-    held_terminal_id TEXT REFERENCES held_terminals(id),
-    skill_version TEXT,
-    opened_at INTEGER,
-    transition TEXT,
-    departed_attachment TEXT,
-    departure TEXT,
+    primary_scope TEXT CHECK (primary_scope IN ('repository', 'wave', 'task')), agent_process_id TEXT, transport_lf_process_id TEXT, fence_locator TEXT, moved_to_machine_id TEXT, held_terminal_id TEXT REFERENCES held_terminals(id), skill_version TEXT, opened_at INTEGER, transition TEXT, departed_attachment TEXT, departure TEXT, agent_started_at INTEGER, agent_pid INTEGER, agent_os_started_at INTEGER, agent_ended_at INTEGER, agent_exit_code INTEGER, agent_launcher_lf_process_id TEXT, agent_spawn_state TEXT
+    CHECK(agent_spawn_state IN ('reserved','spawn_requested','spawn_failed','exited')), agent_command TEXT, agent_interactive INTEGER CHECK(agent_interactive IN (0,1)), agent_endpoint TEXT, agent_inbox TEXT, attachment_token TEXT, attached_lf_process_id TEXT, attached_pid INTEGER, attached_os_started_at INTEGER, attached_terminal_id TEXT,
     CHECK (primary_scope IS NOT 'task' OR task_id IS NOT NULL)
 );
-INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure)
-SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,s.work_source,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,
-    CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
-        WHERE tps.session_id=s.id AND tps.task_id IS s.task_id) THEN 'task' ELSE s.primary_scope END,
-    s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure
+INSERT INTO agent_sessions_task_primary(id,current_capture,title,title_source,completed_at,created_at,request,interactive,repo,provider_thread,task_id,wave_id,work_source,bound_at,input_published,cwd,skill,provider,model,primary_scope,agent_process_id,transport_lf_process_id,fence_locator,moved_to_machine_id,held_terminal_id,skill_version,opened_at,transition,departed_attachment,departure,agent_started_at,agent_pid,agent_os_started_at,agent_ended_at,agent_exit_code,agent_launcher_lf_process_id,agent_spawn_state,agent_command,agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id,attached_pid,attached_os_started_at,attached_terminal_id)
+SELECT s.id,s.current_capture,s.title,s.title_source,s.completed_at,s.created_at,s.request,s.interactive,s.repo,s.provider_thread,s.task_id,s.wave_id,s.work_source,s.bound_at,s.input_published,s.cwd,s.skill,s.provider,s.model,CASE WHEN s.primary_scope IS NULL AND EXISTS(SELECT 1 FROM task_primary_sessions tps
+        WHERE tps.session_id=s.id AND tps.task_id IS s.task_id) THEN 'task' ELSE s.primary_scope END,s.agent_process_id,s.transport_lf_process_id,s.fence_locator,s.moved_to_machine_id,s.held_terminal_id,s.skill_version,s.opened_at,s.transition,s.departed_attachment,s.departure,s.agent_started_at,s.agent_pid,s.agent_os_started_at,s.agent_ended_at,s.agent_exit_code,s.agent_launcher_lf_process_id,s.agent_spawn_state,s.agent_command,s.agent_interactive,s.agent_endpoint,s.agent_inbox,s.attachment_token,s.attached_lf_process_id,s.attached_pid,s.attached_os_started_at,s.attached_terminal_id
 FROM agent_sessions s;
 DROP TABLE agent_sessions;
 ALTER TABLE agent_sessions_task_primary RENAME TO agent_sessions;
 PRAGMA legacy_alter_table = OFF;
+CREATE INDEX agent_sessions_agent_ended ON agent_sessions(agent_ended_at)
+    WHERE agent_ended_at IS NOT NULL;
 CREATE INDEX agent_sessions_agent_process ON agent_sessions(agent_process_id)
     WHERE agent_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_attached ON agent_sessions(attached_lf_process_id)
+    WHERE attached_lf_process_id IS NOT NULL;
 CREATE INDEX agent_sessions_held_terminal ON agent_sessions(held_terminal_id)
     WHERE held_terminal_id IS NOT NULL;
 CREATE UNIQUE INDEX agent_sessions_primary_repository ON agent_sessions(repo)
@@ -144,12 +142,14 @@ CREATE INDEX agent_sessions_provider_thread ON agent_sessions(provider_thread)
     WHERE provider_thread IS NOT NULL;
 CREATE INDEX agent_sessions_transport ON agent_sessions(transport_lf_process_id)
     WHERE transport_lf_process_id IS NOT NULL;
+CREATE INDEX agent_sessions_unended_agent ON agent_sessions(agent_process_id)
+    WHERE agent_process_id IS NOT NULL AND agent_ended_at IS NULL;
 CREATE INDEX agent_sessions_wave ON agent_sessions(wave_id)
     WHERE wave_id IS NOT NULL;
 CREATE INDEX conversation_task_inventory ON agent_sessions(task_id,title,id);
-CREATE INDEX open_sessions ON agent_sessions(created_at, id) WHERE completed_at IS NULL;
-CREATE INDEX session_inventory ON agent_sessions(interactive, completed_at, title, id);
-CREATE INDEX session_repo_inventory ON agent_sessions(repo, interactive, completed_at, title, id);
+CREATE INDEX open_sessions ON "agent_sessions"(created_at, id) WHERE completed_at IS NULL;
+CREATE INDEX session_inventory ON "agent_sessions"(interactive, completed_at, title, id);
+CREATE INDEX session_repo_inventory ON "agent_sessions"(repo, interactive, completed_at, title, id);
 CREATE TRIGGER canonical_agent_sessions_insert BEFORE INSERT ON agent_sessions
 BEGIN
  SELECT RAISE(ABORT,'canonical identity required: agent_sessions') FROM (
@@ -183,6 +183,71 @@ SELECT 'session' AS domain,NEW.id AS original
  WHEN (length(suffix)=32 AND suffix NOT GLOB '*[^0-9a-fA-F]*') OR (length(uuid)=36 AND substr(uuid,9,1)='-' AND substr(uuid,14,1)='-' AND substr(uuid,19,1)='-' AND substr(uuid,24,1)='-' AND length(replace(uuid,'-',''))=32 AND replace(uuid,'-','') NOT GLOB '*[^0-9a-fA-F]*') THEN lower(original)
  ELSE original END AS canonical FROM uuids WHERE domain IS NOT NULL
  ) WHERE original IS NOT canonical;
+END;
+CREATE TRIGGER process_agent_from_session_insert AFTER UPDATE OF agent_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT NULL AND NEW.agent_process_id IS NOT OLD.agent_process_id
+    AND NEW.attachment_token IS NOT OLD.attachment_token
+BEGIN
+    INSERT INTO processes(id,kind,trace_id,parent_lf_process_id,command,repo,cwd,started_at,
+        completed_at,exit_code,pid,os_started_at,agent_session_id,agent_provider,agent_interactive,
+        spawn_state,attached_lf_process_id,attachment_token,endpoint,inbox)
+    SELECT NEW.agent_process_id,'agent',
+        COALESCE((SELECT trace_id FROM processes WHERE id=NEW.agent_launcher_lf_process_id),
+            NEW.agent_process_id),
+        NEW.agent_launcher_lf_process_id,NEW.agent_command,NEW.repo,NEW.cwd,
+        COALESCE(NEW.agent_started_at,CAST(strftime('%s','now') AS INTEGER)),NEW.agent_ended_at,
+        NEW.agent_exit_code,NEW.agent_pid,NEW.agent_os_started_at,NEW.id,NEW.provider,
+        NEW.agent_interactive,NEW.agent_spawn_state,NEW.attached_lf_process_id,NEW.attachment_token,
+        NEW.agent_endpoint,NEW.agent_inbox
+    WHERE NOT EXISTS(SELECT 1 FROM processes WHERE id=NEW.agent_process_id);
+END;
+CREATE TRIGGER process_agent_from_session_update
+AFTER UPDATE OF agent_launcher_lf_process_id,agent_started_at,agent_pid,agent_os_started_at,
+    agent_ended_at,agent_exit_code,agent_spawn_state,agent_command,agent_interactive,
+    agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT NULL AND NEW.agent_process_id IS OLD.agent_process_id
+BEGIN
+    UPDATE processes SET parent_lf_process_id=NEW.agent_launcher_lf_process_id,
+        started_at=COALESCE(NEW.agent_started_at,started_at),
+        pid=CASE WHEN NEW.agent_ended_at IS NULL THEN NEW.agent_pid ELSE pid END,
+        os_started_at=CASE WHEN NEW.agent_ended_at IS NULL THEN NEW.agent_os_started_at
+            ELSE os_started_at END,
+        completed_at=NEW.agent_ended_at,exit_code=NEW.agent_exit_code,
+        spawn_state=NEW.agent_spawn_state,command=NEW.agent_command,
+        agent_interactive=NEW.agent_interactive,endpoint=NEW.agent_endpoint,
+        inbox=NEW.agent_inbox,attachment_token=NEW.attachment_token,
+        attached_lf_process_id=NEW.attached_lf_process_id
+    WHERE id=NEW.agent_process_id AND (parent_lf_process_id IS NOT NEW.agent_launcher_lf_process_id
+        OR started_at IS NOT COALESCE(NEW.agent_started_at,started_at)
+        OR (NEW.agent_ended_at IS NULL AND (pid IS NOT NEW.agent_pid
+            OR os_started_at IS NOT NEW.agent_os_started_at))
+        OR completed_at IS NOT NEW.agent_ended_at OR exit_code IS NOT NEW.agent_exit_code
+        OR spawn_state IS NOT NEW.agent_spawn_state OR command IS NOT NEW.agent_command
+        OR agent_interactive IS NOT NEW.agent_interactive OR endpoint IS NOT NEW.agent_endpoint OR inbox IS NOT NEW.agent_inbox
+        OR attachment_token IS NOT NEW.attachment_token
+        OR attached_lf_process_id IS NOT NEW.attached_lf_process_id);
+END;
+CREATE TRIGGER process_terminal_from_session AFTER UPDATE OF attached_terminal_id ON agent_sessions
+WHEN NEW.attached_lf_process_id IS NOT NULL AND NEW.attached_terminal_id IS NOT OLD.attached_terminal_id
+BEGIN
+    UPDATE processes SET terminal_id=NEW.attached_terminal_id
+    WHERE id=NEW.attached_lf_process_id AND kind='lf' AND terminal_id IS NOT NEW.attached_terminal_id;
+END;
+CREATE TRIGGER session_agent_from_attachment AFTER UPDATE OF agent_process_id ON agent_sessions
+WHEN NEW.agent_process_id IS NOT OLD.agent_process_id AND NEW.attachment_token IS OLD.attachment_token
+BEGIN
+    UPDATE agent_sessions SET (agent_launcher_lf_process_id,agent_started_at,agent_pid,
+        agent_os_started_at,agent_ended_at,agent_exit_code,agent_spawn_state,agent_command,
+        agent_interactive,agent_endpoint,agent_inbox,attachment_token,attached_lf_process_id)=(
+        SELECT parent_lf_process_id,started_at,CASE WHEN completed_at IS NULL THEN pid END,
+            CASE WHEN completed_at IS NULL THEN os_started_at END,completed_at,exit_code,
+            spawn_state,command,agent_interactive,endpoint,inbox,attachment_token,
+            attached_lf_process_id
+        FROM processes WHERE id=NEW.agent_process_id)
+    WHERE id=NEW.id;
+    UPDATE agent_sessions SET (attached_pid,attached_os_started_at,attached_terminal_id)=(
+        SELECT pid,os_started_at,terminal_id FROM processes WHERE id=agent_sessions.attached_lf_process_id)
+    WHERE id=NEW.id;
 END;
 CREATE TRIGGER session_fence_locator_immutable BEFORE UPDATE OF fence_locator ON agent_sessions
 WHEN OLD.fence_locator IS NOT NULL AND NEW.fence_locator IS NOT OLD.fence_locator

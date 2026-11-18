@@ -116,6 +116,7 @@ struct TaskGraphTests {
 
         let blocked = snapshots[2]
         #expect(graphNodeStates(blocked.compiled, latest: blocked)[3] == .blocked)
+        #expect(blocked.steps.last?.error == "check exited 1: 2 tests failed")
         let evidence = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_stalled.json"))
         #expect(evidence.state == .stalled)
         let held = try JSONDecoder().decode(TaskExecutionSnapshot.self, from: fixture("task_execution_waiting.json"))

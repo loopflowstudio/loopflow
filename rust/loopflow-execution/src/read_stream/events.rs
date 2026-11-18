@@ -111,8 +111,8 @@ impl Observer {
             if !first && !completed.is_subset(&cursor.completed) {
                 for graph in store.task_graphs(&task)? {
                     for step in &graph.steps {
-                        if completed.contains(&step.process.id)
-                            && !cursor.completed.contains(&step.process.id)
+                        if completed.contains(&step.run.id)
+                            && !cursor.completed.contains(&step.run.id)
                         {
                             events.push(SubscriptionEvent::GraphStepFinished {
                                 task_id: task.clone(),

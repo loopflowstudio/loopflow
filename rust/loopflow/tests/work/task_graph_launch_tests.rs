@@ -171,7 +171,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
                     assert_eq!(graphs.len(), launched, "{condition} {launch:?}: {error}");
                     let (outcome, steps) = graphs.last().unwrap();
                     assert_eq!(steps.len(), 1, "{condition} {launch:?}: {error}");
-                    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+                    assert_eq!(steps[0]["label"], "sync --plan");
                     assert_eq!(
                         outcome.as_deref(),
                         Some(if output.status.success() {
@@ -209,10 +209,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         // However the Task was named, the Graph left the same Processes.
         let recorded = support::recorded_graphs(home.path());
         assert_eq!(recorded[0].1.len(), 1);
-        assert_eq!(
-            recorded[0].1[0]["argv"],
-            serde_json::json!(["sync", "--plan"])
-        );
+        assert_eq!(recorded[0].1[0]["label"], "sync --plan");
         assert!(recorded.iter().all(|(_, steps)| *steps == recorded[0].1));
         // At its end the Task has nothing left to run; completion retries
         // without replaying the run that reached it.
@@ -295,15 +292,6 @@ fn failed_placement_is_observed_without_starting_a_task() {
         .output()
         .unwrap();
     assert!(!output.status.success());
-    let (cwd, outcome): (String, String) = db
-        .query_row(
-            "SELECT cwd,outcome FROM processes WHERE parent_lf_process_id=?1",
-            [&parent.id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .unwrap();
-    assert_eq!(Path::new(&cwd), task.repo.path().canonicalize().unwrap());
-    assert_eq!(outcome, "failed");
     assert!(support::recorded_graphs(task.home.path()).is_empty());
     // A failed launch for another selector writes no ownership entry anywhere.
     let entries: i64 = db
@@ -402,11 +390,6 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
 
         let parent = loopflow_model::id::LfProcessId::new();
         let trace = loopflow_model::id::TraceId::new();
-        db.execute(
-            "INSERT INTO processes(id,trace_id,cwd,command,started_at,task_id) VALUES(?1,?2,?3,'caller',1,(SELECT task_id FROM task_checkouts WHERE ?3=rtrim(worktree,'/') OR instr(?3,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
-            rusqlite::params![parent, trace, caller.to_str().unwrap()],
-        )
-        .unwrap();
         let (cwd, args): (&Path, &[&str]) = match launch {
             "task" => (&caller, &["-b", "task", "run", "INF-123", "proof"]),
             "direct" => (&caller, &["-b", "--task", "INF-123", "graph", "proof"]),
@@ -458,7 +441,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
         let graph_process = graphs[0]["id"].as_str().unwrap();
         let recorded: String = db
             .query_row(
-                "SELECT cwd FROM processes WHERE id=?1",
+                "SELECT cwd FROM graph_processes WHERE lf_process_id=?1",
                 [graph_process],
                 |row| row.get(0),
             )
@@ -467,35 +450,7 @@ fn running_graphs_belong_to_the_target_checkout_and_retain_their_caller() {
             Path::new(&recorded),
             task.repo.path().canonicalize().unwrap()
         );
-        // Execution retains the caller through its viewer and transport owner;
-        // the number of intervening Processes is not the attribution contract.
-        let caller_retained: bool = db
-            .query_row(
-                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
-                    SELECT id,parent_lf_process_id FROM processes WHERE id=?1
-                    UNION ALL
-                    SELECT p.id,p.parent_lf_process_id FROM processes p
-                    JOIN ancestors a ON p.id=a.parent_lf_process_id
-                 ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
-                rusqlite::params![graph_process, parent],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(caller_retained, "{launch}: Graph lost its original caller");
-        let original: String = db
-            .query_row("SELECT cwd FROM processes WHERE id=?1", [parent], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(Path::new(&original), caller);
-        let inventory = task.run(&[
-            "graph",
-            "list",
-            "--processes",
-            "--for-task",
-            "INF-123",
-            "--json",
-        ]);
+        let inventory = task.run(&["graph", "list", "--runs", "--for-task", "INF-123", "--json"]);
         assert!(
             inventory.status.success(),
             "{}",
@@ -575,7 +530,7 @@ fn task_run_open_while_running(fail_open: bool) {
     };
     let text = fs::read_to_string(&out).unwrap();
     assert_eq!(status.success(), !fail_open, "{text}");
-    let launched = text.find("running as Graph process").unwrap();
+    let launched = text.find("running as Graph run").unwrap();
     let opened = text
         .find(if fail_open {
             "Conversation exited"
@@ -855,10 +810,10 @@ fn task_run_returns_while_its_graph_keeps_running() {
     }
     let printed = fs::read_to_string(&out).unwrap();
     let graph = printed
-        .split("Graph process ")
+        .split("Graph run ")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no Graph process named: {printed}"))
+        .unwrap_or_else(|| panic!("no Graph run named: {printed}"))
         .to_string();
     assert!(printed.contains(&format!("graph-{graph}.log")), "{printed}");
     assert!(
@@ -890,7 +845,7 @@ fn task_run_returns_while_its_graph_keeps_running() {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let steps: i64 = db
         .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
+            "SELECT count(*) FROM graph_process_steps WHERE graph_lf_process_id=?1",
             [&graph],
             |row| row.get(0),
         )
@@ -1111,7 +1066,7 @@ if sys.argv[1:3] == ['session', 'resume']:
         sys.exit(0)
     # Capture completion at attachment, not after the caller exits.
     with sqlite3.connect(home / 'loopflow.db') as db:
-        outcomes = [row[0] for row in db.execute('SELECT p.outcome FROM processes p JOIN graph_processes g ON g.lf_process_id=p.id')]
+        outcomes = [row[0] for row in db.execute("SELECT CASE WHEN ended_at IS NULL THEN NULL WHEN exit_code=0 THEN 'succeeded' ELSE 'failed' END FROM graph_processes")]
     (home / 'opened-graphs.json').write_text(json.dumps(outcomes))
     with (home / 'opened').open('a') as opened:
         opened.write(sys.argv[3] + '\n')
@@ -1318,11 +1273,18 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
     /// `lf task run …` that must succeed, waited.
     fn task_run_ok(&self, args: &[&str]) {
         let ran = self.task_run(args);
-        assert!(ran.success(), "{args:?}: {}", ran.text);
+        assert!(
+            ran.success(),
+            "{args:?} exited {:?}: {}",
+            ran.code,
+            ran.text
+        );
     }
 
     /// Wait for the run a returned `lf task run` printed, if it printed one:
-    /// until its carrier, the Graph process's parent, has exited.
+    /// until the Task's records show nothing running and its carrier has
+    /// exited. Its code is the shipping it carried, else its last Graph
+    /// run's: a carrier's result is its Graph's.
     fn ran(&self, output: std::process::Output) -> Ran {
         let mut text = format!(
             "{}{}",
@@ -1335,7 +1297,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
                 .and_then(|rest| rest.split_whitespace().next())
                 .map(str::to_owned)
         };
-        let (Some(graph), Some(log)) = (printed("running as Graph process "), printed("log:    "))
+        let (Some(graph), Some(log)) = (printed("running as Graph run "), printed("log:    "))
         else {
             return Ran {
                 code: output.status.code(),
@@ -1343,24 +1305,32 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
             };
         };
         let db = rusqlite::Connection::open(self.home.path().join("loopflow.db")).unwrap();
-        let carrier: String = db
+        let task: String = db
             .query_row(
-                "SELECT parent_lf_process_id FROM processes WHERE id=?1",
+                "SELECT task_id FROM graph_processes WHERE lf_process_id=?1",
                 [&graph],
                 |row| row.get(0),
             )
             .unwrap();
+        // The carrier's pid while its records show it, then the OS until it exits.
+        let mut carrier: Option<u32> = None;
         let deadline = Instant::now() + Duration::from_secs(120);
-        let code = loop {
-            let (done, code): (bool, Option<i32>) = db
+        loop {
+            let (pid, ship, graphs): (Option<u32>, Option<u32>, bool) = db
                 .query_row(
-                    "SELECT completed_at IS NOT NULL, exit_code FROM processes WHERE id=?1",
-                    [&carrier],
-                    |row| Ok((row.get(0)?, row.get(1)?)),
+                    "SELECT (SELECT run_pid FROM task_graphs WHERE task_id=?1),
+                        (SELECT pid FROM task_ship_events WHERE task_id=?1 AND ended_at IS NULL
+                            AND kind IN ('approved','carried') ORDER BY at DESC LIMIT 1),
+                        EXISTS(SELECT 1 FROM graph_processes WHERE task_id=?1 AND ended_at IS NULL)",
+                    [&task],
+                    |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
                 )
                 .unwrap();
-            if done {
-                break code;
+            carrier = carrier.or(pid).or(ship);
+            // SAFETY: signal 0 only asks whether the pid exists.
+            let carrier_runs = carrier.is_some_and(|pid| unsafe { libc::kill(pid as i32, 0) } == 0);
+            if pid.is_none() && ship.is_none() && !graphs && !carrier_runs {
+                break;
             }
             assert!(
                 Instant::now() < deadline,
@@ -1368,7 +1338,20 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
                 fs::read_to_string(&log).unwrap_or_default()
             );
             std::thread::sleep(Duration::from_millis(50));
-        };
+        }
+        let code: Option<i32> = db
+            .query_row(
+                "SELECT COALESCE(
+                     (SELECT exit_code FROM task_ship_events WHERE task_id=?1
+                         AND kind IN ('approved','carried') AND ended_at IS NOT NULL
+                         AND at>=(SELECT started_at FROM graph_processes WHERE lf_process_id=?2)
+                         ORDER BY ended_at DESC LIMIT 1),
+                     (SELECT exit_code FROM graph_processes WHERE task_id=?1
+                         ORDER BY started_at DESC,rowid DESC LIMIT 1))",
+                [&task, &graph],
+                |row| row.get(0),
+            )
+            .unwrap();
         text.push_str(&fs::read_to_string(&log).unwrap_or_default());
         Ran { code, text }
     }
@@ -1700,17 +1683,30 @@ fn lf_graph_in_the_worktree_does_not_move_the_task() {
     assert_eq!(task.graph(), before);
 }
 
-/// The Graph processes started beneath `task_run`, by outcome, oldest first.
-fn attempts(home: &Path, task_run: &str) -> Vec<String> {
+/// The last Graph run recorded, as a mark for [`attempts`].
+fn last_graph(home: &Path) -> i64 {
+    rusqlite::Connection::open(home.join("loopflow.db"))
+        .unwrap()
+        .query_row(
+            "SELECT COALESCE(MAX(rowid),0) FROM graph_processes",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
+}
+
+/// The Graph runs recorded after `mark`, by how they ended, oldest first.
+fn attempts(home: &Path, mark: i64) -> Vec<String> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
     let mut rows = db
         .prepare(
-            "SELECT d.outcome FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
-             WHERE d.parent_lf_process_id=?1 ORDER BY d.rowid",
+            "SELECT CASE WHEN ended_at IS NULL THEN 'running' WHEN exit_code=0 THEN 'succeeded'
+                 WHEN exit_code=130 AND error IS NULL THEN 'interrupted' ELSE 'failed' END
+             FROM graph_processes WHERE rowid>?1 ORDER BY rowid",
         )
         .unwrap();
     let outcomes = rows
-        .query_map([task_run], |row| row.get(0))
+        .query_map([mark], |row| row.get(0))
         .unwrap()
         .collect::<rusqlite::Result<_>>()
         .unwrap();
@@ -1725,9 +1721,10 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let steps_of_latest_graph = || -> Vec<String> {
         db.prepare(
-            "SELECT p.command FROM processes p WHERE p.parent_lf_process_id=
-                (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
-             ORDER BY p.rowid",
+            "SELECT (SELECT json_extract(n.value,'$.label') FROM json_each(g.compiled,'$.steps') n
+                     WHERE json_extract(n.value,'$.key')=s.node)
+             FROM graph_process_steps s JOIN graph_processes g ON g.lf_process_id=s.graph_lf_process_id
+             WHERE g.rowid=(SELECT MAX(rowid) FROM graph_processes) ORDER BY s.seq",
         )
         .unwrap()
         .query_map([], |row| row.get(0))
@@ -1738,12 +1735,12 @@ fn a_run_that_ended_waiting_on_a_limit_starts_again_at_that_step_without_replayi
     // The last attempt started at the failed step.
     let steps = steps_of_latest_graph();
     assert_eq!(steps.len(), 1, "{steps:?}");
-    // The step's Process ended waiting on a limit; the wait is over.
+    // The step ended waiting on a limit; the wait is over.
     let waiting: String = db
         .query_row(
-            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+            "SELECT lf_process_id FROM graph_process_steps WHERE graph_lf_process_id=
                 (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
-             ORDER BY p.rowid DESC LIMIT 1",
+             ORDER BY seq DESC LIMIT 1",
             [],
             |row| row.get(0),
         )
@@ -1805,9 +1802,9 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let waiting: String = db
         .query_row(
-            "SELECT p.id FROM processes p WHERE p.parent_lf_process_id=
+            "SELECT lf_process_id FROM graph_process_steps WHERE graph_lf_process_id=
                 (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
-             ORDER BY p.rowid DESC LIMIT 1",
+             ORDER BY seq DESC LIMIT 1",
             [],
             |row| row.get(0),
         )
@@ -1825,7 +1822,7 @@ fn restart_of_a_finished_wait(graph: &str, recorded: Option<&str>) -> String {
     }
     // A failed ship waits before restarting; that wait has passed too.
     db.execute(
-        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        "UPDATE task_ship_events SET ended_at=1 WHERE ended_at IS NOT NULL AND exit_code IS NOT 0",
         [],
     )
     .unwrap();
@@ -1900,9 +1897,9 @@ db = sqlite3.connect(os.path.join(os.environ['LF_HOME'], 'loopflow.db'), timeout
 with db:
     db.execute(
         "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at) "
-        "SELECT p.id,'codex',?,1 FROM processes p WHERE p.parent_lf_process_id="
+        "SELECT s.lf_process_id,'codex',?,1 FROM graph_process_steps s WHERE s.graph_lf_process_id="
         "(SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1) "
-        "ORDER BY p.rowid DESC LIMIT 1",
+        "ORDER BY s.seq DESC LIMIT 1",
         [{reason}],
     )
 sys.exit(code)
@@ -1940,7 +1937,7 @@ sys.exit(code)
     assert!(shipped_at.is_none());
     // Cross ship's retry deadline so reads would restart an approval left behind.
     db.execute(
-        "UPDATE processes SET completed_at=1 WHERE outcome='failed'",
+        "UPDATE task_ship_events SET ended_at=1 WHERE ended_at IS NOT NULL AND exit_code IS NOT 0",
         [],
     )
     .unwrap();
@@ -1971,10 +1968,7 @@ sys.exit(code)
     assert_eq!(graphs.len(), 2);
     assert_eq!(graphs[0].1.len(), 2);
     assert_eq!(graphs[1].1.len(), 1);
-    assert_eq!(
-        graphs[1].1[0]["argv"],
-        serde_json::json!(["graph", "show", "late"])
-    );
+    assert_eq!(graphs[1].1[0]["label"], "graph show late");
     assert_eq!(task.graph()["position"], at("review"));
 }
 
@@ -1996,10 +1990,7 @@ fn a_failed_run_starts_again_at_the_step_that_failed() {
     assert_eq!(graphs[0].1.len(), 2);
     for retry in &graphs[1..] {
         assert_eq!(retry.1.len(), 1);
-        assert_eq!(
-            retry.1[0]["argv"],
-            serde_json::json!(["graph", "show", "late"])
-        );
+        assert_eq!(retry.1[0]["label"], "graph show late");
     }
     let stopped = task.graph();
     assert_eq!(stopped["position"]["step"], "start");
@@ -2026,7 +2017,7 @@ fn from_starts_a_stopped_run_where_it_names() {
     let graphs = support::recorded_graphs(task.home.path());
     let steps = &graphs.last().unwrap().1;
     assert_eq!(steps.len(), 2);
-    assert_eq!(steps[0]["argv"], serde_json::json!(["sync", "--plan"]));
+    assert_eq!(steps[0]["label"], "sync --plan");
     assert_eq!(task.graph()["position"], at("review"));
 }
 
@@ -2038,9 +2029,9 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     db.execute(
         "INSERT INTO agent_limit_recoveries(lf_process_id,provider,reason,updated_at)
-         SELECT p.id,'codex',?1,1 FROM processes p WHERE p.parent_lf_process_id=
+         SELECT s.lf_process_id,'codex',?1,1 FROM graph_process_steps s WHERE s.graph_lf_process_id=
              (SELECT lf_process_id FROM graph_processes ORDER BY rowid DESC LIMIT 1)
-         ORDER BY p.rowid DESC LIMIT 1",
+         ORDER BY s.seq DESC LIMIT 1",
         [format!(
             "codex_error: You've hit your usage limit{}claude",
             loopflow_execution::ops::task_execution::MOVED_TO
@@ -2056,10 +2047,7 @@ fn a_run_that_failed_after_moving_agents_starts_again_at_the_step_that_failed() 
     let graphs = support::recorded_graphs(task.home.path());
     let steps = &graphs.last().unwrap().1;
     assert_eq!(steps.len(), 1);
-    assert_eq!(
-        steps[0]["argv"],
-        serde_json::json!(["graph", "show", "late"])
-    );
+    assert_eq!(steps[0]["label"], "graph show late");
     assert_eq!(task.graph()["position"], at("review"));
 }
 
@@ -2068,6 +2056,7 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     let task = GraphTask::new();
     task.task_run_ok(&["task", "run", "INF-123", "gated"]);
     // Every attempt fails: the Task run gives up and the run holds the Task.
+    let mark = last_graph(task.home.path());
     let ran = task.task_run(&["task", "run", "INF-123"]);
     assert!(!ran.success());
     assert!(ran.text.contains("failed 3 times"), "{}", ran.text);
@@ -2076,12 +2065,8 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     assert_eq!(stopped["position"]["step"], "review");
     assert_eq!(stopped["position"]["at"], "graph show late");
     assert_eq!(stopped["position"]["running"], false);
-    let carrier = stopped["position"]["lf_process_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
     assert_eq!(
-        attempts(task.home.path(), &carrier),
+        attempts(task.home.path(), mark),
         ["failed", "failed", "failed"]
     );
     let status = task.text_status();
@@ -2093,6 +2078,7 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     // The cause clears as the third attempt starts: an `lf` that defines
     // `late` the third time the gate asks for it.
     let bin = tempfile::tempdir().unwrap();
+    let mark = last_graph(task.home.path());
     let lf = lf_shim(
         bin.path(),
         &format!(
@@ -2114,17 +2100,8 @@ fn a_stopped_run_is_started_again_at_the_step_that_failed() {
     assert!(ran.success(), "{}", ran.text);
     // The bare run started the stopped run again at the gate, not after review.
     assert_eq!(task.graph()["position"], at("accepted"));
-    // The carrier of the latest Graph process is the run that just ended.
-    let task_run = rusqlite::Connection::open(task.home.path().join("loopflow.db"))
-        .unwrap()
-        .query_row(
-            "SELECT p.parent_lf_process_id FROM graph_processes g JOIN processes p ON p.id=g.lf_process_id ORDER BY p.rowid DESC LIMIT 1",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap();
     assert_eq!(
-        attempts(task.home.path(), &task_run),
+        attempts(task.home.path(), mark),
         ["failed", "failed", "succeeded"]
     );
     assert_eq!(support::recorded_graphs(task.home.path()).len(), 7);
@@ -2181,6 +2158,7 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
         fs::write(task.repo.path().join(path), content).unwrap();
     }
     task.select_wave_graph("interrupted");
+    let mark = last_graph(task.home.path());
     let ran = task.task_run(&["task", "run", "INF-123", "interrupted"]);
     assert_eq!(ran.code, Some(130), "{}", ran.text);
     assert!(
@@ -2192,11 +2170,24 @@ fn an_interrupt_during_an_operation_stops_the_graph_before_its_next_step() {
     let graphs = support::recorded_graphs(task.home.path());
     assert_eq!(graphs.len(), 1);
     assert_eq!(graphs[0].1.len(), 1, "the second step never started");
-    let carrier = task.graph()["position"]["lf_process_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(attempts(task.home.path(), &carrier).len(), 1);
+    assert_eq!(attempts(task.home.path(), mark), ["interrupted"]);
+    // Status reads the interrupted run as stopped, not failed.
+    let status = command(
+        task.repo.path(),
+        task.home.path(),
+        &["task", "status", "INF-123"],
+    )
+    .output()
+    .unwrap();
+    let status = String::from_utf8_lossy(&status.stdout);
+    let line = status
+        .lines()
+        .find(|line| line.trim_start().starts_with("Graph: "))
+        .unwrap_or_else(|| panic!("{status}"));
+    assert!(
+        line.contains("Stopped") && !line.contains("ailed"),
+        "{status}"
+    );
 }
 
 #[test]
@@ -2212,67 +2203,6 @@ fn interrupting_an_idle_task_records_nothing_and_says_so() {
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(receipt["receipt"]["kind"], "no_live_run");
     assert_eq!(interrupt_rows(task.home.path()), before);
-}
-
-#[test]
-fn interrupting_a_task_with_only_an_open_process_records_it_without_claiming_a_stop() {
-    let task = GraphTask::new();
-    // A commit held in its pre-commit hook: an open Process that changes Work
-    // in the Task's checkout, with no Graph running.
-    let hooks = task.repo.path().join(".git/hooks");
-    fs::create_dir_all(&hooks).unwrap();
-    let hook = hooks.join("pre-commit");
-    fs::write(
-        &hook,
-        "#!/bin/sh\nwhile [ ! -e \"$LF_HOME/release\" ]; do sleep 0.05; done\n",
-    )
-    .unwrap();
-    fs::set_permissions(&hook, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
-    task.repo.create_file("held.txt", "held\n");
-    let mut waiter = command(
-        task.repo.path(),
-        task.home.path(),
-        &["commit", "-m", "Held in its hook"],
-    )
-    .stdin(std::process::Stdio::null())
-    .stdout(std::process::Stdio::null())
-    .stderr(std::process::Stdio::null())
-    .spawn()
-    .unwrap();
-    let db = task.home.path().join("loopflow.db");
-    let open = |db: &Path| -> i64 {
-        rusqlite::Connection::open(db)
-            .ok()
-            .and_then(|conn| {
-                conn.query_row(
-                    "SELECT COUNT(*) FROM processes WHERE completed_at IS NULL AND command LIKE '%\"commit\"%'",
-                    [],
-                    |row| row.get(0),
-                )
-                .ok()
-            })
-            .unwrap_or(0)
-    };
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    while open(&db) == 0 && std::time::Instant::now() < deadline {
-        std::thread::sleep(std::time::Duration::from_millis(100));
-    }
-    let before = interrupt_rows(task.home.path());
-    let output = task.run(&["task", "interrupt", "INF-123"]);
-    fs::write(task.home.path().join("release"), "").unwrap();
-    waiter.wait().unwrap();
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(
-        output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        stdout.contains("interrupt recorded for Process"),
-        "{stdout}"
-    );
-    assert!(!stdout.contains("stopped"), "{stdout}");
-    assert_eq!(interrupt_rows(task.home.path()), before + 1);
 }
 
 #[test]
@@ -2300,15 +2230,12 @@ fn a_graph_that_fails_with_retained_edits_is_not_started_again() {
     )
     .unwrap();
 
+    let mark = last_graph(task.home.path());
     let ran = task.task_run(&["task", "run", "INF-123"]);
     assert!(!ran.success());
     assert!(ran.text.contains(stash.trim()), "{}", ran.text);
     assert!(!ran.text.contains("); starting it again"), "{}", ran.text);
-    let carrier = task.graph()["position"]["lf_process_id"]
-        .as_str()
-        .unwrap()
-        .to_string();
-    assert_eq!(attempts(task.home.path(), &carrier), ["failed"]);
+    assert_eq!(attempts(task.home.path(), mark), ["failed"]);
 }
 
 #[test]
@@ -2463,7 +2390,7 @@ fn completion_preserves_retained_session_input_and_unknown_process_history() {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let exec = uuid::Uuid::new_v4().to_string();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    db.execute("INSERT INTO processes(id,trace_id,cwd,started_at,command,task_id) VALUES(?1,?1,?2,?3,'historical inspection',(SELECT task_id FROM task_checkouts WHERE ?2=rtrim(worktree,'/') OR instr(?2,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
+    db.execute("INSERT INTO processes(id,trace_id,cwd,started_at,command) VALUES(?1,?1,?2,?3,'historical inspection')",
         rusqlite::params![exec, task.repo.path().canonicalize().unwrap().to_str().unwrap(), now]).unwrap();
     db.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,interactive,task_id,wave_id,cwd)
         VALUES('retained-input','retained input','generated',?1,0,0,?2,?3,?4)",

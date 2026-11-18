@@ -157,8 +157,6 @@ mod tests {
         "github_people",
         // Refresh attempts and watermarks do not change displayed Work.
         "linear_team_checks",
-        // How far the maintenance pass has given Processes their Task.
-        "process_task_backfill",
         "machines",
         // Copies from rented Machines are read by explicit CLI listings only.
         "machine_records",
@@ -223,10 +221,6 @@ mod tests {
             for operation in ["insert", "update", "delete"] {
                 // Ownership entries reject deletion; it can never commit.
                 if table == "task_ownership" && operation == "delete" {
-                    continue;
-                }
-                // Auto-Ship events reject updates; one can never commit.
-                if table == "task_ship_events" && operation == "update" {
                     continue;
                 }
                 let name = format!("store_revision_{table}_{operation}");
@@ -307,7 +301,6 @@ mod tests {
                 "conversation",
                 None,
                 &process,
-                true,
                 None,
                 &crate::sqlite::SessionCaller {
                     agent: None,

@@ -735,7 +735,7 @@ fn write_executable(dir: &Path, name: &str, content: &str) {
     }
 }
 
-/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphProcess row
+/// Record a Graph the way `lf graph` leaves one: a Graph process, its GraphExecution row
 /// and one step Process in `cwd`, both exited. Returns the Graph process's id, which
 /// names the Graph.
 #[allow(dead_code)] // Shared helper compiled into integration tests that record no Graph.
@@ -753,9 +753,8 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
         ),
     ] {
         db.execute(
-            // Each records the Task of the checkout holding `cwd`, as lf does.
-            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome,task_id)
-             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6,(SELECT task_id FROM task_checkouts WHERE ?5=rtrim(worktree,'/') OR instr(?5,rtrim(worktree,'/')||'/')=1 ORDER BY length(worktree) DESC LIMIT 1))",
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,command,repo,cwd,started_at,completed_at,outcome)
+             VALUES(?1,?2,?3,?4,?5,?5,1,2,?6)",
             rusqlite::params![
                 id.as_str(),
                 loopflow::id::TraceId::new().as_str(),
@@ -792,7 +791,7 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
             cwd.to_string_lossy()
         ],
     )
-    .expect("record GraphProcess");
+    .expect("record GraphExecution");
     db.execute(
         "INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations) VALUES(?1,?2,0,'[[]]')",
         rusqlite::params![graph_process.as_str(), step.as_str()],
@@ -801,15 +800,18 @@ pub fn record_graph(home: &Path, cwd: &Path, graph: &str, label: &str, outcome: 
     graph_process.to_string()
 }
 
-/// Every Graph in launch order: its process's outcome and each recorded step as
-/// `{graph, label, key, iterations, argv}`, `argv` without the binary path.
+/// Every Graph in launch order: how it ended (`succeeded`, `interrupted`,
+/// `failed`, or `None` while it runs or when nobody saw it end) and each
+/// recorded step as `{graph, label, key, iterations}`.
 #[allow(dead_code)] // Shared helper compiled into integration tests that read no Graph.
 pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Value>)> {
     let db = rusqlite::Connection::open(home.join("loopflow.db")).expect("open test registry");
     let mut graph_processes = db
         .prepare(
-            "SELECT d.id,d.outcome,g.graph,g.compiled FROM graph_processes g JOIN processes d ON d.id=g.lf_process_id
-             ORDER BY d.rowid",
+            "SELECT lf_process_id,CASE WHEN ended_at IS NULL OR exit_code IS NULL THEN NULL
+                 WHEN exit_code=0 THEN 'succeeded'
+                 WHEN exit_code=130 AND error IS NULL THEN 'interrupted' ELSE 'failed' END,
+                 graph,compiled FROM graph_processes ORDER BY rowid",
         )
         .expect("select Graph processes");
     let rows = graph_processes
@@ -833,29 +835,23 @@ pub fn recorded_graphs(home: &Path) -> Vec<(Option<String>, Vec<serde_json::Valu
             }
             let mut steps = db
                 .prepare(
-                    "SELECT e.command,s.node,s.iterations FROM graph_process_steps s
-                     JOIN processes e ON e.id=s.lf_process_id WHERE s.graph_lf_process_id=?1 ORDER BY s.seq",
+                    "SELECT node,iterations FROM graph_process_steps
+                     WHERE graph_lf_process_id=?1 ORDER BY seq",
                 )
                 .expect("select Graph steps");
             let steps = steps
                 .query_map([graph_process], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, u32>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
+                    Ok((row.get::<_, u32>(0)?, row.get::<_, String>(1)?))
                 })
                 .expect("read Graph steps")
                 .map(|row| {
-                    let (argv, key, iterations) = row.expect("a Graph step");
-                    let argv: Vec<String> = serde_json::from_str(&argv).expect("a JSON argv");
+                    let (key, iterations) = row.expect("a Graph step");
                     serde_json::json!({
                         "graph": graph,
                         "label": label(&compiled.steps, key).expect("a compiled node"),
                         "key": key,
                         "iterations": serde_json::from_str::<serde_json::Value>(&iterations)
                             .expect("iteration counts"),
-                        "argv": argv[1..],
                     })
                 })
                 .collect();

@@ -207,6 +207,21 @@ pub struct TaskSnapshot {
     pub ship_approval: Option<ShipMark>,
     /// The stop that keeps a run from approving Auto-Ship, until `lf ship`.
     pub ship_stop: Option<ShipMark>,
+    /// The Task this one is stacked on.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub stack_parent: Option<TaskStackParent>,
+}
+
+/// The Task a stacked Task builds on, as people name it.
+#[derive(
+    Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
+)]
+pub struct TaskStackParent {
+    pub identifier: String,
+    pub branch: String,
+    /// `None` until the parent opens its PR.
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub pr_number: Option<u64>,
 }
 
 /// When someone approved or stopped Auto-Ship, and who.
@@ -398,8 +413,18 @@ pub struct StackedSync {
     /// The recorded base, or the parent's merge commit once HEAD holds it.
     pub fork_base: String,
     pub child: Task,
+    /// The parent Task's identifier.
+    pub parent_identifier: String,
+    /// The parent's PR branch, kept after it merges.
+    pub parent_branch: String,
+    pub parent_merged: bool,
+}
+
+impl StackedSync {
     /// The live parent branch, or `None` once the parent has merged.
-    pub parent_branch: Option<String>,
+    pub fn live_parent_branch(&self) -> Option<&str> {
+        (!self.parent_merged).then_some(self.parent_branch.as_str())
+    }
 }
 
 /// Resolve a Task's current cross-Task stack from durable ids, consulting
@@ -457,8 +482,39 @@ pub fn task_stack(worktree: &Path) -> OpsResult<Option<StackedSync>> {
         Ok(Some(StackedSync {
             fork_base,
             child: *task,
-            parent_branch: (!merged).then_some(parent.branch),
+            parent_identifier: parent_task.identifier,
+            parent_branch: parent.branch,
+            parent_merged: merged,
         }))
+    })
+}
+
+/// The identifier of another open Task that `target` names, by identifier or
+/// by branch: one neither finished nor abandoned whose PR has not merged.
+/// Outside a Task's checkout there is no other Task to name.
+pub fn open_task_named(worktree: &Path, target: &str) -> OpsResult<Option<String>> {
+    block_on_task(async move {
+        let ManagedTask::Managed { store, task: own } = resolve_managed_task(worktree).await?
+        else {
+            return Ok(None);
+        };
+        let named = match store.get_task_by_issue(target).await.map_err(task_error)? {
+            Some(task) => Some(task),
+            None => store.get_task_by_branch(target).await.map_err(task_error)?,
+        };
+        let Some(task) = named.filter(|task| task.id != own.id) else {
+            return Ok(None);
+        };
+        let state = store.task_state(&task.id).await.map_err(task_error)?;
+        if matches!(state, TaskState::Done | TaskState::Abandoned) {
+            return Ok(None);
+        }
+        let merged = store
+            .active_task_pr(&task.id)
+            .await
+            .map_err(task_error)?
+            .is_some_and(|pr| pr.phase() == PrPhase::Merged);
+        Ok((!merged).then_some(task.identifier))
     })
 }
 
@@ -472,7 +528,7 @@ fn contains_commit(worktree: &Path, commit: &str) -> OpsResult<bool> {
 pub fn stack_for_landing(worktree: &Path) -> OpsResult<Option<StackedSync>> {
     let stacked = task_stack(worktree)?;
     if let Some(stacked) = &stacked {
-        if let Some(parent) = &stacked.parent_branch {
+        if let Some(parent) = stacked.live_parent_branch() {
             return Err(task_error(format!(
                 "Task PR is stacked on {parent}, which has not merged; land the parent first"
             )));
@@ -745,10 +801,8 @@ pub fn select_task_run(
         }
     };
     let take_up = row.is_none();
-    if let Some((_, process)) = row.as_ref().and_then(|row| row.run.as_ref()) {
-        if process.completed_at.is_none()
-            && crate::store::task_work::process_may_run(&store.sqlite, process)
-        {
+    if let Some((_, carrier)) = row.as_ref().and_then(|row| row.run.as_ref()) {
+        if crate::store::task_work::carrier_may_run(carrier) {
             return Err(task_error(format!(
                 "Task {issue} is running graph {} from {}; read `lf task status {issue}`, or `lf task interrupt {issue}` to stop it",
                 graph.name, row.as_ref().expect("a run belongs to a row").step
@@ -832,8 +886,13 @@ async fn start_task_run(
         start,
     } = selection;
     let issue = task.identifier.clone();
-    let process = crate::journal::current_lf_process_id()
+    let (process, carrier) = crate::journal::current_lf_process_id()
+        .zip(crate::journal::current_execution_start())
         .ok_or_else(|| task_error("a Task run requires a registered Process"))?;
+    // This lf carries the run, and the Task's shipping when the run hands it
+    // off at `end`; each ends with this lf.
+    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::TaskCarrier);
+    crate::journal::mark_run_owner(loopflow_storage::graph_process::RunOwner::ShipCarrier);
     if take_up {
         crate::store::task_work::take_up_task_graph(&store.sqlite, &task.id, &graph)
             .map_err(task_error)?;
@@ -844,7 +903,7 @@ async fn start_task_run(
     let Some(start) = start else {
         if store
             .sqlite
-            .end_task_graph(&task.id, &process)
+            .end_task_graph(&task.id, (&process, &carrier))
             .map_err(task_error)?
         {
             settle_pending_completion(store, task).await?;
@@ -869,7 +928,7 @@ async fn start_task_run(
         &task.id,
         &row,
         &start.cursor,
-        &process,
+        (&process, &carrier),
         ships,
     )
     .map_err(task_error)?
@@ -1067,7 +1126,11 @@ fn prepare_task(
             task
         } else {
             if let Some(parent) = options.stack_on.as_deref() {
-                stack_existing_task(&store, &main, &task, parent).await?;
+                let stacked = stack_existing_task(&store, &main, &task, parent).await?;
+                eprintln!(
+                    "{stacked}\nRun `lf sync` in {} to merge it.",
+                    task.worktree()?.display()
+                );
             }
             restore_task_checkout(&store, &task, recover_from).await?;
             task
@@ -1251,12 +1314,28 @@ async fn finish_task_checkout(store: &SharedStore, task: &Task) -> OpsResult<()>
     Ok(())
 }
 
+/// Stack the Task checked out at `worktree` on the open Task `parent`, moving
+/// its PR's base, and say so. Merging the parent is the caller's sync.
+pub fn stack_task(worktree: &Path, parent: &str) -> OpsResult<String> {
+    block_on_task(async move {
+        let ManagedTask::Managed { store, task } = resolve_managed_task(worktree).await? else {
+            return Err(task_error(
+                "only a Task's checkout can stack on another Task",
+            ));
+        };
+        let main = crate::git::worktrees::main_repo_root(worktree).map_err(task_error)?;
+        stack_existing_task(&store, &main, &task, parent).await
+    })
+}
+
+/// Record `requested` as the Task's parent and retarget its open PR there.
+/// Returns the line that reports both.
 async fn stack_existing_task(
     store: &SharedStore,
     main_repo: &Path,
     task: &Task,
     requested: &str,
-) -> OpsResult<()> {
+) -> OpsResult<String> {
     fetch_task_refs(main_repo)?;
     let (parent, note) = record_stack_parent(store, main_repo, task, requested).await?;
     let _mutation = lock_task_pr_mutation(task.worktree()?)?;
@@ -1276,14 +1355,28 @@ async fn stack_existing_task(
         .stack_task_placement(task, &parent.id, &base_commit)
         .await
         .map_err(|error| task_error(error.to_string()))?;
-    eprintln!(
-        "Task {} stacks on {requested} ({}){}. This Task's checkout and PR are unchanged; run `lf sync` in {} to integrate it.",
-        task.identifier,
-        parent.branch,
-        note.map(|note| format!("; {note}")).unwrap_or_default(),
-        task.worktree()?.display()
-    );
-    Ok(())
+    let mut line = format!("Stacked {} on {requested}", task.identifier);
+    if let Some(note) = note {
+        line.push_str(&format!("; {note}"));
+    }
+    let open_pr = store
+        .active_task_pr(&task.id)
+        .await
+        .map_err(task_error)?
+        .filter(|pr| pr.phase() == PrPhase::Open)
+        .and_then(|pr| pr.github().map(|github| u64::from(github.number)));
+    if let Some(number) = open_pr {
+        crate::ops::pr::retarget_pr(task.worktree()?, number, &parent.branch, &|_| {}).map_err(
+            |error| {
+                task_error(format!(
+                    "{line}, but PR #{number} still targets its old base ({error}); run `gh pr edit {number} --base {}`",
+                    parent.branch
+                ))
+            },
+        )?;
+        line.push_str(&format!("; PR #{number} now targets {}", parent.branch));
+    }
+    Ok(line)
 }
 
 /// The Task a stacked Task names, with the PR record it already has.
@@ -2350,7 +2443,7 @@ pub struct TaskStatus {
     pub ownership: Option<loopflow_model::durable::TaskOwnership>,
     /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
     pub overview: Option<crate::task_work::TaskOverview>,
-    /// `lf graph show --processes` for each of `overview`'s Graphs, in order.
+    /// `lf graph show` for each of `overview`'s Graphs, in order.
     pub graph_processes: Vec<crate::durable::GraphProcessDetail>,
     pub comments: Option<loopflow_model::comment::TaskComments>,
 }
@@ -3096,15 +3189,16 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
 /// work, such as a Task run between Graph attempts or a Task Session. Unknown
 /// liveness counts as live.
 async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
-    use crate::journal::ProcessIdentityEvidence;
     use crate::ops::task_execution::TaskExecutionState;
+    use crate::store::ProcessIdentityEvidence;
     let graph = store
         .sqlite
         .task_graphs(&task.id)
         .map_err(task_error)?
         .pop()
         .filter(|graph| {
-            crate::journal::lf_evidence(&store.sqlite, graph.id()) != ProcessIdentityEvidence::Dead
+            crate::process::RecordedProcess::from(&graph.run).evidence()
+                != ProcessIdentityEvidence::Dead
         });
     if let Some(graph) = graph {
         let name = graph.name.clone();
@@ -3133,24 +3227,16 @@ async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<St
             return Ok(Some(format!("stopped Graph {name} {position}")));
         }
     }
-    let processes = store
-        .sqlite
-        .task_open_processes(&task.id)
-        .map_err(task_error)?;
-    let open = crate::ops::task_execution::unresolved_processes(&store.sqlite, &processes)?;
-    Ok(open.first().map(|(process, evidence)| {
-        let command = process
-            .command()
-            .and_then(|command| serde_json::from_str::<Vec<String>>(command).ok())
-            .map(|argv| format!(" running `{}`", argv.join(" ")))
-            .unwrap_or_default();
+    let work = store.sqlite.task_open_work(&task.id).map_err(task_error)?;
+    let open = crate::ops::task_execution::unresolved_work(&store.sqlite, &work)?;
+    Ok(open.first().map(|(work, evidence)| {
         let unknown = match evidence {
             ProcessIdentityEvidence::Unknown => " (liveness unknown)",
             _ => "",
         };
         format!(
-            "interrupt recorded for Process {}{command}{unknown}; a Task run or a `--task` Session stops on it",
-            process.id()
+            "interrupt recorded for {}{unknown}; a Task run or a `--task` Session stops on it",
+            work.label()
         )
     }))
 }

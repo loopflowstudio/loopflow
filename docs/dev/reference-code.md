@@ -44,10 +44,10 @@ kernel locks                 live local exclusion authority
 | Submitted creations | `creation_receipts` | Request IDs, content fingerprints, original resource identities and server-owned outcomes for Task creation and new Session threads |
 | Served command answers | `command_answers` | Request IDs, content fingerprints and first answers retained for one day so a lost reply can be retrieved without repeating the write |
 | Execution | `agent_sessions`, `session_events`, `session_activity` | Conversations, selected captures, observed provider transitions, native completions, turn receipts and the current observations availability is judged from |
-| Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
+| Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started. A run records its Task (`task_id`) as it starts: the Task it names, else the deepest Task checkout holding its directory, else the Task of the Session that started it |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
 | Task on this Machine | `task_checkouts`, `task_ship_events`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one, Auto-Ship approvals and stops (who, when, which process), and each move this Machine sent or received (`sent`, `arrived`) |
-| CLI processes | `processes` | Indexed command lifecycle, immutable causal ancestry and the Task each Process belongs to (`task_id`, set at insert: the Task a Graph or Session launch names, else the deepest checkout containing its cwd, else its caller's, else its parent's), written by command start and completion |
+| CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and tracker events |
 | Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by tracker identity |
 | Desktop arrangement | `dashboards`, `dashboard_arrangements`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order; Task order is `tasks.planning_rank`; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
@@ -122,7 +122,7 @@ Task/Wave-bound helpers -------------> shared conversation admission
 | `lf wave`, `task` | Durable planning and Work coordination | Work resolved in the current planning store |
 | `lf session` | Sessions and explicit resolution | Current Machine LfSession state |
 | `lf wt`, `commit`, `sync`, `pr`, `repo ci`; `lf scratch` | Worktree and delivery operations | Exact repository/Task/GitHub object |
-| `lf process list`, `process top`, `process prune`; `lf session usage`, `lf session history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
+| `lf session usage`, `lf session history linear`; `lf machine doctor` | Execution and process observation | Current Machine only |
 | `lf machine` | Machine identity | Current Machine unless routed explicitly |
 | `lf task claim`, `unassign` | Task ownership | The writer Machine, reached over `lf --machine` |
 | `lf --machine <machine-id> <args...>` | Run the target Machine's `lf` | Explicit remote Machine; no implicit fan-out |

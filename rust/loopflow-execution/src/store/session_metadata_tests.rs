@@ -316,21 +316,50 @@ fn session_metadata_reads_its_graph_from_the_process_that_captured_its_input() {
         store.input_events(&input).is_err(),
         "Exact history still reports corrupt payload"
     );
+    let pid = std::process::id();
+    let started = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
+    let graph_state = || {
+        crate::store::session_projection::session_summary(&store, "session", 0)
+            .unwrap()
+            .unwrap()
+            .graph
+            .unwrap()
+            .state
+    };
     store
         .conn
         .lock()
         .unwrap()
         .execute(
-            "UPDATE processes SET outcome='succeeded',completed_at=2 WHERE id=?1",
+            "UPDATE graph_processes SET pid=?2,os_started_at=?3 WHERE lf_process_id=?1",
+            params![graph_process, pid, started + 60],
+        )
+        .unwrap();
+    // A Graph run whose OS process is gone without writing its end stopped.
+    assert_eq!(graph_state(), GraphProcessSummaryState::Stopped);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET os_started_at=?2 WHERE lf_process_id=?1",
+            params![graph_process, started],
+        )
+        .unwrap();
+    assert_eq!(graph_state(), GraphProcessSummaryState::Current);
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE graph_processes SET ended_at=2,exit_code=0,pid=NULL,os_started_at=NULL
+             WHERE lf_process_id=?1",
             params![graph_process],
         )
         .unwrap();
-    let graph = crate::store::session_projection::session_summary(&store, "session", 0)
-        .unwrap()
-        .unwrap()
-        .graph
-        .unwrap();
-    assert_eq!(graph.state, GraphProcessSummaryState::Completed);
+    assert_eq!(graph_state(), GraphProcessSummaryState::Completed);
 }
 
 #[test]

@@ -19,6 +19,8 @@ use rusqlite::Connection;
 /// removes the last read.
 const STILL_READ: &[(&str, &str)] = &[
     ("agent_sessions.work_source", "LOO-836"),
+    // Fixtures write the rows a released lf does; the bridge triggers read them.
+    ("processes", "LOO-965"),
     ("tasks.regressed_in", "LOO-730"),
 ];
 

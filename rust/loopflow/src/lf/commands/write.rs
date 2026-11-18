@@ -1415,11 +1415,8 @@ pub(super) fn run_task(
 }
 
 pub(crate) fn find_machine(selector: &str) -> anyhow::Result<loopflow_model::durable::Machine> {
-    let registry = loopflow_execution::store::read_existing_registry()?
-        .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
-    tokio::runtime::Runtime::new()?.block_on(loopflow_execution::machine::connection::find_machine(
-        &registry, selector,
-    ))
+    tokio::runtime::Runtime::new()?
+        .block_on(loopflow_execution::machine::connection::find_registered_machine(selector))
 }
 
 #[cfg(test)]

@@ -19,13 +19,13 @@ struct LocalWaveAgentLauncherTests {
             "LF_HOME": "/tmp/loopflow-development-home",
             "LF_WAVE_ID": "launching-wave",
             "LF_GRAPH_ID": "launching-step",
-            "LF_RUN_ID": "launching-run",
+            "LF_EXECUTION_ID": "launching-run",
         ])
 
         #expect(environment["LF_HOME"] == "/tmp/loopflow-development-home")
         #expect(environment["LF_WAVE_ID"] == nil)
         #expect(environment["LF_GRAPH_ID"] == nil)
-        #expect(environment["LF_RUN_ID"] == nil)
+        #expect(environment["LF_EXECUTION_ID"] == nil)
     }
 
     @Test("the launcher's terminal and agent output policy are dropped; account authority stays")

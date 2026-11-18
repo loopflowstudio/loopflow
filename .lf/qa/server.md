@@ -116,12 +116,11 @@ Copy the live store with `sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" ".backup 
 `lf` reads one copy and the branch migrates the other. Run both with `LF_*`
 unset, closed stdin and `LF_HOME` set; Tasks of an unplaced repository need
 cwd inside it ("unplaced Task needs a repository"). `lf task show <id>` piped
-prints JSON: `execution.work.processes[].id` and `execution.work.sessions[].id`
-are a Task's membership. `lf machine prune --json` runs the hourly pass on the
-copy (`assigned_processes` is the `processes.task_id` backfill); it also
-closes and forgets Processes, so compare lifecycle fields against the
-installed `lf` run on the pruned copy, not the unpruned one. The installed
-`lf` reads an upgraded copy. A Working-board drag is
+prints JSON: `execution.work.sessions[].id` and
+`execution.work.graph_processes[].id` are a Task's membership. `lf machine
+prune --json` runs the hourly pass on the copy; it ends runs and agents nobody
+saw exit, so compare lifecycle fields against the installed `lf` run on the
+pruned copy, not the unpruned one. The installed `lf` reads an upgraded copy. A Working-board drag is
 `lf desktop dashboard move working-tasks/task:<id> --destination task:<id>`,
 run from the repository. After deleting a copy's `-wal`/`-shm`, `sqlite3
 ?mode=ro` cannot open it; open it read-write.

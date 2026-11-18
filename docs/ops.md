@@ -129,7 +129,7 @@ The waiting process is the only one that repairs. It starts one `ci-fix` when
 its PR fails a required check or GitHub drops its merge request, stops when a
 person removes that request, and returns on merge or closure. A shipping Task
 whose ship process died starts again on the next read of this Machine's work
-(`lf task status`, `lf process list`, Desktop). After bare `lf land` returns, nothing
+(`lf task status`, `lf session list`, Desktop). After bare `lf land` returns, nothing
 repairs its PR.
 
 `lf repo ci` reads the local record, not GitHub: how much of CI repair happened without you.
@@ -277,6 +277,7 @@ target needs an explicit `X.Y.Z`.
 lf commit -m "retry budget" -p      # commit and push; paths after it commit only those
 lf sync --plan                      # what sync would do, without touching git
 lf sync                             # merge main, or the stack parent, into this branch
+lf sync LOO-12                      # stack this Task on LOO-12 and merge its branch
 lf wt create spike                  # a worktree beside the repository, in its layout
 lf wt prune --branches --dry-run    # branches of merged PRs and finished Tasks
 ```
@@ -291,7 +292,40 @@ Sync follows a stack parent through its squash merge. Stack one Task on any
 other Task that has a branch, before that parent lands or even opens a PR:
 
 ```bash
-lf task run LOO-13 --stack-on LOO-12
+lf task run LOO-13 --stack-on LOO-12   # a new Task, forked from LOO-12's branch
+lf sync LOO-12                         # from LOO-13's worktree, once it already exists
+```
+
+```
+$ lf sync LOO-12
+Stacked LOO-13 on LOO-12; PR #1972 now targets jack/loo-12-retry-budget
+Merging origin/jack/loo-12-retry-budget...
+Synced onto origin/jack/loo-12-retry-budget.
+```
+
+`lf sync` names its target by Task identifier or by branch. When the target is
+another open Task, sync records it as this Task's stack parent, moves the PR's
+base to the parent's branch, and merges it. A Task already stacked on a
+different parent moves to the new one and carries only its own commits across.
+`lf task checkout LOO-13 --stack-on LOO-12` records the same thing without
+merging. `lf task status LOO-13` reads `stacked on LOO-12 (#1974,
+jack/loo-12-retry-budget)`, and Desktop shows "Stacked on LOO-12" beside the
+PR. In an unstacked Task, any other branch, or a Task whose PR has merged,
+merges without recording a stack; a stacked Task syncs onto its parent, another
+open Task, or the default branch, which detaches it.
+
+Record a stack with these commands, not with `git merge` of the parent's branch
+or `gh pr edit --base`: lf reads neither, so the next `lf sync` merges main
+and the PR's base disagrees with the Task.
+
+`lf pr publish` keeps the PR's base. It sets the base when it creates the PR,
+and after that moves it only when the stack parent has merged, retargeting to
+main. When the base disagrees with the stack, publish updates the title and
+body, leaves the base, and names a command for each side:
+
+```
+PR #1972 targets jack/loo-12-retry-budget (LOO-12), but LOO-13 records no stack parent.
+Kept the PR's base. Record it: lf sync LOO-12. Follow the record: gh pr edit 1972 --base main
 ```
 
 When the parent has no PR yet, stacking pushes its branch if origin lacks it or
@@ -379,7 +413,7 @@ the token's lifetime (about a day). Its provider deletes a rented machine at
 its deadline. `lf --wave infrastructure set machine.capacity code`
 (or no `--wave`, for the repository) sends a scope's unowned Tasks to `code` when they run. A machine
 goes back 15 minutes after its last Task finished; first its Sessions and
-Processes are copied home, so `lf session list` shows them "from code-1".
+Graph runs are copied home, so `lf session list` shows them "from code-1".
 Unpushed work refuses the give-back unless you pass `--force`.
 
 ## Authentication

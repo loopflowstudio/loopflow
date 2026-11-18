@@ -1,14 +1,15 @@
-//! One association rule for CLI and Desktop. A Process records its Task once,
-//! when it is written ([`process_task`]); reads follow that column and never
-//! rewrite event attribution. A Session records its Task when it is created.
+//! One association rule for CLI and Desktop. A Task's work is its Sessions and
+//! its Graph runs; each records its Task once, when it starts
+//! ([`starting_task_in`]), and reads follow that column, never a path.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::process::LfProcess;
 use crate::task_session::TaskSession;
 use crate::StoreResult;
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::LfProcessId;
+use loopflow_model::id::{LfProcessId, LfSessionId};
+
+use crate::graph_process::{Execution, ExecutionStart};
 
 use super::SqliteStore;
 
@@ -25,7 +26,6 @@ pub struct TaskOverviewRecords {
 pub struct TaskWorkRecords {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<crate::execution::GraphProcessInventoryEntry>,
-    pub processes: Vec<crate::process::ProcessEntry>,
     pub graph: Option<SavedTaskGraphRow>,
 }
 
@@ -39,8 +39,7 @@ pub(super) fn counts_for_task(session: &str) -> String {
     format!("coalesce({session}.primary_scope,'task')='task'")
 }
 
-/// A Session belongs to the Task it recorded when it was created
-/// ([`super::sessions`] infers the checkout's Task then).
+/// A Session belongs to the Task it recorded when it was created.
 pub(super) fn session_membership(session: &str) -> String {
     format!("{} AND {session}.task_id=tw.id", counts_for_task(session))
 }
@@ -77,59 +76,30 @@ pub(super) fn deepest_checkout(cwd: &str) -> String {
     )
 }
 
-/// The Task a new lf Process belongs to, recorded once at insert: the deepest
-/// checkout holding its cwd, else its caller's (the agent's, else the calling
-/// Session's), else its parent's. A command run inside a checkout is that
-/// Task's work whoever ran it; one run elsewhere is its caller's. A launch that
-/// names a Task records it afterwards, on the row it started (a Graph, a
-/// Session it creates or attaches).
-pub(super) fn process_task(parent: &str, cwd: &str, session: &str, agent: &str) -> String {
-    format!(
-        "coalesce({},
-            (SELECT task_id FROM processes WHERE id={agent}),
-            (SELECT {} FROM agent_sessions s WHERE s.id={session}),
-            (SELECT task_id FROM processes WHERE id={parent}))",
-        deepest_checkout(cwd),
-        agent_task("s")
-    )
-}
-
-/// The Task a Session's agent Process belongs to: the Session's own.
-pub(super) fn agent_task(session: &str) -> String {
-    format!(
-        "CASE WHEN {} THEN {session}.task_id END",
-        counts_for_task(session)
-    )
-}
-
-/// A Task's Processes: those recorded for it, and the agents (with the lf
-/// Process attached to each) of its Sessions, which may be bound after they start.
-pub(super) fn lf_process_ids(selector: &str) -> String {
-    format!(
-        "WITH tw AS MATERIALIZED ({}),
-        members AS MATERIALIZED (SELECT a.id FROM tw JOIN agent_sessions a ON {})
-        SELECT p.id FROM tw CROSS JOIN processes p INDEXED BY processes_task ON p.task_id=tw.id
-        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
-        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
-        tasks(selector),
-        session_membership("a")
-    )
-}
-
-/// The Task the Process recorded when it was written.
-pub(super) fn task_of_process(
+/// The Task a Session or a Graph run belongs to, read once as it starts: the
+/// Task it names, else the deepest checkout holding its directory on this
+/// Machine, else the Task of the Session that started it. A command run inside
+/// a checkout is that Task's work whoever ran it.
+pub(super) fn starting_task_in(
     conn: &rusqlite::Connection,
-    process: &LfProcessId,
-) -> StoreResult<Option<String>> {
-    use rusqlite::OptionalExtension;
+    named: Option<&TaskId>,
+    cwd: Option<&str>,
+    started_by: Option<&LfSessionId>,
+) -> StoreResult<Option<TaskId>> {
+    if let Some(named) = named {
+        return Ok(Some(named.clone()));
+    }
     Ok(conn
         .query_row(
-            "SELECT task_id FROM processes WHERE id=?1",
-            [process],
-            |row| row.get(0),
-        )
-        .optional()?
-        .flatten())
+            &format!(
+                "SELECT coalesce({},(SELECT s.task_id FROM agent_sessions s WHERE s.id=?2 AND {}))",
+                deepest_checkout("?1"),
+                counts_for_task("s")
+            ),
+            rusqlite::params![cwd, started_by],
+            |row| row.get::<_, Option<String>>(0),
+        )?
+        .map(TaskId::from_raw))
 }
 
 /// Each Task among `task_ids` paired with each Graph started for it. The Graph
@@ -143,10 +113,13 @@ fn task_graph_pairs(task_ids: &str) -> String {
 pub(super) fn graphs_of_task(
     conn: &rusqlite::Connection,
     task: &TaskId,
-) -> StoreResult<Vec<crate::graph_process::GraphProcess>> {
+) -> StoreResult<Vec<crate::graph_process::GraphExecution>> {
     super::graph_inventory::graphs_in(
         conn,
-        &format!("e.id IN (SELECT graph FROM ({}))", task_graph_pairs("?1")),
+        &format!(
+            "g.lf_process_id IN (SELECT graph FROM ({}))",
+            task_graph_pairs("?1")
+        ),
         &[&task.as_str()],
     )
 }
@@ -160,8 +133,7 @@ fn completed_graph_steps(
     let mut query = conn.prepare(&format!(
         "SELECT pairs.task_id, gs.lf_process_id FROM ({}) pairs
          JOIN graph_process_steps gs ON gs.graph_lf_process_id=pairs.graph
-         JOIN processes s ON s.id=gs.lf_process_id
-         WHERE s.completed_at IS NOT NULL",
+         WHERE gs.ended_at IS NOT NULL",
         task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
@@ -183,11 +155,11 @@ fn completed_graph_steps(
 fn latest_task_graphs(
     conn: &rusqlite::Connection,
     tasks: &[&TaskId],
-) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphProcess>> {
+) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphExecution>> {
     let mut latest = HashMap::new();
     let mut query = conn.prepare(&format!(
         "SELECT task_id, graph FROM ({}) pairs
-         ORDER BY (SELECT e.rowid FROM processes e WHERE e.id=pairs.graph)",
+         ORDER BY (SELECT g.rowid FROM graph_processes g WHERE g.lf_process_id=pairs.graph)",
         task_graph_pairs("SELECT value FROM json_each(?1)")
     ))?;
     let ids = super::children::ids_json(tasks.iter().map(|id| id.as_str()));
@@ -200,11 +172,11 @@ fn latest_task_graphs(
     let ids = super::children::ids_json(latest.values().map(String::as_str));
     let graphs: HashMap<_, _> = super::graph_inventory::graphs_in(
         conn,
-        "e.id IN (SELECT value FROM json_each(?1))",
+        "g.lf_process_id IN (SELECT value FROM json_each(?1))",
         &[&ids],
     )?
     .into_iter()
-    .map(|graph| (graph.process.id.to_string(), graph))
+    .map(|graph| (graph.run.id.to_string(), graph))
     .collect();
     latest
         .into_iter()
@@ -226,7 +198,7 @@ fn latest_task_graphs(
 pub struct SavedTaskGraphRow {
     pub graph: String,
     pub step: String,
-    pub run: Option<(String, LfProcess)>,
+    pub run: Option<(String, crate::graph_process::TaskCarrier)>,
 }
 
 /// A Task's Graph as another Machine takes it up: the graph it took up, the
@@ -244,16 +216,25 @@ fn task_graph_row(
     task: &TaskId,
 ) -> StoreResult<Option<SavedTaskGraphRow>> {
     use rusqlite::OptionalExtension;
-    let Some((graph, step, start, process)) = conn
+    let Some((graph, step, start, carrier)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id FROM task_graphs WHERE task_id=?1",
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at
+             FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<LfProcessId>>(3)?
+                        .map(|id| -> rusqlite::Result<_> {
+                            Ok(crate::graph_process::TaskCarrier {
+                                id,
+                                pid: row.get(4)?,
+                                os_started_at: row.get(5)?,
+                            })
+                        })
+                        .transpose()?,
                 ))
             },
         )
@@ -261,22 +242,12 @@ fn task_graph_row(
     else {
         return Ok(None);
     };
-    let run = match start.zip(process) {
-        Some((start, process)) => Some((
-            start,
-            conn.query_row(
-                &format!("{} WHERE e.id=?1", super::processes::PROCESS_SELECT),
-                [process],
-                super::processes::read_lf_process,
-            )?,
-        )),
-        None => None,
-    };
+    let run = start.zip(carrier);
     Ok(Some(SavedTaskGraphRow { graph, step, run }))
 }
 
-/// Put the Task on a run from `start`, carried by `by`, if it still stands
-/// where the caller read it: at `step`, with `stopped` the run that last left
+/// Put the Task on a run from `cursor`, carried by `by` as it started at
+/// `start`, if it still stands where the caller read it: at `step`, with `stopped` the run that last left
 /// it, if any. With `ships`, the run reaches `end` and hands the Task off,
 /// granting merge authority unless a person stopped shipping it.
 #[allow(clippy::too_many_arguments)]
@@ -284,20 +255,23 @@ fn start_run_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
     (step, stopped): (&str, Option<&LfProcessId>),
-    start: &str,
-    by: &LfProcessId,
+    cursor: &str,
+    (by, start): (&LfProcessId, &ExecutionStart),
     ships: bool,
 ) -> StoreResult<bool> {
     let left = tx.execute(
-        "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,updated_at=?4
+        "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
+            updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
-            start,
+            cursor,
             by.as_str(),
             crate::rows::now_unix(),
             step,
-            stopped.map(LfProcessId::as_str)
+            stopped.map(LfProcessId::as_str),
+            start.pid,
+            start.os_started_at
         ],
     )?;
     if left == 0 {
@@ -308,7 +282,7 @@ fn start_run_in(
         ship_in(
             tx,
             task,
-            by,
+            (by, start),
             "it runs to the end with no interactive step left",
             Approval::Route,
         )?;
@@ -317,13 +291,15 @@ fn start_run_in(
 }
 
 /// A Task handed off to finish on its own: since when, the process that
-/// approved it, this Machine's process carrying it there, and how many times
-/// in a row that process was started again after it failed.
+/// approved it, this Machine's run carrying it there, and how many times in a
+/// row that run was started again after it failed.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskShipping {
     pub shipped_at: i64,
     pub approved_by: Option<LfProcessId>,
-    pub process: Option<LfProcessId>,
+    /// The Session whose agent approved it, when one did.
+    pub approving_session: Option<LfSessionId>,
+    pub carrier: Option<Execution>,
     pub restarts: u32,
 }
 
@@ -336,12 +312,14 @@ pub enum Approval {
     Route,
 }
 
-/// A person's `lf ship --stop`: when, and the process that ran it.
+/// A person's `lf ship --stop`: when, the process that ran it and the
+/// Session whose agent ran it, when one did.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShipStop {
     pub at: i64,
     pub by: Option<LfProcessId>,
     pub person: Option<String>,
+    pub session: Option<LfSessionId>,
 }
 
 pub(super) fn ship_stop_in(
@@ -379,13 +357,15 @@ impl ShipEvent {
 pub struct ShipApproval {
     pub at: i64,
     pub by: Option<LfProcessId>,
+    /// The Session whose agent approved it, when one did.
+    pub session: Option<LfSessionId>,
 }
 
 /// What a Task's Auto-Ship log says now.
 #[derive(Debug, Default)]
 struct ShipLog {
     approval: Option<ShipApproval>,
-    carrier: Option<LfProcessId>,
+    carrier: Option<Execution>,
     restarts: u32,
     stop: Option<ShipStop>,
 }
@@ -398,7 +378,8 @@ pub const SHIP_RESTARTS_COUNTED: u32 = 6;
 /// Read from the latest approval or stop: each starts the log over.
 fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLog> {
     let mut query = conn.prepare_cached(
-        "SELECT kind,at,lf_process_id,person FROM task_ship_events WHERE task_id=?1
+        "SELECT kind,at,lf_process_id,person,pid,os_started_at,ended_at,exit_code,error,caller_session_id
+         FROM task_ship_events WHERE task_id=?1
          AND id>=IFNULL((SELECT max(id) FROM task_ship_events
              WHERE task_id=?1 AND kind IN ('approved','stopped')),0)
          ORDER BY id",
@@ -408,18 +389,30 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
     while let Some(row) = rows.next()? {
         let at: i64 = row.get(1)?;
         let process: Option<LfProcessId> = row.get(2)?;
+        let run = |id: &LfProcessId| -> rusqlite::Result<Execution> {
+            Ok(Execution {
+                id: id.clone(),
+                started_at: at,
+                pid: row.get(4)?,
+                os_started_at: row.get(5)?,
+                ended_at: row.get(6)?,
+                exit_code: row.get(7)?,
+                error: row.get(8)?,
+            })
+        };
         match serde_json::from_value::<ShipEvent>(row.get::<_, String>(0)?.into())? {
             ShipEvent::Approved => {
                 log = ShipLog {
+                    carrier: process.as_ref().map(run).transpose()?,
                     approval: Some(ShipApproval {
                         at,
-                        by: process.clone(),
+                        by: process,
+                        session: row.get(9)?,
                     }),
-                    carrier: process,
                     ..ShipLog::default()
                 }
             }
-            ShipEvent::Carried => log.carrier = process,
+            ShipEvent::Carried => log.carrier = process.as_ref().map(run).transpose()?,
             ShipEvent::Restarted => log.restarts += 1,
             ShipEvent::Stopped => {
                 log = ShipLog {
@@ -427,6 +420,7 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
                         at,
                         by: process,
                         person: row.get(3)?,
+                        session: row.get(9)?,
                     }),
                     ..ShipLog::default()
                 }
@@ -442,14 +436,15 @@ fn ship_log_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<ShipLo
     Ok(log)
 }
 
-/// A Task has one carrier: a new `carried` row replaces the last.
+/// A Task has one carrier: a new `carried` row replaces the last. An
+/// approving or carrying lf on this Machine records the OS process it runs as.
 fn append_ship_event_in(
     conn: &rusqlite::Connection,
     task: &TaskId,
     event: ShipEvent,
     at: i64,
-    process: Option<&LfProcessId>,
-    person: Option<&str>,
+    (process, start): (Option<&LfProcessId>, Option<&ExecutionStart>),
+    (person, session): (Option<&str>, Option<&LfSessionId>),
 ) -> StoreResult<()> {
     if event == ShipEvent::Carried {
         conn.execute(
@@ -458,13 +453,17 @@ fn append_ship_event_in(
         )?;
     }
     conn.execute(
-        "INSERT INTO task_ship_events(task_id,kind,at,lf_process_id,person) VALUES(?1,?2,?3,?4,?5)",
+        "INSERT INTO task_ship_events(task_id,kind,at,lf_process_id,person,pid,os_started_at,caller_session_id)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8)",
         rusqlite::params![
             task.as_str(),
             event.as_str(),
             at,
             process.map(LfProcessId::as_str),
-            person
+            person,
+            start.and_then(|start| start.pid),
+            start.and_then(|start| start.os_started_at),
+            session.or(start.and_then(|start| start.caller_session.as_ref()))
         ],
     )?;
     Ok(())
@@ -488,8 +487,12 @@ pub(super) fn shipping_in(
     let log = ship_log_in(conn, task)?;
     Ok(Some(TaskShipping {
         shipped_at,
+        approving_session: log
+            .approval
+            .as_ref()
+            .and_then(|approval| approval.session.clone()),
         approved_by: log.approval.and_then(|approval| approval.by),
-        process: log.carrier,
+        carrier: log.carrier,
         restarts: log.restarts,
     }))
 }
@@ -512,7 +515,14 @@ pub(super) fn unship_in(
     let log = ship_log_in(conn, task)?;
     if log.approval.is_some() || log.carrier.is_some() || log.restarts > 0 {
         let now = crate::rows::now_unix();
-        append_ship_event_in(conn, task, ShipEvent::Withdrawn, now, None, None)?;
+        append_ship_event_in(
+            conn,
+            task,
+            ShipEvent::Withdrawn,
+            now,
+            (None, None),
+            (None, None),
+        )?;
     }
     Ok(shipping)
 }
@@ -522,7 +532,7 @@ pub(super) fn unship_in(
 fn ship_in(
     tx: &rusqlite::Transaction<'_>,
     task: &TaskId,
-    by: &LfProcessId,
+    (by, start): (&LfProcessId, &ExecutionStart),
     note: &str,
     approval: Approval,
 ) -> StoreResult<Option<TaskShipping>> {
@@ -556,9 +566,23 @@ fn ship_in(
     }
     // `lf ship` also lifts a stop that stands beside shipping a peer recorded.
     if !shipping || log.stop.is_some() {
-        append_ship_event_in(tx, task, ShipEvent::Approved, now, Some(by), None)?;
-    } else if log.carrier.as_ref() != Some(by) {
-        append_ship_event_in(tx, task, ShipEvent::Carried, now, Some(by), None)?;
+        append_ship_event_in(
+            tx,
+            task,
+            ShipEvent::Approved,
+            now,
+            (Some(by), Some(start)),
+            (None, None),
+        )?;
+    } else if log.carrier.as_ref().map(|carrier| &carrier.id) != Some(by) {
+        append_ship_event_in(
+            tx,
+            task,
+            ShipEvent::Carried,
+            now,
+            (Some(by), Some(start)),
+            (None, None),
+        )?;
     }
     shipping_in(tx, task)
 }
@@ -572,8 +596,24 @@ fn arrive_in(
     carrier: &LfProcessId,
     step: &str,
 ) -> StoreResult<bool> {
+    use rusqlite::OptionalExtension;
+    // The carrier's OS process, which a hand-off at `end` makes its ship carrier's.
+    let start = tx
+        .query_row(
+            "SELECT run_pid,run_os_started_at FROM task_graphs WHERE task_id=?1 AND lf_process_id=?2",
+            rusqlite::params![task.as_str(), carrier.as_str()],
+            |row| {
+                Ok(ExecutionStart {
+                    started_at: crate::rows::now_unix(),
+                    pid: row.get(0)?,
+                    os_started_at: row.get(1)?,
+                    caller_session: None,
+                })
+            },
+        )
+        .optional()?;
     let arrived = tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3
          WHERE task_id=?1 AND lf_process_id=?4",
         rusqlite::params![
             task.as_str(),
@@ -587,10 +627,11 @@ fn arrive_in(
         // A routed path may reach end even though another path had an
         // interactive step, so launch-time prediction is not sufficient.
         if !super::durable::task_state_in(tx, task)?.is_terminal() {
+            let start = start.expect("an arrived run was on the Task");
             ship_in(
                 tx,
                 task,
-                carrier,
+                (carrier, &start),
                 "its run reached the end",
                 Approval::Route,
             )?;
@@ -602,40 +643,102 @@ fn arrive_in(
 
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
-        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,updated_at=?3 WHERE task_id=?1",
+        "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,updated_at=?3 WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
     )? > 0)
 }
 
-/// Unfinished Processes of the selected Tasks; state only, never `history.db`.
-/// Start from the small unfinished inventory.
-pub(super) fn task_open_process_ids(selector: &str, filter: &str) -> String {
+/// Unended Graph runs paired with the selected Task each recorded. The few
+/// unended runs seed it.
+pub(super) fn task_open_graph_pairs(selector: &str) -> String {
     format!(
-        "SELECT process FROM ({})",
-        task_open_process_pairs(selector, filter)
+        "SELECT g.task_id AS task_id,g.lf_process_id AS graph
+         FROM graph_processes g INDEXED BY graph_processes_unended
+         WHERE g.ended_at IS NULL AND g.task_id IN ({selector})"
     )
 }
 
-/// Unfinished Processes paired with the selected Task each belongs to: the one
-/// it recorded, or for an agent (and its attached lf Process) its Session's.
-pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
-    format!(
-        "WITH open AS MATERIALIZED (SELECT p.id,p.task_id,p.kind,p.agent_session_id,p.attached_lf_process_id
-            FROM processes p INDEXED BY processes_unfinished WHERE p.completed_at IS NULL AND ({filter})),
-        agents AS MATERIALIZED (SELECT tw.id AS task_id,open.id,open.attached_lf_process_id FROM open
-            CROSS JOIN agent_sessions a ON a.id=open.agent_session_id
-            CROSS JOIN tasks tw ON tw.id IN ({selector}) AND ({})
-            WHERE open.kind='agent')
-        SELECT open.task_id AS task_id,open.id AS process FROM open WHERE open.task_id IN ({selector})
-        UNION SELECT task_id,id FROM agents
-        UNION SELECT task_id,attached_lf_process_id FROM agents WHERE attached_lf_process_id IS NOT NULL",
-        session_membership("a")
-    )
+/// What runs in a Task's work, or in a checkout no Task holds: an open
+/// Session whose agent started and has not ended, or a Graph run that has
+/// not ended. Whether it still runs is asked of the OS by its own pid.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum OpenWork {
+    Session {
+        id: loopflow_model::id::LfSessionId,
+        agent: loopflow_model::id::AgentProcessId,
+        /// The lf that attached its current agent.
+        launcher: Option<LfProcessId>,
+        held_terminal: Option<loopflow_model::id::TerminalId>,
+    },
+    Graph {
+        run: Execution,
+        held_terminal: Option<loopflow_model::id::TerminalId>,
+    },
+}
+
+impl OpenWork {
+    /// What a person names it by: the Session or the Graph run.
+    pub fn label(&self) -> String {
+        match self {
+            Self::Session { id, .. } => format!("Session {id}"),
+            Self::Graph { run, .. } => format!("Graph run {}", run.id),
+        }
+    }
+
+    pub fn held_terminal(&self) -> Option<&loopflow_model::id::TerminalId> {
+        match self {
+            Self::Session { held_terminal, .. } | Self::Graph { held_terminal, .. } => {
+                held_terminal.as_ref()
+            }
+        }
+    }
+}
+
+/// Open work whose Session `a` or Graph run `g` matches the scopes, which
+/// share their parameters.
+fn open_work_in(
+    conn: &rusqlite::Connection,
+    sessions: &str,
+    graphs: &str,
+    values: &[&dyn rusqlite::ToSql],
+) -> StoreResult<Vec<OpenWork>> {
+    let mut work = conn
+        .prepare(&format!(
+            "SELECT a.id,a.agent_process_id,a.agent_launcher_lf_process_id,a.held_terminal_id
+             FROM agent_sessions a INDEXED BY agent_sessions_unended_agent
+             WHERE a.agent_process_id IS NOT NULL AND a.agent_ended_at IS NULL
+                AND a.agent_started_at IS NOT NULL AND a.completed_at IS NULL AND ({sessions})
+             ORDER BY a.created_at,a.id"
+        ))?
+        .query_map(values, |row| {
+            Ok(OpenWork::Session {
+                id: row.get(0)?,
+                agent: row.get(1)?,
+                launcher: row.get(2)?,
+                held_terminal: row.get(3)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let runs = conn
+        .prepare(&format!(
+            "SELECT {},g.held_terminal_id FROM graph_processes g INDEXED BY graph_processes_unended
+             WHERE g.ended_at IS NULL AND ({graphs}) ORDER BY g.rowid",
+            super::graph_inventory::run_columns("g")
+        ))?
+        .query_map(values, |row| {
+            Ok(OpenWork::Graph {
+                run: super::graph_inventory::read_run(row)?,
+                held_terminal: row.get(7)?,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    work.extend(runs);
+    Ok(work)
 }
 
 /// One of a Task's Graph processes with its inventory entry.
 type MemberGraph = (
-    crate::graph_process::GraphProcess,
+    crate::graph_process::GraphExecution,
     crate::execution::GraphProcessInventoryEntry,
 );
 
@@ -730,9 +833,8 @@ impl SqliteStore {
         .collect()
     }
 
-    /// Current workspace facts, without enumerating mechanical Process history.
     /// The Task's overview and, for each of its Graphs in the same order, what
-    /// `lf graph show --processes` says of it.
+    /// `lf graph show` says of it.
     pub fn task_overview_records(
         &self,
         task: &TaskId,
@@ -760,7 +862,7 @@ impl SqliteStore {
         ))
     }
 
-    /// The Task's Graph position and what `lf graph show --processes` says of
+    /// The Task's Graph position and what `lf graph show` says of
     /// each of its Graphs, without listing its Sessions: a hook reads this.
     pub fn task_progress_records(
         &self,
@@ -782,47 +884,53 @@ impl SqliteStore {
         Ok((graph, details))
     }
 
-    /// Read all three owners in one SQLite snapshot, including closed history.
+    /// Read the Task's Sessions, Graph runs and Graph in one SQLite snapshot,
+    /// including closed history.
     pub fn task_work_records(&self, task: &TaskId) -> StoreResult<TaskWorkRecords> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
         let graphs = graphs.into_iter().map(|(_, entry)| entry).collect();
-        let processes = tx
-            .prepare(&format!(
-                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-                super::processes::PROCESS_SELECT,
-                lf_process_ids("?1")
-            ))?
-            .query_map([task.as_str()], super::processes::read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
         let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
         Ok(TaskWorkRecords {
             sessions,
             graph_processes: graphs,
-            processes,
             graph,
         })
     }
 
-    /// Single-Task execution gates need neither other Tasks nor retained Session/Graph payloads.
-    pub fn task_open_processes(
-        &self,
-        task: &TaskId,
-    ) -> StoreResult<Vec<crate::process::ProcessEntry>> {
+    /// What runs in the Task's work, for execution gates; no history.
+    pub fn task_open_work(&self, task: &TaskId) -> StoreResult<Vec<OpenWork>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
-        let mut query = conn.prepare(&format!(
-            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-            super::processes::PROCESS_SELECT,
-            task_open_process_ids("?1", "1"),
-        ))?;
-        let processes = query
-            .query_map([task.as_str()], super::processes::read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        Ok(processes)
+        open_work_in(
+            &conn,
+            &format!(
+                "EXISTS(SELECT 1 FROM tasks tw WHERE tw.id=?1 AND ({}))",
+                session_membership("a")
+            ),
+            &format!(
+                "g.lf_process_id IN (SELECT graph FROM ({}))",
+                task_open_graph_pairs("?1")
+            ),
+            &[&task.as_str()],
+        )
+    }
+
+    /// What runs in `worktree` or below it, for a checkout no Task holds.
+    pub fn checkout_open_work(&self, worktree: &std::path::Path) -> StoreResult<Vec<OpenWork>> {
+        let mut connection = self.conn.lock().expect("store mutex poisoned");
+        let conn = connection.savepoint()?;
+        let within =
+            |cwd: &str| format!("{cwd}=rtrim(?1,'/') OR instr({cwd},rtrim(?1,'/')||'/')=1");
+        open_work_in(
+            &conn,
+            &within("a.cwd"),
+            &within("g.cwd"),
+            &[&worktree.to_string_lossy()],
+        )
     }
 
     /// The Task's Graph as captured, for running it.
@@ -895,7 +1003,7 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// Put the Task on a run from `start`, carried by `by`. Returns false,
+    /// Put the Task on a run from `cursor`, carried by `by`. Returns false,
     /// writing nothing, when the Task no longer stands where `row` read it, so
     /// two runs cannot both set out.
     pub fn start_task_graph_run(
@@ -903,13 +1011,13 @@ impl SqliteStore {
         task: &TaskId,
         step: &str,
         stopped: Option<&LfProcessId>,
-        start: &str,
-        by: &LfProcessId,
+        cursor: &str,
+        carrier: (&LfProcessId, &ExecutionStart),
         ships: bool,
     ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
-        let started = start_run_in(&tx, task, (step, stopped), start, by, ships)?;
+        let started = start_run_in(&tx, task, (step, stopped), cursor, carrier, ships)?;
         tx.commit()?;
         Ok(started)
     }
@@ -954,7 +1062,11 @@ impl SqliteStore {
 
     /// Put the Task at `end` with nothing left to run, requesting completion.
     /// Returns whether it reached `end` now.
-    pub fn end_task_graph(&self, task: &TaskId, by: &LfProcessId) -> StoreResult<bool> {
+    pub fn end_task_graph(
+        &self,
+        task: &TaskId,
+        by: (&LfProcessId, &ExecutionStart),
+    ) -> StoreResult<bool> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         let ended = tx.execute(
@@ -984,7 +1096,7 @@ impl SqliteStore {
     pub fn ship_task(
         &self,
         task: &TaskId,
-        by: &LfProcessId,
+        by: (&LfProcessId, &ExecutionStart),
         note: &str,
     ) -> StoreResult<TaskShipping> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -1014,8 +1126,8 @@ impl SqliteStore {
                 task,
                 ShipEvent::Stopped,
                 by.at,
-                by.by.as_ref(),
-                by.person.as_deref(),
+                (by.by.as_ref(), None),
+                (by.person.as_deref(), by.session.as_ref()),
             )?;
         }
         unship_in(&tx, task)?;
@@ -1076,7 +1188,14 @@ impl SqliteStore {
             return Ok(());
         }
         let now = crate::rows::now_unix();
-        append_ship_event_in(&conn, task, ShipEvent::Restarted, now, None, None)
+        append_ship_event_in(
+            &conn,
+            task,
+            ShipEvent::Restarted,
+            now,
+            (None, None),
+            (None, None),
+        )
     }
 
     /// A ship step completed: the next failure restarts without waiting long.
@@ -1120,11 +1239,18 @@ impl SqliteStore {
                 task,
                 ShipEvent::Approved,
                 approval.at,
-                approval.by.as_ref(),
-                None,
+                (approval.by.as_ref(), None),
+                (None, approval.session.as_ref()),
             )?;
             // The approving Process ran where the Task came from; nothing carries it here yet.
-            append_ship_event_in(&tx, task, ShipEvent::Carried, approval.at, None, None)?;
+            append_ship_event_in(
+                &tx,
+                task,
+                ShipEvent::Carried,
+                approval.at,
+                (None, None),
+                (None, None),
+            )?;
         }
         tx.commit()?;
         Ok(())
@@ -1134,7 +1260,7 @@ impl SqliteStore {
     pub fn latest_task_graphs(
         &self,
         tasks: &[&TaskId],
-    ) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphProcess>> {
+    ) -> StoreResult<HashMap<TaskId, crate::graph_process::GraphExecution>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         latest_task_graphs(&conn, tasks)
     }
@@ -1152,7 +1278,7 @@ impl SqliteStore {
     pub fn task_graphs(
         &self,
         task: &TaskId,
-    ) -> StoreResult<Vec<crate::graph_process::GraphProcess>> {
+    ) -> StoreResult<Vec<crate::graph_process::GraphExecution>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         graphs_of_task(&conn, task)
     }
@@ -1164,80 +1290,12 @@ mod tests {
     use rusqlite::params;
 
     use loopflow_model::durable::{ProjectId, TaskId};
-    use loopflow_model::id::{LfProcessId, TraceId, WaveId};
+    use loopflow_model::id::{LfProcessId, LfSessionId, TraceId, WaveId};
 
-    fn recorded_task(conn: &rusqlite::Connection, process: &LfProcessId) -> Option<String> {
-        super::task_of_process(conn, process).unwrap()
-    }
+    use super::OpenWork;
 
     #[test]
-    fn a_process_records_the_deepest_checkout_by_whole_path_components() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        conn.execute_batch(
-            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
-             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
-             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111','FIX-1',1),
-                ('task_22222222222222222222222222222222','repo_11111111111111111111111111111111','FIX-2',1);
-             INSERT INTO task_checkouts(task_id,worktree)
-             VALUES('task_22222222222222222222222222222222','/other');",
-        ).unwrap();
-        let cwds = [
-            None,
-            Some(""),
-            Some("/"),
-            Some("//"),
-            Some("/repo/task"),
-            Some("/repo/task/"),
-            Some("/repo/task//sub"),
-            Some("/repo/task-other"),
-            Some("/repo/task0"),
-            Some("relative/sub"),
-            Some("relative"),
-            Some("relative-other"),
-            Some("/repo/%_"),
-            Some("/repo/%_/é"),
-            Some("/repo/AB/x"),
-            Some("/repo//task/sub"),
-        ];
-        for root in [
-            "/repo/task",
-            "/repo/task/",
-            "/repo//task//",
-            "/repo/%_",
-            "relative/",
-            "/",
-            "///",
-        ] {
-            conn.execute_batch(
-                "DELETE FROM task_checkouts WHERE task_id='task_11111111111111111111111111111111'",
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES('task_11111111111111111111111111111111',?1)",
-                [root],
-            )
-            .unwrap();
-            // The checkout holds the cwd itself or a descendant by whole components.
-            let root_path = root.trim_end_matches('/');
-            for cwd in cwds {
-                let process = crate::test_fixture::start_process(&conn, cwd, None);
-                let expected = cwd.is_some_and(|cwd| {
-                    cwd == root_path || cwd.starts_with(&format!("{root_path}/"))
-                });
-                assert_eq!(
-                    recorded_task(&conn, &process).as_deref()
-                        == Some("task_11111111111111111111111111111111"),
-                    expected,
-                    "root={root:?}, cwd={cwd:?}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn work_keeps_its_task_when_a_checkout_path_is_reused() {
+    fn work_keeps_its_task_when_its_repository_moves_and_its_path_is_reused() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let repository = crate::test_fixture::repository(&store, "/repo");
@@ -1256,306 +1314,130 @@ mod tests {
         };
         let (first, second) = (task("First"), task("Second"));
         let checkout = |task: &TaskId| {
-            let conn = store.conn.lock().unwrap();
-            conn.execute("DELETE FROM task_checkouts WHERE worktree='/repo.task'", [])
+            store
+                .conn
+                .lock()
+                .unwrap()
+                .execute(
+                    "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
+                    [task.as_str()],
+                )
                 .unwrap();
-            conn.execute(
-                "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task')",
-                [task.as_str()],
-            )
-            .unwrap();
         };
-        checkout(&first);
-        let (worker, child) = {
-            let conn = store.conn.lock().unwrap();
-            let worker = crate::test_fixture::start_process(&conn, Some("/repo.task/src"), None);
-            // A child started elsewhere is still its parent's work.
-            (
-                worker.clone(),
-                crate::test_fixture::start_process(&conn, Some("/tmp"), Some(&worker)),
-            )
-        };
-        // A conversation that names nothing belongs to the checkout it opened in.
-        let session = |cwd: &str| {
+        // Neither names a Task: each belongs to the checkout it starts in.
+        let conversation = |cwd: &str| {
             let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
             session.work_source = None;
             session.cwd = cwd.into();
-            let session = store.create_session_prepared(session, None).unwrap();
-            assert_eq!(
-                session.work_source,
-                Some(crate::session::WorkSource::Checkout)
-            );
-            session.id.to_string()
+            store.create_session_prepared(session, None).unwrap().id
         };
-        let conversation = session("/repo.task/src");
-        // The first checkout goes and another Task's clone takes its path.
-        checkout(&second);
-        let later = crate::test_fixture::start_process(
-            &store.conn.lock().unwrap(),
-            Some("/repo.task"),
-            None,
-        );
-        let later_conversation = session("/repo.task");
-        let sessions = |task: &TaskId| {
-            store
-                .task_work_records(task)
-                .unwrap()
-                .sessions
-                .into_iter()
-                .map(|session| session.id.to_string())
-                .collect::<Vec<_>>()
+        let graph = crate::graph::CompiledGraph {
+            name: "proof".into(),
+            steps: vec![],
         };
-        assert_eq!(sessions(&first), std::slice::from_ref(&conversation));
-        assert_eq!(sessions(&second), [later_conversation]);
-        assert_eq!(
-            store.session_task_ids(&conversation).unwrap(),
-            std::slice::from_ref(&first)
-        );
-        let processes = |task: &TaskId| {
-            let mut ids: Vec<String> = store
-                .task_work_records(task)
-                .unwrap()
-                .processes
-                .iter()
-                .map(|process| process.id().to_owned())
-                .collect();
-            ids.sort();
-            ids
-        };
-        let mut expected = vec![worker.to_string(), child.to_string()];
-        expected.sort();
-        assert_eq!(processes(&first), expected);
-        assert_eq!(processes(&second), [later.to_string()]);
-    }
-
-    #[test]
-    fn recording_and_reading_a_process_task_probe_indexes() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        let insert = format!("SELECT {}", super::process_task("?1", "?2", "?3", "?4"));
-        let read = format!("SELECT id FROM ({})", super::lf_process_ids("?1"));
-        for (sql, indexes) in [
-            (
-                &insert,
-                &[
-                    "task_checkouts_root (<expr>=?)",
-                    "agent_sessions",
-                    "processes",
-                ][..],
-            ),
-            (&read, &["processes_task (task_id=?)"][..]),
-        ] {
-            let plans: Vec<String> = conn
-                .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-                .unwrap()
-                .query_map(
-                    rusqlite::params_from_iter(["x"; 4].iter().take(if sql == &insert {
-                        4
-                    } else {
-                        1
-                    })),
-                    |row| row.get(3),
-                )
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap();
-            for index in indexes {
-                assert!(
-                    plans.iter().any(|line| line.contains(index)),
-                    "missing {index}: {plans:?}"
-                );
-            }
-            assert!(
-                !plans.iter().any(|line| line.starts_with("SCAN processes")
-                    || line.starts_with("SCAN task_checkouts")),
-                "{plans:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn process_membership_ignores_events_and_unrelated_history() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let task = TaskId::new();
-        let wave = WaveId::new();
-        let project = ProjectId::new();
-        let turn = LfProcessId::new();
-        let finished = LfProcessId::new();
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
-            [&wave],
-        )
-        .unwrap();
-        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-        conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1',1)",params![project.as_str(),task.as_str()]).unwrap();
-        conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
-            params![task.as_str()],
-        )
-        .unwrap();
-        // The Session is bound, and its Processes ran elsewhere: each recorded
-        // the Task when it started.
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
-            VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
-        for (id, completed) in [(&turn, None), (&finished, Some(2))] {
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,task_id) VALUES(?1,?2,'/elsewhere',1,?3,?4,?5)",
-                params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded"), task.as_str()],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
-                VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
-        }
-        let read = |unfinished: bool, expected: &[&LfProcessId]| {
-            let mut query = conn
-                .prepare(&format!(
-                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-                    super::super::processes::PROCESS_SELECT,
-                    if unfinished {
-                        "e.completed_at IS NULL AND"
-                    } else {
-                        ""
-                    },
-                    super::lf_process_ids("?1")
-                ))
-                .unwrap();
-            let mut ids = query
-                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-            let mut expected: Vec<_> = expected.iter().map(|id| (*id).clone()).collect();
-            expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-            assert_eq!(ids, expected);
-            query.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = (read(true, &[&turn]), read(false, &[&turn, &finished]));
-        for n in 0..2_000 {
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                VALUES('bound','observed',?1,1,'{}')",
-                [n.to_string()],
-            )
-            .unwrap();
-        }
-        let after = (read(true, &[&turn]), read(false, &[&turn, &finished]));
-        assert!(
-            after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
-            "Events naming no Process increased membership work: {before:?} → {after:?}"
-        );
-        // Cleanup must ignore completed Process history as it grows, including
-        // attachment lookup for unrelated completed providers.
-        let cleanup_cost = || {
-            let mut query = conn
-                .prepare(&super::task_open_process_ids("?1", "1"))
-                .unwrap();
-            let ids = query
-                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(ids, vec![turn.clone()]);
-            (
-                query.get_status(rusqlite::StatementStatus::VmStep),
-                query.get_status(rusqlite::StatementStatus::FullscanStep),
-            )
-        };
-        let before_cleanup = cleanup_cost();
-        for n in 0..2_000 {
+        let run = |cwd: &str, started_by: Option<&LfSessionId>| {
             let id = LfProcessId::new();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at)
-                VALUES(?1,?1,'/unrelated',1,2)",
-                [&id],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute(
-                "INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1)",
-                params![TaskId::new().as_str(), project.as_str(), format!("OLD-{n}")],
-            )
-            .unwrap();
-        }
-        let after_cleanup = cleanup_cost();
-        eprintln!("cleanup VM/full-scan steps: {before_cleanup:?} → {after_cleanup:?}");
-        assert!(
-            after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
-            "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
+            let mut start = crate::graph_process::ExecutionStart::reserved(1);
+            start.caller_session = started_by.cloned();
+            store
+                .record_graph(&id, &graph, None, &start, None, Some(cwd), None)
+                .unwrap();
+            id
+        };
+        checkout(&first);
+        let first_conversation = conversation("/repo/task/src");
+        let first_run = run("/repo/task/src", None);
+        // A run the conversation starts elsewhere is its Task's work too.
+        let elsewhere = run("/tmp", Some(&first_conversation));
+        // The repository moves, and another Task's clone takes the old path.
+        store.relocate_repository(&repository, "/moved").unwrap();
+        checkout(&second);
+        let second_conversation = conversation("/repo/task");
+        // The checkout holding a run outranks the Session that started it.
+        let second_run = run("/repo/task", Some(&first_conversation));
+        let work = |task: &TaskId| {
+            let records = store.task_work_records(task).unwrap();
+            let sessions: Vec<_> = records.sessions.into_iter().map(|s| s.id).collect();
+            let runs: Vec<_> = store
+                .task_graphs(task)
+                .unwrap()
+                .iter()
+                .map(|graph| graph.id().clone())
+                .collect();
+            assert_eq!(records.graph_processes.len(), runs.len());
+            (sessions, runs)
+        };
+        assert_eq!(
+            work(&first),
+            (vec![first_conversation], vec![first_run, elsewhere])
         );
-        // A Graph started for the Task is its work wherever it ran, and other
-        // Tasks' Graphs cost one Task's reading nothing.
-        conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
-            params![finished, task.as_str()],
+        assert_eq!(
+            work(&second),
+            (vec![second_conversation], vec![second_run.clone()])
+        );
+        let open: Vec<_> = store
+            .task_open_work(&second)
+            .unwrap()
+            .iter()
+            .map(OpenWork::label)
+            .collect();
+        assert_eq!(open, [format!("Graph run {second_run}")]);
+    }
+
+    #[test]
+    fn upgrade_gives_graph_runs_that_named_no_task_theirs() {
+        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        apply_before_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "task_facts_once",
+        );
+        conn.execute_batch(
+            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
+             INSERT INTO tasks(id,repository_id,issue_identifier,created_at) VALUES
+                ('task_1','repo_1','FIX-1',1),('task_2','repo_1','FIX-2',1);
+             INSERT INTO task_checkouts(task_id,worktree) VALUES('task_1','/repo/1');
+             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
+             VALUES('caller','Caller','human',1,0,'/elsewhere','task_2');
+             INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,cwd,caller_session_id) VALUES
+                ('inside','code','{}',NULL,1,'/repo/1/src','caller'),
+                ('called','code','{}',NULL,1,'/tmp','caller'),
+                ('named','code','{}','task_2',1,'/repo/1',NULL),
+                ('nowhere','code','{}',NULL,1,'/tmp',NULL);",
         )
         .unwrap();
-        let pairs = super::task_graph_pairs("?1");
-        let read_graphs = || {
-            let mut statement = conn.prepare(&pairs).unwrap();
-            let selected = statement
-                .query_map([task.as_str()], |row| row.get::<_, String>(1))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(selected, vec![finished.to_string()]);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = read_graphs();
-        let others: Vec<String> = conn
-            .prepare("SELECT id FROM tasks WHERE id!=?1")
+        conn.execute_batch(&migration_section_sql("task_facts_once"))
+            .unwrap();
+        let runs: Vec<(String, Option<String>)> = conn
+            .prepare("SELECT lf_process_id,task_id FROM graph_processes ORDER BY lf_process_id")
             .unwrap()
-            .query_map([task.as_str()], |row| row.get(0))
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
             .unwrap()
-            .collect::<rusqlite::Result<_>>()
+            .collect::<Result<_, _>>()
             .unwrap();
-        for other in &others {
-            let graph = LfProcessId::new();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
-                params![graph, TraceId::new()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
-                params![graph, other],
-            )
-            .unwrap();
-        }
-        let after = read_graphs();
-        assert!(
-            after <= before * 2,
-            "Other Tasks' Graphs increased one Task's Graph reading: {before} → {after}"
+        assert_eq!(
+            runs,
+            [
+                ("called".into(), Some("task_2".into())),
+                ("inside".into(), Some("task_1".into())),
+                ("named".into(), Some("task_2".into())),
+                ("nowhere".into(), None),
+            ]
         );
-        // Every Task's Graphs come from the Graph records, so Sessions that
-        // reach no Graph cost nothing however many Tasks are read. On October
-        // 18, 2026 each Task rescanned all 4,246 of Jack Heart's Sessions:
-        // 2.3 s for 622 Tasks.
-        let every_task = super::task_graph_pairs("SELECT id FROM tasks");
-        let read_every_task = || {
-            let mut statement = conn.prepare(&every_task).unwrap();
-            let pairs = statement
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .count();
-            assert_eq!(pairs, others.len() + 1);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = read_every_task();
-        for n in 0..2_000 {
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
-                VALUES(?1,'quiet','human',1,0,?2,?3,'/repo/task')", params![format!("quiet-{n}"), task.as_str(), wave]).unwrap();
-        }
-        let after = read_every_task();
-        assert!(
-            after <= before * 2,
-            "Sessions reaching no Graph increased every Task's Graph reading: {before} → {after}"
-        );
+        // A run that took a Task keeps it; one with none may still take one.
+        assert!(conn
+            .execute(
+                "UPDATE graph_processes SET task_id='task_1' WHERE lf_process_id='named'",
+                []
+            )
+            .is_err());
+        conn.execute(
+            "UPDATE graph_processes SET task_id='task_1' WHERE lf_process_id='nowhere'",
+            [],
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1638,6 +1520,7 @@ mod tests {
             at: 25,
             by: None,
             person: Some("Casey".into()),
+            session: None,
         };
         assert!(store
             .stop_shipping(&task.id, "Casey", Some(stop.clone()))
@@ -1780,21 +1663,18 @@ mod tests {
                 ("/repo/task-other/x", Some(&sibling)),
                 ("/elsewhere", None),
             ] {
-                let id = LfProcessId::new();
-                conn.execute(
-                    "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,?3,1)",
-                    params![id, TraceId::new(), cwd],
-                )
-                .unwrap();
-                graphs.push((id, owner));
+                graphs.push((LfProcessId::new(), cwd, owner));
             }
         }
         let graph = crate::graph::CompiledGraph {
             name: "proof".into(),
             steps: vec![],
         };
-        for (id, owner) in &graphs {
-            store.record_graph_process(id, &graph, *owner).unwrap();
+        for (id, cwd, owner) in &graphs {
+            let start = crate::graph_process::ExecutionStart::reserved(1);
+            store
+                .record_graph(id, &graph, *owner, &start, None, Some(cwd), None)
+                .unwrap();
         }
         let latest = store.latest_task_graphs(&[&task, &sibling, &idle]).unwrap();
         for id in [&task, &sibling, &idle] {
@@ -1804,14 +1684,8 @@ mod tests {
                 "{id}"
             );
         }
-        assert_eq!(
-            latest[&task].process.cwd.as_deref(),
-            Some("/repo/task/deep/er")
-        );
-        assert_eq!(
-            latest[&sibling].process.cwd.as_deref(),
-            Some("/repo/task-other/x")
-        );
+        assert_eq!(latest[&task].cwd.as_deref(), Some("/repo/task/deep/er"));
+        assert_eq!(latest[&sibling].cwd.as_deref(), Some("/repo/task-other/x"));
         assert!(!latest.contains_key(&idle));
     }
 
@@ -1835,7 +1709,16 @@ mod tests {
         };
         let (laptop, mini) = (open(&laptop_dir), open(&mini_dir));
         let approver = LfProcessId::new();
-        let shipping = laptop.ship_task(&id, &approver, "ship").unwrap();
+        let shipping = laptop
+            .ship_task(
+                &id,
+                (
+                    &approver,
+                    &crate::graph_process::ExecutionStart::reserved(1),
+                ),
+                "ship",
+            )
+            .unwrap();
         let approval = laptop.task_ship_approval(&id).unwrap().unwrap();
         assert_eq!(approval.by, Some(approver.clone()));
         // Delivered twice, as a retried move is.
@@ -1846,7 +1729,8 @@ mod tests {
             Some(super::TaskShipping {
                 shipped_at: approval.at,
                 approved_by: Some(approver),
-                process: None,
+                approving_session: None,
+                carrier: None,
                 restarts: 0,
             })
         );
@@ -1868,17 +1752,32 @@ mod tests {
                 due_date: None,
             })
             .unwrap();
-        store.ship_task(&id, &LfProcessId::new(), "ship").unwrap();
+        store
+            .ship_task(
+                &id,
+                (
+                    &LfProcessId::new(),
+                    &crate::graph_process::ExecutionStart::reserved(1),
+                ),
+                "ship",
+            )
+            .unwrap();
         // A day of restarts at the longest backoff, each carried by a new process.
         let mut carrier = LfProcessId::new();
         for _ in 0..48 {
             store.count_ship_restart(&id).unwrap();
             carrier = LfProcessId::new();
-            store.ship_task(&id, &carrier, "ship").unwrap();
+            store
+                .ship_task(
+                    &id,
+                    (&carrier, &crate::graph_process::ExecutionStart::reserved(1)),
+                    "ship",
+                )
+                .unwrap();
         }
         let shipping = store.task_shipping(&id).unwrap().unwrap();
         assert_eq!(shipping.restarts, super::SHIP_RESTARTS_COUNTED);
-        assert_eq!(shipping.process, Some(carrier));
+        assert_eq!(shipping.carrier.map(|run| run.id), Some(carrier));
         let rows = || -> i64 {
             let conn = store.conn.lock().unwrap();
             conn.query_row(
@@ -1898,7 +1797,7 @@ mod tests {
 
     #[test]
     fn a_released_tasks_shipping_columns_become_its_auto_ship_log() {
-        use crate::migration_runner::{apply_before_migration, migration_section_sql};
+        use crate::migration_runner::{apply_before_migration, upgrade_from_migration};
 
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         apply_before_migration(
@@ -1909,9 +1808,11 @@ mod tests {
         );
         let (shipping, stopped) = (TaskId::new(), TaskId::new());
         let (approver, carrier) = (LfProcessId::new(), LfProcessId::new());
-        // The carrier's Process row was pruned, as released stores allowed.
+        // The carrier failed; the upgrade carries its end onto the ship log.
         conn.execute_batch(&format!(
-            "PRAGMA foreign_keys=OFF;
+            "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES('{approver}','t1','/repo',1);
+             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome,exit_code,error)
+             VALUES('{carrier}','t2','/repo',2,12,'failed',1,'provider unavailable');
              INSERT INTO repository_plans(id,repo,selected) VALUES('repo_1','/repo',1);
              INSERT INTO tasks(id,repository_id,issue_identifier,created_at,shipped_at,
                  ship_approved_lf_process_id,ship_lf_process_id,ship_restarts)
@@ -1921,17 +1822,21 @@ mod tests {
              VALUES('{stopped}','repo_1','SHIP-2',1,20,'Casey');"
         ))
         .unwrap();
-        conn.execute_batch(&migration_section_sql("task_machine_local"))
-            .unwrap();
-        assert_eq!(
-            super::shipping_in(&conn, &shipping).unwrap(),
-            Some(super::TaskShipping {
-                shipped_at: 10,
-                approved_by: Some(approver),
-                process: Some(carrier),
-                restarts: 2,
-            })
+        upgrade_from_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
+            "task_machine_local",
         );
+        let handoff = super::shipping_in(&conn, &shipping).unwrap().unwrap();
+        assert_eq!(
+            (handoff.shipped_at, handoff.approved_by, handoff.restarts),
+            (10, Some(approver), 2)
+        );
+        let run = handoff.carrier.unwrap();
+        assert_eq!(run.id, carrier);
+        assert_eq!(run.result(), crate::graph_process::ExecutionResult::Failed);
+        assert_eq!(run.error.as_deref(), Some("provider unavailable"));
         assert_eq!(super::ship_stop_in(&conn, &shipping).unwrap(), None);
         assert_eq!(super::shipping_in(&conn, &stopped).unwrap(), None);
         assert_eq!(
@@ -1940,6 +1845,7 @@ mod tests {
                 at: 20,
                 by: None,
                 person: Some("Casey".into()),
+                session: None,
             })
         );
         assert!(conn

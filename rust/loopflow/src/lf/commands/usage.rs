@@ -71,7 +71,7 @@ pub fn context_report(
     let steps = if runs.is_empty() {
         Vec::new()
     } else {
-        let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
             &loopflow_execution::store::database_path_from_env()?,
             loopflow_execution::store::token_key::encryption_key,
         )?;

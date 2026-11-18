@@ -160,7 +160,7 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
         let terminal = fixture.session_terminal("final-turn", None);
         let agent = fixture.store.sqlite.test_lf_process();
         let mut worker = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
-        let process = crate::journal::OsProcess::read(worker.0.id()).unwrap().unwrap();
+        let process = crate::process::OsProcess::read(worker.0.id()).unwrap().unwrap();
         fixture.sql().execute("UPDATE processes SET started_at=?2,pid=?3,os_started_at=?2,held_terminal_id=?4 WHERE id=?1",
             params![agent,process.started_at,process.pid,terminal]).unwrap();
         fixture.sql().execute("UPDATE agent_sessions SET agent_process_id=?1 WHERE id='final-turn'", [&agent]).unwrap();
@@ -171,11 +171,16 @@ fn retirement_waits_for_final_work_and_shell_job_settlement() {
             fixture.assert_retained();
         }
         fixture.sql().execute("UPDATE session_activity SET open_tools=0,pending_input=0,yielded=1", []).unwrap();
+        // Closing waits for the conversation's agent to exit.
+        advance(&fixture.store, &fixture.task).await.unwrap();
+        assert_eq!(fixture.intent().phase, "closing");
+        let reason = fixture.diagnostics().0.unwrap_or_default();
+        assert!(reason.contains("Session final-turn"), "{reason}");
+        let _ = worker.0.kill();
+        worker.0.wait().unwrap();
         let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
         assert!(error.to_string().contains("without confirmed job cleanup"));
         assert_eq!(fixture.intent().phase, "closing");
-        let _ = worker.0.kill();
-        worker.0.wait().unwrap();
         fixture.sql().execute("UPDATE agent_sessions SET completed_at=1 WHERE id='final-turn'", []).unwrap();
         fixture.sql().execute("UPDATE processes SET completed_at=1 WHERE id=?1", [&agent]).unwrap();
         let error = advance(&fixture.store, &fixture.task).await.unwrap_err();
@@ -216,8 +221,8 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
                 params![fixture.task.id.as_str(), terminal],
             )
             .unwrap();
-        // The conversation's lf process, a child of the holder, which records no Process.
-        let live = crate::journal::OsProcess::read(std::process::id())
+        // The conversation's lf process, a child of the holder.
+        let live = crate::process::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();
         let conversation = crate::process::LfProcess {
@@ -242,7 +247,7 @@ fn cleanup_ends_a_done_tasks_held_conversation() {
         fixture
             .store
             .sqlite
-            .record_process_within(&conversation, Some(&terminal), std::time::Duration::ZERO)
+            .record_process(&conversation)
             .unwrap();
         // Its provider, attached to it, binds the conversation to the Task.
         let agent = loopflow_model::id::AgentProcessId::new();
@@ -612,7 +617,7 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     let terminal = held_terminal(&conn);
     let agent = store.test_lf_process();
     // A live agent is needed to exercise Task-wide work retention.
-    let live = crate::journal::OsProcess::read(std::process::id())
+    let live = crate::process::OsProcess::read(std::process::id())
         .unwrap()
         .unwrap();
     conn.execute(
@@ -715,9 +720,9 @@ fn conversation_cleanup_owns_grace_membership_and_work() {
     assert_eq!(request(), Some(false));
     let graph = store.test_lf_process();
     conn.execute(
-        "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,updated_at)
-        VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,1)",
-        params![task.as_str(), graph],
+        "INSERT INTO task_graphs(task_id,graph,step,run_start,lf_process_id,run_pid,run_os_started_at,updated_at)
+        VALUES(?1,'{\"name\":\"test\",\"steps\":[]}','start','{\"index\":0}',?2,?3,?4,1)",
+        params![task.as_str(), graph, live.pid, live.started_at],
     )
     .unwrap();
     assert_eq!(request(), None);
@@ -785,7 +790,7 @@ fn abandoned_checkout_retries_after_live_work_exits_and_keeps_dirty_files() {
         // The Run's lf process, live in its terminal.
         let run = fixture.store.sqlite.test_lf_process();
         let mut worker = Child(Command::new("/bin/sleep").arg("60").spawn().unwrap());
-        let process = crate::journal::OsProcess::read(worker.0.id())
+        let process = crate::process::OsProcess::read(worker.0.id())
             .unwrap()
             .unwrap();
         fixture

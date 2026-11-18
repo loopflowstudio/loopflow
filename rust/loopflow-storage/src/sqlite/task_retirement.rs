@@ -66,8 +66,8 @@ impl SqliteStore {
                  AND (CASE WHEN tw.planning_completed_at IS NULL THEN tw.updated_at
                      ELSE unixepoch(tw.planning_completed_at) END)+?3<=?2
                  AND {viewed}+?3<=?2
-                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg JOIN processes g ON g.id=tg.lf_process_id
-                     WHERE tg.task_id=tw.id AND g.completed_at IS NULL)))"
+                 AND NOT EXISTS(SELECT 1 FROM task_graphs tg
+                     WHERE tg.task_id=tw.id AND tg.run_pid IS NOT NULL)))"
             )
         };
         let conn = self.conn.lock().expect("store mutex poisoned");

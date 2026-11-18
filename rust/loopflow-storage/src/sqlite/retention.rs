@@ -1,7 +1,8 @@
 //! Retention: the store keeps facts, and streams stay in files.
 //!
-//! This prune closes Processes whose OS process is gone without recording its exit,
-//! then forgets finished Processes nothing needs, as exit does. It moves the
+//! This prune ends the runs and Session agents whose OS process is gone
+//! without recording its exit, the liveness pass SQL readers rely on: a Task
+//! reads moving while its carrier's pid is set. It moves the
 //! history an earlier lf kept in `loopflow.db` into `history.db`, its turns
 //! into `history.turns`, and forgets history older than [`HISTORY_DAYS`]. Each step
 //! is one short transaction on its own connection, so live writers wait well
@@ -10,14 +11,12 @@
 use std::path::Path;
 use std::time::Duration;
 
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{params, Connection, TransactionBehavior};
 use serde::{Deserialize, Serialize};
 
+use crate::graph_process::RunOwner;
 use crate::StoreResult;
 
-const PROCESS_BATCH: i64 = 10_000;
-/// Processes given their Task per transaction.
-const TASK_BATCH: i64 = 5_000;
 /// Rows moved or forgotten per transaction.
 const ROW_BATCH: i64 = 10_000;
 /// Pages freed per incremental vacuum transaction: 40 MB of 4 KiB pages,
@@ -31,10 +30,8 @@ pub const HISTORY_DAYS: i64 = 90;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RetentionReport {
-    pub closed_processes: u64,
-    pub forgotten_processes: u64,
-    /// Processes written without a Task (by an earlier lf) that now record one.
-    pub assigned_processes: u64,
+    /// Runs and Session agents ended because their OS process was gone.
+    pub ended_owners: u64,
     /// Observations an earlier lf kept in `loopflow.db`, now in `history.db`.
     pub moved_observations: u64,
     /// Turns an earlier lf kept as three rows, now one row in `history.turns`.
@@ -50,7 +47,7 @@ pub struct RetentionReport {
 /// When the store cannot be opened or a prune transaction fails.
 pub fn prune(
     database: &Path,
-    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
+    dead: &[(RunningOwner, i64)],
     now: i64,
 ) -> StoreResult<RetentionReport> {
     let conn = Connection::open(database)?;
@@ -60,17 +57,14 @@ pub fn prune(
     conn.execute_batch("PRAGMA foreign_keys = OFF;")?;
     crate::history::attach(&conn, database);
     let history = crate::history::HistoryFile::beside(Some(database));
-    let closed_processes = close_dead_processes(&conn, dead)?;
+    let ended_owners = end_dead_owners(&conn, dead)?;
     let cutoff = now - HISTORY_DAYS * 86_400;
     let mut forgotten_history = forget_unread_rows(&conn, cutoff)?;
     let moved_observations = move_observations(&conn, &history)?;
     let converted_turns = super::turns::convert_turn_rows(database)?;
     forgotten_history += forget_old_history(&history, database, cutoff)?;
-    let forgotten_processes = forget_processes(&conn)?;
     Ok(RetentionReport {
-        closed_processes,
-        forgotten_processes,
-        assigned_processes: assign_process_tasks(&conn)?,
+        ended_owners,
         moved_observations,
         converted_turns,
         forgotten_history,
@@ -219,144 +213,114 @@ fn forget_old_history(
     Ok(forgotten)
 }
 
-/// Saved identities and locators for observation before pruning.
-pub fn unfinished_processes(
-    database: &Path,
-) -> StoreResult<Vec<(crate::process::ProcessEntry, Option<String>)>> {
+// ---------------------------------------------------------------------------
+// Liveness: runs and agents whose OS process is gone
+
+/// A record that runs as an OS process and has not ended: a Graph run or
+/// step, a Project activation, a Task's or its shipping's carrier, or a
+/// Session's agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RunningOwner {
+    pub owner: Owner,
+    /// The run's id, or the Session's current agent.
+    pub id: String,
+    pub pid: Option<u32>,
+    pub os_started_at: Option<i64>,
+    /// When it started, where its record says.
+    pub started_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Owner {
+    Run(RunOwner),
+    /// The Session whose current agent this is.
+    SessionAgent {
+        session: String,
+    },
+}
+
+/// Every unended owner, each with the OS process it recorded. A Task's
+/// carrier counts only while it records one: its end clears the pid alone.
+const RUNNING_OWNERS: &str = "
+    SELECT 'graph_run',lf_process_id,pid,os_started_at,started_at,NULL FROM graph_processes
+        WHERE ended_at IS NULL
+    UNION ALL SELECT 'graph_step',lf_process_id,pid,os_started_at,started_at,NULL
+        FROM graph_process_steps WHERE ended_at IS NULL
+    UNION ALL SELECT 'activation',project_activation_lf_process_id,project_activation_pid,
+        project_activation_os_started_at,project_activation_started_at,NULL FROM waves
+        WHERE project_activation_lf_process_id IS NOT NULL AND project_activation_ended_at IS NULL
+    UNION ALL SELECT 'task_carrier',lf_process_id,run_pid,run_os_started_at,NULL,NULL
+        FROM task_graphs WHERE run_pid IS NOT NULL
+    UNION ALL SELECT 'ship_carrier',lf_process_id,pid,os_started_at,at,NULL FROM task_ship_events
+        WHERE kind IN ('approved','carried') AND pid IS NOT NULL AND ended_at IS NULL
+    UNION ALL SELECT 'session_agent',agent_process_id,agent_pid,agent_os_started_at,
+        agent_started_at,id FROM agent_sessions
+        WHERE agent_process_id IS NOT NULL AND agent_pid IS NOT NULL AND agent_ended_at IS NULL";
+
+/// The owners to observe before pruning.
+pub fn running_owners(database: &Path) -> StoreResult<Vec<RunningOwner>> {
     let conn = Connection::open(database)?;
-    let unfinished = conn
-        .prepare(&format!(
-            "{} WHERE e.completed_at IS NULL",
-            process_receipt_select()
-        ))?
-        .query_map([], process_receipt_row)?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(unfinished)
+    running_owners_in(&conn)
 }
 
-fn process_receipt_select() -> String {
-    super::processes::PROCESS_SELECT
-        .replace(" FROM processes e", ",e.receipt_locator FROM processes e")
-}
-
-fn process_receipt_row(
-    row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<(crate::process::ProcessEntry, Option<String>)> {
-    Ok((
-        super::processes::read_process(row)?,
-        row.get("receipt_locator")?,
-    ))
-}
-
-fn close_dead_processes(
-    conn: &Connection,
-    dead: &[(crate::process::ProcessEntry, Option<String>, i64)],
-) -> StoreResult<u64> {
-    let mut closed = 0;
-    for (process, locator, at) in dead {
-        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
-        let current = tx
-            .query_row(
-                &format!("{} WHERE e.id=?1", process_receipt_select()),
-                [process.id()],
-                process_receipt_row,
-            )
-            .optional()?;
-        if !current
-            .as_ref()
-            .is_some_and(|(saved, saved_locator)| saved == process && saved_locator == locator)
-        {
-            continue;
-        }
-        let closed_here = tx.execute(
-            "UPDATE processes SET completed_at=?2,
-                 spawn_state=CASE WHEN kind!='agent' THEN spawn_state
-                     WHEN spawn_state='reserved' AND pid IS NULL THEN 'spawn_failed' ELSE 'exited' END,
-                 endpoint=NULL
-             WHERE id=?1 AND completed_at IS NULL AND pid IS ?3 AND os_started_at IS ?4",
-            params![process.id(), at, process.pid(), process.os_started_at()],
-        )?;
-        if closed_here > 0 {
-            super::processes::complete_dead_headless_run_in(&tx, process.id(), *at)?;
-        }
-        tx.commit()?;
-        closed += closed_here as u64;
-    }
-    Ok(closed)
-}
-
-/// Finished Processes nothing needs ([`super::processes::FORGETTABLE`]): those
-/// crash-closed above, and those a finished parent left behind when it exited
-/// before them. Exit forgets the rest as it happens.
-fn forget_processes(conn: &Connection) -> StoreResult<u64> {
-    let forgettable = super::processes::FORGETTABLE;
-    let mut forgotten = 0;
-    loop {
-        let deleted = conn.execute(
-            &format!(
-                "DELETE FROM processes WHERE id IN (
-                     SELECT p.id FROM processes p WHERE {forgettable} LIMIT ?1)"
-            ),
-            [PROCESS_BATCH],
-        )?;
-        forgotten += deleted as u64;
-        // A parent becomes forgettable once its last child goes.
-        if deleted == 0 {
-            return Ok(forgotten);
-        }
-    }
-}
-
-/// Give each Process written without a Task the one it belongs to, oldest
-/// first, so a parent or caller resolves before the rows that inherit from it.
-/// The same rules as an insert, plus what an earlier lf recorded instead: the
-/// Task a Graph names, and the Task of a Session the Process started.
-/// `process_task_backfill` remembers how far the pass has read, so a row with
-/// no Task is examined once.
-fn assign_process_tasks(conn: &Connection) -> StoreResult<u64> {
-    let lf = super::task_work::process_task(
-        "p.parent_lf_process_id",
-        "p.cwd",
-        "p.caller_session_id",
-        "p.caller_agent_process_id",
-    );
-    let task = format!(
-        "SELECT CASE WHEN p.kind='agent'
-            THEN (SELECT {} FROM agent_sessions s WHERE s.id=p.agent_session_id)
-            ELSE coalesce((SELECT task_id FROM graph_processes WHERE lf_process_id=p.id),
-                (SELECT a.task_id FROM session_events se INDEXED BY session_events_process
-                    JOIN agent_sessions a ON a.id=se.session_id
-                    WHERE se.lf_process_id=p.id AND se.kind IN ('captured','started')
-                    AND {member} AND a.task_id IS NOT NULL LIMIT 1),
-                {lf}) END AS task_id
-         FROM processes p WHERE p.rowid=?1 AND p.task_id IS NULL",
-        super::task_work::agent_task("s"),
-        member = super::task_work::counts_for_task("a"),
-    );
-    let mut assigned = 0;
-    loop {
-        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
-        let rows = tx
-            .prepare(
-                "SELECT rowid FROM processes
-                 WHERE rowid>(SELECT after_rowid FROM process_task_backfill) ORDER BY rowid LIMIT ?1",
-            )?
-            .query_map([TASK_BATCH], |row| row.get::<_, i64>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let Some(&last) = rows.last() else {
-            return Ok(assigned);
+fn running_owners_in(conn: &Connection) -> StoreResult<Vec<RunningOwner>> {
+    let mut statement = conn.prepare(RUNNING_OWNERS)?;
+    let rows = statement.query_map([], |row| {
+        let owner = match row.get::<_, String>(0)?.as_str() {
+            "graph_run" => Owner::Run(RunOwner::GraphRun),
+            "graph_step" => Owner::Run(RunOwner::GraphStep),
+            "activation" => Owner::Run(RunOwner::ProjectActivation),
+            "task_carrier" => Owner::Run(RunOwner::TaskCarrier),
+            "ship_carrier" => Owner::Run(RunOwner::ShipCarrier),
+            _ => Owner::SessionAgent {
+                session: row.get(5)?,
+            },
         };
-        let mut assign = tx.prepare(&format!(
-            "UPDATE processes SET task_id=found.task_id FROM ({task}) found
-             WHERE processes.rowid=?1 AND found.task_id IS NOT NULL"
-        ))?;
-        for row in &rows {
-            assigned += assign.execute([row])? as u64;
+        Ok(RunningOwner {
+            owner,
+            id: row.get(1)?,
+            pid: row.get(2)?,
+            os_started_at: row.get(3)?,
+            started_at: row.get(4)?,
+        })
+    })?;
+    Ok(rows.collect::<Result<Vec<_>, _>>()?)
+}
+
+/// End each owner observed dead, at its time, as nobody saw it exit: no exit
+/// code, no error, its OS process cleared. One that changed since it was
+/// observed (another start, or its own end) is left.
+fn end_dead_owners(conn: &Connection, dead: &[(RunningOwner, i64)]) -> StoreResult<u64> {
+    let mut ended = 0;
+    for (observed, at) in dead {
+        let tx = rusqlite::Transaction::new_unchecked(conn, TransactionBehavior::Immediate)?;
+        let unchanged = running_owners_in(&tx)?.contains(observed);
+        if unchanged {
+            match &observed.owner {
+                Owner::Run(owner) => super::graph_inventory::finish_run_in(
+                    &tx,
+                    *owner,
+                    &observed.id,
+                    *at,
+                    None,
+                    None,
+                )?,
+                Owner::SessionAgent { session } => {
+                    tx.execute(
+                        "UPDATE agent_sessions SET agent_ended_at=?3,agent_pid=NULL,
+                            agent_os_started_at=NULL,agent_endpoint=NULL,agent_spawn_state='exited'
+                         WHERE id=?1 AND agent_process_id=?2 AND agent_ended_at IS NULL",
+                        params![session, observed.id, at],
+                    )?;
+                    super::processes::complete_dead_headless_run_in(&tx, &observed.id, *at)?;
+                }
+            }
+            ended += 1;
         }
-        drop(assign);
-        tx.execute("UPDATE process_task_backfill SET after_rowid=?1", [last])?;
         tx.commit()?;
     }
+    Ok(ended)
 }
 
 /// Return freed pages to the filesystem. The first reclaim converts the store
@@ -402,184 +366,43 @@ fn is_busy(error: &rusqlite::Error) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use rusqlite::Connection;
+mod observation_tests {
+    use super::{prune, running_owners};
 
-    use super::prune;
-
+    /// A Session agent that died unseen ends at the next pass, unless it
+    /// changed between observation and pruning.
     #[test]
-    fn prune_forgets_unneeded_processes() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("store.db");
-        crate::test_fixture::open(&path).unwrap();
-
-        let now = time::OffsetDateTime::now_utc().unix_timestamp() + 2 * 86_400;
-        let conn = Connection::open(&path).unwrap();
-        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
-        let process = |n: u8, parent: Option<u8>, finished: bool, via_agent: bool| {
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,via_agent)
-                 VALUES(?1,?1,?2,?3,?4,?5,?6)",
-                rusqlite::params![
-                    id(n),
-                    parent.map(id),
-                    now,
-                    finished.then_some(now),
-                    finished.then_some("succeeded"),
-                    via_agent
-                ],
-            )
-            .unwrap();
-        };
-        // Finished long ago or just now, nothing needs these three.
-        process(1, None, true, false);
-        process(7, None, true, false);
-        process(8, Some(7), true, false);
-        // A running child holds its parent; a running parent holds its child.
-        process(2, None, true, false);
-        process(3, Some(2), false, false);
-        process(4, Some(3), true, false);
-        process(5, None, true, true);
-
-        assert_eq!(prune(&path, &[], now).unwrap().forgotten_processes, 3);
-
-        let left: Vec<String> = conn
-            .prepare("SELECT id FROM processes ORDER BY id")
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        assert_eq!(left, [id(2), id(3), id(4), id(5)]);
-        let violations: i64 = conn
-            .query_row("SELECT count(*) FROM pragma_foreign_key_check", [], |row| {
-                row.get(0)
-            })
-            .unwrap();
-        assert_eq!(violations, 0);
-    }
-
-    #[test]
-    fn prune_gives_processes_an_earlier_lf_wrote_their_task_once() {
+    fn a_dead_agent_ends_unless_it_changed_after_observation() {
         let home = tempfile::tempdir().unwrap();
         let path = home.path().join("store.db");
         let store = crate::test_fixture::open(&path).unwrap();
-        let repository = crate::test_fixture::repository(&store, "/repo");
-        let task = |title: &str| {
-            store
-                .create_task(&crate::work::task::NewTask {
-                    id: loopflow_model::durable::TaskId::new(),
-                    repository_id: repository.clone(),
-                    project_id: None,
-                    title: title.into(),
-                    description: String::new(),
-                    due_date: None,
-                })
-                .unwrap()
-                .id
-        };
-        let (checked_out, named) = (task("Checked out"), task("Named"));
-        drop(store);
-        let now = time::OffsetDateTime::now_utc().unix_timestamp();
-        let conn = Connection::open(&path).unwrap();
+        store.test_session("session", &crate::session_record::new_artifact_key());
+        let conn = rusqlite::Connection::open(&path).unwrap();
         conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo.task')",
-            [checked_out.as_str()],
+            "UPDATE agent_sessions SET agent_process_id='agent',attachment_token='token',
+                agent_started_at=1,agent_pid=123,agent_os_started_at=456,
+                agent_spawn_state='spawn_requested' WHERE id='session'",
+            [],
         )
         .unwrap();
+        let saved = running_owners(&path).unwrap().remove(0);
         conn.execute(
-            "INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
-             VALUES('bound','Bound','human',1,0,'/elsewhere',?1)",
-            [named.as_str()],
+            "UPDATE agent_sessions SET agent_pid=124 WHERE id='session'",
+            [],
         )
         .unwrap();
-        // Rows as released lf writes them: no Task, running, so nothing forgets them.
-        let id = |n: u8| format!("00000000-0000-4000-8000-0000000000{n:02}");
-        let insert = |n: u8, kind: &str, cwd: &str, parent: Option<u8>, caller: Option<u8>| {
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,kind,cwd,parent_lf_process_id,caller_agent_process_id,
-                    agent_session_id,started_at)
-                 VALUES(?1,?1,?2,?3,?4,?5,CASE WHEN ?2='agent' THEN 'bound' END,?6)",
-                rusqlite::params![id(n), kind, cwd, parent.map(id), caller.map(id), now],
+        assert_eq!(prune(&path, &[(saved, 10)], 10).unwrap().ended_owners, 0);
+        let current = running_owners(&path).unwrap().remove(0);
+        assert_eq!(prune(&path, &[(current, 10)], 10).unwrap().ended_owners, 1);
+        let ended: (Option<i64>, Option<u32>, Option<i32>) = conn
+            .query_row(
+                "SELECT agent_ended_at,agent_pid,agent_exit_code FROM agent_sessions WHERE id='session'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        };
-        insert(1, "lf", "/repo.task/src", None, None);
-        insert(2, "lf", "/tmp", Some(1), None);
-        insert(3, "agent", "/elsewhere", Some(2), None);
-        insert(4, "lf", "/tmp", Some(1), Some(3));
-        insert(5, "lf", "/elsewhere", None, None);
-        insert(6, "lf", "/repo.task", None, Some(3));
-        let tasks = || -> Vec<Option<String>> {
-            conn.prepare("SELECT task_id FROM processes ORDER BY id")
-                .unwrap()
-                .query_map([], |row| row.get(0))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap()
-        };
-        assert_eq!(prune(&path, &[], now).unwrap().assigned_processes, 5);
-        let (checked_out, named) = (Some(checked_out.to_string()), Some(named.to_string()));
-        // The checkout, the parent, the agent's Session, the calling agent over
-        // the parent; a row with no Task stays without one; and a checkout
-        // over the calling agent.
-        assert_eq!(
-            tasks(),
-            [
-                checked_out.clone(),
-                checked_out.clone(),
-                named.clone(),
-                named,
-                None,
-                checked_out
-            ]
-        );
-        assert_eq!(prune(&path, &[], now).unwrap().assigned_processes, 0);
-    }
-}
-
-#[cfg(test)]
-mod observation_tests {
-    use super::{prune, unfinished_processes};
-
-    #[test]
-    fn pruning_does_not_close_a_process_changed_after_observation() {
-        let home = tempfile::tempdir().unwrap();
-        let path = home.path().join("store.db");
-        let _store = crate::test_fixture::open(&path).unwrap();
-        let conn = rusqlite::Connection::open(&path).unwrap();
-        let id = "00000000-0000-4000-8000-000000000001";
-        conn.execute(
-            "INSERT INTO processes(id,trace_id,started_at,via_agent) VALUES(?1,?1,1,1)",
-            [id],
-        )
-        .unwrap();
-        let (saved, locator) = unfinished_processes(&path).unwrap().remove(0);
-        conn.execute(
-            "UPDATE processes SET pid=123,os_started_at=456 WHERE id=?1",
-            [id],
-        )
-        .unwrap();
-        assert_eq!(
-            prune(&path, &[(saved, locator, 10)], 10)
-                .unwrap()
-                .closed_processes,
-            0
-        );
-        assert!(conn
-            .query_row(
-                "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-                [id],
-                |row| row.get::<_, bool>(0)
-            )
-            .unwrap());
-        let (current, locator) = unfinished_processes(&path).unwrap().remove(0);
-        assert_eq!(
-            prune(&path, &[(current, locator, 10)], 10)
-                .unwrap()
-                .closed_processes,
-            1
-        );
+        assert_eq!(ended, (Some(10), None, None));
+        assert!(running_owners(&path).unwrap().is_empty());
     }
 }
 

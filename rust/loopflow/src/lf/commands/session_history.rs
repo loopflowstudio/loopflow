@@ -37,7 +37,7 @@ pub(crate) fn collect_history(
     if !database.exists() {
         return Ok(Vec::new());
     }
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database,
         loopflow_execution::store::token_key::encryption_key,
     )?;
@@ -73,7 +73,7 @@ pub(crate) fn render(selector: &str, view: SessionView, json: bool) -> Result<St
     let mut output = String::new();
     let home = loopflow_execution::store::lf_home_dir();
     let database = loopflow_execution::store::database_path_from_env()?;
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database,
         loopflow_execution::store::token_key::encryption_key,
     )?;

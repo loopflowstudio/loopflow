@@ -391,17 +391,6 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode([WorkAuthor].self, from: JSONEncoder().encode(authors)) == authors)
     }
 
-    @Test("Activity retains unknown record identity without a PID")
-    func activityFixture() throws {
-        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))
-        let unknown = snapshot.nodes[2]
-        #expect(unknown.state == .unknown)
-        #expect(unknown.pid == nil)
-        #expect(unknown.parentId == snapshot.nodes[0].id)
-        #expect(unknown.id == "33333333-3333-4333-8333-333333333333")
-        #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
-    }
-
     @Test("Composed delivery keeps completion independent of the running Graph and its arrival")
     func composedTaskLifecycle() throws {
         let snapshots = try TaskLifecycleCapture.load(loadFixtureData("task_lifecycle.json"))
@@ -468,7 +457,7 @@ struct DTOFixtureTests {
         #expect(overview.graphProcesses.count == 1)
     }
 
-    @Test("Task work retains conversations, Graphs and command history")
+    @Test("Task work retains conversations and Graphs")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
@@ -477,7 +466,6 @@ struct DTOFixtureTests {
         #expect(work.sessions[1].graphLfProcessId == work.graphProcesses[0].id)
         #expect(work.graphProcesses[0].name == "pursue")
         #expect(work.graphProcesses[0].state == .current)
-        #expect(!work.processes.isEmpty)
         let graph = try #require(work.graph)
         #expect(graph.name == "feature")
         #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
@@ -553,28 +541,6 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Process pages retain command outcomes, caller evidence and continuation")
-    func processPageFixture() throws {
-        let data = try loadFixtureData("process_page.json")
-        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
-        guard case .lf(let lf) = page.entries[0], case .agent(let agent) = page.entries[1] else {
-            Issue.record("expected an lf entry then an agent entry")
-            return
-        }
-        #expect(lf.exitCode == 42)
-        #expect(lf.viaAgent == nil)
-        #expect(lf.pid == nil)
-        #expect(agent.pid == 4242)
-        #expect(agent.agentSessionID == "conversation")
-        #expect(agent.osStartedAt == 1790640000)
-        #expect(agent.parentLfProcessId == lf.id)
-        #expect(page.next?.id == agent.id.rawValue)
-        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
-        }
-    }
-
     @Test("Context report keeps unknown sources distinct from zero")
     func contextReportFixture() throws {
         let report = try JSONDecoder().decode(ContextReport.self, from: loadFixtureData("context_report.json"))
@@ -622,25 +588,39 @@ struct DTOFixtureTests {
         }
     }
 
-    @Test("Task execution names who started its Graph and who stopped Auto-Ship, requiring every mark")
+    @Test("Task execution names who started its Graph, who stopped Auto-Ship and its stack parent, requiring every mark")
     func taskExecutionAttributionFixture() throws {
         let data = try loadFixtureData("task_checkout.json")
         let execution = try JSONDecoder().decode(TaskExecution.self, from: data)
         #expect(execution.startedBy?.label == "Session \"LOO-291 task\" for Maya")
         #expect(execution.shipApproval == nil)
         #expect(execution.shipStop == ShipMark(at: 1793266380, by: .person(name: "Maya")))
+        #expect(execution.stackParent?.identifier == "LOO-290")
+        #expect(execution.stackParent?.branch == "maya/loo-290-parent")
+        #expect(execution.stackParent != nil && execution.stackParent?.prNumber == nil)
         #expect(Starter.person(name: nil).label == "attribution unresolved")
         var root = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
         root.removeValue(forKey: "ship_approval")
         #expect(throws: DecodingError.self) {
             try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: root))
         }
+        var unstacked = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        var parent = try #require(unstacked["stack_parent"] as? [String: Any])
+        parent.removeValue(forKey: "pr_number")
+        unstacked["stack_parent"] = parent
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: unstacked))
+        }
+        unstacked.removeValue(forKey: "stack_parent")
+        #expect(throws: DecodingError.self) {
+            try JSONDecoder().decode(TaskExecution.self, from: JSONSerialization.data(withJSONObject: unstacked))
+        }
         let lifecycle = try #require(JSONSerialization.jsonObject(with: loadFixtureData("task_lifecycle.json")) as? [String: [String: Any]])
         for (phase, capture) in lifecycle {
             let status = try #require(capture["status"] as? [String: Any], "\(phase)")
             let recorded = try JSONDecoder().decode(
                 TaskExecution.self, from: JSONSerialization.data(withJSONObject: try #require(status["execution"])))
-            #expect(recorded.startedBy == nil && recorded.shipStop == nil, "\(phase)")
+            #expect(recorded.startedBy == nil && recorded.shipStop == nil && recorded.stackParent == nil, "\(phase)")
         }
     }
 
@@ -1035,14 +1015,14 @@ struct DTOFixtureTests {
             try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
         }
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
-                                                "activity", "task", "git_destinations"])
+                                                "task", "git_destinations"])
         #expect(frames[0].answers == nil)
         #expect(frames[2].answers == 7)
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
               case .workActivity(let activity?) = frames[4].content,
-              case .gitDestinations(let reading?) = frames[7].content else {
+              case .gitDestinations(let reading?) = frames[6].content else {
             Issue.record("fixture parts changed shape")
             return
         }
@@ -1058,7 +1038,7 @@ struct DTOFixtureTests {
             return
         }
         #expect(frames[3].unavailable == "Task LOO-1 is not registered")
-        guard case .task(let read?) = frames[6].content else {
+        guard case .task(let read?) = frames[5].content else {
             Issue.record("a read Task part carries its work and Graph processes")
             return
         }

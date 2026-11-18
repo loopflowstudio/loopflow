@@ -12,9 +12,6 @@ use loopflow_model::durable::{MachineId, RepositoryId, TaskId};
 
 use super::SqliteStore;
 
-/// Processes started or finished in the window.
-const PROCESSES: &str = "SELECT id FROM processes WHERE started_at>=?1 OR completed_at>=?1";
-
 /// Every column the table has in this Machine's schema, by name: a copy
 /// carries what its origin wrote, whatever release that was.
 fn columns_in(conn: &Connection, table: &str) -> StoreResult<String> {
@@ -83,19 +80,13 @@ fn rows_in(
 }
 
 impl SqliteStore {
-    /// This Machine's Sessions, Processes, Graph rows and session events
-    /// touched since `since`, and the artifact keys of their captures.
+    /// This Machine's Sessions and session events touched since `since`, and
+    /// the artifact keys of their captures.
     pub fn export_records(&self, since: i64) -> StoreResult<(Vec<Record>, Vec<String>)> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let conn = conn.savepoint()?;
         let mut records = Vec::new();
         for (kind, key, table, filter) in [
-            (
-                RecordKind::Process,
-                "id",
-                "processes",
-                format!("id IN ({PROCESSES})"),
-            ),
             (
                 RecordKind::Session,
                 "id",
@@ -109,18 +100,6 @@ impl SqliteStore {
                 "seq",
                 "session_events",
                 "observed_at>=?1".to_string(),
-            ),
-            (
-                RecordKind::GraphProcess,
-                "lf_process_id",
-                "graph_processes",
-                format!("lf_process_id IN ({PROCESSES})"),
-            ),
-            (
-                RecordKind::GraphProcessStep,
-                "seq",
-                "graph_process_steps",
-                format!("graph_lf_process_id IN ({PROCESSES})"),
             ),
         ] {
             records.extend(rows_in(&conn, kind, key, table, &filter, since)?);
@@ -176,7 +155,6 @@ impl SqliteStore {
         };
         Ok(CopyCounts {
             sessions: count(RecordKind::Session)?,
-            processes: count(RecordKind::Process)?,
         })
     }
 

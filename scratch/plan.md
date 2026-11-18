@@ -4,14 +4,14 @@
 
 Each fact about a Task has one home, and nothing reads a second copy. A store
 test fails the moment code reads or writes a member marked leaving, so a
-duplicate can't quietly come back. A Process and a Session record their Task
-when they start; membership reads that column instead of matching paths, and
-`relocated_task_processes` with its two-sided queries goes.
+duplicate can't quietly come back. A Task's work is its Sessions and its Graph
+runs; each records its Task when it starts, and membership reads that column
+instead of matching paths. (`processes` and `relocated_task_processes` left
+with #1974; LOO-965 drops them.)
 
 What people notice:
-- A Task's Processes and Sessions stay with it when its repository moves on
-  disk, and when a checkout path is later reused by another clone. Today that
-  depends on a frozen-pair table and a `sqlite_master` probe on every read.
+- A Task's Sessions and Graph runs stay with it when its repository moves on
+  disk, and when a checkout path is later reused by another clone.
 - `lf task status` and the Desktop Task list show the same title, URL and
   order on every surface, because there is one stored value per fact.
 - Dragging a Task tile in Desktop's Working board changes its rank, the same
@@ -126,90 +126,45 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 | `task_checkouts`, `task_primary_sessions`, `task_ship_events` | keep | LOO-874's homes |
 | `task_prs.branch/base_commit/parent_pr_id` | keep for now | trigger-copied from `task_checkouts` and enforced equal (`task_machine_local.sql:105-140`); PR delivery reads them for merged PRs too, where the checkout is gone. Not a free duplicate; questions.md |
 | `pr_landings.worktree` | keep | a landing is supervised on one Machine (`supervisor_machine_id`) and may have no Task (`lf land` in any checkout). Execution table already |
-| `processes.task_id` | **add** | the Task a Process belongs to, written at insert |
-| `agent_sessions.task_id` | keep, backfill | becomes the only Session→Task link |
-| `relocated_task_processes` | **leaving** | membership no longer depends on paths |
+| `agent_sessions.task_id` | keep, backfill | the only Session→Task link |
+| `graph_processes.task_id` | keep, backfill | the only Graph run→Task link; a run that named none may take one once (adoption), then it is fixed |
+| `processes`, `relocated_task_processes` | leaving (LOO-965, #1974) | not this Task's |
 
 ## Source of truth after the change
 
 - Task (shared): `tasks`. Observed provider Task: `pm_items`. Queue: `tracker_actions` (LOO-925/938).
 - Checkout here: `task_checkouts`. Primary conversation here: `task_primary_sessions`. Auto-Ship: `task_ship_events`.
-- A Process's Task: `processes.task_id`. A Session's Task: `agent_sessions.task_id`.
+- A Session's Task: `agent_sessions.task_id`. A Graph run's Task: `graph_processes.task_id`.
 - Order: `tasks.planning_rank` (desired), `pm_items.rank` (observed).
 
-## Process and Session membership
+## Session and Graph run membership
 
-One rule, applied once, when the row is written. A Process's Task is, in
-order:
+One rule, one function (`task_work::starting_task_in`), applied once when the
+row is written:
 
-1. the Task the launch names: a Graph (`record_graph_process`), a Session the
-   Process creates with a Task (`insert_session_in`) or attaches to
-   (`attach_in`) — written on the Process's row by that call;
-2. the deepest `task_checkouts` row containing `cwd`;
-3. its caller's: the caller agent Process's `task_id`, else the caller
-   Session's `task_id` (`caller_session_id`, non-primary);
-4. its parent Process's `task_id` (`parent_lf_process_id`);
-5. else NULL.
+> the Task it names, else the deepest checkout holding its directory on this
+> Machine, else the Task of the Session that started it.
 
-The checkout outranks inheritance (built, changed from the kickoff order). On
-the 187,600-row copy, caller/parent-first gave 6,687 Processes that ran inside
-one Task's checkout to the Task of the agent that ran them: 5,672 `lf session
-serve`, plus `commit`, `pr publish`, `pr land`, `lf --task LOO-921 ship` from
-LOO-959's agent. Those are the checkout's Task's work. Inheritance covers what
-runs outside any checkout (repo root, `/tmp`).
+Checkout before caller: a command run inside a checkout is that Task's work
+whoever ran it (live store, 2026-11-17: the caller-first order gave 6,687
+Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
+`pr publish`, `pr land`, `lf --task LOO-921 ship` from LOO-959's agent).
 
-Measured before deleting the Session-event unions: 386 of 22,378 event-linked
-(Task, Process) pairs were reached by no rule; nearly all the lf Process that
-captured or started a Task's Session from outside its checkout (`lf session
-resume --task EXP-49` from the repo root). Rule 1's Session writes cover those
-going forward; the backfill reads `session_events` `captured`/`started` for
-old rows. The 166 `observed`-only pairs (a Process that only wrote an
-observation into a Session) are no longer its Task's work.
-
-An agent Process copies `agent_sessions.task_id`. A Session's Task is the
-named Task, else the deepest checkout containing its cwd at creation.
-
-Writers: `record_process_in` (`sqlite.rs:1578`) and the agent insert
-(`sqlite/processes.rs`) are the only production inserts; both resolve
-`task_id` in the insert statement. Rules 2 and 3 are primary-key probes; rule 4
-is the ancestor probe `session_tasks` already uses (`task_work.rs:89`).
-
-Readers collapse to the column. `lf_process_ids` today unions path matching,
-relocation receipts, and four Session-derived sets (`session_events`,
-`history.session_history`, `history.turns`, agent attachments); it becomes
-`SELECT id FROM processes WHERE task_id=?` plus the agent rows of the Task's
-Sessions. `task_of_process` becomes a primary-key read. `session_membership`
-reads `task_id` only. `has_relocations`, `relocated_process_membership`, the
-freeze in `relocate_repository` (`repositories.rs:136`), the fixture writer in
-`read_stream/events.rs:362-376`, and the `relocated_task_processes` and
-`tasks.ship_lf_process_id` clauses of `FORGETTABLE` (`processes.rs:347-350`)
-go.
-
-Backfill: `agent_sessions.task_id` (2,659 rows) in the migration, with the
-reconciliation rule below. Processes do not fit there. Measured on a
-`VACUUM INTO` copy of the live store (2026-11-17): the deepest-checkout probe,
-materialized into a temp table and applied with `UPDATE … FROM`, resolved
-156,708 of 187,600 Processes in 28.6 s wall, 4.5 s CPU; a correlated-CTE
-version ran over 10 minutes. Holding the shared write lock for 30 s at upgrade
-stalls every agent, so the migration only adds the column, and the server's
-maintenance pass applies the same five rules to `task_id IS NULL` rows in
-batches of 5,000 ids per write transaction (oldest first, relocation receipts
-applied first while the table exists), beside pruning. Rows the prune deletes
-anyway are skipped.
-
-No compat trigger. Released `lf` keeps inserting Processes without `task_id`
-during the window; the same maintenance pass picks them up. (A trigger could
-not reuse the probe anyway: SQLite rejects a `WITH` clause inside
-`CREATE TRIGGER`.) Until a pass runs, such a Process is missing from its Task's
-list; on a Machine running this build, only Sessions still held by an old
-binary produce them.
-
-A Process launched outside lf has no row, so path matching has no remaining
-caller.
-
-Reconciliation rule for the 3 primary Sessions whose `task_id` disagrees:
-`task_primary_sessions` names the Task; the migration sets the Session's
-`task_id` to it.
+- `record_graph` applies all three clauses (`ExecutionStart.caller_session`).
+- Session creation (`resolve_ancestry_in`) applies the first two; the Task of
+  the Session that started it arrives named, as `work_source='inherited'`,
+  from `select_work`.
+- Adoption: `write_task_checkout_in` gives open taskless Sessions and unended
+  taskless Graph runs inside a newly placed checkout its Task. So
+  `graph_processes_launch_is_immutable` lets `task_id` go NULL → value once
+  and never change after, the shape `validate_conversation_ancestry_update`
+  already gives Sessions.
+- Readers: `session_membership`, `session_tasks`, `task_graph_pairs` and
+  `task_open_graph_pairs` read `task_id` only. `checkout_open_work` still
+  matches paths: it answers for a checkout no Task holds.
+- Backfill in `task_facts_once.sql`: the 3 primaries from
+  `task_primary_sessions`, the deepest checkout for Sessions naming nothing
+  (22,342 live Sessions: 0.19 s), then Graph runs with no Task by the rule.
 
 ## A duplicate can't come back
 
@@ -234,14 +189,10 @@ Checked: putting `t.worktree` back in `TASK_COLUMNS` fails 5 of 11
 ## Acceptance check at gate
 
 ```bash
-# membership survives a move, with no relocation table
-cargo test -p loopflow-storage --lib sqlite::repositories::   # relocate keeps Processes and Sessions with their Task
-cargo test -p loopflow-storage --lib task_work::              # membership by task_id
-# the guard
+cargo test -p loopflow-storage --lib task_work::              # membership by task_id, move and path reuse
 cargo test -p loopflow-storage --lib leaving_members_are_unreadable
 # against a copy of the live store
-cp ~/.lf/loopflow.db /tmp/lf937.db && LF_HOME=… lf task status LOO-937 --json   # same title/url/sessions/processes as released lf
-sqlite3 /tmp/lf937.db "select count(*) from processes where task_id is null and cwd in checkout"  # 0
+cp ~/.lf/loopflow.db /tmp/lf937.db && LF_HOME=… lf task status LOO-937 --json   # same title/url/sessions/graph runs as released lf
 ```
 
 Report before/after in the PR: tables, columns, store size, `pub fn` count in
@@ -252,17 +203,16 @@ stated).
 
 - Task with no provider binding: no `pm_items` row; URL and team absent, the
   branch present when lf recorded it under Git planning (as today).
-- Process in no checkout and no named Task: `task_id` NULL, same as today's
-  non-match.
+- Session or Graph run in no checkout, naming no Task, started by no Task's
+  Session: `task_id` NULL.
 - Checkout removed, then path reused: membership unchanged, which today needs
   the frozen pairs.
 
 ## Operational boundary
 
-One write lock for hundreds of agents: the process insert gains one indexed
-ancestor probe (depth ≤ path components), after two primary-key probes. Check with `EXPLAIN QUERY PLAN` on
-the 187k-row store; membership queries lose the `sqlite_master` probe and the
-anti-join. New index `processes(task_id)` partial `WHERE task_id IS NOT NULL`.
+One write lock for hundreds of agents: starting a Session or a Graph run adds
+one indexed ancestor probe (depth ≤ path components) and, for a run, one
+primary-key read of the calling Session.
 
 ## Exclusions
 
@@ -275,11 +225,8 @@ anti-join. New index `processes(task_id)` partial `WHERE task_id IS NOT NULL`.
 
 ## What goes
 
-- `relocated_task_processes` reads/writes; `has_relocations`,
-  `relocated_process_membership`, the freeze in `relocate_repository`
-  (its test at `repositories.rs:379-430` stays, asserting membership instead
-  of frozen pairs), `events.rs:362-376` fixture inserts (test-only; the brief's
-  "second path"), `processes.rs:347` and `:350` prune clauses.
+- Path matching in Task membership: `checkout()`, `TASK_CHECKOUTS`, the
+  path-or-id `session_membership`/`session_tasks`/`task_open_graph_pairs`.
 - `sqlite.rs:379-410` pre-`task_checkouts` registry fallback.
 - Reads/writes of `tasks.planning_provider_revision/planning_completed`,
   `projects.planning_provider_revision`.
@@ -292,52 +239,21 @@ every Process/Session association, conflict answers.
 
 ## Slices
 
-1. **Process and Session record their Task.** *Built
-   (`process_task.sql`). `cargo test -p loopflow-storage --lib task_work::`:
-   11 passed (realign, 2026-11-17).* Built: `processes.task_id` +
-   `processes_task`, relocation receipts copied in and the table marked
-   leaving, the freeze in `relocate_repository` and `has_relocations` gone,
-   `lf_process_ids`/`task_open_process_pairs`/`task_of_process`/performed-work
-   read the column (plus agent rows of the Task's Sessions, which can be bound
-   after they start), the prune clause for relocations gone. The backfill is
-   `assign_process_tasks` in `retention::prune` behind a one-row cursor table
-   `process_task_backfill` (a NULL row is examined once; drops with LOO-877
-   once no released lf writes rows). On the copy: 161,718 of 187,600 assigned,
-   38 batches, 10.8 s total, about 0.28 s write lock per batch (debug build);
-   149,984 agree with path matching, 6,687 differ only by the precedence fix
-   above being absent (now 0 by construction), 5,047 newly reached by
-   inheritance. Insert-time probe is index seeks
-   (`recording_and_reading_a_process_task_probe_indexes`).
-   Session half built: `reserve_session_in` records the deepest checkout's
-   Task on a Session that names no Task or Wave (`work_source='checkout'`,
-   the Wave follows the Task), the same rule `lf <skill>` already used via
-   `select_work`. Readers checked first: `session_task_ids` (prompt context,
-   task updates, agent launch, moves) already counted checkout membership, so
-   they see the same Task; LaunchKind keys on `bound`/primary, so a checkout
-   Session stays a chat; `capture_in` now stamps the Task's Wave on the
-   captured event, which `session list --wave` already counted by path. What
-   the live store gains is helpers (1,563 "Generate PR title", ~145 commit
-   messages, 715 `sync-conflicts`) recording the Task whose checkout they ran
-   in, which path matching already gave them. `process_task.sql` backfills:
-   the 3 primaries from `task_primary_sessions`, then the deepest checkout for
-   every Session naming nothing; on a copy of the live 22,342 Sessions that is
-   0.19 s and leaves 0 path-only members. `session_membership`,
-   `session_tasks` and `agent_task` read `task_id` only; `checkout()` and
-   `TASK_CHECKOUTS` are gone. No path matching is left in membership.
-   Demo: `work_keeps_its_task_when_a_checkout_path_is_reused` (Processes and
-   Sessions stay with the first Task when a second clone takes the path).
-   Learned: recording at insert alone misses adoption, where `place_task`
-   gives a Task a checkout a taskless Graph is already running in (the Process
-   half had broken `adopting_a_checkout_with_a_running_graph_prevents_another_run`).
-   `write_task_checkout_in` now gives unfinished taskless Processes and open
-   taskless Sessions inside the new checkout its Task, once, by the
-   `processes_unfinished`/`open_sessions` indexes. A Session in a nested
-   checkout now belongs to the deepest Task only (it used to count for every
-   enclosing one too), and a Task keeps its Sessions after its checkout goes.
-   Left for gate: `session_lifecycle_tests`, `two_people`, `performance_tests::`,
-   `session_cli_tests::` and the `loopflow` crate's fixtures, which insert
-   `agent_sessions` rows by SQL; any that relied on a path match need a
-   `task_id`.
+1. **Sessions and Graph runs record their Task.** *Built
+   (`task_facts_once.sql`, was `process_task.sql`).* The Process half built
+   first (`processes.task_id`, its backfill pass and cursor table) is deleted:
+   #1974 stopped writing `processes`. What stands: `starting_task_in` for
+   Session creation and `record_graph`; adoption in `write_task_checkout_in`
+   (recording at start alone misses `place_task` giving a Task a checkout a
+   taskless run is already in, which
+   `adopting_a_checkout_with_a_running_graph_prevents_another_run` checks);
+   readers on `task_id` only. A Session or run in a nested checkout belongs to
+   the deepest Task only, and a Task keeps its work after its checkout goes.
+   Demo: `work_keeps_its_task_when_its_repository_moves_and_its_path_is_reused`
+   (a run and a conversation started in a checkout with no `--task`, the
+   repository moved, the old path taken by a second clone; each Task lists
+   exactly its own). Upgrade: `upgrade_records_the_task_each_session_belonged_to_by_path`,
+   `upgrade_gives_graph_runs_that_named_no_task_theirs`.
 2. **The guard.** *Built (`leaving_guard.rs`). `cargo nextest run -p
    loopflow-storage --lib`: 390 passed under it.* The first run failed 140
    tests; nearly all were SQLite's foreign-key checks and cascades (exempted,
@@ -354,7 +270,7 @@ every Process/Session association, conflict answers.
    unguarded so feature unification can't change the CLI. Every later slice
    lands under it: slice 3 marks its columns leaving and the Task tests say
    what still reads them.
-3. **Observation bookkeeping.** *Built (`process_task.sql`, commit
+3. **Observation bookkeeping.** *Built (`task_facts_once.sql`, commit
    "A Task is completed when its state says so"). `cargo nextest run -p
    loopflow-storage --lib`: 391 passed under the guard.* `tasks.planning_completed`,
    `tasks.planning_provider_revision` and `projects.planning_provider_revision`
@@ -372,7 +288,7 @@ every Process/Session association, conflict answers.
    `pm_snapshot_synced_at` (inventory rows above say why). Also repaired:
    four `admission_lifecycle_tests` expected a Session to stay taskless after
    its checkout was placed; slice 1's adoption gives it the Task.
-4. **One order.** *Built (`process_task.sql`, commit "One Task order").
+4. **One order.** *Built (`task_facts_once.sql`, commit "One Task order").
    `cargo nextest run -p loopflow-storage --lib`: 391 passed under the guard,
    which now refuses `task_orders` and `tracker_projects.task_order_json`
    (`leaving_members_are_unreadable`). Swift `DashboardWorkspaceTests`: 15

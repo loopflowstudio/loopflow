@@ -1340,14 +1340,12 @@ mod tests {
             [process.as_str()],
         )
         .unwrap();
-        let old =
-            attachment::claim_session_attachment(&store, "saved", None, &process, true).unwrap();
+        let old = attachment::claim_session_attachment(&store, "saved", None, &process).unwrap();
         store
             .record_session_connection("saved", &old, "/missing.sock", &"saved-thread".into())
             .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, "saved", Some(&old), &process, true)
-                .unwrap();
+            attachment::claim_session_attachment(&store, "saved", Some(&old), &process).unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
@@ -1384,7 +1382,7 @@ mod tests {
             .release_session_attachment("saved", &attachment)
             .unwrap();
         let retry =
-            attachment::claim_session_attachment(&store, "saved", Some(&released), &process, true)
+            attachment::claim_session_attachment(&store, "saved", Some(&released), &process)
                 .unwrap();
         harness.resume_agent_session = Some("saved-thread".into());
         let error = runtime

@@ -1136,7 +1136,7 @@ private final class PerformanceReader {
             }
         }
         send(.task, request.id, #"""
-            {"overview":{"sessions":[],"graph_processes":\#(graphs),"processes":[],"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
+            {"overview":{"sessions":[],"graph_processes":\#(graphs),"graph":null},"graph_processes":\#(runs),"comments":{"identifier":"\#(task)","comments":[],"pending_sync":[],"conflicts":{},"refresh_error":null},"execution":null}
             """#)
     }
 

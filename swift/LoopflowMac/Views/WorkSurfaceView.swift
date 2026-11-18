@@ -119,6 +119,9 @@ struct WorkSurfaceView: View {
                                 .buttonStyle(WorkPlainButtonStyle())
                                 .font(Typography.body(12.5))
                         }
+                        if let parent = model.taskExecution[task.id].value?.stackParent {
+                            TaskStackParentLabel(parent: parent)
+                        }
                         if let github = task.pr?.publication?.github {
                             Link("PR #\(github.number)", destination: github.url)
                                 .buttonStyle(WorkLinkStyle())
@@ -291,4 +294,24 @@ struct TaskDirectiveEditor: View {
         .interactiveDismissDisabled(isSaving)
     }
 }
+
+/// The open Task a stacked Task builds on, as `lf task status` names it.
+struct TaskStackParentLabel: View {
+    let parent: TaskStackParent
+    @Environment(\.palette) private var palette
+
+    var help: String {
+        let pr = parent.prNumber.map { " (PR #\($0))" } ?? ""
+        return "Builds on \(parent.identifier)'s branch \(parent.branch)\(pr). lf sync main detaches it."
+    }
+
+    var body: some View {
+        Text("Stacked on \(parent.identifier)")
+            .font(Typography.body(12.5))
+            .foregroundStyle(palette.textSecondary)
+            .help(help)
+            .accessibilityIdentifier("task-stack-parent")
+    }
+}
+
 #endif

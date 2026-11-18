@@ -47,7 +47,7 @@ Operate each Wave that has started work by following `lf help wave-operate`,
 here or with `lf --wave <wave> wave-operate "<direction>"`, and operate your
 started Tasks outside any Wave with `lf task-operate <issue>`. Sending someone
 to another conversation is not operating. Follow each intervention to its
-result. Never start a competing Graph process.
+result. Never start a competing Graph run.
 
 `lf task run <issue>` continues a Task to its next interactive step. `lf -b
 task run`, `lf ship`, and any run with no interactive step left ahead approve
@@ -70,9 +70,11 @@ Task and PR. Routine progress goes in this conversation, not Task comments.
   earlier turn. A failed read is not an empty list. To open one, run
   `lf resume <session-id> --prepare --json` and execute its `open_argv`
   unchanged.
-- **Processes.** When work looks stuck, run `lf top` before guessing. Time
-  alone never means dead. `lf process prune --dry-run` shows cleanup
-  candidates. Never kill a PID you can't account for.
+- **Execution.** When work looks stuck, run `lf session list --json` and
+  `lf graph list --runs --state current --json`: what runs, confirmed
+  against the OS. Time alone
+  never means dead. `lf machine doctor` reports strays and kills nothing.
+  Never kill a PID you can't account for.
 - **Machines.** A Task belongs to a person on a Machine. Each person picks
   where new Tasks run with `lf --wave <wave> set machine <machine>` or
   `lf --repo <repo> set machine <machine>`, never committed. This pass changes

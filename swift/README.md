@@ -128,7 +128,7 @@ The board and sidebar use the same activity reading. These badges describe
 conversations; the Task's lifecycle and NOW condition remain separate.
 
 A Task's conversations are the Sessions that started for it: launched for the
-Task, or started inside its checkout. Each Session and process records its Task
+Task, or started inside its checkout. Each Session and Graph run records its Task
 when it starts, so moving the repository on disk, or cloning another one into a
 path a removed checkout used, leaves every Task's list as it was. Repository and
 Wave primary conversations keep their own scope, even in a Task checkout. The
@@ -509,9 +509,8 @@ Choose **Graph processes** in **⌘K** to open the Graph process log. It lists e
 Task's checkout, newest first, whether an edge or a person started it; it is
 not the Workflow's history. One line each: Graph, state, when it started and
 how long it ran. A row opens to its id, graph and steps (the shape of
-`lf process show ID --json`). A Graph whose process exited early reads
-**stopped**. One whose process was killed has no exit record and keeps reading
-as running. **Task details → Debug** lists the Task's raw Sessions and Processes.
+`lf graph show ID --json`). A Graph whose runner exited or was killed reads
+**stopped**. **Task details → Debug** lists the Task's raw Sessions.
 Sessions list **Waiting** first and working ones in a compact group.
 The Wave page's **Workflow** opens its definition in the catalogue inspector.
 **Customize** or **Edit** opens the existing source editor; captured Task
@@ -753,7 +752,7 @@ codebase tree, and registry health.
   Lifecycle mutations remain `lf task run` and `lf task interrupt`; review stages use
   the Task's persisted graph position and provider Run identity.
 - **Registry queries** own durable reads. `RegistryQuery` runs
-  `lf wave list/show/status`, `lf process list`, and `lf session history` JSON commands; the app does not
+  `lf wave list/show/status` and `lf session history` JSON commands; the app does not
   maintain a second planning or lifecycle database. Unavailable per-Wave evidence
   renders its reason, and refresh failures leave the last successful planning or
   Activity history visible.
@@ -934,7 +933,7 @@ See the [creation contract](../rust/loopflow/src/server/README.md#creation-recei
 
 The parts: the plan, the repository's Dashboard plans
 (`lf desktop view list`), Sessions (`lf session list`) and planning status, the shown Task's status, its
-activity (`lf session history`) and live call trees (`lf process list`). Each subscription is
+activity (`lf session history`). Each subscription is
 internally consistent; panes do not share one snapshot. Changing what the window
 shows restarts only the subscriptions whose read changed; the rest answer from their last frame without reading again.
 

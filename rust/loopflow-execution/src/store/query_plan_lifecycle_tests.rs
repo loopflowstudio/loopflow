@@ -45,8 +45,7 @@ fn a_hook_reading_its_steers_and_task_updates_plans_by_index() {
     let (_home, store, task, _viewer) = fixture();
     store.test_session("hooked", &crate::session_record::new_artifact_key());
     let process = store.test_lf_process();
-    let claim =
-        attachment::claim_session_attachment(&store, "hooked", None, &process, false).unwrap();
+    let claim = attachment::claim_session_attachment(&store, "hooked", None, &process).unwrap();
     store
         .record_agent_process_identity("hooked", &claim, std::process::id(), 1)
         .unwrap();

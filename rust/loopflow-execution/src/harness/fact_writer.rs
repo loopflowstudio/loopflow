@@ -429,14 +429,13 @@ mod tests {
         conn.execute("UPDATE agent_sessions SET interactive=?1", [interactive])
             .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, "conversation", None, &process, false)
-                .unwrap();
+            attachment::claim_session_attachment(&store, "conversation", None, &process).unwrap();
         store
             .record_agent_process_identity(
                 "conversation",
                 &attachment,
                 std::process::id(),
-                crate::journal::process_started_at(std::process::id())
+                crate::process::os_process::process_started_at(std::process::id())
                     .unwrap()
                     .unwrap(),
             )
@@ -1055,139 +1054,6 @@ mod tests {
     }
 
     #[test]
-    fn a_delayed_codex_start_keeps_request_capture_across_a_b_a_takeover() {
-        for reply_first in [false, true] {
-            let (home, store, first) = attached(false);
-            let sql = rusqlite::Connection::open(home.path().join("facts.db")).unwrap();
-            let original = store.session("conversation").unwrap().unwrap();
-            let a = first.lf_process_id.clone().unwrap();
-            let b = LfProcessId::new();
-            sql.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',1)",
-                [&b],
-            )
-            .unwrap();
-            let origins = super::RequestOrigins::default();
-            let writer_for = |attachment: &SessionAttachment| {
-                FactWriter::new(
-                    store.clone(),
-                    "conversation".into(),
-                    Some(attachment.clone()),
-                    origins.clone(),
-                )
-            };
-            let mut decoder = CodexDecoder::default();
-            send(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"id":1,"method":"turn/start"}),
-            );
-            let middle = attachment::claim_session_attachment(
-                &store,
-                "conversation",
-                Some(&first),
-                &b,
-                false,
-            )
-            .unwrap();
-            let mut next = original.clone();
-            next.artifact_key = Some(crate::session_record::new_artifact_key());
-            let next = crate::store::sessions::replace_session_input(
-                &store,
-                original.captured,
-                next,
-                None,
-            )
-            .unwrap();
-            let current = attachment::claim_session_attachment(
-                &store,
-                "conversation",
-                Some(&middle),
-                &a,
-                false,
-            )
-            .unwrap();
-            assert_ne!(first.token, current.token);
-            assert!(store.session_turn_origin("conversation", &first).is_err());
-            // Both requests predate the start notification. A second reply for
-            // the same turn must not replace the first correlated origin.
-            send(
-                &mut decoder,
-                &mut writer_for(&current),
-                json!({"id":2,"method":"turn/start"}),
-            );
-            let reply = json!({"id":1,"result":{"turn":{"id":"late"}}});
-            let start = json!({"method":"turn/started","params":{"threadId":"thread","turn":{"id":"late"}}});
-            let messages = if reply_first {
-                [reply.clone(), start.clone()]
-            } else {
-                [start.clone(), reply.clone()]
-            };
-            for message in messages {
-                hear(&mut decoder, &mut writer_for(&first), message);
-                assert_eq!(
-                    store
-                        .conn
-                        .lock()
-                        .unwrap()
-                        .query_row(
-                            "SELECT count(*) FROM history.turns WHERE captured_event=?1",
-                            [next.captured],
-                            |row| row.get::<_, i64>(0)
-                        )
-                        .unwrap(),
-                    0
-                );
-            }
-            let before = store.session_turns("conversation").unwrap();
-            for message in [json!({"id":2,"result":{"turn":{"id":"late"}}}), start] {
-                hear(&mut decoder, &mut writer_for(&current), message);
-            }
-            assert_eq!(store.session_turns("conversation").unwrap(), before);
-            // The turn's usage row comes from its rollout, under the same id.
-            store.record_turn_usage(
-                "conversation",
-                &"thread".into(),
-                "late",
-                0,
-                &json!({"total":{"inputTokens":12},"last":{"inputTokens":12}}),
-            );
-            hear(
-                &mut decoder,
-                &mut writer_for(&first),
-                json!({"method":"turn/completed","params":{"threadId":"thread","turn":{"id":"late","status":"completed"}}}),
-            );
-            let retained = store
-                .session_turns("conversation")
-                .unwrap()
-                .into_iter()
-                .filter(|turn| turn.turn == "late")
-                .collect::<Vec<_>>();
-            assert_eq!(retained.len(), 1);
-            assert!(retained[0].usage.is_some() && retained[0].ended_at.is_some());
-            assert_eq!(retained[0].lf_process_id.as_deref(), Some(a.as_str()));
-            assert_eq!(
-                crate::store::sessions::input_history(&store, original.input_key().unwrap())
-                    .unwrap()
-                    .usage
-                    .total_input_tokens,
-                Some(12)
-            );
-            assert_eq!(
-                crate::store::sessions::input_history(&store, next.input_key().unwrap())
-                    .unwrap()
-                    .usage
-                    .total_input_tokens,
-                None
-            );
-            assert_eq!(
-                store.session_attachment("conversation").unwrap(),
-                Some(current)
-            );
-        }
-    }
-
-    #[test]
     fn codex_resumed_or_broadcast_turns_do_not_claim_this_clients_origin() {
         let (_home, store, attachment) = attached(false);
         let turns = || store.session_turns("conversation").unwrap();
@@ -1287,12 +1153,14 @@ mod tests {
             [&replacement],
         )
         .unwrap();
+        store
+            .record_agent_process_exit("conversation", &attachment, true)
+            .unwrap();
         attachment::claim_session_attachment(
             &store,
             "conversation",
             Some(&attachment),
             &replacement,
-            true,
         )
         .unwrap();
         let messages = vec![

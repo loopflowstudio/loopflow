@@ -68,8 +68,8 @@ fn write_task_checkout_in(conn: &Connection, task: &Task) -> StoreResult<()> {
     let inside = |cwd: &str| format!("({cwd}=rtrim(?2,'/') OR instr({cwd},rtrim(?2,'/')||'/')=1)");
     conn.execute(
         &format!(
-            "UPDATE processes SET task_id=?1 WHERE id IN (SELECT id FROM processes
-                INDEXED BY processes_unfinished WHERE completed_at IS NULL)
+            "UPDATE graph_processes SET task_id=?1 WHERE lf_process_id IN (SELECT lf_process_id
+                FROM graph_processes INDEXED BY graph_processes_unended WHERE ended_at IS NULL)
              AND task_id IS NULL AND {}",
             inside("cwd")
         ),

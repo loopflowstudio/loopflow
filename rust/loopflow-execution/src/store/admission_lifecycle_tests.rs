@@ -661,7 +661,7 @@ fn bind_preserves_prior_work_and_usage_while_assigning_future_work() {
         )
         .unwrap();
     let attachment =
-        attachment::claim_session_attachment(&store, "orphan", None, &process, false).unwrap();
+        attachment::claim_session_attachment(&store, "orphan", None, &process).unwrap();
     let origin = store.session_turn_origin("orphan", &attachment).unwrap();
     store.record_session_turn_origin(&"thread".into(), "future", &origin);
     let events = store.session_history("orphan", 0, 0).unwrap();

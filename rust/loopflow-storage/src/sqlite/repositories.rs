@@ -111,9 +111,8 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 /// Routing and transactional preparation use the same sharing boundary.
 /// Shared mutation routes are planning evidence, never an execution reservation.
 impl SqliteStore {
-    /// Move current addresses together. Captures, Process rows and provider
-    /// history retain the paths at which they were recorded; each Process
-    /// keeps the Task it recorded when it started.
+    /// Move current addresses together. Captures and provider history retain
+    /// the paths at which they were recorded.
     pub fn relocate_repository(&self, id: &RepositoryId, destination: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -341,7 +340,7 @@ impl SqliteStore {
 mod tests {
 
     #[test]
-    fn relocation_rolls_back_and_retains_nested_task_processes() {
+    fn relocation_rolls_back_and_moves_nested_checkouts() {
         use loopflow_model::durable::{ProjectId, TaskId};
         use loopflow_model::id::WaveId;
         use rusqlite::params;
@@ -351,7 +350,7 @@ mod tests {
         let wave = WaveId::new();
         let project = ProjectId::new();
         let task = TaskId::new();
-        let process = {
+        {
             let conn = store.conn.lock().unwrap();
             conn.execute(
                 "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/before',1)",
@@ -367,7 +366,6 @@ mod tests {
             )
             .unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
-            crate::test_fixture::start_process(&conn, Some("/before/task/src"), None)
         };
         assert!(store.relocate_repository(&id, "/after").is_err());
         assert_eq!(
@@ -383,27 +381,14 @@ mod tests {
             .unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
-        assert_eq!(
-            store.task_open_processes(&task).unwrap()[0].id(),
-            process.as_str()
-        );
         let conn = store.conn.lock().unwrap();
-        assert_eq!(
-            super::super::task_work::task_of_process(&conn, &process)
-                .unwrap()
-                .as_deref(),
-            Some(task.as_str())
-        );
-        let cwd: String = conn
-            .query_row("SELECT cwd FROM processes WHERE id=?1", [&process], |row| {
-                row.get(0)
-            })
+        let worktree: String = conn
+            .query_row(
+                "SELECT worktree FROM task_checkouts WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(cwd, "/before/task/src");
-        // A clone reusing the old path is not the moved Task's work.
-        let unrelated = crate::test_fixture::start_process(&conn, Some("/before/task/src"), None);
-        assert!(super::super::task_work::task_of_process(&conn, &unrelated)
-            .unwrap()
-            .is_none());
+        assert_eq!(worktree, "/after/task");
     }
 }

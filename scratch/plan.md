@@ -158,6 +158,11 @@ what is stored and why.
    migration runner if only a released migration's hook calls it and the
    hook can call `capture` per record instead. Report before/after.
 
+## Docs written ahead
+
+- `docs/work.md` (Share the plan: 5 s check, push only on change, switch publishes whole plan)
+- `docs/dev/planning.md` (Git-only journal, stored `planning_tracker` and seed, outbox-gated 5 s loop)
+
 ## Affected surfaces
 
 - `rust/loopflow-storage/src/sqlite/planning_write.rs` (capture gate),

@@ -182,7 +182,9 @@ observations from another Wave to adopt conflicting Linear membership, retain bo
 values and advance unrelated fields. It never grants execution or provider-write authority.
 
 One typed writer, `sqlite/planning_write.rs`, owns planning field persistence and
-Git mutation capture. Local writes and journal mutations carry `WorkEdit`: a target
+Git mutation capture. It journals a write only when the record's repository plans
+through Git: a save or tracker event in a Linear or Asana repository writes no
+`planning_peer_*` row. Local writes and journal mutations carry `WorkEdit`: a target
 identity and a typed `WorkValue`. The value determines its scope and conflict field;
 Git and the local journal retain the same typed mutation, including its causal
 parents. SQLite derives target, field and clock indexes from that value; its table
@@ -214,7 +216,17 @@ Current Work ownership selects new Git exports. Each exported or imported mutati
 retains its repository and destination in `planning_peer_routes`, independently of
 live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
 routing or rejected imports. Status derives the active destination from configuration;
-there is no stored selection or per-Work membership inventory. These routes are
+there is no stored destination or per-Work membership inventory. The store keeps
+one copy of a config fact, `repository_plans.planning_tracker` (`git`, `linear`,
+`asana`; NULL until seen), so the writer can decide whether to journal without
+reading `.lf/config.yaml` under the write lock. Every Git exchange records `git`
+on binding its destination and every Linear or Asana drain records its tracker,
+each only when the value changes. Recording `git` captures every record the
+repository owns in the same transaction, before the first acquisition, so a
+repository switched to Git publishes its whole plan once. A switched repository
+keeps its journal: on a switch back to Git, the kept observed heads are the seed's
+causal parents, so values saved under Linear win and a peer's change made
+meanwhile still shows as lost. These routes are
 exchange evidence and grant no Task ownership. Ownership entries travel as marked
 Task comments in both modes; with Git planning, each local append sorts after every
 entry its Machine has seen.
@@ -293,8 +305,13 @@ mutation journal grows with every edit, so `lf repo plan journal` reads it on
 request: every change, losing values included, and the ranked candidate IDs, which
 are not applied or published evidence; rejected projections retain their failure reasons.
 Journal read failures fail the status read; Desktop keeps its last reading with the
-error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections own Git exchange
-for their lifetimes; Linear checks run at the boundaries described below. A short save attempts exchange before returning. No resident,
+error, rather than inventing an empty plan. Foreground CLI, headless Session and Desktop connections in a Git repository own
+its exchange for their lifetimes: one loop every 5 s acquires (one fetch), and
+publishes only when Git's outbox is not empty, meaning an owned journal change has
+no route to the active destination or the last publication is not confirmed.
+Other repositories' saves never wake it. Connections in a Linear or Asana
+repository start no Git exchange; Linear checks run at the boundaries described
+below. A save publishes after the command answers, so the loop is the retry path. No resident,
 whole-store callback, scheduler or implicit turn/Graph replay is involved.
 
 `--machine` sends portable pushed-code requirements and a Task selector, then the

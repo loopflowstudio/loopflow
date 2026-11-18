@@ -249,6 +249,16 @@ Ref names are not access control; pick a remote whose readers should see the
 plan. When two people edit the same field, the later edit wins; the other
 value shows as lost on its Task and in `lf repo plan` until you answer it.
 
+An open `lf` Session or Desktop checks the ref every 5 seconds and pushes only
+when it has a change the remote lacks; a save pushes right after the command
+answers. Switching a repository from Linear or Asana to Git publishes its whole
+current plan on the first exchange:
+
+```bash
+lf task sync LOO-12      # after changing planning to provider: git
+lf repo plan             # the destination, its last publication, any lost values
+```
+
 ### Linear or Asana
 
 ```bash

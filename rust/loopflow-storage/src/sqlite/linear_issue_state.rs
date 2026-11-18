@@ -1,4 +1,4 @@
-//! Retained Linear acquisition evidence, independent of accepted Work and delivery.
+//! The last known state of each Linear issue, kept apart from the Work it updated and from queued tracker actions.
 pub use crate::planning::revision_nanos;
 use crate::sqlite::{planning_write, SqliteStore};
 use crate::work::edit::WorkValue as Edit;

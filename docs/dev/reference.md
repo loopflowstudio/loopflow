@@ -22,7 +22,7 @@ routing, client admission and installation.
 
 The Rust application owns Clap, server dispatch and compiled build identity.
 [`loopflow-execution`](../../rust/loopflow-execution/README.md) owns the shared
-operations, provider conversations, native lifetimes and acquisition above
+operations, provider conversations, native lifetimes and tracker fetches above
 synchronous storage. Model, definitions, storage and terminal state remain
 separate private libraries. Command-only edits leave execution reusable; the
 application supplies its running identity and command semantics at their edges.

@@ -398,7 +398,7 @@ synthetic Linear on Linux, with disposable TLS trust. It covers lost replies,
 independent acquisition during failed delivery, local buffering and retained execution.
 The peer implements team deltas with current revision timestamps. Graph acquisition
 waits for a turn/step boundary; only watchers retry on the 30–240-second clock.
-Run these Linux fixtures when changing Linear acquisition, even if macOS checks pass.
+Run these Linux fixtures when changing Linear fetches, even if macOS checks pass.
 Linear and Git planning run separately; no provider receipt crosses Git.
 `planning_setup_tests` proves configuration selection and personal-key recovery.
 `planning_foreground_tests` exercises disposable custom refs through public CLI and

@@ -52,7 +52,7 @@ The exact landing fence is modeled in
 
 `lf checkout` resolves a saved Task inside one Wave's planning and
 creates or reuses its managed worktree without creating a PR. Saved planning
-works without Linear; an unknown tracker alias needs initial acquisition.
+works without Linear; an unknown tracker alias is fetched first.
 It starts no execution. `lf task run ISSUE` uses the same substrate and additionally
 runs a fresh Graph there. The repository identity—not the caller's
 current directory spelling—selects the Git directory and sibling worktree

@@ -227,7 +227,7 @@ impl Forward {
 }
 
 /// Return whether dispatch completed remotely. No Task Graph or checkout is
-/// mutated before routing. Unknown provider aliases retain ordinary acquisition.
+/// mutated before routing. Unknown tracker aliases are still fetched as usual.
 pub fn dispatch(cli: &Cli, args: &[String]) -> Result<bool> {
     let Some(forward) = forward(cli, args, &std::env::current_dir()?)? else {
         return Ok(false);
@@ -556,7 +556,7 @@ fn context_scope(
     })
 }
 
-/// Inspect known Work only. Provider acquisition and plan exchange have their
+/// Inspect known Work only. Tracker fetches and plan exchange have their
 /// own owners; neither is run merely to choose a launch destination.
 pub(super) fn resolve(cli: &Cli) -> Result<Option<TaskExecutionRoute>> {
     let Some(selector) = launch_task(cli) else {

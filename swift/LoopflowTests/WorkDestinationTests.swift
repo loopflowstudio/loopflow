@@ -192,11 +192,7 @@ struct WorkDestinationTests {
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(snapshot), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
         model.navigation.palette = .newTask
-        // The window's own repository layout read precedes the click.
         let deadline = ContinuousClock.now + .seconds(3)
-        while !requests.withLock({ $0.contains { $0.starts(with: ["desktop", "layout", "repository"]) } }),
-              ContinuousClock.now < deadline { await Task.yield() }
-        requests.withLock { $0.removeAll() }
         StartingTaskView.start(model: model, request: "fix the flaky retry test", wave: nil, graph: nil)
         // The click closes the sheet; the words stand in until the answer.
         #expect(model.navigation.palette == nil)
@@ -271,10 +267,6 @@ struct WorkDestinationTests {
         }
         let (model, registry) = destinationModel(query: query, repoPath: task.task.repo)
         model.applyFixture(roadmap: .available(without), waves: .available([]), workActivity: .loading, repos: [], fixed: true)
-        let deadline = ContinuousClock.now + .seconds(3)
-        while !requests.withLock({ $0.contains { $0.starts(with: ["desktop", "layout", "repository"]) } }),
-              ContinuousClock.now < deadline { await Task.yield() }
-        requests.withLock { $0.removeAll() }
         try await model.createTask(request: "fix the flaky retry test", wave: nil, graph: nil, requestID: UUID().uuidString)
         #expect(model.navigation.startingTask == nil)
         #expect(model.selection == .task(id: task.id))

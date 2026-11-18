@@ -186,11 +186,6 @@ freeze in `relocate_repository` (`repositories.rs:136`), the fixture writer in
 `tasks.ship_lf_process_id` clauses of `FORGETTABLE` (`processes.rs:347-350`)
 go.
 
-Before deleting the Session-derived unions, count on the `/tmp` copy the
-Processes they reach that rules 1–4 do not (event-only attribution with no
-`caller_session_id`). If any survive the prune, the backfill adds a clause for
-them; the read never keeps the unions.
-
 Backfill: `agent_sessions.task_id` (2,659 rows) in the migration, with the
 reconciliation rule below. Processes do not fit there. Measured on a
 `VACUUM INTO` copy of the live store (2026-11-17): the deepest-checkout probe,
@@ -320,16 +315,11 @@ every Process/Session association, conflict answers.
    `session_membership`/`session_tasks` read `task_id` only. Until then
    Sessions keep binding-or-path membership (paths already move with
    `relocate_repository`).
-   Original scope: Migration adds
-   `processes.task_id` + index, backfills Sessions, marks
-   `relocated_task_processes` leaving; the maintenance pass backfills
-   Processes. Writers apply the five rules; membership reads the column;
-   relocation code and the Session-derived unions go. Demo: `relocate_repository` test, then reuse the
-   old path for a new clone, and `lf task status` still lists only the
-   original Processes. This could prove the plan wrong if some launch has no
-   knowable Task at insert, or if the insert-time probe shows up in
-   `EXPLAIN QUERY PLAN` as anything but index seeks. The batched backfill is
-   part of this slice; check each batch's lock hold on the `/tmp` copy.
+   Demo for the whole slice: `relocate_repository` test, then reuse the old
+   path for a new clone, and `lf task status` still lists only the original
+   Processes and Sessions. Session cwd-matching (`checkout()` in
+   `task_work.rs`, `session_membership`, the checkout half of
+   `session_tasks`) is the last path match left; it goes with this half.
 2. **The guard.** Authorizer in test stores, leaving list from `build.rs`.
    Fix the reads it catches (the `ship_lf_process_id` prune clause, the
    registry fallback). Every later slice lands under it.

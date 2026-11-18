@@ -17,8 +17,14 @@ Made for review in `scratch/plan.md`; each is reversible before release.
   not exchange through Git or the hub there. The design says they do. Needs
   "which refs are mine" and one owner per field; left for the tracker Task
   (your slice, Linear manual order), which is not filed yet.
-- Slice 4 (a person's order of their claimed Tasks) is a new value and a new
-  view rule. In this Task, or with the tracker Task?
+- Concept review, 2026-11-18, each reversible before release
+  (`scratch/concept-review.html`, questions 1-5): a Machine's ref holds its
+  whole plan, not only the fields it stamped newest; both carriers keep one
+  cursor and say "unsent" (`hub_sends` goes); a clone takes its repository id
+  from the plan ref if binding carries saved rows; a person's order of their
+  claimed Tasks moves to the tracker Task.
+- Whole-plan refs cost one small commit per Machine per change. Fine at ten
+  Machines; untested beyond.
 - First-wins claims add "the last entry I had seen" to the ownership marker.
   Entries a released `lf` wrote have none and read as having seen everything.
 

@@ -2,8 +2,10 @@
 
 Design for LOO-938, 2026-11-18. Guide page: `scratch/plan-design.html`.
 Exploration it came from: `scratch/explore.html`, `scratch/explore.md`.
-It replaces the direction in `scratch/plan.md` ("the hub owns the plan"),
-which the branch currently implements.
+It replaces "the hub owns the plan", which the branch currently implements.
+`scratch/plan.md` builds this design with three differences listed at its
+top (what a ref holds, one carrier shape, the repository id); where they
+differ the plan holds.
 
 ## What you get
 

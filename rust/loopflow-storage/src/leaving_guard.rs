@@ -76,11 +76,6 @@ fn keys(conn: &Connection) -> Keys {
     keys
 }
 
-/// Whether `member` (`table` or `table.column`) is marked leaving.
-pub(crate) fn is_leaving(member: &str) -> bool {
-    leaving().contains(member)
-}
-
 fn leaving_member(context: &AuthContext<'_>, keys: &Keys) -> Option<String> {
     if context.accessor.is_some() || context.database_name.is_some_and(|name| name != "main") {
         return None;

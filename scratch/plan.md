@@ -40,8 +40,9 @@ open scripts/benchmarks/crate-rebuild/results/loo-923.html
 ```
 
 The results page shows base `7bb879aff4` against the branch: a storage edit
-and an ops edit both hit the harness cache, a decoder edit misses harness,
-execution and the application and hits storage, and the owner's test build.
+and an ops edit both reuse the harness library, a decoder edit recompiles
+harness, execution and the application and reuses storage, and the owner's
+test build drops from 35.6 s to 1.2 s.
 
 ## The concepts
 
@@ -339,24 +340,54 @@ measured compile share: `ops` above the rest, not another leaf.
      only one that needed more than a path.
    - Rechecked after the slice, 2026-11-18: `origin/main` is still
      `7bb879aff4`; #1967, #1968, #1972 and #1976 are open.
-3. **Measure and document. Remains.**
-   - `run.py`: cases `harness_format` and `harness_test`, and the harness-hit
-     requirement on `execution` and `storage` (Acceptance check, above).
-     `probe.py`'s member list gains `rust/loopflow-harness`.
-   - `lf task status LOO-921` and `LOO-922` first, then one `run.py` run of
-     base `7bb879aff4` against `HEAD`, written to
-     `scripts/benchmarks/crate-rebuild/results/loo-923.{json,html}`.
-   - `scripts/test.py`: a harness-only change reaches `loopflow-harness`'s
-     tests and execution's harness suites; `scripts/macos_inputs.py` if the
-     Desktop build reads the crate.
-   - Correct the docs written ahead of the code against slices 1 and 2:
-     `recognizes` on `Launcher`, `transcript_home` without a default, a fifth
-     harness failing to compile until it has a launcher, `pi_rpc.py` staying
-     in execution, `transcript::testdata` and `fact::trace` behind
-     `test-support`, the crate's dependency list.
-   - The PR body carries the checks left for gate (clippy over execution and
-     the application, `documented_commands::`, `binary(golden_prompt)`) and
-     which LOO-921/LOO-922 numbers did not exist.
+3. **Measure and document. Built (`7953d9a7c5`, `c3695d4ebe`, `6926071940`).**
+   `run.py` has the `harness_format` and `harness_test` cases and takes each
+   edit's expected recompiles from the revision's own crates; `report.py`
+   renders any named comparison. The page is
+   `scripts/benchmarks/crate-rebuild/results/loo-923.html`.
+   What the run showed, 2026-11-18, this Machine, base `7bb879aff4` against
+   `7953d9a7c5`, one Cargo job, three cohorts, private caches, one-minute load
+   10.9-133.4 on 16 CPUs from other checkouts (median, seconds elapsed):
+
+   | Edit | Base | Candidate |
+   |---|---|---|
+   | Execution (ops), through `lf` | 40.53 [40.10-41.26] | 39.74 [38.99-41.95] |
+   | Saved Task record, through `lf` | 47.26 [47.02-47.28] | 47.09 [47.09-48.90] |
+   | Decoder, through `lf` | 39.51 [39.17-40.19] | 41.48 [40.14-42.72] |
+   | Decoder, owner's test binary | 35.56 [34.71-36.85] | 1.17 [1.15-1.22] |
+
+   - The compiler closures are as designed: an execution or storage edit never
+     compiles `loopflow_harness` (Cargo-fresh; a cache hit in a fresh
+     worktree), and a decoder edit compiles harness, execution and the
+     application and leaves storage alone. The validator enforces both.
+   - **The ops and storage edits did not get faster.** -0.8 s and -0.2 s, with
+     overlapping ranges. `loopflow_harness` compiles in 0.8-0.9 s; execution
+     still takes 24-26 s and the application 13-14 s. This is the outcome
+     "What the evidence says" named: a sibling this size is not worth its
+     boundary for the edit loop, and the next extraction is chosen by compile
+     share (`ops` above the rest), not another leaf.
+   - A decoder edit through to `lf` costs about 2 s more (one more crate in
+     the chain).
+   - What the crate does buy: the decoder's own test build, 35.6 s to 1.2 s
+     and 4.76 GiB to 0.32 GiB peak RSS; and execution's compile peaks at
+     3.01 GiB, down from 3.30.
+   - Absolute seconds are not comparable with LOO-650's (57.5 s, 65.5 s): this
+     run's client CPU exceeds its elapsed time and LOO-650's did not. Only the
+     base-against-candidate pairs within this run are.
+   - `lf task status`: LOO-921 idle with stopped Graphs, LOO-922 unstarted;
+     no other `crate-rebuild` process was running. No LOO-921 or LOO-922
+     number exists to compare against.
+   - Not done, with reasons in `scratch/questions.md`: five cohorts,
+     `probe.py`'s member list, changes to `scripts/test.py` and
+     `scripts/macos_inputs.py` (neither needed one; `scripts/testing.md` gained
+     the gate filter `package(loopflow-harness) | test(harness::)`).
+   - Docs corrected against slices 1 and 2: the crate README, execution's
+     harness README, `docs/dev/codebase.md`. `docs/dev/reference*.md` and
+     execution's README already matched.
+   - For gate, not run here: clippy over execution and the application,
+     `documented_commands::` (README and docs edits), `binary(golden_prompt)`,
+     `uv run pytest python/tests` for the benchmark scripts if any test
+     imports them. The PR body states that no LOO-921/LOO-922 numbers existed.
 
 ## Seen in review, not changed
 

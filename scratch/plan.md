@@ -266,6 +266,11 @@ measured compile share: `ops` above the rest, not another leaf.
      measures those.
    - Execution's `harness::conformance_tests`, `fact_writer` and `pi_tests`:
      40 passed against the crate.
+   - Application launch through a real `lf`
+     (`cargo test -p loopflow --test session_launch_contract pi_native_callbacks_retain_identity_final_output_and_usage`):
+     passed.
+   - Not run here, for gate: `documented_commands::` (README edit), clippy
+     over execution and the application.
    What it taught:
    - Surface that became `pub`: the three decoder structs with their methods,
      `ReaderState`'s four readers, `codex_decode::{turn_request, rpc_error}`,

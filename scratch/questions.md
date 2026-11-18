@@ -20,28 +20,20 @@
   holds every fact shown on any Machine, `pm_items` what the provider last
   said. Passed over: provider-only facts in `pm_items`, which loses the branch
   on Git-planning repositories.
-- **No released-lf trigger for `processes.task_id`.** The maintenance backfill
-  catches rows an old binary inserts. Passed over: a trigger, which SQLite
-  forbids from using the recursive ancestor probe (`WITH` in a trigger).
 - **The branch has three homes after this Task**: `tasks.planning_branch_name`
   (the Task's branch, shared), `task_checkouts.branch` (this Machine's
   checkout), `task_prs.branch` (the PR's head). Whether they can
   ever differ, and so whether one "the Task's branch" suffices, is LOO-934's.
-- **Checkout before caller for a Process's Task.** Chosen from the live copy:
+- **Checkout before caller for a Session's or Graph run's Task.** Chosen from the live copy:
   a command run inside a checkout is that Task's work whoever ran it
   (`session serve`, `pr land`, `--task X ship` from another Task's agent).
   Passed over: the kickoff's caller/parent-first order, which gave 6,687 such
   Processes to the calling agent's Task.
-- **`observed`-only Processes leave their Task's list.** 166 pairs where a
-  Process only wrote an observation into a Session; not treated as the Task's
-  work. Passed over: a backfill clause for them.
-- **`process_task_backfill` cursor table** so a Process with no Task is
-  examined once per store rather than every hourly pass. Drops with LOO-877.
 - **No maintenance pass for Sessions.** Released `lf` still creates helper
   Sessions without a Task during the window; they miss their Task's list
   until... nothing assigns them. Chosen: accept it (helpers are PR-title and
   commit-message runs; Task Graphs name their Task). Passed over: a second
-  cursor in `assign_process_tasks` for `agent_sessions`.
+  maintenance pass for `agent_sessions`.
 - **Guard reach.** Chosen: only `loopflow-storage`'s `cfg(test)` stores.
   Passed over: `test-support` stores too, which would catch execution and
   application SQL but put the authorizer behind a feature Cargo unifies into
@@ -122,3 +114,29 @@ runs each naming their Task at start, by one shared rule (plan, "Next").
 "2) i dont understand it", "3) dont understand": both follow from 1 (lf
 commands in a checkout are not listed as Task work; LOO-965 owns
 `relocated_task_processes`). "4) (b)": a fresh run from `implement`.
+
+## Merge of main after #1974 (implement, 2026-11-18)
+
+- **A run already in a checkout a Task then takes stays out of that Task's
+  history.** Main says so (`open_graph_execution`: "prevents overlapping runs
+  without making that Graph part of the Task's history"), and
+  `adopting_a_checkout_with_a_running_graph_prevents_another_run` checks the
+  Task is idle and runnable once that run ends. So `task_open_graph_pairs`
+  keeps one path clause, for unended runs that recorded no Task; a run's
+  `task_id` stays fixed from its start. Passed over: adoption giving the run
+  the Task (as it does open Sessions), which left the Task Blocked on a run
+  from before it held the checkout. Sessions and runs differ here; whether
+  they should is open.
+- **The migration's Graph-run backfill attaches earlier taskless runs by
+  today's checkouts**, ended ones included, so a run that predates a Task's
+  adoption of its checkout joins that Task's history on upgrade. Few rows:
+  `graph_process_task` already paired runs by path, and `lf graph` in a
+  checkout has named the Task since. Passed over: no backfill.
+- **Steers during this pass** (Jack Heart, via the Task): "Cancel the previous
+  steer: keep the migration name task_facts_once. Do not rename it." and "Bug
+  in task_facts_once: the Graph-run backfill takes the caller Session's Task
+  only when s.primary_scope IS NULL ... Use the membership rule". At that
+  point in the migration no row can hold `'task'` yet (the CHECK is rebuilt
+  later), so it selected the same rows; it now reads as the membership rule,
+  and both the upgrade test and the membership test start a run from a Task
+  primary.

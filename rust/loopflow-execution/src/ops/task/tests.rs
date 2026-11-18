@@ -712,7 +712,7 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
             .task_graphs(&fixture.task.id)
             .unwrap()
             .len(),
-        2
+        3
     );
 }
 

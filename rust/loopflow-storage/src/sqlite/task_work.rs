@@ -648,13 +648,20 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
     )? > 0)
 }
 
-/// Unended Graph runs paired with the selected Task each recorded. The few
-/// unended runs seed it.
+/// Unended Graph runs paired with each selected Task they occupy: the Task a
+/// run recorded, or for a run that recorded none, the Task whose checkout
+/// holds it. A Task can take a checkout a run is already in; that run stays
+/// out of the Task's history and still keeps a second run from starting
+/// beside it. The few unended runs seed it.
 pub(super) fn task_open_graph_pairs(selector: &str) -> String {
+    // Whole path components: `/repo.task` does not hold `/repo.task-other`.
     format!(
-        "SELECT g.task_id AS task_id,g.lf_process_id AS graph
+        "SELECT tw.id AS task_id,g.lf_process_id AS graph
          FROM graph_processes g INDEXED BY graph_processes_unended
-         WHERE g.ended_at IS NULL AND g.task_id IN ({selector})"
+         JOIN tasks tw ON tw.id IN ({selector}) AND (g.task_id=tw.id OR (g.task_id IS NULL
+            AND EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id
+                AND (g.cwd=rtrim(c.worktree,'/') OR instr(g.cwd,rtrim(c.worktree,'/')||'/')=1))))
+         WHERE g.ended_at IS NULL"
     )
 }
 
@@ -1328,6 +1335,7 @@ mod tests {
         let conversation = |cwd: &str| {
             let mut session = crate::test_fixture::unpublished_conversation(None, None, 1);
             session.work_source = None;
+            session.interactive = true;
             session.cwd = cwd.into();
             store.create_session_prepared(session, None).unwrap().id
         };
@@ -1347,8 +1355,13 @@ mod tests {
         checkout(&first);
         let first_conversation = conversation("/repo/task/src");
         let first_run = run("/repo/task/src", None);
-        // A run the conversation starts elsewhere is its Task's work too.
+        // A run the conversation starts elsewhere is its Task's work too,
+        // and still is once the conversation is the Task's primary.
         let elsewhere = run("/tmp", Some(&first_conversation));
+        store
+            .choose_task_primary(&first, first_conversation.as_str())
+            .unwrap();
+        let from_primary = run("/tmp", Some(&first_conversation));
         // The repository moves, and another Task's clone takes the old path.
         store.relocate_repository(&repository, "/moved").unwrap();
         checkout(&second);
@@ -1369,7 +1382,10 @@ mod tests {
         };
         assert_eq!(
             work(&first),
-            (vec![first_conversation], vec![first_run, elsewhere])
+            (
+                vec![first_conversation],
+                vec![first_run, elsewhere, from_primary]
+            )
         );
         assert_eq!(
             work(&second),
@@ -1401,6 +1417,7 @@ mod tests {
              INSERT INTO task_checkouts(task_id,worktree) VALUES('task_1','/repo/1');
              INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
              VALUES('caller','Caller','human',1,0,'/elsewhere','task_2');
+             INSERT INTO task_primary_sessions(task_id,session_id) VALUES('task_2','caller');
              INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id,started_at,cwd,caller_session_id) VALUES
                 ('inside','code','{}',NULL,1,'/repo/1/src','caller'),
                 ('called','code','{}',NULL,1,'/tmp','caller'),
@@ -1426,18 +1443,13 @@ mod tests {
                 ("nowhere".into(), None),
             ]
         );
-        // A run that took a Task keeps it; one with none may still take one.
+        // A run's Task is fixed again once the upgrade has recorded it.
         assert!(conn
             .execute(
-                "UPDATE graph_processes SET task_id='task_1' WHERE lf_process_id='named'",
-                []
+                "UPDATE graph_processes SET task_id='task_1' WHERE lf_process_id='nowhere'",
+                [],
             )
             .is_err());
-        conn.execute(
-            "UPDATE graph_processes SET task_id='task_1' WHERE lf_process_id='nowhere'",
-            [],
-        )
-        .unwrap();
     }
 
     #[test]

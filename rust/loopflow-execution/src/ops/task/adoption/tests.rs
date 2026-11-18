@@ -186,12 +186,13 @@ fn creation_adopts_only_the_selected_work() {
     assert_eq!(table.primary(&plain), None);
     assert_eq!(table.session(&research).task_id, None);
 
-    // A checkout alone selects no conversation, however recent.
+    // A checkout alone selects no primary, however recent; the conversation
+    // open in it becomes the Task's work.
     let adopted = table.create("Prototype", None, Some(&root)).unwrap();
     assert_eq!(adopted.worktree.as_deref(), Some(root.as_path()));
     assert_eq!(adopted.branch, "prototype");
     assert_eq!(table.primary(&adopted), None);
-    assert_eq!(table.session(&research).task_id, None);
+    assert_eq!(table.session(&research).task_id, Some(adopted.id.clone()));
     assert_eq!(
         table.create("Retry", None, Some(&root)).unwrap().id,
         adopted.id,
@@ -405,7 +406,8 @@ fn binding_refuses_background_and_closed_sessions() {
         );
         assert!(refusal(table.create("Same work", Some(session), None))
             .contains("unfinished interactive Session"));
-        assert_eq!(table.session(session).task_id, None);
+        // Each started in the Task's checkout, so it is the Task's work.
+        assert_eq!(table.session(session).task_id, Some(task.id.clone()));
     }
     assert_eq!(table.primary(&task), None);
     assert_eq!(table.count("tasks"), 1);

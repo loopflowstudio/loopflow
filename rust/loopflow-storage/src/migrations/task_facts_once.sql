@@ -30,9 +30,8 @@ FROM (SELECT s.id, (WITH RECURSIVE up(path) AS (
 JOIN tasks t ON t.id=inside.task_id LEFT JOIN projects p ON p.id=t.project_id
 WHERE inside.id=agent_sessions.id;
 
--- Graph runs that named no Task take theirs by the same rule. A run names its
--- Task once: one that started with none may take the Task that adopts the
--- checkout it runs in, and a recorded Task never changes.
+-- Graph runs that named no Task take theirs by the same rule, once. A run's
+-- Task is part of its launch, so the trigger that fixes it steps aside here.
 DROP TRIGGER graph_processes_launch_is_immutable;
 CREATE TEMP TABLE graph_run_tasks AS
 SELECT g.lf_process_id AS run, coalesce(
@@ -45,7 +44,7 @@ SELECT g.lf_process_id AS run, coalesce(
      WHERE up.path!='' OR substr(g.cwd,1,1)='/' OR g.cwd=''
      ORDER BY length(up.path) DESC, c.task_id LIMIT 1),
     (SELECT s.task_id FROM agent_sessions s
-     WHERE s.id=g.caller_session_id AND s.primary_scope IS NULL)) AS task_id
+     WHERE s.id=g.caller_session_id AND coalesce(s.primary_scope,'task')='task')) AS task_id
 FROM graph_processes g WHERE g.task_id IS NULL;
 UPDATE graph_processes SET task_id=found.task_id
 FROM graph_run_tasks found
@@ -53,8 +52,7 @@ WHERE found.run=graph_processes.lf_process_id AND found.task_id IS NOT NULL;
 DROP TABLE graph_run_tasks;
 CREATE TRIGGER graph_processes_launch_is_immutable BEFORE UPDATE ON graph_processes
 WHEN NEW.lf_process_id IS NOT OLD.lf_process_id OR NEW.graph IS NOT OLD.graph
-    OR NEW.compiled IS NOT OLD.compiled
-    OR (OLD.task_id IS NOT NULL AND NEW.task_id IS NOT OLD.task_id)
+    OR NEW.compiled IS NOT OLD.compiled OR NEW.task_id IS NOT OLD.task_id
     OR NEW.caller_session_id IS NOT OLD.caller_session_id
 BEGIN
     SELECT RAISE(ABORT,'A Graph record is append-only');

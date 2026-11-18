@@ -154,14 +154,14 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
 - Session creation (`resolve_ancestry_in`) applies the first two; the Task of
   the Session that started it arrives named, as `work_source='inherited'`,
   from `select_work`.
-- Adoption: `write_task_checkout_in` gives open taskless Sessions and unended
-  taskless Graph runs inside a newly placed checkout its Task. So
-  `graph_processes_launch_is_immutable` lets `task_id` go NULL → value once
-  and never change after, the shape `validate_conversation_ancestry_update`
-  already gives Sessions.
-- Readers: `session_membership`, `session_tasks`, `task_graph_pairs` and
-  `task_open_graph_pairs` read `task_id` only. `checkout_open_work` still
-  matches paths: it answers for a checkout no Task holds.
+- Adoption: `write_task_checkout_in` gives open taskless Sessions inside a
+  newly placed checkout its Task. A Graph run already there keeps no Task
+  (`graph_processes_launch_is_immutable` stands as main wrote it) and stays
+  out of the Task's history; it still blocks a second run (questions.md).
+- Readers: `session_membership`, `session_tasks` and `task_graph_pairs` read
+  `task_id` only. Two path matches remain, both about what occupies a
+  directory now: `task_open_graph_pairs` for unended runs that recorded no
+  Task, and `checkout_open_work` for a checkout no Task holds.
 - Backfill in `task_facts_once.sql`: the 3 primaries from
   `task_primary_sessions`, the deepest checkout for Sessions naming nothing
   (22,342 live Sessions: 0.19 s), then Graph runs with no Task by the rule.
@@ -260,7 +260,7 @@ every Process/Session association, conflict answers.
    see above), the rest `work_source`/`regressed_in` (still read by design,
    `STILL_READ`) and three test-side readers. Production SQL it caught: none
    beyond the two planned. The `ship_lf_process_id` prune clause is gone;
-   `process_task.sql` nulls that column (190 live rows, every one already a
+   the migration nulled that column (190 live rows, every one already a
    `task_ship_events` row since task_machine_local; v0.16.0 writes it only in
    a test), so no Process stays pinned by it. The pre-`task_checkouts`
    registry fallback is gone from `read_task_branches` and
@@ -334,48 +334,19 @@ drops `task_primary_sessions_mark_insert`, `task_primary_sessions_mark_update`
 and `agent_sessions_task_primary_row`, and makes `agent_sessions_primary_task`
 unique.
 
-## Next: merge main (#1974) and replace the Process half
+## Next: gate
 
-`origin/main` merged #1974: Sessions and Graph runs record their own OS
-processes, nothing writes `processes` rows, and `processes` and
-`relocated_task_processes` are marked leaving for LOO-965. See
-`scratch/concept-review.html` (reviewed against main).
-
-A Task's work is its Sessions and its Graph runs. Each names its Task once,
-when it starts, by one rule, one function used by both Session creation and
-`record_graph` (main's `graph_inventory.rs`):
-
-> the Task it names, else the deepest checkout holding its directory on this
-> Machine, else the Task of the Session that started it.
-
-Checkout before caller: a command run inside a checkout is that Task's work
-whoever ran it (live store: the caller-first order gave 6,687 Processes to the
-calling agent's Task).
-
-To do, in this order:
-1. Merge `origin/main`. Take main's Graph-run membership
-   (`graph_processes.task_id`) and keep this PR's Session rule
-   (`agent_sessions.task_id` only, no path match) over main's path-or-id
-   `session_membership` and `session_tasks`.
-2. Delete this PR's Process half: `processes.task_id`, `processes_task`,
-   `process_task_backfill`, the `process_task()` resolution and its maintenance
-   pass, their tests and docs, and this PR's
-   `-- leaving: relocated_task_processes LOO-877` mark (LOO-965 owns it).
-3. Add the one Task rule above and use it for Sessions and Graph runs; a Graph
-   run launched inside a checkout without `--task` takes the checkout's Task.
-   The migration backfills Graph runs with no Task by the same rule.
-4. Redo the Task-primary rebuild in `process_task.sql` on main's
-   `agent_sessions` (46 columns, main's indexes and triggers, rebuilt by
-   `process_rows_on_owners.sql`); keep the `'task'` CHECK, the mirror triggers
-   and the plain `agent_sessions_primary_task` index.
-5. Test what people notice: a Graph run started inside a checkout with no
-   `--task`, the repository moved, the old path reused by a second clone;
-   each Task lists exactly its own runs and conversations.
+Main after #1974 is merged and the Process half is gone (slice 1). Focused
+tests pass in storage and execution; gate runs the suites listed under
+"Acceptance check at gate" plus `session_lifecycle_tests`, `two_people`,
+`performance_tests::`, `session_cli_tests::`, `world_recipes::`,
+`documented_commands::` and the Swift DTO fixtures.
 
 Known before this pass (clean `LF_*` env, also failing at `600e0f9495`): both
 `adoption::tests`, `input_replacement_retains_workspace_and_task_membership`,
-`screen_reads_are_compact_passive_and_match_cli`, two `work_open_tests`; fix
-them in this pass. Order-dependent (pass alone):
+`screen_reads_are_compact_passive_and_match_cli`, two `work_open_tests`. Both
+`adoption::tests` are fixed (a conversation open in a checkout a Task takes is
+its work); the rest were not rerun after the merge. Order-dependent (pass alone):
 `resuming_an_ended_conversation_launches_its_provider_as_the_session`,
 `task_identifier_repairs_all_generated_titles_from_a_replaced_editor_with_foreign_capture`,
 `a_task_run_takes_its_waves_agent_without_flags`. Unconfirmed:

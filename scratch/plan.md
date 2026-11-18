@@ -229,3 +229,16 @@ all-read total drops from about 6,200 µs to about 50 µs.
   relied on an ended agent's activity row to re-read would now wait for a
   write or a process death. None is known; `process_death_invalidates_session_pages_and_task_selections_without_a_write`
   and the quiet-deadline test cover the two real wake sources.
+
+## Docs written ahead of the code
+
+- `docs/dev/reference-models.md`, "Conversation and attachment lifetime": an
+  agent whose end is recorded is dead by its row in every read, finished
+  Sessions included; the OS is asked only about unended agents.
+- `docs/dev/data.md`, after the measured-statistics paragraph: a
+  one-row-per-Session table is growing; read across Sessions from the live
+  subset and join by primary key. Plan text there was run against
+  `~/.lf/loopflow.db` on 2026-11-18.
+
+No user guide, README or command reference changes: no command, flag or output
+field does.

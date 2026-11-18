@@ -1,1 +1,0 @@
-- Launch budget (`agent_startup_tests`): main reads 19,111 SQLite rows on the bare launch, this branch 20,235. The whole difference is schema loads (statement-less rows), from every store connection attaching `history.db`. Budget raised to 21,000 in the ci-fix. Attaching history only on connections that read it would win the rows back; left for a follow-up.

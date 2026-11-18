@@ -703,7 +703,7 @@ pending IDs and losing local bodies from one SQLite snapshot. An observed commen
 conflict adopts Linear’s body, author and time while the action retains both
 complete comments; no replacement comment is created. Connected repositories show
 pending sync, including comments on unmapped Tasks. Saves and on-demand boundaries
-attempt delivery; team checks acquire incoming comments independently. Desktop and
+attempt delivery; team checks fetch incoming comments independently. Desktop and
 `--subscribe` continue checks while open. Lost replies are resolved by exact UUID,
 issue and body. Incoming comments enter the same thread without echoing locally
 saved steers. Comments and adopted definition revisions save immutable

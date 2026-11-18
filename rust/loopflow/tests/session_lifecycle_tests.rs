@@ -720,7 +720,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         .unwrap();
     loopflow_execution::store::open_sqlite(&fixture.home.path().join("loopflow.db"))
         .unwrap()
-        .observe_pm_issue_change("fixture-deleted", None, true)
+        .record_tracker_event("fixture-deleted", None, true)
         .unwrap();
     let refused = fixture
         .command(&["session", "resume", &session])
@@ -740,7 +740,7 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     let removed = fixture.run(&["task", "delete", task_id]);
     assert!(removed.status.success(), "{removed:?}");
     let history = fixture.json(&["desktop", "task", task_id, "--json"]);
-    assert_eq!(history["plan_state"], "removed");
+    assert_eq!(history["tracker_state"]["state"], "removed");
     assert_eq!(
         history["execution"]["actions"]["reason"],
         "Task was deleted; retained history is read-only"

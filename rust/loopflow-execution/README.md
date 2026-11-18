@@ -6,7 +6,7 @@ cargo test -p loopflow-execution --lib task_graph::tests::
 ```
 
 `engine` supplies typed operations; `ops` implements them. Provider conversations,
-Task and Graph execution, acquisition above synchronous storage, shared readings,
+Task and Graph execution, tracker fetches above synchronous storage, shared readings,
 Machine clients and native terminal lifetimes live here. The crate depends on
 model, definitions, storage and terminal libraries and never on `loopflow`.
 

@@ -941,7 +941,7 @@ def _planning_peer_exchange(
             history = database.execute(
                 "SELECT * FROM session_events WHERE session_id=? ORDER BY seq", (session,)
             ).fetchall()
-            mutations = set(database.execute("SELECT id FROM planning_peer_changes"))
+            mutations = set(database.execute("SELECT id FROM git_tracker_changes"))
         run(peer, "task", "edit", task, "--title", label)
         run(peer, "task", "comment", task, f"Peer comment {label}")
         if label == "live-connect":
@@ -975,7 +975,7 @@ def _planning_peer_exchange(
             # Capture observation can finish after the native request starts;
             # retain its append-only history instead of freezing ordinary capture.
             assert after[: len(history)] == history
-            assert mutations <= set(database.execute("SELECT id FROM planning_peer_changes"))
+            assert mutations <= set(database.execute("SELECT id FROM git_tracker_changes"))
         with sqlite3.connect(_database(peer)) as database:
             assert database.execute("SELECT count(*) FROM agent_sessions").fetchone() == (0,)
             assert database.execute(

@@ -128,8 +128,8 @@ struct WorkSurfaceView: View {
                     .tint(palette.actionInk)
                     .foregroundStyle(palette.actionInk)
                     TaskPlanningFactsView(task: task)
-                    if task.task.acquisition.state != .available {
-                        Text("Planning evidence: \(task.task.acquisition.state.rawValue)")
+                    if task.task.trackerState.state != .available {
+                        Text("Tracker state: \(task.task.trackerState.state.rawValue)")
                             .font(Typography.caption())
                             .foregroundStyle(palette.textSecondary)
                     }

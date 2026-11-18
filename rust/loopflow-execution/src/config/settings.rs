@@ -625,7 +625,7 @@ pub fn resolve_layers(
     insert(
         &mut defaults,
         &["planning"],
-        serde_yaml_ng::to_value(super::PlanningConfig::default()).expect("planning serializes"),
+        serde_yaml_ng::to_value(super::TrackerConfig::default()).expect("planning serializes"),
     );
     for key in crate::prompt::context_budget::BudgetKey::ALL {
         insert(

@@ -357,8 +357,8 @@ fn readiness_in(
              w.project_activation_os_started_at,w.project_activation_exit_code,
              w.project_activation_error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
-             LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
-             LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
+             LEFT JOIN tracker_wave_sync s ON s.wave_id=w.id
+             LEFT JOIN tracker_projects f ON f.repo=w.repo AND f.tracker=COALESCE(s.tracker,'linear') AND f.id=p.external_project_id
              WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;
@@ -442,7 +442,7 @@ mod tests {
         assert_eq!(store.project(&id).unwrap().unwrap().name, "Later edit");
         let receipt: (String,bool) = store.conn.lock().unwrap().query_row("SELECT successor_id,settled_at IS NOT NULL FROM project_transitions WHERE wave_id=?1",[wave.id()],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
         assert_eq!(receipt, (reserved.into(), true));
-        assert!(store.project(&id).unwrap().unwrap().linear_id.is_none());
+        assert!(store.project(&id).unwrap().unwrap().tracker_id.is_none());
     }
 
     #[test]

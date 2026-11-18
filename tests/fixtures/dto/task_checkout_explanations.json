@@ -40,7 +40,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "behavior": "prepare",
@@ -94,7 +94,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "behavior": "reuse",
@@ -148,7 +148,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": {
       "behavior": "restore",
@@ -202,7 +202,7 @@
       "process": {
         "state": "unbound"
       },
-      "planning_observed_at": null
+      "tracker_synced_at": null
     },
     "action": null,
     "impediments": [

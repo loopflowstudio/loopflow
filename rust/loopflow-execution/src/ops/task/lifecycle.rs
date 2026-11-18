@@ -146,7 +146,7 @@ async fn save_abandon(store: &SharedStore, task: &Task) -> OpsResult<()> {
     Ok(())
 }
 
-/// Remove planning immediately, retaining execution and pending provider
+/// Remove planning immediately, retaining execution and pending tracker
 /// delivery. Returns the identifier and whether the tracker still has
 /// something to hear about this Task.
 pub fn task_delete(repo: &Path, issue: &str) -> OpsResult<(String, bool)> {
@@ -203,7 +203,7 @@ async fn prepare_abandon(
     }
     require_idle(store, task)?;
     if pr.is_some() {
-        if let Some(issue) = &task.linear_id {
+        if let Some(issue) = &task.tracker_id {
             require_known_prs(repo, pr.as_ref(), issue.as_str()).await?;
         }
     }

@@ -656,7 +656,7 @@ pub enum MetricUnknownCauseDto {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum MetricContractIssueDto {
-    ChapterUnavailable {
+    ProjectUnavailable {
         wave_id: String,
         reason: String,
     },
@@ -1042,7 +1042,7 @@ pub struct MetricContractDiscovery {
 
 pub fn contract_issue_sort_key(issue: &MetricContractIssueDto) -> (u8, String, String) {
     match issue {
-        MetricContractIssueDto::ChapterUnavailable { wave_id, reason } => {
+        MetricContractIssueDto::ProjectUnavailable { wave_id, reason } => {
             (5, wave_id.clone(), reason.clone())
         }
         MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => {

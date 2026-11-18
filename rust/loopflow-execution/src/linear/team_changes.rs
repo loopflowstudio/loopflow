@@ -7,7 +7,7 @@ use serde_json::json;
 use super::{CommentNode, Connection, IssueNode, LinearClient, PageInfo, CHANGED_ISSUE_FIELDS};
 use super::{TrackerItem, TrackerProject};
 use crate::linear::{LinearError, LinearResult};
-use loopflow_storage::planning::{TrackerComment, TrackerObservation};
+use loopflow_storage::planning::{TrackerComment, TrackerEvent};
 
 const QUERY: &str = r#"query TeamChanges($issues: IssueFilter!, $comments: CommentFilter!, $issuesAfter: String, $commentsAfter: String, $readIssues: Boolean!, $readComments: Boolean!) {
   issues(filter: $issues, first: 25, after: $issuesAfter, orderBy: updatedAt) @include(if: $readIssues) {
@@ -41,7 +41,7 @@ impl LinearClient {
         through: &str,
         live: &[String],
         finished: &[String],
-    ) -> LinearResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerObservation)>> {
+    ) -> LinearResult<Vec<(TrackerItem, Option<TrackerProject>, TrackerEvent)>> {
         let mut eligible = json!({"team":{"id":{"eq":team}}, "id":{"nin":finished},
             "or":[{"id":{"in":live}}, {"state":{"type":{"nin":["completed","canceled"]}}}]});
         let mut revision = json!({"lte":through});
@@ -114,7 +114,10 @@ impl LinearClient {
             .filter_map(|(issue, _)| issue.project_id.clone())
         {
             if let Entry::Vacant(entry) = projects.entry(id) {
-                let project = self.project_node(entry.key()).await?.into_observation()?;
+                let project = self
+                    .project_node(entry.key())
+                    .await?
+                    .into_tracker_project()?;
                 entry.insert(project);
             }
         }
@@ -126,13 +129,13 @@ impl LinearClient {
                     .as_ref()
                     .and_then(|id| projects.get(id).cloned());
                 comments.sort_by(|a, b| a.revision.cmp(&b.revision).then(a.id.cmp(&b.id)));
-                let observation = TrackerObservation {
+                let event = TrackerEvent {
                     revision: issue.revision.clone().expect("Linear issue has a revision"),
                     title: issue.name.clone(),
                     description: issue.description.clone(),
                     comments,
                 };
-                (issue, project, observation)
+                (issue, project, event)
             })
             .collect())
     }

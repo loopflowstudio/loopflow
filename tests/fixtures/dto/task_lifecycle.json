@@ -169,8 +169,8 @@
       },
       "shipping": null,
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -179,7 +179,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -338,8 +338,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -657,7 +657,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -709,16 +708,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -894,8 +892,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -904,7 +902,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -1078,10 +1076,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1096,6 +1094,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   },
@@ -1253,8 +1255,8 @@
       },
       "shipping": null,
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -1263,7 +1265,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -1422,8 +1424,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1708,7 +1710,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -1763,16 +1764,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -1932,8 +1932,8 @@
         },
         "shipping": null,
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -1942,7 +1942,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -2116,10 +2116,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -2134,6 +2134,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   },
@@ -2295,8 +2299,8 @@
         "state": "building"
       },
       "task": {
-        "acquisition": {
-          "observed_at": 1793156337,
+        "tracker_state": {
+          "synced_at": 1793156337,
           "state": "available"
         },
         "assignee": null,
@@ -2305,7 +2309,7 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "name": "Deliver the command",
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "rank": 0,
@@ -2424,8 +2428,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "pr": {
@@ -2708,7 +2712,6 @@
           ]
         }
       ],
-      "observed_at": 1793156337,
       "overview": {
         "graph": {
           "interactive_steps": [],
@@ -2763,16 +2766,15 @@
       },
       "plan_error": null,
       "plan_stale": false,
-      "plan_state": "available",
       "project": {
         "created_at": "2026-10-28T02:58:55Z",
         "description": "",
         "id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
         "krs": [],
-        "linear_id": "project-1",
+        "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -2936,8 +2938,8 @@
           "state": "building"
         },
         "task": {
-          "acquisition": {
-            "observed_at": 1793156337,
+          "tracker_state": {
+            "synced_at": 1793156337,
             "state": "available"
           },
           "assignee": null,
@@ -2946,7 +2948,7 @@
           "due_date": null,
           "id": "task_9d1de6a17408459aa2db78181c5fb02a",
           "identifier": "FIX-1",
-          "linear_id": "source-issue",
+          "tracker_id": "source-issue",
           "name": "Deliver the command",
           "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
           "rank": 0,
@@ -3050,10 +3052,10 @@
         "due_date": null,
         "id": "task_9d1de6a17408459aa2db78181c5fb02a",
         "identifier": "FIX-1",
-        "linear_id": "source-issue",
+        "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",
@@ -3066,6 +3068,10 @@
         "wave_id": "b007dd43-6b65-410d-8a0e-c58be2910faf",
         "workspace_slug": "delivery",
         "worktree": "/private/var/folders/m6/r3tllnrs1yq7yfbwm680tss40000gn/T/.tmpVbmsXG"
+      },
+      "tracker_state": {
+        "state": "available",
+        "synced_at": 1793156337
       }
     }
   }

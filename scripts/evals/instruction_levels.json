@@ -38,7 +38,7 @@
     "id": "taskless_graph",
     "skill": "implement",
     "no_loopflow": false,
-    "context": "This is the implement step of an explicitly selected pursue Graph, with an accepted parser-fix design in scratch. The Graph is taskless. No Wave is named and there is no planning provider.",
+    "context": "This is the implement step of an explicitly selected pursue Graph, with an accepted parser-fix design in scratch. The Graph is taskless. No Wave is named and there is no tracker.",
     "request": "Implement the accepted parser fix.",
     "required": [
       "implement",

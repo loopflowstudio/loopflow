@@ -123,9 +123,9 @@ const COMMANDS: &[Cmd] = &[
         global_default: true,
     },
     Cmd {
-        id: "wave edit-plan",
-        path: &["wave", "edit-plan"],
-        base_args: &["wave", "edit-plan", "--summary", "Fixture"],
+        id: "wave edit-project",
+        path: &["wave", "edit-project"],
+        base_args: &["wave", "edit-project", "--summary", "Fixture"],
         wave_form: WaveForm::Positional,
         global_default: false,
     },
@@ -152,9 +152,9 @@ const COMMANDS: &[Cmd] = &[
         global_default: false,
     },
     Cmd {
-        id: "wave update-plan",
-        path: &["wave", "update-plan"],
-        base_args: &["wave", "update-plan", "--plan", "plan.json"],
+        id: "wave update-project",
+        path: &["wave", "update-project"],
+        base_args: &["wave", "update-project", "--file", "plan.json"],
         wave_form: WaveForm::Flag,
         global_default: false,
     },
@@ -338,7 +338,6 @@ fn seed(home: &Path, repo: &Path) -> Wave {
     store
         .seed_inventory(&InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".to_string(),
             initiative: "initiative-1".to_string(),
             synced_at: chrono::Utc::now().timestamp(),
             snapshot: crate::test_linear_input::Inventory {

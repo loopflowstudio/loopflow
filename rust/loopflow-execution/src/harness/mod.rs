@@ -43,9 +43,7 @@ pub(crate) fn configure_vendor_std_env(command: &mut std::process::Command) -> R
 }
 
 pub(crate) fn configure_agent_env(command: &mut tokio::process::Command, config: &AgentConfig) {
-    for name in crate::agent::EXECUTION_IDENTITY_ENV {
-        command.env_remove(name);
-    }
+    crate::agent::remove_caller_session_env(command.as_std_mut());
     command
         .envs(&config.env)
         .env_remove(crate::os_process::DISCORD_TOKEN_ENV)

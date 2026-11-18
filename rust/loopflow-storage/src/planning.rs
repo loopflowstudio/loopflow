@@ -1,4 +1,4 @@
-//! Retained provider planning records and their pure syntax.
+//! Retained tracker planning records and their pure syntax.
 use super::{StoreError, StoreResult};
 use crate::metric::MetricTarget;
 use crate::work::project::{ProjectKR, ProjectStatus};
@@ -100,7 +100,7 @@ pub struct TrackerItem {
     /// Provider branch name used to find existing Git work.
     pub branch_name: Option<String>,
     /// Provider-owned issue URL captured during PM sync. `None` stays explicit
-    /// when the provider did not return one; status and roadmap reads never
+    /// when the tracker did not return one; status and roadmap reads never
     /// fetch it on demand.
     pub url: Option<String>,
     pub name: String,
@@ -138,12 +138,12 @@ impl TrackerItem {
 }
 
 /// A read of one issue's editable content plus its comments, taken to
-/// stream Linear edits into a Task. `revision` is the provider's
+/// stream Linear edits into a Task. `revision` is the tracker's
 /// last-updated marker (Linear `updatedAt`), monotonic per issue, and is
 /// compared — not trusted as identity — so out-of-order responses never move
 /// the cursor backward.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TrackerObservation {
+pub struct TrackerEvent {
     pub revision: String,
     pub title: String,
     pub description: String,
@@ -151,7 +151,7 @@ pub struct TrackerObservation {
 }
 
 /// Linear's comment and attribution metadata, retained unchanged in conflict receipts.
-/// A provider user or an explicit requester steer supplies person attribution;
+/// A tracker user or an explicit requester steer supplies person attribution;
 /// an integration's display name alone does not.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TrackerComment {
@@ -162,7 +162,7 @@ pub struct TrackerComment {
     pub revision: Option<String>,
     pub body: String,
     pub author_id: Option<String>,
-    /// Provider display name for attribution, independent of the provider user ID.
+    /// Tracker display name for attribution, independent of the tracker user ID.
     pub author_name: Option<String>,
 }
 

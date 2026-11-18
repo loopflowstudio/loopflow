@@ -258,7 +258,7 @@ lf session list --json --select id,title,state   # only those fields of each Ses
 ```
 
 `lf wave list` is the registry plane, `lf wave status` is the focused operational view,
-and `lf wave show` joins the current plan to that runtime truth.
+and `lf wave show` joins the Wave's plan to that runtime truth.
 `lf session history` is the ordered durable history; each item reuses `WorkRef` and
 carries one typed fact with its execution, Task PR, or Steer evidence. Agents consume
 those projections; they do not rebuild the joins.

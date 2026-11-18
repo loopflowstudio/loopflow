@@ -26,6 +26,7 @@ fn transport(repo: &Path) -> PlanningGit {
     PlanningGit::new(
         repo,
         &loopflow_execution::planning_git::resolve_destination(repo, "origin", PLANNING_REF)
+            .unwrap()
             .unwrap(),
     )
     .unwrap()
@@ -247,6 +248,7 @@ fn selected_destinations_never_mix_retained_or_published_plans() {
             "origin",
             "refs/loopflow/planning/shared/team",
         )
+        .unwrap()
         .unwrap(),
     )
     .unwrap();
@@ -291,6 +293,7 @@ fn independent_destinations_can_both_confirm_conflicting_task_delegation() {
             "origin",
             "refs/loopflow/planning/shared/team",
         )
+        .unwrap()
         .unwrap(),
     )
     .unwrap();
@@ -321,6 +324,7 @@ fn saved_binding_survives_alias_redirection_without_publishing_to_the_replacemen
     let replacement = TestRepo::new();
     let destination =
         loopflow_execution::planning_git::resolve_destination(repo.path(), "origin", PLANNING_REF)
+            .unwrap()
             .unwrap();
     let saved_binding = serde_json::to_vec(&destination).unwrap();
     let planning = PlanningGit::new(repo.path(), &destination).unwrap();
@@ -367,4 +371,15 @@ fn divergent_fetch_and_push_endpoints_cannot_be_bound() {
         PLANNING_REF
     )
     .is_err());
+}
+
+#[test]
+fn checkout_without_the_remote_has_no_destination() {
+    let repo = TestRepo::new();
+    git(repo.path(), &["remote", "remove", "origin"]);
+    assert_eq!(
+        loopflow_execution::planning_git::resolve_destination(repo.path(), "origin", PLANNING_REF)
+            .unwrap(),
+        None
+    );
 }

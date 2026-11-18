@@ -170,8 +170,9 @@ pub struct TaskSnapshot {
     pub task_id: String,
     pub external_project_id: Option<String>,
     pub project: Option<String>,
-    pub pm_snapshot_synced_at: Option<i64>,
-    pub pm_writeback: loopflow_storage::work::task::LinearWritebackState,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
+    pub tracker_writeback: loopflow_storage::work::task::LinearWritebackState,
     pub wave: Option<String>,
     pub project_id: Option<String>,
     #[serde(rename = "repo_id")]
@@ -958,22 +959,27 @@ pub(crate) fn check_out_moved_task(repo: &Path, source: remote::TaskSource) -> O
     )
 }
 
-/// Take a Task this Machine has not saved from the repository's planning.
-pub(crate) async fn acquire_from_planning(main: &Path, issue: &str) -> OpsResult<Task> {
-    match crate::config::load_config(Some(main))
+/// Fetch a Task this Machine has not saved from the repository's tracker.
+/// The fetch imports the record once; the stored Task owns every later read
+/// and write, including while the tracker is unavailable.
+pub(crate) async fn fetch_from_tracker(
+    repo: &Path,
+    issue: &str,
+    refresh: super::linear::LinearRefresh,
+) -> OpsResult<Task> {
+    match crate::config::load_config(Some(repo))
         .map_err(task_error)?
         .unwrap_or_default()
         .planning_transport()
     {
-        crate::config::PlanningConfig::Linear { .. } => {
-            super::linear::acquire_task(main, issue, super::linear::LinearRefresh::Auto).await
+        crate::config::TrackerConfig::Linear { .. } => {
+            super::linear::fetch_task(repo, issue, refresh).await
         }
-        crate::config::PlanningConfig::Git { .. } => Err(task_error(format!(
-            "Task {issue:?} not found in selected Git planning"
+        crate::config::TrackerConfig::Git { .. } => Err(task_error(format!(
+            "Task {issue:?} not found in the Git tracker"
         ))),
-        remote => Err(task_error(format!(
-            "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-            remote.remote_name().unwrap_or("provider")
+        crate::config::TrackerConfig::Asana { .. } => Err(task_error(format!(
+            "Task {issue:?} not saved on this Machine; Asana Tasks are not fetched yet"
         ))),
     }
 }
@@ -994,10 +1000,10 @@ fn prepare_task(
         }
         let main = crate::git::worktrees::main_repo_root(repo).map_err(task_error)?;
         let saved = super::planning_sync::find_task(&store, &main.to_string_lossy(), issue).await?;
-        let acquired = saved.is_none();
+        let fetched = saved.is_none();
         let task = match saved {
             Some(task) => task,
-            None => acquire_from_planning(&main, issue).await?,
+            None => fetch_from_tracker(&main, issue, super::linear::LinearRefresh::Auto).await?,
         };
         let destination = store
             .task_execution_route(&task.id)
@@ -1027,7 +1033,7 @@ fn prepare_task(
             )));
         }
         validate_task_preparation(&store, &task).await?;
-        options.validate_directive((!acquired).then_some(&task))?;
+        options.validate_directive((!fetched).then_some(&task))?;
         options.validate_workspace_name(&task)?;
         if recover_from.is_some() && task.worktree.is_none() {
             return Err(task_error(
@@ -1845,9 +1851,9 @@ pub fn task_create(
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         if let Err(error) =
-            super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
+            super::planning_sync::fetch_repository(&store, &main.to_string_lossy()).await
         {
-            tracing::debug!(%error,"planning acquisition pending; creating from retained planning");
+            tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
         }
         let receipt = receipt.map(|identity| Receipt {
             identity,
@@ -1912,8 +1918,8 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::planning_sync::acquire_repository(&store, &repo).await {
-            tracing::warn!(%error, "planning acquisition after creation failed");
+        if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
+            tracing::warn!(%error, "tracker fetch after creation failed");
         }
         super::planning_sync::sync_after_save(
             &store,
@@ -2338,13 +2344,11 @@ pub struct TaskStatus {
     pub sync: Option<loopflow_storage::planning_sync::TrackerSync>,
     pub task: Option<Task>,
     pub project: Option<loopflow_storage::work::project::Project>,
-    pub observed_at: Option<i64>,
+    pub tracker_state: crate::store::TrackerState,
     #[serde(rename = "plan_error")]
     pub planning_error: Option<String>,
     #[serde(rename = "plan_stale")]
     pub planning_stale: bool,
-    #[serde(rename = "plan_state")]
-    pub planning_state: crate::store::PlanningState,
     pub execution: Option<TaskSnapshot>,
     pub ownership: Option<loopflow_model::durable::TaskOwnership>,
     /// Its Sessions, Graphs and Workflow; `null` for an unregistered Task.
@@ -2402,10 +2406,12 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     sync: None,
                     task: None,
                     project: None,
-                    observed_at: None,
+                    tracker_state: crate::store::TrackerState {
+                        state: crate::store::PlanningState::Unavailable,
+                        synced_at: None,
+                    },
                     planning_error: None,
                     planning_stale: false,
-                    planning_state: crate::store::PlanningState::Unavailable,
                     execution: None,
                     ownership: None,
                     overview: None,
@@ -2413,17 +2419,17 @@ pub fn task_status(repo: &Path, issue: Option<&str>) -> OpsResult<TaskStatus> {
                     comments: None,
                 };
                 if let Some(read) = inspection {
-                    // Foreign observations remain acquisition evidence, not owned Work.
-                    result.planning_state = read.observation.state;
-                    result.observed_at = read.observation.observed_at;
+                    // An unmapped issue can still supply tracker state.
+                    result.tracker_state.state = read.issue_state.state;
+                    result.tracker_state.synced_at = read.issue_state.observed_at;
                 }
                 result
             }
         };
         if planning_error.is_some() {
             result.planning_error = planning_error;
-            if result.planning_state == crate::store::PlanningState::Available {
-                result.planning_state = crate::store::PlanningState::Unavailable;
+            if result.tracker_state.state == crate::store::PlanningState::Available {
+                result.tracker_state.state = crate::store::PlanningState::Unavailable;
             }
         }
         result.planning_stale = planning_stale(&result);
@@ -2451,9 +2457,9 @@ pub async fn read_task_status(
 }
 
 pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResult<TaskStatus> {
-    let acquisition = store
+    let tracker_state = store
         .sqlite
-        .task_acquisition(&task.id)
+        .task_tracker_state(&task.id)
         .map_err(task_error)?;
     let (overview, graph_processes) =
         crate::store::task_work::task_overview(&store.sqlite, &task.id).map_err(task_error)?;
@@ -2463,10 +2469,9 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
             Some(id) => store.get_project(id).await.map_err(task_error)?,
             None => None,
         },
-        observed_at: acquisition.observed_at,
+        tracker_state,
         planning_error: None,
         planning_stale: false,
-        planning_state: acquisition.state,
         execution: Some(read_task_snapshot(store, task.clone()).await?),
         ownership: Some(
             crate::store::ownership::task_ownership(&store.sqlite, &task.id).map_err(task_error)?,
@@ -2481,9 +2486,10 @@ pub async fn registered_task_status(store: &SharedStore, task: Task) -> OpsResul
 }
 
 fn planning_stale(status: &TaskStatus) -> bool {
-    status.planning_state != crate::store::PlanningState::Available
+    status.tracker_state.state != crate::store::PlanningState::Available
         || status
-            .observed_at
+            .tracker_state
+            .synced_at
             .is_some_and(|at| crate::observe::deadline(at + super::linear::LINEAR_SOFT_STALE_SECS))
 }
 
@@ -2555,7 +2561,7 @@ pub fn start_conversation_beside(task: &Task) {
 /// look for every sent action and resend what the tracker lacks; Git
 /// exchanges the repository's planning ref, so a peer's Task this Machine
 /// has not fetched yet is found in `repo`'s planning. An `answer` first
-/// settles every value the Task lost; `lf repo plan answer` settles one.
+/// settles every value the Task lost; `lf repo tracker answer` settles one.
 pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsResult<String> {
     block_on_task(async {
         let store = task_store().await?;
@@ -2583,9 +2589,9 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let acquired = super::planning_sync::acquire_repository(&store, &repo).await;
+            let fetched = super::planning_sync::fetch_repository(&store, &repo).await;
             super::planning_sync::publish_repository_now(&store, &repo).await?;
-            acquired?;
+            fetched?;
             return synced(&store, &task.id).await;
         };
         let project = task
@@ -2607,7 +2613,7 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
             .await
             .map_err(task_error)?
             .ok_or_else(|| task_error("Task is missing"))?;
-        if saved.linear_id.is_none() {
+        if saved.tracker_id.is_none() {
             let sync = store.task_tracker_sync(&saved.id).map_err(task_error)?;
             let reason = sync
                 .actions
@@ -2767,7 +2773,7 @@ pub(super) async fn link_pr_to_planning(store: &SharedStore, task: &Task, pr: &m
                 None
             }
             Some(action) => Some(action.error.unwrap_or_else(|| {
-                "PR link is waiting to be sent; `lf repo plan` lists it".into()
+                "PR link is waiting to be sent; `lf repo tracker` lists it".into()
             })),
             None => None,
         })
@@ -3223,7 +3229,7 @@ pub(crate) async fn task_comment_async(
     if let Some(message) = message {
         append_task_comment_async(&store, &task, message, steer).await?;
     }
-    let refresh_error = if message.is_none() && task.linear_id.is_some() {
+    let refresh_error = if message.is_none() && task.tracker_id.is_some() {
         match tokio::time::timeout(
             std::time::Duration::from_secs(5),
             super::tracker_events::refresh_task_comments(&store, &task),
@@ -3271,31 +3277,7 @@ pub async fn resolve_saved_task(
     let task = super::planning_sync::find_task(&store, &canonical.to_string(), issue).await?;
     let task = match task {
         Some(task) => task,
-        None => {
-            // Cold acquisition imports the remote record once. The stored Task owns
-            // every subsequent read and write, including while Linear is unavailable.
-            match crate::config::load_config(Some(repo))
-                .map_err(task_error)?
-                .unwrap_or_default()
-                .planning_transport()
-            {
-                crate::config::PlanningConfig::Linear { .. } => {
-                    super::linear::acquire_task(repo, issue, super::linear::LinearRefresh::Force)
-                        .await?
-                }
-                crate::config::PlanningConfig::Git { .. } => {
-                    return Err(task_error(format!(
-                        "Task {issue:?} not found in selected Git planning"
-                    )))
-                }
-                remote => {
-                    return Err(task_error(format!(
-                    "Task {issue:?} not found in Loopflow planning; {} tasks are not acquired yet",
-                    remote.remote_name().unwrap_or("provider")
-                )))
-                }
-            }
-        }
+        None => fetch_from_tracker(repo, issue, super::linear::LinearRefresh::Force).await?,
     };
     validate_saved_task_scope(&store, repo, wave, &task).await?;
     Ok((store, task))

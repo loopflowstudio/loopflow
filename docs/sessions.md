@@ -177,6 +177,11 @@ Graph. Nothing hosts either: no server, no holder.
 | The start is never acknowledged | the command says delivery is unknown and starts nothing again; `lf task status` shows whether it ran |
 | Steers | reach a Graph's steps and `lf -b <skill>` run for a Task through that Task |
 
+Run from inside a Claude Code or Codex conversation, `lf` starts each agent as
+its own Session, never as that conversation's child: it saves its transcript
+and `lf resume` reopens it. Your settings (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`,
+API keys) still reach it; the calling conversation's session markers don't.
+
 A headless step of `lf task run` is a worker. `lf task run` started by an agent, a
 script or Desktop
 behaves the same way whether or not a terminal is attached; only a person's

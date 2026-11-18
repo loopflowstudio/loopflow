@@ -110,7 +110,7 @@ impl Table {
         let mut task = self.task.clone();
         task.id = loopflow_storage::work::task::TaskId::new();
         task.identifier = "INF-124".into();
-        task.linear_id = None;
+        task.tracker_id = None;
         task.worktree = None;
         crate::test_support::planning::seed_unplaced_task(
             &self.home.path().join("loopflow.db"),

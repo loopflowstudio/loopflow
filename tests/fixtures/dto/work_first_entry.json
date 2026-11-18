@@ -125,7 +125,7 @@
               "current": true,
               "id": "proj_afa19d1ddecc466d956f0bc47eccaad9",
               "krs": [],
-              "linear_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
+              "tracker_id": "project-7b839056-f5c3-44c7-b729-ff62bf8c43ba",
               "metric_targets": [],
               "name": "Task PR tests",
               "slug": "task-pr-tests",
@@ -236,8 +236,8 @@
           },
           "section": "backlog",
           "task": {
-            "acquisition": {
-              "observed_at": 1791757688,
+            "tracker_state": {
+              "synced_at": 1791757688,
               "state": "available"
             },
             "assignee": null,
@@ -247,7 +247,7 @@
             "follow_up_sources": [],
             "id": "task_ab8d3359dc7053bda4afd24ff7e7a7d7",
             "identifier": "INF-123",
-            "linear_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
+            "tracker_id": "issue-81928071-6f48-4343-b343-29dcb93f7cc9",
             "name": "Prove Task PR transitions",
             "rank": 0,
             "state": null,

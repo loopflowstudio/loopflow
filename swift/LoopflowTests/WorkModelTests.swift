@@ -88,21 +88,21 @@ struct WorkModelTests {
         #expect(model.selection == nil)
     }
 
-    @Test("Current chapter source references navigate directly to the Wave")
-    func chapterReferencesSelectWave() async throws {
+    @Test("Current project source references navigate directly to the Wave")
+    func projectReferencesSelectWave() async throws {
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query)
         await model.refresh()
         let wave = try #require(fixture.roadmap.waves.first)
-        let chapter = try #require(wave.currentProject)
-        for reference in [chapter.id, chapter.slug, chapter.linearId].compactMap({ $0 }) {
+        let project = try #require(wave.currentProject)
+        for reference in [project.id, project.slug, project.trackerId].compactMap({ $0 }) {
             model.select(.project(id: reference))
             #expect(model.selection == .wave(id: wave.wave.id))
         }
     }
 
-    @Test("Selected Task survives a chapter transfer with temporarily absent membership")
-    func selectedTaskSurvivesChapterTransfer() async throws {
+    @Test("Selected Task survives a project transfer with temporarily absent membership")
+    func selectedTaskSurvivesProjectTransfer() async throws {
         let fixture = try WorkTestFixture.load()
         let model = WorkModel(query: fixture.query)
         await model.refresh()
@@ -125,7 +125,7 @@ struct WorkModelTests {
         var plans = try #require(projects["items"] as? [[String: Any]])
         var successor = plans[0]
         successor["id"] = "next"
-        successor["name"] = "Next chapter"
+        successor["name"] = "Next project"
         plans[0]["current"] = false
         plans.append(successor)
         projects["items"] = plans
@@ -140,8 +140,8 @@ struct WorkModelTests {
         #expect(model.task(id: "issue-now")?.wave!.projects.items.last?.id == "next")
     }
 
-    @Test("Chapter history remains reachable when the current plan is unavailable")
-    func historyOpensWithoutCurrentChapter() throws {
+    @Test("Project history remains reachable when the current plan is unavailable")
+    func historyOpensWithoutCurrentProject() throws {
         let fixture = try WorkTestFixture.load()
         var wire = try #require(JSONSerialization.jsonObject(with: Data(fixture.roadmapJSON.utf8)) as? [String: Any])
         var waves = try #require(wire["waves"] as? [[String: Any]])
@@ -176,7 +176,7 @@ struct WorkModelTests {
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("tests/fixtures/dto")
         var historical = try #require(JSONSerialization.jsonObject(with: Data(contentsOf: fixtures.appendingPathComponent("wave_detail.json"))) as? [String: Any])
         historical["projects"] = ["state": "ok", "truncated": false, "items": [[
-            "id": "old-plan", "linear_id": NSNull(), "slug": "old", "name": "Previous",
+            "id": "old-plan", "tracker_id": NSNull(), "slug": "old", "name": "Previous",
             "workflow": "feature", "status": "completed", "current": false, "metric_targets": [], "krs": [],
             "sync": ["actions": []]
         ]]]
@@ -559,7 +559,7 @@ struct WorkModelStreamTests {
     }
 
     @Test("Peer status updates independently, preserves failures and rejects old scopes")
-    func peerPlanningFrames() async throws {
+    func gitDestinationsFrames() async throws {
         let fixture = try WorkTestFixture.load()
         let feed = WorkFeed()
         let model = WorkModel(query: fixture.streaming(feed), repoPath: "/src/loopflow")
@@ -569,46 +569,46 @@ struct WorkModelStreamTests {
         let scope = try await feed.request(1)
         let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent()
-            .appendingPathComponent("tests/fixtures/dto/peer_planning_status.json")
+            .appendingPathComponent("tests/fixtures/dto/git_destinations.json")
         let statuses = String(decoding: try Data(contentsOf: url), as: UTF8.self)
-        func peers(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
+        func destinationFrame(_ sequence: Int, _ answers: Int, repo: String, statuses: String) throws -> WorkFrame {
             let body = #"{"tracker":"git","destinations":\#(statuses)}"#
-            return try fixture.frame("peer_planning", sequence: sequence, answers: answers,
+            return try fixture.frame("git_destinations", sequence: sequence, answers: answers,
                                      scope: WorkScope(repo: repo, headless: false, task: nil, activity: nil, taskListWave: nil),
                                      body: body)
         }
         await feed.send(try fixture.planningFrame(sequence: 1, answers: scope.id))
-        await feed.send(try peers(2, scope.id, repo: "/src/loopflow", statuses: statuses))
-        try await eventually { model.peerPlanning.value?.count == 2 }
-        #expect(model.peerPlanning.value?[0].pendingLocal == true)
-        #expect(model.peerPlanning.value?[1].active == true)
+        await feed.send(try destinationFrame(2, scope.id, repo: "/src/loopflow", statuses: statuses))
+        try await eventually { model.gitDestinations.value?.count == 2 }
+        #expect(model.gitDestinations.value?[0].pendingLocal == true)
+        #expect(model.gitDestinations.value?[1].active == true)
         #expect(model.roadmap.value != nil)
 
         await feed.send(WorkFrame(sequence: 3, answers: scope.id,
-                                 unavailable: "sync read failed", content: .peerPlanning(nil), wire: nil))
-        try await eventually { model.peerPlanning.failure == "sync read failed" }
-        #expect(model.peerPlanning.value?.count == 2)
+                                 unavailable: "sync read failed", content: .gitDestinations(nil), wire: nil))
+        try await eventually { model.gitDestinations.failure == "sync read failed" }
+        #expect(model.gitDestinations.value?.count == 2)
         #expect(model.roadmap.failure == nil)
-        await feed.send(try peers(4, scope.id, repo: "/src/loopflow", statuses: statuses))
-        try await eventually { model.peerPlanning.failure == nil }
+        await feed.send(try destinationFrame(4, scope.id, repo: "/src/loopflow", statuses: statuses))
+        try await eventually { model.gitDestinations.failure == nil }
 
         model.setRepoPath("/src/context")
         model.syncWorkScope()
         let changed = try await feed.request(2)
         // Even a later sequence cannot publish an answer from the old scope.
-        await feed.send(try peers(5, scope.id, repo: "/src/loopflow", statuses: statuses))
-        await feed.send(try peers(6, changed.id, repo: "/src/loopflow", statuses: statuses))
+        await feed.send(try destinationFrame(5, scope.id, repo: "/src/loopflow", statuses: statuses))
+        await feed.send(try destinationFrame(6, changed.id, repo: "/src/loopflow", statuses: statuses))
         try await Task.sleep(for: .milliseconds(50))
-        #expect(model.peerPlanning.value == nil)
-        await feed.send(try peers(7, changed.id, repo: "/src/context", statuses: "[]"))
-        try await eventually { model.peerPlanning.value == [] }
+        #expect(model.gitDestinations.value == nil)
+        await feed.send(try destinationFrame(7, changed.id, repo: "/src/context", statuses: "[]"))
+        try await eventually { model.gitDestinations.value == [] }
         await feed.fail(RegistryQueryError("reader exited"))
-        try await eventually { model.peerPlanning.failure == "reader exited" }
-        #expect(model.peerPlanning.value == [])
+        try await eventually { model.gitDestinations.failure == "reader exited" }
+        #expect(model.gitDestinations.value == [])
         try await feed.opened(2, within: .seconds(5))
         let reopened = try await feed.request(3)
-        await feed.send(try peers(1, reopened.id, repo: "/src/context", statuses: statuses))
-        try await eventually { model.peerPlanning.value?.count == 2 && model.peerPlanning.failure == nil }
+        await feed.send(try destinationFrame(1, reopened.id, repo: "/src/context", statuses: statuses))
+        try await eventually { model.gitDestinations.value?.count == 2 && model.gitDestinations.failure == nil }
     }
 
     @Test("Frames update planning in place and an older frame cannot replace a newer one")
@@ -1116,7 +1116,7 @@ private struct WorkTestFixture {
         let query = RegistryQuery { args, _ in
             switch args.first {
             case "plan" where args.dropFirst().first == "list": return roadmapJSON
-            case "repo" where args.dropFirst().first == "plan": return #"{"destinations":[]}"#
+            case "repo" where args.dropFirst().first == "tracker": return #"{"destinations":[]}"#
             case "desktop" where args.dropFirst().prefix(2) == ["view", "show"]:
                 return String(decoding: try JSONEncoder().encode(fixtureViewPlan(
                     owner: .init(repository: "repo", kind: .repository, id: "repo"), members: [])), as: UTF8.self)

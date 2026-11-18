@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use super::settings::SettingScope;
 use super::{
     placement, AutomationConfig, ConfigDeclarations, ConfigSource, LogConfig, MergeMethod,
-    PlanningConfig, ReleaseConfig, SessionConfig, SummaryConfig, UserConfig,
+    ReleaseConfig, SessionConfig, SummaryConfig, TrackerConfig, UserConfig,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, schemars::JsonSchema)]
@@ -155,8 +155,21 @@ impl Definition {
 
     pub fn accepts(&self, path: &[&str]) -> bool {
         let schema = (self.schema)().to_value();
-        schema_path(&schema, &schema, &path[self.key.split('.').count()..])
+        let fields = &path[self.key.split('.').count()..];
+        if self.key == "planning" && !fields.is_empty() {
+            // Validation here receives the released, internally tagged path.
+            return fields == ["provider"]
+                || ["linear", "asana", "git"]
+                    .iter()
+                    .any(|tag| schema_path(&schema, &schema, &[&[*tag][..], fields].concat()));
+        }
+        schema_path(&schema, &schema, fields)
     }
+}
+
+pub(crate) fn tracker_field(fields: &[&str]) -> bool {
+    let schema = schemars::schema_for!(TrackerConfig).to_value();
+    schema_path(&schema, &schema, fields)
 }
 
 fn schema_path(root: &serde_json::Value, node: &serde_json::Value, path: &[&str]) -> bool {
@@ -281,7 +294,7 @@ definitions! {
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";
     portfolio: Option<crate::portfolio::Selection> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Repository navigation selection";
-    planning: Option<PlanningConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Tagged planning transport configuration";
+    planning: Option<TrackerConfig> = "null", Repository, Replace, Portable, DomainAction, Planning, "Repository tracker and its settings";
     release: ReleaseConfig = "{targets: {}}", Repository, Merge, ReferencedAssets, DomainAction, Release, "Repository release targets";
     land: String = "gh", Repository, Replace, Portable, DomainAction, Release, "Landing strategy: gh or local";
     merge_method: Option<MergeMethod> = "null", Repository, Replace, Portable, DomainAction, Release, "Preferred allowed merge method";

@@ -3,8 +3,6 @@
   "plan_stale": false,
   "sync": null,
   "execution": null,
-  "plan_state": "available",
-  "observed_at": 1790683200,
   "task": {
     "id": "task_11111111111111111111111111111111",
     "revision": 1,
@@ -16,9 +14,9 @@
     "due_date": null,
     "state": "unstarted",
     "completed_at": null,
-    "linear_id": "issue-gmail",
-    "pm_snapshot_synced_at": 1790683200,
-    "pm_writeback": {
+    "tracker_id": "issue-gmail",
+    "tracker_synced_at": 1790683200,
+    "tracker_writeback": {
       "state": "current"
     },
     "wave_id": "11111111-1111-4111-8111-111111111111",
@@ -46,8 +44,8 @@
     ],
     "metric_targets": [],
     "status": "started",
-    "linear_id": "project-gmail",
-    "pm_snapshot_synced_at": 1790683200,
+    "tracker_id": "project-gmail",
+    "tracker_synced_at": 1790683200,
     "wave_id": "11111111-1111-4111-8111-111111111111",
     "created_at": "2026-09-29T12:00:00Z",
     "updated_at": "2026-09-29T12:00:00Z"
@@ -120,5 +118,9 @@
     ],
     "refresh_error": null,
     "conflicts": {}
+  },
+  "tracker_state": {
+    "state": "available",
+    "synced_at": 1790683200
   }
 }

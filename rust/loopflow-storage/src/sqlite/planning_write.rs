@@ -320,8 +320,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
         };
         let saved: Option<String> = conn
             .query_row(
-                "SELECT mutation FROM planning_peer_changes WHERE object_id=?1 AND field=?2
-             AND id IN (SELECT id FROM planning_peer_observed)
+                "SELECT mutation FROM git_tracker_changes WHERE object_id=?1 AND field=?2
+             AND id IN (SELECT id FROM git_tracker_seen)
              ORDER BY clock DESC,id DESC LIMIT 1",
                 params![target, edit.change.field()],
                 |row| row.get(0),
@@ -334,8 +334,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
         }
         let parents = {
             let mut query = conn.prepare(
-                "SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2
-                 AND id IN (SELECT id FROM planning_peer_observed)",
+                "SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2
+                 AND id IN (SELECT id FROM git_tracker_seen)",
             )?;
             let parents = query
                 .query_map(params![target, edit.change.field()], |row| row.get(0))?
@@ -351,8 +351,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
 /// competing values resolve to it. Nothing when the field has one head.
 pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
     let mut query = conn.prepare(
-        "SELECT c.id FROM planning_peer_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
-             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+        "SELECT c.id FROM git_tracker_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
+             SELECT 1 FROM git_tracker_changes child,json_each(child.mutation,'$.parents') parent
              WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
     )?;
     let heads = query
@@ -366,7 +366,7 @@ pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
 
 fn record(conn: &Connection, edit: WorkEdit, parents: BTreeSet<String>) -> StoreResult<()> {
     let clock = conn.query_row(
-        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM git_tracker_changes",
         [], |row| row.get(0),
     )?;
     let mutation = PlanningMutation {
@@ -383,7 +383,7 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
     // An import retains thousands of changes under the write lock; preparing
     // an insert compiles the table's triggers, so prepare each statement once.
     let existing: Option<String> = conn
-        .prepare_cached("SELECT mutation FROM planning_peer_changes WHERE id=?1")?
+        .prepare_cached("SELECT mutation FROM git_tracker_changes WHERE id=?1")?
         .query_row([id], |row| row.get(0))
         .optional()?;
     if let Some(existing) = existing {
@@ -395,7 +395,7 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
         return Ok(());
     }
     conn.prepare_cached(
-        "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
+        "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
     )?
     .execute(params![
         id,
@@ -411,12 +411,12 @@ pub(crate) fn observe<'a>(
     ids: impl IntoIterator<Item = &'a str>,
 ) -> StoreResult<()> {
     conn.prepare_cached(
-        "DELETE FROM planning_peer_observed WHERE id IN
-         (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2)",
+        "DELETE FROM git_tracker_seen WHERE id IN
+         (SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2)",
     )?
     .execute(params![edit.target, edit.change.field()])?;
     let mut insert =
-        conn.prepare_cached("INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)")?;
+        conn.prepare_cached("INSERT OR IGNORE INTO git_tracker_seen(id) VALUES(?1)")?;
     for id in ids {
         insert.execute([id])?;
     }
@@ -731,8 +731,8 @@ mod tests {
             "refs/loopflow/planning/shared/fields",
         )
         .unwrap();
-        let route = store.bind_peer_planning("/repo", &destination).unwrap();
-        let snapshot = store.export_peer_planning("/repo", &route).unwrap();
+        let route = store.bind_git_destination("/repo", &destination).unwrap();
+        let snapshot = store.export_git_plan("/repo", &route).unwrap();
         assert!(snapshot
             .winners()
             .any(|(_, change)| change.edit.target == id.as_str()
@@ -831,12 +831,12 @@ mod tests {
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
-        a.bind_peer_planning("/repo", &route).unwrap();
-        b.bind_peer_planning("/repo", &route).unwrap();
+        a.bind_git_destination("/repo", &route).unwrap();
+        b.bind_git_destination("/repo", &route).unwrap();
         let task = plan(&a);
         let exchanged = |store: &SqliteStore| {
             store
-                .export_peer_planning("/repo", &route.id())
+                .export_git_plan("/repo", &route.id())
                 .unwrap()
                 .changes
                 .into_values()
@@ -859,7 +859,7 @@ mod tests {
             .unwrap();
             tx.commit().unwrap();
         }
-        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        let journal = a.export_git_plan("/repo", &route.id()).unwrap();
         crate::test_fixture::import_saved(&b, "/repo", &route.id(), "first", &journal).unwrap();
 
         assert_eq!(b.task(&task).unwrap().unwrap().title, "Original");
@@ -867,7 +867,7 @@ mod tests {
     }
 
     #[test]
-    fn a_stored_released_regression_row_leaves_peer_planning_readable() {
+    fn a_stored_released_regression_row_leaves_git_destinations_readable() {
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
         let task = plan(&store);
@@ -880,25 +880,23 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE planning_peer_changes SET mutation=?1 WHERE field='task_regressed_in'",
+                "UPDATE git_tracker_changes SET mutation=?1 WHERE field='task_regressed_in'",
                 [&stored],
             )
             .unwrap();
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
-        store.bind_peer_planning("/repo", &route).unwrap();
+        store.bind_git_destination("/repo", &route).unwrap();
 
-        let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
+        let exported = store.export_git_plan("/repo", &route.id()).unwrap();
 
         assert!(exported
             .changes
             .values()
             .any(|change| change.clock == 1793827427857
                 && change.edit.change == Edit::HistoricalTaskRegressedIn(None)));
-        let status = store
-            .peer_planning_status("/repo", Some(&route.id()))
-            .unwrap();
+        let status = store.git_destinations("/repo", Some(&route.id())).unwrap();
         assert_eq!(status.len(), 1);
     }
 
@@ -934,7 +932,7 @@ mod tests {
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
         for store in [&a, &b] {
-            store.bind_peer_planning("/repo", &route).unwrap();
+            store.bind_git_destination("/repo", &route).unwrap();
         }
         {
             let conn = a.conn.lock().unwrap();
@@ -950,7 +948,7 @@ mod tests {
             )
             .unwrap();
         }
-        let journal = a.export_peer_planning("/repo", &route.id()).unwrap();
+        let journal = a.export_git_plan("/repo", &route.id()).unwrap();
         crate::test_fixture::import_saved(&b, "/repo", &route.id(), "revision", &journal).unwrap();
         let received = b.project(project.as_ref().unwrap()).unwrap().unwrap();
         assert_eq!(received.description, saved.description);
@@ -978,7 +976,7 @@ mod tests {
         let pending = a
             .pending_project_changes(project.as_ref().unwrap())
             .unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
+        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
         assert!(a
             .edit_project(project.as_ref().unwrap(), Some("Renamed"), None, None)
             .is_err());
@@ -1004,9 +1002,9 @@ mod tests {
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
         for store in [&a, &b] {
-            store.bind_peer_planning("/repo", &route).unwrap();
+            store.bind_git_destination("/repo", &route).unwrap();
         }
-        let base = a.export_peer_planning("/repo", &route.id()).unwrap();
+        let base = a.export_git_plan("/repo", &route.id()).unwrap();
         crate::test_fixture::import_saved(&b, "/repo", &route.id(), "base", &base).unwrap();
         {
             let conn = b.conn.lock().unwrap();
@@ -1096,11 +1094,8 @@ mod tests {
             super::super::task_state::decide_in(&tx, &task, "completed").unwrap();
             tx.commit().unwrap();
         }
-        let snapshot = a.export_peer_planning("/repo", &route.id()).unwrap();
-        assert_eq!(
-            snapshot,
-            a.export_peer_planning("/repo", &route.id()).unwrap()
-        );
+        let snapshot = a.export_git_plan("/repo", &route.id()).unwrap();
+        assert_eq!(snapshot, a.export_git_plan("/repo", &route.id()).unwrap());
         crate::test_fixture::import_saved(&b, "/repo", &route.id(), "next", &snapshot).unwrap();
         let revision = b.revisions().unwrap();
         crate::test_fixture::import_saved(&b, "/repo", &route.id(), "next", &snapshot).unwrap();
@@ -1154,8 +1149,8 @@ mod tests {
             0
         );
         drop(conn);
-        let before = a.export_peer_planning("/repo", &route.id()).unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
+        let before = a.export_git_plan("/repo", &route.id()).unwrap();
+        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
         let current = a.task(&task).unwrap().unwrap();
         let pending = a.pending_task_changes(&task).unwrap();
         assert!(a
@@ -1170,10 +1165,7 @@ mod tests {
             .is_err());
         assert_eq!(a.task(&task).unwrap().unwrap().title, current.title);
         assert_eq!(a.pending_task_changes(&task).unwrap(), pending);
-        assert_eq!(
-            a.export_peer_planning("/repo", &route.id()).unwrap(),
-            before
-        );
+        assert_eq!(a.export_git_plan("/repo", &route.id()).unwrap(), before);
     }
 
     #[test]
@@ -1186,8 +1178,8 @@ mod tests {
         let route =
             PlanningDestination::new("/synthetic.git", "refs/loopflow/planning/shared/test")
                 .unwrap();
-        store.bind_peer_planning("/repo", &route).unwrap();
-        let mut incoming = store.export_peer_planning("/repo", &route.id()).unwrap();
+        store.bind_git_destination("/repo", &route).unwrap();
+        let mut incoming = store.export_git_plan("/repo", &route.id()).unwrap();
         let prior = incoming
             .winners()
             .find(|(_, c)| {
@@ -1231,14 +1223,11 @@ mod tests {
         }
         crate::test_fixture::import_saved(&store, "/repo", &route.id(), "rejected", &incoming)
             .unwrap();
-        let exported = store.export_peer_planning("/repo", &route.id()).unwrap();
+        let exported = store.export_git_plan("/repo", &route.id()).unwrap();
         assert_eq!(exported.changes["rejected"], incoming.changes["rejected"]);
-        let status = store.peer_planning_status("/repo", None).unwrap().remove(0);
+        let status = store.git_destinations("/repo", None).unwrap().remove(0);
         assert_eq!(status.conflicts.len(), 1);
-        let journal = store
-            .peer_planning_journal("/repo", None)
-            .unwrap()
-            .remove(0);
+        let journal = store.git_journal("/repo", None).unwrap().remove(0);
         assert_eq!(journal.changes, exported.changes);
         assert!(journal.candidates.contains("rejected"));
         let mut conn = store.conn.lock().unwrap();
@@ -1247,7 +1236,7 @@ mod tests {
         assert!(values.contains(&Edit::WaveProject(serde_json::from_value(prior).unwrap())));
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM planning_peer_observed WHERE id='rejected'",
+                "SELECT count(*) FROM git_tracker_seen WHERE id='rejected'",
                 [],
                 |r| r.get::<_, i64>(0)
             )
@@ -1265,7 +1254,7 @@ mod tests {
         .unwrap();
         tx.commit().unwrap();
         drop(conn);
-        let local = store.export_peer_planning("/repo", &route.id()).unwrap();
+        let local = store.export_git_plan("/repo", &route.id()).unwrap();
         let (_, name) = local
             .winners()
             .find(|(_, c)| {
@@ -1290,9 +1279,6 @@ mod tests {
             &reused
         )
         .is_err());
-        assert_eq!(
-            store.export_peer_planning("/repo", &route.id()).unwrap(),
-            before
-        );
+        assert_eq!(store.export_git_plan("/repo", &route.id()).unwrap(), before);
     }
 }

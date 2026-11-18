@@ -246,11 +246,11 @@ writes! {
         *answer,
     )?,
 
-    /// `lf repo plan answer <action> --keep-theirs | --use-mine`: answer one
+    /// `lf repo tracker answer <action> --keep-theirs | --use-mine`: answer one
     /// lost line of the directory's repository, whoever owns it. Answers the
     /// line as it stood.
-    #[serde(rename = "plan.answer")]
-    PlanAnswer {
+    #[serde(rename = "repo.tracker.answer")]
+    TrackerAnswer {
         directory: PathBuf,
         action: String,
         answer: loopflow_execution::store::planning_sync::LostAnswer,
@@ -496,7 +496,7 @@ writes! {
     },
 
     /// `lf wave plan bind <wave> <project> --json`: the tracker Project
-    /// bound as the Wave's current plan.
+    /// bound as the Wave's current Project.
     #[serde(rename = "wave.plan.bind")]
     WavePlanBind {
         directory: PathBuf,
@@ -1089,7 +1089,7 @@ macro_rules! directory_of {
             | Write::TaskShip { directory, .. }
             | Write::TaskHold { directory, .. }
             | Write::TaskSync { directory, .. }
-            | Write::PlanAnswer { directory, .. }
+            | Write::TrackerAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
             | Write::TaskReport { directory, .. }
             | Write::TaskInterrupt { directory, .. }

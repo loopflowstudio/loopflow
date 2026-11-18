@@ -131,13 +131,13 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         rusqlite::Connection::open(home.path().join("loopflow.db"))
             .unwrap()
             .execute_batch(
-                "UPDATE pm_items SET observed_at=1; UPDATE pm_projects SET observed_at=1;",
+                "UPDATE tracker_items SET observed_at=1; UPDATE tracker_projects SET observed_at=1;",
             )
             .unwrap();
         if condition.starts_with("invalid") || condition == "removed" {
             runtime
-                .block_on(registered.store.observe_pm_issue_change(
-                    registered.task.linear_id.as_ref().unwrap().as_str(),
+                .block_on(registered.store.record_tracker_event(
+                    registered.task.tracker_id.as_ref().unwrap().as_str(),
                     None,
                     condition == "removed",
                 ))
@@ -146,7 +146,7 @@ fn task_run_checks_admission_while_standalone_graphs_run_with_task_context() {
         if condition == "invalid_without_inventory" {
             rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
-                .execute("DELETE FROM pm_items", [])
+                .execute("DELETE FROM tracker_items", [])
                 .unwrap();
         }
         let run = |args: &[&str]| command(repo.path(), home.path(), args).output().unwrap();

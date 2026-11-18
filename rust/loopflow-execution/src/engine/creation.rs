@@ -243,11 +243,9 @@ pub fn create(id: &str, mut input: TaskCreation) -> Result<Created> {
     receipt.graph = Some(graph);
     receipt.milestone = "started".into();
     step("admit_receipt", || -> Result<()> {
-        store.sqlite.advance_creation(
-            id,
-            &receipt.milestone,
-            Some(&serde_json::to_value(&receipt)?),
-        )?;
+        store
+            .sqlite
+            .advance_creation(id, &receipt.milestone, Some(&receipt.stored_result()?))?;
         Ok(())
     })?;
     answered(&store, &runtime, receipt)

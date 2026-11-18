@@ -123,10 +123,11 @@ pub struct TaskSummary {
     pub repo: String,
     pub project_id: Option<String>,
     pub wave_id: Option<String>,
-    pub acquisition: loopflow_execution::store::TaskAcquisition,
+    pub tracker_state: loopflow_execution::store::TrackerState,
     pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub id: String,
-    pub linear_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<String>,
     pub identifier: String,
     pub name: String,
     pub description: String,
@@ -390,7 +391,8 @@ pub struct ProjectSummary {
     pub sync: loopflow_storage::planning_sync::TrackerSync,
     pub current: bool,
     pub id: String,
-    pub linear_id: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_id: Option<String>,
     pub slug: String,
     pub name: String,
     pub status: loopflow_storage::work::project::ProjectStatus,
@@ -413,11 +415,11 @@ async fn project_planning(store: &SharedStore, wave: &Wave) -> Evidence<ProjectS
                     current: current.as_deref().is_some_and(|id| {
                         id == project.id.as_str()
                             || project
-                                .linear_id
+                                .tracker_id
                                 .as_ref()
                                 .is_some_and(|linear| linear.as_str() == id)
                     }),
-                    linear_id: project.linear_id.map(|id| id.as_str().to_owned()),
+                    tracker_id: project.tracker_id.map(|id| id.as_str().to_owned()),
                     id: project.id.to_string(),
                     slug: project.slug,
                     name: project.name,
@@ -439,7 +441,7 @@ fn print_projects(projects: &Evidence<ProjectSummary>) {
         Evidence::Ok { items, .. } => {
             for project in items {
                 println!(
-                    "  chapter   {} ({}) · {} · {}",
+                    "  Project   {} ({}) · {} · {}",
                     project.name,
                     project.id,
                     if project.current {
@@ -564,7 +566,7 @@ pub(crate) async fn wave_snapshots(store: &SharedStore, all: bool) -> Result<Vec
     Ok(snapshots)
 }
 
-/// `lf wave status [wave]` — one Wave's current plan, Tasks and Session evidence.
+/// `lf wave status [wave]` — one Wave's current Project, Tasks and Session evidence.
 /// `lf wave status [<wave>]` observes the tracker first; `lf wave plan
 /// <wave>` reads what the store records and `lf wave sync` exchanges planning.
 pub fn status(wave: Option<&str>, json: bool, observe: bool) -> Result<()> {
@@ -2083,11 +2085,11 @@ async fn snapshot_task_detail(
         &shared.machines,
         &shared.local_machine,
     );
-    let acquisition = facts
-        .acquisitions
+    let tracker_state = facts
+        .tracker_states
         .get(&task.id)
         .cloned()
-        .ok_or_else(|| anyhow!("Task {} has no planning acquisition", task.id))?;
+        .ok_or_else(|| anyhow!("Task {} has no tracker state", task.id))?;
     let latest_event = facts.latest_events.get(&task.id);
     let worktree_blocker =
         loopflow_execution::ops::task::task_worktree_blocker_after(task, latest_event)?;
@@ -2100,7 +2102,7 @@ async fn snapshot_task_detail(
         )
         .or_else(|| {
             matches!(
-                acquisition.state,
+                tracker_state.state,
                 loopflow_execution::store::PlanningState::Invalid
                     | loopflow_execution::store::PlanningState::Removed
             )
@@ -2238,7 +2240,7 @@ async fn snapshot_task_detail(
                 .get(&task.id)
                 .map(|open| open.clone().status(reads.planning_connections[&open.repo]))
                 .ok_or_else(|| anyhow!("Task {} has no tracker actions read", task.id))?,
-            acquisition,
+            tracker_state,
             facts
                 .repository_paths
                 .get(&task.repository_id)
@@ -2548,7 +2550,7 @@ fn task_pr_empty(task: &Task, pr: &TaskPr) -> Option<bool> {
 fn task_summary(
     task: &Task,
     sync: loopflow_storage::planning_sync::TrackerSync,
-    acquisition: loopflow_execution::store::TaskAcquisition,
+    tracker_state: loopflow_execution::store::TrackerState,
     repo: String,
 ) -> TaskSummary {
     TaskSummary {
@@ -2556,11 +2558,11 @@ fn task_summary(
         repo,
         project_id: task.project_id.as_ref().map(ToString::to_string),
         wave_id: task.wave_id.as_ref().map(ToString::to_string),
-        acquisition,
+        tracker_state,
         due_date: task.due_date.clone(),
         sync,
         id: task.id.to_string(),
-        linear_id: task.linear_id.as_ref().map(|id| id.as_str().to_string()),
+        tracker_id: task.tracker_id.as_ref().map(|id| id.as_str().to_string()),
         identifier: task.identifier.clone(),
         name: task.title.clone(),
         description: task.description.clone(),
@@ -2906,14 +2908,14 @@ fn metric_value(metric: &MetricReadingDto) -> String {
 fn metric_target(metric: &MetricReadingDto, portfolio: &MetricPortfolioDto) -> String {
     if portfolio.contract_issues.iter().any(|issue| {
         matches!(issue,
-            MetricContractIssueDto::ChapterUnavailable { wave_id, .. }
+            MetricContractIssueDto::ProjectUnavailable { wave_id, .. }
             if wave_id == metric.identity.wave_id()
         )
     }) {
-        return "unavailable for this chapter".into();
+        return "unavailable for this Project".into();
     }
     match metric.target {
-        None => "unset for this chapter".into(),
+        None => "unset for this Project".into(),
         Some(Threshold::AtLeast { value }) => {
             format!(">= {}", format_metric_number(value, &metric.unit))
         }
@@ -2960,7 +2962,7 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
         MetricEvidenceDto::Unknown { cause } => Some(match cause {
             MetricUnknownCauseDto::Never => "no observation has arrived".to_string(),
             MetricUnknownCauseDto::TargetUnavailable { .. } => {
-                "chapter target planning is unavailable".to_string()
+                "Project target planning is unavailable".to_string()
             }
             MetricUnknownCauseDto::RevisionMismatch {
                 expected_contract_revision,
@@ -2994,8 +2996,8 @@ fn metric_reason(evidence: &MetricEvidenceDto) -> Option<String> {
 
 fn metric_contract_issue(issue: &MetricContractIssueDto) -> String {
     match issue {
-        MetricContractIssueDto::ChapterUnavailable { wave_id, reason } => format!("{wave_id}: chapter targets unavailable: {reason}"),
-        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => format!("{wave_id}/{metric_id}: chapter target has no readable instrument contract"),
+        MetricContractIssueDto::ProjectUnavailable { wave_id, reason } => format!("{wave_id}: Project targets unavailable: {reason}"),
+        MetricContractIssueDto::UnresolvedTarget { wave_id, metric_id } => format!("{wave_id}/{metric_id}: Project target has no readable instrument contract"),
         MetricContractIssueDto::MalformedContract { path, message } => {
             format!("{path}: {message}")
         }
@@ -3618,7 +3620,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: serde_json::from_str(include_str!(
@@ -3690,7 +3691,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 1,
                     snapshot: planning.clone(),
@@ -3715,7 +3715,7 @@ mod tests {
             let item = planning
                 .items
                 .iter()
-                .find(|item| Some(item.id.as_str()) == detail.task.linear_id.as_deref())
+                .find(|item| Some(item.id.as_str()) == detail.task.tracker_id.as_deref())
                 .unwrap();
             assert_eq!(detail.task.state, item.state);
             assert_eq!(detail.task.completed_at, item.completed_at);
@@ -3801,7 +3801,6 @@ mod tests {
                 .seed_inventory(
                     crate::test_linear_input::InventoryFixture {
                         wave_id: wave.id().clone(),
-                        provider: "linear".into(),
                         initiative: "initiative".into(),
                         synced_at: 2,
                         snapshot: serde_json::from_value(serde_json::json!({"projects":[{
@@ -3829,7 +3828,7 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET initiative_ids='not-json' WHERE id='first-ear'",
+                "UPDATE tracker_projects SET initiative_ids='not-json' WHERE id='first-ear'",
                 [],
             )
             .unwrap();
@@ -3847,7 +3846,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn chapter_deletion_stays_absent_from_wave_and_roadmap_planning() {
+    async fn project_deletion_stays_absent_from_wave_and_roadmap_planning() {
         let directory = tempfile::tempdir().unwrap();
         let database = directory.path().join("registry.db");
         let store = Arc::new(
@@ -3887,11 +3886,10 @@ mod tests {
         items.push(item);
         let snapshot = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 1,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
-                "id":"current", "slug":"current", "name":"Current chapter", "summary":"",
+                "id":"current", "slug":"current", "name":"Current project", "summary":"",
                 "metric_targets":[], "workflow":"feature", "status":"started", "krs":[],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":items}))
@@ -3912,7 +3910,7 @@ mod tests {
                 let mut successor = stale.snapshot.projects[0].clone();
                 successor.id = "next".into();
                 successor.slug = "next".into();
-                successor.name = "Next chapter".into();
+                successor.name = "Next project".into();
                 stale.snapshot.projects[0].status =
                     loopflow_storage::work::project::ProjectStatus::Completed;
                 stale.snapshot.projects[0].revision = Some("2026-09-30T00:00:01Z".into());
@@ -3938,7 +3936,7 @@ mod tests {
             };
             assert_eq!(items.len(), 1);
             assert!(detail.unavailable_tasks.is_empty());
-            assert_eq!(items[0].task.linear_id.as_deref(), Some("started"));
+            assert_eq!(items[0].task.tracker_id.as_deref(), Some("started"));
         }
     }
 
@@ -3974,12 +3972,12 @@ mod tests {
         assert!(missing.metrics.is_empty());
         assert!(matches!(
             &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
         store.seed_inventory(crate::test_linear_input::InventoryFixture {
-            wave_id: wave.id().clone(), provider: "linear".into(), initiative: "initiative".into(), synced_at: 2,
+            wave_id: wave.id().clone(), initiative: "initiative".into(), synced_at: 2,
             snapshot: serde_json::from_value(serde_json::json!({"projects":[{
-                "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First chapter", "summary":"",
+                "id":"999bdbdd-c045-41a6-8ffc-a97c4a40b0b3", "slug":"first", "name":"First project", "summary":"",
                 "metric_targets":[], "workflow":"feature", "status":"started", "krs":[{"text":"Edited proof", "holds":false}],
                 "initiative_ids":["initiative"], "team_ids":["team"]
             }], "items":[]})).unwrap(),
@@ -4003,7 +4001,6 @@ mod tests {
         );
         let unreadable = crate::test_linear_input::InventoryFixture {
             wave_id: wave.id().clone(),
-            provider: "linear".into(),
             initiative: "initiative".into(),
             synced_at: 3,
             snapshot: crate::test_linear_input::Inventory {
@@ -4019,7 +4016,7 @@ mod tests {
         // Invalid provider evidence cannot erase the owned plan, but prevents metric evaluation.
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("UPDATE pm_projects SET initiative_ids='not-json'", [])
+            .execute("UPDATE tracker_projects SET initiative_ids='not-json'", [])
             .unwrap();
         let super::Evidence::Ok {
             items,
@@ -4044,7 +4041,7 @@ mod tests {
         .unwrap();
         assert!(matches!(
             &missing.contract_issues[..],
-            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable { .. }]
+            [loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable { .. }]
         ));
     }
 
@@ -4102,7 +4099,6 @@ mod tests {
             .seed_inventory(
                 crate::test_linear_input::InventoryFixture {
                     wave_id: wave.id().clone(),
-                    provider: "linear".into(),
                     initiative: "initiative".into(),
                     synced_at: 2,
                     snapshot: crate::test_linear_input::Inventory {
@@ -4134,7 +4130,7 @@ mod tests {
         );
         for _ in 0..2 {
             let current = loopflow_execution::ops::project::current_project(&store, &wave).unwrap();
-            assert_eq!(current.linear_id.as_ref().unwrap().as_str(), selected);
+            assert_eq!(current.tracker_id.as_ref().unwrap().as_str(), selected);
 
             let super::Evidence::Ok {
                 items: projects, ..
@@ -4170,7 +4166,7 @@ mod tests {
                 .unwrap()
                 .unwrap();
             assert_eq!(items[0].task.id, saved.id.as_str());
-            assert_eq!(items[0].task.linear_id.as_deref(), Some(item.id.as_str()));
+            assert_eq!(items[0].task.tracker_id.as_deref(), Some(item.id.as_str()));
             assert!(tasks.unavailable_tasks.is_empty());
         }
         let after = (
@@ -4199,7 +4195,7 @@ mod tests {
         .await
         .unwrap();
         assert!(
-            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.linear_id.as_deref() == Some(item.id.as_str()))
+            matches!(retained.tasks, super::Evidence::Ok { items, .. } if items.len() == 1 && items[0].task.tracker_id.as_deref() == Some(item.id.as_str()))
         );
     }
 
@@ -4213,7 +4209,7 @@ mod tests {
     }
 
     #[test]
-    fn text_metrics_preserve_values_when_chapter_targets_are_unavailable() {
+    fn text_metrics_preserve_values_when_project_targets_are_unavailable() {
         let fixture: MetricPortfolioDto = serde_json::from_str(include_str!(
             "../../../../../tests/fixtures/dto/metric_portfolio.json"
         ))
@@ -4248,7 +4244,7 @@ mod tests {
             metric.evidence = MetricEvidenceDto::Unknown { cause };
             let portfolio = MetricPortfolioDto {
                 contract_issues: vec![
-                    loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                    loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
                         wave_id: metric.identity.wave_id().to_string(),
                         reason: "current Project is ambiguous".into(),
                     },
@@ -4256,9 +4252,9 @@ mod tests {
                 metrics: vec![metric],
             };
             let text = metric_portfolio_text(&portfolio);
-            assert!(text.contains("Target unavailable for this chapter"));
+            assert!(text.contains("Target unavailable for this Project"));
             assert!(text.contains(if never { "Value -" } else { "Value 100.00%" }));
-            assert!(!text.contains("unset for this chapter"));
+            assert!(!text.contains("unset for this Project"));
         }
         let mut known_empty = observed.clone();
         known_empty.evidence = MetricEvidenceDto::Untargeted {
@@ -4269,14 +4265,14 @@ mod tests {
         let text = metric_portfolio_text(&MetricPortfolioDto {
             metrics: vec![known_empty],
             contract_issues: vec![
-                loopflow_execution::work::wave::metrics::MetricContractIssueDto::ChapterUnavailable {
+                loopflow_execution::work::wave::metrics::MetricContractIssueDto::ProjectUnavailable {
                     wave_id: "another-wave".into(),
                     reason: "no saved plan".into(),
                 },
             ],
         });
         assert!(text.contains("[no target]"));
-        assert!(text.contains("Target unset for this chapter"));
+        assert!(text.contains("Target unset for this Project"));
     }
 
     #[test]

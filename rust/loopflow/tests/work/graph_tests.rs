@@ -742,7 +742,7 @@ fn checkout_task_identity_ignores_main_and_parent_upstreams() {
             .block_on(child.store.get_task(&parent.id))
             .unwrap()
             .unwrap();
-        parent_after.pm_writeback = parent_before.pm_writeback.clone();
+        parent_after.tracker_writeback = parent_before.tracker_writeback.clone();
         assert_eq!(parent_after, parent_before);
     }
 }

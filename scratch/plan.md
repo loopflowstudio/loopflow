@@ -133,11 +133,13 @@ nothing left worth that. The PR says so.
   (one row per Session, forever). Its `sqlite_autoindex_session_activity_1`
   row goes into `MEASURED` as `'20732 1'` with the table in the `DELETE` list,
   and the doc comment says where the number came from.
-- `store::query_plans::tests::` gains a test that traces
-  `session_projection_inputs` for all Sessions and for one, each followed by
-  `pin`, over the `retirement` fixture with activity recorded, and asserts
-  `growing_scans` is empty. With today's statement it fails on
-  `SCAN session_activity`.
+- No new test in `store::query_plans::tests::`.
+  `identity_acquisition_is_batched_and_indexes_out_completed_history`
+  (`rust/loopflow-execution/src/store/session_projection.rs`) already traces
+  the three statements and `pin`, for all Sessions and for one, through
+  `growing_scans`. With the old deadline statement restored it fails on
+  `SCAN session_activity` (run 2026-11-18), so a second trace of the same
+  statements was deleted in compress.
 - Adding the table to `GROWING` puts every other traced path's
   `session_activity` statements under the same check. A scan it finds
   elsewhere is fixed here when it is a one-line predicate, otherwise filed.
@@ -145,9 +147,7 @@ nothing left worth that. The PR says so.
   two Sessions with fresh activity, one whose agent has ended. The all-read
   carries one deadline, the live Session's; a single read of the ended one
   carries none; a single read of the live one carries its own.
-- `identity_acquisition_is_batched_and_indexes_out_completed_history`
-  (`rust/loopflow-execution/src/store/session_projection.rs`) keeps its count
-  of 6 SELECTs: three statements, twice.
+- That test keeps its count of 6 SELECTs: three statements, twice.
 
 `graph_processes` is left out of `GROWING`: the all-read walks
 `graph_processes_unended` in full by design, and `growing_scans` would need
@@ -196,7 +196,7 @@ ended agent in every summary.
 ## Slices
 
 All three statements, Dead from the row and both tests are built. The two
-commands under "Acceptance check at gate" ran here on 94fdc3f612: 14 and 5
+commands under "Acceptance check at gate" ran here after compress: 13 and 5
 tests, all passing. Left:
 
 - Gate runs the suites and clippy; the PR body carries the plans and times below.

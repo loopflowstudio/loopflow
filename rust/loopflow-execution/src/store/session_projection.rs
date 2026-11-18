@@ -382,6 +382,10 @@ mod tests {
                 .available
         );
     }
+
+    // The one plan check for the inputs read: identities, Graph runs and quiet
+    // deadlines, for every Session and for one. `session_activity` is in
+    // `GROWING`, so a deadline statement that scans it fails here.
     #[test]
     fn identity_acquisition_is_batched_and_indexes_out_completed_history() {
         use loopflow_storage::query_plans::{growing_scans, statements};

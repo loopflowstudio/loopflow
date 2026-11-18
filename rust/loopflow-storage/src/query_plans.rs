@@ -503,57 +503,6 @@ mod tests {
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }
 
-    // A reading of Sessions asks the OS about the agents that have not ended.
-    // It finds them, their quiet deadlines and the running Graphs without
-    // walking history, for every Session and for one.
-    #[test]
-    fn session_projection_inputs_plan_from_the_unended_agents() {
-        let (_home, store, _task, _viewer) = fixture();
-        let attachment = store
-            .attach_session(
-                "viewed",
-                None,
-                &store.test_lf_process(),
-                None,
-                &crate::sqlite::sessions::SessionCaller {
-                    agent: None,
-                    capture_key: None,
-                },
-            )
-            .unwrap();
-        store
-            .record_session_activity(
-                "viewed",
-                &attachment,
-                &crate::session::SessionActivity {
-                    preview: None,
-                    observed_at: 450,
-                    open_tools: 0,
-                    pending_input: 0,
-                    yielded: false,
-                },
-            )
-            .unwrap();
-        let traced = statements(&store, || {
-            for session in [None, Some("viewed")] {
-                let inputs = store.session_projection_inputs(500, session).unwrap();
-                assert_eq!(inputs.identities.len(), 1);
-                assert_eq!(inputs.deadlines, [450 + 120]);
-                let mut conn = store.conn.lock().unwrap();
-                assert!(inputs.pin(&mut conn).unwrap().is_some());
-            }
-        });
-        assert_eq!(
-            traced
-                .iter()
-                .filter(|sql| sql.starts_with("SELECT"))
-                .count(),
-            12
-        );
-        let scans = growing_scans(&store, &traced);
-        assert!(scans.is_empty(), "{}", scans.join("\n"));
-    }
-
     // Every save runs a pass: its creation check and queue read plan by index,
     // and a check that finds nothing takes no write lock.
     #[test]

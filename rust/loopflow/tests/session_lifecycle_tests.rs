@@ -682,14 +682,15 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
     );
     support::seed_store(fixture.home.path());
     // A bare run stops before the interactive review step; it may return as
-    // its Graph registers, so wait for it to stop there.
+    // its Graph registers, so wait for it to stop there. The Task reads as
+    // moving until the run's own Process has ended.
     let run = fixture
         .command(&["--agent", "codex", "task", "run", task_id, "proof"])
         .output()
         .unwrap();
     assert!(run.status.success(), "{run:?}");
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    let final_status = loop {
+    loop {
         let status = fixture.json(&["desktop", "task", task_id, "--json"]);
         let finished = support::recorded_graphs(fixture.home.path())
             .first()
@@ -697,13 +698,13 @@ fn personal_task_launch_resume_and_skill_graph_keep_native_identity() {
         if finished
             && status["execution"]["work"]["graph"]["position"]
                 == serde_json::json!({"kind": "at", "step": "review"})
+            && status["execution"]["status"] == "active"
         {
-            break status;
+            break;
         }
         assert!(std::time::Instant::now() < deadline, "{status}");
         std::thread::sleep(std::time::Duration::from_millis(100));
-    };
-    assert_eq!(final_status["execution"]["status"], "active");
+    }
     assert_eq!(fixture.count("agent_sessions"), 2);
     let graphs = support::recorded_graphs(fixture.home.path());
     assert_eq!(graphs.len(), 1);

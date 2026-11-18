@@ -243,3 +243,17 @@ Slice 5 (implement):
 - Not built, recorded: the runtime reap-before-settle race ("a reaped
   attachment is not a move" in `attachment_lost`); `starts_since_turn` counts
   only the pass's starts while `last_started_at` also holds a person's.
+
+## Slice 6: fresh thread after a lost transcript
+
+- The `running (fresh thread; the old one's transcript was gone)` line is not
+  built. `ended`/`start` cannot say it; a nullable `start.fresh_thread` would
+  touch the DTO fixtures and 13 Swift inline fixtures. The pane prints "The
+  claude transcript of this conversation is gone; continuing on a fresh
+  thread." Build the field if the Task page should show it.
+- A lost thread restarts with its original request and skill, not a log: no
+  log exists. Headless `lf -b resume --message` on a lost thread still fails
+  in `adopt_native`; it could take the same branch.
+- `new_thread` now treats a live conversation whose transcript is not yet
+  saved as lost (original request) instead of failing "retry after claude
+  saves its first turn".

@@ -573,37 +573,37 @@ Must survive:
    conversation X: its transcript is missing", the start counts as a death,
    and after 5 the line offers `lf resume --task X`, which fails the same way.
    The promise "one command continues it" is false for exactly the crash case.
-   To build:
-   - `ops::recovery`: beside `launch_failure`, `thread_lost(conversation)`:
-     the Session names a provider thread and no home lf knows
-     (`conversation_home`, the native home) holds its transcript
-     (`transcript::transcript`). Read only for a due conversation, never on a
-     status read.
-   - `server/recovery.rs`: a due conversation whose thread is lost is started
-     with `human_session::new_thread(store, id, None, false, false,
-     "recover:<session>:<agent>:fresh")` (fresh thread on the same Session,
-     seeded with lf's log of the old one; the creation receipt dedupes across
-     a server restart), then `continuing()` as usual. It counts as one start;
-     a fresh thread that dies again is an ordinary death.
-   - `lf session resume` (a person's start) does the same when the thread is
-     lost, instead of failing: one rule for both starters, in the start path
-     they share (`adopt_native`'s missing-transcript `ensure!` becomes the
-     fresh-thread branch's trigger, not an error). Then the five-starts line's
-     `lf resume --task X` is true.
-   - The Session's `start` shows it: `start.failure` stays null; the
-     conversation line reads `running (fresh thread; the old one's transcript
-     was gone)` until its first finished turn. Keep it to the text form; no
-     new wire field if `ended`/`start` already say it, else one nullable
-     `start.fresh_thread: bool` in the DTO fixtures.
-   - Test: `server::recovery::tests::a_conversation_whose_transcript_is_gone_starts_on_a_fresh_thread`
-     (one start, request `…:fresh`, a second pass starts nothing while it
-     runs) and a `session::tests::` case that `lf resume` of a lost thread
-     opens a fresh one instead of erroring. Break check: restore the `ensure!`
-     and both fail.
+   Built, simpler than drafted (both starters already run `lf session
+   resume`, so the rule lives once, in `human_session::open`):
+   - `transcript::thread_lost(store, provider, thread)`: neither the native
+     home nor `conversation_home` holds the transcript; only Claude and Codex
+     can lose one. Read on a resume only, never on a status read.
+   - `human_session::open`: a resume whose thread is lost, with no terminal
+     elsewhere and no live agent, prints "The claude transcript of this
+     conversation is gone; continuing on a fresh thread." and calls
+     `new_thread` (request `fresh-thread:<session>:<thread>`, deduped by its
+     creation receipt). The pass needs no branch of its own: its held
+     terminal's `lf session resume` takes this path, and the start counts once.
+   - `new_thread` seeds from the original request and keeps the skill when
+     the old transcript is lost (it used to fail reading the log, so `lf
+     session new` on a lost thread failed too). `adopt_native`'s `ensure!`
+     stays for headless `-b resume --message` and Graph steps.
+   - Not built: the `running (fresh thread; …)` status line. Nothing in
+     `ended`/`start` says it, and a wire field means 13 Swift fixtures; the
+     pane's diagnostic says it. In `questions.md`.
+   - Docs: `docs/sessions.md` (recovery section).
+   - Test: `context_launch_tests::a_killed_task_conversation_comes_back_once_and_a_quit_one_stays_quit`
+     now logs each launch's thread: the kill restart resumes (`--resume X`,
+     transcript present), the server-restart start after the transcript is
+     removed opens a new `--session-id`. Fails with the branch disabled.
+     `transcript::tests::old_account_…` covers `thread_lost` per home.
+   Taught: the fixture's "finished turn" reset left `last_started_at`, so the
+   restart waited a full backoff minute and only passed by a second; it now
+   clears both, as `steers.rs` does.
 
 ## Remaining
 
-Slice 6. Then, left for later steps:
+Left for later steps:
 - gate: the named checks under Checks, and CI's full matrix;
 - a person: acceptance check 5 against real Claude (does a SIGTERM'd provider
   exit 0?), and the real reboot with three Tasks;
@@ -636,6 +636,10 @@ Slice 6. Then, left for later steps:
   `doctor::tests::` (6); `context_launch_tests::a_killed_task_conversation` (1);
   `documented_commands::` (4); clippy clean.
 - `scripts/test_desktop.sh --filter 'DTOFixtureTests'`: 58 pass (implement).
+- Slice 6 (implement): `context_launch_tests::a_killed_task_conversation` (1, and fails
+  with the branch disabled), `transcript::tests::old_account_…` (1),
+  `ops::human_session::tests::` (29), `documented_commands::` (4). Gate: clippy,
+  `test(session_cli_tests::)`, `binary(session_lifecycle_tests)` (new_thread seeding).
 - Gate: every Swift suite with an inline
   Session fixture (keys `ended`/`start` added to 13 files), `binary(session_lifecycle_tests)`
   (`work_first_entry.json`), `test(performance_tests::)` (`summary_query` gained one PK join).

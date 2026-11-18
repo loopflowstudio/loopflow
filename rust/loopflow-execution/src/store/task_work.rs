@@ -25,7 +25,6 @@ pub fn task_work(store: &SqliteStore, task: &TaskId) -> StoreResult<TaskWork> {
     Ok(TaskWork {
         sessions: records.sessions,
         graph_processes: records.graph_processes,
-        processes: records.processes,
         graph: records
             .graph
             .map(|row| decode_row(row).map(read_task_graph))

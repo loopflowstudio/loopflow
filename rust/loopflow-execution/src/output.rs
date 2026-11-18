@@ -13,24 +13,6 @@ pub fn format_time(unix: i64) -> String {
         .unwrap_or_else(|| unix.to_string())
 }
 
-pub fn print_process(process: &crate::process::ProcessEntry) {
-    println!("{}", render_process(process));
-}
-
-pub fn render_process(process: &crate::process::ProcessEntry) -> String {
-    let command = process.command().unwrap_or("unknown command");
-    let display = serde_json::from_str::<Vec<String>>(command)
-        .map(|argv| argv.join(" "))
-        .unwrap_or_else(|_| command.to_string());
-    format!(
-        "{}  {}  {}  {}",
-        process.id(),
-        process.started_at(),
-        process.outcome().unwrap_or("unknown"),
-        display
-    )
-}
-
 #[derive(Debug, Clone, Copy)]
 pub struct Colors {
     pub cyan: &'static str,

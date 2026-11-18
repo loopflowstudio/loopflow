@@ -226,6 +226,16 @@ pub fn executable(pid: u32) -> Option<PathBuf> {
 }
 
 pub fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
+    Ok(procargs(pid)?.and_then(|buffer| decode_arguments(&buffer)))
+}
+
+/// The values of `names` in `pid`'s environment; the rest never leaves here.
+pub fn environment(pid: u32, names: &[&str]) -> io::Result<Option<Vec<(String, String)>>> {
+    Ok(procargs(pid)?.and_then(|buffer| decode_environment(&buffer, names)))
+}
+
+/// The kernel's argument block: argc, the executable path, argv, then the environment.
+fn procargs(pid: u32) -> io::Result<Option<Vec<u8>>> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as i32];
     let mut buffer = vec![0u8; 1024 * 1024];
     let mut length = buffer.len();
@@ -253,7 +263,7 @@ pub fn arguments(pid: u32) -> io::Result<Option<Vec<String>>> {
         };
     }
     buffer.truncate(length);
-    Ok(decode_arguments(&buffer))
+    Ok(Some(buffer))
 }
 
 fn decode_arguments(buffer: &[u8]) -> Option<Vec<String>> {
@@ -272,9 +282,22 @@ fn decode_arguments(buffer: &[u8]) -> Option<Vec<String>> {
     Some(args)
 }
 
+fn decode_environment(buffer: &[u8], names: &[&str]) -> Option<Vec<(String, String)>> {
+    let count = usize::try_from(i32::from_ne_bytes(buffer.get(..4)?.try_into().ok()?)).ok()?;
+    let body = buffer.get(4..)?;
+    let executable_end = body.iter().position(|byte| *byte == 0)?;
+    let body = body.get(executable_end + 1..)?;
+    let start = body.iter().position(|byte| *byte != 0)?;
+    let environment = body[start..]
+        .split(|byte| *byte == 0)
+        .skip(count)
+        .take_while(|entry| !entry.is_empty());
+    Some(super::select_environment(environment, names))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{decode_arguments, kernel_state};
+    use super::{decode_arguments, decode_environment, kernel_state};
 
     #[test]
     fn exiting_and_zombie_states_are_distinct_from_running() {
@@ -298,6 +321,16 @@ mod tests {
                 "--listen",
                 "unix:///Task servers/rex.sock"
             ]
+        );
+    }
+
+    #[test]
+    fn environment_reads_only_the_named_variables() {
+        let mut buffer = 2_i32.to_ne_bytes().to_vec();
+        buffer.extend_from_slice(b"/bin/lf\0\0\0lf\0run\0LF_PROCESS_ID=p\0SECRET=s\0\0");
+        assert_eq!(
+            decode_environment(&buffer, &["LF_PROCESS_ID", "LF_STEER_SESSION"]),
+            Some(vec![("LF_PROCESS_ID".into(), "p".into())])
         );
     }
 }

@@ -111,8 +111,8 @@ pub(super) fn repository_id_in(conn: &Connection, repo: &str) -> StoreResult<Opt
 /// Routing and transactional preparation use the same sharing boundary.
 /// Shared mutation routes are planning evidence, never an execution reservation.
 impl SqliteStore {
-    /// Move current addresses together. Captures, Process rows and provider
-    /// history retain the paths at which they were recorded.
+    /// Move current addresses together. Captures and provider history retain
+    /// the paths at which they were recorded.
     pub fn relocate_repository(&self, id: &RepositoryId, destination: &str) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -132,16 +132,6 @@ impl SqliteStore {
                 "{destination} already retains another repository; no Work was moved"
             )));
         }
-        // Freeze only observed checkout membership before changing its address.
-        // A future clone reusing the old path cannot acquire this history.
-        tx.execute(
-            "INSERT OR IGNORE INTO relocated_task_processes(task_id,process_id)
-             SELECT t.id,e.id FROM task_checkouts c JOIN tasks t ON t.id=c.task_id
-               JOIN repository_plans w ON w.id=t.repository_id JOIN processes e
-               ON e.cwd=rtrim(c.worktree,'/') OR instr(e.cwd,rtrim(c.worktree,'/')||'/')=1
-             WHERE w.repo=?1 AND (c.worktree=?1 OR instr(c.worktree,?1||'/')=1)",
-            [&source],
-        )?;
         for table in [
             "repository_plans",
             "waves",
@@ -350,9 +340,9 @@ impl SqliteStore {
 mod tests {
 
     #[test]
-    fn relocation_rolls_back_and_retains_nested_task_processes() {
+    fn relocation_rolls_back_and_moves_nested_checkouts() {
         use loopflow_model::durable::{ProjectId, TaskId};
-        use loopflow_model::id::{LfProcessId, TraceId, WaveId};
+        use loopflow_model::id::WaveId;
         use rusqlite::params;
         let dir = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
@@ -360,7 +350,6 @@ mod tests {
         let wave = WaveId::new();
         let project = ProjectId::new();
         let task = TaskId::new();
-        let process = LfProcessId::new();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
@@ -376,7 +365,6 @@ mod tests {
                 [task.as_str()],
             )
             .unwrap();
-            conn.execute("INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/before/task/src',1)",params![process,TraceId::new()]).unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
         }
         assert!(store.relocate_repository(&id, "/after").is_err());
@@ -394,18 +382,13 @@ mod tests {
         store.relocate_repository(&id, "/after").unwrap();
         store.relocate_repository(&id, "/after").unwrap();
         let conn = store.conn.lock().unwrap();
-        let cwd: String = conn
-            .query_row("SELECT cwd FROM processes WHERE id=?1", [&process], |row| {
-                row.get(0)
-            })
+        let worktree: String = conn
+            .query_row(
+                "SELECT worktree FROM task_checkouts WHERE task_id=?1",
+                [task.as_str()],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(cwd, "/before/task/src");
-        assert_eq!(
-            conn.query_row("SELECT count(*) FROM relocated_task_processes", [], |row| {
-                row.get::<_, i64>(0)
-            })
-            .unwrap(),
-            1
-        );
+        assert_eq!(worktree, "/after/task");
     }
 }

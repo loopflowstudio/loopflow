@@ -135,7 +135,7 @@ pub async fn explain_task_planning(
     selection: WorkSelection<'_>,
     request: &TaskPlanningRequest<'_>,
 ) -> TaskPlanningExplanation {
-    let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
+    let resolution = crate::ops::context::explain_context(store, cwd, selection, None).await;
     let mut report = TaskPlanningExplanation {
         resolution,
         action: None,
@@ -373,7 +373,6 @@ async fn read_creation(
             task: None,
             wave: Some(wave.id().as_str()),
         },
-        None,
         None,
     )
     .await;

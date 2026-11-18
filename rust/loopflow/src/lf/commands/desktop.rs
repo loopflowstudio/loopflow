@@ -870,8 +870,7 @@ fn view_plan(
             .ok_or(loopflow_execution::store::StoreError::NotFound)
             .context("Work registry is unavailable")?;
         let repository = selection_repository(cli, &store.sqlite)?;
-        let resolution =
-            super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
+        let resolution = super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None)?;
         let expression = if cli.task.is_some() {
             SelectionExpression::Work {
                 work: WorkWorkspaceKey {

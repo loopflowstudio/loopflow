@@ -25,7 +25,6 @@ pub struct TaskOverviewRecords {
 pub struct TaskWorkRecords {
     pub sessions: Vec<TaskSession>,
     pub graph_processes: Vec<crate::execution::GraphProcessInventoryEntry>,
-    pub processes: Vec<crate::process::ProcessEntry>,
     pub graph: Option<SavedTaskGraphRow>,
 }
 
@@ -43,31 +42,6 @@ fn checkout(cwd: &str) -> String {
     // remain usable after checkout removal; SQL LIKE would treat '%' as syntax.
     // `tw` is any relation with the Task's `id`; the checkout is looked up here.
     format!("EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id AND ({cwd}=rtrim(c.worktree,'/') OR instr({cwd},rtrim(c.worktree,'/')||'/')=1))")
-}
-
-fn has_relocations(conn: &rusqlite::Connection) -> StoreResult<bool> {
-    // Read-only clients also inspect released databases before promotion.
-    // Those schemas cannot have relocation receipts; leave them untouched.
-    Ok(conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE name='relocated_task_processes' AND type='table')",
-        [], |row| row.get(0),
-    )?)
-}
-
-#[cfg(test)]
-fn relocated_process_membership(process: &str) -> String {
-    let current = checkout(&format!("{process}.cwd"));
-    format!("(({current}) AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id={process}.id)) OR EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.task_id=tw.id AND r.process_id={process}.id)")
-}
-
-/// The cwd-membership reading `lf_process_ids` must agree with.
-#[cfg(test)]
-fn process_membership(conn: &rusqlite::Connection, process: &str) -> StoreResult<String> {
-    Ok(if has_relocations(conn)? {
-        relocated_process_membership(process)
-    } else {
-        checkout(&format!("{process}.cwd"))
-    })
 }
 
 pub(super) fn session_membership(session: &str) -> String {
@@ -105,34 +79,6 @@ pub(super) fn session_tasks(session: &str) -> String {
          WHERE up.path!='' OR substr({session}.cwd,1,1)='/' OR {session}.cwd=''
          ORDER BY id"
     )
-}
-
-pub(super) fn lf_process_ids(conn: &rusqlite::Connection, selector: &str) -> StoreResult<String> {
-    let (unmoved, relocated) = if has_relocations(conn)? {
-        (
-            "AND NOT EXISTS(SELECT 1 FROM relocated_task_processes r WHERE r.process_id=ae.id)",
-            "UNION SELECT r.process_id FROM tw JOIN relocated_task_processes r ON r.task_id=tw.id",
-        )
-    } else {
-        ("", "")
-    };
-    // History and attachments share one query-local membership; the partial
-    // index skips retained events that name no Process. In BINARY path order,
-    // [root+'/', root+'0') is exactly the descendants of root. CROSS JOIN keeps
-    // the selected checkouts outside the cwd probes; '%' and '_' stay literal.
-    Ok(format!("WITH members AS MATERIALIZED ({}), tw AS MATERIALIZED ({})
-        SELECT ae.id FROM tw CROSS JOIN processes ae
-        WHERE tw.worktree IS NOT NULL
-            AND (ae.cwd=rtrim(tw.worktree,'/') OR
-                (ae.cwd>=rtrim(tw.worktree,'/')||'/' AND ae.cwd<rtrim(tw.worktree,'/')||'0'))
-            {unmoved}
-        {relocated}
-        UNION SELECT se.lf_process_id FROM session_events se INDEXED BY session_process_membership WHERE se.session_id IN (SELECT id FROM members) AND se.lf_process_id IS NOT NULL
-        UNION SELECT h.lf_process_id FROM history.session_history h WHERE h.session_id IN (SELECT id FROM members) AND h.lf_process_id IS NOT NULL
-        UNION SELECT t.lf_process_id FROM history.turns t WHERE t.session_id IN (SELECT id FROM members) AND t.lf_process_id IS NOT NULL
-        UNION SELECT p.attached_lf_process_id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members) AND p.attached_lf_process_id IS NOT NULL
-        UNION SELECT p.id FROM processes p WHERE p.kind='agent' AND p.agent_session_id IN (SELECT id FROM members)",
-        session_ids(selector), tasks(selector)))
 }
 
 /// Each Task among `task_ids` paired with each Graph started for it. The Graph
@@ -920,27 +866,19 @@ impl SqliteStore {
         Ok((graph, details))
     }
 
-    /// Read all three owners in one SQLite snapshot, including closed history.
+    /// Read the Task's Sessions, Graph runs and Graph in one SQLite snapshot,
+    /// including closed history.
     pub fn task_work_records(&self, task: &TaskId) -> StoreResult<TaskWorkRecords> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.savepoint()?;
         let (sessions, graphs) = members(&tx, task)?;
         let graphs = graphs.into_iter().map(|(_, entry)| entry).collect();
-        let processes = tx
-            .prepare(&format!(
-                "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-                super::processes::PROCESS_SELECT,
-                lf_process_ids(&tx, "?1")?
-            ))?
-            .query_map([task.as_str()], super::processes::read_process)?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
         let graph = task_graph_row(&tx, task)?;
         tx.commit()?;
         drop(conn);
         Ok(TaskWorkRecords {
             sessions,
             graph_processes: graphs,
-            processes,
             graph,
         })
     }
@@ -1337,188 +1275,6 @@ mod tests {
     use loopflow_model::id::{LfProcessId, TraceId, WaveId};
 
     #[test]
-    fn process_membership_upgrade_probes_cwd_and_session_indexes() {
-        use crate::migration_runner::{apply_before_migration, apply_pending_migrations};
-        use rusqlite::{types::Value, StatementStatus};
-
-        let conn = rusqlite::Connection::open_in_memory().unwrap();
-        apply_before_migration(
-            &crate::test_fixture::observers(),
-            &crate::test_fixture::build(),
-            &conn,
-            "session_list_indexes",
-        );
-        crate::history::attach_empty(&conn);
-        conn.execute_batch(
-            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
-             INSERT INTO tasks(id,repository_id,issue_identifier,worktree,checkout_machine_id,created_at)
-             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111',
-                'FIX-1','/repo/task',(SELECT id FROM machines WHERE is_local=1),1);
-             INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id)
-             VALUES('member','Member','human',1,0,'/elsewhere','task_11111111111111111111111111111111');
-             WITH RECURSIVE n(i) AS (VALUES(1) UNION ALL SELECT i+1 FROM n WHERE i<6000)
-             INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,kind)
-             SELECT printf('00000000-0000-4000-8000-%012x',i),
-                    printf('00000000-0000-4000-8000-%012x',i),'/unrelated/'||i,1,2,
-                    CASE WHEN i>3000 THEN 'agent' ELSE 'lf' END FROM n;
-             UPDATE processes SET cwd='/repo/task' WHERE id='00000000-0000-4000-8000-000000000001';
-             UPDATE processes SET cwd='/repo/task/sub' WHERE id='00000000-0000-4000-8000-000000000002';
-             UPDATE processes SET cwd='/repo/task-other' WHERE id='00000000-0000-4000-8000-000000000003';
-             INSERT INTO history.turns(session_id,provider_thread,provider_turn,lf_process_id,started_at)
-             VALUES('member','thread','turn','00000000-0000-4000-8000-000000000004',1);
-             UPDATE processes SET agent_session_id='member',attached_lf_process_id='00000000-0000-4000-8000-000000000005'
-                WHERE id='00000000-0000-4000-8000-000000001001';
-             INSERT INTO relocated_task_processes(task_id,process_id)
-             VALUES('task_11111111111111111111111111111111','00000000-0000-4000-8000-000000000006');",
-        ).unwrap();
-        let sql = format!(
-            "{} WHERE e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-            super::super::processes::PROCESS_SELECT,
-            super::lf_process_ids(&conn, "?1").unwrap()
-        );
-        let read = || {
-            let mut query = conn.prepare(&sql).unwrap();
-            let width = query.column_count();
-            let rows = query
-                .query_map(["FIX-1"], |row| {
-                    (0..width)
-                        .map(|i| row.get::<_, Value>(i))
-                        .collect::<rusqlite::Result<Vec<_>>>()
-                })
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            (
-                rows,
-                query.get_status(StatementStatus::VmStep),
-                query.get_status(StatementStatus::FullscanStep),
-            )
-        };
-        // The upgrade moves the released checkout into `task_checkouts`.
-        apply_pending_migrations(
-            &crate::test_fixture::observers(),
-            &crate::test_fixture::build(),
-            &conn,
-        );
-        let (after, _, scans) = read();
-        let ids: Vec<_> = after.iter().map(|row| row[0].clone()).collect();
-        assert_eq!(
-            ids,
-            [1, 2, 4, 5, 6, 4097].map(|i| Value::Text(format!("00000000-0000-4000-8000-{i:012x}")))
-        );
-        assert!(scans < 100, "fullscan steps: {scans}");
-        let plans: Vec<String> = conn
-            .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-            .unwrap()
-            .query_map(["FIX-1"], |row| row.get(3))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap();
-        for index in [
-            "processes_cwd (cwd=?)",
-            "processes_cwd (cwd>? AND cwd<?)",
-            "processes_agent_session",
-        ] {
-            assert!(
-                plans.iter().any(|line| line.contains(index)),
-                "missing {index}: {plans:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn indexed_process_membership_keeps_lexical_paths_and_relocations() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let conn = store.conn.lock().unwrap();
-        conn.execute_batch(
-            "INSERT INTO repository_plans(id,repo,selected) VALUES('repo_11111111111111111111111111111111','/repo',1);
-             INSERT INTO tasks(id,repository_id,issue_identifier,created_at)
-             VALUES('task_11111111111111111111111111111111','repo_11111111111111111111111111111111','FIX-1',1),
-                ('task_22222222222222222222222222222222','repo_11111111111111111111111111111111','FIX-2',1);
-             INSERT INTO task_checkouts(task_id,worktree)
-             VALUES('task_11111111111111111111111111111111','/repo/task'),
-                ('task_22222222222222222222222222222222','/other');",
-        ).unwrap();
-        for cwd in [
-            None,
-            Some(""),
-            Some("/"),
-            Some("//"),
-            Some("/repo/task"),
-            Some("/repo/task/"),
-            Some("/repo/task//sub"),
-            Some("/repo/task-other"),
-            Some("/repo/task0"),
-            Some("relative/sub"),
-            Some("relative"),
-            Some("relative-other"),
-            Some("/repo/%_"),
-            Some("/repo/%_/é"),
-            Some("/repo/AB/x"),
-            Some("/repo//task/sub"),
-        ] {
-            let id = LfProcessId::new();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?1,?2,1)",
-                params![id, cwd],
-            )
-            .unwrap();
-        }
-        conn.execute_batch(
-            "INSERT INTO relocated_task_processes(task_id,process_id)
-             SELECT 'task_22222222222222222222222222222222',id FROM processes WHERE cwd='/repo/task';
-             INSERT INTO relocated_task_processes(task_id,process_id)
-             SELECT 'task_11111111111111111111111111111111',id FROM processes WHERE cwd='/repo/AB/x';",
-        ).unwrap();
-        let original = format!(
-            "SELECT ae.id FROM processes ae JOIN ({}) tw ON ({}) ORDER BY ae.id",
-            super::tasks("?1"),
-            super::process_membership(&conn, "ae").unwrap()
-        );
-        let indexed = format!(
-            "SELECT id FROM ({}) ORDER BY id",
-            super::lf_process_ids(&conn, "?1").unwrap()
-        );
-        for root in [
-            "/repo/task",
-            "/repo/task/",
-            "/repo//task//",
-            "/repo/%_",
-            "relative/",
-            "/",
-            "///",
-            "",
-        ] {
-            for local in [true, false] {
-                let task = "task_11111111111111111111111111111111";
-                conn.execute("DELETE FROM task_checkouts WHERE task_id=?1", [task])
-                    .unwrap();
-                if local && !root.is_empty() {
-                    conn.execute(
-                        "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,?2)",
-                        params![task, root],
-                    )
-                    .unwrap();
-                }
-                let read = |sql: &str| {
-                    conn.prepare(sql)
-                        .unwrap()
-                        .query_map(["FIX-1"], |row| row.get::<_, String>(0))
-                        .unwrap()
-                        .collect::<Result<Vec<_>, _>>()
-                        .unwrap()
-                };
-                assert_eq!(
-                    read(&indexed),
-                    read(&original),
-                    "root={root:?}, local={local}"
-                );
-            }
-        }
-    }
-
-    #[test]
     fn session_membership_upgrade_probes_task_indexes() {
         use crate::migration_runner::{apply_before_migration, apply_pending_migrations};
         let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -1773,188 +1529,6 @@ mod tests {
         assert_eq!(latest[&task].cwd.as_deref(), Some("/repo/task/deep/er"));
         assert_eq!(latest[&sibling].cwd.as_deref(), Some("/repo/task-other/x"));
         assert!(!latest.contains_key(&idle));
-    }
-
-    #[test]
-    fn process_membership_does_not_read_events_that_name_no_process() {
-        let dir = tempfile::tempdir().unwrap();
-        let store = crate::test_fixture::open(&dir.path().join("db")).unwrap();
-        let task = TaskId::new();
-        let wave = WaveId::new();
-        let project = ProjectId::new();
-        let turn = LfProcessId::new();
-        let finished = LfProcessId::new();
-        let conn = store.conn.lock().unwrap();
-        conn.execute(
-            "INSERT INTO waves(id,name,repo,created_at) VALUES(?1,'proof','/repo',1)",
-            [&wave],
-        )
-        .unwrap();
-        conn.execute("INSERT INTO projects(id,wave_id,external_project_id,created_at) VALUES(?1,?2,'project',1)", params![project.as_str(), wave]).unwrap();
-        conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-        conn.execute("INSERT INTO tasks(repository_id,id,project_id,external_issue_id,issue_identifier,created_at) VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?1),?2,?1,'issue','PROOF-1',1)",params![project.as_str(),task.as_str()]).unwrap();
-        conn.execute(
-            "INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task')",
-            params![task.as_str()],
-        )
-        .unwrap();
-        // The Session is bound, and its Processes ran elsewhere: only event
-        // history associates them with the Task.
-        conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
-            VALUES('bound','bound','human',1,0,?1,?2,'/elsewhere')", params![task.as_str(), wave]).unwrap();
-        for (id, completed) in [(&turn, None), (&finished, Some(2))] {
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at,outcome) VALUES(?1,?2,'/elsewhere',1,?3,?4)",
-                params![id, TraceId::new(), completed, completed.map(|_: i64| "succeeded")],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO session_events(session_id,kind,receipt_key,lf_process_id,observed_at,payload)
-                VALUES('bound','started',?1,?1,1,'{}')", [id]).unwrap();
-        }
-        let read = |unfinished: bool, expected: &[&LfProcessId]| {
-            let mut query = conn
-                .prepare(&format!(
-                    "{} WHERE {} e.id IN ({}) ORDER BY e.started_at DESC,e.id",
-                    super::super::processes::PROCESS_SELECT,
-                    if unfinished {
-                        "e.completed_at IS NULL AND"
-                    } else {
-                        ""
-                    },
-                    super::lf_process_ids(&conn, "?1").unwrap()
-                ))
-                .unwrap();
-            let mut ids = query
-                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(0))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            ids.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-            let mut expected: Vec<_> = expected.iter().map(|id| (*id).clone()).collect();
-            expected.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-            assert_eq!(ids, expected);
-            query.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = (read(true, &[&turn]), read(false, &[&turn, &finished]));
-        for n in 0..2_000 {
-            conn.execute(
-                "INSERT INTO session_events(session_id,kind,receipt_key,observed_at,payload)
-                VALUES('bound','observed',?1,1,'{}')",
-                [n.to_string()],
-            )
-            .unwrap();
-        }
-        let after = (read(true, &[&turn]), read(false, &[&turn, &finished]));
-        assert!(
-            after.0 <= before.0 * 2 && after.1 <= before.1 * 2,
-            "Events naming no Process increased membership work: {before:?} → {after:?}"
-        );
-        // Cleanup's open Graph runs ignore Process history and other Tasks
-        // as they grow.
-        let cleanup_cost = || {
-            let mut query = conn.prepare(&super::task_open_graph_pairs("?1")).unwrap();
-            let ids = query
-                .query_map([task.as_str()], |row| row.get::<_, LfProcessId>(1))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert!(ids.is_empty(), "{ids:?}");
-            (
-                query.get_status(rusqlite::StatementStatus::VmStep),
-                query.get_status(rusqlite::StatementStatus::FullscanStep),
-            )
-        };
-        let before_cleanup = cleanup_cost();
-        for n in 0..2_000 {
-            let id = LfProcessId::new();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at,completed_at)
-                VALUES(?1,?1,'/unrelated',1,2)",
-                [&id],
-            )
-            .unwrap();
-            conn.execute("INSERT INTO repository_plans(id,repo,selected) SELECT 'repo_'||lower(hex(randomblob(16))),w.repo,1 FROM waves w WHERE NOT EXISTS(SELECT 1 FROM repository_plans r WHERE r.repo=w.repo AND r.selected=1) GROUP BY w.repo", []).unwrap();
-            conn.execute(
-                "INSERT INTO tasks(repository_id,id,project_id,issue_identifier,created_at)
-                VALUES((SELECT r.id FROM projects p JOIN waves w ON w.id=p.wave_id JOIN repository_plans r ON r.repo=w.repo AND r.selected=1 WHERE p.id=?2),?1,?2,?3,1)",
-                params![TaskId::new().as_str(), project.as_str(), format!("OLD-{n}")],
-            )
-            .unwrap();
-        }
-        let after_cleanup = cleanup_cost();
-        eprintln!("cleanup VM/full-scan steps: {before_cleanup:?} → {after_cleanup:?}");
-        assert!(
-            after_cleanup.0 <= before_cleanup.0 * 2 && after_cleanup.1 <= before_cleanup.1 * 2,
-            "Unrelated history increased cleanup scans: {before_cleanup:?} → {after_cleanup:?}"
-        );
-        // A Graph started for the Task is its work wherever it ran, and other
-        // Tasks' Graphs cost one Task's reading nothing.
-        conn.execute(
-            "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
-            params![finished, task.as_str()],
-        )
-        .unwrap();
-        let pairs = super::task_graph_pairs("?1");
-        let read_graphs = || {
-            let mut statement = conn.prepare(&pairs).unwrap();
-            let selected = statement
-                .query_map([task.as_str()], |row| row.get::<_, String>(1))
-                .unwrap()
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .unwrap();
-            assert_eq!(selected, vec![finished.to_string()]);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = read_graphs();
-        let others: Vec<String> = conn
-            .prepare("SELECT id FROM tasks WHERE id!=?1")
-            .unwrap()
-            .query_map([task.as_str()], |row| row.get(0))
-            .unwrap()
-            .collect::<rusqlite::Result<_>>()
-            .unwrap();
-        for other in &others {
-            let graph = LfProcessId::new();
-            conn.execute(
-                "INSERT INTO processes(id,trace_id,cwd,started_at) VALUES(?1,?2,'/unrelated',1)",
-                params![graph, TraceId::new()],
-            )
-            .unwrap();
-            conn.execute(
-                "INSERT INTO graph_processes(lf_process_id,graph,compiled,task_id) VALUES(?1,'proof','{}',?2)",
-                params![graph, other],
-            )
-            .unwrap();
-        }
-        let after = read_graphs();
-        assert!(
-            after <= before * 2,
-            "Other Tasks' Graphs increased one Task's Graph reading: {before} → {after}"
-        );
-        // Every Task's Graphs come from the Graph records, so Sessions that
-        // reach no Graph cost nothing however many Tasks are read. On October
-        // 18, 2026 each Task rescanned all 4,246 of Jack Heart's Sessions:
-        // 2.3 s for 622 Tasks.
-        let every_task = super::task_graph_pairs("SELECT id FROM tasks");
-        let read_every_task = || {
-            let mut statement = conn.prepare(&every_task).unwrap();
-            let pairs = statement
-                .query_map([], |row| row.get::<_, String>(0))
-                .unwrap()
-                .count();
-            assert_eq!(pairs, others.len() + 1);
-            statement.get_status(rusqlite::StatementStatus::VmStep)
-        };
-        let before = read_every_task();
-        for n in 0..2_000 {
-            conn.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,task_id,wave_id,cwd)
-                VALUES(?1,'quiet','human',1,0,?2,?3,'/repo/task')", params![format!("quiet-{n}"), task.as_str(), wave]).unwrap();
-        }
-        let after = read_every_task();
-        assert!(
-            after <= before * 2,
-            "Sessions reaching no Graph increased every Task's Graph reading: {before} → {after}"
-        );
     }
 
     #[test]

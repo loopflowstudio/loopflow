@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use loopflow_model::durable::TaskId;
-use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId, WaveId};
+use loopflow_model::id::{AgentProcessId, LfProcessId, LfSessionId, TraceId};
 
 /// One recorded lf process. Unknown historical caller and exit evidence stays absent.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -194,56 +194,6 @@ impl std::fmt::Display for Starter {
             }
         }
     }
-}
-
-/// Command discovery filters. Work means recorded work, never today's caller binding.
-/// Contains searches are literal; command case folding follows SQLite lower().
-#[derive(Debug, Clone, Default)]
-pub struct ProcessFilter {
-    pub id: Option<String>,
-    pub repo: Option<String>,
-    pub parent_lf_process_id: Option<LfProcessId>,
-    pub caller_agent_process_id: Option<AgentProcessId>,
-    pub caller_session_id: Option<LfSessionId>,
-    pub command_contains: Option<String>,
-    pub identity_contains: Option<String>,
-    pub outcome: Option<ProcessOutcomeFilter>,
-    pub performed_work: Option<ProcessWorkFilter>,
-}
-
-/// Unknown means no terminal observation, not an OS liveness judgment.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProcessOutcomeFilter {
-    Succeeded,
-    Failed,
-    Interrupted,
-    Unknown,
-}
-
-/// IDs are already resolved by the caller, independently of launch eligibility.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum ProcessWorkFilter {
-    Task(TaskId),
-    Wave(WaveId),
-}
-
-/// Exclusive continuation in started_at DESC, id ASC order. Reuse the same filters.
-/// A cursor is not a cross-request snapshot: late observations or changed outcomes may
-/// change membership. Refresh from the first page to observe those changes.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessCursor {
-    pub started_at: i64,
-    /// The row's `processes.id` position, an opaque continuation for either kind.
-    pub id: String,
-}
-
-/// At most the requested number of command rows; no Session or Graph payloads.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ProcessPage {
-    pub entries: Vec<ProcessEntry>,
-    pub next: Option<ProcessCursor>,
 }
 
 /// Stable provenance installed in one provider conversation's tool environment.

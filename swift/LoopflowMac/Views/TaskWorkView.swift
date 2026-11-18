@@ -710,7 +710,7 @@ struct TaskDiagnosticsView: View {
     }
 }
 
-/// The Task's conversations and mechanical Processes, including headless work and
+/// The Task's conversations, including headless work and
 /// conversations without turns: raw records, shown under Debug. Its Graph
 /// processes are listed by `GraphProcessLog`.
 struct TaskWorkView: View {
@@ -728,11 +728,7 @@ struct TaskWorkView: View {
                     row(session.interactive ? "Session" : "Run", id: session.id, name: session.title,
                         state: session.completedAt == nil ? "open" : "completed")
                 }
-                ForEach(work.processes) { process in
-                    row(process.isAgent ? "Agent" : "Process", id: process.id,
-                        name: process.command ?? "Unknown command", state: process.outcome ?? "unknown")
-                }
-                if work.sessions.isEmpty && work.processes.isEmpty {
+                if work.sessions.isEmpty {
                     Text("No recorded work.")
                 }
             }

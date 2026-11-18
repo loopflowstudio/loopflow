@@ -457,7 +457,7 @@ struct DTOFixtureTests {
         #expect(overview.graphProcesses.count == 1)
     }
 
-    @Test("Task work retains conversations, Graphs and command history")
+    @Test("Task work retains conversations and Graphs")
     func taskWorkFixture() throws {
         let data = try loadFixtureData("task_work.json")
         let work = try JSONDecoder().decode(TaskWork.self, from: data)
@@ -466,7 +466,6 @@ struct DTOFixtureTests {
         #expect(work.sessions[1].graphLfProcessId == work.graphProcesses[0].id)
         #expect(work.graphProcesses[0].name == "pursue")
         #expect(work.graphProcesses[0].state == .current)
-        #expect(!work.processes.isEmpty)
         let graph = try #require(work.graph)
         #expect(graph.name == "feature")
         #expect(graph.interactiveSteps.map(\.name) == ["review-design", "demo"])
@@ -539,28 +538,6 @@ struct DTOFixtureTests {
         #expect(page.next == nil)
         #expect(throws: (any Error).self) {
             try JSONDecoder().decode(SessionPage.self, from: Data(#"{"next":null}"#.utf8))
-        }
-    }
-
-    @Test("Process pages retain command outcomes, caller evidence and continuation")
-    func processPageFixture() throws {
-        let data = try loadFixtureData("process_page.json")
-        let page = try JSONDecoder().decode(ProcessPage.self, from: data)
-        guard case .lf(let lf) = page.entries[0], case .agent(let agent) = page.entries[1] else {
-            Issue.record("expected an lf entry then an agent entry")
-            return
-        }
-        #expect(lf.exitCode == 42)
-        #expect(lf.viaAgent == nil)
-        #expect(lf.pid == nil)
-        #expect(agent.pid == 4242)
-        #expect(agent.agentSessionID == "conversation")
-        #expect(agent.osStartedAt == 1790640000)
-        #expect(agent.parentLfProcessId == lf.id)
-        #expect(page.next?.id == agent.id.rawValue)
-        #expect(try JSONDecoder().decode(ProcessPage.self, from: JSONEncoder().encode(page)) == page)
-        #expect(throws: DecodingError.self) {
-            try JSONDecoder().decode(ProcessPage.self, from: Data("{}".utf8))
         }
     }
 

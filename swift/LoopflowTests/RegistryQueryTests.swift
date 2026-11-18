@@ -693,12 +693,11 @@ struct RegistryQueryTests {
     func doctorDecodes() async throws {
         let json = """
         {
-          "rows": 2,
           "checks": [
             {
-              "name": "lineage",
+              "name": "store",
               "status": "ok",
-              "detail": "every parent process resolves"
+              "detail": "selected database is compatible with this build"
             }
           ]
         }
@@ -709,8 +708,7 @@ struct RegistryQueryTests {
         }
 
         let report = try await query.doctor()
-        #expect(report.rows == 2)
-        #expect(report.checks[0].name == "lineage")
+        #expect(report.checks[0].name == "store")
         #expect(report.checks[0].status == "ok")
     }
 

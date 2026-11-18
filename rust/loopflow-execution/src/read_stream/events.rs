@@ -352,17 +352,12 @@ mod tests {
         // Graph membership follows the Task checkout on the local Machine.
         conn.execute("INSERT INTO task_checkouts(task_id,worktree) VALUES(?1,'/repo/task') ON CONFLICT(task_id) DO UPDATE SET worktree=excluded.worktree", [task.as_str()]).unwrap();
         // The graph's session membership also works before Machine registration.
-        let old = store.test_graph(
+        store.test_graph(
             "code",
             "/repo/task",
             &[("old", Some("succeeded"))],
             Some("succeeded"),
         );
-        conn.execute(
-            "INSERT INTO relocated_task_processes(process_id,task_id) VALUES(?1,?2)",
-            rusqlite::params![old.as_str(), task.as_str()],
-        )
-        .unwrap();
         let body = json!({"task":{"id":task}});
         let mut observer = Observer::default();
         assert!(observer.read(&store, &body).unwrap().is_empty());
@@ -372,11 +367,6 @@ mod tests {
             &[("implement", Some("succeeded")), ("gate", Some("failed"))],
             Some("failed"),
         );
-        conn.execute(
-            "INSERT INTO relocated_task_processes(process_id,task_id) VALUES(?1,?2)",
-            rusqlite::params![graph.as_str(), task.as_str()],
-        )
-        .unwrap();
         let events = observer.read(&store, &body).unwrap();
         assert_eq!(events.len(), 2);
         assert!(

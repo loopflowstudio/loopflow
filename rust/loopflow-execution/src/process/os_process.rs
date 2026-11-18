@@ -51,6 +51,36 @@ impl OsProcess {
         }
     }
 
+    /// The values of `names` in `pid`'s environment, and nothing else from
+    /// it: an environment holds secrets that never reach output. `None` when
+    /// the process is gone or not readable.
+    pub fn environment(pid: u32, names: &[&str]) -> io::Result<Option<Vec<(String, String)>>> {
+        #[cfg(target_os = "macos")]
+        {
+            macos::environment(pid, names)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            match std::fs::read(format!("/proc/{pid}/environ")) {
+                Ok(bytes) => Ok(Some(select_environment(
+                    bytes
+                        .split(|byte| *byte == 0)
+                        .filter(|entry| !entry.is_empty()),
+                    names,
+                ))),
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::PermissionDenied
+                    ) =>
+                {
+                    Ok(None)
+                }
+                Err(error) => Err(error),
+            }
+        }
+    }
+
     pub fn read(pid: u32) -> io::Result<Option<Self>> {
         crate::observe::process(pid)
     }
@@ -300,6 +330,22 @@ pub(crate) fn elapsed_seconds(value: &str) -> Option<u64> {
         _ => return None,
     };
     days.checked_mul(86_400)?.checked_add(clock)
+}
+
+/// `NAME=value` entries whose name is one of `names`.
+fn select_environment<'a>(
+    entries: impl Iterator<Item = &'a [u8]>,
+    names: &[&str],
+) -> Vec<(String, String)> {
+    entries
+        .filter_map(|entry| {
+            let entry = String::from_utf8_lossy(entry);
+            let (name, value) = entry.split_once('=')?;
+            names
+                .contains(&name)
+                .then(|| (name.to_owned(), value.to_owned()))
+        })
+        .collect()
 }
 
 // ---------------------------------------------------------------------------

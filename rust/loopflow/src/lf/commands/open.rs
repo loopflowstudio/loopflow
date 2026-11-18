@@ -350,9 +350,9 @@ fn work_context(
     // Without a Task, an exact Session selects the Work; a Wave must contain it.
     let mut resolution = match (task, session) {
         (None, Some(session)) => {
-            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session))?;
             if let Some(wave) = wave {
-                let work = super::context::explain_in(directory, Some(wave), None, None, None)?;
+                let work = super::context::explain_in(directory, Some(wave), None, None)?;
                 anyhow::ensure!(
                     matches!((&work.wave, &selected.wave),
                     (ContextFact::Bound { value: wave, .. }, ContextFact::Bound { value: session_wave, .. }) if wave == session_wave),
@@ -361,7 +361,7 @@ fn work_context(
             }
             selected
         }
-        _ => super::context::explain_in(directory, wave, task, None, None)?,
+        _ => super::context::explain_in(directory, wave, task, None)?,
     };
     if let ContextFact::Bound { value, .. } = &resolution.task {
         let task = loopflow_model::durable::TaskId::parse(value)?;
@@ -386,7 +386,7 @@ fn work_context(
                 source: "explicit_session_on_execution_machine".into(),
             };
         } else {
-            let selected = super::context::explain_in(directory, None, None, Some(session), None)?;
+            let selected = super::context::explain_in(directory, None, None, Some(session))?;
             anyhow::ensure!(
                 matches!((&resolution.task, &selected.task),
                 (ContextFact::Bound { value: task, .. }, ContextFact::Bound { value: session_task, .. }) if task == session_task),
@@ -676,7 +676,7 @@ fn available(cli: &crate::lf::Cli) -> Result<(Vec<Resolved>, Vec<String>)> {
     let wave = cli
         .wave
         .as_deref()
-        .map(|wave| super::context::explain(Some(wave), None, None, None))
+        .map(|wave| super::context::explain(Some(wave), None, None))
         .transpose()?
         .and_then(|context| match context.wave {
             ContextFact::Bound { value, .. } => Some(value),

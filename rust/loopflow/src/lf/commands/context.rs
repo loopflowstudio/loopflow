@@ -98,9 +98,8 @@ pub fn explain(
     wave: Option<&str>,
     task: Option<&str>,
     session: Option<&str>,
-    process: Option<&str>,
 ) -> Result<loopflow_execution::ops::context::ContextExplanation> {
-    explain_in(&std::env::current_dir()?, wave, task, session, process)
+    explain_in(&std::env::current_dir()?, wave, task, session)
 }
 
 /// [`explain`] as if run in `cwd`.
@@ -109,14 +108,10 @@ pub fn explain_in(
     wave: Option<&str>,
     task: Option<&str>,
     session: Option<&str>,
-    process: Option<&str>,
 ) -> Result<loopflow_execution::ops::context::ContextExplanation> {
     anyhow::ensure!(
-        (wave.is_some() || task.is_some()) as usize
-            + session.is_some() as usize
-            + process.is_some() as usize
-            <= 1,
-        "select Work, a Session, or a Process, not several independent targets"
+        !((wave.is_some() || task.is_some()) && session.is_some()),
+        "select Work or a Session, not both"
     );
     let runtime = tokio::runtime::Runtime::new()?;
     Ok(runtime.block_on(async {
@@ -128,7 +123,6 @@ pub fn explain_in(
                     cwd,
                     loopflow_execution::ops::WorkSelection { task, wave },
                     session,
-                    process,
                 )
                 .await
             }

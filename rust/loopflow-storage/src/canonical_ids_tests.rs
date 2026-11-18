@@ -447,7 +447,12 @@ fn canonical_ids_released_work_upgrades_without_replacing_history() {
         "session_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     );
     assert_eq!(
-        store.resolve_process(PROCESS).unwrap().unwrap().id(),
+        conn.query_row(
+            "SELECT id FROM processes WHERE id=?1",
+            [PROCESS.to_ascii_lowercase()],
+            |row| row.get::<_, String>(0),
+        )
+        .unwrap(),
         PROCESS.to_ascii_lowercase()
     );
     assert!(conn

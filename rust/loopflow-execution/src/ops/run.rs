@@ -500,7 +500,6 @@ mod tests {
                 wave: None,
             },
             None,
-            None,
         )
         .await;
         assert_eq!(
@@ -543,8 +542,7 @@ mod tests {
         let project = project(&wave, "runtime", "project-runtime");
         store.create_project(&project).await.unwrap();
         let task = task(&store, &wave, &project, repo.path().to_path_buf()).await;
-        let inferred =
-            explain_context(&store, repo.path(), WorkSelection::default(), None, None).await;
+        let inferred = explain_context(&store, repo.path(), WorkSelection::default(), None).await;
         assert_eq!(
             inferred.task,
             ContextFact::Bound {
@@ -559,7 +557,6 @@ mod tests {
                 task: Some(task.identifier.as_str()),
                 wave: None,
             },
-            None,
             None,
         )
         .await;
@@ -599,8 +596,7 @@ mod tests {
                 .id,
             task.id
         );
-        let unbound =
-            explain_context(&store, other.path(), WorkSelection::default(), None, None).await;
+        let unbound = explain_context(&store, other.path(), WorkSelection::default(), None).await;
         assert_eq!(unbound.task, ContextFact::Unbound);
         // Explaining a plain clone does not mint a plan or associate by remote.
         assert_eq!(unbound.repository, ContextFact::Unbound);
@@ -624,7 +620,7 @@ mod tests {
             task: Some(task.id.as_str()),
             wave: None,
         };
-        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        let report = explain_context(&store, directory.path(), selection(), None).await;
         assert_eq!(
             report.checkout,
             ContextFact::Bound {
@@ -645,7 +641,7 @@ mod tests {
             [task.id.as_str()],
         )
         .unwrap();
-        let report = explain_context(&store, directory.path(), selection(), None, None).await;
+        let report = explain_context(&store, directory.path(), selection(), None).await;
         assert_eq!(
             report.execution_machine,
             ContextFact::Unavailable {
@@ -668,7 +664,6 @@ mod tests {
                 directory.path(),
                 WorkSelection { task, wave: None },
                 session,
-                process,
             )
             .await;
             assert!(matches!(report.task, ContextFact::Unavailable { .. }));

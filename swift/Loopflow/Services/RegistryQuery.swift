@@ -1888,7 +1888,6 @@ public struct HomeRetention: Codable, Sendable, Equatable, Identifiable {
 }
 
 public struct DoctorReport: Decodable, Sendable {
-    public let rows: Int
     public let checks: [DoctorCheck]
 }
 

@@ -1,105 +1,84 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>LOO-959 qa: Task conversations and runs after a kill or reboot</title>
+<html lang="en"><head><meta charset="utf-8"><title>LOO-959 qa: after the crash</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
 pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
 .ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
-td,th{padding:.3rem .6rem;border-bottom:1px solid #eee;text-align:left;vertical-align:top}table{border-collapse:collapse}
 </style></head><body>
-<h1>LOO-959 qa: Task conversations and runs after a kill or reboot</h1>
-<p>Branch <code>lf</code> (bef7fbb94 plus this step's fixes) on a private lf-world Machine
-(<code>one-task</code>, then three more Tasks), its own <code>lf server run</code>, stand-in providers.
-All observations are from <code>lf task status</code> as a person reads it. 2026-11-17.</p>
+<h1>LOO-959 qa, run after the Machine crash</h1>
+<p>The earlier qa run died with the Machine at 18:40 on 2026-11-17. The cause was a macOS kernel panic in the
+Wi-Fi driver (<code>busy timeout (60s): 'wlan'</code>), not lf. That run had fixed one race (left uncommitted) and
+was chasing a second. This run picks both up on branch <code>lf</code> (<code>d2839242c</code> plus fixes), on a private
+lf-world Machine at <code>/tmp/lfqa959</code> with three Tasks (90ae87, 0a8011, a7e6bd), its own
+<code>lf server run</code> and stand-in providers. Every line below is <code>lf task status &lt;task&gt; | grep Conversation</code>.</p>
 
-<h2>1. Kill the conversation's provider <span class="ok">works</span></h2>
-<pre>$ kill -9 26991            # 15:31:49
-t+1: Conversation: died 15:31 (exit 137) · starting again
-t+2: Conversation: running (started again 15:31, attempt 1)</pre>
-<p>Under two seconds from death to a new provider resuming the same thread.</p>
+<h2>1. Fresh checkout: the pass starts all three <span class="ok">works</span></h2>
+<pre>lf task checkout 90ae87; lf task checkout 0a8011; lf task checkout a7e6bd
+90ae87 Conversation: running
+0a8011 Conversation: running
+a7e6bd Conversation: running</pre>
 
-<h2>2. Kill it again: backoff <span class="fix">fixed</span></h2>
-<p>Before: the pass woke only on a store change or its 60 s tick, so a backoff due 15:32:52 started at ~15:33:20,
-showing "starting again" for 30 s with nothing happening.</p>
-<pre>15:32:49 Conversation: died 15:32 (exit 137) · starts again 15:32
-15:32:55 Conversation: died 15:32 (exit 137) · starting again
-...
-15:33:23 Conversation: running (started again 15:33, attempt 2)</pre>
-<p>Fix: <code>due_task_conversations</code> also returns the soonest <code>next_at</code>, and the watcher
-waits until then (<code>server/recovery.rs</code>). After it, a backoff due 23:53:07Z started at:</p>
-<pre>INFO loopflow::server::recovery: Task conversation started ... 2026-11-17T23:53:07.938Z  attempt=5
-  PID STARTED
-88158 Tue Nov 17 15:53:07 2026</pre>
+<h2>2. Kill, kill again, then a person resumes during the backoff <span class="fix">fixed</span></h2>
+<pre>21:49:57 running
+21:49:59 died 21:49 (exit 137) · starting again
+21:50:03 running (started again 21:50, attempt 1)
+          (second kill)
+21:50:09 died 21:50 (exit 137) · starts again 21:51
+$ lf resume --task 0a8011     → opens cleanly, viewer alive
+21:50:17 running</pre>
+<p>Before the fix (crashed run): the person's start reset the count, which made the Session due at once. The pass
+started it in the same second and the person's <code>lf resume</code> failed with "invalid control authority".
+Now a person's start is start zero (<code>record_persons_start</code> sets <code>last_started_at</code>). The pass
+waits the first backoff from it, and a finished turn clears it again.</p>
 
-<h2>3. A start under way <span class="fix">fixed</span></h2>
-<p>Before: once the pass had counted a start, the line named the backoff for the death after it:
-<code>died 15:39 (exit 137) · starts again 15:41</code> while the provider was coming up at 15:39:51.
-Now a start counted after the agent ended reads as due then: <code>· starting again</code>
-(<code>session_ending</code>, test <code>a_task_conversation_says_how_it_ended_and_when_it_starts_again</code>).</p>
+<h2>3. Simulated reboot (one SIGKILL to server, holders, providers) <span class="fix">fixed</span></h2>
+<p>Before the fix:</p>
+<pre>21:50:30 quit 21:50; `lf resume --task 90ae87` opens it | died 21:50 (exit 137) · starts again 21:51 | quit 21:50; …
+21:51:39 quit 21:50; `lf resume --task 90ae87` opens it | running (…attempt 1) | running (…attempt 1)</pre>
+<p>90ae87 stayed down for good. Its launcher row read <code>succeeded 0</code>, written at 05:50:31, a second after
+the new server started. The cause: the recovery pass's first reading reaped the dead agent, which finishes the
+Session's attachment, <em>before</em> the registry thread settled the ended terminal. <code>native_exit::settle</code>
+then saw the attachment gone, judged it a move (<code>interrupted</code>) and recorded exit 0: a quit. a7e6bd hit
+the other order. The pass started it first, and the old end then read as a move to the new attachment, which also
+recorded 0.</p>
+<p>Fix: <code>Registry::open</code> settles the ends its adoption found before it returns
+(<code>transport/registry.rs</code>), and the pass starts only after it. After:</p>
+<pre>22:00:28 closed; `lf resume --task 90ae87` opens it | died 22:00 (exit 137) · starting again | died 22:00 (exit 137) · starting again
+22:00:36 died 22:00 (exit 137) · starts again 22:01 | running (started again 22:00, attempt 2) | running (…attempt 2)
+22:01:11 running (started again 22:01, attempt 1)   | running (…attempt 2)                     | running (…attempt 2)</pre>
+<p>All three record 137 and come back. 90ae87 waited a minute because a person had just started it (scenario 2's rule).
+It had finished no turn since, and the stand-in never finishes one.</p>
 
-<h2>4. Quit stays quit <span class="ok">works</span></h2>
-<pre>$ lf resume --task 3040a4      # in a PTY; typed hello, then quit
-reply ff045d80-…: hello
-Left “Design transcript search”. Continue with: lf resume session_53124fb7…
-Conversation: quit 15:47; `lf resume --task 3040a4` opens it
-after 60s
-Conversation: quit 15:47; `lf resume --task 3040a4` opens it</pre>
-
-<h2>5. Server restart with a live holder <span class="ok">works</span></h2>
-<p>Server stopped and a new build started three times. Each time the same provider pid kept running, the line stayed
-<code>running</code>, and no second provider started.</p>
-
-<h2>6. Simulated reboot <span class="ok">works</span></h2>
-<pre>$ kill -9 &lt;server&gt; &lt;holder&gt; &lt;provider&gt;
-Conversation: closed · starting again        # no server: nothing is going to start it yet
-15:49:05 server started
-t+1 Conversation: died 15:49 (exit 137) · starting again | holders 35129
-t+2 Conversation: running (started again 15:49, attempt 4) | 35206 | holders 35129</pre>
-<p>One holder, one provider, one start.</p>
-
-<h2>7. Five starts, then the person's <span class="ok">works</span></h2>
-<pre>Conversation: died 15:53 (exit 137) · started 5 times; `lf resume --task 3040a4` opens it
-(65 s later, unchanged; no provider)</pre>
-
-<h2>8. A Task run whose carrier died <span class="ok">works</span></h2>
-<p>Graph <code>implement → interactive: human-review</code>, headless stand-in holding <code>implement</code>.</p>
-<pre>$ kill -9 -59139; kill -9 &lt;step provider&gt;       # carrier's group, 15:52:43
-15:52:47 2f0aa8 moving | latest Graph: Run died at implement; the server's next pass carries it again
-15:53:09 2f0aa8 moving | Graph qarun: running at implement
-87738 92135 /tmp/lfqa959/bin/lf task run 2f0aa8         # parent: the server</pre>
-<p>Killing only the carrier leaves the Graph running; released, it arrived at <code>human-review</code> with the Task
-<code>active</code>, not shipping. Carried again after 25 s: run backoffs still wait for the tick.</p>
-
-<h2>9. Shutdown SIGTERM (acceptance check 5) <span class="ok">holds</span>, with a window</h2>
-<p>Stand-in patched with <code>trap "exit 0" TERM</code>.</p>
-<table>
-<tr><th>Signal</th><th>Recorded</th><th>Next</th></tr>
-<tr><td>TERM to server, holder and provider in one <code>kill</code></td><td>died, exit 137 (holder died before <code>exit.json</code>; unknown reads as SIGKILL, <code>held.rs:43</code>)</td><td>started again by the next server</td></tr>
-<tr><td>TERM to the provider alone, holder alive</td><td>exit 0: <code>quit 16:01</code></td><td>stays down</td></tr>
-</table>
-<p>A shutdown reads as quit only if the provider exits 0 and the holder records it before TERM reaches the holder.
-Whether real Claude exits 0 on SIGTERM was not checked.</p>
+<h2>4. Shutdown: SIGTERM to the holder's process group and the server <span class="ok">works</span></h2>
+<pre>22:12:15 died 22:12 (exit 137) · starting again | died 22:12 (exit 137) · starting again | unknown
+22:12:33 running (started again 22:12, attempt 2) | running (…attempt 3) | running (…attempt 3)</pre>
+<p>The stand-in does not catch SIGTERM, so this shows nothing about real Claude's exit code under SIGTERM.</p>
 
 <h2>What works now</h2>
-<p>Kill, backoff on time, quit, server restart, reboot (simulated), give-up after five, died carrier carried again
-from its step, shutdown TERM counted as died. Tests after the fixes: <code>server::recovery::tests::</code> (7),
-<code>human_session::tests::a_task_conversation…</code>, <code>dto_fixtures::</code> (52),
-<code>lf::commands::session::tests::</code>, <code>context_launch_tests::a_killed_task_conversation</code>; clippy clean.</p>
+<ul>
+<li>Kill → back within about 4 s; a second death waits the backoff; a person's resume during it is not raced.</li>
+<li>Reboot and shutdown: every conversation records died (137) and the new server starts each one.</li>
+</ul>
 
 <h2>Not reached</h2>
 <ul>
-<li>A real Machine restart with three Tasks: simulated with SIGKILL; launchd's own order at logout was not observed.</li>
-<li>Desktop's conversation line: no Desktop build was run; the Swift DTO fixture covers decoding only.</li>
-<li>A launch failure (provider missing from the server's <code>PATH</code>): covered by fixtures, not driven live.</li>
-<li>Real Claude: stand-ins only. They finish no turns, so the restart count never reset here.</li>
+<li>Died carriers, five-start give-up and quit-stays-quit were not re-run. The first qa run covered them, and this
+run's fixes do not touch those paths.</li>
+<li>Real Claude under SIGTERM (acceptance check 5's open window) and a real reboot with three Tasks need a person's
+Machine and login.</li>
 </ul>
 
 <h2>Still wrong or open, worst first</h2>
 <ol>
-<li><span class="open">Restart count outlives a person's quit and resume.</span> After quitting and resuming, the line read
-<code>running (started again 15:39, attempt 3)</code>, and later deaths had fewer starts left. Real turns reset it.</li>
-<li>Run backoffs wait for the 60 s tick (25 s observed); conversations no longer do.</li>
-<li>With the server down, a dead conversation reads <code>closed · starting again</code>.</li>
-<li>A conversation killed before its first turn has no transcript; the stand-in fails each resume five times. Real Claude: unchecked.</li>
+<li><span class="open">Transcripts lost in the crash.</span> After the real reboot, 11 loopflow Task conversations had no
+Claude transcript at their recorded thread (separate investigation, <code>3e06ba67</code>). The recovery pass
+would start each one five times and give up. Resuming a thread with no transcript should start a fresh
+conversation instead (questions.md, 3a).</li>
+<li>Transient reads while a start is under way: <code>Conversation: unknown</code>, and once
+<code>closed; `lf resume` opens it</code> just before a died line. Each lasts one read of a few seconds.</li>
+<li>The same reap-before-settle race can in principle hit a live server: a provider killed under a live holder, with
+the pass reaping in the milliseconds before the registry settles. Not seen in any kill this run (all 137).</li>
+<li>A died carrier is noticed only on the pass's 60 s read (first qa run: 50–65 s).</li>
 </ol>
 </body></html>

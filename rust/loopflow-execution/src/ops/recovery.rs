@@ -65,14 +65,19 @@ pub fn retain() {
 /// `lf session resume` it runs. Any other start of a Session is a person's.
 pub const RECOVERING_ENV: &str = "LF_RECOVERING_SESSION";
 
-/// A person started `session` (`lf resume`, Desktop, the phone), unless this
-/// process is the pass's own start of it: the pass's count of starts after a
-/// death begins again, and an earlier start's failure is forgotten.
-pub fn record_start(store: &SqliteStore, session: &LfSessionId) -> crate::store::StoreResult<()> {
+/// A person started `session` at `at` (`lf resume`, Desktop, the phone),
+/// unless this process is the pass's own start of it: the pass's count of
+/// starts after a death begins again, an earlier start's failure is
+/// forgotten, and the pass holds off while the person's start comes up.
+pub fn record_start(
+    store: &SqliteStore,
+    session: &LfSessionId,
+    at: i64,
+) -> crate::store::StoreResult<()> {
     if std::env::var(RECOVERING_ENV).is_ok_and(|recovering| *session == recovering) {
         return Ok(());
     }
-    store.reset_conversation_starts(session)
+    store.record_persons_start(session, at)
 }
 
 /// Why starting `conversation` would fail before any provider runs: its
@@ -94,8 +99,8 @@ pub struct DueConversations {
 /// Open Tasks claimed here whose conversation was never started, or whose
 /// agent died rather than being quit. An agent still unfinished in the store
 /// counts as died only when its recorded process is gone; unknown liveness
-/// waits. The first start after a death is immediate; later ones wait the
-/// landing's repair backoff (1 minute, doubling to 30) from the last.
+/// waits. The first start after a death is immediate; one after a start
+/// waits the landing's repair backoff (1 minute, doubling to 30) from it.
 pub fn due_task_conversations(
     store: &SqliteStore,
     now: i64,
@@ -122,13 +127,11 @@ pub fn due_task_conversations(
 }
 
 /// When something that died, started again `attempts` times since it last made
-/// progress, last at `last_started_at`, may start again; `None`: at once. Task
-/// conversations and Task runs share this schedule.
+/// progress, last at `last_started_at`, may start again; `None`: at once, as
+/// nothing has started it since. Task conversations and Task runs share this
+/// schedule.
 pub fn next_start_at(attempts: u32, last_started_at: Option<i64>) -> Option<i64> {
-    match (attempts, last_started_at) {
-        (0, _) | (_, None) => None,
-        (attempts, Some(at)) => Some(at + crate::ops::pr_landing::repair_backoff(attempts)),
-    }
+    last_started_at.map(|at| at + crate::ops::pr_landing::repair_backoff(attempts))
 }
 
 #[cfg(test)]

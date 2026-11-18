@@ -878,7 +878,11 @@ async fn resume(
     let named_work = connection.work_flag(cli).is_some();
     if let Some(message) = message {
         let id = select(&store, &cwd, target).await?;
-        loopflow_execution::ops::recovery::record_start(&store.sqlite, &id.as_str().into())?;
+        loopflow_execution::ops::recovery::record_start(
+            &store.sqlite,
+            &id.as_str().into(),
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+        )?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -958,7 +962,11 @@ async fn reopen(
         .await;
     }
     let id = select(store, directory, target).await?;
-    loopflow_execution::ops::recovery::record_start(&store.sqlite, &id.as_str().into())?;
+    loopflow_execution::ops::recovery::record_start(
+        &store.sqlite,
+        &id.as_str().into(),
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,

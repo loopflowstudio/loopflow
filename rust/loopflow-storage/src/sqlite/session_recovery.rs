@@ -96,12 +96,14 @@ impl SqliteStore {
             .optional()?)
     }
 
-    /// A person started `session` again: the pass's starts count from zero.
-    pub fn reset_conversation_starts(&self, session: &LfSessionId) -> StoreResult<()> {
+    /// A person started `session` at `at`: it is start zero. The pass's count
+    /// begins again, and its next start waits the first backoff from this one,
+    /// so it never races the person's own.
+    pub fn record_persons_start(&self, session: &LfSessionId, at: i64) -> StoreResult<()> {
         self.conn.lock().expect("store mutex poisoned").execute(
-            "UPDATE agent_sessions SET starts_since_turn=0,start_failure=NULL
-             WHERE id=?1 AND (starts_since_turn>0 OR start_failure IS NOT NULL)",
-            [session.as_str()],
+            "UPDATE agent_sessions SET starts_since_turn=0,start_failure=NULL,last_started_at=?2
+             WHERE id=?1",
+            params![session.as_str(), at],
         )?;
         Ok(())
     }

@@ -613,6 +613,11 @@ Nothing left to implement in this Task's scope. Left for later steps:
   `context_launch_tests::a_killed_task_conversation` pass; clippy clean.
 - Slice 5 (implement): `server::recovery::tests::` (9), `lf::commands::session::tests::` (2),
   `dto_fixtures::` + `documented_commands::` (56); clippy on storage, execution, loopflow clean.
+- qa after the Machine crash (private Machine, branch `lf`): person-vs-pass race
+  on `lf resume` (fixed: a person's start is start zero), simulated reboot recorded
+  exit 0 for reaped agents (fixed: `Registry::open` settles adoption's ends first),
+  shutdown SIGTERM (`scratch/qa.html`). After them: `server::recovery::tests::` (9),
+  `steers::tests::a_conversation_on_an_app_server…`, `context_launch_tests::a_killed_task_conversation`.
 - A real reboot with three Tasks (a person runs it).
 
 ## Docs

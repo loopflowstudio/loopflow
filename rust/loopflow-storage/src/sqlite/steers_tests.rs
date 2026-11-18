@@ -148,15 +148,15 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .unwrap();
     assert_eq!(yielded(&store), None, "headless: lf's stream reports");
     interactive(true);
-    let attempts = |store: &SqliteStore| -> u32 {
+    let attempts = |store: &SqliteStore| -> (u32, Option<i64>) {
         store
             .conn
             .lock()
             .unwrap()
             .query_row(
-                "SELECT starts_since_turn FROM agent_sessions WHERE id='session'",
+                "SELECT starts_since_turn,last_started_at FROM agent_sessions WHERE id='session'",
                 [],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .unwrap()
     };
@@ -165,7 +165,7 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .lock()
         .unwrap()
         .execute(
-            "UPDATE agent_sessions SET starts_since_turn=3 WHERE id='session'",
+            "UPDATE agent_sessions SET starts_since_turn=3,last_started_at=7 WHERE id='session'",
             [],
         )
         .unwrap();
@@ -173,7 +173,11 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         .record_native_turn(&adapter, "native", false, None)
         .unwrap();
     assert_eq!(yielded(&store), Some(false));
-    assert_eq!(attempts(&store), 3, "a started turn has not finished");
+    assert_eq!(
+        attempts(&store),
+        (3, Some(7)),
+        "a started turn has not finished"
+    );
     store
         .record_native_turn(&adapter, "native", true, Some(0))
         .unwrap();
@@ -182,7 +186,11 @@ fn a_conversation_on_an_app_server_records_its_turns_from_hooks() {
         Some(true),
         "idle, so the server can wake it"
     );
-    assert_eq!(attempts(&store), 0, "a finished turn resets recovery");
+    assert_eq!(
+        attempts(&store),
+        (0, None),
+        "a finished turn resets recovery; its next death starts at once"
+    );
 }
 
 #[test]

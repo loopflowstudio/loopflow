@@ -190,9 +190,11 @@ impl SqliteStore {
             })?;
             if yielded {
                 // A finished turn is a conversation that runs: the recovery
-                // pass counts its starts again from none.
+                // pass counts its starts again from none, and starts the
+                // first death after it at once.
                 self.conn.lock().expect("store mutex poisoned").execute(
-                    "UPDATE agent_sessions SET starts_since_turn=0 WHERE id=?1 AND starts_since_turn>0",
+                    "UPDATE agent_sessions SET starts_since_turn=0,last_started_at=NULL
+                     WHERE id=?1 AND (starts_since_turn>0 OR last_started_at IS NOT NULL)",
                     [&adapter.session],
                 )?;
             }

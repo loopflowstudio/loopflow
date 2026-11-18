@@ -215,3 +215,21 @@ Slice 5 (implement):
   count; nothing else does.
 - The run waker covers ship backoffs too (`restart_ship`), not only died runs.
   Limit waits (`limit_recovery`) still wake on the minute tick.
+
+## qa after the crash (2026-11-17)
+
+- Fixed: a reboot made some conversations read `quit` and stay down. The pass
+  reaped the dead agent (finishing its attachment) before the registry settled
+  the ended terminal, and `native_exit::settle` read the missing attachment as
+  a move, recording exit 0. `Registry::open` now settles adoption's ends
+  before returning. Open: the same order can in principle happen at runtime
+  (provider killed, holder alive, a pass reaps in the ms before the registry
+  settles). Never seen. A sturdier rule would be "a reaped attachment is not a
+  move" in `attachment_lost`, but many writers finish attachments, so it was
+  left alone.
+- A person's start is start zero: after it, a death with no finished turn
+  waits the first backoff (1 min). A real conversation finishes a turn quickly,
+  which clears `last_started_at`, so after a real reboot this mostly costs nothing.
+- The real crash lost 11 loopflow Task conversations' Claude transcripts. The
+  pass would fail to resume each five times. That makes 3a (no transcript: start
+  fresh) more pressing than it looked.

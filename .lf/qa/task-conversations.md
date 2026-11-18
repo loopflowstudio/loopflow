@@ -70,6 +70,14 @@ second. The world stand-in finishes no turns, so the count never resets: five
 kills give up with "started 5 times". Type `quit` through `lf resume --task` in
 a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL
 to the server, every `lf holder run` and every provider, then a new server.
+Collect the pids with `pgrep -f '^<qa bin>/lf holder run'` (anchored: other
+checkouts' fixtures run holders too) and `eval "kill -9 $S $H $P"`: zsh does
+not split an unquoted pid list, so a bare `kill -9 $H` kills only part of it.
+Before each reboot, give every running stand-in a transcript (its
+`--session-id` or `--resume` argv, under each checkout's project directory), or
+the resumed ones die with exit 1. After the reboot, every conversation should
+read `died … (exit 137)`; a `quit` there means an end was settled after the
+pass reaped its agent. A shutdown is `kill -TERM -<holder pgid>` and the server.
 
 Replace a binary a server or holder runs with `rm` then `cp`: `cp` over it
 breaks its macOS signature and every next exec dies with 137.

@@ -556,18 +556,22 @@ mod tests {
             loopflow_execution::ops::recovery::RECOVERING_ENV,
             fixture.session.as_str(),
         );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session).unwrap();
+        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
+            .unwrap();
         std::env::remove_var(loopflow_execution::ops::recovery::RECOVERING_ENV);
         assert_eq!(
             fixture.attempts().0,
             4,
             "the pass's start is not a person's"
         );
-        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session).unwrap();
+        loopflow_execution::ops::recovery::record_start(&fixture.store, &fixture.session, NOW)
+            .unwrap();
         assert_eq!(fixture.failure(), None);
-        // It dies again: the pass starts it as attempt 1, not out of starts.
+        // While the person's start comes up, the pass does not race it.
+        assert!(fixture.pass(NOW + 1, false).is_empty());
+        // It died: the pass starts it as attempt 1, not out of starts.
         assert_eq!(
-            fixture.pass(NOW, false),
+            fixture.pass(NOW + 60, false),
             [format!("recover:{}:{}:1", fixture.session, fixture.agent)]
         );
     }

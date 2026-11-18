@@ -60,7 +60,7 @@ struct TaskConceptTests {
                     #expect(!task.awaitsStart)
                     #expect(!task.isCompleted)
                     #expect(TaskHistoryFilter().includes(task, now: .now))
-                    #expect(task.conversationIntent == .start)
+                    #expect(task.opensConversationAutomatically)
                     #expect(task.isUnassigned == (phase.name == "unassigned_working"))
                     #expect(throws: (any Error).self) { try header.inspect().find(button: "Reopen") }
                     #expect(throws: (any Error).self) {
@@ -70,7 +70,7 @@ struct TaskConceptTests {
                     #expect(label == (task.lifecycle == .done ? "Completed" : "Canceled"))
                     _ = try header.inspect().find(button: "Reopen")
                     #expect(!task.awaitsStart)
-                    #expect(task.conversationIntent == .reveal)
+                    #expect(!task.opensConversationAutomatically)
                 } else if task.lifecycle == .unstarted {
                     #expect(task.awaitsStart)
                 }
@@ -92,7 +92,7 @@ struct TaskConceptTests {
             model.applyFixture(roadmap: .available(roadmap), waves: .available([]), workActivity: .loading, repos: [])
             await model.refreshSessions()
             let members = phase.tasks.map { task in
-                WorkViewPlan.Content(paneRevision: nil, face: nil,
+                WorkViewPlan.Content(
                     work: .init(repository: task.task.repositoryId, kind: .task, id: task.id), title: task.task.name,
                     states: Array(task.selectionStates), identifier: task.task.identifier, primarySession: nil,
                     location: nil, argv: nil, unavailable: [])

@@ -3327,8 +3327,8 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,written_here)
-                 VALUES(?1,?2,'recorded',NULL,NULL,1,1000,1)",
+                "INSERT INTO task_ownership(id,task_id,kind,person,machine_id,at,ordered_at,writer_machine_id,written_here)
+                 VALUES(?1,?2,'recorded',NULL,NULL,1,1000,(SELECT id FROM machines WHERE is_local=1),1)",
                 [
                     format!("own_{}", uuid::Uuid::new_v4().simple()),
                     task.id.to_string(),

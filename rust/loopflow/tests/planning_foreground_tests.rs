@@ -248,7 +248,7 @@ fn public_work_connections_exchange_offline_edits_without_replaying_execution() 
         Connection::open(right.path().join("loopflow.db"))
             .unwrap()
             .query_row(
-                "SELECT count(*) FROM task_ownership WHERE written_here=1",
+                "SELECT count(*) FROM task_ownership WHERE writer_machine_id=(SELECT id FROM machines WHERE is_local=1)",
                 [],
                 |row| row.get::<_, i64>(0)
             )

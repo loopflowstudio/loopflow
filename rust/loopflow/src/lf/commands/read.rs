@@ -201,9 +201,9 @@ pub enum Read {
         destination: loopflow_execution::config::files::Destination,
         key: String,
     },
-    /// `lf --cwd <directory> desktop layout <work>`: a Work's saved panes.
+    /// `lf --cwd <directory> desktop layout query:<id>`: a Dashboard's slots.
     #[serde(rename = "desktop.layout")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::desktop::DesktopLayoutRecord>()))]
+    #[schemars(extend("x-result" = generator.subschema_for::<loopflow_storage::work::selection::Dashboard>()))]
     DesktopLayout { directory: PathBuf, work: String },
     /// `lf --cwd <directory> repo people`: who owns the repository's Tasks.
     #[serde(rename = "repo.people")]

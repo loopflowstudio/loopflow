@@ -48,7 +48,7 @@ schemas and old format readers. The cutover retains current Work and links,
 native history and resumable conversations. Configured acceptance is separate.
 
 Current CLI examples use supported spellings. `lf resume` selects a Session ID,
-Task or Wave. Retained native terminals attach without replacing their provider.
+Task or Wave. A held terminal gains a view; a native client lf can't share is taken over.
 A Run's id, running or finished, is refused with a pointer to its Task's Session;
 only a Graph continues its own step's Run (structured-output correction).
 A Graph whose process died leaves its

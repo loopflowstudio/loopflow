@@ -69,7 +69,6 @@ pub use run::{
     resolve_execution_binding, resolve_work_binding, resolve_work_selection, WorkBinding,
     WorkSelection,
 };
-pub use sync::{abort_sync_after_authorization, continue_sync_after_authorization};
 pub use sync::{
     abort_sync_for_resolution, continue_sync_for_resolution, plan_sync, recover_sync,
     sync_class_name, sync_strategy_name, sync_with_plan, sync_with_recovery, SyncClass,

@@ -68,7 +68,16 @@ async fn migration_preserves_planning_identity_and_removes_snapshot_storage() {
         .is_ok());
 
     // A delayed list cannot resurrect a confirmed removal in either reader.
-    store.sqlite.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'issue','FIX-1',1)", [&wave]).unwrap();
+    store
+        .sqlite
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)",
+            [],
+        )
+        .unwrap();
     store.seed_inventory(list, None).await.unwrap();
     let removed = store.linear_issue_state("/repo", "FIX-1").await.unwrap();
     assert_eq!(removed.state, PlanningState::Removed);

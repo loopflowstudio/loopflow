@@ -1009,8 +1009,8 @@ mod tests {
         rusqlite::Connection::open(directory.path().join("loopflow.db"))
             .unwrap()
             .execute(
-                "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,1)",
-                rusqlite::params![wave.id().as_str(), task.tracker_id.as_ref().unwrap().as_str(), task.identifier],
+                "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+                [task.id.as_str()],
             )
             .unwrap();
 
@@ -1079,9 +1079,11 @@ mod tests {
             let resumed = crate::journal::with_test_ledger(
                 crate::store::database_path_from_env().unwrap(),
                 || {
-                    crate::harness::native_session::resume_session(
+                    crate::harness::native_session::resume_session_with_env(
                         &capture.artifact_key(),
-                        &history,
+                        Some(&history),
+                        &Default::default(),
+                        None,
                         false,
                     )
                 },

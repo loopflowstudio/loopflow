@@ -7,7 +7,6 @@ use serde_json::{json, Value};
 
 use super::OpenHost;
 use loopflow_execution::transport::local_directory_report;
-use loopflow_storage::work::selection::SplitAxis;
 
 use loopflow_execution::terminal_host::{rex_endpoint, RexLocation};
 
@@ -110,10 +109,6 @@ impl Rex {
             .into())
     }
 
-    pub(super) fn sessions(&self) -> Result<Vec<Value>> {
-        array(self.call("session.list", json!({}))?, "sessions")
-    }
-
     fn windows(&self, container: &str) -> Result<Vec<Value>> {
         let view = self.call("session.view", json!({"session_id":container}))?;
         // Rex omits windows for an empty session. Its identity and revision
@@ -187,13 +182,6 @@ pub(super) fn focus_view(placement: &str) -> Result<()> {
     let result = rex.focus(&location.session, id)?;
     anyhow::ensure!(!result.contains("unconfirmed"), "{result}");
     Ok(())
-}
-
-pub(super) fn split(axis: SplitAxis, ratio: f64, before: Value, after: Value) -> Value {
-    json!({"split":{
-        "direction": if axis == SplitAxis::Vertical { "horizontal" } else { "vertical" },
-        "ratio": ratio, "before": before, "after": after,
-    }})
 }
 
 fn array(mut value: Value, key: &str) -> Result<Vec<Value>> {

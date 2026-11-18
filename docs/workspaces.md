@@ -29,17 +29,22 @@ Agent calls never attach recursively inside their tool output, including when
 opening their own Session. An agent's `--here` request fails with a command to
 run from an interactive terminal; it does not change the requested mode.
 
-If the conversation is already open, `--here`, `--tab` and ordinary terminal
-opening report where it is and suggest `--focus`. They neither take its input
-nor create another view. Detection covers known live views across local hosts
-on this Machine and matches the Session and view IDs, even if tabs were renamed.
-It does not search other Machines. A known remote viewer is reported with its
-location; opening does not take it over. To deliberately move input, use
-`lf resume <session>`.
+A conversation takes any number of views, and every one types; a draft typed
+in one shows in the others. If it is already open, `--here` and `--tab` attach
+one more view beside the existing ones. Desktop shows a conversation once:
+opening it there focuses its existing pane. The view used last (attached, typed
+in or focused) sets the terminal's size and colors; when it closes, the one
+used before it takes over.
 
-A view may still be opening or show an attachment error. `--focus` only reveals
-it. After correcting an attachment failure, repeat the opening command to
-reconnect; an attachment still in progress is reported without launching another.
+`--focus` reveals an existing view and creates nothing. Detection covers known
+live views across local hosts on this Machine and matches the Session and view
+IDs, even if tabs were renamed. It does not search other Machines. A view may
+still be opening or show an attachment error; `--focus` only reveals it. After
+correcting an attachment failure, repeat the opening command.
+
+A conversation whose provider runs in a client lf cannot share, such as one
+started in a plain terminal before, is taken over: that client ends and the
+conversation continues in the new view.
 
 `--focus` reports **Not open** when no view exists, including while Desktop is
 still resolving an opening before creating its pane. A view the host cannot
@@ -61,154 +66,57 @@ A plain terminal supports `--here`. With no sibling-tab support, `--tab` fails
 and prints a command to run in a terminal you open yourself. The same applies
 to an agent call without a supported host; it does not fall back to attaching
 inside the tool call. Use `--host desktop` to choose Desktop navigation.
-`--server <endpoint>` selects a Rex Unix socket. Rex workspace layouts can
-reach a Task's recorded Machine; Herdr and cmux workspace layouts stay local.
+`--server <endpoint>` selects a Rex Unix socket. Rex workspaces can
+reach a Task's recorded Machine; Herdr and cmux workspaces stay local.
 
 ## Open a workspace
 
 ```bash
-lf workspace --task ENG-123         # the Task's configured panes in your host
-lf workspace --wave product        # Product's started, unfinished Tasks
-lf workspace                       # this checkout's Task, Wave or repository
-lf workspace --available           # conversations ready for your next turn
-lf task view ENG-123                # only the Task brief and workflow
+lf open --wave product --workspace  # Product's started, unfinished Tasks
+lf open --workspace                 # this repository's started, unfinished Tasks
+lf open --available                 # conversations ready for your next turn
 lf diff ENG-123                     # only its changes
 ```
 
-`lf workspace` opens arrangements and overviews. In a repository or Wave, it
-shows started, unfinished Tasks; backlog Tasks appear only when selected.
+Without `--workspace`, `lf open --wave product` attaches the Wave's
+conversation. With it, a repository or Wave opens as an overview of its
+started, unfinished Tasks, once: a Task started later opens with
+`lf open --task <task>`. A Task has no overview of its own, so `--workspace`
+with a Task names the Wave or repository overview to open instead.
 Desktop shows its board, while Rex, Herdr and cmux arrange native Task tabs.
-Use `lf open --task <task>` to enter a conversation from an overview. Overviews
-and automatic arrivals start no agents and leave existing conversation input
-where it is. A Task's configured workspace can hide Conversation; ordinary
-`lf open` always reaches the requested conversation regardless of that layout.
+Each Task tab is the Task's conversation: an ended one starts its provider
+when the tab opens, so an overview of twelve Tasks runs twelve agents.
 
-Rex and Herdr place a Task in the current session or workspace; cmux uses the
-current group, or the window if there is no group. A repository or Wave gets a
-new container. External hosts own these arrangements: use their controls to
+An overview gets a new Rex session, Herdr workspace or cmux group. A single
+conversation's tab (`--tab`) joins the current one; cmux uses the current group,
+or the window if there is no group. External hosts own these arrangements: use their controls to
 rearrange, rename, close and restore them. `--host` selects a host;
 `--no-focus` keeps the current tab selected. Hosts without workspace support
-report that limitation; use `lf open`, `lf task view` or `lf diff` for a single
+report that limitation; drop `--workspace`, or use `lf diff`, for a single
 activity.
 
-## Choose a layout
+## What a Task tab holds
 
-`lf workspace` uses the first available layout:
+Each Task tab in an overview holds the Task's Session, opened as
+`lf open --task ENG-123 --here` would. Every view of a Session can type into
+it, and you see drafts from one view in the others.
 
-1. The Task's saved Desktop arrangement.
-2. Its `task_layout` configuration, including Wave preferences.
-3. The builtin Conversation, Task & workflow and Shell layout.
+Add shells, editors or splits with the host's own controls; LF builds no layout
+in Rex, Herdr or cmux, and nothing it does there changes Desktop. Desktop
+remembers how you arranged each Task on that Mac, and only there: a second Mac
+driving the same Machine keeps its own arrangement. Unsent file drafts and
+background tabs remain in Desktop.
 
-Only visible panes and their selected tabs open. LF recreates the arrangement as
-closely as the host supports and reports tools it cannot display. A Conversation
-pane uses the same Session resolution and attachment rules as `lf open`. If it
-is already open elsewhere, the workspace reports its location without moving
-input or substituting Task & workflow for the requested conversation.
-
-Arrange a Task in Desktop to save its layout for later launches. Changes made in
-Rex, Herdr or cmux stay in that app; they do not change Desktop's saved layout or
-your templates. Opening another workspace creates another arrangement, without
-duplicating existing conversation views. Unsent file drafts and background tabs
-remain in Desktop.
-
-## Set a Wave's default
-
-This template opens Changes beside a shell and hides Conversation:
-
-```yaml
-# .lf/wave/product/config.yaml
-task_layout:
-  hidden: [conversation]          # pane IDs to leave out
-  tree:
-    kind: split
-    axis: vertical
-    ratio: 0.6
-    first:
-      kind: pane
-      id: changes
-      content:
-        kind: browser
-        location: null
-        tabs: [{kind: changes, id: changes, comparison: {kind: working_tree, base: parent}}]
-        selected: changes
-    second:
-      kind: split
-      axis: horizontal
-      ratio: 0.5
-      first: {kind: pane, id: conversation, content: {kind: session, session_id: null, location: null}}
-      second:
-        kind: pane
-        id: shell
-        content: {kind: shell, tabs: [{id: s, location: null, lf_process_id: null}], selected: s}
-```
-
-Include a conversation, shell and browser pane; add unused pane IDs to `hidden`.
-Leave Session IDs and locations unset so they resolve from the Task when opened.
-Templates cannot contain open file drafts or specific conversations.
-
-Use these configuration files:
-
-- `.lf/wave/<name>/config.yaml` for a shared Wave default.
-- `lf.config.local.yaml` for private repository and Wave overrides.
-- `.lf/config.yaml` or `~/.lf/config.yaml` for broader defaults.
-
-See [configuration scopes](config.md#where-settings-live). Task worktrees share
-the repository's private configuration. The winning scope replaces the whole
-layout. A saved Desktop Task arrangement takes precedence over a template.
-Changing a template affects future launches; existing tabs stay as you arranged them.
-
-## Choose your tools
-
-| Pane | What opens in a terminal host |
-| --- | --- |
-| Conversation | The Task's primary Session, subject to the same already-open rules as `lf open` |
-| Shell | A fresh shell in the Task worktree |
-| Files | Your file browser or editor |
-| Changes | Git's pager or your diff tool |
-| Task & workflow | The Task brief, workflow and recorded runs |
-
-Opening a Conversation pane does not start the Task's Graph or replay its
-prompt. A new shell starts in the worktree without copying another shell's jobs
-or variables.
+Opening a conversation does not start the Task's Graph or replay its prompt.
 
 ```bash
-export LF_FILE_BROWSER=yazi          # directory browser
-export EDITOR=vim                    # file editor
-lf task view ENG-123                 # inspect the Task and workflow
+lf diff ENG-123 --base parent --difftool    # the Task's changes in your diff tool
 ```
-
-Files uses `LF_FILE_BROWSER` for directories, then `VISUAL`, `EDITOR`, or `vi` for
-editing. Set these on the Machine where the Task runs. GUI editors may open their
-own windows.
-
-Changes runs `lf task diff`, using Git's pager and diff settings. Working-tree
-patches include untracked files; `--difftool` covers tracked files:
-
-```bash
-lf diff ENG-123 --base parent --difftool
-```
-
-Use `--head <commit>` for a committed comparison. In Task & workflow, `n` and `p`
-select a step and `l` reads its log. Viewing starts no work.
-
-## Follow newly started Tasks
-
-A repository or Wave opened with `lf workspace` in Rex includes a Workspace tab.
-Keep it running to add newly started Tasks without taking focus or adding backlog
-Tasks. A Task tab you close stays closed while that Workspace tab runs.
-
-New arrivals show Task & workflow information and the configured tools without
-attaching conversations. They leave input in your existing terminals. Run
-`lf open --task <task>` when you want to resume that conversation.
-
-Following includes remote Tasks on their recorded Machines. Starting a Task does
-not reopen a closed host app. Single-Task opens do not follow sibling Tasks;
-Herdr and cmux do not support following.
 
 ## Split in the directory you are using
 
-Use your terminal app's normal Split shortcut. From a Conversation or Task tool,
-the new shell starts in the Task worktree. From a shell, it follows that shell's
+Use your terminal app's normal Split shortcut. From a Conversation tab, the new
+shell starts in the Task worktree. From a shell, it follows that shell's
 current directory, including changes made with `cd`.
 
 ```bash
@@ -224,9 +132,9 @@ splits again.
 A successful conversation open means the Session attached, not just that the
 host created a tab. Attachment failures return a failure to the opening command
 and leave readable diagnostics in the destination. Correct the reported cause
-and retry the same command; LF rechecks the Session's live view rather than
-blindly adding another conversation tab. If attachment completed before the
-reply was lost, the retry reports its location and offers `--focus`.
+and retry the same command. Desktop rechecks its pane before opening another;
+a terminal retry attaches one more view, so if attachment completed before the
+reply was lost, `--focus` reveals the first one.
 
 Starting a Task's first conversation needs a harness. With no `default_agent` and
 several harnesses installed, choose one for this invocation or set a default:

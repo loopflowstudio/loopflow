@@ -222,9 +222,6 @@ pub(super) fn run_with_io(
         }) if !preview => Some(connection),
         _ => None,
     };
-    let replace = connection.is_none_or(|connection| {
-        connection.intent() == loopflow_execution::session::SessionOpenIntent::Resume
-    });
     // Only a person at a terminal views the remote Session; scripts and pipes
     // keep the plain SSH command, whose stdin reaches the provider directly.
     let attended = !cli.batch && std::io::stdin().is_terminal();
@@ -263,7 +260,7 @@ pub(super) fn run_with_io(
                 !record.open_argv.is_empty(),
                 "Session has no viewer launch command"
             );
-            loopflow_execution::transport::relay_over(&record.open_argv, replace)?;
+            loopflow_execution::transport::relay_over(&record.open_argv)?;
             // Read the returned Session without repeating New/fork or starting
             // another provider. JSON belongs after the terminal has returned.
             let bytes = runtime.block_on(request(
@@ -290,11 +287,6 @@ pub(super) fn run_with_io(
                     "--".into(),
                 ],
             );
-        }
-        if !replace && !record.open_argv.is_empty() {
-            record
-                .open_argv
-                .splice(0..0, ["/usr/bin/env".into(), "LF_RELAY_IF_FREE=1".into()]);
         }
         if connection.json || cli.json {
             output(&mut io, &format!("{}\n", serde_json::to_string(&record)?))?;
@@ -342,8 +334,6 @@ pub(super) fn run_with_io(
                             notes: None,
                             ..
                         },
-                }) | Some(crate::lf::Commands::Desktop {
-                    cmd: crate::lf::DesktopCommand::Layout { save: true, .. },
                 })
             );
             loopflow_execution::machine::ssh::run_ssh_io(
@@ -354,10 +344,11 @@ pub(super) fn run_with_io(
                 io,
             )
         }
-        None if viewer => loopflow_execution::transport::relay_over(
-            &ssh_argv(&target.route, forward_agent, &preamble)?,
-            replace,
-        ),
+        None if viewer => loopflow_execution::transport::relay_over(&ssh_argv(
+            &target.route,
+            forward_agent,
+            &preamble,
+        )?),
         None => run_ssh(&target.route, forward_agent, &preamble),
     }
 }

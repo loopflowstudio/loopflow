@@ -9,20 +9,10 @@
     }
   },
   "primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -67,20 +57,10 @@
     "raw": false
   },
   "reopened": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -294,20 +274,10 @@
   },
   "sessions": [
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.repo",
@@ -352,20 +322,10 @@
       "raw": false
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": null,
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK",
@@ -415,20 +375,10 @@
       "raw": false
     },
     {
-      "actions": [
-        {
-          "help": "Open this Session in a terminal",
-          "kind": "open",
-          "label": "Open here",
-          "unavailable_reason": null
-        },
-        {
-          "kind": "reveal",
-          "label": "Show conversation",
-          "help": "Continue existing history without taking another terminal's input",
-          "unavailable_reason": null
-        }
-      ],
+      "action": {
+        "label": "Open here",
+        "help": "Open this Session in a terminal"
+      },
       "agent_process_id": "cbe8d875-580e-4683-89d4-bd6b51fc277b",
       "availability": null,
       "cwd": "/private/tmp/.tmpRKKNhK.unscoped",
@@ -473,20 +423,10 @@
     }
   ],
   "task_primary": {
-    "actions": [
-      {
-        "help": "Open this Session in a terminal",
-        "kind": "open",
-        "label": "Open here",
-        "unavailable_reason": null
-      },
-      {
-        "kind": "reveal",
-        "label": "Show conversation",
-        "help": "Continue existing history without taking another terminal's input",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "agent_process_id": null,
     "availability": null,
     "cwd": "/private/tmp/.tmpRKKNhK",

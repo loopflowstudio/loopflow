@@ -172,19 +172,6 @@ impl Store {
         run_sqlite(&self.sqlite, move |store| store.update_task_pr(&pr)).await
     }
 
-    pub(crate) async fn record_task_pr_repair_incident(
-        &self,
-        pr_id: &TaskPrId,
-        kind: loopflow_storage::work::task::TaskPrRepairKind,
-        occurred_at: OffsetDateTime,
-    ) -> StoreResult<bool> {
-        let pr_id = pr_id.clone();
-        run_sqlite(&self.sqlite, move |store| {
-            store.record_task_pr_repair_incident(&pr_id, kind, occurred_at)
-        })
-        .await
-    }
-
     pub async fn task_prs(&self, task_id: &TaskId) -> StoreResult<Vec<TaskPr>> {
         let task_id = task_id.clone();
         run_sqlite(&self.sqlite, move |store| store.task_prs(&task_id)).await

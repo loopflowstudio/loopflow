@@ -16,7 +16,6 @@
       "task_id": "task_44444444444444444444444444444444",
       "wave": null,
       "session": null,
-      "diff": false,
       "execution_machine": "home_55555555555555555555555555555555"
     },
     "conversation": "other_conversation",
@@ -43,7 +42,6 @@
       "task_id": null,
       "wave": "product",
       "session": null,
-      "diff": false,
       "execution_machine": null
     },
     "conversation": "unknown",

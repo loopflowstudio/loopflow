@@ -71,7 +71,7 @@ pub(crate) async fn accept_linear_issue(
 #[cfg(test)]
 mod tests {
     use crate::test_linear_input::SeedLinearSqlite;
-    use rusqlite::{params, Connection};
+    use rusqlite::Connection;
 
     use crate::store::PlanningState;
     use loopflow_model::id::WaveId;
@@ -182,7 +182,6 @@ mod tests {
             ("UPDATE pm_items SET body=json_remove(body,'$.project_id') WHERE id='issue'", PlanningState::Invalid),
             ("UPDATE pm_projects SET body=json_set(body,'$.team_ids',json('[\"foreign\"]')) WHERE id='project'", PlanningState::Invalid),
             ("INSERT INTO pm_issue_changes(issue_id,removed) VALUES('issue',1)", PlanningState::Removed),
-            ("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) SELECT id,'issue','TEAM-1',55 FROM waves", PlanningState::Removed),
             ("DELETE FROM pm_items WHERE id='issue'", PlanningState::Unavailable),
             ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET membership_unresolved=1 WHERE id='project'", PlanningState::Invalid),
             ("DELETE FROM pm_items WHERE id='issue'; UPDATE pm_projects SET archived=1 WHERE id='project'", PlanningState::Invalid),
@@ -348,8 +347,6 @@ mod tests {
                 [serde_json::to_string(&project.initiative_ids).unwrap()],
             )
             .unwrap();
-            conn.execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,?2,?3,50)",
-                params![wave.id(),item.id,item.identifier]).unwrap();
         }
         validate().unwrap();
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);

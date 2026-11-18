@@ -827,7 +827,7 @@ not exercised by macOS-only checks.
 
 Installed-host tests are `#[ignore]`d and use `support::rex::IsolatedRex`, which
 refuses unqualified CLI requests so a fixture cannot reach your own server. Run
-them one at a time: together they can miss a follower's arrival deadline.
+them one at a time: together they can miss a host's reply deadline.
 On macOS, run Rex fixtures directly: `scripts/test_network.py` blocks Rex's
 `/usr/bin/login` launcher before the terminal command executes. These fixtures
 use private homes, an isolated server and stand-in providers.

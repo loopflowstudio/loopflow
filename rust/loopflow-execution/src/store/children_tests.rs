@@ -5,7 +5,7 @@ use loopflow_storage::migration_runner::migration_section_sql;
 use loopflow_storage::planning_exchange::PlanningMutation;
 use loopflow_storage::sqlite::SqliteStore;
 use loopflow_storage::work::task::{NewTask, TaskUpdate};
-use rusqlite::{params, OptionalExtension};
+use rusqlite::params;
 
 fn local_repository(store: &SqliteStore) -> RepositoryId {
     let repo = store.home_dir().unwrap();
@@ -644,7 +644,15 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         )
         .unwrap();
     assert_eq!(edited.title, "A mapping does not transfer authority");
-    store.conn.lock().unwrap().execute("INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES(?1,'different-provider-uuid','TEAM-9',1)", [&mapped.wave_id]).unwrap();
+    store
+        .conn
+        .lock()
+        .unwrap()
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=1 WHERE id=?1",
+            [mapped.id.as_str()],
+        )
+        .unwrap();
     assert!(store.task_deleted(&mapped).unwrap());
     assert!(store.list_tasks(None).unwrap().is_empty());
     let retained = store.task(&mapped.id).unwrap().unwrap();
@@ -719,7 +727,7 @@ fn local_planning_prefix_collision_is_explicit() {
 }
 
 #[test]
-fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidence() {
+fn local_planning_migration_preserves_released_links() {
     use crate::store::migrations::{apply_before_migration, upgrade_from_migration};
 
     let conn = rusqlite::Connection::open_in_memory().unwrap();
@@ -895,10 +903,6 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     let project = store.project(&project).unwrap().unwrap();
     assert_eq!(project.tracker_id.unwrap().as_str(), "linear-project");
     assert_eq!(project.description, "Retain KRs");
-    assert_eq!(
-            store.conn.lock().unwrap().query_row("SELECT issue_id,identifier FROM task_issue_identities WHERE wave_id=?1 AND identifier='LOO-2'", [&orphan_wave], |row| Ok((row.get::<_, String>(0)?,row.get::<_, String>(1)?))).optional().unwrap(),
-            Some(("orphan-issue".into(), "LOO-2".into()))
-        );
     assert!(store.task_by_issue("LOO-2").unwrap().is_none());
 }
 

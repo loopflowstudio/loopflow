@@ -271,27 +271,6 @@ fn remote_session_open_returns_an_owner_pinned_terminal_command() {
     assert!(script.contains("/remote/private home"), "{script}");
     assert!(!script.contains("session remote"), "{script}");
     assert_eq!(opened["workspace"], record["workspace"]);
-    for intent in ["--start-if-free", "--reveal-existing"] {
-        let automatic = fixture.json(&[
-            "--machine",
-            "mini",
-            "session",
-            "resume",
-            &id,
-            intent,
-            "--prepare",
-            "--json",
-        ]);
-        let automatic = automatic["open_argv"].as_array().unwrap();
-        assert_eq!(
-            &automatic[..2],
-            &[
-                serde_json::json!("/usr/bin/env"),
-                serde_json::json!("LF_RELAY_IF_FREE=1")
-            ]
-        );
-        assert_eq!(&automatic[2..], opened["open_argv"].as_array().unwrap());
-    }
 }
 
 #[test]
@@ -1083,8 +1062,8 @@ esac
         &attach,
         &format!(
             r#"#!/bin/sh
-if [ "$1 $2 $3" = 'session resume --start-if-free' ]; then
-  printf '%s\n' "$4" > "$LF_HOME/opened"
+if [ "$1 $2" = 'session resume' ]; then
+  printf '%s\n' "$3" > "$LF_HOME/opened"
   pwd -P > "$LF_HOME/opened-cwd"
   exit 0
 fi
@@ -3941,7 +3920,7 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
         .write_all(
             format!(
                 "{}\n",
-                serde_json::json!({"terminal": terminal, "revision": 3})
+                serde_json::json!({"terminal": terminal, "revision": loopflow_execution::transport::registry::REVISION})
             )
             .as_bytes(),
         )
@@ -3953,8 +3932,7 @@ fn watch_for(home: &Path, terminal: &str, line: String) -> std::thread::JoinHand
     }
     let answer: serde_json::Value = serde_json::from_slice(&answer).unwrap();
     assert_eq!(answer["answer"], "hosted", "{terminal}: {answer}");
-    let request = serde_json::json!({"id":1,"kind":"attach","control":false,"replace":true,"rows":24,"cols":80})
-        .to_string();
+    let request = serde_json::json!({"id":1,"kind":"attach","rows":24,"cols":80}).to_string();
     let mut frame = vec![0x11];
     frame.extend((request.len() as u32).to_be_bytes());
     frame.extend(request.as_bytes());

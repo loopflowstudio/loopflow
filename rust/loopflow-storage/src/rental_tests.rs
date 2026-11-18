@@ -37,7 +37,6 @@ fn code(max: u32, max_per_hour: &str) -> OnDemand {
         max_machines: max,
         max_usd_per_hour: usd(max_per_hour),
         hours: 4.0,
-        created_at: now(),
     }
 }
 
@@ -211,7 +210,6 @@ fn lab(off: bool) -> Pool {
     Pool {
         name: "lab".into(),
         off,
-        created_at: now(),
     }
 }
 

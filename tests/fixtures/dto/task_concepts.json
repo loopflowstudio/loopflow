@@ -4,20 +4,10 @@
     "sessions": [
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/elsewhere",
@@ -68,20 +58,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2/nested",
@@ -132,20 +112,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -194,20 +164,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -258,20 +218,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -706,26 +656,10 @@
     "sessions": [
       {
         "account": null,
-        "actions": [
-          {
-            "help": "Open this Session in a terminal",
-            "kind": "open",
-            "label": "Open here",
-            "unavailable_reason": "This conversation is open in another terminal on this Machine; Take back transfers input here"
-          },
-          {
-            "help": "Continue here from another terminal on this Machine; the previous terminal reports the move",
-            "kind": "move_here",
-            "label": "Take back",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-          }
-        ],
+        "action": {
+          "label": "Take over",
+          "help": "Continue here; the client that has it ends, unsent text there is lost"
+        },
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": null,
         "cwd": "/elsewhere",
@@ -798,20 +732,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2/nested",
@@ -862,20 +786,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -924,20 +838,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -988,20 +892,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -1445,26 +1339,10 @@
     "sessions": [
       {
         "account": null,
-        "actions": [
-          {
-            "help": "Open this Session in a terminal",
-            "kind": "open",
-            "label": "Open here",
-            "unavailable_reason": "This conversation is open in another terminal on this Machine; Take back transfers input here"
-          },
-          {
-            "help": "Continue here from another terminal on this Machine; the previous terminal reports the move",
-            "kind": "move_here",
-            "label": "Take back",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-          }
-        ],
+        "action": {
+          "label": "Take over",
+          "help": "Continue here; the client that has it ends, unsent text there is lost"
+        },
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": null,
         "cwd": "/elsewhere",
@@ -1537,20 +1415,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2/nested",
@@ -1601,20 +1469,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -1663,20 +1521,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -1727,20 +1575,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -2175,26 +2013,10 @@
     "sessions": [
       {
         "account": null,
-        "actions": [
-          {
-            "help": "Open this Session in a terminal",
-            "kind": "open",
-            "label": "Open here",
-            "unavailable_reason": "This conversation is open in another terminal on this Machine; Take back transfers input here"
-          },
-          {
-            "help": "Continue here from another terminal on this Machine; the previous terminal reports the move",
-            "kind": "move_here",
-            "label": "Take back",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-          }
-        ],
+        "action": {
+          "label": "Take over",
+          "help": "Continue here; the client that has it ends, unsent text there is lost"
+        },
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": "available",
         "cwd": "/elsewhere",
@@ -2267,20 +2089,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2/nested",
@@ -2331,20 +2143,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -2393,20 +2195,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -2457,20 +2249,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -2916,26 +2698,10 @@
     "sessions": [
       {
         "account": null,
-        "actions": [
-          {
-            "help": "Open this Session in a terminal",
-            "kind": "open",
-            "label": "Open here",
-            "unavailable_reason": "This conversation is open in another terminal on this Machine; Take back transfers input here"
-          },
-          {
-            "help": "Continue here from another terminal on this Machine; the previous terminal reports the move",
-            "kind": "move_here",
-            "label": "Take back",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "This conversation is controlled elsewhere; use Take back to continue here"
-          }
-        ],
+        "action": {
+          "label": "Take over",
+          "help": "Continue here; the client that has it ends, unsent text there is lost"
+        },
         "agent_process_id": "aff7c43d-5479-436f-9dc1-9ca331c797a3",
         "availability": "available",
         "cwd": "/elsewhere",
@@ -3008,20 +2774,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2/nested",
@@ -3072,20 +2828,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -3134,20 +2880,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",
@@ -3198,20 +2934,10 @@
       },
       {
         "account": null,
-        "actions": [
-          {
-            "help": "The previous launch ended before the provider saved any history; Try again repeats its request",
-            "kind": "move_here",
-            "label": "Try again",
-            "unavailable_reason": null
-          },
-          {
-            "help": "Continue existing history without taking another terminal's input",
-            "kind": "reveal",
-            "label": "Show conversation",
-            "unavailable_reason": "No saved provider history; start this conversation explicitly"
-          }
-        ],
+        "action": {
+          "label": "Try again",
+          "help": "The previous launch ended before the provider saved any history; this repeats its request"
+        },
         "agent_process_id": null,
         "availability": null,
         "cwd": "/repo/fix-2",

@@ -566,120 +566,6 @@
         }
       ]
     },
-    "BrowserTab": {
-      "description": "A browser tab: the Task's Files view (with its own document tabs), its Graph\nprocess log, or a web page.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "files",
-              "type": "string"
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/FileTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "Task brief and workflow, independent of associated Graph processes.",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "task",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The exact comparison, independent of its host's renderer.",
-          "properties": {
-            "comparison": {
-              "$ref": "#/$defs/ChangeComparison"
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "changes",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "comparison"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "graph_log",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "url",
-              "type": "string"
-            },
-            "url": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "url"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "BuildProvenance": {
       "enum": [
         "development",
@@ -718,75 +604,6 @@
         "Loopflow"
       ],
       "type": "string"
-    },
-    "ChangeComparison": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "working_tree",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "base"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "head": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "branch",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "base",
-            "head"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "base": {
-              "type": "string"
-            },
-            "head": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "pull_request",
-              "type": "string"
-            },
-            "number": {
-              "format": "uint64",
-              "minimum": 0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "kind",
-            "number",
-            "base",
-            "head"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "Check": {
       "properties": {
@@ -1561,7 +1378,7 @@
       ]
     },
     "Close": {
-      "description": "The last frame before an orderly terminal disconnect. No stream offset or\ncontrol claim transfers to a replacement terminal.",
+      "description": "The last frame before an orderly terminal disconnect. No stream offset\ntransfers to a replacement terminal.",
       "properties": {
         "reason": {
           "$ref": "#/$defs/CloseReason"
@@ -2190,25 +2007,6 @@
         "errors"
       ],
       "type": "object"
-    },
-    "DesktopLayoutRecord": {
-      "anyOf": [
-        {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/WorkPaneLayout"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        {
-          "$ref": "#/$defs/Dashboard",
-          "description": "Its `slots`; null is the default layout."
-        }
-      ],
-      "description": "`layout` reads and writes a Work's pane intent or a Dashboard's slot layout."
     },
     "DesktopTaskPane": {
       "description": "The full Task reading used by Desktop and terminal Task views, plus the\nDesktop row that keeps the pane current after the Task leaves the plan.",
@@ -2839,52 +2637,6 @@
         "path",
         "key",
         "inspections"
-      ],
-      "type": "object"
-    },
-    "FileDraft": {
-      "additionalProperties": false,
-      "description": "Recovery data, not permission to overwrite a file. The host compares the base on reopen.",
-      "properties": {
-        "base_content": {
-          "type": "string"
-        },
-        "base_revision": {
-          "type": "string"
-        },
-        "location": {
-          "$ref": "#/$defs/ViewLocation"
-        },
-        "path": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "location",
-        "path",
-        "base_revision",
-        "base_content",
-        "text"
-      ],
-      "type": "object"
-    },
-    "FileTab": {
-      "additionalProperties": false,
-      "description": "References the Task's document owner; drafts are stored once on WorkPaneLayout.",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "path": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "id",
-        "path"
       ],
       "type": "object"
     },
@@ -5677,163 +5429,6 @@
         }
       ]
     },
-    "PaneIntent": {
-      "description": "A Task workspace holds exactly one of each designated pane; Wave and repository\nworkspaces hold only the session pane. Arrangement is free; membership is not.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "One conversation at a time; none shows the start state.",
-          "properties": {
-            "kind": {
-              "const": "session",
-              "type": "string"
-            },
-            "location": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ViewLocation"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "session_id": {
-              "type": [
-                "string",
-                "null"
-              ]
-            }
-          },
-          "required": [
-            "kind",
-            "session_id",
-            "location"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "shell",
-              "type": "string"
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/ShellTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "kind": {
-              "const": "browser",
-              "type": "string"
-            },
-            "location": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/ViewLocation"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "selected": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "tabs": {
-              "items": {
-                "$ref": "#/$defs/BrowserTab"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "kind",
-            "location",
-            "tabs",
-            "selected"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "PaneTree": {
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "properties": {
-            "content": {
-              "$ref": "#/$defs/PaneIntent"
-            },
-            "id": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "pane",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "id",
-            "content"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "axis": {
-              "$ref": "#/$defs/SplitAxis"
-            },
-            "first": {
-              "$ref": "#/$defs/PaneTree"
-            },
-            "kind": {
-              "const": "split",
-              "type": "string"
-            },
-            "ratio": {
-              "format": "double",
-              "type": "number"
-            },
-            "second": {
-              "$ref": "#/$defs/PaneTree"
-            }
-          },
-          "required": [
-            "kind",
-            "axis",
-            "ratio",
-            "first",
-            "second"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -7596,7 +7191,7 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf --cwd <directory> desktop layout <work>`: a Work's saved panes.",
+          "description": "`lf --cwd <directory> desktop layout query:<id>`: a Dashboard's slots.",
           "properties": {
             "directory": {
               "type": "string"
@@ -7616,7 +7211,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/DesktopLayoutRecord"
+            "$ref": "#/$defs/Dashboard"
           }
         },
         {
@@ -10118,38 +9713,20 @@
       ]
     },
     "SessionAction": {
+      "description": "What opening a Session does here, as a person reads it. Every opening is\n`lf resume`: it adds a view, resumes saved history, or takes the\nconversation over from a client lf can't share.",
       "properties": {
         "help": {
           "type": "string"
         },
-        "kind": {
-          "$ref": "#/$defs/SessionActionKind"
-        },
         "label": {
           "type": "string"
-        },
-        "unavailable_reason": {
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
-        "kind",
         "label",
-        "help",
-        "unavailable_reason"
+        "help"
       ],
       "type": "object"
-    },
-    "SessionActionKind": {
-      "enum": [
-        "reveal",
-        "open",
-        "move_here"
-      ],
-      "type": "string"
     },
     "SessionAttached": {
       "additionalProperties": false,
@@ -10551,15 +10128,6 @@
       ],
       "type": "string"
     },
-    "SessionOpenIntent": {
-      "description": "Whether opening may take control, start a thread, or only reveal history.",
-      "enum": [
-        "resume",
-        "start",
-        "reveal"
-      ],
-      "type": "string"
-    },
     "SessionPage": {
       "properties": {
         "entries": {
@@ -10619,11 +10187,16 @@
             "null"
           ]
         },
-        "actions": {
-          "items": {
-            "$ref": "#/$defs/SessionAction"
-          },
-          "type": "array"
+        "action": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionAction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How opening it here reads; absent for a Run, which opens nowhere."
         },
         "agent_process_id": {
           "anyOf": [
@@ -10810,7 +10383,7 @@
         "work",
         "wave_id",
         "work_path",
-        "actions",
+        "action",
         "title",
         "title_source",
         "graph_membership",
@@ -11184,37 +10757,6 @@
         "source",
         "scope",
         "locator"
-      ],
-      "type": "object"
-    },
-    "ShellTab": {
-      "additionalProperties": false,
-      "description": "A retained shell identity, independent of its tool pane and current selection.",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "lf_process_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "location": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/ViewLocation"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "location",
-        "lf_process_id"
       ],
       "type": "object"
     },
@@ -13690,7 +13232,7 @@
           "type": "string"
         },
         "writer_machine_id": {
-          "description": "Absent from entries released lf wrote, which name no writer (Task 538340\ndrops `written_here`, after which every entry names one).",
+          "description": "Absent from entries lf before `task_machine_local` wrote, which name no writer.",
           "type": [
             "string",
             "null"
@@ -15033,16 +14575,6 @@
             "null"
           ]
         },
-        "face": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PaneIntent"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "identifier": {
           "description": "A Task's short name, as people say it: `LOO-809`.",
           "type": [
@@ -15058,13 +14590,6 @@
             {
               "type": "null"
             }
-          ]
-        },
-        "pane_revision": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
           ]
         },
         "primary_session": {
@@ -15094,8 +14619,6 @@
         }
       },
       "required": [
-        "pane_revision",
-        "face",
         "work",
         "title",
         "states",
@@ -15958,9 +15481,6 @@
     },
     "WorkLinkTarget": {
       "properties": {
-        "diff": {
-          "type": "boolean"
-        },
         "execution_machine": {
           "description": "The execution owner when it is another Machine.",
           "type": [
@@ -16015,58 +15535,7 @@
         "task_id",
         "wave",
         "session",
-        "diff",
         "execution_machine"
-      ],
-      "type": "object"
-    },
-    "WorkPaneLayout": {
-      "additionalProperties": false,
-      "properties": {
-        "drafts": {
-          "items": {
-            "$ref": "#/$defs/FileDraft"
-          },
-          "type": "array"
-        },
-        "focused": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "hidden": {
-          "items": {
-            "type": "string"
-          },
-          "type": "array",
-          "uniqueItems": true
-        },
-        "revision": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "tree": {
-          "$ref": "#/$defs/PaneTree"
-        },
-        "work": {
-          "$ref": "#/$defs/WorkWorkspaceKey"
-        },
-        "zoomed": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "work",
-        "revision",
-        "tree",
-        "focused",
-        "zoomed",
-        "hidden",
-        "drafts"
       ],
       "type": "object"
     },
@@ -16900,14 +16369,10 @@
           },
           "x-result-example": {
             "account": "work",
-            "actions": [
-              {
-                "help": "Open this Session in a terminal",
-                "kind": "open",
-                "label": "Open here",
-                "unavailable_reason": null
-              }
-            ],
+            "action": {
+              "help": "Open this Session in a terminal",
+              "label": "Open here"
+            },
             "agent_process_id": "44444444-4444-4444-8444-444444444444",
             "availability": "available",
             "cwd": "/src/loopflow.task",
@@ -17094,9 +16559,6 @@
                 "null"
               ]
             },
-            "intent": {
-              "$ref": "#/$defs/SessionOpenIntent"
-            },
             "kind": {
               "const": "session.resume",
               "type": "string"
@@ -17120,8 +16582,7 @@
             "id",
             "task",
             "wave",
-            "agent",
-            "intent"
+            "agent"
           ],
           "type": "object",
           "x-result": {
@@ -18709,35 +18170,6 @@
           "type": "object",
           "x-result": {
             "$ref": "#/$defs/DesktopTileRecord"
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf desktop layout <work> --save`, with `layout` (JSON) on stdin.",
-          "properties": {
-            "directory": {
-              "type": "string"
-            },
-            "kind": {
-              "const": "desktop.layout.save",
-              "type": "string"
-            },
-            "layout": {
-              "type": "string"
-            },
-            "work": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind",
-            "directory",
-            "work",
-            "layout"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/WorkPaneLayout"
           }
         },
         {

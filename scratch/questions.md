@@ -95,3 +95,22 @@ Choices made for review; `scratch/concept-review.html` shows each one.
     `extension_ui_request`, taken from memory of Pi's RPC shape and the
     stand-in; no real Pi dialog was recorded. A request with neither gives the
     reason without a question.
+
+21. **"Its stopped Task Session resumes" was built as "the next `lf task run`
+    starts the step again".** A worker's Session is a Run and `lf resume`
+    refuses Runs, so the interrupted conversation's native thread is never
+    continued; the step gets a new one. The test keeps the name the docs gave
+    it. Should an interrupted step continue its own conversation instead?
+
+22. **What does an interrupted Claude or Codex worker record for its turn?**
+    Not read. The test runs OpenCode and Pi; the README says "not shown" for
+    the other two. On OpenCode and Pi the turn was recorded `failed` until
+    this slice.
+
+23. **Ctrl-C in a terminal reaches the provider and lf together.** If the
+    provider dies before lf's handler runs, `agent::interrupted()` is still
+    false when the reader settles and the turn can read `failed`. The Graph's
+    stop signals lf alone, so a Task step does not race.
+
+24. **The worker tests are slow only on the first run after a build**
+    (120-175s against 39s). Not looked into; nextest's limit is 300s.

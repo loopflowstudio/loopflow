@@ -19,7 +19,7 @@ checked, and how the next gap is seen.
 | a steer sent while the step runs reaches it | same test |
 | a harness that is not installed is passed over, or named once | `a_step_that_cannot_launch_is_not_started_again` |
 | a question with nobody there ends the turn | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step`. Claude, Codex: not shown |
-| interrupt stops a worker; a stopped Task Session resumes | slice 4 |
+| interrupt stops a worker with its turn recorded interrupted; the next run starts the step again | OpenCode, Pi: `a_worker_stops_on_interrupt_and_its_session_resumes`. Claude, Codex: not shown |
 | a usage limit moves to the next agent | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
 | an idle work session hears a steer | Claude, Codex: yes. OpenCode, Pi: no (excluded) |
 
@@ -165,6 +165,7 @@ cargo test -p loopflow --lib task_graph_launch_tests::a_task_step_runs_as_a_work
 cargo test -p loopflow --lib task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again
 cargo test -p loopflow --lib task_graph_launch_tests::a_failed_command_step_is_started_again
 cargo test -p loopflow --lib task_graph_launch_tests::a_question_with_nobody_there_ends_the_step
+cargo test -p loopflow --lib task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes
 cargo test -p loopflow-execution --lib harness::opencode_decode::
 cargo test -p loopflow-execution --lib harness::launch_matrix
 ```
@@ -322,14 +323,35 @@ The docs commit the implementation to three things the plan had left open:
    - Not built: Claude and Codex (no decoder fails a turn on a question, no
      trace recorded; the table says "not shown"), and stopping the two retries
      that ask the same question again. `scratch/questions.md` 18 and 19.
-4. **Cancel and resume, on both. Next.** OpenCode's interrupt now stops the
-   run's process group and the turn settles `Interrupted`
-   (`a_stopped_run_is_interrupted_whatever_it_printed` covers the decoder);
-   no test interrupts a running worker on either harness yet. Build
-   `task_graph_launch_tests::a_worker_stops_on_interrupt_and_its_session_resumes`
-   on the OpenCode and Pi stand-ins: interrupt `implement` mid-turn, see the
-   turn settle `Interrupted`, resume the Task Session and see the same native
-   thread continue. Then fill the README row's cells from what it shows.
+4. **Interrupt, then run again. Built for OpenCode and Pi.**
+   - `a_worker_stops_on_interrupt_and_its_session_resumes` holds `implement`
+     mid-turn on each stand-in (`hold-turn` in the home; the stand-in writes
+     `holding` once its turn is under way), runs `lf task interrupt`, and
+     reads: exit 130, one attempt, the worker's turn `interrupted`, no answer.
+     Then `lf task run` again settles the step and the Graph stands at `review`.
+   - What it found: the Graph stops a worker with SIGTERM within a second,
+     before the worker's own five-second interrupt poll calls
+     `Driver::interrupt`. The provider then died under a driver that had not
+     asked for it, and the turn was recorded `failed` ("OpenCode exited before
+     finishing the turn", "pi_disconnected: Pi RPC stream closed").
+     `agent::interrupted()` now says a signal is ending the lf process, and
+     both readers settle the open turn `Interrupted`.
+   - The plan was wrong about resume. "Resume the Task Session and see the
+     same native thread continue" cannot be built for a worker: its Session is
+     a Run, and `run_refusal` refuses to continue a Run on every harness. The
+     next `lf task run` starts the step in a new conversation, and the test
+     asserts that. A conversation continuing its native thread is shown below
+     the Task level: `each_turn_is_one_run_that_continues_the_named_conversation`
+     (OpenCode), `pi_headless_resumes_a_conversation_recorded_by_its_id` (Pi),
+     `terminal_first_launch_and_failed_startup_reopen_the_same_conversation`.
+   - The OpenCode stand-in now holds after its `step_start` line, as the real
+     CLI prints one before working; `transport_tests`' three `hold-turn` tests
+     still pass.
+   - Timing, 2026-11-18: 39s on a second run, 120s and 175s on the first run
+     after a build; the two timed harness bodies took 12s each either way. The
+     329s seen in slice 3 was also a first run after a build. What the first
+     run spends is not known.
+   - Not built: Claude and Codex in this test (`scratch/questions.md` 22).
 5. **OpenCode launches match Claude and Codex. Built.**
    - Headless (`harness/opencode.rs` `Driver`): each turn is one
      `opencode run --standalone --format json --auto [--model m] --session ses_…`
@@ -380,8 +402,9 @@ The docs commit the implementation to three things the plan had left open:
   old "private server failed to start: <stderr>" line is gone.
 - Reopening a conversation whose first launch failed continues the same
   capture, since lf named the conversation before it started.
-- A run that dies mid-turn records the turn `failed`, where the server's
-  dropped stream recorded `interrupted`.
+- A run that dies mid-turn on its own records the turn `failed`, where the
+  server's dropped stream recorded `interrupted`. One stopped by
+  `lf task interrupt` or a signal to lf records `interrupted`.
 - Headless OpenCode passes `--auto` always; lf no longer answers permission
   asks one at a time.
 

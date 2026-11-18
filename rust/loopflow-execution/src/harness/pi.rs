@@ -360,8 +360,14 @@ impl Driver {
             let mut state = state.lock().expect("Pi state lock poisoned");
             state.dead = true;
             state.responses.clear();
+            // A signal ending lf takes Pi with it: that turn was interrupted.
+            let interrupted = crate::agent::interrupted();
             if let Some(mut turn) = state.turn.take() {
-                let decoded = turn.finish(Lifecycle::Failed);
+                let decoded = turn.finish(if interrupted {
+                    Lifecycle::Interrupted
+                } else {
+                    Lifecycle::Failed
+                });
                 let mapped = display(&decoded);
                 if let Err(error) = state.record(decoded) {
                     tracing::warn!(%error, "could not retain Pi failure");
@@ -369,6 +375,9 @@ impl Driver {
                 for event in mapped {
                     let _ = events.send(event);
                 }
+            }
+            if interrupted {
+                return;
             }
             let _ = events.send(ConversationEvent::Error {
                 code: "pi_disconnected".into(),

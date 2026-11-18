@@ -199,7 +199,8 @@ impl Driver {
             let Some(mut turn) = state.turn.take() else {
                 return;
             };
-            let interrupted = std::mem::take(&mut state.interrupted);
+            // Stopped by this driver, or with the lf process a signal is ending.
+            let interrupted = std::mem::take(&mut state.interrupted) || crate::agent::interrupted();
             let mut decoded = Vec::new();
             if !exited && !interrupted {
                 let detail = std::fs::read_to_string(&diagnostics).unwrap_or_default();

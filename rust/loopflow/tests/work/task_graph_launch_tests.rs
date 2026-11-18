@@ -2076,6 +2076,86 @@ fn a_question_with_nobody_there_ends_the_step() {
     }
 }
 
+/// `lf task interrupt` ends a worker's turn while it runs: the turn is recorded
+/// interrupted, nothing starts the run again, and the next `lf task run` takes
+/// the step up and moves the Graph on.
+#[test]
+fn a_worker_stops_on_interrupt_and_its_session_resumes() {
+    for (provider, agent, script, answer) in [
+        (
+            "opencode",
+            "opencode:opencode/fixture",
+            opencode_stand_in(),
+            "Fixture completed.",
+        ),
+        ("pi", "pi:fixture/model", pi_stand_in(), "answer 1:"),
+    ] {
+        let task = GraphTask::with_tools(&[(provider, &script)]);
+        task.repo.create_file(
+            ".lf/graphs/worker.yaml",
+            "- implement\n- interactive: {name: demo, id: review}\n",
+        );
+        task.repo.stage_all();
+        task.repo.commit("Define a worker followed by a review");
+        let home = task.home.path();
+        fs::write(home.join("hold-turn"), "").unwrap();
+
+        let mark = last_graph(home);
+        let started = task.run(&["task", "run", "INF-123", "worker", "-a", agent]);
+        // The stand-in says when the worker's own turn is under way.
+        wait_for("the worker's turn", || home.join("holding").exists());
+        task.ok(&["task", "interrupt", "INF-123"]);
+        let stopped = task.ran(started);
+        assert_eq!(stopped.code, Some(130), "{provider}: {}", stopped.text);
+        assert_eq!(attempts(home, mark), ["interrupted"], "{provider}");
+        assert_eq!(task.graph()["position"]["running"], false, "{provider}");
+
+        let db = rusqlite::Connection::open(home.join("loopflow.db")).unwrap();
+        let worker = |ended: &str| -> (String, Option<String>, Option<String>) {
+            db.query_row(
+                &format!(
+                    "SELECT s.id, s.provider_thread,
+                        (SELECT turn_status FROM session_events
+                          WHERE session_id=s.id AND kind='captured'
+                          ORDER BY rowid DESC LIMIT 1)
+                     FROM agent_sessions s
+                     WHERE s.task_id=?1 AND s.provider=?2 AND s.skill='implement'
+                       AND s.interactive=0 {ended}
+                     ORDER BY s.rowid DESC LIMIT 1"
+                ),
+                rusqlite::params![task.registered.task.id.as_str(), provider],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+        };
+        let (interrupted, thread, turn) = worker("");
+        assert_eq!(turn.as_deref(), Some("interrupted"), "{provider}");
+        assert!(
+            thread.is_some_and(|thread| !thread.is_empty()),
+            "{provider}"
+        );
+        // The stand-in is gone with its turn: nothing answers after the stop.
+        let history = task.run(&["history", "show", &interrupted, "--final"]);
+        assert!(
+            !String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+
+        // Nobody continues a Run: the step starts again in a conversation of its own.
+        fs::remove_file(home.join("hold-turn")).unwrap();
+        task.task_run_ok(&["task", "run", "INF-123", "-a", agent]);
+        assert_eq!(task.graph()["position"], at("review"), "{provider}");
+        let (resumed, _, turn) = worker("AND s.completed_at IS NOT NULL");
+        assert_ne!(resumed, interrupted, "{provider}");
+        assert_eq!(turn.as_deref(), Some("completed"), "{provider}");
+        let history = task.run(&["history", "show", &resumed, "--final"]);
+        assert!(
+            String::from_utf8_lossy(&history.stdout).contains(answer),
+            "{provider}: {history:?}"
+        );
+    }
+}
+
 /// A harness that is not installed fails the same way on every attempt, so the
 /// run is not started again; with another agent in the order the step runs there.
 #[test]

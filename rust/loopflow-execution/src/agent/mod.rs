@@ -48,9 +48,18 @@ pub fn register_interrupt_cleanup(f: impl Fn() + Send + 'static) {
         .push(Box::new(f));
 }
 
+static INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Whether a signal is ending this process. A provider that exits from here on
+/// was stopped with it: its turn was interrupted, it did not fail.
+pub fn interrupted() -> bool {
+    INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 /// Finish interruption while excluding the command's ordinary return path.
 /// Killing a child can wake that path before the remaining hooks finish.
 pub fn exit_on_interrupt() -> ! {
+    INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
     // Before taking the hooks lock: the command's own return waits on it.
     crate::os_process::foreground::end_leader();
     let hooks = INTERRUPT_HOOKS.get().and_then(|hooks| hooks.lock().ok());

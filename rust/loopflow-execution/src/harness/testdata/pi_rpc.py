@@ -19,6 +19,8 @@ file = (
 )
 # A fixture leaves this marker to make any prompt open a dialog.
 ASK = Path(os.environ.get("LF_HOME", ".")) / "ask-question"
+# And this one to make any prompt start a turn that never ends on its own.
+HOLD = Path(os.environ.get("LF_HOME", ".")) / "hold-turn"
 if not file.exists():
     file.write_text('{"type":"session","id":"fixture","version":3}\n')
 
@@ -219,8 +221,10 @@ for line in sys.stdin:
     if text == "extension error":
         _emit({"type": "extension_error", "error": "fixture context delivery failed"})
         continue
-    if text == "wait":
+    if text == "wait" or HOLD.exists():
         _emit({"type": "agent_start"})
+        if HOLD.exists():
+            HOLD.with_name("holding").write_text(str(file))
         continue
     if text == "auth":
         _emit(

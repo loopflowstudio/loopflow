@@ -144,11 +144,6 @@ def _run(session, text):
     prompt = [{"text": instructions}, {"text": text}]
     sessions[session].append({"id": "msg_" + uuid.uuid4().hex, "type": "user", "text": text})
     _save(sessions)
-    deadline = time.monotonic() + 30
-    while (HOME / "hold-turn").exists():
-        if time.monotonic() >= deadline:
-            raise TimeoutError("fixture turn was not released")
-        time.sleep(0.01)
     assistant = "msg_" + uuid.uuid4().hex
     message = {
         "id": assistant,
@@ -161,6 +156,14 @@ def _run(session, text):
     sessions[session].append(message)
     _save(sessions)
     _line("step_start", session, id="prt_" + uuid.uuid4().hex, messageID=assistant, type="step-start")
+    # The turn is under way, as the real CLI's first line shows, and stays open.
+    deadline = time.monotonic() + 30
+    if (HOME / "hold-turn").exists():
+        (HOME / "holding").write_text(session)
+    while (HOME / "hold-turn").exists():
+        if time.monotonic() >= deadline:
+            raise TimeoutError("fixture turn was not released")
+        time.sleep(0.01)
     if (HOME / "ask-question").exists():
         # `run --auto` cancels the question and lets the model answer anyway.
         _line(

@@ -453,8 +453,8 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,task_id,wave_id)
         VALUES('caller-session','Historical','human',1,1,'/missing',?1,?2)",
         rusqlite::params![task.as_str(),wave]).unwrap();
-    history.execute("INSERT INTO session_history(session_id,receipt_key,lf_process_id,task_id,wave_id,observed_at,payload)
-        VALUES('caller-session','',?1,?2,?3,1,'unreadable history')",
+    history.execute("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,task_id,wave_id,started_at)
+        VALUES('caller-session','thread','turn',?1,?2,?3,1)",
         rusqlite::params![ids[1],task.as_str(),wave]).unwrap();
     for args in [
         vec!["history", "list", "--all", "--task", "PROOF-1", "--json"],
@@ -514,8 +514,8 @@ async fn process_discovery_pages_real_commands_and_preserves_unknown_history() {
         .unwrap();
     connection.execute("INSERT INTO agent_sessions(id,title,title_source,created_at,input_published,cwd,wave_id)
         VALUES('other-session','Other','human',1,1,'/missing',?1)", [&other_wave]).unwrap();
-    history.execute("INSERT INTO session_history(session_id,receipt_key,lf_process_id,wave_id,observed_at,payload)
-        VALUES('other-session','',?1,?2,1,'unreadable history')", rusqlite::params![ids[0],other_wave]).unwrap();
+    history.execute("INSERT INTO turns(session_id,provider_thread,provider_turn,lf_process_id,wave_id,started_at)
+        VALUES('other-session','thread','turn',?1,?2,1)", rusqlite::params![ids[0],other_wave]).unwrap();
     for (repo, expected) in repos.iter().zip([&ids[1], &ids[0]]) {
         let result = command(
             home.path(),
@@ -946,6 +946,13 @@ async fn monitor_prune_settles_proven_dead_processes_and_keeps_unknown_ones() {
                     let mut args = vec!["monitor", "prune"];
                     if dry_run {
                         args.push("--dry-run");
+                    } else {
+                        // Store retention closes the row from its receipt, so
+                        // it runs before the receipt goes.
+                        let retention = command(home.path(), home.path(), &["machine", "prune"])
+                            .output()
+                            .unwrap();
+                        assert!(retention.status.success(), "{retention:?}");
                     }
                     if json {
                         args.push("--json");

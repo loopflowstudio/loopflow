@@ -810,10 +810,10 @@ fn task_run_returns_while_its_graph_keeps_running() {
     }
     let printed = fs::read_to_string(&out).unwrap();
     let graph = printed
-        .split("Graph process ")
+        .split("Graph run ")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no Graph process named: {printed}"))
+        .unwrap_or_else(|| panic!("no Graph run named: {printed}"))
         .to_string();
     assert!(printed.contains(&format!("graph-{graph}.log")), "{printed}");
     assert!(

@@ -4173,8 +4173,8 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
     fixture.held_ends(&terminal);
 }
 
-/// Every held terminal shares its build's one holder, which `lf ps` lists
-/// once across a server restart; no owner process runs per terminal.
+/// Every held terminal shares its build's one holder across a server
+/// restart; no owner process runs per terminal.
 #[test]
 fn held_terminals_list_one_holder_process() {
     let fixture = Fixture::new();

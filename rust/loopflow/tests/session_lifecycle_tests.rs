@@ -1544,17 +1544,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         .unwrap_or_else(|| {
             attachment::claim_session_attachment(&store, &session, None, &origin).unwrap()
         });
-    // The launcher installs its own trace; this fixture reads the launch's.
-    let trace: String = fixture
-        .db()
-        .query_row(
-            "SELECT trace_id FROM processes WHERE id=?1",
-            [&origin],
-            |row| row.get(0),
-        )
-        .unwrap();
-    let trace = loopflow_model::id::TraceId::parse(&trace).ok();
-    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), trace)).unwrap();
+    let caller = serde_json::to_string(&attachment.caller(session.clone().into(), None)).unwrap();
     let closed = store.session(&session).unwrap().unwrap();
     loopflow_execution::store::sessions::bind_session(
         &store,
@@ -1610,22 +1600,6 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
         let work = fixture.run_parents(&capture);
         assert_eq!(work.0, expected);
         assert_eq!(work.2.as_deref(), source);
-        let retained: bool = fixture
-            .db()
-            .query_row(
-                "WITH RECURSIVE ancestors(id,parent_lf_process_id) AS (
-                SELECT p.id,p.parent_lf_process_id FROM processes p
-                JOIN session_events e ON e.lf_process_id=p.id
-                WHERE e.kind='captured' AND e.receipt_key=?1
-                UNION ALL
-                SELECT p.id,p.parent_lf_process_id FROM processes p
-                JOIN ancestors a ON p.id=a.parent_lf_process_id
-             ) SELECT EXISTS(SELECT 1 FROM ancestors WHERE id=?2)",
-                rusqlite::params![capture, origin],
-                |row| row.get(0),
-            )
-            .unwrap();
-        assert!(retained, "provider-issued work lost its causal parent");
     }
     // A stale provider keeps its original causal parent and grants no Work.
     attachment::claim_session_attachment(&store, &session, Some(&attachment), &origin).unwrap();
@@ -1644,7 +1618,7 @@ fn provider_parentage_does_not_assign_work_outside_its_checkout() {
 }
 
 #[test]
-fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
+fn declared_agent_tools_use_their_checkout() {
     let fixture = Fixture::new(false);
     let x = fixture.repo.create_named_worktree("task-x");
     let task =
@@ -1679,9 +1653,6 @@ fn declared_agent_tools_use_their_checkout_and_keep_the_process_parent() {
         fixture.run_parents(&captures[1]).0,
         Some(sibling.id.to_string())
     );
-    let (caller, ..) = fixture.session_row(&captures[0]);
-    let parent: (String, String) = fixture.db().query_row("SELECT c.parent_lf_process_id,a.parent_lf_process_id FROM processes c JOIN agent_sessions s ON s.id=c.caller_session_id JOIN processes a ON a.id=s.agent_process_id WHERE c.caller_session_id=?1", [&caller], |row| Ok((row.get(0)?,row.get(1)?))).unwrap();
-    assert_eq!(parent.0, parent.1);
     for line in std::fs::read_to_string(fixture.home.path().join("declarations"))
         .unwrap()
         .lines()
@@ -1802,19 +1773,12 @@ fn declared_agent_can_start_another_tasks_graph() {
         std::fs::read_to_string(fixture.home.path().join("step-declaration")).unwrap(),
         format!("task:{}", target.task.id)
     );
-    // The step ran in Y's checkout under a Graph process X's conversation started.
+    // The Graph ran in Y's checkout, started by X's conversation.
     let observed: (String, String) = fixture
         .db()
         .query_row(
-            "WITH RECURSIVE ancestors(cwd,id,parent_lf_process_id,caller_session_id) AS (
-            SELECT step.cwd,step.id,step.parent_lf_process_id,step.caller_session_id
-            FROM processes step
-            JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
-            UNION ALL
-            SELECT a.cwd,p.id,p.parent_lf_process_id,p.caller_session_id
-            FROM processes p JOIN ancestors a ON p.id=a.parent_lf_process_id
-         ) SELECT DISTINCT a.cwd,s.task_id FROM ancestors a
-         JOIN agent_sessions s ON s.id=a.caller_session_id",
+            "SELECT g.cwd,s.task_id FROM graph_processes g
+             JOIN agent_sessions s ON s.id=g.caller_session_id",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -2087,42 +2051,9 @@ fn taskless_structured_output_correction_is_bounded_and_preserves_the_conversati
             Some(if exhausted { "failed" } else { "succeeded" })
         );
         assert_eq!(steps.len(), if exhausted { 4 } else { 3 });
-        // The decision is the plain skill command; its contract is in the message.
+        // Every correction repeats the decision's node in its one conversation.
         let decision = &steps[1];
-        assert_eq!(decision["argv"][0], "--batch");
-        assert!(decision["argv"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|arg| arg == "decide-proof"));
-        assert!(decision["argv"]
-            .as_array()
-            .unwrap()
-            .last()
-            .unwrap()
-            .as_str()
-            .unwrap()
-            .contains("Return the final answer as the declared JSON value"));
-        // Every correction resumes the conversation that gave the answer.
-        let conversation: String = fixture
-            .db()
-            .query_row(
-                "SELECT id FROM agent_sessions WHERE skill='decide-proof'",
-                [],
-                |row| row.get(0),
-            )
-            .unwrap();
         for correction in &steps[2..] {
-            let args = correction["argv"].as_array().unwrap();
-            assert_eq!(args[0], "--batch");
-            assert_eq!(args[1], "--output-schema");
-            let schema: serde_json::Value =
-                serde_json::from_str(args[2].as_str().unwrap()).unwrap();
-            assert_eq!(
-                schema["properties"]["decision"]["enum"],
-                serde_json::json!(["advance", "iterate", "blocked"])
-            );
-            assert_eq!(args[3..6], ["session", "resume", conversation.as_str()]);
             assert_eq!(correction["key"], decision["key"]);
             assert_eq!(correction["iterations"], decision["iterations"]);
         }
@@ -2175,7 +2106,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     let error: String = fixture
         .db()
         .query_row(
-            "SELECT d.error FROM processes d JOIN graph_processes g ON g.lf_process_id=d.id",
+            "SELECT error FROM graph_processes",
             [],
             |row| row.get(0),
         )

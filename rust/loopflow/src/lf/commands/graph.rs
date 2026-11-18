@@ -1309,6 +1309,24 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    /// Record the Graph run `execute` writes before any step, which each
+    /// step's row references.
+    fn record_run(running: &super::RunningGraph<'_>) {
+        running
+            .store
+            .sqlite
+            .record_graph(
+                &running.process,
+                &loopflow_execution::graph::compiled::compile(running.graph, running.steps),
+                running.task.as_ref(),
+                &loopflow_storage::graph_process::ExecutionStart::reserved(0),
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
     #[test]
     fn linear_on_demand_graph_steps_acquire_before_spawning() {
         use crate::lf::Cli;
@@ -1366,6 +1384,7 @@ mod tests {
                 task_run: None,
                 interrupt: None,
             };
+            record_run(&running);
             runtime.block_on(async {
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 for index in 0..2 {
@@ -1452,6 +1471,7 @@ mod tests {
                         .unwrap(),
                 ),
             };
+            record_run(&running);
             let begun = std::time::Instant::now();
             let outcome = runtime.block_on(async {
                 let interrupt = async {

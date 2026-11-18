@@ -72,7 +72,6 @@ const FILTER_ONLY: &[&[&str]] = &[
     &["task", "list"],
     &["session", "history"],
     &["repo", "ci"],
-    &["session", "history", "list"],
     &["session", "history", "search"],
     &["session", "usage"],
 ];

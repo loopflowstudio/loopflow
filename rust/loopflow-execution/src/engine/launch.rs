@@ -43,10 +43,8 @@ pub struct Launched {
 impl Launched {
     pub fn render(&self) -> String {
         format!(
-            "{} running as process {}\n  follow: lf process show {}\n  log:    {}",
+            "{} running in the background\n  log:    {}",
             self.run,
-            self.process,
-            self.process,
             self.log.display()
         )
     }

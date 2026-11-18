@@ -1790,15 +1790,12 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         }
         let conn = rusqlite::Connection::open(&database).unwrap();
         let initial: Option<i64> = conn
-            .query_row(
-                "SELECT exit_code FROM processes WHERE parent_lf_process_id IS NULL",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT exit_code FROM graph_processes", [], |row| row.get(0))
             .optional()
-            .unwrap();
+            .unwrap()
+            .flatten();
         // A Graph stopped short of its end exits 3, which no caller retries.
-        // A direct land nothing references is forgotten at exit.
+        // A direct land records no Graph run.
         assert_eq!(initial, graph.then_some(3));
         let state: String = conn
             .query_row("SELECT state FROM pr_landings", [], |row| row.get(0))
@@ -1828,18 +1825,17 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         assert_eq!(state, "merged");
         if graph {
             // The Graph stopped at its watched landing: the step's command
-            // handed off and returned, and its Graph process exited without running
+            // handed off and returned, and its Graph run exited without running
             // further steps. The merge resumes nothing.
-            let (step, graph_process): (i64, String) = conn
+            let exits: (i64, i64) = conn
                 .query_row(
-                    "SELECT step.exit_code,graph_process.outcome FROM processes step
-                     JOIN graph_process_steps recorded ON recorded.lf_process_id=step.id
-                     JOIN processes graph_process ON graph_process.id=recorded.graph_lf_process_id",
+                    "SELECT step.exit_code,run.exit_code FROM graph_process_steps step
+                     JOIN graph_processes run ON run.lf_process_id=step.graph_lf_process_id",
                     [],
                     |row| Ok((row.get(0)?, row.get(1)?)),
                 )
                 .unwrap();
-            assert_eq!((step, graph_process.as_str()), (0, "failed"));
+            assert_eq!(exits, (0, 3));
         }
         assert!(
             !worktree.exists(),

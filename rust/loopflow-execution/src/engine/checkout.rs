@@ -90,10 +90,12 @@ impl Sync {
                 ));
                 lines.join("\n")
             }
-            Self::Running { process, run, log } => format!(
-                "{run} running as process {process}\n  follow: lf process show {process}\n  log:    {}",
-                log.display()
-            ),
+            Self::Running { run, log, .. } => {
+                format!(
+                    "{run} running in the background\n  log:    {}",
+                    log.display()
+                )
+            }
             Self::Finished { message } => message.clone(),
         }
     }
@@ -297,7 +299,7 @@ mod tests {
         let running: Sync = result(include_str!(
             "../../tests/fixtures/dto/server/checkout_syncing.json"
         ));
-        assert!(running.render().contains("running as process"));
+        assert!(running.render().contains("running in the background"));
         assert!(serde_json::from_str::<Sync>(r#"{"state":"finished"}"#).is_err());
         assert!(serde_json::from_str::<Committed>(r#"{"head":"abc"}"#).is_err());
     }

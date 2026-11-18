@@ -608,22 +608,15 @@ fn remote_task_promotion_needs_no_provider_account() {
 }
 
 #[test]
-fn remote_command_exit_is_retained_in_local_process_history() {
+fn remote_command_exit_reaches_the_local_caller() {
     let fixture = Machines::new();
     assert_success(&fixture.run(&["machine", "add", "mini"]));
-    let database = fixture.root.path().join("local/loopflow.db");
-    let db = rusqlite::Connection::open(&database).unwrap();
-    let parent = loopflow_test_support::RunningParent::insert(&database);
-    let output = parent
-        .adopt(&mut fixture.command(&["--machine", "mini", "fail"]))
+    let output = fixture
+        .command(&["--machine", "mini", "fail"])
         .output()
         .unwrap();
     assert_eq!(output.status.code(), Some(42));
     assert!(!String::from_utf8_lossy(&output.stderr).contains("Error:"));
-    let outcome: (String, i32, bool) = db.query_row(
-        "SELECT outcome, exit_code, completed_at IS NOT NULL FROM processes WHERE command LIKE '%--machine%fail%' ORDER BY started_at DESC LIMIT 1", [], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))
-    ).unwrap();
-    assert_eq!(outcome, ("failed".to_string(), 42, true));
 }
 
 #[test]

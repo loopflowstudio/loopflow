@@ -1465,7 +1465,7 @@ impl SqliteStore {
     }
 
     /// Write a Process row the way a released lf does; fixtures for the
-    /// readers a later change deletes (`lf ps`, doctor, history) seed with it.
+    /// upgrade bridge and the released-lf readers LOO-965 deletes seed with it.
     #[cfg(any(test, feature = "test-support"))]
     pub fn record_process(&self, process: &crate::process::LfProcess) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");

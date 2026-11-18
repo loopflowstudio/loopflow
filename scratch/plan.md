@@ -664,6 +664,13 @@ Left for later steps:
   (`resuming_an_ended_conversation_…` failed in-module, passed alone); both now use
   `with_runtime`. `ops::human_session::tests::` (31), `launch_mode_tests::reopening_…`,
   `context_launch_tests::a_killed_task_conversation` pass; clippy on execution clean.
+- qa after slice 6 (private lf-world Machine, branch `lf`, `scratch/qa.html`): lost
+  transcript + kill restarts on a fresh thread at attempt 1; kept transcript resumes;
+  quit stays quit; a person's `lf resume` of a quit, lost conversation starts fresh;
+  attaching to a running one with no transcript views it; simulated reboot with one
+  kept and one lost thread brings both back. Fixed: the fresh-thread line claimed
+  "seeded with what the claude thread knew" with no thread to read; it now says
+  "seeded with its original request". Clippy on execution clean.
 - A real reboot with three Tasks (a person runs it).
 
 ## Docs

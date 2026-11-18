@@ -1,84 +1,72 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>LOO-959 qa: after the crash</title>
+<html><head><meta charset="utf-8"><title>LOO-959 qa: lost threads</title>
 <style>
 body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
 pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
 .ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
 </style></head><body>
-<h1>LOO-959 qa, run after the Machine crash</h1>
-<p>The earlier qa run died with the Machine at 18:40 on 2026-11-17. The cause was a macOS kernel panic in the
-Wi-Fi driver (<code>busy timeout (60s): 'wlan'</code>), not lf. That run had fixed one race (left uncommitted) and
-was chasing a second. This run picks both up on branch <code>lf</code> (<code>d2839242c</code> plus fixes), on a private
-lf-world Machine at <code>/tmp/lfqa959</code> with three Tasks (90ae87, 0a8011, a7e6bd), its own
-<code>lf server run</code> and stand-in providers. Every line below is <code>lf task status &lt;task&gt; | grep Conversation</code>.</p>
+<h1>LOO-959 qa after slice 6: a conversation whose transcript is gone</h1>
+<p>Branch <code>lf</code> at 4f8a1743d plus the fix below, on a private lf-world Machine at
+<code>/tmp/lfq959b</code> with its own <code>lf server run</code> and the world's stand-in
+<code>claude</code>. Tasks a9e364 (Design transcript search) and 85af23 (Second conversation).
+Status lines are <code>lf task status &lt;task&gt; | grep Conversation</code>. The thread a start used is read from
+the provider's argv (<code>--resume</code> means it continued, <code>--session-id</code> means a new thread).</p>
 
-<h2>1. Fresh checkout: the pass starts all three <span class="ok">works</span></h2>
-<pre>lf task checkout 90ae87; lf task checkout 0a8011; lf task checkout a7e6bd
-90ae87 Conversation: running
-0a8011 Conversation: running
-a7e6bd Conversation: running</pre>
+<h2>1. Crash lost the transcript, then the provider is killed <span class="ok">works</span></h2>
+<pre>mv …/48024041-….jsonl away; kill -9 &lt;claude&gt;
+23:29:32 died 23:29 (exit 137) · starting again
+23:29:35 running (started again 23:29, attempt 1)
+argv: … --session-id 7161a088-…        (fresh thread, same Session)
+lf resume --task a9e364, type hello → reply 7161a088-…: hello</pre>
+<p>Before slice 6 this start failed five times and gave up. Now the first start comes back.</p>
 
-<h2>2. Kill, kill again, then a person resumes during the backoff <span class="fix">fixed</span></h2>
-<pre>21:49:57 running
-21:49:59 died 21:49 (exit 137) · starting again
-21:50:03 running (started again 21:50, attempt 1)
-          (second kill)
-21:50:09 died 21:50 (exit 137) · starts again 21:51
-$ lf resume --task 0a8011     → opens cleanly, viewer alive
-21:50:17 running</pre>
-<p>Before the fix (crashed run): the person's start reset the count, which made the Session due at once. The pass
-started it in the same second and the person's <code>lf resume</code> failed with "invalid control authority".
-Now a person's start is start zero (<code>record_persons_start</code> sets <code>last_started_at</code>). The pass
-waits the first backoff from it, and a finished turn clears it again.</p>
+<h2>2. Quit stays quit, and a person reopens a lost one <span class="fix">fixed</span></h2>
+<pre>type quit → Conversation: quit 23:30; `lf resume --task a9e364` opens it
+(65 s later, after a pass) still quit
+lf resume --task a9e364
+  The claude transcript of this conversation is gone; continuing on a fresh thread.
+  Started a new claude thread for Design transcript search, seeded with what the claude thread knew.</pre>
+<p>The second line was false: no thread was read, and the new one carries the original request.
+<code>new_thread</code> (<code>ops/human_session.rs</code>) now says so:</p>
+<pre>Started a new claude thread for 85af23 Second conversation, seeded with its original request.</pre>
+<p>The skill was kept: the fresh thread opened with <code>&lt;lf:skill:task-session&gt;</code>.</p>
 
-<h2>3. Simulated reboot (one SIGKILL to server, holders, providers) <span class="fix">fixed</span></h2>
-<p>Before the fix:</p>
-<pre>21:50:30 quit 21:50; `lf resume --task 90ae87` opens it | died 21:50 (exit 137) · starts again 21:51 | quit 21:50; …
-21:51:39 quit 21:50; `lf resume --task 90ae87` opens it | running (…attempt 1) | running (…attempt 1)</pre>
-<p>90ae87 stayed down for good. Its launcher row read <code>succeeded 0</code>, written at 05:50:31, a second after
-the new server started. The cause: the recovery pass's first reading reaped the dead agent, which finishes the
-Session's attachment, <em>before</em> the registry thread settled the ended terminal. <code>native_exit::settle</code>
-then saw the attachment gone, judged it a move (<code>interrupted</code>) and recorded exit 0: a quit. a7e6bd hit
-the other order. The pass started it first, and the old end then read as a move to the new attachment, which also
-recorded 0.</p>
-<p>Fix: <code>Registry::open</code> settles the ends its adoption found before it returns
-(<code>transport/registry.rs</code>), and the pass starts only after it. After:</p>
-<pre>22:00:28 closed; `lf resume --task 90ae87` opens it | died 22:00 (exit 137) · starting again | died 22:00 (exit 137) · starting again
-22:00:36 died 22:00 (exit 137) · starts again 22:01 | running (started again 22:00, attempt 2) | running (…attempt 2)
-22:01:11 running (started again 22:01, attempt 1)   | running (…attempt 2)                     | running (…attempt 2)</pre>
-<p>All three record 137 and come back. 90ae87 waited a minute because a person had just started it (scenario 2's rule).
-It had finished no turn since, and the stand-in never finishes one.</p>
+<h2>3. Transcript present: a kill still resumes the same thread <span class="ok">works</span></h2>
+<pre>23:33:20 died 23:33 (exit 137) · starting again
+23:33:21 running (started again 23:33, attempt 1)
+argv: --resume 6cb92570-…</pre>
 
-<h2>4. Shutdown: SIGTERM to the holder's process group and the server <span class="ok">works</span></h2>
-<pre>22:12:15 died 22:12 (exit 137) · starting again | died 22:12 (exit 137) · starting again | unknown
-22:12:33 running (started again 22:12, attempt 2) | running (…attempt 3) | running (…attempt 3)</pre>
-<p>The stand-in does not catch SIGTERM, so this shows nothing about real Claude's exit code under SIGTERM.</p>
+<h2>4. Simulated reboot, one kept thread and one lost <span class="ok">works</span></h2>
+<p>SIGKILL to the server, holders and providers, binary swapped for the fix, new server.</p>
+<pre>23:33:55 a9e364 closed · starts again 23:34          | 85af23 died 23:33 (no exit recorded) · starting again
+23:33:58 a9e364 died 23:33 (no exit recorded) · …   | 85af23 running (started again 23:33, attempt 1)   --session-id 4620bc22 (fresh)
+23:34:49 a9e364 running (started again 23:34, attempt 2)                                               --resume 6cb92570 (kept)</pre>
+<p>a9e364 waited the 1-minute backoff because it had died once already with no finished turn (scenario 3).
+One provider survived the kill (pid-list split), so its holder's death took it down instead. It reads "no exit
+recorded", which is the same as a reboot.</p>
+
+<h2>5. Attaching to a running conversation with no transcript <span class="ok">works</span></h2>
+<pre>lf resume --task 85af23 (running d8b37dbb, no transcript file) → reply d8b37dbb-…: x   (viewed, no new thread)</pre>
+
+<h2>What it leaves behind</h2>
+<p>Still two Sessions, one per Task. <code>creation_receipts</code> holds one
+<code>fresh-thread:&lt;session&gt;:&lt;lost thread&gt;</code> per fresh start (5 here), with no duplicates.
+Every server, holder and stand-in was stopped at the end.</p>
 
 <h2>What works now</h2>
-<ul>
-<li>Kill → back within about 4 s; a second death waits the backoff; a person's resume during it is not raced.</li>
-<li>Reboot and shutdown: every conversation records died (137) and the new server starts each one.</li>
-</ul>
+<p>A lost transcript no longer strands a conversation. The pass's restart and a person's resume each go on in a
+fresh thread on the same Session, at the first attempt. Kept threads resume as before, and quit stays quit.</p>
 
 <h2>Not reached</h2>
-<ul>
-<li>Died carriers, five-start give-up and quit-stays-quit were not re-run. The first qa run covered them, and this
-run's fixes do not touch those paths.</li>
-<li>Real Claude under SIGTERM (acceptance check 5's open window) and a real reboot with three Tasks need a person's
-Machine and login.</li>
-</ul>
+<p>Real Claude: its SIGTERM exit code (acceptance check 5's quit window) and a real reboot with three Tasks
+need a person's Machine and login. Died carriers and the five-start give-up were not re-run. Slice 6 does not
+touch them, and earlier qa covered them.</p>
 
 <h2>Still wrong or open, worst first</h2>
-<ol>
-<li><span class="open">Transcripts lost in the crash.</span> After the real reboot, 11 loopflow Task conversations had no
-Claude transcript at their recorded thread (separate investigation, <code>3e06ba67</code>). The recovery pass
-would start each one five times and give up. Resuming a thread with no transcript should start a fresh
-conversation instead (questions.md, 3a).</li>
-<li>Transient reads while a start is under way: <code>Conversation: unknown</code>, and once
-<code>closed; `lf resume` opens it</code> just before a died line. Each lasts one read of a few seconds.</li>
-<li>The same reap-before-settle race can in principle hit a live server: a provider killed under a live holder, with
-the pass reaping in the milliseconds before the registry settles. Not seen in any kill this run (all 137).</li>
-<li>A died carrier is noticed only on the pass's 60 s read (first qa run: 50–65 s).</li>
-</ol>
+<p><span class="open">The pass's fresh start is silent to a later viewer.</span> The notice goes to the starting
+terminal before the provider draws. Someone who attaches later sees only the new conversation, and status reads
+<code>running (started again …, attempt 1)</code> with nothing about the fresh thread. This is already in
+<code>questions.md</code> (no status line for a fresh thread).</p>
+<p>Transient <code>closed · starts again</code> on the first read after a reboot, before the died line (one read).</p>
 </body></html>

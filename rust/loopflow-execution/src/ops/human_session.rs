@@ -1474,8 +1474,12 @@ pub async fn new_thread(
         store.sqlite.record_provider_lineage(&next, &lineage)?;
     }
     let next = finish_thread_creation(store, next, request_id).await?;
+    let seed = match threaded {
+        true => format!("what the {from} thread knew"),
+        false => "its original request".to_owned(),
+    };
     crate::journal::request::diagnostic(format_args!(
-        "Started a new {} thread for {}, seeded with what the {from} thread knew.",
+        "Started a new {} thread for {}, seeded with {seed}.",
         next.provider.as_deref().unwrap_or("provider"),
         next.title
     ));

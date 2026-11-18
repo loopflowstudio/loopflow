@@ -72,8 +72,10 @@ kills give up with "started 5 times". Type `quit` through `lf resume --task` in
 a PTY for exit 0; Ctrl+] steps away and leaves it running. A reboot is SIGKILL
 to the server, every `lf holder run` and every provider, then a new server.
 Collect the pids with `pgrep -f '^<qa bin>/lf holder run'` (anchored: other
-checkouts' fixtures run holders too) and `eval "kill -9 $S $H $P"`: zsh does
-not split an unquoted pid list, so a bare `kill -9 $H` kills only part of it.
+checkouts' fixtures run holders too) and kill them in a loop
+(`for p in $(pgrep …) …; do kill -9 $p; done`): zsh does not split an unquoted
+pid list, and `eval "kill -9 $P"` runs the second line of a multi-pid list as
+a command.
 Before each reboot, give every running stand-in a transcript (its
 `--session-id` or `--resume` argv, under each checkout's project directory), or
 the resumed ones die with exit 1. After the reboot, every conversation should
@@ -83,10 +85,17 @@ pass reaped its agent. A shutdown is `kill -TERM -<holder pgid>` and the server.
 Replace a binary a server or holder runs with `rm` then `cp`: `cp` over it
 breaks its macOS signature and every next exec dies with 137.
 
-The world stand-in can't resume a conversation that never wrote a transcript,
-so a recovered never-turned conversation dies with exit 1 each start. Before
-the first kill, write a line to `$CLAUDE_CONFIG_DIR/projects/<cwd with / and .
-as ->/<id>.jsonl`, taking `<id>` from the provider's `--session-id` argv.
+The world stand-in writes no transcript, so every thread it starts reads as
+lost: the next start (the pass's or `lf resume`'s) opens a fresh thread
+(`--session-id <new>`) and prints "The claude transcript of this conversation
+is gone; continuing on a fresh thread." To check a plain resume (`--resume
+<id>`), write a line to `$CLAUDE_CONFIG_DIR/projects/<cwd with / and . as
+->/<id>.jsonl` first, taking `<id>` from the provider's argv; to simulate a
+crash that lost one, move that file away. Read which thread a start used from
+`pgrep -fl w/bin/claude | grep -o -- '--\(resume\|session-id\) [0-9a-f-]*'`;
+`creation_receipts` holds one `fresh-thread:<session>:<lost thread>` per
+fresh start. The notice prints on the starting terminal: a person's `lf
+resume` shows it, a viewer attaching to the pass's terminal later does not.
 
 A Task run: add `.lf/graphs/qarun.yaml` (`- implement` then `- interactive:
 human-review`), commit it, and `lf task run <task> qarun`. Its headless step

@@ -5,6 +5,16 @@
 LOO-936 merged as #1965 (`fb14b674c9`) and #1964 with it; synced at
 `ac93e4c0e7`, resolved against the LOO-936 branch history (main's tree
 equals its tip). Inventory rescanned after the sync (79 statements; "Inventory").
+Synced again onto #1958 (LOO-935, `1b888be85b`) at `e0a7ee14df`. It brought
+`-- leaving:` marks and their checks: `scripts/schema_page.py --check`
+(regenerated `SCHEMA.md` for this branch's new columns) and
+`check_migrations.py`'s named-columns rule (`task_conversations`' `SELECT
+candidates.*` now names its columns). #1958's `unused_store_members.sql`
+already marks `processes.{viewed,native_input,viewer_hold,viewer_hold_at}`
+and `tasks.ship_{,approved_,stopped_}lf_process_id` leaving → LOO-954, so
+slice 6 does not drop those. When the journal stops, this Task's migration
+marks `-- leaving: processes <contract Task>` (and each column the change
+stops using), and `scripts/due_removals.py` dates the contract.
 
 Built: slice 2a ("Slice 2a as built", QA in `scratch/qa.html`); the
 renames to `Execution`, `ExecutionResult`, `ExecutionStart`,
@@ -698,10 +708,11 @@ two live agents on one Session; a `Legacy*` type.
 5. **Bridge test.** Released-shape writer SQL (copied from the 0.16.0
    statements) drives an old Graph runner's step discovery against a new step
    → found; old launcher's endpoint update → visible in `lf session list`.
-6. **File the contract Task**: after `STAGING_DAYS` (30), export `processes`
+6. **Mark leaving and file the contract Task**: `-- leaving:` marks in
+   `process_rows_on_owners.sql` name it; after `STAGING_DAYS` (30), export `processes`
    to JSON lines (`-- exports:`), drop it, the bridge triggers,
    `relocated_task_processes`, `transport_lf_process_id`,
-   `tasks.ship_lf_process_id`, every remaining foreign key to `processes`
+   every remaining foreign key to `processes`
    (rebuild `agent_sessions`, `desktop_shells`, `ci_incidents`, `waves`,
    `task_graphs`, `session_events`, `steer_*`, `tasks` without them),
    `steer_batches.attachment_token`, unused locator indexes.

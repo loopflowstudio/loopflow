@@ -121,3 +121,14 @@ concept review after slice 2a.
 
 - Call: the Session's agent columns are filled by triggers from the agent row for this lf too, not by Rust writers, until the attachment moves onto the Session. The agent row's writers (`attach_in`, `replace_agent`, `finish`, `commit`, settlement, retention) carry the attachment in the same statements, and a replaced or detached agent has no Session to write; moving them is the attachment cut.
 - Call: retirement-by-terminal waits for `task_open_process_pairs` to become live Sessions + Graph runs, since Graph runs have no `held_terminal_id` yet.
+
+## Test-order leak from main (seen at the 2026-11-17 sync onto 1b888be85b)
+
+Under plain `cargo test -p loopflow-execution --lib ops::human_session::`,
+`resuming_an_ended_conversation_launches_its_provider_as_the_session` (#1958)
+fails with "Native launch has no admitted invocation" when
+`resume_refuses_a_run_and_leaves_its_provider_running` (#1954) ran first in
+the same process: `journal::with_process` sets the global `PROCESS_STARTED_AT`,
+so `is_cli_process()` stays true and `with_runtime` skips admission. Each
+passes in its own process (nextest). Fix: run the `with_process` test in an
+isolated child process, as AGENTS.md asks of process-global tests.

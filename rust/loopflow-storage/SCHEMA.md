@@ -90,6 +90,12 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `planning_user`: singleton, user_key
 - `repository_plans`: id, repo, selected
 
+## Hub plan
+
+- `hub_plans`: repo, hub_machine_id, seq, error, failing_since, reached_at
+- `hub_sends`: seq, repo, owner_table, target, field, edit_json, sent_at
+- `plan_changes`: seq, repo, owner_table, owner_id
+
 ## Steer
 
 - `steer_adapters`: agent_process_id, capability, created_at, activated_at

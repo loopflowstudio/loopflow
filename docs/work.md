@@ -269,9 +269,9 @@ to update and how (`ssh -- 'mini' 'lf install'`).
 Set the hub once per Machine, not per repository; it holds the plan of every
 repository on it that has no Linear or Asana. On the hub itself, `lf repo
 tracker` reads `Plan: this Machine (hub)` and nothing queues. The hub reaches
-the repository through its own checkout: clone it there and run any `lf`
-command in it once. Until then, sends stay open and say the hub has no
-checkout. `lf machine hub --clear` keeps the plan on this Machine again;
+the repository through its own checkout: clone it there and bind it to this
+repository's plan. Until then, sends stay open and `lf repo tracker` names the
+command, `lf config repo --bind <id>`, to run in that clone. `lf machine hub --clear` keeps the plan on this Machine again;
 `lf machine list` marks the hub.
 
 The first time a Machine reaches its hub, it reads the hub's plan, then sends

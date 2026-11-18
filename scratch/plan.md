@@ -259,6 +259,61 @@ origin, inert; deleting it is one hand-run
 
 ## Slices
 
+Slice 1 built (2026-11-18, headless): `lf machine hub` / `--clear` /
+bare (the `hub:` key in `~/.lf/config.yaml`), `lf machine list` marks it;
+migration `plan_hub.sql` (`plan_changes`, `hub_plans`, `hub_sends`);
+`sqlite/plan_hub.rs`; the writer records each owner's change and queues
+local saves (a created record whole); `ops/plan_hub.rs` exchange and hub
+answers; `plan.changes` / `plan.apply` at protocol revision 9 (Swift
+`ServerProtocol.revision` 9); every Git exchange boundary
+(`planning_sync::exchange_repository`) goes to the hub when one is set;
+`lf repo tracker` prints `Plan: hub mini[, unreachable since …]. N open.`;
+a Wave rename now syncs after its save. Checked with storage tests
+(`plan_hub::`) and the two-home run below.
+
+What slice 1 taught, and changed from the shape above:
+
+- **`hub_sends` is its own table, not `tracker_actions` rows.**
+  `tracker_actions.tracker` is `CHECK(tracker IN ('linear','asana'))`: a
+  `hub` row needs a table rebuild (with its canonical-identity triggers), and
+  a released lf's `TrackerKind::parse` fails on it. Concept review point 1
+  (the hub is not a tracker) says the same. One row per (target, field),
+  replaced on save; a confirmed send deletes its rows.
+- **The watermark row is the switch.** A `hub_plans` row for the repository
+  is what makes the writer queue; `seq IS NULL` is first contact. The row is
+  made at the first exchange, so saves before it reach the hub through first
+  contact, not as queued rows.
+- **A clone on the hub mints its own repository identity.** The hub needs
+  `lf config repo --bind <id>` in its clone; the error names it.
+  `docs/work.md` said "run any `lf` command in it once"; corrected.
+- **Sends group by owner,** so a record the hub lacks arrives with every
+  value `ensure_record` needs, in batches under half a control message.
+- Two-home run (stand-in `ssh`, `/tmp` homes): a Task made before the hub was
+  set reached mini by first contact; `lf task create` and `lf task edit`
+  sent at once; with mini down, `lf repo tracker` read `Plan: hub mini,
+  unreachable since … 1 open.` with the ssh reason, and the edit sent last
+  (`two`) won on both after mini came back; a Wave made and renamed on mini
+  appeared on the laptop after `lf task sync`; a Wave renamed on the laptop
+  reached mini at once. A swapped hub binary answered "Loopflow server uses
+  another executable".
+
+Left for slice 1's gate or slice 2:
+
+- Reads come only at the existing Git boundaries (`lf task sync`, a cold Task
+  lookup, a foreground provider's loop, `lf wave status --sync`). `docs/work.md`
+  says "Each `lf` command sends what is open and reads what changed on the
+  hub"; sends hold, reads don't.
+- `lf task sync` prints `synchronized`; the docs show `nothing open`.
+- `lf repo tracker --json` (`TrackerStatus`, Desktop's DTO) still reports Git
+  destinations with a hub set; slice 2 changes it with Desktop's line.
+- No hub Machine shows `Plan: this Machine (hub)` yet: without a hub the Git
+  status prints, until slice 2.
+- A foreground provider's loop opens `ssh … lf server connect` every 5 s to
+  read; LOO-861's persistent connection replaces it.
+- The plan's Rust integration test over the `lf server connect` pipe is not
+  written; the exchange's sequence and the repeated apply are covered at the
+  store, the carrier by the two-home run.
+
 1. **The hub holds the plan.** `lf machine hub`, hub rows in
    `tracker_actions` for every `WorkEdit`, `plan.apply`, `plan_changes`,
    `plan.changes`, the drain's hub sender, inbound import with the

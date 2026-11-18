@@ -22,3 +22,13 @@
   and write the plan with no account. The hub is SSH-as-you, so without Linear
   or Asana the plan is one person's. Docs say "To share a plan with coworkers,
   use Linear or Asana." Intended, or should a hub admit other people?
+- Implement (2026-11-18): `lf machine hub --clear` deletes every
+  `hub_sends` row (values saved here but never sent stay here only) and
+  every `hub_plans` row; setting another hub keeps open sends and starts
+  first contact with the new one. Reversible.
+- Implement: the `hub:` key is new in `~/.lf/config.yaml`; a released lf on
+  the same Machine rejects it as an unknown setting. Only `lf machine hub`
+  writes it, after install.
+- Implement: owners hard-deleted on the hub (Wave removal) leave their
+  `plan_changes` rows; `plan.changes` skips them and other Machines keep
+  their copies. Deletion that travels is still `task_deleted_at` only.

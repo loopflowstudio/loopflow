@@ -2158,7 +2158,7 @@
           "$ref": "#/$defs/Dashboard"
         },
         {
-          "description": "The repository's Task order.",
+          "description": "The moved Task's order among its Project's Tasks.",
           "items": {
             "type": "string"
           },

@@ -141,6 +141,8 @@ mod tests {
             "SELECT * FROM work_pane_layouts",
             "UPDATE tasks SET worktree=NULL",
             "INSERT INTO relocated_task_processes(task_id,process_id) VALUES('t','p')",
+            "SELECT task_ids_json FROM task_orders",
+            "SELECT task_order_json FROM tracker_projects",
         ] {
             let error = conn.prepare(sql).err();
             assert!(error.is_some(), "{sql} was allowed");

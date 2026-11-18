@@ -147,6 +147,20 @@ impl SqliteStore {
         tx.commit()?;
         Ok(task)
     }
+
+    /// `id` takes `to`'s rank among their Project's Tasks; returns that
+    /// Project's order. Tasks in different Projects change nothing.
+    pub fn reorder_task(&self, id: &TaskId, to: &TaskId) -> StoreResult<Vec<String>> {
+        let mut conn = self.conn.lock().expect("store mutex poisoned");
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let task = super::children::task_on(&tx, id)?.ok_or(StoreError::NotFound)?;
+        let target = super::children::task_on(&tx, to)?.ok_or(StoreError::NotFound)?;
+        super::children::require_task_not_deleted(&tx, &task)?;
+        super::children::require_task_not_deleted(&tx, &target)?;
+        let order = super::planning_order::move_in(&tx, &task, &target)?;
+        tx.commit()?;
+        Ok(order)
+    }
 }
 
 fn validate_edit(

@@ -841,13 +841,6 @@ fn local_planning_migration_preserves_released_links() {
         assert_eq!(rows(&conn, sql), expected, "{table}");
     }
     upgrade_from_migration(&conn, "optional_task_pr");
-    let order: String = conn
-        .query_row(
-            "SELECT task_order_json FROM tracker_projects WHERE id='current'",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
     let store = SqliteStore::from_fixture_connection(conn, crate::store::token_key::encryption_key);
     let observation: crate::test_linear_input::IssueFixture =
         loopflow_test_support::retained_task_input_in(
@@ -865,10 +858,6 @@ fn local_planning_migration_preserves_released_links() {
     );
     assert_eq!(observation.observed_at, 7);
     let imported = store.task_by_issue("LOO-318").unwrap().unwrap();
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&order).unwrap(),
-        serde_json::json!([imported.id.as_str()])
-    );
     assert_eq!(imported.project_id, Some(imported_project));
     assert!(imported.worktree.is_none());
     assert!(store.task_prs(&imported.id).unwrap().is_empty());

@@ -9,7 +9,7 @@ use crate::work::selection::{
     WorkWorkspaceKind,
 };
 use crate::{StoreError, StoreResult};
-use loopflow_model::durable::RepositoryId;
+use loopflow_model::durable::{ProjectId, RepositoryId};
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
@@ -100,7 +100,7 @@ fn work_in(
         });
     }
     let tasks = super::children::repository_tasks_in(conn, repository)?;
-    let reading = task_selection_in(conn, repository, &repo, projection)?;
+    let reading = task_selection_in(conn, &repo, projection)?;
     // State, publication and ownership for every Task in a fixed number of
     // statements: a query per Task costs thousands on a large repository.
     let ids: Vec<_> = tasks.iter().map(|task| task.id.clone()).collect();
@@ -127,7 +127,11 @@ fn work_in(
             .activity
             .get(&task.id)
             .is_none_or(|activity| activity.known);
-        let order = reading.order.key(task.id.as_str(), task.rank, &states);
+        let order = reading.order.key(
+            task.project_id.as_ref().map(ProjectId::as_str),
+            task.rank,
+            task.id.as_str(),
+        );
         task_work.push((
             order,
             SelectionWork {
@@ -163,21 +167,24 @@ pub struct TaskSelectionReading {
     pub activity: HashMap<crate::execution::TaskId, TaskActivity>,
 }
 
+/// Rank order: Tasks follow their Project's rank, then their own. Standalone
+/// Tasks follow every Project.
 #[derive(Debug)]
-pub struct TaskOrder(HashMap<String, usize>);
+pub struct TaskOrder(HashMap<String, u32>);
 
 impl TaskOrder {
     pub fn key(
         &self,
-        id: &str,
+        project: Option<&str>,
         rank: u32,
-        states: &BTreeSet<SelectionState>,
-    ) -> (usize, bool, u32, String) {
-        let waiting = states.contains(&SelectionState::Available)
-            || states.contains(&SelectionState::Blocked);
+        id: &str,
+    ) -> (u32, Option<String>, u32, String) {
         (
-            self.0.get(id).copied().unwrap_or(usize::MAX),
-            !waiting,
+            project
+                .and_then(|project| self.0.get(project))
+                .copied()
+                .unwrap_or(u32::MAX),
+            project.map(str::to_owned),
             rank,
             id.to_owned(),
         )
@@ -216,7 +223,6 @@ pub fn task_selection_states(
 
 fn task_selection_in(
     conn: &Connection,
-    repository: &RepositoryId,
     repo: &str,
     projection: &SessionProjection,
 ) -> StoreResult<TaskSelectionReading> {
@@ -269,30 +275,17 @@ fn task_selection_in(
         }
     }
     Ok(TaskSelectionReading {
-        order: TaskOrder(
-            task_order_in(conn, repository)?
-                .into_iter()
-                .enumerate()
-                .map(|(position, id)| (id, position))
-                .collect(),
-        ),
+        order: TaskOrder(project_ranks_in(conn, repo)?),
         activity,
     })
 }
 
-fn task_order_in(conn: &Connection, repository: &RepositoryId) -> StoreResult<Vec<String>> {
-    let order: Option<String> = conn
-        .query_row(
-            "SELECT task_ids_json FROM task_orders WHERE repository_id=?1",
-            [repository.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?;
-    Ok(order
-        .as_deref()
-        .map(serde_json::from_str)
-        .transpose()?
-        .unwrap_or_default())
+fn project_ranks_in(conn: &Connection, repo: &str) -> StoreResult<HashMap<String, u32>> {
+    let mut query = conn.prepare(
+        "SELECT p.id,p.planning_rank FROM projects p JOIN waves w ON w.id=p.wave_id WHERE w.repo=?1",
+    )?;
+    let rows = query.query_map([repo], |row| Ok((row.get(0)?, row.get(1)?)))?;
+    rows.collect::<Result<_, _>>().map_err(Into::into)
 }
 
 pub fn repository_default() -> Selection {
@@ -626,9 +619,7 @@ impl SqliteStore {
             [repository.as_str()],
             |row| row.get(0),
         )?;
-        Ok(Some(task_selection_in(
-            &snapshot, repository, &repo, projection,
-        )?))
+        Ok(Some(task_selection_in(&snapshot, &repo, projection)?))
     }
 
     pub fn dashboards(&self, repository: &RepositoryId) -> StoreResult<Vec<Dashboard>> {
@@ -775,42 +766,6 @@ impl SqliteStore {
             .ok_or(StoreError::NotFound)?;
         tx.commit()?;
         Ok(saved)
-    }
-
-    /// Read the saved order and membership before application reordering.
-    pub fn task_order_inputs(
-        &self,
-        repository: &RepositoryId,
-        inputs: &SessionProjectionInputs,
-        projection: &SessionProjection,
-    ) -> StoreResult<Option<(Vec<String>, Vec<SelectionWork>)>> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let Some(snapshot) = inputs.pin(&mut conn)? else {
-            return Ok(None);
-        };
-        Ok(Some((
-            task_order_in(&snapshot, repository)?,
-            work_in(&snapshot, repository, projection)?,
-        )))
-    }
-
-    pub fn commit_task_order(
-        &self,
-        repository: &RepositoryId,
-        read: &[String],
-        order: &[String],
-    ) -> StoreResult<bool> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        if task_order_in(&tx, repository)? != read {
-            return Ok(false);
-        }
-        tx.execute(
-            "INSERT INTO task_orders(repository_id,task_ids_json) VALUES(?1,?2) ON CONFLICT(repository_id) DO UPDATE SET task_ids_json=excluded.task_ids_json",
-            params![repository.as_str(), serde_json::to_string(order)?],
-        )?;
-        tx.commit()?;
-        Ok(true)
     }
 
     pub fn delete_dashboard(

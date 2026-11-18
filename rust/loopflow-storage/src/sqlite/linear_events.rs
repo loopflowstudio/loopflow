@@ -496,13 +496,13 @@ fn observe_order(
         }
         observed.push(id);
     }
-    sqlite::planning_order::observe_in(conn, repo, external, &project, observed)
+    sqlite::planning_order::observe_in(conn, &project, observed)
 }
 
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
+    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
     JOIN tracker_wave_projects m ON m.project_id=p.id
     LEFT JOIN tracker_wave_sync sync ON sync.wave_id=m.wave_id AND sync.tracker=p.tracker
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo

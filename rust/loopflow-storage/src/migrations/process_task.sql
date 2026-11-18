@@ -72,3 +72,10 @@ BEGIN UPDATE tasks SET planning_completed=(NEW.planning_state IS 'completed') WH
 -- leaving: tasks.planning_completed LOO-877
 -- leaving: tasks.planning_provider_revision LOO-877
 -- leaving: projects.planning_provider_revision LOO-877
+
+-- One order: a Task's rank. The Working board follows Project rank, then Task
+-- rank, and a tile Move edits rank, so its own saved order goes. The tracker's
+-- order of a Project is its observed items by rank.
+-- leaving: task_orders LOO-877
+-- leaving: tracker_projects.task_order_json LOO-877
+-- leaving: pm_projects.task_order_json LOO-877

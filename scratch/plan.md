@@ -133,7 +133,7 @@ to lack, no harness can mismatch.
 `_fallthrough_rungs` drops rungs whose CLI is missing and records each as a move
 with the reason "not installed", the same record a limit move writes. When no
 rung is left the step fails with the first choice's install hint. The check at
-`run.rs:751` moves behind the rung choice so a Graph step asks once. `Config`
+`run.rs` moves behind the rung choice so a Graph step asks once. `Config`
 stays free of Machine probes: no filter in `agent_order` or `resolve_agents`. A
 chat or batch whose choice is missing fails with the hint as it does now; only a
 Graph step moves, as with limits.
@@ -288,7 +288,23 @@ The docs commit the implementation to three things the plan had left open:
    - Not run: `lf task run` on a real Task with real OpenCode or Pi. A worker
      needs the Machine server, and the branch `lf` was only run against an
      isolated `LF_HOME`. Demo owns it.
-2. **A step that cannot launch.** Rules 2 and 3 and their three tests. Next.
+2. **A step that cannot launch. Built.** `agent::start_on_installed_agent`
+   puts a headless launch on the first installed agent of its order before the
+   conversation opens (`run.rs`), records a passed-over first choice as a move,
+   and takes missing agents out of the fallback order. `lf task run` stops
+   after one attempt when `graph_failed_before_its_agent` holds: the failed
+   step is a skill step whose Process captured no Session input.
+   `a_step_that_cannot_launch_is_not_started_again` covers the pin and the
+   move; `a_failed_command_step_is_started_again` is the existing `cmd:` retry
+   test under its plan name.
+   - "No AgentProcess under its Process" is read as "no captured input"
+     (`process_inputs`, already indexed by Process). A launch that captured and
+     then failed to spawn still gets three attempts.
+   - The stop reads `the run of <graph> stopped before any agent started:
+     <cause>; lf task run <ID> starts the run again there`, and ends an
+     Auto-Ship approval like the other stops.
+   - A missing agent later in the order is dropped without a record: one
+     recovery row per step holds the move that happened, not ones that might.
 3. **A worker's question ends the turn** on OpenCode, matching Pi. What
    `opencode run` prints or does when the model asks a question with `--auto`
    is unknown; record a real trace first.

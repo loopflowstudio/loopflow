@@ -67,3 +67,12 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 
 15. **Steers to a running headless OpenCode turn** now rely on the plugin's
     between-tool check alone. Not seen working on the real CLI yet.
+
+16. **A missing agent in the middle of the order is skipped without a record.**
+    Only a missing first choice shows as a move in `lf task status`; a later
+    one is taken out of the order before the step starts. Recording it would
+    need a second row per step or a longer reason.
+
+17. **With `agents: [opencode, codex]` and OpenCode missing, a refused Codex
+    step's stop advice reads "Nothing is left in its order after codex"**; it
+    does not name the entry that was passed over.

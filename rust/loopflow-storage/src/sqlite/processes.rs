@@ -1287,7 +1287,7 @@ impl SqliteStore {
     }
 
     /// Independent transport writers may progress together, but neither may
-    /// cross a provider stop, replacement or attachment handoff.
+    /// cross a provider stop or replacement.
     pub(super) fn lock_session_dispatch(&self, session: &str) -> StoreResult<File> {
         self.lock_session_fence(session, true)
     }

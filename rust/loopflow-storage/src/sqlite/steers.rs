@@ -166,8 +166,8 @@ impl SqliteStore {
     }
 
     /// Native hooks report turn boundaries and work that outlives a reply.
-    /// A retained provider capability follows attachment handoff, but cannot
-    /// report for a replacement provider or a different native conversation.
+    /// A retained provider capability cannot report for a replacement
+    /// provider or a different native conversation.
     pub fn record_native_turn(
         &self,
         adapter: &SteerAdapter,

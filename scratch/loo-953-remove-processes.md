@@ -94,9 +94,10 @@ step (1), the lf-row readers:
   does today) and delete `agent_parent`; the journal's agent edge then takes
   parent and trace from the env. This replaces "convert `agent_parent`'s
   trace" in step (1) with a deletion.
-- **Stale handoff prose** to fix in the same pass: `SteerAdapter`'s doc
-  (`steer.rs:3`), `record_native_turn`'s doc (`steers.rs:169`),
-  `native_exit`'s "handed-off launcher is not recorded" context.
+- Stale handoff prose fixed at realign (`SteerAdapter`, `record_native_turn`,
+  `lock_session_dispatch`, `native_exit`'s context, `terminal_title`). "Handed-off
+  exit" in `transport`/`native_exit` means the launcher's exit record passed to
+  its host, not an attachment handoff, and stays.
 - `SessionAttachment.lf_process_id: Option` + `launcher_lf_process_id` encode
   one lf plus "held". Left as is: the column pair goes with slice 6, and the
   bridge writes released readers' `attached_lf_process_id` from it.

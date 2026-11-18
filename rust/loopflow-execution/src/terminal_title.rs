@@ -322,7 +322,7 @@ impl TerminalTitle {
                 let previous = std::mem::replace(&mut self.names, names);
                 self.publish(Some(&previous));
             }
-            // A handed-off attachment must stop changing the old terminal's names.
+            // A replaced or released attachment must stop changing the old terminal's names.
             Ok(None) => self.host = None,
             Err(error) => {
                 tracing::warn!(%error, "cannot refresh terminal Session name");

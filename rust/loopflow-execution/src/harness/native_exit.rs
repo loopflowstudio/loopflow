@@ -148,7 +148,7 @@ pub fn settle(exit: &NativeExit, status: ExitStatus) -> Settled {
         let recorded = (|| -> Result<()> {
             let mut process = store
                 .lf_process(&attachment.launcher_lf_process_id)?
-                .context("handed-off launcher is not recorded")?;
+                .context("the provider's launcher is not recorded")?;
             process.completed_at = Some(time::OffsetDateTime::now_utc().unix_timestamp());
             process.outcome = Some(
                 match settled.code {

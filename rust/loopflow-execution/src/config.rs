@@ -319,7 +319,7 @@ pub enum TrackerConfig {
     /// after the repository; Wave Projects are Asana projects in the team.
     Asana { team: String },
     /// `provider: git`, which the released `lf` still writes and reads: no
-    /// tracker here. Task a94893 removes it once that release is gone.
+    /// tracker here. LOO-973 removes it once that release is gone.
     ReleasedGit,
 }
 

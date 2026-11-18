@@ -27,7 +27,7 @@ watermark, and the Machine writes them as an import. No translation, no
 `decide`, no tracker identity binding: both ends share every id and field. On
 the hub Machine the store *is* the plan and nothing is queued. The Git
 planning ref, the peer journal, field causality, destinations and the
-per-Session exchange go in slice 2. `lf repo tracker` reads
+per-Session exchange are deleted. `lf repo tracker` reads
 `Plan: hub mini. 3 open.`
 
 ## Concept review changes (2026-11-18, made for review)
@@ -164,23 +164,6 @@ Plus a Rust integration test of the same sequence with the carrier mocked at
 the `lf server connect` pipe, including a lost `plan.apply` reply that is
 sent again and applied once.
 
-## Affected surfaces
-
-- `plan_hub.sql` gains the `-- leaving:` marks (slice 2).
-- Server protocol + `tests/fixtures/dto/server_schema.json`, Swift
-  `ServerProtocol`, Pi extension, `server_connection.js` (revision bump only).
-- `lf repo tracker` / `TrackerActionStatus`: hub reachability line replaces
-  destination receipts; `lf repo tracker journal` goes.
-- `lf machine hub`, `lf machine list`.
-- `.lf/config.yaml`: `tracker: { git: … }` is a shared file the released `lf`
-  reads; the branch parses it and treats it as "no tracker", marked with a
-  removal Task filed in this change (AGENTS.md shared-file rule).
-- Docs: `docs/dev/planning.md` (Git sections), `docs/dev/machines.md`,
-  `docs/glossary.md` ("destination"; "tracker" now means Linear or Asana,
-  and the hub is where the plan lives), `AGENTS.md` work model line
-  ("Linear, Asana or a Git ref is the repository's tracker"),
-  `rust/loopflow/src/server/README.md`, `rust/loopflow-storage/SCHEMA.md`.
-
 ## Cutover for etude
 
 Not code (no cross-repo migrations). Before installing: with the released
@@ -245,7 +228,7 @@ origin, inert; deleting it is one hand-run
   `lf repo tracker --subscribe` read. One exchange per repository at a time
   (file lock under `locks/plan-hub`).
 - `TrackerConfig` is Linear | Asana | `ReleasedGit`; `planning_transport()`
-  returns `None` for no tracker. Task a94893 removes `ReleasedGit`.
+  returns `None` for no tracker. LOO-973 removes `ReleasedGit`.
 - `lf repo tracker --json`: `{tracker, plan: {hub, is_hub, unreachable_since,
   error, open: [{owner, field, phase}]}, actions}`; text prints
   `Plan: this Machine.`, `Plan: this Machine (hub).` or the hub lines. Desktop's
@@ -280,20 +263,12 @@ origin, inert; deleting it is one hand-run
 - `… --test integration --test global_commands -E 'test(machine_commands::) | test(planning_setup_tests::) | test(subscribe::the_plan_s_home) | test(dto_fixtures::) | test(repository_identity_binding)'`: passed after one test's expected text moved to "not found" (implement).
 - Gate: `server::schema::tests::`, `lf::tests::`, `documented_commands::`, `binary(golden_prompt)` if prompts changed, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
 
-## User docs (written first, 2026-11-18)
+## User docs
 
 `docs/work.md` ("Share the plan", Sync reference, `--subscribe` line),
 `docs/ops.md` (Other machines), `docs/config.md` (Tracker row),
-`docs/glossary.md` (Tracker, Hub, Linear). Choices made while writing:
-`lf repo tracker` heads with `Plan: hub mini. N open.` /
-`Plan: hub mini, unreachable since 14:02. N open.` / `Plan: this Machine (hub)`;
-hub lines are `<task-id>  <field> · queued · <send error>` and
-`wave <name>  <field> · …`; a hub without the repository's checkout keeps sends
-open with "the hub has no checkout". `documented_commands` will flag
-`lf machine hub` until slice 1 adds the command.
-
-Open question: today a coworker who clones a repository shares its Git plan
-with no account. After slice 2, a repository without Linear or Asana shares
-its plan only among one person's Machines (the hub is reached over SSH as
-you). Is losing zero-setup coworker sharing intended, or should a hub admit
-other people?
+`docs/glossary.md` (Tracker, Hub, Linear). Hub lines are
+`<task-id>  <field> · queued · <send error>` and `wave <name>  <field> · …`;
+a hub without the repository's checkout keeps sends open with "the hub has no
+checkout". Coworker sharing without Linear/Asana is an open question in
+`scratch/questions.md`.

@@ -1016,10 +1016,6 @@ fn server_operations_match_their_lf_commands() {
                         },
                     key: "agent".into(),
                 },
-                Read::DesktopLayout {
-                    directory: repo.path().to_owned(),
-                    work: "repository".into(),
-                },
                 Read::RepoPeople {
                     directory: repo.path().to_owned(),
                 },
@@ -1229,7 +1225,6 @@ fn server_operations_match_their_lf_commands() {
             .unwrap(),
         )
     };
-    let repository_id = repository["id"].as_str().unwrap().to_owned();
     // A saved record as the app reads it, and the revision a write names.
     let layout = |work: &str| -> Value {
         Read::DesktopLayout {
@@ -1241,25 +1236,6 @@ fn server_operations_match_their_lf_commands() {
     };
     let revision = |work: &str| layout(work)["revision"].as_i64().unwrap();
     let dashboard = || without_revision(layout("query:served"));
-    let pane = |revision: i64| Write::DesktopLayoutSave {
-        directory: directory.clone(),
-        work: "repository".into(),
-        layout: serde_json::json!({
-            "work": {"repository": repository_id, "kind": "repository", "id": repository_id},
-            "revision": revision,
-            "tree": {"kind": "pane", "id": "session",
-                     "content": {"kind": "session", "session_id": null, "location": null}},
-            "focused": null,
-            "zoomed": null,
-            "hidden": [],
-            "drafts": []
-        })
-        .to_string(),
-    };
-    let pane_revision = || {
-        let saved = layout("repository");
-        saved["revision"].as_i64().unwrap_or(0)
-    };
     // A new Write fails to compile here until it is compared too.
     let (writes, arrangement) = match (Write::TaskReopen {
         directory: directory.clone(),
@@ -1341,8 +1317,7 @@ fn server_operations_match_their_lf_commands() {
         // configuration_edits_use_the_server_without_work_processes covers settings.
         | Write::ConfigSet { .. }
         | Write::ConfigUnset { .. }
-        | Write::ConfigTheme { .. }
-        | Write::DesktopLayoutSave { .. } => (
+        | Write::ConfigTheme { .. } => (
             [
                 Write::TaskUpdate {
                     directory: directory.clone(),
@@ -1374,7 +1349,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionResume {
                     directory: directory.clone(),
@@ -1382,7 +1356,6 @@ fn server_operations_match_their_lf_commands() {
                     task: None,
                     wave: None,
                     agent: None,
-                    intent: loopflow_execution::session::SessionOpenIntent::Resume,
                 },
                 Write::SessionNew {
                     request_id: "new-thread-parity".into(),
@@ -1469,7 +1442,6 @@ fn server_operations_match_their_lf_commands() {
                     expression: "state:backlog".into(),
                     revision: Some(revision("query:served")),
                 }),
-                Box::new(|| pane(pane_revision())),
             ],
         ),
     };
@@ -1782,7 +1754,6 @@ fn server_operations_match_their_lf_commands() {
                         task: None,
                         wave: None,
                         agent: None,
-                        intent: loopflow_execution::session::SessionOpenIntent::Resume,
                     });
                     assert_eq!(
                         Path::new(saved["cwd"].as_str().unwrap())
@@ -2268,7 +2239,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
             task,
             wave,
             agent,
-            intent,
         } => {
             let mut spelled = Vec::new();
             if id.is_none() && task.is_none() && wave.is_none() {
@@ -2278,7 +2248,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--agent", agent]));
             }
             spelled.extend(words(&["session", "resume"]));
-            spelled.extend(intent.flag().map(str::to_owned));
             spelled.extend(id.clone());
             if let Some(task) = task {
                 spelled.extend(words(&["--task", task]));
@@ -2824,12 +2793,6 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 "--destination",
                 destination,
             ]),
-        ),
-        Write::DesktopLayoutSave {
-            directory, work, ..
-        } => (
-            path(directory),
-            words(&["desktop", "layout", work, "--save"]),
         ),
         Write::ConfigSet { .. } | Write::ConfigUnset { .. } | Write::ConfigTheme { .. } => {
             unreachable!("settings writes are compared on their own")

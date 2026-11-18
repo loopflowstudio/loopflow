@@ -1,5 +1,5 @@
 //! One held terminal's execution as the Machine server hosts it: its viewers,
-//! who may type and who sizes it, the retained screen, queued input, the
+//! every one of which may type, who sizes it, the retained screen, queued input, the
 //! native client's return line and exit settlement. The execution itself is
 //! behind [`Source`], the holder's socket.
 
@@ -15,12 +15,12 @@ use crate::harness::native_exit::NativeExit;
 use loopflow_model::id::TerminalId;
 
 use super::held::Source;
-use super::input::PendingInput;
+use super::input::{self, PendingInput};
 use super::wire::{CloseReason, Event, Incoming, Reply, Request, Tag};
 use super::{
     close_viewers, deliver, dimensions, end_viewers, lifetime, native, output, place_events,
     provider_exit_code, publish_reports, release_viewer_hold, selected_directory, snapshot,
-    viewer_hold, Ownership, Settling, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
+    viewer_hold, Settling, Sizing, Span, Viewer, HEARTBEAT_TIMEOUT, LIMIT,
 };
 use loopflow_storage::sqlite::ViewerHold;
 
@@ -67,9 +67,10 @@ pub(super) struct Hosted {
     /// What the execution's own control requests present.
     control_key: String,
     viewers: Vec<Viewer>,
-    /// Who may type.
-    control: Option<String>,
-    ownership: Ownership,
+    /// The view whose input last reached the provider, which ends its paste if
+    /// it leaves mid-way.
+    writer: Option<String>,
+    sizing: Sizing,
     size: (u16, u16),
     pending_input: PendingInput,
     output: output::Output,
@@ -141,8 +142,8 @@ impl Hosted {
         Ok(Self {
             control_key,
             viewers: Vec::new(),
-            control: None,
-            ownership: Ownership::default(),
+            writer: None,
+            sizing: Sizing::default(),
             size: (24, 80),
             pending_input: PendingInput::default(),
             output: output::Output::new(true)?,
@@ -223,28 +224,28 @@ impl Hosted {
     /// Serve every connection, move input and output, and judge the ending.
     pub fn pass(&mut self, child: &mut Source) -> Result<Pass> {
         let child_pid = child.pid();
-        let mut replaced = Vec::new();
         let mut owner_change = false;
         let mut size_change = false;
         let mut theme_change = false;
         let mut attaching = Vec::new();
-        // Observe every connection before admitting claims. A viewer earlier
-        // in the list must not see Busy for a controller whose EOF is ready.
+        // Observe every connection before reading its requests.
         self.viewers.retain_mut(|viewer| {
             !viewer.heartbeat_expired(Instant::now()) && viewer.read().is_ok()
         });
-        owner_change |= self.ownership.settle(&self.viewers);
-        self.release_lost_control();
-        let controller_ready = self.client.is_some()
-            && self.viewers.iter().any(|viewer| {
-                viewer.token.is_some() && viewer.token == self.control && viewer.ready
-            });
+        owner_change |= self.sizing.settle(&self.viewers);
+        self.finish_departed_paste();
+        let viewed = self.viewers.iter().any(Viewer::live);
+        let native_ready = self.client.is_some()
+            && self
+                .viewers
+                .iter()
+                .any(|viewer| viewer.live() && viewer.ready);
         {
             let Self {
                 viewers,
-                control,
+                writer,
                 control_key,
-                ownership,
+                sizing,
                 pending_input,
                 output,
                 detach,
@@ -266,13 +267,30 @@ impl Hosted {
                     while let Some((tag, payload)) = viewer.decoder.next()? {
                         let request = match tag {
                             Tag::Input => {
-                                // Stale and passive viewers cannot write.
-                                if viewer.token.is_some() && viewer.token == *control {
-                                    anyhow::ensure!(
-                                        pending_input.push(&payload),
-                                        "Provider input is busy"
-                                    );
+                                // Every attached view types. Only the view that
+                                // sizes the terminal answers the agent's queries:
+                                // every view's terminal answers them.
+                                if !viewer.attached {
+                                    continue;
                                 }
+                                let typed = if sizing.held_by(viewer) {
+                                    payload
+                                } else {
+                                    input::without_reports(&payload)
+                                };
+                                if typed.is_empty() {
+                                    continue;
+                                }
+                                // Another view's paste ends before this one types.
+                                if writer.as_ref() != Some(&viewer.id) {
+                                    pending_input.finish_paste();
+                                }
+                                anyhow::ensure!(
+                                    pending_input.push(&typed),
+                                    "Provider input is busy"
+                                );
+                                *writer = Some(viewer.id.clone());
+                                sizing.touch(viewer);
                                 continue;
                             }
                             Tag::Request => serde_json::from_slice::<Incoming>(&payload)?,
@@ -326,6 +344,19 @@ impl Hosted {
                                 viewer.input_hint = Some(hint);
                                 *hint_due = true;
                             }
+                            Request::Focus { focused } if viewer.attached => {
+                                if focused {
+                                    sizing.touch(viewer);
+                                }
+                                // The agent hears focus only when it asked for it.
+                                if output
+                                    .terminal()
+                                    .is_some_and(|terminal| terminal.focus_reporting())
+                                {
+                                    let report: &[u8] = if focused { b"\x1b[I" } else { b"\x1b[O" };
+                                    let _ = pending_input.push(report);
+                                }
+                            }
                             Request::Controlled { ready } => {
                                 if let Some(ready) = ready {
                                     viewer.ready = viewer.attached
@@ -339,8 +370,8 @@ impl Hosted {
                                 viewer.reply(
                                     answers,
                                     Reply::Controlled {
-                                        held: control.is_some(),
-                                        ready: Some(controller_ready),
+                                        viewed,
+                                        ready: Some(native_ready),
                                     },
                                 );
                             }
@@ -373,51 +404,24 @@ impl Hosted {
                                 viewer.reply(answers, Reply::Accepted);
                             }
                             Request::Attach {
-                                control: wants_control,
-                                replace,
-                                own,
                                 rows,
                                 cols,
                                 name,
-                                moved,
                                 from,
                             } => {
-                                if wants_control
-                                    && !replace
-                                    && control.is_some()
-                                    && viewer.token != *control
-                                {
-                                    viewer.reply(answers, Reply::Busy);
-                                    continue;
-                                }
                                 *attached = true;
                                 viewer.size = dimensions(rows, cols);
                                 viewer.name = name;
                                 viewer.from = from;
-                                if wants_control {
-                                    // A view continuing its screen showed the hint already.
-                                    *hint_due |= viewer.from.is_none();
-                                    if viewer.token != *control {
-                                        if let Some(token) = &*control {
-                                            pending_input.finish_paste();
-                                            replaced.push((token.clone(), moved));
-                                        }
-                                    }
-                                    let token = uuid::Uuid::new_v4().to_string();
-                                    *control = Some(token.clone());
-                                    viewer.token = Some(token);
-                                } else {
-                                    if viewer.token.is_some() && viewer.token == *control {
-                                        pending_input.finish_paste();
-                                        *control = None;
-                                    }
-                                    viewer.token = None;
-                                }
+                                // A view continuing its screen showed the hint already.
+                                viewer.wants_hint = from.is_none();
+                                *hint_due = true;
                                 viewer.attached = true;
                                 viewer.heartbeat_at = Instant::now();
                                 attaching.push(viewer.id.clone());
-                                owner_change |= ownership.claim(own, viewer);
-                                viewer.reply(answers, viewer.attached_reply(ownership.id(), true));
+                                sizing.touch(viewer);
+                                let owner = Some(viewer.id.as_str());
+                                viewer.reply(answers, viewer.attached_reply(owner, true));
                                 // Binding selects a directory for later connections;
                                 // the running provider keeps its own.
                                 if let Some(cwd) = exit_record
@@ -435,19 +439,16 @@ impl Hosted {
                             }
                             Request::Resize { rows, cols } => {
                                 viewer.size = dimensions(rows, cols);
-                                size_change |= ownership.held_by(viewer);
-                            }
-                            Request::Own { mode } if viewer.attached => {
-                                owner_change |= ownership.claim(Some(mode), viewer);
+                                size_change |= sizing.held_by(viewer);
                             }
                             Request::Theme { theme } if viewer.attached => {
                                 viewer.theme = Some(theme);
-                                theme_change |= ownership.held_by(viewer);
+                                theme_change |= sizing.held_by(viewer);
                             }
                             Request::Leave => {
                                 viewer.leaving = true;
                             }
-                            _ => {} // stale and passive viewers cannot release another claim
+                            _ => {} // a key the execution did not issue, or a passive connection
                         }
                     }
                     viewer.flush()?;
@@ -457,11 +458,12 @@ impl Hosted {
             });
         }
         self.viewers.retain(|viewer| !viewer.leaving);
-        owner_change |= self.ownership.settle(&self.viewers);
+        owner_change |= self.sizing.settle(&self.viewers);
+        self.finish_departed_paste();
         let owner = self
             .viewers
             .iter()
-            .find(|viewer| self.ownership.held_by(viewer));
+            .find(|viewer| self.sizing.held_by(viewer));
         let new_size = owner
             .filter(|_| owner_change || size_change)
             .map(|viewer| viewer.size);
@@ -507,7 +509,7 @@ impl Hosted {
                 }
             }
             if owner_change || fresh {
-                let event = self.ownership.event(viewer);
+                let event = self.sizing.event(viewer);
                 viewer.event(event);
             }
             if fresh {
@@ -528,48 +530,34 @@ impl Hosted {
                 }
             }
         }
-        // The viewer that held control learns where it went; LOO-618's viewer
-        // leaves on that, a shared viewer may stay.
-        for (token, notice) in replaced {
-            for viewer in self
-                .viewers
-                .iter_mut()
-                .filter(|viewer| viewer.token.as_ref() == Some(&token))
-            {
-                viewer.token = None;
-                viewer.event(Event::Control {
-                    held: false,
-                    notice: notice.clone(),
-                });
-            }
-        }
         if let Some(event) = self.returning.take() {
             for viewer in self.viewers.iter_mut().filter(|viewer| viewer.attached) {
                 viewer.ready = false;
                 viewer.event(event.clone());
             }
         }
-        // The controls reach the one controlling viewer when it attaches or
-        // when the execution registers them, whichever comes later.
+        // The controls reach each view when it attaches and every view when the
+        // execution registers them; a view continuing its screen has them already.
         if std::mem::take(&mut self.hint_due) {
             let hint = self.viewers.iter().rev().find_map(|v| v.input_hint.clone());
             if let Some(hint) = hint {
                 for viewer in self
                     .viewers
                     .iter_mut()
-                    .filter(|v| v.attached && v.token.is_some() && v.token == self.control)
+                    .filter(|v| v.attached && v.wants_hint)
                 {
+                    viewer.wants_hint = false;
                     viewer.event(Event::Hint { text: hint.clone() });
                 }
             }
         }
-        self.release_lost_control();
-        // A controlling view still catching up throws away what its terminal
-        // answers; the retained screen answers live queries meanwhile.
+        // The view that sizes the terminal answers the agent's queries. While
+        // it catches up it throws its answers away; the retained screen
+        // answers live queries meanwhile, and when no view is attached.
         let answering = !self
             .viewers
             .iter()
-            .any(|v| v.token.is_some() && v.token == self.control && !v.catching_up);
+            .any(|v| self.sizing.held_by(v) && !v.catching_up);
         if let Some(name) = self.title.tick() {
             self.output.title(&name);
         }
@@ -618,7 +606,7 @@ impl Hosted {
         // Output written before the execution detached reaches its viewers first.
         if self.detach {
             self.pending_input.finish_paste();
-            self.control = None;
+            self.writer = None;
             end_viewers(&mut self.viewers, Event::Detached);
             // The execution's own control connections outlive its viewers.
             self.viewers.retain(|v| !v.attached);
@@ -778,14 +766,13 @@ impl Hosted {
         Ok(Pass::Continue)
     }
 
-    /// Nobody types once the viewer holding the claim is gone.
-    fn release_lost_control(&mut self) {
-        if !self
-            .viewers
-            .iter()
-            .any(|viewer| viewer.token.is_some() && viewer.token == self.control)
-            && self.control.take().is_some()
-        {
+    /// A paste the departed writer left open ends with it.
+    fn finish_departed_paste(&mut self) {
+        let Some(writer) = &self.writer else {
+            return;
+        };
+        if !self.viewers.iter().any(|v| v.live() && &v.id == writer) {
+            self.writer = None;
             self.pending_input.finish_paste();
         }
     }

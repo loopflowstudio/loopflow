@@ -37,11 +37,10 @@ struct ToolTabTests {
         #expect(files.document("first.txt") === document)
         #expect(document.text == "unsaved draft")
         let portableLocation = WorkViewPlan.Location(machineID: location.machineId, cwd: location.worktree)
-        let saved = store.paneLayout(work: work, revision: 2,
-            files: files.browserTab, drafts: files.drafts(location: portableLocation))
+        let saved = store.paneLayout(files: files.browserTab, drafts: files.drafts(location: portableLocation))
         let decoded = try JSONDecoder().decode(WorkPaneLayout.self, from: JSONEncoder().encode(saved))
         let restored = MultiplexerStore(taskId: work.id)
-        restored.restore(decoded)
+        restored.restore(decoded, taskId: work.id)
         #expect(restored.layout.allPanes.map(\.id) == store.layout.allPanes.map(\.id))
         #expect(restored.browserPane?.id == filesPane.id)
         #expect(restored.shellPane?.content.selectedShell?.id == first.id)
@@ -69,9 +68,9 @@ struct ToolTabTests {
     @Test func emptyFilesRetainTheirRecordedLocation() throws {
         let store = MultiplexerStore(taskId: work.id)
         let pane = try #require(store.showBrowser(.files, location: location))
-        let saved = store.paneLayout(work: work, revision: 0, files: nil, drafts: [])
+        let saved = store.paneLayout(files: nil, drafts: [])
         let restored = MultiplexerStore(taskId: work.id)
-        restored.restore(saved)
+        restored.restore(saved, taskId: work.id)
         #expect(restored.layout.pane(for: pane.id)?.content.location == location)
     }
 

@@ -13,24 +13,23 @@ lf open loopflow://loopflow/task/LOO-12       # attach LOO-12's conversation her
 lf open --task LOO-12 --tab                  # attach in a sibling tab
 lf open --task LOO-12 --focus                # reveal its existing view
 lf open --wave product                      # the product Wave's conversation
-lf workspace --wave product                 # the Wave's Task overview
-lf open --task LOO-12 --host desktop --diff   # conversation and Changes in Desktop
+lf open --wave product --workspace          # the Wave's Task overview
+lf open --task LOO-12 --host desktop         # the conversation in Desktop
 ```
 
 Direct CLI opening attaches in the current terminal, including inside Rex.
 An agent call defaults to a sibling tab in its conversation's host. It never
 attaches inside its own tool call. Desktop navigation focuses its existing view.
 
-Ordinary terminal opening reports an already-open conversation's location and
-offers `--focus`; it does not move input or create a duplicate. `--focus` reports
-**Not open** if there is no live view. A plain terminal without sibling-tab
+Terminal opening adds a view even when the conversation is already open
+elsewhere, and every view types. `--focus` reveals an existing view instead and
+reports **Not open** if there is none. A plain terminal without sibling-tab
 support reports that limitation and gives a command to run in a terminal you
 open yourself. `--host desktop|rex|cmux|herdr|tmux|terminal` chooses a host; a
 failure never falls through to another.
 
-`lf open` resolves one conversation, independently of workspace layouts.
-`lf workspace` opens configured arrangements and repository or Wave overviews;
-`lf task view` inspects workflow. Opening a conversation does not advance a Graph
+`lf open` resolves one conversation; `lf open --workspace` opens a repository
+or Wave overview instead. Opening a conversation does not advance a Graph
 or replay its prompt. Success means the conversation attached; attachment
 failure reaches the opening command and can be retried.
 
@@ -159,9 +158,8 @@ changes the Machine has not answered.
 Desktop uses the local Loopflow server to read Work and attach Session terminals.
 Installation prepares the connection. Check availability with `lf server status`.
 The native connection row shows recovery while keeping the screen and local
-reading actions available; input waits for acknowledgement. **Retry** reconnects;
-**Move here** explicitly requests control when another viewer has it. Recovery
-never replays uncertain input. See [Connect clients](server.md) for updates,
+reading actions available; input waits for acknowledgement. **Retry** reconnects.
+Recovery never replays uncertain input. See [Connect clients](server.md) for updates,
 background access and the distinction from Machine execution destinations.
 
 ## Drive Desktop from a script

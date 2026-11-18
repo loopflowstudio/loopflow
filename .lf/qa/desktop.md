@@ -41,7 +41,7 @@ the private server and every relay afterward.
 A probe compiling `ServerConnection.swift` against real relay publications can
 check mailbox delivery and cancellation without WindowServer. Label this as a
 component probe: it does not establish mounted panes, hidden-pane rendering,
-focus, copy/Find, or Move here interaction. Keep display diagnostics optional in
+focus or copy/Find. Keep display diagnostics optional in
 headless runs; record those limits and leave the full Swift suite and Xcode
 fallback build to gate. See `swift/README.md` for the supported checks.
 
@@ -94,11 +94,10 @@ Run the app's bundled `lf` with the world's `env.json` variables and
 - Desktop puts `~/.local/bin` ahead of the world's `bin` on its panes' `PATH`,
   so a provider Desktop starts is the real `claude` (check `lsof -p <pid>` txt).
   Start the Task's conversation first from a PTY running the prepared
-  `open_argv` with `--start-if-free` under the world's `PATH`; Desktop's panes
-  then attach to that stand-in. `lf desktop do refresh-session|take-back-session
-  -p session`, `desktop send`/`send-key` and `desktop capture --region scrollback`
-  drive and read the pane; a pane's `attachment` reads `usable`, `elsewhere` or
-  `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
+  `open_argv` under the world's `PATH`; Desktop's panes then attach to that
+  stand-in. `lf desktop do refresh-session -p session`, `desktop send`/`send-key`
+  and `desktop capture --region scrollback` drive and read the pane; a pane's
+  `attachment` reads `opening`, `usable` or `failed`. Reuse no markers across runs: scrollback keeps earlier replies.
 - Reinstalling the bundle changes its `lf`: the running private server then
   answers "uses another executable" and panes lose their surfaces. Restart that
   server with the new bundled `lf`; held providers survive in the old holder.

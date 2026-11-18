@@ -2253,7 +2253,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
         // Membership moves retain the original start, even without a checkout.
         db.execute("INSERT INTO task_events(task_id,kind_json,created_at) VALUES(?1,'{\"kind\":\"started\"}',17)", [task.id.as_str()]).unwrap();
         db.execute(
-            "INSERT INTO task_ownership(id,task_id,kind,at,ordered_at,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',17,17000,1)",
+            "INSERT INTO task_ownership(id,task_id,kind,at,ordered_at,writer_machine_id,written_here) VALUES('own_'||lower(hex(randomblob(16))),?1,'recorded',17,17000,(SELECT id FROM machines WHERE is_local=1),1)",
             [task.id.as_str()],
         )
         .unwrap();

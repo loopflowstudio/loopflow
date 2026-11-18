@@ -193,7 +193,7 @@ fn record(
         work: None,
         wave_id: None,
         work_path: None,
-        actions: Vec::new(),
+        action: None,
         title,
         title_source,
         graph_membership: SessionGraphMembership::Independent,

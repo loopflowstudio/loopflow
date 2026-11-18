@@ -27,14 +27,10 @@
     ],
     "terminal_ids": [],
     "work_path": "product / LOO-291",
-    "actions": [
-      {
-        "kind": "open",
-        "label": "Open here",
-        "help": "Open this Session in a terminal",
-        "unavailable_reason": null
-      }
-    ],
+    "action": {
+      "label": "Open here",
+      "help": "Open this Session in a terminal"
+    },
     "graph_membership": {
       "kind": "step",
       "graph": "task-design",

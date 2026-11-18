@@ -177,7 +177,7 @@ status itself.
 
 | Piece | Removes | Needs |
 | --- | --- | --- |
-| Every view types; size follows the newest view; the server's emulator answers every terminal query and replies coming from a view's terminal are dropped before the PTY | Takeover tokens, **Move here**, and Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused") | |
+| The server's emulator answers every terminal query, so no view's replies reach the PTY | Desktop's relay status handshake (`LF_SERVER_STATUS`, "Opening… Input paused"), once Reconnecting, Session unavailable and Retry have another carrier | |
 | Retire leaked processes and find the tests that leak them | Test and demo leftovers | |
 
 Server operations for these pieces are added under one protocol revision
@@ -186,14 +186,18 @@ one each.
 
 ### Every view types
 
-What a held terminal's views would become:
+Built. A held terminal has no controlling view:
 
-- **Size.** The most recently opened view owns the terminal size; other views
-  render that grid. When it closes, ownership falls back to the next most
-  recently opened view. A reconnect is not an open, and a Desktop pane counts
-  as open only while it is shown.
-- **Input.** Every view can type. There is no controlling view, takeover
-  token or **Move here**.
+- **Input.** Every view can type. There is no takeover token or **Move
+  here**. Opening a Session whose provider runs in a native client outside a
+  held terminal takes it over: lf cannot share that terminal.
+- **Size.** The live view with the latest attach, input or focus sets the
+  terminal size; other views render that grid. When it detaches, the size
+  goes to the remaining view that most recently did one of those. Views
+  report focus through DEC 1004; hosts that don't fall back to attach and
+  typing.
+- **Queries.** Only the sizing view's answers to terminal queries reach the
+  agent; other views' replies are dropped before the PTY.
 
 ## Open
 

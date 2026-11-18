@@ -45,8 +45,8 @@
 - **Environment overrides are part of the key; only `--setting` bypasses the
   shared value.** The environment is one value for a whole process, so it
   cannot be "one command's" override the way a thread's `--setting` is. The
-  server README says both "belong to the command that carries them"; the
-  result a reader sees is the same either way.
+  server README said both "belong to the command that carries them"; realign
+  rewrote that sentence to match.
 - **The settings key holds the checkout path as given**, not made absolute.
   Callers in a server pass absolute paths and the server never changes cwd.
 - **A slot stays while a reading still holds its dependencies**, or for 300 s

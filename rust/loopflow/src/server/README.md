@@ -270,9 +270,10 @@ An edit that changes nothing in the selected answer sends no line. Until a
 file changes, readings share one resolved value per checkout and Wave, and one
 catalog per set of skill directories. A file that fails to load gives every
 reading the same error it gives `lf config settings`, and the server warns
-about it once per edit. Environment and `--setting` overrides belong to the
-command that carries them: a read with an override resolves for itself and
-leaves the shared value alone.
+about it once per edit. A `--setting` override belongs to the command that
+carries it: a read with one resolves for itself and leaves the shared value
+alone. Settings from the environment are the server's own, the same for every
+reading, and identify the shared value along with the checkout and Wave.
 
 In code this is `observe::derived`: a value computed from observed facts,
 kept with the facts its computation read and computed again when one changes.

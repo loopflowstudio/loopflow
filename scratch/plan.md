@@ -40,7 +40,7 @@ is kept with the dependencies its computation read.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Derived {
     Settings { checkout: Option<PathBuf>, wave: Option<String>, outside: Outside },
-    WaveSetup { checkout: PathBuf, wave: String, outside: Outside },
+    SkillAgents { checkout: PathBuf, wave: String, outside: Outside },
     SkillCatalog { repo: Option<PathBuf>, home: Option<PathBuf>,
                    claude: Option<PathBuf>, codex: Option<PathBuf> },
 }
@@ -101,7 +101,7 @@ For settings that rule is carried by the code, not by convention.
 ```rust
 /// What settings resolution reads that is not a file.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Outside { environment: String, invocation: String,
+pub struct Outside { environment: Value, invocation: Value,   // serde_yaml_ng, Hash + Eq
                      sole_harness: Option<&'static str>, home: PathBuf,
                      remote: Option<String> }
 pub fn outside() -> Result<Outside, LoadError>;      // reads them, once per call
@@ -116,7 +116,7 @@ callers. Read per call as today; nothing in the sample points at it.
 - `--setting` overrides: when `outside.invocation` is non-null the settings
   are computed inline and never enter a slot. A choice: keying on it would also
   be correct, and was passed over so one command's override cannot occupy a
-  shared slot.
+  shared slot. Environment settings are process-wide, so they stay in the key.
 - Wave named by ID (`files::wave_name` walks `.lf/wave` with `ignore`): resolve
   the name before `derived`; the key holds the name.
 - Main checkout of a worktree (`std::fs` in `git::worktree_root`, under
@@ -138,20 +138,23 @@ cache, so a stale value could reach a display, never a launched agent.
 ### What is derived: three values
 
 1. **Settings for a checkout and Wave.** `config::resolved(repo, wave) ->
-   Result<Arc<ResolvedSettings>, LoadError>` is `config_layers` +
-   `resolve_with(_, None, outside)`. `load_wave_config`, `load_config`,
-   `load_global_config`, `scope_graph_default` and the other `Config`-returning
-   helpers read from it; layers come from `config.setting_layers`.
-   `resolve_task_agent` with no skill reads the agent from it: today that is
-   two full resolves per Task per reading.
+   Result<Arc<ResolvedSettings>, LoadError>` is `file_layers` +
+   `resolve_with(_, None, outside)`. `load_wave_config` and
+   `resolve_task_agent` read from it; layers come from
+   `config.setting_layers`. `resolve_task_agent` with a skill still resolves
+   per call on top of the shared value; the Wave detail read passes none.
    `LoadError` derives `Clone` (every variant holds a `String`), so the slot
    holds the `Result` itself and both paths return the same variant and text.
    `task_configuration_refusal` and `lf config` match
    `LoadError::AgentSelection`; a slot that kept only a message would break
    them.
-2. **A Wave's settings half of `WaveSetup`** (`wave/setup.rs:44-57`: graph,
-   agent and one resolve plus one skill load per skill named in any layer).
-   `machine()` reads the store and stays outside.
+2. **A Wave's skill agents** (`work/wave/setup.rs`, `Derived::SkillAgents`):
+   one resolve plus one skill load per skill named in any layer. Its
+   computation calls `config::resolved_with`, so nesting is used by real
+   code. `WaveSetup`'s graph and agent come straight from (1); `machine()`
+   reads the store and stays outside. Known gap in the "key only" rule:
+   `load_skill` reads `HOME` and the provider directories, process-wide in a
+   server, outside this key.
 3. **The skill catalog.** `SkillCatalog::load(repo, home, overrides)` returns
    the shared `Arc<SkillCatalog>`; the walk and each `is_generated` front
    matter parse run once per change under `.lf/skills`, `.claude`, `.agents`,
@@ -165,20 +168,14 @@ is a fourth variant keyed by `(home, scope chain)`.
 File warnings (`reader::warn`, stderr) are printed when a value is computed, so
 the server says each once per file change per checkout, not once per read.
 
-## What goes
+## What went
 
-Two earlier per-reading caches for this same cost, superseded by (1):
-
-- `config::PersonalSettings`, `load_wave_config_with`, `config_layers_with`
-  and the `personal` parameter threaded through `resolve_task_agent`,
-  `task_configuration_refusal`, `task_process_refusal_after`
-  (`ops/task.rs:2274-2318`), `ops/task/snapshot.rs:32`, `session.rs:15`.
-  `PersonalSettings` flattened a personal file's error to
-  `InvalidGraph(message)`; without it the error keeps its own variant. Check
-  the text any test pins.
-- In `rust/loopflow/src/lf/commands/waves.rs`: the `personal` map
-  (`:1876-1884`, filled at `:1953-1963`) and the `agents` memo keyed by
-  serialized layers (`:1889-1892`, `:1998-2027`).
+`config::PersonalSettings`, `load_wave_config_with`, `config_layers_with`, the
+`personal` parameter through `ops/task.rs`, `ops/task/snapshot.rs` and
+`session.rs`, and the `personal` and `agents` maps in
+`rust/loopflow/src/lf/commands/waves.rs`. A personal settings file that fails
+to load now reports its own variant (`io error: …`) where `PersonalSettings`
+wrapped it as `invalid graph: …`; no test pinned the old text.
 
 Must survive unchanged: `lf config settings --explain`, `--setting` overrides,
 `configuration_changes_reach_an_existing_subscription_without_store_writes`,
@@ -187,19 +184,23 @@ Must survive unchanged: `lf config settings --explain`, `--setting` overrides,
 
 ## Acceptance at gate
 
-`cargo test -p loopflow-execution --lib read_stream::tests::` with one new test
-beside the two "changes reach" tests: a pulled subscription whose read calls
-`load_wave_config` and `SkillCatalog::load`; three checkpoints force three
-readings and settings resolve once and the catalog collects once (a
-`#[cfg(test)]` count of computations per key in `observe`); an edit to
-`.lf/config.yaml` resolves once more and the frame shows the new value; a
-malformed file yields the same answer as today; an invocation override set
-around a reading changes that reading's answer and leaves the next one's
-untouched; two homes read through one `Cache` get their own global settings.
-Break `derived` to always compute and the count fails; break dependency
-nesting and the existing "changes reach" tests hang.
+Built, in `loopflow-execution`:
 
-`cargo test -p loopflow --test integration wave_setup_tests::` passes.
+- `read_stream::tests::readings_share_resolved_settings_until_a_settings_file_changes`:
+  a pulled subscription reading `load_wave_config`; four readings resolve
+  once, an edit resolves once more and the frame shows it, a file that does
+  not parse answers as a bare command does, a `--setting` override changes its
+  own reading only, a second `LF_HOME` through the same `Cache` gets its own
+  settings.
+- `skills::catalog::tests::readings_share_one_catalog_until_a_skill_file_changes`
+  and `work::wave::setup::tests::readings_share_a_waves_skill_agents_until_a_settings_file_changes`,
+  through `Cache::capture`.
+- `observe::tests::`: shared until a fact changes, nested wake-up, four
+  workers compute once, a panic leaves the slot to the next caller.
+
+Counts come from a `#[cfg(test)]` list of computed keys on `Cache`. The
+catalog reaching a live subscription is still
+`new_and_edited_skill_overrides_reach_an_existing_subscription`.
 
 ## Demo
 
@@ -210,28 +211,12 @@ outside the second after a config edit. The numbers go in the PR body.
 Installing a branch build over a server with live Sessions is a person's call;
 the headless stand-in is slice 1's timing.
 
-## Slices
+## State
 
-All three are built and committed on this branch.
-
-1. `observe::derived`, nested `Dependencies`, `Outside`, `resolve_with`,
-   `config::resolved` under `load_wave_config`.
-2. Task agents read `config::resolved`; a Wave's skill agents are a derived
-   value over it. `PersonalSettings`, the `_with` loaders and both `waves.rs`
-   maps are deleted.
-3. `SkillCatalog::load` returns the shared `Arc<SkillCatalog>`.
-
-Where the code differs from the design above:
-
-- `Outside.environment` and `.invocation` are `serde_yaml_ng::Value` (it is
-  `Hash + Eq`), not serialized strings.
-- The second variant is `Derived::SkillAgents`, not `WaveSetup`: graph and
-  agent come straight from the `Settings` value, so only the per-skill agents
-  needed their own. Its computation calls `config::resolved_with`, so the
-  nesting is used by real code and not only by tests.
-- `Derived::SkillAgents` loads skills, which reads `LF_PERSONAL_PROFILE`
-  (in `Outside`), `HOME` and the provider directories (process-wide in a
-  server) outside its key.
+Built and committed in three commits: `observe::derived` with nested
+`Dependencies`, `Outside`, `resolve_with` and `config::resolved`; Task agents
+and Wave skill agents on the shared settings with the per-reading caches
+deleted; `SkillCatalog::load` returning the shared `Arc<SkillCatalog>`.
 
 What a run showed (2026-11-18, debug build, 1,000 readings of
 `load_wave_config` over three layers of eight leaves): 8.9 s resolving every
@@ -240,18 +225,20 @@ time, 22 ms through one `Cache`. Filtering the same three layers 1,000 times
 about half of a cold resolve.
 
 Still paid on every call, as before this change: `outside()` reads the
-environment and looks for each harness on `PATH` (`default_agent`).
+environment and stats each harness name along `PATH` (`default_agent`), once
+per Task per reading in Wave detail; `load_wave_config` clones the shared
+`Config`. Neither has been measured.
 
 A reading's first resolve is now once per Task checkout, where the deleted
 `waves.rs` memo resolved once per distinct configuration within a reading.
 After a server start that is one cold resolve per worktree, then none.
 
-Left:
+Left, none of it code this plan commits to:
 
 - The live `sample` under load (Demo above), by a person.
-- A `sample` of a locally run server reading a seeded store, to see what of
-  `validate_value` and `collect` is left, and whether placement
-  (`store/placement.rs`) needs a fourth variant. Not run here.
+- A `sample` of a locally run server reading a seeded store (qa or demo), to
+  see what of `validate_value`, `collect` and `outside()` is left, and whether
+  placement (`store/placement.rs`) needs a fourth variant. Not run.
 
 Checks run by this step, all passing:
 
@@ -275,14 +262,9 @@ Left on `scratch/concept-review.html`, not built here:
 - A warning about a bad setting, found by a served read, goes to the server's
   stderr. The person editing the file in front of Desktop sees nothing.
 
-## Docs written ahead of the code
+## Docs
 
-- `rust/loopflow/src/server/README.md`, after "external observations do not
-  share that transaction": what a subscriber sees when a settings or skill
-  file changes, then `observe::derived` and the rule for what a computation
-  may read. The code must match it: about a second to a new reading, one
-  warning per edit, an override never enters the shared value.
-- `AGENTS.md`, the `observe` line under `*.rs`: derived values. Written now,
-  so slice 3 no longer adds it.
-
-No page under `docs/` changes: nothing a read returns changes.
+`rust/loopflow/src/server/README.md` (after "external observations do not
+share that transaction") and the `observe` line in `AGENTS.md` describe
+derived values and match the code. No page under `docs/` changes: nothing a
+read returns changes.

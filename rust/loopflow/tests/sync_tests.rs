@@ -2636,6 +2636,30 @@ case "$1 $2" in
 esac
 "#;
 
+/// Parent Task INF-123 on pushed branch `parent`, and unstacked child INF-124 on
+/// pushed branch `child` with its own open PR #42.
+fn parent_and_published_child(
+    repo: &TestRepo,
+    home: &std::path::Path,
+) -> (
+    support::RegisteredTask,
+    std::path::PathBuf,
+    Task,
+    std::path::PathBuf,
+) {
+    let main = repo.head_sha();
+    let parent_path = repo.create_named_worktree("parent");
+    commit_file(&parent_path, "parent.txt", "parent work\n");
+    git(&parent_path, &["push", "-u", "origin", "parent"]);
+    let parent = support::register_task_without_pr(home, &parent_path, "parent", &main);
+    let child_path = repo.create_named_worktree("child");
+    commit_file(&child_path, "child.txt", "child work\n");
+    git(&child_path, &["push", "-u", "origin", "child"]);
+    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
+    publish_child_pr(&parent, &child, &child_path);
+    (parent, parent_path, child, child_path)
+}
+
 /// Give `child` its own published PR #42 at its current head.
 fn publish_child_pr(parent: &support::RegisteredTask, child: &Task, child_path: &std::path::Path) {
     let runtime = tokio::runtime::Runtime::new().unwrap();
@@ -2672,16 +2696,7 @@ fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
-    let main = repo.head_sha();
-    let parent_path = repo.create_named_worktree("parent");
-    commit_file(&parent_path, "parent.txt", "parent work\n");
-    git(&parent_path, &["push", "-u", "origin", "parent"]);
-    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
-    let child_path = repo.create_named_worktree("child");
-    commit_file(&child_path, "child.txt", "child work\n");
-    git(&child_path, &["push", "-u", "origin", "child"]);
-    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
-    publish_child_pr(&parent, &child, &child_path);
+    let (_parent, parent_path, _child, child_path) = parent_and_published_child(&repo, home.path());
 
     let output = lf(&child_path, &["sync", "INF-123"]);
     let stdout = String::from_utf8_lossy(&output.stdout);
@@ -2721,16 +2736,7 @@ fn publish_keeps_the_prs_base_and_names_a_disagreement() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
     let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
-    let main = repo.head_sha();
-    let parent_path = repo.create_named_worktree("parent");
-    commit_file(&parent_path, "parent.txt", "parent work\n");
-    git(&parent_path, &["push", "-u", "origin", "parent"]);
-    let parent = support::register_task_without_pr(home.path(), &parent_path, "parent", &main);
-    let child_path = repo.create_named_worktree("child");
-    commit_file(&child_path, "child.txt", "child work\n");
-    git(&child_path, &["push", "-u", "origin", "child"]);
-    let child = support::register_sibling_task(&parent, "INF-124", "child", &child_path);
-    publish_child_pr(&parent, &child, &child_path);
+    let (parent, _parent_path, child, child_path) = parent_and_published_child(&repo, home.path());
     rusqlite::Connection::open(&parent.database)
         .unwrap()
         .execute(

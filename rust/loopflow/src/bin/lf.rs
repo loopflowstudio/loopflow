@@ -680,12 +680,15 @@ fn format_task_pr_line(
         .map(|github| format!("GitHub #{}", github.number))
         .unwrap_or_else(|| "not opened on GitHub".to_string());
     let placement = stack_parent
-        .map(|parent| match parent.pr_number {
-            Some(number) => format!(
-                "  stacked on {} (#{number}, {})",
+        .map(|parent| {
+            let number = parent
+                .pr_number
+                .map(|number| format!("#{number}, "))
+                .unwrap_or_default();
+            format!(
+                "  stacked on {} ({number}{})",
                 parent.identifier, parent.branch
-            ),
-            None => format!("  stacked on {} ({})", parent.identifier, parent.branch),
+            )
         })
         .unwrap_or_default();
     let linkage = pr

@@ -109,18 +109,7 @@ pub fn create_or_update_pr(
 
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let publication_base = || -> OpsResult<(Option<StackedSync>, String)> {
-        let stack = crate::ops::task::task_stack(repo)?;
-        let base = match stack.as_ref() {
-            Some(stack) => stack
-                .live_parent_branch()
-                .unwrap_or(&default_branch)
-                .to_string(),
-            None => pr_target(repo, &main_repo, &default_branch)?,
-        };
-        Ok((stack, base))
-    };
-    let (stack, base_branch) = publication_base()?;
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
 
     // Record the ancestry already present in Git before the first remote effect.
     // This recognizes completed merges without integrating or rewriting history.
@@ -164,7 +153,7 @@ pub fn create_or_update_pr(
     // to later Loopflow pushes and shipping requests in this worktree.
     let _mutation = crate::ops::task::lock_task_pr_mutation(repo)?;
     // Preparation may have selected a parent while copy generation was running.
-    let (stack, base_branch) = publication_base()?;
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let locked_branch = current_branch(repo)?;
     let locked_head = rev_parse(repo, "HEAD")?;
@@ -534,13 +523,7 @@ pub fn generate_pr_copy(
         .ok_or_else(|| OpsError::Message("pr-message skill has no content".to_string()))?;
     let main_repo = resolve_main_repo(repo);
     let default_branch = get_default_branch(&main_repo)?;
-    let stack = crate::ops::task::task_stack(repo)?;
-    let base_branch = match stack.as_ref() {
-        Some(stack) => stack
-            .live_parent_branch()
-            .map_or(default_branch, str::to_string),
-        None => pr_target(repo, &main_repo, &default_branch)?,
-    };
+    let (stack, base_branch) = publication_base(repo, &main_repo, &default_branch)?;
     require_non_task_pr_range_nonempty(repo, stack.is_some(), &base_branch)?;
     let log = git_stdout(
         repo,
@@ -2061,6 +2044,24 @@ fn update_pr(repo: &Path, number: u64, title: &str, body: &str) -> OpsResult<()>
 // PR base
 // ---------------------------------------------------------------------------
 
+/// The Task's stack and the base its PR should target: a stacked Task's live
+/// parent, else the default branch; a worktree without a stack follows its upstream.
+fn publication_base(
+    repo: &Path,
+    main_repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(Option<StackedSync>, String)> {
+    let stack = crate::ops::task::task_stack(repo)?;
+    let base = match stack.as_ref() {
+        Some(stack) => stack
+            .live_parent_branch()
+            .unwrap_or(default_branch)
+            .to_string(),
+        None => pr_target(repo, main_repo, default_branch)?,
+    };
+    Ok((stack, base))
+}
+
 /// What publication knows about where an existing PR should point.
 struct PublicationRecord<'a> {
     /// The Task's identifier; `None` outside a Task worktree.
@@ -2119,13 +2120,10 @@ fn pr_base_disagreement(
         None => "records no stack parent".to_string(),
     };
     let record_it = match owner {
-        Some(owner) => Some(owner),
-        None if pr_base == record.default_branch => Some(record.default_branch),
-        None => None,
+        Some(owner) => format!("Record it: lf sync {owner}. "),
+        None if pr_base == record.default_branch => format!("Record it: lf sync {pr_base}. "),
+        None => String::new(),
     };
-    let record_it = record_it
-        .map(|target| format!("Record it: lf sync {target}. "))
-        .unwrap_or_default();
     format!(
         "PR #{number} targets {pr_base}{owned}, but {identifier} {recorded}.\nKept the PR's base. {record_it}Follow the record: gh pr edit {number} --base {}",
         record.base

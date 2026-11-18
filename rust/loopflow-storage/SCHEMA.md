@@ -55,27 +55,29 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 - `ci_incidents`: identity, landing_id, task_id, pr_id, repo, pr_number, failed_head_sha, failure_set_json, provider_completed_at, poll_observed_at, webhook_received_at, claimed_landing_generation, responded_at, green_at, merged_at, blocked_at, blocked_reason, created_at, updated_at, repaired_head_sha, repair_lf_process_id, repair_session_id, repair_retries, repair_finished_at, repair_error, repair_conclusion
 - `pr_landings`: id, repo, pr_number, worktree, branch, task_id, requested_head_sha, observed_head_sha, merge_commit, after_merge, next_slug, state, generation, supervisor_placement, supervisor_machine_id, supervisor_process_id, supervisor_heartbeat_at, blocked_reason, created_at, updated_at, retired_supervisor_json
 
-## Linear observations
+## Tracker events
+
+Released lf still writes the retired `pm_*` and `planning_peer_*` names; mirror triggers copy each write into the tables below.
 
 - `linear_team_checks`: team_id, attempted_at, synced_through
-- `pm_issue_changes`: issue_id, revision_ns, removed
-- `pm_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
+- `tracker_events`: issue_id, revision_ns, removed
+- `tracker_items`: repo, provider, id, identifier, project_id, observed_at, needs_refresh, revision, branch_name, url, name, description, rank, completed, completed_at, due_date, state, team_id, assignee, completed_at_observed, due_date_observed, assignee_observed, claimed_project_id, project_id_observed
 - `pm_project_name_cutover` — **leaving → LOO-954, unused_store_members**: repo, provider, id, body, observed_at, archived, membership_unresolved, converted_at
-- `pm_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
-- `pm_wave_projects`: wave_id, project_id, position
-- `pm_wave_sync`: wave_id, provider, initiative, synced_at
+- `tracker_projects`: repo, provider, id, observed_at, archived, membership_unresolved, task_order_json, revision, slug, name, summary, status, krs, metric_targets, initiative_ids, team_ids, description, description_revision, description_observed_at
+- `tracker_wave_projects`: wave_id, project_id, position
+- `tracker_wave_sync`: wave_id, provider, initiative, synced_at
 - `project_binding_imports` — **leaving → LOO-954, unused_store_members**: wave_id, original_yaml, imported_at
 - `project_transition_items` — **leaving → LOO-954, unused_store_members**: wave_id, successor_id, issue_id
 - `project_transitions`: wave_id, successor_id, predecessor_id, reset_name, create_successor, created_at, settled_at, local_plan_json, export_json, export_attempted, export_link_attempted, export_error, export_observed_at
 
-## Planning exchange
+## Git tracker
 
-- `planning_destinations`: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
-- `planning_peer_changes`: id, record_table, mutation, object_id, field, clock
-- `planning_peer_conflicts`: repo, kind, object_id, reason, active
-- `planning_peer_imports`: repo, destination, revision
-- `planning_peer_observed`: id
-- `planning_peer_routes`: mutation_id, repo, destination
+- `git_tracker_destinations`: repo, id, endpoint, reference, fetched_revision, acquisition_error, publication_revision, publication_state, publication_digest, publication_error
+- `git_tracker_changes`: id, record_table, mutation, object_id, field, clock
+- `git_tracker_conflicts`: repo, kind, object_id, reason, active
+- `git_tracker_imports`: repo, destination, revision
+- `git_tracker_seen`: id
+- `git_tracker_routes`: mutation_id, repo, destination
 - `planning_user`: singleton, user_key
 - `repository_plans`: id, repo, selected
 

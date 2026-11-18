@@ -9,6 +9,7 @@ import os
 import select
 import socket
 import struct
+import subprocess
 import sys
 import threading
 import time
@@ -223,6 +224,27 @@ def _overrides(args: list[str]) -> dict:
     return overrides
 
 
+def _start_hooks(args: list[str]) -> None:
+    """Like Codex, a bare terminal tells its SessionStart hooks its thread."""
+    resumed = "resume" in args
+    thread = args[args.index("resume") + 2] if resumed else str(uuid.uuid4())
+    event = json.dumps({
+        "hook_event_name": "SessionStart",
+        "session_id": thread,
+        "source": "resume" if resumed else "startup",
+        "cwd": os.getcwd(),
+    })
+    hooks = _overrides(args).get("hooks", {})
+    for group in hooks.get("SessionStart", []):
+        for hook in group["hooks"]:
+            subprocess.run(
+                ["/bin/sh", "-c", hook["command"]],
+                input=event.encode(),
+                stdout=subprocess.DEVNULL,
+                check=True,
+            )
+
+
 def _server(endpoint: str, home: Path) -> None:
     server_config = json.loads((home / "native-server-config.json").read_text())
     tier_file = home / "native-tier.json"
@@ -417,7 +439,10 @@ def main() -> None:
         _stdio(home)
     else:
         # A bare launch is plain `codex` in its terminal, configured by argv.
+        if (home / "fail-terminal").exists():
+            raise SystemExit(24)
         print("\n".join(args), flush=True)
+        _start_hooks(args)
         with (home / "launched").open("a") as file:
             file.write(os.environ.get("LF_CAPTURE_KEY", "") + "\n")
 

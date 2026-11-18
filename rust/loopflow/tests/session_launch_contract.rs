@@ -1011,7 +1011,8 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
     let fixture = Fixture::new("codex");
     let machine = fixture.home.path().join("machine");
     fixture.create_wave();
-    fs::write(machine.join("fail-server"), "").unwrap();
+    // A chat is a bare Codex terminal; this one exits before starting a thread.
+    fs::write(machine.join("fail-terminal"), "").unwrap();
     let failed = fixture
         .command()
         .args([
@@ -1025,8 +1026,7 @@ fn another_agent_resumes_a_failed_codex_bootstrap_on_its_own_input() {
         .unwrap();
     assert!(!failed.status.success());
     let session = fixture.session();
-    fs::remove_file(machine.join("fail-server")).unwrap();
-    // The server failed before Codex started a thread.
+    fs::remove_file(machine.join("fail-terminal")).unwrap();
     let resumed = fixture.run(&["-a", "claude", "session", "resume", &session]);
     // A fresh Claude input, not the reopened Codex bootstrap.
     assert!(args(&resumed).contains(&"--session-id"), "{resumed}");
@@ -1216,11 +1216,12 @@ fn live_taskless_provider_switch_preserves_identity_and_accepts_terminal_input()
     let _ = first.kill();
     first.wait().unwrap();
     success(&switched);
+    // A taskless chat reopens as a chat: bare Codex takes the history as argv.
     let imported = fixture.received();
     assert!(
-        imported["turns"]
-            .to_string()
-            .contains("Preserve the original design"),
+        args(&imported)
+            .iter()
+            .any(|arg| arg.contains("Preserve the original design")),
         "{imported}"
     );
     assert_eq!(fixture.session(), session);

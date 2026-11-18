@@ -79,9 +79,10 @@ row names the test that shows it; "no" is a gap with its owner.
 
 | a Task step | Claude | Codex | OpenCode | Pi | test |
 |---|---|---|---|---|---|
-| starts as a worker, settles, records its answer, native thread and usage; the Graph advances | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
-| receives the step's context | yes | yes | yes | yes | same |
-| hears a steer sent while it runs | yes | yes | yes | yes | same |
+| starts as a worker, settles, records its answer and native thread; the Graph advances | yes | yes | yes | yes | `task_graph_launch_tests::a_task_step_runs_as_a_worker_on_every_harness` |
+| records its usage | not shown | not shown | not shown | not shown | |
+| receives the step's context | not shown | not shown | not shown | not shown | |
+| hears a steer sent while it runs | not shown | not shown | not shown | not shown | |
 | runs as `yolo` in its Task's checkout | yes | yes | yes | yes | `harness::launch_matrix` |
 | is passed over when its CLI is not installed, or named once when it was the only choice | yes | yes | yes | yes | `task_graph_launch_tests::a_step_that_cannot_launch_is_not_started_again` |
 | fails the turn, with the question as its reason, when it asks one and nobody is there | not shown | not shown | yes | yes | `task_graph_launch_tests::a_question_with_nobody_there_ends_the_step` |

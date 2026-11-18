@@ -15,8 +15,9 @@ checked, and how the next gap is seen.
 | behavior | shown by |
 |---|---|
 | a worker starts, settles, records answer, native thread and usage; the Graph advances | `a_task_step_runs_as_a_worker_on_every_harness` |
-| the step's context reaches the provider | same test, read from the stand-in's input |
-| a steer sent while the step runs reaches it | same test |
+| the step's context reaches the provider | not asserted yet: slice 6 |
+| a steer sent while the step runs reaches it | not asserted yet: slice 6 |
+| the step's usage is recorded | not asserted yet: slice 6 |
 | a harness that is not installed is passed over, or named once | `a_step_that_cannot_launch_is_not_started_again` |
 | a question with nobody there ends the turn | OpenCode, Pi: `a_question_with_nobody_there_ends_the_step`. Claude, Codex: not shown |
 | interrupt stops a worker with its turn recorded interrupted; the next run starts the step again | OpenCode, Pi: `a_worker_stops_on_interrupt_and_its_session_resumes`. Claude, Codex: not shown |
@@ -372,6 +373,16 @@ The docs commit the implementation to three things the plan had left open:
    - Steers to a running headless turn are no longer posted by lf
      (`send_current` is `NotSteerable`); the plugin's between-tool check
      delivers them, and one that arrives after the last tool seeds the next turn.
+
+6. **Next: the worker test reads back context, a steer and usage.** Gate's
+   acceptance asks `a_task_step_runs_as_a_worker_on_every_harness` for these,
+   and it asserts none of them; the README rows read "not shown" until it does
+   (they read "yes" before this realign). Per stand-in: the step's context in
+   the input it received, a steer sent with `lf steer` while it holds mid-turn
+   (the `hold-turn`/`holding` handshake slice 4 added), and usage in the
+   Task's history. OpenCode delivers context and steers through the JS plugin,
+   which `opencode_cli.py` never runs; if the stand-in cannot show them, the
+   OpenCode cells say so and demo checks them on the real CLI.
 
 ## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
 

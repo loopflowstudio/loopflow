@@ -1370,7 +1370,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
             assert_eq!(retained.worktree, saved.worktree);
             assert_eq!(retained.branch, saved.branch);
             assert_eq!(retained.base_commit, saved.base_commit);
-            assert_eq!(retained.pm_snapshot_synced_at, saved.pm_snapshot_synced_at);
+            assert_eq!(retained.tracker_synced_at, saved.tracker_synced_at);
             {
                 let rows = &status["projects"]["items"];
                 let rows = rows.as_array().unwrap();
@@ -1560,7 +1560,7 @@ fn project_edits_save_offline_in_both_connection_modes() {
             // The unsent rename is sent last and wins; unsaved fields follow Linear.
             assert_eq!(read["project"]["name"], "Saved");
             assert_eq!(read["project"]["krs"][0]["holds"], true);
-            assert_eq!(read["project"]["pm_snapshot_synced_at"], 18);
+            assert_eq!(read["project"]["tracker_synced_at"], 18);
             let revision: String = rusqlite::Connection::open(home.path().join("loopflow.db"))
                 .unwrap()
                 .query_row(

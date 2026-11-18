@@ -2,10 +2,10 @@ use crate::planning_git::PlanningDestination;
 
 use super::{run_sqlite, Store, StoreResult};
 
-pub use super::peer_records::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use loopflow_storage::git_tracker::{GitDestination, GitDestinationConflict, PlanningJournal};
 
 impl Store {
-    pub async fn peer_planning_journal(
+    pub async fn git_journal(
         &self,
         repo: &str,
         active: Option<&str>,
@@ -13,20 +13,20 @@ impl Store {
         let repo = repo.to_string();
         let active = active.map(str::to_string);
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_journal(&repo, active.as_deref())
+            sqlite.git_journal(&repo, active.as_deref())
         })
         .await
     }
 
-    pub async fn peer_planning_status(
+    pub async fn git_destinations(
         &self,
         repo: &str,
         active: Option<&str>,
-    ) -> StoreResult<Vec<PeerPlanningStatus>> {
+    ) -> StoreResult<Vec<GitDestination>> {
         let repo = repo.to_string();
         let active = active.map(str::to_string);
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.peer_planning_status(&repo, active.as_deref())
+            sqlite.git_destinations(&repo, active.as_deref())
         })
         .await
     }
@@ -43,7 +43,7 @@ impl Store {
         run_sqlite(&self.sqlite, move |sqlite| sqlite.planning_user_key()).await
     }
 
-    pub async fn bind_peer_planning(
+    pub async fn bind_git_destination(
         &self,
         repo: &str,
         destination: &PlanningDestination,
@@ -51,21 +51,21 @@ impl Store {
         let repo = repo.to_string();
         let destination = destination.clone();
         run_sqlite(&self.sqlite, move |sqlite| {
-            sqlite.bind_peer_planning(&repo, &destination)
+            sqlite.bind_git_destination(&repo, &destination)
         })
         .await
     }
 }
 
-/// Observe peer configuration and repository identity before the SQL import.
-pub fn import_peer_planning(
+/// Read the Git tracker configuration and repository identity before the SQL import.
+pub fn import_git_plan(
     store: &super::sqlite::SqliteStore,
     repo: &str,
     destination: &str,
     revision: &str,
     incoming: &loopflow_storage::planning_exchange::PlanningSnapshot,
 ) -> StoreResult<()> {
-    if store.peer_import_current(repo, destination, revision)? {
+    if store.git_import_current(repo, destination, revision)? {
         return Ok(());
     }
     let incoming = incoming
@@ -87,7 +87,7 @@ pub fn import_peer_planning(
             .map(|(name, declaration)| (declaration.id, name))
             .collect();
         let connected = crate::ops::tracker::connected(repo);
-        let import = super::sqlite::PeerImport {
+        let import = super::sqlite::GitPlanImport {
             repo,
             destination,
             revision,
@@ -96,7 +96,7 @@ pub fn import_peer_planning(
             planning_connected: connected,
             machine_names,
         };
-        if store.import_prepared_peer_planning(&import)? {
+        if store.import_prepared_git_plan(&import)? {
             return Ok(());
         }
     }
@@ -104,14 +104,14 @@ pub fn import_peer_planning(
 
 #[cfg(test)]
 mod tests {
-    use super::import_peer_planning;
+    use super::import_git_plan;
     use crate::planning_git::PlanningDestination;
     use crate::repository::location::{
         bind_repository, ensure_repository, locator_directory, read_locator,
     };
     use loopflow_model::durable::RepositoryId;
     use loopflow_storage::planning_exchange::PlanningSnapshot;
-    use loopflow_storage::sqlite::PeerImport;
+    use loopflow_storage::sqlite::GitPlanImport;
     use loopflow_test_support::TestRepo;
 
     #[test]
@@ -124,7 +124,7 @@ mod tests {
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/retry")
                 .unwrap();
-        let route = store.bind_peer_planning(path, &destination).unwrap();
+        let route = store.bind_git_destination(path, &destination).unwrap();
         let incoming = PlanningSnapshot::default();
         store
             .conn
@@ -135,7 +135,7 @@ mod tests {
              BEGIN SELECT RAISE(ABORT,'registration failed'); END;",
             )
             .unwrap();
-        assert!(import_peer_planning(&store, path, &route, "one", &incoming).is_err());
+        assert!(import_git_plan(&store, path, &route, "one", &incoming).is_err());
         assert!(store.repository_id(path).unwrap().is_none());
         let directory = locator_directory(
             &crate::git::worktrees::git_common_dir(repo.path()).unwrap(),
@@ -148,10 +148,10 @@ mod tests {
             .unwrap()
             .execute_batch("DROP TRIGGER fail_registration")
             .unwrap();
-        import_peer_planning(&store, path, &route, "one", &incoming).unwrap();
+        import_git_plan(&store, path, &route, "one", &incoming).unwrap();
         assert_eq!(store.repository_id(path).unwrap(), Some(original));
-        assert!(store.peer_import_current(path, &route, "one").unwrap());
-        assert!(store.peer_planning_status(path, Some(&route)).unwrap()[0].active);
+        assert!(store.git_import_current(path, &route, "one").unwrap());
+        assert!(store.git_destinations(path, Some(&route)).unwrap()[0].active);
     }
 
     #[test]
@@ -162,10 +162,10 @@ mod tests {
         let destination =
             PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/scope")
                 .unwrap();
-        let route = store.bind_peer_planning("/repo", &destination).unwrap();
+        let route = store.bind_git_destination("/repo", &destination).unwrap();
         let inputs = store.repository_registration("/repo").unwrap();
         let incoming = PlanningSnapshot::default();
-        let prepared = PeerImport {
+        let prepared = GitPlanImport {
             inputs: &inputs,
             repo: "/repo",
             destination: &route,
@@ -176,10 +176,10 @@ mod tests {
         };
         let later = RepositoryId::new();
         bind_repository(&store, "/repo", &later).unwrap();
-        assert!(!store.import_prepared_peer_planning(&prepared).unwrap());
-        assert!(!store.peer_import_current("/repo", &route, "one").unwrap());
-        import_peer_planning(&store, "/repo", &route, "one", &incoming).unwrap();
+        assert!(!store.import_prepared_git_plan(&prepared).unwrap());
+        assert!(!store.git_import_current("/repo", &route, "one").unwrap());
+        import_git_plan(&store, "/repo", &route, "one", &incoming).unwrap();
         assert_eq!(store.repository_id("/repo").unwrap(), Some(later));
-        assert!(store.peer_import_current("/repo", &route, "one").unwrap());
+        assert!(store.git_import_current("/repo", &route, "one").unwrap());
     }
 }

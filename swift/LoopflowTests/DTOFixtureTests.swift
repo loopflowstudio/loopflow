@@ -995,10 +995,11 @@ struct DTOFixtureTests {
         #expect(decoded == session)
     }
 
-    @Test("Peer planning keeps independent receipts")
-    func peerPlanningStatus() throws {
-        let data = try loadFixtureData("peer_planning_status.json")
-        let statuses = try JSONDecoder().decode([PeerPlanningStatus].self, from: data)
+    @Test("Git destinations track fetch and publication independently")
+    func gitDestinations() throws {
+        let data = try loadFixtureData("git_destinations.json")
+        let statuses = try JSONDecoder().decode([GitDestination].self, from: data)
+        #expect(statuses[0].fetchError == "remote unavailable")
         #expect(statuses[0].pendingLocal)
         #expect(statuses[0].publicationState == "unconfirmed")
         #expect(statuses[0].importedRevision == "retained-import")
@@ -1006,11 +1007,11 @@ struct DTOFixtureTests {
         #expect(statuses[0].conflicts[0].target == "retained-task")
         #expect(statuses[1].pendingLocal == true)
         #expect(statuses[1].active)
-        for field in ["conflicts", "pending_local"] {
+        for field in ["conflicts", "pending_local", "fetch_error"] {
             var object = try #require(JSONSerialization.jsonObject(with: data) as? [[String: Any]])[1]
             object.removeValue(forKey: field)
             #expect(throws: (any Error).self) {
-                try JSONDecoder().decode(PeerPlanningStatus.self, from: JSONSerialization.data(withJSONObject: object))
+                try JSONDecoder().decode(GitDestination.self, from: JSONSerialization.data(withJSONObject: object))
             }
         }
     }
@@ -1027,14 +1028,14 @@ struct DTOFixtureTests {
             try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
         }
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
-                                                "activity", "task", "peer_planning"])
+                                                "activity", "task", "git_destinations"])
         #expect(frames[0].answers == nil)
         #expect(frames[2].answers == 7)
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
               case .workActivity(let activity?) = frames[4].content,
-              case .peerPlanning(let peers?) = frames[7].content else {
+              case .gitDestinations(let reading?) = frames[7].content else {
             Issue.record("fixture parts changed shape")
             return
         }
@@ -1043,8 +1044,8 @@ struct DTOFixtureTests {
         #expect(sessions.repo == "/src/loopflow")
         #expect(!sessions.includesHeadless)
         #expect(activity.scope.task == "LOO-1")
-        #expect(peers.repo == "/src/loopflow")
-        #expect(peers.destinations.isEmpty)
+        #expect(reading.repo == "/src/loopflow")
+        #expect(reading.destinations.isEmpty)
         guard case .task(nil) = frames[3].content else {
             Issue.record("a failed reading has no body")
             return

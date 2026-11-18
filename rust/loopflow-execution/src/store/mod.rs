@@ -49,10 +49,9 @@ pub use loopflow_storage::transcript;
 pub use loopflow_storage::work;
 pub use opening::open_sqlite;
 pub mod ownership;
-pub use loopflow_storage::peer_records;
 pub use loopflow_storage::people;
+pub mod git_tracker;
 pub mod placement;
-pub mod planning_peers;
 mod planning_reads;
 pub use loopflow_storage::planning_sync;
 mod pr_landings;
@@ -88,7 +87,7 @@ mod state_without_history_tests;
 mod steer_lifecycle_tests;
 
 pub use error::{StoreError, StoreResult};
-pub use planning_peers::{PeerPlanningStatus, PeerProjectionConflict, PlanningJournal};
+pub use git_tracker::{GitDestination, GitDestinationConflict, PlanningJournal};
 pub use recording_gap::{GapSpan, RecordingGap};
 pub use records::*;
 
@@ -815,9 +814,9 @@ mod tests {
             identifier: "INF-123".to_string(),
             title: "Add hello world".to_string(),
             description: "Ship one command".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(wave.id().clone()),
             project_id: Some(project.id.clone()),
             worktree: Some(PathBuf::from("/repo.inf-123")),
@@ -887,7 +886,7 @@ mod tests {
             description: "Definition:\nKeep local work fast.".to_string(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
             created_at: now,
@@ -989,7 +988,7 @@ mod tests {
             expected.title = "Accepted title".into();
             expected.description = "Accepted direction".into();
             expected.state = Some("unstarted".into());
-            expected.pm_snapshot_synced_at = Some(17);
+            expected.tracker_synced_at = Some(17);
             assert!(accepted.updated_at >= task.updated_at);
             expected.updated_at = accepted.updated_at;
             // Placement records the Task's branch in its plan.
@@ -1055,7 +1054,7 @@ mod tests {
                     .krs,
                 snapshot.snapshot.projects[1].krs
             );
-            assert_eq!(record.pm_snapshot_synced_at, Some(17));
+            assert_eq!(record.tracker_synced_at, Some(17));
             let process = loopflow_model::id::LfProcessId::new();
             rusqlite::Connection::open(directory.path().join("registry.db")).unwrap().execute(
                 "INSERT INTO processes(id,trace_id,started_at,completed_at,outcome) VALUES(?1,?2,1,2,'succeeded')",
@@ -1143,7 +1142,7 @@ mod tests {
             assert_eq!(record.completed_at, None);
             assert_eq!(record.assignee, None);
             assert_eq!(record.rank, 0);
-            assert_eq!(record.pm_snapshot_synced_at, Some(17));
+            assert_eq!(record.tracker_synced_at, Some(17));
             assert_eq!(
                 crate::store::task_work::task_graph(&store.sqlite, &task.id).unwrap(),
                 reopened
@@ -1502,7 +1501,7 @@ mod tests {
             assert_eq!(retried.identifier, task.identifier);
             assert_eq!(retried.title, task.title);
             assert_eq!(retried.description, task.description);
-            assert_eq!(retried.pm_snapshot_synced_at, task.pm_snapshot_synced_at);
+            assert_eq!(retried.tracker_synced_at, task.tracker_synced_at);
             assert!(store.task_prs(&task.id).await.unwrap().is_empty());
             assert_eq!(retried.branch, first.branch);
             assert_eq!(retried.base_commit, first.base_commit);
@@ -1607,7 +1606,7 @@ mod tests {
         store.create_project(&project).await.unwrap();
         select_project(&store, &project);
         let mut task = make_task(&store, &wave, &project);
-        task.pm_snapshot_synced_at = Some(1);
+        task.tracker_synced_at = Some(1);
         let pr = make_task_pr(&task);
         store.seed_task(&task, &pr).await.unwrap();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
@@ -1702,9 +1701,9 @@ mod tests {
         let retained = store.get_project(&project.id).await.unwrap().unwrap();
         let refreshed = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(retained.name, snapshot.snapshot.projects[0].name);
-        assert_eq!(retained.pm_snapshot_synced_at, Some(10));
+        assert_eq!(retained.tracker_synced_at, Some(10));
         assert_eq!(refreshed.title, "New issue title");
-        assert_eq!(refreshed.pm_snapshot_synced_at, Some(20));
+        assert_eq!(refreshed.tracker_synced_at, Some(20));
         assert_eq!(refreshed.worktree, task.worktree);
         assert_eq!(store.task_prs(&task.id).await.unwrap(), vec![pr]);
         assert_eq!(
@@ -1793,7 +1792,7 @@ mod tests {
         store.seed_inventory(snapshot, None).await.unwrap();
         let projected = store.get_project(&project.id).await.unwrap().unwrap();
         assert_eq!(projected.name, original.name);
-        assert_eq!(projected.pm_snapshot_synced_at, Some(10));
+        assert_eq!(projected.tracker_synced_at, Some(10));
     }
 
     #[tokio::test]
@@ -1914,7 +1913,7 @@ mod tests {
         assert_eq!(updated_project.wave_id, project.wave_id);
         let mut updated_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(updated_task.title, "Refreshed work");
-        assert_eq!(updated_task.pm_snapshot_synced_at, Some(10));
+        assert_eq!(updated_task.tracker_synced_at, Some(10));
         assert_eq!(updated_task.state.as_deref(), Some("canceled"));
         updated_task.state = task.state.clone();
         updated_task.revision = task.revision;
@@ -1922,7 +1921,7 @@ mod tests {
         updated_task.identifier = task.identifier.clone();
         updated_task.title = task.title.clone();
         updated_task.description = task.description.clone();
-        updated_task.pm_snapshot_synced_at = task.pm_snapshot_synced_at;
+        updated_task.tracker_synced_at = task.tracker_synced_at;
         assert!(updated_task.updated_at >= task.updated_at);
         updated_task.updated_at = task.updated_at;
         assert_eq!(updated_task, task);
@@ -2032,7 +2031,7 @@ mod tests {
             Some(snapshot.synced_at)
         );
         let durable = store.get_project(&project.id).await.unwrap().unwrap();
-        assert_eq!(durable.pm_snapshot_synced_at, Some(10));
+        assert_eq!(durable.tracker_synced_at, Some(10));
         assert_eq!(durable.metric_targets, confirmed.metric_targets);
         assert_eq!(durable.krs, confirmed.krs);
         let other = Wave::new(WaveId::new(), "other".into(), wave.repo().into());
@@ -2439,7 +2438,7 @@ mod tests {
         assert_eq!(saved.identifier, task.identifier);
         assert_eq!(saved.title, task.title);
         assert_eq!(saved.description, task.description);
-        assert_eq!(saved.pm_snapshot_synced_at, task.pm_snapshot_synced_at);
+        assert_eq!(saved.tracker_synced_at, task.tracker_synced_at);
         assert_eq!(saved.worktree, task.worktree);
         let durable_child_rows = |path: &std::path::Path| {
             rusqlite::Connection::open(path)
@@ -2558,9 +2557,9 @@ mod tests {
         expected.revision += 1;
         expected.title = "Edited planning title".into();
         expected.description = "Edited planning notes".into();
-        expected.pm_snapshot_synced_at = expected.pm_snapshot_synced_at.map(|at| at + 1);
+        expected.tracker_synced_at = expected.tracker_synced_at.map(|at| at + 1);
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        snapshot.synced_at = expected.pm_snapshot_synced_at.unwrap();
+        snapshot.synced_at = expected.tracker_synced_at.unwrap();
         snapshot.snapshot.items[0].name = expected.title.clone();
         snapshot.snapshot.items[0].description = expected.description.clone();
         expected.state = snapshot.snapshot.items[0].state.clone();
@@ -2631,17 +2630,14 @@ mod tests {
         let stored_project = store.get_project(&project.id).await.unwrap().unwrap();
         let stored_task = store.get_task(&task.id).await.unwrap().unwrap();
         assert_eq!(stored_project.status, observed.status);
-        assert_eq!(stored_project.pm_snapshot_synced_at, Some(10));
+        assert_eq!(stored_project.tracker_synced_at, Some(10));
         assert_eq!(wave_refresh_at(dir.path(), &wave), None);
         assert_eq!(stored_task.revision, task.revision);
         assert_eq!(stored_task.tracker_id, task.tracker_id);
         assert_eq!(stored_task.identifier, task.identifier);
         assert_eq!(stored_task.title, task.title);
         assert_eq!(stored_task.description, task.description);
-        assert_eq!(
-            stored_task.pm_snapshot_synced_at,
-            task.pm_snapshot_synced_at
-        );
+        assert_eq!(stored_task.tracker_synced_at, task.tracker_synced_at);
         assert_eq!(stored_task.project_id, Some(stored_project.id));
     }
 
@@ -2960,7 +2956,7 @@ mod tests {
         let mut refreshed_plan = task.clone();
         refreshed_plan.title = "Latest provider title".into();
         let mut snapshot = task_planning_snapshot(&wave, &project, &task);
-        snapshot.synced_at = refreshed_plan.pm_snapshot_synced_at.unwrap();
+        snapshot.synced_at = refreshed_plan.tracker_synced_at.unwrap();
         snapshot.snapshot.items[0].name = refreshed_plan.title.clone();
         snapshot.snapshot.items[0].revision = Some("2026-10-05T13:00:00Z".into());
         snapshot.snapshot.items[0].completed = false;
@@ -2988,10 +2984,7 @@ mod tests {
         assert_eq!(retained.identifier, refreshed_plan.identifier);
         assert_eq!(retained.title, refreshed_plan.title);
         assert_eq!(retained.description, refreshed_plan.description);
-        assert_eq!(
-            retained.pm_snapshot_synced_at,
-            refreshed_plan.pm_snapshot_synced_at
-        );
+        assert_eq!(retained.tracker_synced_at, refreshed_plan.tracker_synced_at);
         let stored = store.task_prs(&task.id).await.unwrap();
         assert!(stored.is_empty());
         assert_eq!(retained.branch, task.branch);

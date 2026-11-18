@@ -230,15 +230,13 @@ they are the plan writer and sync.
 3. **Wire + Project vocabulary (implemented).** Task status and Work share `tracker_state {state, synced_at}`. Tasks and Projects expose `tracker_id`; metric issues use `project_unavailable`, and Wave removal counts `projects`. Rust, Swift, CLI text, the server schema and shared fixtures match. Stored creation receipts keep the binding readable by released writers.
 4. **Events and tracker prose (implemented).** Linear and Asana produce `TrackerEvent`. Task steering keeps a per-Task cursor, and planning reads the latest `LinearIssueState`. CLI help, Desktop comment conflicts and planning docs name the tracker. LOO-960 owns the contract migration 30 days after merge.
 
-5. **Git destination and Task JSON names (next).** The two decisions above:
-   rename types, modules, calls, the `fetch_error` wire key with its Swift
-   mirror, `tests/fixtures/dto/*` and `server_schema.json`; rename the two
-   `pm_` Task/Project fields and the printed line; add the glossary row. Done
-   when `git grep -nE 'PeerPlanning|PeerProjection|peer_records|planning_peers|peer_status|acquisition_error|acquisitionError|pm_writeback|pm_snapshot_synced_at|PM writeback' -- rust swift docs tests/fixtures/dto`
-   finds only migrations, released-schema fixtures, SQL column names and the
-   mirror tests in `sqlite/revisions.rs`. Check: `cargo clippy --all-targets -- -D warnings`,
-   `cargo test -p loopflow --test integration dto_fixtures::`, and
-   `lf repo tracker --json` in a Git-tracker repo shows `fetch_error`.
+5. **Git destination and Task JSON names (implemented).** Rust, Swift and the
+   server schema use `GitDestination`, `GitDestinationConflict` and
+   `fetch_error`. Task and Project JSON expose `tracker_synced_at`, and the
+   Task's writeback field is `tracker_writeback`. Released names remain in
+   stored creation receipts for replay across CLI versions, historical
+   migration references, SQL columns and mirror tests. The glossary defines
+   destination.
 
 ## What goes
 
@@ -257,6 +255,7 @@ names. Released migrations, release notes and released-schema fixtures under
 - Slice 2: six config-key tests and four documented-command checks passed. A temporary Git repository exercised tracker status, journal, key creation and lookup, and the switch from Linear to Git. Installed lf read the Linear team written by the candidate. Offline Project edits passed in both connection modes, the server schema matched the candidate CLI, and clippy passed for all targets.
 - Slice 3: 52 Rust DTO fixtures, the stream timestamp test, four documented-command checks and all-target clippy passed. Changed Swift sources parsed. A server restart replayed the creation receipt. Installed and candidate CLIs each replayed the other’s creation in an isolated Git repo; Task show and Work agreed on the unbound ID and sync state.
 - Slice 4: 23 focused event, historical upgrade, schema and documented-command tests passed, plus the issue-fetch and end-to-end Task comment tests. All-target clippy passed. Candidate `lf help wave sync` names the tracker. The architecture HTML matches its source.
+- Slice 5: all-target clippy, 52 Rust DTO fixtures, the server-restart replay test and four documented-command checks passed. A standalone Swift decoder read independent fetch and publication errors and rejected a missing fetch_error. In an isolated Git repository, both CLI versions replayed each other’s Task creation. The candidate reported fetch_error for its ref and printed “tracker writeback: current” after checkout.
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
 

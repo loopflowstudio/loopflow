@@ -517,8 +517,9 @@ pub struct Task {
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<LinearIssueId>,
     /// Time of the last successful tracker refresh.
-    pub pm_snapshot_synced_at: Option<i64>,
-    pub pm_writeback: LinearWritebackState,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
+    pub tracker_writeback: LinearWritebackState,
     /// Read projection from the Project join, validated against the Project on save.
     pub wave_id: Option<WaveId>,
     /// Stable repository identity, independent of planning membership.
@@ -767,9 +768,9 @@ mod tests {
             identifier: "INF-123".to_string(),
             title: "Ship it".to_string(),
             description: String::new(),
-            pm_snapshot_synced_at: Some(1),
+            tracker_synced_at: Some(1),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(loopflow_model::id::WaveId::new()),
             project_id: Some(crate::work::project::ProjectId::new()),
             worktree: Some("/tmp/task".into()),
@@ -792,13 +793,13 @@ mod tests {
     fn task_content_round_trip_keeps_binding_revision_and_observation_age() {
         let mut task = task();
         task.revision = 17;
-        task.pm_snapshot_synced_at = Some(42);
+        task.tracker_synced_at = Some(42);
         let value = serde_json::to_value(&task).unwrap();
         assert!(value.get("plan").is_none());
         assert_eq!(value["title"], "Ship it");
         assert_eq!(value["revision"], 17);
         assert_eq!(value["tracker_id"], "issue-1");
-        assert_eq!(value["pm_snapshot_synced_at"], 42);
+        assert_eq!(value["tracker_synced_at"], 42);
         assert_eq!(serde_json::from_value::<Task>(value).unwrap(), task);
     }
 
@@ -811,7 +812,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_pm_writeback_has_a_stable_json_shape() {
+    fn pending_tracker_writeback_has_a_stable_json_shape() {
         let state = LinearWritebackState::Pending {
             operation: LinearWritebackOperation::CompleteTask,
             error: "offline".to_string(),
@@ -1025,9 +1026,9 @@ mod tests {
     }
 
     #[test]
-    fn pending_pm_writeback_is_valid_without_a_controller() {
+    fn pending_tracker_writeback_is_valid_without_a_controller() {
         let mut task = task();
-        task.pm_writeback = LinearWritebackState::Pending {
+        task.tracker_writeback = LinearWritebackState::Pending {
             operation: LinearWritebackOperation::CompleteTask,
             error: "too early".to_string(),
         };

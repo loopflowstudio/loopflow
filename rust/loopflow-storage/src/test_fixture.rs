@@ -233,7 +233,7 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         description: "Probe Task execution".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave_id.clone(),
         created_at: now,
@@ -257,9 +257,9 @@ pub fn task() -> (tempfile::TempDir, SqliteStore, Task, TaskPr) {
         identifier: "PROBE-1".to_string(),
         title: "Probe Task execution".to_string(),
         description: "Exercise the Task Graph store".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave_id),
         project_id: Some(project_id),
         worktree: Some(PathBuf::from("/repo.probe")),
@@ -416,7 +416,7 @@ pub fn import_saved(
         .validate()
         .map_err(|error| super::StoreError::InvalidData(error.to_string()))?;
     assert!(
-        store.import_prepared_peer_planning(&super::sqlite::PeerImport {
+        store.import_prepared_git_plan(&super::sqlite::GitPlanImport {
             inputs: &inputs,
             repo,
             destination,

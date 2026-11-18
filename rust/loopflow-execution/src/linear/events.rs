@@ -389,7 +389,7 @@ mod tests {
         assert!(task.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(task.title, item.name);
-        assert_eq!(task.pm_snapshot_synced_at, Some(42));
+        assert_eq!(task.tracker_synced_at, Some(42));
         store.seed_inventory(&row).unwrap();
         assert_eq!(store.task_by_issue(&item.id).unwrap().unwrap().id, task.id);
         row.synced_at = 43;
@@ -419,7 +419,7 @@ mod tests {
             .unwrap();
         let refreshed = store.task(&task.id).unwrap().unwrap();
         assert_eq!(refreshed.title, detail.name);
-        assert_eq!(refreshed.pm_snapshot_synced_at, Some(44));
+        assert_eq!(refreshed.tracker_synced_at, Some(44));
         assert!(refreshed.worktree.is_none());
         assert!(store.task_prs(&task.id).unwrap().is_empty());
         assert_eq!(

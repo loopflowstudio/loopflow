@@ -66,18 +66,18 @@ pub fn refresh(checkout: &Path) -> Result<()> {
         // Refresh records its own failure and never waits on publication.
         // A refresh waits out another process's publication, then sends this
         // Machine's pending changes out.
-        let acquired =
-            loopflow_execution::ops::planning_sync::acquire_repository(&store, &repo_key).await;
+        let fetched =
+            loopflow_execution::ops::planning_sync::fetch_repository(&store, &repo_key).await;
         loopflow_execution::ops::planning_sync::publish_repository_now(&store, &repo_key).await?;
-        acquired?;
+        fetched?;
         let destinations =
-            loopflow_execution::ops::planning_sync::peer_status(&store, &repo_key).await?;
+            loopflow_execution::ops::planning_sync::git_destinations(&store, &repo_key).await?;
         let Some(active) = destinations.into_iter().find(|d| d.active) else {
             return Err(anyhow!(
                 "no Git planning destination is configured; see `lf repo tracker`"
             ));
         };
-        if let Some(error) = active.acquisition_error {
+        if let Some(error) = active.fetch_error {
             return Err(anyhow!("planning refresh failed: {error}"));
         }
         Ok(())
@@ -170,7 +170,7 @@ pub(crate) fn subscribe_status(
 pub(crate) struct TrackerStatus {
     /// `git`, `linear` or `asana`.
     tracker: String,
-    destinations: Vec<loopflow_execution::store::PeerPlanningStatus>,
+    destinations: Vec<loopflow_execution::store::GitDestination>,
     /// What the tracker has yet to confirm (open: `queued`, `sent`), in send
     /// order, and each value it kept over a local one (lost: `conflicted`)
     /// until it is answered. On Git, only lost values: Git keeps no queue.
@@ -183,7 +183,7 @@ enum Status {
     Remote(TrackerKind, Vec<TrackerActionStatus>),
     /// Git's destinations, and each value its journal lost.
     Git(
-        Vec<loopflow_execution::store::PeerPlanningStatus>,
+        Vec<loopflow_execution::store::GitDestination>,
         Vec<TrackerActionStatus>,
     ),
 }
@@ -258,7 +258,9 @@ async fn status(store: Option<&Store>, repo: &str) -> Result<Status> {
     }
     Ok(Status::Git(
         match store {
-            Some(store) => loopflow_execution::ops::planning_sync::peer_status(store, repo).await?,
+            Some(store) => {
+                loopflow_execution::ops::planning_sync::git_destinations(store, repo).await?
+            }
             None => Vec::new(),
         },
         actions,
@@ -338,7 +340,7 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
                 ""
             }
         );
-        for error in [destination.acquisition_error, destination.publication_error]
+        for error in [destination.fetch_error, destination.publication_error]
             .into_iter()
             .flatten()
         {
@@ -387,7 +389,7 @@ fn short_id(id: &str) -> &str {
 }
 
 async fn print_journal(store: &Store, repo: &str, json: bool) -> Result<()> {
-    let journals = loopflow_execution::ops::planning_sync::peer_journal(store, repo).await?;
+    let journals = loopflow_execution::ops::planning_sync::git_journal(store, repo).await?;
     if json {
         println!("{}", serde_json::to_string(&journals)?);
         return Ok(());

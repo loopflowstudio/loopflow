@@ -114,9 +114,9 @@ pub(super) fn create_task_in(conn: &Connection, input: &NewTask) -> StoreResult<
         identifier: format!("lf-{}", input.id.as_str().trim_start_matches("task_")),
         title: input.title.clone(),
         description: input.description.clone(),
-        pm_snapshot_synced_at: None,
+        tracker_synced_at: None,
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id,
         repository_id: input.repository_id.clone(),
         project_id: input.project_id.clone(),
@@ -1260,7 +1260,7 @@ impl SqliteStore {
             "UPDATE projects SET pm_snapshot_synced_at=?2,created_at=?3,updated_at=?4 WHERE id=?1",
             params![
                 project.id.as_str(),
-                project.pm_snapshot_synced_at,
+                project.tracker_synced_at,
                 project.created_at.unix_timestamp(),
                 project.updated_at.unix_timestamp()
             ],
@@ -1641,7 +1641,7 @@ fn insert_task_row(conn: &Connection, task: &Task) -> StoreResult<()> {
         crate::sqlite::planning_write::WriteOrigin::Local,
     )?;
     conn.execute("UPDATE tasks SET pm_snapshot_synced_at=?2,workspace_slug=?3,created_at=?4,updated_at=?5 WHERE id=?1",params![
-        task.id.as_str(),task.pm_snapshot_synced_at,task.workspace_slug,
+        task.id.as_str(),task.tracker_synced_at,task.workspace_slug,
         task.created_at.unix_timestamp(),task.updated_at.unix_timestamp()])?;
     write_task_checkout_in(conn, task)
 }
@@ -2296,9 +2296,9 @@ fn map_task_columns(
         identifier,
         title: row.get(2)?,
         description: row.get(3)?,
-        pm_snapshot_synced_at: row.get(9)?,
+        tracker_synced_at: row.get(9)?,
 
-        pm_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
+        tracker_writeback: serde_json::from_str(&row.get::<_, String>(10)?)
             .map_err(|error| invalid_column(10, error))?,
         wave_id: row.get(4)?,
         project_id: row.get::<_, Option<String>>(11)?.map(ProjectId::from_raw),
@@ -2501,7 +2501,7 @@ pub(super) fn map_project_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Proje
             .map_err(|error| invalid_column(11, error))?,
         metric_targets: serde_json::from_str(&row.get::<_, String>(12)?)
             .map_err(|error| invalid_column(12, error))?,
-        pm_snapshot_synced_at: row.get(6)?,
+        tracker_synced_at: row.get(6)?,
         status: serde_json::from_value(serde_json::Value::String(row.get(9)?))
             .map_err(|error| invalid_column(9, error))?,
 

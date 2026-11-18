@@ -251,9 +251,9 @@ esac
                 identifier: item.identifier.clone(),
                 title: item.name,
                 description: item.description,
-                pm_snapshot_synced_at: Some(1),
+                tracker_synced_at: Some(1),
 
-                pm_writeback: LinearWritebackState::Current,
+                tracker_writeback: LinearWritebackState::Current,
                 wave_id: Some(wave.id().clone()),
                 project_id: Some(project.id),
                 worktree: Some(checkout.clone()),
@@ -373,7 +373,7 @@ esac
                         .task(&task.id)
                         .unwrap()
                         .unwrap()
-                        .pm_writeback,
+                        .tracker_writeback,
                     LinearWritebackState::Current
                 ));
                 assert!(checkout.exists());

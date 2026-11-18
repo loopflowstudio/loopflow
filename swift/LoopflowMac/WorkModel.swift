@@ -1289,14 +1289,14 @@ final class WorkModel {
     }
     /// The Sessions as the Machine last read them.
     private var sessionsRead: Reading<[SessionRecord]> { sessionReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
-    private var peerPlanningReadings: [RepositoryReadingKey: Reading<[PeerPlanningStatus]>] = [:] {
-        didSet { reported(WorkPart.peerPlanning.rawValue, "Planning", from: oldValue, to: peerPlanningReadings) }
+    private var gitDestinationsReadings: [RepositoryReadingKey: Reading<[GitDestination]>] = [:] {
+        didSet { reported(WorkPart.gitDestinations.rawValue, "Planning", from: oldValue, to: gitDestinationsReadings) }
     }
-    private(set) var peerPlanning: Reading<[PeerPlanningStatus]> {
-        get { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
-        set { peerPlanningReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
+    private(set) var gitDestinations: Reading<[GitDestination]> {
+        get { gitDestinationsReadings[repositoryReadingKey(repoPath ?? "")] ?? .loading }
+        set { gitDestinationsReadings[repositoryReadingKey(repoPath ?? "")] = newValue }
     }
-    private var peerPlanningGeneration = 0
+    private var gitDestinationsGeneration = 0
     @ObservationIgnored private(set) var liveSessionCount: Int?
     /// The repository's Sessions with this Machine's pending renames made.
     private(set) var sessions: Reading<[SessionRecord]> {
@@ -1751,14 +1751,14 @@ final class WorkModel {
         roadmap = .unavailable(lastGood: roadmap.value, reason: reason)
         if let value = waves.value { waves = .unavailable(lastGood: value, reason: reason) }
         if repoPath != nil, sessionsRead.value != nil { sessions = sessionsRead.failed(reason) }
-        peerPlanningReadings = peerPlanningReadings.mapValues {
+        gitDestinationsReadings = gitDestinationsReadings.mapValues {
             .unavailable(lastGood: $0.value, reason: reason)
         }
         if repoPath != nil {
             applySelectionPlans(nil, reason: reason)
             applyTaskList(nil, wave: workScope.taskListWave, reason: reason)
         }
-        if repoPath != nil { peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason) }
+        if repoPath != nil { gitDestinations = .unavailable(lastGood: gitDestinations.value, reason: reason) }
         if let value = processActivity.value { processActivity = .unavailable(lastGood: value, reason: reason) }
         taskExecution.values = taskExecution.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
         taskWork.values = taskWork.values.mapValues { .unavailable(lastGood: $0.value, reason: reason) }
@@ -1799,16 +1799,16 @@ final class WorkModel {
             if let line = frame.wire?.taskList, let repoPath {
                 savedReadings(workMachine ?? savedMachineId)?.save(line, Self.taskListSubscription(repo: repoPath, wave: wave))
             }
-        case .peerPlanning(let body):
+        case .gitDestinations(let body):
             guard answers >= max(planningFloor, scopeFloor), let repoPath else { return }
             guard let body else {
-                peerPlanning = .unavailable(lastGood: peerPlanning.value, reason: reason)
+                gitDestinations = .unavailable(lastGood: gitDestinations.value, reason: reason)
                 break
             }
             guard body.repo.normalizedFilePath == repoPath.normalizedFilePath else { return }
-            peerPlanningGeneration &+= 1
+            gitDestinationsGeneration &+= 1
             let next = Reading.available(body.destinations)
-            if peerPlanning != next { peerPlanning = next }
+            if gitDestinations != next { gitDestinations = next }
         case .sessions(let body):
             guard answers >= max(sessionsFloor, scopeFloor), let repoPath else { return }
             guard let body else {
@@ -1940,8 +1940,8 @@ final class WorkModel {
             navigation.clearSelection()
         }
         sessionReadings = [:]
-        peerPlanningReadings = [:]
-        peerPlanningGeneration &+= 1
+        gitDestinationsReadings = [:]
+        gitDestinationsGeneration &+= 1
         savedSessionRepos = []
         taskWork = TaskReadings<TaskOverview>()
         taskExecution = TaskReadings<TaskExecution>()
@@ -1958,11 +1958,11 @@ final class WorkModel {
             return
         }
         async let sessions: Void = refreshSessions()
-        async let peers: Void = refreshPeerPlanning()
+        async let destinations: Void = refreshGitDestinations()
         async let list: Void = refreshTaskList()
         await refreshPlanning()
         await sessions
-        await peers
+        await destinations
         await list
     }
 
@@ -1984,16 +1984,16 @@ final class WorkModel {
         }
     }
 
-    private func refreshPeerPlanning() async {
+    private func refreshGitDestinations() async {
         guard !usesFixedFixture, let repo = repoPath else { return }
-        peerPlanningGeneration &+= 1
-        let generation = peerPlanningGeneration
+        gitDestinationsGeneration &+= 1
+        let generation = gitDestinationsGeneration
         let key = repositoryReadingKey(repo)
-        let result: Result<[PeerPlanningStatus], Error>
-        do { result = .success(try await query.peerPlanningStatus(cwd: repo)) }
+        let result: Result<[GitDestination], Error>
+        do { result = .success(try await query.gitDestinations(cwd: repo)) }
         catch { result = .failure(error) }
-        guard generation == peerPlanningGeneration, repo == repoPath, key == repositoryReadingKey(repo) else { return }
-        peerPlanning = reading(from: result, lastGood: peerPlanning.value)
+        guard generation == gitDestinationsGeneration, repo == repoPath, key == repositoryReadingKey(repo) else { return }
+        gitDestinations = reading(from: result, lastGood: gitDestinations.value)
     }
 
     func refreshPlanning() async {
@@ -2120,7 +2120,7 @@ final class WorkModel {
         historyLookup?.cancel()
         historyLookup = nil
         sessionsGeneration &+= 1
-        peerPlanningGeneration &+= 1
+        gitDestinationsGeneration &+= 1
         taskListGeneration &+= 1
         workActivityGeneration &+= 1
         repoPath = path
@@ -2140,7 +2140,7 @@ final class WorkModel {
             historyLookup?.cancel()
             historyLookup = nil
             sessionsGeneration &+= 1
-            peerPlanningGeneration &+= 1
+            gitDestinationsGeneration &+= 1
             taskListGeneration &+= 1
             workActivityGeneration &+= 1
             if !usesFixedFixture { workActivity = .loading }

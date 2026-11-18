@@ -55,7 +55,8 @@ pub struct Project {
     #[serde(deserialize_with = "Option::deserialize")]
     pub tracker_id: Option<LinearProjectId>,
     /// Time of the last successful tracker refresh.
-    pub pm_snapshot_synced_at: Option<i64>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
     /// Current ownership. Wave name and checkout are resolved from this id.
     pub wave_id: WaveId,
     #[schemars(with = "String")]

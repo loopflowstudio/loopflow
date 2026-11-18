@@ -163,8 +163,8 @@ pub(super) async fn read_task_snapshot(store: &SharedStore, task: Task) -> OpsRe
             .and_then(|p| p.tracker_id.as_ref())
             .map(|id| id.as_str().to_string()),
         project: project.map(|p| p.slug),
-        pm_snapshot_synced_at: task.pm_snapshot_synced_at,
-        pm_writeback: task.pm_writeback,
+        tracker_synced_at: task.tracker_synced_at,
+        tracker_writeback: task.tracker_writeback,
         wave: wave.as_ref().map(|w| w.slug().to_string()),
         project_id: task.project_id.as_ref().map(ToString::to_string),
         repository_id: task.repository_id.to_string(),

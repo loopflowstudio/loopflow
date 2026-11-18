@@ -5,8 +5,8 @@
   "task_id": "ts_11111111111111111111111111111111",
   "external_project_id": "project-external",
   "project": "workspace",
-  "pm_snapshot_synced_at": 1,
-  "pm_writeback": {
+  "tracker_synced_at": 1,
+  "tracker_writeback": {
     "state": "current"
   },
   "wave": "product",

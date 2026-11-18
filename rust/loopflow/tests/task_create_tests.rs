@@ -149,8 +149,14 @@ fn task_create_answers_and_its_conversation_starts_the_graph_across_a_server_res
     let replay = receipt(reply.result);
     let mut expected = saved.clone();
     let fields = expected["task"].as_object_mut().unwrap();
-    let binding = fields.remove("linear_id").expect("released receipt format");
-    fields.insert("tracker_id".into(), binding);
+    for (released, current) in [
+        ("linear_id", "tracker_id"),
+        ("pm_snapshot_synced_at", "tracker_synced_at"),
+        ("pm_writeback", "tracker_writeback"),
+    ] {
+        let value = fields.remove(released).expect("released receipt format");
+        assert!(fields.insert(current.into(), value).is_none());
+    }
     assert_eq!(replay, expected);
     let output = task.run(&[
         "task",

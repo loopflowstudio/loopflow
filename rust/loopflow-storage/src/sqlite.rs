@@ -30,12 +30,12 @@ mod linear_issue_state;
 mod subscription_events;
 mod task_started;
 
+mod git_tracker;
 mod linear_team_checks;
 mod machine_records;
 mod metrics;
 pub mod planning_order;
-mod planning_peers;
-pub use planning_peers::PeerImport;
+pub use git_tracker::GitPlanImport;
 mod planning_sync;
 pub mod planning_write;
 mod pr_landings;

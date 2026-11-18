@@ -47,7 +47,7 @@ pub fn render_task_context(
     }
     context.push_str(&format!(
         "\nTask directive snapshot synced at: {}\nWorktree: {}\nBranch: {}\nBase commit: {}",
-        task.pm_snapshot_synced_at
+        task.tracker_synced_at
             .map(|at| at.to_string())
             .unwrap_or_else(|| "not observed".into()),
         task.worktree
@@ -384,7 +384,7 @@ mod tests {
             description: "Ship the requested behavior.".to_string(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
             wave_id: wave.id().clone(),
             created_at: now,
@@ -407,9 +407,9 @@ mod tests {
             identifier: "LOO-267".to_string(),
             title: "Research the runtime".to_string(),
             description: "Compare independent findings.".to_string(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
 
-            pm_writeback: LinearWritebackState::Current,
+            tracker_writeback: LinearWritebackState::Current,
             wave_id: Some(wave.id().clone()),
             project_id: Some(project.id.clone()),
             worktree: Some(worktree),

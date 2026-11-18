@@ -716,19 +716,19 @@ fn task_view_keeps_workflow_checkout_and_conversations_after_live_updates() {
 }
 
 #[test]
-fn peer_planning_receipts_reach_an_open_watch() {
+fn git_destinations_receipts_reach_an_open_watch() {
     use loopflow_execution::planning_git::PlanningDestination;
-    use loopflow_execution::store::PeerPlanningStatus;
+    use loopflow_execution::store::GitDestination;
 
     let home = Machine::new();
     let subscription = home.subscribe(&["planning", "status"]);
     let repo = home.wave.repo();
-    let read = |accept: &dyn Fn(&[PeerPlanningStatus]) -> bool| {
+    let read = |accept: &dyn Fn(&[GitDestination]) -> bool| {
         let body = subscription.body(Duration::from_secs(10), |body| {
-            serde_json::from_value::<Vec<PeerPlanningStatus>>(body["destinations"].clone())
+            serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone())
                 .is_ok_and(|statuses| accept(&statuses))
         });
-        serde_json::from_value::<Vec<PeerPlanningStatus>>(body["destinations"].clone()).unwrap()
+        serde_json::from_value::<Vec<GitDestination>>(body["destinations"].clone()).unwrap()
     };
     assert!(read(&|statuses| statuses.is_empty()).is_empty());
     // Non-Git Work folders still display stored status; foreground acquisition
@@ -738,8 +738,8 @@ fn peer_planning_receipts_reach_an_open_watch() {
         "refs/loopflow/planning/shared/team",
     )
     .unwrap();
-    let id = home.store.bind_peer_planning(repo, &destination).unwrap();
-    home.store.export_peer_planning(repo, &id).unwrap();
+    let id = home.store.bind_git_destination(repo, &destination).unwrap();
+    home.store.export_git_plan(repo, &id).unwrap();
     let statuses = read(&|statuses| {
         statuses
             .iter()

@@ -57,7 +57,7 @@ fn test_project(wave: &Wave, slug: &str, updated_at: OffsetDateTime) -> Project 
         description: "Keep status truthful.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(updated_at.unix_timestamp()),
+        tracker_synced_at: Some(updated_at.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: updated_at,
@@ -239,7 +239,7 @@ fn seed_stale_project_work(
         description: "Keep the system legible and minimally simple.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
+        tracker_synced_at: Some(now.unix_timestamp() - 1),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -267,9 +267,9 @@ fn seed_stale_project_work(
         identifier: "W2-127".to_string(),
         title: "Preserve historical architecture evidence".to_string(),
         description: "This Task outlived its retired Linear Project.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp() - 1),
+        tracker_synced_at: Some(now.unix_timestamp() - 1),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(stale.id.clone()),
         worktree: Some(home.join("repo.w2-127")),
@@ -340,7 +340,7 @@ fn seed_stale_project_work(
         description: "Every claim points to its receipt.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,

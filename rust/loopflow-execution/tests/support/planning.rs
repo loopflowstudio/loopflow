@@ -17,7 +17,7 @@ pub fn seed_unplaced_task(database: &Path, task: &Task) {
                 task.identifier,
                 task.title,
                 task.description,
-                task.pm_snapshot_synced_at,
+                task.tracker_synced_at,
                 task.created_at.unix_timestamp(),
                 task.updated_at.unix_timestamp(),
                 task.repository_id.as_str()
@@ -44,11 +44,11 @@ pub fn seed_linear_admission(
     conn.execute(
         "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids)
          VALUES(?1,'linear',?2,?3,?4,?5,?6,'started','[]','[]','[\"initiative-task-pr-tests\"]','[\"team-task-pr-tests\"]')",
-        params![wave.repo(),external_project,project.pm_snapshot_synced_at,project.slug,project.name,project.summary],
+        params![wave.repo(),external_project,project.tracker_synced_at,project.slug,project.name,project.summary],
     ).unwrap();
     conn.execute(
         "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,'linear','initiative-task-pr-tests',?2)",
-        params![wave.id(),project.pm_snapshot_synced_at],
+        params![wave.id(),project.tracker_synced_at],
     ).unwrap();
     conn.execute(
         "INSERT INTO tracker_wave_projects(wave_id,project_id,position) VALUES(?1,?2,0)",
@@ -58,7 +58,7 @@ pub fn seed_linear_admission(
     conn.execute(
         "INSERT INTO tracker_items(repo,tracker,id,observed_at,identifier,project_id,claimed_project_id,name,description,rank,completed,team_id,project_id_observed,assignee_observed,completed_at_observed,due_date_observed)
          VALUES(?1,'linear',?2,?3,?4,?5,?5,?6,?7,1,0,'team-task-pr-tests',1,1,1,1)",
-        params![wave.repo(),external_issue,task.pm_snapshot_synced_at,task.identifier,external_project,task.title,task.description],
+        params![wave.repo(),external_issue,task.tracker_synced_at,task.identifier,external_project,task.title,task.description],
     ).unwrap();
     let url = "https://linear.app/loopflow/issue/INF-123/prove-task-pr-transitions";
     conn.execute(

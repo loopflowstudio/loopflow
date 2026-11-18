@@ -112,7 +112,9 @@ impl SqliteStore {
             receipt.result = result.map(|text| serde_json::from_str(&text)).transpose()?;
             if receipt.kind == "task.create" {
                 if let Some(result) = &mut receipt.result {
-                    rename_task_binding(result, "linear_id", "tracker_id");
+                    for (stored, wire) in TASK_RECEIPT_FIELDS {
+                        rename_task_field(result, stored, wire);
+                    }
                 }
             }
             receipt.launch = launch.map(|text| serde_json::from_str(&text)).transpose()?;
@@ -238,21 +240,29 @@ pub struct TaskCreateReceipt {
 }
 
 // The released CLI shares the receipt store and replays its original Task snapshot.
+const TASK_RECEIPT_FIELDS: [(&str, &str); 3] = [
+    ("linear_id", "tracker_id"),
+    ("pm_snapshot_synced_at", "tracker_synced_at"),
+    ("pm_writeback", "tracker_writeback"),
+];
+
 impl TaskCreateReceipt {
     pub fn stored_result(&self) -> serde_json::Result<serde_json::Value> {
         let mut result = serde_json::to_value(self)?;
-        rename_task_binding(&mut result, "tracker_id", "linear_id");
+        for (stored, wire) in TASK_RECEIPT_FIELDS {
+            rename_task_field(&mut result, wire, stored);
+        }
         Ok(result)
     }
 }
 
-fn rename_task_binding(result: &mut serde_json::Value, from: &str, to: &str) {
+fn rename_task_field(result: &mut serde_json::Value, from: &str, to: &str) {
     if let Some(task) = result
         .get_mut("task")
         .and_then(serde_json::Value::as_object_mut)
     {
-        if let Some(binding) = task.remove(from) {
-            task.insert(to.into(), binding);
+        if let Some(value) = task.remove(from) {
+            task.insert(to.into(), value);
         }
     }
 }

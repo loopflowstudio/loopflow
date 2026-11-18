@@ -6221,7 +6221,7 @@ mod tests {
             .find(|task| task.identifier == "INF-REOPEN")
             .unwrap();
         assert!(matches!(
-            reopen.pm_writeback,
+            reopen.tracker_writeback,
             crate::work::task::LinearWritebackState::Current
         ));
     }

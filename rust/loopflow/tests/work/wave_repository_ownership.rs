@@ -75,7 +75,7 @@ fn project(wave: &Wave) -> Project {
         description: "Keep identity boring.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -104,9 +104,9 @@ fn task(
         identifier: "LOO-127".to_string(),
         title: "Repository-owned Waves".to_string(),
         description: "Preserve Task history through relocation.".to_string(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: LinearWritebackState::Current,
+        tracker_writeback: LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repo.join("task-worktree")),

@@ -646,8 +646,8 @@ fn subscribe_frames_carry_each_reads_json_result() {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
             "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
-            "peer_planning" => {
-                read::<Vec<loopflow_execution::store::PeerPlanningStatus>>(&body["destinations"]);
+            "git_destinations" => {
+                read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
                 assert_eq!(body["tracker"], "git");
             }
             other => panic!("unknown subscription {other}"),
@@ -994,13 +994,17 @@ fn session_steers_say_when_each_was_read() {
 }
 
 #[test]
-fn peer_planning_status_keeps_independent_receipts() {
+fn git_destinations_keeps_independent_receipts() {
     let value: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/peer_planning_status.json"
+        "../../../tests/fixtures/dto/git_destinations.json"
     ))
     .unwrap();
-    let statuses: Vec<loopflow_execution::store::PeerPlanningStatus> =
+    let statuses: Vec<loopflow_execution::store::GitDestination> =
         serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        statuses[0].fetch_error.as_deref(),
+        Some("remote unavailable")
+    );
     assert!(statuses[0].pending_local);
     assert_eq!(
         statuses[0].publication_state.as_deref(),
@@ -1009,12 +1013,11 @@ fn peer_planning_status_keeps_independent_receipts() {
     assert_eq!(statuses[0].conflicts.len(), 1);
     assert!(statuses[1].pending_local);
     assert_eq!(serde_json::to_value(&statuses).unwrap(), value);
-    for field in ["conflicts", "pending_local"] {
+    for field in ["conflicts", "pending_local", "fetch_error"] {
         let mut missing = value[1].clone();
         missing.as_object_mut().unwrap().remove(field);
         assert!(
-            serde_json::from_value::<loopflow_execution::store::PeerPlanningStatus>(missing)
-                .is_err()
+            serde_json::from_value::<loopflow_execution::store::GitDestination>(missing).is_err()
         );
     }
 }

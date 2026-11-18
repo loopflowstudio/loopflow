@@ -1075,8 +1075,8 @@ public struct RegistryQuery: Sendable {
             .planList(directory: repo ?? "/", wave: nil, task: issue, all: repo == nil)))
     }
 
-    public func peerPlanningStatus(cwd: String) async throws -> [PeerPlanningStatus] {
-        struct Status: Decodable { let destinations: [PeerPlanningStatus] }
+    public func gitDestinations(cwd: String) async throws -> [GitDestination] {
+        struct Status: Decodable { let destinations: [GitDestination] }
         return try Self.decode(Status.self, from: await serve(.repoTracker(directory: cwd))).destinations
     }
 

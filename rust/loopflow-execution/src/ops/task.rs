@@ -171,8 +171,9 @@ pub struct TaskSnapshot {
     pub task_id: String,
     pub external_project_id: Option<String>,
     pub project: Option<String>,
-    pub pm_snapshot_synced_at: Option<i64>,
-    pub pm_writeback: loopflow_storage::work::task::LinearWritebackState,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub tracker_synced_at: Option<i64>,
+    pub tracker_writeback: loopflow_storage::work::task::LinearWritebackState,
     pub wave: Option<String>,
     pub project_id: Option<String>,
     #[serde(rename = "repo_id")]
@@ -1843,7 +1844,7 @@ pub fn task_create(
     block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         if let Err(error) =
-            super::planning_sync::acquire_repository(&store, &main.to_string_lossy()).await
+            super::planning_sync::fetch_repository(&store, &main.to_string_lossy()).await
         {
             tracing::debug!(%error,"tracker refresh pending; creating from retained planning");
         }
@@ -1910,7 +1911,7 @@ pub(crate) fn sync_admitted(main: &Path, task: &loopflow_model::durable::TaskId)
     let synced = block_on_task(async {
         let store = Arc::new(super::planning_sync::planning_store().await?);
         let repo = main.to_string_lossy();
-        if let Err(error) = super::planning_sync::acquire_repository(&store, &repo).await {
+        if let Err(error) = super::planning_sync::fetch_repository(&store, &repo).await {
             tracing::warn!(%error, "planning acquisition after creation failed");
         }
         super::planning_sync::sync_after_save(
@@ -2583,7 +2584,7 @@ pub fn task_sync(repo: &Path, issue: &str, answer: Option<LostAnswer>) -> OpsRes
                 .map_err(task_error)?;
         }
         let Some(tracker) = super::tracker::queued_tracker(&repository) else {
-            let acquired = super::planning_sync::acquire_repository(&store, &repo).await;
+            let acquired = super::planning_sync::fetch_repository(&store, &repo).await;
             super::planning_sync::publish_repository_now(&store, &repo).await?;
             acquired?;
             return synced(&store, &task.id).await;

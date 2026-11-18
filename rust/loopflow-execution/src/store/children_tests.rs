@@ -36,8 +36,8 @@ fn import_edits(
         "refs/loopflow/planning/shared/title-fixture",
     )
     .unwrap();
-    let route = store.bind_peer_planning(repo, &destination)?;
-    let mut snapshot = store.export_peer_planning(repo, &route)?;
+    let route = store.bind_git_destination(repo, &destination)?;
+    let mut snapshot = store.export_git_plan(repo, &route)?;
     let clock = snapshot
         .changes
         .values()
@@ -60,7 +60,7 @@ fn import_edits(
             },
         );
     }
-    crate::store::planning_peers::import_peer_planning(store, repo, &route, "edited", &snapshot)
+    crate::store::git_tracker::import_git_plan(store, repo, &route, "edited", &snapshot)
 }
 
 #[test]
@@ -441,11 +441,12 @@ fn canonical_task_fields_survive_restart_and_peer_import() {
     let repo = wave.repo();
     let target_path = target.path().canonicalize().unwrap();
     let target_repo = target_path.to_str().unwrap();
-    let destination_id = store.bind_peer_planning(repo, &destination).unwrap();
-    peer.bind_peer_planning(target_repo, &destination).unwrap();
-    let snapshot = store.export_peer_planning(repo, &destination_id).unwrap();
+    let destination_id = store.bind_git_destination(repo, &destination).unwrap();
+    peer.bind_git_destination(target_repo, &destination)
+        .unwrap();
+    let snapshot = store.export_git_plan(repo, &destination_id).unwrap();
     for _ in 0..2 {
-        crate::store::planning_peers::import_peer_planning(
+        crate::store::git_tracker::import_git_plan(
             &peer,
             target_repo,
             &destination_id,
@@ -612,7 +613,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
         description: String::new(),
     };
     let local = store.create_task(&input).unwrap();
-    assert_eq!(local.pm_snapshot_synced_at, None);
+    assert_eq!(local.tracker_synced_at, None);
     // Export is a separate slice; this proves the schema accepts a different
     // provider UUID without changing local identity or creation history.
     store.conn.lock().unwrap().execute(
@@ -652,7 +653,7 @@ fn local_planning_provider_mapping_preserves_identity_and_creation_receipt() {
     assert_eq!(retained.identifier, edited.identifier);
     assert_eq!(retained.title, edited.title);
     assert_eq!(retained.description, edited.description);
-    assert_eq!(retained.pm_snapshot_synced_at, edited.pm_snapshot_synced_at);
+    assert_eq!(retained.tracker_synced_at, edited.tracker_synced_at);
     assert_eq!(store.create_task(&input).unwrap(), retained);
 }
 
@@ -863,7 +864,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     assert_eq!(imported.project_id, Some(imported_project));
     assert!(imported.worktree.is_none());
     assert!(store.task_prs(&imported.id).unwrap().is_empty());
-    assert_eq!(imported.pm_snapshot_synced_at, Some(7));
+    assert_eq!(imported.tracker_synced_at, Some(7));
     let stored_state: (Option<String>, bool) = store
         .conn
         .lock()

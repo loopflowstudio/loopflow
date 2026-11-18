@@ -336,8 +336,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -712,7 +712,7 @@
         "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -1072,8 +1072,8 @@
         "identifier": "FIX-1",
         "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1417,8 +1417,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -1764,7 +1764,7 @@
         "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -2109,8 +2109,8 @@
         "identifier": "FIX-1",
         "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "error": "Could not read the credential. Retry the Linear operation; no credential was cleared.",
           "operation": "complete_task",
           "state": "pending"
@@ -2418,8 +2418,8 @@
         "observation": {
           "freshness": "not_required"
         },
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "pr": {
@@ -2763,7 +2763,7 @@
         "tracker_id": "project-1",
         "metric_targets": [],
         "name": "Provider destination",
-        "pm_snapshot_synced_at": 1793156337,
+        "tracker_synced_at": 1793156337,
         "slug": "provider-destination",
         "status": "started",
         "summary": "",
@@ -3042,8 +3042,8 @@
         "identifier": "FIX-1",
         "tracker_id": "source-issue",
         "parent_pr_id": null,
-        "pm_snapshot_synced_at": 1793156337,
-        "pm_writeback": {
+        "tracker_synced_at": 1793156337,
+        "tracker_writeback": {
           "state": "current"
         },
         "project_id": "proj_e7b7e8a944a340d0ad66d4701134ce98",

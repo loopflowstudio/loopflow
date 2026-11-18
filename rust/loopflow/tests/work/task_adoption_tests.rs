@@ -105,7 +105,7 @@ fn task_adopts_linear_checkout_and_preserves_graph_history() {
             description: "Adopt existing work".into(),
             krs: Vec::new(),
             metric_targets: Vec::new(),
-            pm_snapshot_synced_at: Some(now.unix_timestamp()),
+            tracker_synced_at: Some(now.unix_timestamp()),
             created_at: now,
             updated_at: now,
         };

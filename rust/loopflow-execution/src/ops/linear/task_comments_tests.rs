@@ -385,7 +385,7 @@ async fn task_comments_read_and_publish_without_starting_work() {
 
             let delivered = store.task_steers(&task.id).await.unwrap();
             assert_eq!(delivered.iter().filter(|steer| steer.text.contains("incoming-after-reconnect")).count(), 1);
-            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().pm_writeback,
+            assert!(matches!(store.get_task(&task.id).await.unwrap().unwrap().tracker_writeback,
                 loopflow_storage::work::task::LinearWritebackState::Pending {
                     operation: loopflow_storage::work::task::LinearWritebackOperation::CompleteTask, ..
                 }));

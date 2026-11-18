@@ -27,7 +27,7 @@ fn message(error: impl std::fmt::Display) -> OpsError {
 }
 
 /// Saved Tasks need no network before a read or local save. On a cache miss,
-/// acquire the selected planning destinations once, without allocating execution.
+/// fetch the selected planning destinations once, without allocating execution.
 pub(crate) async fn find_task(
     store: &Store,
     repo: &str,
@@ -42,7 +42,7 @@ pub(crate) async fn find_task(
     if let Some(task) = read().map_err(message)? {
         return Ok(Some(task));
     }
-    if let Err(error) = acquire_repository(store, repo).await {
+    if let Err(error) = fetch_repository(store, repo).await {
         tracing::warn!(%error, "tracker refresh pending; resolving retained Task");
     }
     read().map_err(message)
@@ -50,8 +50,8 @@ pub(crate) async fn find_task(
 
 /// One fetch per destination, also used before resolving a cold Task.
 /// An unavailable remote never prevents a saved local plan from being used.
-pub async fn acquire_repository(store: &Store, repo: &str) -> OpsResult<()> {
-    exchange_repository(store, repo, Exchange::Acquire).await
+pub async fn fetch_repository(store: &Store, repo: &str) -> OpsResult<()> {
+    exchange_repository(store, repo, Exchange::Fetch).await
 }
 
 /// Publishes unless another process is publishing; that one or the next
@@ -68,7 +68,7 @@ pub async fn publish_repository_now(store: &Store, repo: &str) -> OpsResult<()> 
 
 #[derive(Debug, Clone, Copy)]
 enum Exchange {
-    Acquire,
+    Fetch,
     Publish { wait: bool },
 }
 
@@ -211,7 +211,7 @@ pub async fn configured_destination(store: &Store, repo: &str) -> OpsResult<Opti
         return Ok(None);
     };
     let id = store
-        .bind_peer_planning(repo, &destination)
+        .bind_git_destination(repo, &destination)
         .await
         .map_err(message)?;
     Ok(Some(id))
@@ -262,21 +262,21 @@ async fn provisioned_user_key(store: &Store) -> OpsResult<String> {
 
 /// Passive status uses configuration, never a persisted copy of its selection.
 /// Retained routes remain readable in a Work folder without a Git checkout.
-pub async fn peer_status(
+pub async fn git_destinations(
     store: &Store,
     repo: &str,
-) -> OpsResult<Vec<crate::store::PeerPlanningStatus>> {
+) -> OpsResult<Vec<crate::store::GitDestination>> {
     let Some(active) = active_destination(store, repo).await? else {
         return Ok(Vec::new());
     };
     store
-        .peer_planning_status(repo, active.as_deref())
+        .git_destinations(repo, active.as_deref())
         .await
         .map_err(message)
 }
 
 /// `lf repo tracker journal`: each destination's retained changes.
-pub async fn peer_journal(
+pub async fn git_journal(
     store: &Store,
     repo: &str,
 ) -> OpsResult<Vec<crate::store::PlanningJournal>> {
@@ -284,7 +284,7 @@ pub async fn peer_journal(
         return Ok(Vec::new());
     };
     store
-        .peer_planning_journal(repo, active.as_deref())
+        .git_journal(repo, active.as_deref())
         .await
         .map_err(message)
 }
@@ -376,7 +376,7 @@ fn exchange_destination(
     };
     let result = (|| {
         let binding = store
-            .peer_planning_destination(repo, id)
+            .git_destination(repo, id)
             .map_err(message)?
             .ok_or_else(|| message("planning destination is missing"))?;
         let git = PlanningGit::new(Path::new(repo), &binding).map_err(message)?;
@@ -384,7 +384,7 @@ fn exchange_destination(
             store.recover_task_filings(repo).map_err(message)?;
             publish_destination(store, repo, id, &git)
         } else {
-            acquire_destination(store, repo, id, &git).map(|_| ())
+            fetch_destination(store, repo, id, &git).map(|_| ())
         }
     })();
     // Do not persist tracker data or credential-bearing destinations in errors.
@@ -396,7 +396,7 @@ fn exchange_destination(
         }
     });
     store
-        .record_peer_error(repo, id, !publish, error)
+        .record_destination_error(repo, id, !publish, error)
         .map_err(message)?;
     result
 }
@@ -417,7 +417,7 @@ fn wait_for_publication(path: &Path) -> OpsResult<Option<std::fs::File>> {
 
 const PUBLICATION_WAIT: Duration = Duration::from_secs(10);
 
-fn acquire_destination(
+fn fetch_destination(
     store: &SqliteStore,
     repo: &str,
     destination: &str,
@@ -425,7 +425,7 @@ fn acquire_destination(
 ) -> OpsResult<Option<(PlanningRevision, PlanningSnapshot)>> {
     let remote = git.fetch().map_err(message)?;
     store
-        .record_peer_fetch(
+        .record_destination_fetch(
             repo,
             destination,
             remote.as_ref().map(|document| document.revision.as_str()),
@@ -433,7 +433,7 @@ fn acquire_destination(
         .map_err(message)?;
     let imported = if let Some(document) = remote {
         let snapshot = PlanningSnapshot::from_bytes(&document.bytes).map_err(message)?;
-        crate::store::planning_peers::import_peer_planning(
+        crate::store::git_tracker::import_git_plan(
             store,
             repo,
             destination,
@@ -446,7 +446,7 @@ fn acquire_destination(
         None
     };
     store
-        .record_peer_error(repo, destination, true, None)
+        .record_destination_error(repo, destination, true, None)
         .map_err(message)?;
     Ok(imported)
 }
@@ -457,22 +457,26 @@ fn publish_destination(
     destination: &str,
     git: &PlanningGit,
 ) -> OpsResult<()> {
-    // Always acquire before deciding what to publish, including recovery from a
+    // Always fetch before deciding what to publish, including recovery from a
     // lost push response. Never publish from a stale local Git document alone.
-    let (remote, remote_snapshot) = match acquire_destination(store, repo, destination, git)? {
+    let (remote, remote_snapshot) = match fetch_destination(store, repo, destination, git)? {
         Some((revision, snapshot)) => (Some(revision), snapshot),
         None => (None, PlanningSnapshot::default()),
     };
-    let exported = store
-        .export_peer_planning(repo, destination)
-        .map_err(message)?;
+    let exported = store.export_git_plan(repo, destination).map_err(message)?;
     // Omitted/held objects retain their last shared history, not private local
     // moves. Only today's selected export may add local mutations to the remote.
     let merged = remote_snapshot.merge(&exported).map_err(message)?;
     if let Some(remote) = &remote {
         if merged == remote_snapshot {
             return store
-                .record_peer_publication(repo, destination, remote.as_str(), "confirmed", &exported)
+                .record_destination_publication(
+                    repo,
+                    destination,
+                    remote.as_str(),
+                    "confirmed",
+                    &exported,
+                )
                 .map_err(message);
         }
     } else if merged.changes.is_empty() {
@@ -496,7 +500,7 @@ fn publish_destination(
     // Persist uncertainty before the effect. A crash at any later point recovers
     // by fetching first, not by assuming that a failed response means no push.
     store
-        .record_peer_publication(
+        .record_destination_publication(
             repo,
             destination,
             saved.revision.as_str(),
@@ -510,7 +514,13 @@ fn publish_destination(
         PlanningPublication::Unconfirmed => "unconfirmed",
     };
     store
-        .record_peer_publication(repo, destination, saved.revision.as_str(), state, &exported)
+        .record_destination_publication(
+            repo,
+            destination,
+            saved.revision.as_str(),
+            state,
+            &exported,
+        )
         .map_err(message)
 }
 
@@ -601,7 +611,7 @@ impl PlanningSync {
                     tokio::select! {
                         _ = stopped => {},
                         _ = repeat_sync("Git plan fetch", Duration::from_secs(5), || {
-                            acquire_repository(&store, &repo)
+                            fetch_repository(&store, &repo)
                         }) => {},
                         _ = repeat_sync("Git planning publication", Duration::from_secs(1), || {
                             publish_repository(&store, &repo)

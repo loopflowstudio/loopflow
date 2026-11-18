@@ -4,7 +4,7 @@ use crate::planning_exchange::PlanningMutation;
 use std::collections::{BTreeMap, BTreeSet};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerProjectionConflict {
+pub struct GitDestinationConflict {
     pub target: String,
     pub reason: String,
 }
@@ -12,19 +12,20 @@ pub struct PeerProjectionConflict {
 /// Local routing and import evidence. Endpoints are deliberately not displayed:
 /// Git URLs can contain credentials. A checkpoint is not publication evidence.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
-pub struct PeerPlanningStatus {
+pub struct GitDestination {
     pub id: String,
     pub reference: String,
     pub active: bool,
     pub selected_records: u64,
     pub imported_revision: Option<String>,
     pub fetched_revision: Option<String>,
-    pub acquisition_error: Option<String>,
+    #[serde(deserialize_with = "Option::deserialize")]
+    pub fetch_error: Option<String>,
     pub publication_revision: Option<String>,
     pub publication_state: Option<String>,
     pub publication_error: Option<String>,
     pub pending_local: bool,
-    pub conflicts: Vec<PeerProjectionConflict>,
+    pub conflicts: Vec<GitDestinationConflict>,
 }
 
 /// `lf repo tracker journal`: one destination's retained journal. It grows with

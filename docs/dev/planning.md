@@ -24,6 +24,7 @@ other implementation and proof gaps.
 | plan | the shared Waves, Projects and Tasks | |
 | Project | a Wave's current Project: its KRs, targets and Tasks | |
 | tracker | where the plan is mirrored: Git, Linear or Asana; `tracker:` in `.lf/config.yaml`, shown by `lf repo tracker` | bridge, planning provider; provider means the agent's provider |
+| destination | one Git ref the plan is exchanged with, listed by `lf repo tracker` | |
 | action | one outgoing change for Linear or Asana in `tracker_actions`: queued or sent (open), then confirmed, conflicted (lost, until answered) or retired; Git exchanges the journal instead. Prose near Desktop says "tracker action": Desktop's actions are buttons | effect, receipt, delivery, export |
 | event | one incoming change from a tracker | observation, acceptance, acquisition |
 | sync | moving the plan in either direction | |

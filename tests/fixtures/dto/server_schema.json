@@ -2888,6 +2888,100 @@
       ],
       "type": "object"
     },
+    "GitDestination": {
+      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
+      "properties": {
+        "active": {
+          "type": "boolean"
+        },
+        "conflicts": {
+          "items": {
+            "$ref": "#/$defs/GitDestinationConflict"
+          },
+          "type": "array"
+        },
+        "fetch_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetched_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "imported_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pending_local": {
+          "type": "boolean"
+        },
+        "publication_error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_revision": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publication_state": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference": {
+          "type": "string"
+        },
+        "selected_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "reference",
+        "active",
+        "selected_records",
+        "imported_revision",
+        "fetched_revision",
+        "fetch_error",
+        "publication_revision",
+        "publication_state",
+        "publication_error",
+        "pending_local",
+        "conflicts"
+      ],
+      "type": "object"
+    },
+    "GitDestinationConflict": {
+      "properties": {
+        "reason": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "reason"
+      ],
+      "type": "object"
+    },
     "GithubObservation": {
       "description": "The last attempt to refresh one persisted GitHub PR. This metadata lives on\n`TaskPr` beside the cached PR fields: it bounds repeated reads across `lf`\nprocesses without making GitHub the source of truth.",
       "properties": {
@@ -5740,100 +5834,6 @@
         }
       ]
     },
-    "PeerPlanningStatus": {
-      "description": "Local routing and import evidence. Endpoints are deliberately not displayed:\nGit URLs can contain credentials. A checkpoint is not publication evidence.",
-      "properties": {
-        "acquisition_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "active": {
-          "type": "boolean"
-        },
-        "conflicts": {
-          "items": {
-            "$ref": "#/$defs/PeerProjectionConflict"
-          },
-          "type": "array"
-        },
-        "fetched_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "imported_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pending_local": {
-          "type": "boolean"
-        },
-        "publication_error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_revision": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "publication_state": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "reference": {
-          "type": "string"
-        },
-        "selected_records": {
-          "format": "uint64",
-          "minimum": 0,
-          "type": "integer"
-        }
-      },
-      "required": [
-        "id",
-        "reference",
-        "active",
-        "selected_records",
-        "imported_revision",
-        "fetched_revision",
-        "acquisition_error",
-        "publication_revision",
-        "publication_state",
-        "publication_error",
-        "pending_local",
-        "conflicts"
-      ],
-      "type": "object"
-    },
-    "PeerProjectionConflict": {
-      "properties": {
-        "reason": {
-          "type": "string"
-        },
-        "target": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "target",
-        "reason"
-      ],
-      "type": "object"
-    },
     "PlacementStrategy": {
       "enum": [
         "create",
@@ -6574,14 +6574,6 @@
         "name": {
           "type": "string"
         },
-        "pm_snapshot_synced_at": {
-          "description": "Time of the last successful tracker refresh.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
         "slug": {
           "type": "string"
         },
@@ -6595,6 +6587,14 @@
           "description": "The record’s ID in the repository's tracker.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
             "null"
           ]
         },
@@ -6616,7 +6616,7 @@
         "metric_targets",
         "status",
         "tracker_id",
-        "pm_snapshot_synced_at",
+        "tracker_synced_at",
         "wave_id",
         "created_at",
         "updated_at"
@@ -12123,17 +12123,6 @@
             "null"
           ]
         },
-        "pm_snapshot_synced_at": {
-          "description": "Time of the last successful tracker refresh.",
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
-        },
         "project_id": {
           "type": [
             "string",
@@ -12173,6 +12162,17 @@
             "null"
           ]
         },
+        "tracker_synced_at": {
+          "description": "Time of the last successful tracker refresh.",
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
+        },
         "updated_at": {
           "type": "string"
         },
@@ -12209,8 +12209,8 @@
         "state",
         "completed_at",
         "tracker_id",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave_id",
         "repo_id",
         "project_id",
@@ -14377,16 +14377,6 @@
           "$ref": "#/$defs/Observation",
           "description": "Freshness of the PR state against GitHub as of this read. `Degraded`\nmeans a bounded remote read failed and the PR fields are cached, not\nfreshly confirmed."
         },
-        "pm_snapshot_synced_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "pm_writeback": {
-          "$ref": "#/$defs/LinearWritebackState"
-        },
         "pr": {
           "anyOf": [
             {
@@ -14458,6 +14448,16 @@
         "task_id": {
           "type": "string"
         },
+        "tracker_synced_at": {
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tracker_writeback": {
+          "$ref": "#/$defs/LinearWritebackState"
+        },
         "updated_at": {
           "type": "string"
         },
@@ -14487,8 +14487,8 @@
         "task_id",
         "external_project_id",
         "project",
-        "pm_snapshot_synced_at",
-        "pm_writeback",
+        "tracker_synced_at",
+        "tracker_writeback",
         "wave",
         "project_id",
         "repo_id",
@@ -14908,7 +14908,7 @@
         },
         "destinations": {
           "items": {
-            "$ref": "#/$defs/PeerPlanningStatus"
+            "$ref": "#/$defs/GitDestination"
           },
           "type": "array"
         },

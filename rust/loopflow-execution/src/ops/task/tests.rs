@@ -355,7 +355,7 @@ fn prepared_placement_consumes_accepted_facts_before_checkout_or_execution() {
         {
             assert_eq!(task.title, "Accepted after resolution");
             assert_eq!(task.description, "Preserve this direction");
-            assert_eq!(task.pm_snapshot_synced_at, Some(7));
+            assert_eq!(task.tracker_synced_at, Some(7));
             assert_eq!(task.worktree.as_ref(), Some(&checkout));
             assert_eq!(
                 runtime.block_on(fixture.store.get_task(&task.id)).unwrap(),
@@ -742,7 +742,7 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         description: "Keep automatic Task recovery bounded.".to_string(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
         wave_id: wave.id().clone(),
         created_at: now,
@@ -758,9 +758,9 @@ async fn task_fixture_at(identifier: &str, repository: std::path::PathBuf) -> Ta
         identifier: identifier.to_string(),
         title: "Task recovery fixture".to_string(),
         description: String::new(),
-        pm_snapshot_synced_at: Some(now.unix_timestamp()),
+        tracker_synced_at: Some(now.unix_timestamp()),
 
-        pm_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
+        tracker_writeback: loopflow_storage::work::task::LinearWritebackState::Current,
         wave_id: Some(wave.id().clone()),
         project_id: Some(project.id.clone()),
         worktree: Some(repository),

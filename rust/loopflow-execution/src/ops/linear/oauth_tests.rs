@@ -116,7 +116,7 @@ async fn pm_read_linear_oauth_recovers() {
         description: "Retain this planning history.".into(),
         krs: Vec::new(),
         metric_targets: Vec::new(),
-        pm_snapshot_synced_at: Some(1),
+        tracker_synced_at: Some(1),
 
         wave_id: wave.id().clone(),
         created_at: timestamp,
@@ -186,7 +186,7 @@ async fn pm_read_linear_oauth_recovers() {
     );
 
     assert!(refreshed.krs.iter().any(|kr| kr.text == "Fresh proof"));
-    assert!(refreshed.pm_snapshot_synced_at > project.pm_snapshot_synced_at);
+    assert!(refreshed.tracker_synced_at > project.tracker_synced_at);
     assert_eq!(
         fixture
             .store

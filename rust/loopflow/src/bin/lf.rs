@@ -665,7 +665,7 @@ impl Drop for EnvGuard {
 
 /// One PR's line in `lf task status`. A degraded Linear linkage is named here
 /// because this reading is where an operator already looks for writeback health —
-/// the Task's `PM writeback` line sits directly above. Silence means linked.
+/// the Task's `tracker writeback` line sits directly above. Silence means linked.
 fn format_task_pr_line(pr: &loopflow_execution::work::task::TaskPr) -> String {
     let provider = pr
         .github()
@@ -703,7 +703,7 @@ fn print_task_snapshot(
     if json {
         println!("{}", serde_json::to_string_pretty(&snapshot)?);
     } else {
-        let pm_writeback = match &snapshot.pm_writeback {
+        let tracker_writeback = match &snapshot.tracker_writeback {
             loopflow_execution::work::task::LinearWritebackState::Current => "current".to_string(),
             loopflow_execution::work::task::LinearWritebackState::Pending { error, .. } => {
                 format!("pending: {error}")
@@ -715,14 +715,14 @@ fn print_task_snapshot(
             snapshot.provider.as_deref().unwrap_or("not selected")
         );
         println!(
-            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  PM writeback: {}",
+            "{}  {}\n  task: {}\n  body: {}\n  worktree: {}\n  branch: {}\n  tracker writeback: {}",
             snapshot.issue_identifier,
             snapshot.status,
             snapshot.task_id,
             body,
             snapshot.worktree.as_deref().unwrap_or("unplaced"),
             branch,
-            pm_writeback,
+            tracker_writeback,
         );
         if let Some(graph) = &snapshot.work.graph {
             println!("  {}", graph.summary());
@@ -3609,7 +3609,7 @@ mod tests {
     }
 
     /// A degraded Linear writeback is named in the same reading that already
-    /// carries `PM writeback`, so an expired token cannot fail silently forever.
+    /// carries `tracker writeback`, so an expired token cannot fail silently forever.
     #[test]
     fn task_pr_line_names_a_degraded_linear_link() {
         let mut pr = published_pr();

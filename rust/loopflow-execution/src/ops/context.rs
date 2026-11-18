@@ -258,7 +258,7 @@ async fn read_context(
         };
         if let Some(task) = selected.task {
             report.task = ContextFact::bound(&task.id, provenance);
-            report.planning_observed_at = task.pm_snapshot_synced_at;
+            report.planning_observed_at = task.tracker_synced_at;
             if let Some(checkout) = store.task_checkout(&task.id).await? {
                 report.checkout =
                     ContextFact::bound(checkout.worktree.display(), "recorded_checkout");

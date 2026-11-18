@@ -169,7 +169,7 @@ impl Drop for PlanningEnvironment {
     }
 }
 
-/// Refresh through the actual acquisition path, then retain its input for replay.
+/// Refresh through the actual refresh path, then retain its input for replay.
 pub(crate) async fn refresh_task_input(
     repo: &std::path::Path,
     selector: &str,

@@ -1,4 +1,10 @@
-//! Canonical setting paths and their released file layout.
+//! Setting keys sit on their primitive: `repo.tracker.linear.team`,
+//! `skill.<name>.agent`, `wave.graph`, `wave.<id>.account`. The typed catalogue
+//! (`Config`) keeps the released layout (`planning: {provider}`, `skills`,
+//! `graph`, `waves`), which is also each key's shorthand. Readers accept every
+//! spelling (including the released `repo.plan`, `plan` and `linear.team`) and
+//! fold a document into the typed layout; writers gather the key's group into
+//! that released layout, the one both builds read, before they edit it.
 use serde_yaml_ng::{Mapping, Value};
 
 /// A Wave's own file already stands on the primitive: `graph` stays bare there.

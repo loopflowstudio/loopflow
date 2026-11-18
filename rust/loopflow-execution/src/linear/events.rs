@@ -400,7 +400,7 @@ mod tests {
             store.task_by_issue("MOVED-42").unwrap().unwrap().id,
             task.id
         );
-        // A detail acquisition refreshes content, never the order observed by a list.
+        // A detail event refreshes content, never the order observed by a list.
         let mut detail = row.snapshot.items[0].clone();
         detail.name = "Updated on another machine".into();
         detail.rank = 99;

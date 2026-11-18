@@ -171,7 +171,7 @@ async fn fresh_lookup_and_wave_list_share_planning_without_execution() {
 }
 
 #[tokio::test]
-async fn acquisition_returns_saved_task_fields_without_replacing_pending_edits() {
+async fn refresh_returns_saved_task_fields_without_replacing_pending_edits() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;
@@ -781,7 +781,7 @@ async fn provider_revisions_and_change_receipts_converge_without_execution() {
                     .state,
                 crate::store::PlanningState::Available
             );
-            // A removal received before acquisition also fences future list/detail writes.
+            // A removal received before a refresh also fences future list/detail writes.
             fixture
                 .store
                 .record_tracker_event("issue-2", Some("2026-09-29T12:00:00.125Z"), true)
@@ -1422,7 +1422,7 @@ async fn delayed_absence_preserves_a_newer_accepted_task() {
 }
 
 #[tokio::test]
-async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
+async fn refresh_reads_ownership_without_reconstructing_tracker_content() {
     let _lock = crate::journal::test_env_lock();
     let _restore = PlanningEnvironment::isolate();
     let fixture = Fixture::new().await;

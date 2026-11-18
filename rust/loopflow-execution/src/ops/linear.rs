@@ -2816,7 +2816,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acquisition_reads_projects_and_their_issues() {
+    async fn refresh_reads_projects_and_their_issues() {
         let (base_url, requests) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([
@@ -2847,7 +2847,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn acquisition_preserves_moved_and_detached_issue_ownership() {
+    async fn refresh_preserves_moved_and_detached_issue_ownership() {
         let (base_url, _) = test_server::spawn(vec![
             projects_response(json!([project_node("project-123", "Scan")])),
             issues_response(json!([

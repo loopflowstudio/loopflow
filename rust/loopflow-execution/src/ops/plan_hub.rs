@@ -178,7 +178,7 @@ pub fn exchange(store: &SqliteStore, repo: &str, hub: &Machine, send_only: bool)
                 break;
             }
         }
-        store.import_hub_plan(repo, &edits, since.unwrap_or(0))?;
+        store.import_hub_plan(repo, &edits, since.unwrap_or(0), &machine_names(store)?)?;
         send(store, &mut connection, repo, &repository)
     })();
     let error = result.as_ref().err().map(|error| format!("{error:#}"));
@@ -302,7 +302,7 @@ pub fn apply_here(
     repository: &RepositoryId,
     edits: &[WorkEdit],
 ) -> Result<serde_json::Value> {
-    store.apply_hub_edits(&checkout(store, repository)?, edits)?;
+    store.apply_hub_edits(&checkout(store, repository)?, edits, &machine_names(store)?)?;
     Ok(serde_json::json!({}))
 }
 
@@ -318,6 +318,17 @@ pub fn changes_here(
         seq: page.seq,
         more: page.more,
     })
+}
+
+/// The person's names for their Machines, for the steers an arriving
+/// ownership entry writes.
+fn machine_names(store: &SqliteStore) -> Result<loopflow_storage::sqlite::plan_hub::MachineNames> {
+    let config = crate::config::placement::global_settings_at(&store.home_dir()?)?;
+    Ok(config
+        .machines
+        .into_iter()
+        .map(|(name, declaration)| (declaration.id, name))
+        .collect())
 }
 
 fn checkout(store: &SqliteStore, repository: &RepositoryId) -> Result<String> {

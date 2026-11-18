@@ -1257,15 +1257,14 @@ fn graph_context_preview_reads_selected_machine_graph_without_executing_steps() 
     assert!(!repo.join(".lf/tmp").exists());
 }
 
-/// Two Homes share one repository plan through Git planning; ownership entries
-/// travel as marked comments and every append runs on the Task's writer.
+/// Two Homes share one repository plan, the remote one as the hub; ownership
+/// entries travel as marked comments and every append runs on the Task's writer.
 struct SharedPlan {
     repository: loopflow_execution::durable::RepositoryId,
     local: loopflow_execution::store::sqlite::SqliteStore,
     remote: loopflow_execution::store::sqlite::SqliteStore,
     local_path: std::path::PathBuf,
     remote_path: std::path::PathBuf,
-    destination: loopflow_execution::planning_git::PlanningDestination,
     _repos: Vec<loopflow_test_support::TestRepo>,
 }
 
@@ -1308,7 +1307,6 @@ impl SharedPlan {
         remote_path: std::path::PathBuf,
     ) -> Self {
         use loopflow_execution::durable::RepositoryId;
-        use loopflow_execution::planning_git::PlanningDestination;
 
         let local =
             loopflow_execution::store::open_sqlite(&fixture.root.path().join("local/loopflow.db"))
@@ -1330,53 +1328,50 @@ impl SharedPlan {
             &repository,
         )
         .unwrap();
-        let destination =
-            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
-                .unwrap();
-        for (store, path) in [(&local, &local_path), (&remote, &remote_path)] {
-            store
-                .bind_git_destination(path.to_str().unwrap(), &destination)
-                .unwrap();
-        }
         Self {
             repository,
             local,
             remote,
             local_path,
             remote_path,
-            destination,
             _repos: repos,
         }
     }
 
-    fn to_local(&self) {
-        let journal = self
-            .remote
-            .export_git_plan(self.remote_path.to_str().unwrap(), &self.destination.id())
-            .unwrap();
-        loopflow_execution::store::git_tracker::import_git_plan(
-            &self.local,
+    /// One exchange as the local Machine makes it: read what changed on the
+    /// remote hub, then send what is open here.
+    fn exchange(&self) {
+        let (local, remote) = (
             self.local_path.to_str().unwrap(),
-            &self.destination.id(),
-            &uuid::Uuid::new_v4().to_string(),
-            &journal,
-        )
-        .unwrap();
+            self.remote_path.to_str().unwrap(),
+        );
+        let since = self.local.select_hub(local, "remote").unwrap().seq;
+        let page = self
+            .remote
+            .plan_changes_since(remote, since, usize::MAX)
+            .unwrap();
+        self.local
+            .import_hub_plan(local, &page.edits, page.seq, &Default::default())
+            .unwrap();
+        let sends = self.local.open_hub_sends(local).unwrap();
+        let edits = sends
+            .iter()
+            .map(|send| send.edit.clone())
+            .collect::<Vec<_>>();
+        self.remote
+            .apply_hub_edits(remote, &edits, &Default::default())
+            .unwrap();
+        self.local
+            .confirm_hub_sends(&sends.iter().map(|send| send.seq).collect::<Vec<_>>())
+            .unwrap();
+    }
+
+    fn to_local(&self) {
+        self.exchange();
     }
 
     fn to_remote(&self) {
-        let journal = self
-            .local
-            .export_git_plan(self.local_path.to_str().unwrap(), &self.destination.id())
-            .unwrap();
-        loopflow_execution::store::git_tracker::import_git_plan(
-            &self.remote,
-            self.remote_path.to_str().unwrap(),
-            &self.destination.id(),
-            &uuid::Uuid::new_v4().to_string(),
-            &journal,
-        )
-        .unwrap();
+        self.exchange();
     }
 
     fn task(&self) -> loopflow_execution::durable::TaskId {
@@ -3076,12 +3071,6 @@ fn task_move_to_a_mini_without_the_repository_takes_it_in_from_planning() {
                 .unwrap()
                 .id
         )
-    );
-    let local = loopflow_execution::store::open_sqlite(&local_home.join("loopflow.db")).unwrap();
-    assert_eq!(
-        remote.planning_user_key().unwrap(),
-        local.planning_user_key().unwrap(),
-        "mini reads another person's plan"
     );
     assert!(
         fixture

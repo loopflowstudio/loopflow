@@ -1018,9 +1018,9 @@ mod tests {
         let config = load_repo_config(temp.path()).unwrap().unwrap();
         assert_eq!(
             config.planning_transport(),
-            TrackerConfig::Linear {
+            Some(TrackerConfig::Linear {
                 team: Some(team.to_string())
-            }
+            })
         );
     }
 
@@ -1030,9 +1030,9 @@ mod tests {
         let config: Config = serde_yaml_ng::from_str(yaml).expect("parse config");
         assert_eq!(
             config.planning_transport(),
-            TrackerConfig::Asana {
+            Some(TrackerConfig::Asana {
                 team: "9876543210".to_string(),
-            }
+            })
         );
     }
 

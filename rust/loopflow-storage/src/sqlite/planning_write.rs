@@ -512,11 +512,9 @@ mod tests {
     use super::{create, local};
     use crate::session::{LfSession, TitleSource};
     use crate::sqlite::{SessionCaller, SqliteStore};
-    use crate::work::edit::{Disposition, WorkEdit, WorkValue, WorkValue as Edit};
+    use crate::work::edit::{Disposition, WorkValue as Edit};
     use crate::work::task::NewTask;
-    use crate::work::task::TaskUpdate;
     use crate::work::wave::Wave;
-    use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
     use loopflow_model::durable::{ProjectId, TaskId};
     use loopflow_model::id::WaveId;
 

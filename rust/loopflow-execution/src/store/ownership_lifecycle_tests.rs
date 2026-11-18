@@ -1,7 +1,6 @@
-//! Ownership acquisition and peer exchange through application commands.
+//! Ownership acquisition and exchange with the hub through application commands.
 
 use crate::durable::{OwningMachineSource, TaskExecutionSource};
-use crate::planning_git::PlanningDestination;
 use crate::store::ownership::local_label;
 use loopflow_model::comment::{TaskComment, TaskCommentAuthor};
 use loopflow_model::durable::{MachineId, OwnershipKind, RepositoryId, TaskId};
@@ -183,12 +182,11 @@ struct Side {
     path: String,
 }
 
-/// A laptop and mini sharing one Task's planning; `to_laptop`/`to_mini`
-/// exchange the planning journal.
+/// A laptop whose plan is on mini, its hub; `to_laptop`/`to_mini` are one
+/// exchange each, as `lf task sync` on the laptop makes it.
 struct Pair {
     laptop: Side,
     mini: Side,
-    destination: PlanningDestination,
     task: TaskId,
     _dir: tempfile::TempDir,
 }
@@ -198,16 +196,12 @@ impl Pair {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let repository = RepositoryId::new();
-        let destination =
-            PlanningDestination::new("/unused/fixture", "refs/loopflow/planning/shared/owners")
-                .unwrap();
         let side = |name: &str| {
             let store = crate::store::opening::open_ephemeral(&dir.path().join(name)).unwrap();
             let repo = TestRepo::new();
             let path = repo.path().canonicalize().unwrap();
             let path = path.to_str().unwrap().to_owned();
             crate::repository::location::bind_repository(&store, &path, &repository).unwrap();
-            store.bind_git_destination(&path, &destination).unwrap();
             Side { store, repo, path }
         };
         let (laptop, mini) = (side("laptop.db"), side("mini.db"));
@@ -233,34 +227,43 @@ impl Pair {
         Self {
             laptop,
             mini,
-            destination,
             task,
             _dir: dir,
         }
     }
 
-    fn exchange(&self, from: &Side, to: &Side) {
-        let destination = self.destination.id();
-        let journal = from
+    /// Read what changed on mini, then send what the laptop has open.
+    fn exchange(&self) {
+        let (laptop, mini) = (&self.laptop, &self.mini);
+        let since = laptop.store.select_hub(&laptop.path, "mini").unwrap().seq;
+        let page = mini
             .store
-            .export_git_plan(&from.path, &destination)
+            .plan_changes_since(&mini.path, since, usize::MAX)
             .unwrap();
-        crate::store::git_tracker::import_git_plan(
-            &to.store,
-            &to.path,
-            &destination,
-            &uuid::Uuid::new_v4().to_string(),
-            &journal,
-        )
-        .unwrap();
+        laptop
+            .store
+            .import_hub_plan(&laptop.path, &page.edits, page.seq, &Default::default())
+            .unwrap();
+        let sends = laptop.store.open_hub_sends(&laptop.path).unwrap();
+        let edits = sends
+            .iter()
+            .map(|send| send.edit.clone())
+            .collect::<Vec<_>>();
+        mini.store
+            .apply_hub_edits(&mini.path, &edits, &Default::default())
+            .unwrap();
+        laptop
+            .store
+            .confirm_hub_sends(&sends.iter().map(|send| send.seq).collect::<Vec<_>>())
+            .unwrap();
     }
 
     fn to_laptop(&self) {
-        self.exchange(&self.mini, &self.laptop);
+        self.exchange();
     }
 
     fn to_mini(&self) {
-        self.exchange(&self.laptop, &self.mini);
+        self.exchange();
     }
 }
 
@@ -332,7 +335,7 @@ fn the_owner_reclaims_after_a_stale_unclaim_elsewhere() {
         .unwrap();
     pair.to_mini();
     // A stale reading on mini treats the Task as its own and unclaims it there,
-    // delivering the unclaim as mini would: a marked comment in the journal.
+    // delivering the unclaim as mini would: a marked comment on the Task.
     let later = time::OffsetDateTime::now_utc() + time::Duration::seconds(5);
     let entry = serde_json::json!({
         "id": format!("own_{}", uuid::Uuid::new_v4().simple()),
@@ -357,7 +360,7 @@ fn the_owner_reclaims_after_a_stale_unclaim_elsewhere() {
         )
         .unwrap();
     pair.to_laptop();
-    // The laptop's claim stays open locally and it claims again in the journal.
+    // The laptop's claim stays open locally and it claims again on the hub.
     let ownership = crate::store::ownership::task_ownership(&pair.laptop.store, task).unwrap();
     assert_eq!(
         ownership.owner.unwrap().machine.id,

@@ -3,7 +3,7 @@
 //! owner changed last (`plan_changes`), so any of them can answer as a hub;
 //! a Machine whose plan is on a hub also queues each local save (`hub_sends`)
 //! and remembers how far it has read the hub (`hub_plans`).
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -12,6 +12,10 @@ use super::SqliteStore;
 use crate::rows::now_unix;
 use crate::work::edit::{WorkEdit, WorkValue};
 use crate::{StoreError, StoreResult};
+use loopflow_model::durable::{MachineId, TaskId};
+
+/// The person's names for their Machines, which an ownership steer shows.
+pub type MachineNames = HashMap<MachineId, String>;
 
 /// Where this Machine stands with its hub for one repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,7 +237,13 @@ impl SqliteStore {
     /// an open send keeps its local value: that value is on its way. At first
     /// contact, every owner here the hub did not return is queued whole, so
     /// two plans become one.
-    pub fn import_hub_plan(&self, repo: &str, edits: &[WorkEdit], seq: i64) -> StoreResult<()> {
+    pub fn import_hub_plan(
+        &self,
+        repo: &str,
+        edits: &[WorkEdit],
+        seq: i64,
+        names: &MachineNames,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let plan = hub_plan_in(&tx, repo)?.ok_or(StoreError::NotFound)?;
@@ -251,7 +261,9 @@ impl SqliteStore {
             .filter(|edit| !open.contains(&(edit.target.clone(), edit.change.field().to_owned())))
             .cloned()
             .collect::<Vec<_>>();
+        let arriving = new_comments(&tx, &kept)?;
         planning_write::create(&tx, repo, &kept, WriteOrigin::Import)?;
+        comments_arrived(&tx, &kept, &arriving, names)?;
         if plan.seq.is_none() {
             let on_hub = edits
                 .iter()
@@ -335,13 +347,86 @@ impl SqliteStore {
 
     /// Write another Machine's saves as this Machine's own, in one
     /// transaction. Applying the same edits again changes nothing.
-    pub fn apply_hub_edits(&self, repo: &str, edits: &[WorkEdit]) -> StoreResult<()> {
+    pub fn apply_hub_edits(
+        &self,
+        repo: &str,
+        edits: &[WorkEdit],
+        names: &MachineNames,
+    ) -> StoreResult<()> {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let arriving = new_comments(&tx, edits)?;
         planning_write::create(&tx, repo, edits, WriteOrigin::Local)?;
+        comments_arrived(&tx, edits, &arriving, names)?;
         tx.commit()?;
         Ok(())
     }
+}
+
+/// The comments in `edits` this Machine does not have yet.
+fn new_comments(conn: &Connection, edits: &[WorkEdit]) -> StoreResult<BTreeSet<String>> {
+    let mut exists =
+        conn.prepare_cached("SELECT EXISTS(SELECT 1 FROM task_comments WHERE id=?1)")?;
+    let mut new = BTreeSet::new();
+    for edit in edits {
+        if matches!(edit.change, WorkValue::CommentTask(_))
+            && !exists.query_row([&edit.target], |row| row.get::<_, bool>(0))?
+        {
+            new.insert(edit.target.clone());
+        }
+    }
+    Ok(new)
+}
+
+/// What a comment from another Machine carries besides its row: an
+/// ownership entry, which joins the Task's log, and a person's direction,
+/// which steers the Task as a comment made here would. An open claim here
+/// that the arrived log no longer shows is claimed again.
+fn comments_arrived(
+    tx: &rusqlite::Transaction<'_>,
+    edits: &[WorkEdit],
+    arriving: &BTreeSet<String>,
+    names: &MachineNames,
+) -> StoreResult<()> {
+    let comments = edits
+        .iter()
+        .filter(|edit| matches!(edit.change, WorkValue::CommentContent(_)))
+        .map(|edit| edit.target.as_str())
+        .collect::<BTreeSet<_>>();
+    let mut touched = Vec::<TaskId>::new();
+    for id in comments {
+        let (task, body, author, created_at): (String, String, String, Option<String>) = tx
+            .query_row(
+                "SELECT task_id,body,author,created_at FROM task_comments WHERE id=?1",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )?;
+        let task = TaskId::from_raw(task);
+        super::task_ownership::ingest_marker_in(
+            tx,
+            &task,
+            &body,
+            super::task_ownership::provider_order(created_at.as_deref()),
+            names,
+        )?;
+        if arriving.contains(id) {
+            let comment = loopflow_model::comment::TaskComment {
+                id: id.to_owned(),
+                author: serde_json::from_str(&author)?,
+                body,
+                created_at,
+            };
+            super::task_comments::comment_steer_in(tx, &task, &comment)?;
+        }
+        if !touched.contains(&task) {
+            touched.push(task);
+        }
+    }
+    for task in &touched {
+        // A repository whose plan is on a hub has no tracker.
+        super::task_ownership::reassert_in(tx, task, false)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -366,13 +451,16 @@ mod tests {
     fn exchange(laptop: &SqliteStore, hub: &SqliteStore) {
         let since = laptop.select_hub(REPO, "hub").unwrap().seq;
         let page = hub.plan_changes_since(REPO, since, usize::MAX).unwrap();
-        laptop.import_hub_plan(REPO, &page.edits, page.seq).unwrap();
+        laptop
+            .import_hub_plan(REPO, &page.edits, page.seq, &Default::default())
+            .unwrap();
         let sends = laptop.open_hub_sends(REPO).unwrap();
         let edits = sends
             .iter()
             .map(|send| send.edit.clone())
             .collect::<Vec<_>>();
-        hub.apply_hub_edits(REPO, &edits).unwrap();
+        hub.apply_hub_edits(REPO, &edits, &Default::default())
+            .unwrap();
         laptop
             .confirm_hub_sends(&sends.iter().map(|send| send.seq).collect::<Vec<_>>())
             .unwrap();
@@ -479,7 +567,8 @@ mod tests {
 
         // A reply lost after the hub wrote it: the send goes again, harmlessly.
         let revisions = hub.revisions().unwrap();
-        hub.apply_hub_edits(REPO, &[open[0].edit.clone()]).unwrap();
+        hub.apply_hub_edits(REPO, &[open[0].edit.clone()], &Default::default())
+            .unwrap();
         assert_eq!(hub.revisions().unwrap(), revisions);
     }
 

@@ -219,6 +219,25 @@ Task explanations read `tracker_synced_at` directly from the Task and print
 `Tracker synced:`. Swift decodes the required nullable key as `trackerSyncedAt`.
 The tracker lookup functions are `fetch_task` and `fetch_from_tracker`.
 
+### The explanation's sentences say fetch and tracker (made for review)
+
+`lf --explain task …` prints prose around `Tracker synced:` that still says
+acquisition and Provider. Exact text:
+
+| Where | Now | Becomes |
+|---|---|---|
+| `ops/task/planning_explain.rs:127` | `Nothing was saved, acquired or synchronized.` | `Nothing was saved, fetched or synchronized.` |
+| `:283` | `Provider freshness, synchronization delivery and concurrent saves are not observed or reserved` | `Tracker freshness, queued tracker actions and concurrent saves are not read or reserved` |
+| `:296` | `{reason}; no planning acquisition was performed` | `{reason}; nothing was fetched from the tracker` |
+| `:299` | `No saved Task selected; no planning acquisition was performed` | `No saved Task selected; nothing was fetched from the tracker` |
+| `:361` | `{error}; Wave registration/acquisition was not performed` | `{error}; the Wave was not registered and nothing was fetched from the tracker` |
+| `ops/task.rs:1919` (log) | `planning acquisition after creation failed` | `tracker fetch after creation failed` |
+
+"Observation only;" opens three explain reports and means the explanation
+itself; it stays under the scope rule, as does the `Effect:` label. Passed
+over: leaving the sentences as prose (they are what a person reads when the
+command fails).
+
 `planning_write`, `planning_order`, `planning_reads`, `planning_sync` stay:
 they are the plan writer and sync.
 
@@ -246,7 +265,19 @@ they are the plan writer and sync.
 
 6. **Explanation sync time and fetch verbs (implemented).** Rust, Swift and
    the shared explanations use the Task's sync timestamp. A Task that has
-   never synced reports null in JSON and unknown in the CLI. Gate is next.
+   never synced reports null in JSON and unknown in the CLI.
+
+7. **Explanation sentences (next).** Apply the table under "The explanation's
+   sentences say fetch and tracker". Update the assertions that quote them:
+   `rust/loopflow/tests/global_commands.rs:2038,2053,2269` and the message at
+   `rust/loopflow/tests/planning_foreground_tests.rs:257`. Reword the three
+   doc comments that say "planning acquisition"
+   (`rust/loopflow-storage/src/sqlite/children.rs:156,1499`,
+   `rust/loopflow/src/lf/commands/work_route.rs:68`) to tracker fetch / tracker
+   state. Done when
+   `git grep -nE 'planning acquisition|registration/acquisition|Provider freshness|acquired or synchronized' -- rust docs`
+   is empty and the three explain tests in `global_commands.rs` pass. No type,
+   wire key, fixture or SQL changes. Gate follows.
 
 ## What goes
 

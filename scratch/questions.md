@@ -23,3 +23,5 @@
 - Concept review, second pass after build: the explanation keeps the Task’s sync time, and Task lookups use the fetch verb (slice 6). Passed over: dropping the field from the explanation.
 - Kept under their released names: lock directory `locks/planning-peers`, shared with the released lf like `chapter-locks`.
 - Larger than this change, on `scratch/concept-review.html`: `TaskPlanningAction` and the `action` key in `lf --explain --json` use "action" for what a command would do, a third sense beside the tracker's and Desktop's.
+- Concept review, third pass after build: `lf --explain task …` sentences say fetch and tracker (slice 7, exact text in the plan). "Observation only;" and the `Effect:` label stay. Passed over: leaving them as prose.
+- Larger than this change, on `scratch/concept-review.html`: `docs/dev/planning.md` prose still narrates with acquire/observed/accepted under a correct glossary; a rewrite of that document.

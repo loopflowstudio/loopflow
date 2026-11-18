@@ -1285,7 +1285,6 @@ pub async fn new_thread(
         Some(key) => store.sqlite.input_provider_session(key)?.is_some(),
         None => false,
     };
-    let threaded = threaded && !thread_unwritten(store, &session)?;
     // A conversation with no provider history carries its original first prompt.
     let request = if threaded {
         Some(conversation_log::continuation(&store.sqlite, &session)?)
@@ -1323,13 +1322,8 @@ pub async fn new_thread(
         store.sqlite.record_provider_lineage(&next, &lineage)?;
     }
     let next = finish_thread_creation(store, next, request_id).await?;
-    let seed = if threaded {
-        format!("seeded with what the {from} thread knew")
-    } else {
-        "starting from its first prompt".to_owned()
-    };
     crate::journal::request::diagnostic(format_args!(
-        "Started a new {} thread for {}, {seed}.",
+        "Started a new {} thread for {}, seeded with what the {from} thread knew.",
         next.provider.as_deref().unwrap_or("provider"),
         next.title
     ));
@@ -1339,37 +1333,6 @@ pub async fn new_thread(
         false => None,
     };
     Ok((next, launch))
-}
-
-/// Whether the provider never wrote the thread `session` records: nothing runs
-/// it and no transcript is where the provider keeps them. Claude's thread is
-/// named before Claude starts, so a launch that ended before its first turn
-/// leaves one. It has no log to seed from and never will.
-fn thread_unwritten(store: &SharedStore, session: &LfSession) -> Result<bool> {
-    use crate::transcript::{Gap, Located};
-    let harness = session
-        .provider
-        .as_deref()
-        .and_then(crate::harness::HarnessKind::parse);
-    let reference = store.sqlite.input_provider_session(session.input_key()?)?;
-    let (Some(harness), Some(reference)) = (harness, reference) else {
-        return Ok(false);
-    };
-    if matches!(
-        resume_intent(&current_summary(store, &session.id)?),
-        SessionResumeIntent::View | SessionResumeIntent::TakeOver
-    ) {
-        return Ok(false);
-    }
-    Ok(matches!(
-        crate::transcript::locate(
-            &store.sqlite,
-            harness,
-            &reference.agent_session,
-            &session.cwd
-        )?,
-        Located::Gone(Gap::FileMissing { .. })
-    ))
 }
 
 // First submission and recovery finish the same input. Publication may already

@@ -274,7 +274,10 @@ etude checkout and `lf` version are unknown.
   Machines exchanging through Git on a tracker repository. This needs its own
   Task, not filed yet: it needs "which refs are mine" and a decision on which
   rule owns a field both a tracker and a stamp carry. The two orders are
-  designed together there.
+  designed together there. Two things said for it on 2026-11-18 are in
+  `scratch/explore.md` and the design's tracker section: backlog reorders
+  are written in each tracker's own terms, and a Team or Initiative matters
+  only as the default for a new Wave.
 - A command that deletes a gone Machine's ref, and squashing a ref's history.
 - Who may use someone's hub beyond SSH reach.
 - The phone, presence, the hub's persistent connection: LOO-861.
@@ -287,7 +290,12 @@ etude checkout and `lf` version are unknown.
   `mark_hub_sent`, `confirm_hub_sends`, the `queued` / `sent` phase;
   `hub_plans` (into `plan_carriers`); `forget_hub_plans` reporting values
   "the hub never took".
-- "The change sent last wins" in docs, comments and test names.
+- "The change sent last wins" for the hub: gone from code and docs. The
+  phrase stays where it describes Linear/Asana (`planning/rules.rs`,
+  `docs/dev/reference.md` "Linear events", `docs/dev/delivery.md`), which
+  this Task leaves alone. The old test name is still in
+  `rust/loopflow/tests/README.md` and `scripts/testing.md` if slice 1 did
+  not rename it there; check when slice 2 extends that test.
 - Already deleted on this branch and staying deleted: the journal, field
   causality, destinations, `PlanningSync`, `lf repo tracker key` / `journal`,
   the `two-people` World. The Git carrier is new code in a new module; nothing
@@ -357,6 +365,11 @@ etude checkout and `lf` version are unknown.
   `cargo nextest run -p loopflow-storage --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::) | test(revisions::)'`;
   `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(store::children_tests::) | test(store::ownership_lifecycle_tests::) | test(planning_setup_tests::) | test(dto_fixtures::subscribe_frames) | test(server::schema::tests::)'`;
   `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings`.
+- Those ran before main (#1974, the `processes` table goes) was merged in at
+  `be214dee63`. After the merge only
+  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
+  ran, clean, 2026-11-18. Slice 2 reruns the hub acceptance test as it
+  extends it; the storage tests rerun at gate.
 - Not run, for gate: the rest of `machine_commands::`, `transport::`,
   `binary(transport_tests)`, `documented_commands::`, `performance_tests::`,
   and Swift `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`

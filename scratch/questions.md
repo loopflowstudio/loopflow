@@ -28,3 +28,14 @@
   next provider**, instead of importing the transcript. Chosen because a PR
   prompt's diff is longer than the import's excerpt. Passed over: a flag on
   the launch marking it one-shot.
+
+- **A provider move rewrites the Session's `provider` and `model`.** Needed so
+  the Session closes and reads the transcript of the agent it now runs. A
+  model move inside one provider leaves `model` as it was, same as before.
+  Whether Session lists should show the first agent or the current one was
+  not asked; they now show the current one.
+
+- **Stderr prefix on a Codex refusal read from `codexErrorInfo`** is
+  `provider_rate_limited: You’ve hit…`, where the docs' example shows
+  `codex_error: You’ve hit…` (what the text match yields). Which one people
+  see depends on the unobserved field.

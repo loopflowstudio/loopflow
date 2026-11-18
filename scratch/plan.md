@@ -179,44 +179,29 @@ refusal there still stops. An order that leads with one of them never moves.
 Survives: the Graph step's waits and recorded recoveries, pinning by `-a` and
 `agent:`, the revoked-login skip, the `checkpoint` step commit.
 
-## Slices
+## Built
 
-1. **Codex refusals classify, and a command moves.** Fold `’` in the text
-   classifiers and read `codexErrorInfo` in `codex_decode.rs`; drop the early
-   return. Test in `agent_tests.rs` beside the model-unavailable one: a Codex
-   stand-in whose turn fails with the message exactly as Codex sends it
-   (`You’ve`), `fallback_agents: [claude]`, `wait_for_capacity: false`; the
-   result is Claude's answer, and the prompt the Claude stand-in received is
-   the launch's `task_prompt` byte for byte. This is the slice that could prove the plan
-   wrong: if the stand-in's refusal does not classify through the real decode
-   path, nothing after it matters. Change the `'` in existing fixtures to `’`
-   so they match the provider.
-2. **PR copy.** Skill settings and fallbacks in `generate_pr_copy`. Two tests
-   in `tests/work/pr_tests.rs` through `create_or_update_pr` with `agent:
-   None`: `agents: [codex, claude]` with Codex refused publishes Claude's
-   title, and the Claude stand-in saw the whole diff; `skill.pr-message.default_agent` picks the stand-in that answers
-   while the other would fail the test if launched.
-3. **Commit fold.** One launch in `generate_commit_message`, resolved the way
-   PR copy is (`Chosen(Some)` sets the resolved config's `agent`); a focused test
-   that a refused first agent yields the second's message.
-4. **Docs and comments** listed under What goes.
+All four slices are in. What building them taught:
 
-## Docs written ahead of the code
+- **A move from Codex to Claude had never completed.** The Session kept
+  `provider='codex'` after the move, so stopping the Claude that followed asked
+  Codex's close check for an endpoint and failed with `Codex AgentProcess
+  connection is unavailable`. A retry that changes provider now records the
+  provider and model on the Session (`record_session_agent`). Claude to Codex
+  worked only because the default close check asks nothing.
+- **"No reply yet" is its own function, not a changed `continuation`.**
+  `conversation_log::continuation_of_work` returns `None` when the transcript
+  holds no agent item; `continuation` keeps its signature for `lf session new
+  -a` and resume, which want the log either way.
+- **PR copy and commit messages share `ops::commit::message_launch`**: skill
+  settings, the chosen agent, then `resolve_agents`.
+- The Codex stand-in (`support::refused_codex_script`) leaves `codexErrorInfo`
+  null, so the integration tests cover the apostrophe fold; the field is
+  covered in `codex_decode`'s unit test.
+- `bare_interactive_returns_a_quota_refusal_without_retry` is deleted: it
+  drove the headless loop, which interactive Sessions never reach.
 
-Slice 4's prose is in place and describes the intended behavior; implement
-makes it true and still owes the `agent/mod.rs` comments and the `agents`
-description in `config/catalog.rs:274`.
-
-- `docs/config.md` "Keep going when a provider runs out": `lf pr open` example
-  with the move lines, the spent-order error, commands never wait.
-- `docs/subscriptions.md`: refusal table rows for other headless work, Pi and
-  OpenCode; a turn refused before any reply restarts from its prompt.
-- `docs/troubleshooting.md` "Rate limits".
-- `docs/orchestration.md`: `default_agent` for `commit-message` and
-  `pr-message`; "headless work", not "a step", moves through `agents`.
-
-The docs state that Pi and OpenCode entries stop at a refusal. `docs/sessions.md`
-needed no change.
+Left for later steps: clippy (lint), the suites (gate).
 
 ## Demo
 
@@ -233,7 +218,9 @@ out of quota: `lf pr open` prints the move lines, then the PR URL.
 
 ## Checks
 
-- `cargo test -p loopflow-execution --lib agent::` — not run; implement.
-- `cargo test -p loopflow --test agent_tests` — not run; implement.
-- `cargo test -p loopflow --lib pr_tests::` — not run; implement, then gate.
+- `cargo test -p loopflow --test agent_tests -- a_command_refused model_unavailable` — passed; implement.
+- `cargo test -p loopflow --lib pr_tests::pr_` — passed; implement, then gate.
+- `cargo test -p loopflow --test integration commit_tests::a_commit_message` — passed; implement.
+- `cargo test -p loopflow-execution --lib -- agent::tests harness::codex_decode ops::task_execution ops::human_session::conversation_log` — passed; implement.
 - `cargo clippy --all-targets -- -D warnings` — not run; lint.
+- `test(store::) | test(session_record::capture_tests::) | test(process::runtime::tests::)` — not run; gate. The retry path now writes the Session's provider.

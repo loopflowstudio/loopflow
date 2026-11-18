@@ -243,32 +243,6 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
     }
 }
 
-/// A Codex whose first turn the provider refuses, in the words Codex sends:
-/// the rollout holds the thread and nothing the agent said.
-fn refused_codex_script() -> String {
-    support::codex_socket_script(
-        r#"#!/bin/sh
-read -r initialize
-echo '{"jsonrpc":"2.0","id":1,"result":{}}'
-read -r initialized
-read -r thread_start
-thread=$(python3 -c 'import uuid; print(uuid.uuid4())')
-turn=$(python3 -c 'import uuid; print(uuid.uuid4())')
-echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"'"$thread"'"}}}'
-read -r turn_start
-echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"'"$turn"'"}}}'
-echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"inProgress"}}}'
-day="$CODEX_HOME/sessions/$(date -u +%Y/%m/%d)"
-mkdir -p "$day"
-echo '{"type":"session_meta","payload":{"id":"'"$thread"'","cwd":"'"$PWD"'"}}' > "$day/rollout-$(date -u +%Y-%m-%dT%H-%M-%S)-$thread.jsonl"
-echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"'"$thread"'","turnId":"'"$turn"'","willRetry":false,"error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}'
-echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"'"$thread"'","turn":{"id":"'"$turn"'","status":"failed","error":{"message":"You’ve hit your usage limit. Upgrade to Pro, or try again at 9:41 PM.","codexErrorInfo":null,"additionalDetails":null}}}}'
-if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
-while read -r line; do :; done
-"#,
-    )
-}
-
 #[test]
 fn a_command_refused_by_codex_finishes_on_the_next_provider_with_its_whole_prompt() {
     let home = TempDir::new().unwrap();
@@ -277,7 +251,10 @@ fn a_command_refused_by_codex_finishes_on_the_next_provider_with_its_whole_promp
         "open(os.environ['LF_TEST_INPUT'], 'w').write(message['message']['content'][0]['text'])\ntext = 'written by claude'",
     );
     let _env = EnvGuard::with_lf_home(
-        &[("codex", &refused_codex_script()), ("claude", &claude)],
+        &[
+            ("codex", &support::refused_codex_script()),
+            ("claude", &claude),
+        ],
         home.path(),
     );
     let _directory = support::InDirectory::enter(home.path());

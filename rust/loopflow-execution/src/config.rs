@@ -537,7 +537,7 @@ impl Config {
         Ok((first, fallback))
     }
 
-    /// The agents a headless step may move to when a usage limit refuses its
+    /// The agents headless work may move to when a usage limit refuses its
     /// own: the rest of [`Config::agent_order`]. An `agent` choice has none.
     pub fn fallback_agents(&self) -> Vec<String> {
         self.agent_order().into_iter().skip(1).collect()

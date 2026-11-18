@@ -298,6 +298,24 @@ once. Interactive Sessions retain the
 refusal and require an explicit retry or move, even when attached to a Task.
 
 ```bash
+lf task status MTG-328
+#   compress went on under claude after: provider_rate_limited: You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.
+```
+
+The first word of the reason is what the provider said went wrong:
+
+| Reason starts with | The provider said | A Graph step |
+| --- | --- | --- |
+| `provider_rate_limited:` | The account's usage is spent | Tries the next entry; waits once every entry is spent |
+| `provider_model_unavailable:` | The account can't use that model, or there is no such model | Tries the next entry |
+| `provider_credential_invalidated:` | The login was revoked or could not be refreshed | Skips that provider's other models and tries the next provider |
+| `provider_capacity:` | The provider is overloaded | Retries the same conversation |
+| `codex_error:` | Nothing about the cause | Goes by the message; one Loopflow doesn't recognize stops the step |
+
+A step that ran on a provider you didn't expect has a reason here too: a
+misspelled model in `agents` reads `provider_model_unavailable:` and moves on.
+
+```bash
 lf set --global agents claude,codex
 lf config settings --skill gate --explain
 lf -a codex gate

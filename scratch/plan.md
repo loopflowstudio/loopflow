@@ -165,3 +165,28 @@ stay as they are.
 - Native (interactive) Codex Sessions; this is the headless step path.
 - Other harnesses' decoders.
 - A typed failure on `CommandError`, so `release.rs` stops reading words.
+
+## Docs written first
+
+- `docs/config.md`, "Keep going when a provider runs out": the status line
+  with the typed prefix and the full recorded message, and a model the
+  account can't use (or a misspelled one) moving on.
+- `docs/troubleshooting.md`, "Rate limits": the status line and a table from
+  the reason's first word to what the step does.
+
+`docs/subscriptions.md` and `docs/orchestration.md` already describe this
+behavior and are unchanged.
+
+Open, found while writing them:
+
+- The status line used to read `after: codex_error: …`, which named the
+  provider that refused. `after: provider_rate_limited: …` names only the
+  provider the step moved to. Should the reason a person reads keep the
+  refusing provider's name (`codex: provider_rate_limited: …`, or the cause
+  in plain words such as `codex usage limit: …`)?
+- `provider_rate_limited` is the code for a spent usage limit, while Codex's
+  own `rateLimitExceeded` stays untyped. The docs table has to explain that
+  "rate limited" means usage spent.
+- The table says a typed `provider_capacity` retries the same conversation,
+  as the text-classified capacity failure does today. Confirm when slice 1
+  lands.

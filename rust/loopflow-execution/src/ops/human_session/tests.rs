@@ -90,8 +90,7 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
     let _ambient = crate::test_ambient::EnvGuard::new();
     let home = ledger.home();
     let runtime = tokio::runtime::Runtime::new().unwrap();
-    crate::journal::with_process(|| {
-        crate::journal::admit_process(home, &["lf".into(), "session".into()]);
+    crate::journal::with_runtime(home, &["lf".into(), "session".into()], || {
         runtime.block_on(async {
             let store = std::sync::Arc::new(
                 crate::store::open_ephemeral_store(&crate::store::StorageConfig::sqlite(

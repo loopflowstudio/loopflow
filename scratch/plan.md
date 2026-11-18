@@ -658,6 +658,12 @@ Left for later steps:
   exit 0 for reaped agents (fixed: `Registry::open` settles adoption's ends first),
   shutdown SIGTERM (`scratch/qa.html`). After them: `server::recovery::tests::` (9),
   `steers::tests::a_conversation_on_an_app_server…`, `context_launch_tests::a_killed_task_conversation`.
+- Compress after slice 6: `lost_thread` reads liveness from the summary `open` already
+  holds. Two tests called `journal::with_process`, which is once per process, so under
+  `cargo test` any later `with_runtime` test had no admitted Process
+  (`resuming_an_ended_conversation_…` failed in-module, passed alone); both now use
+  `with_runtime`. `ops::human_session::tests::` (31), `launch_mode_tests::reopening_…`,
+  `context_launch_tests::a_killed_task_conversation` pass; clippy on execution clean.
 - A real reboot with three Tasks (a person runs it).
 
 ## Docs

@@ -2777,8 +2777,7 @@ mod launch_mode_tests {
         use crate::session_record::{SessionCaptureSpec, SessionGraphMembership, SessionRecorder};
 
         let ledger = crate::journal::TestLedgerGuard::new();
-        crate::journal::with_process(|| {
-            crate::journal::admit_process(ledger.home(), &["lf".into(), "resume".into()]);
+        crate::journal::with_runtime(ledger.home(), &["lf".into(), "resume".into()], || {
             let store = crate::journal::process_ledger().unwrap();
             // Attribution selects a launch kind independently of the stored
             // surface. Resume eligibility is checked before delegation.

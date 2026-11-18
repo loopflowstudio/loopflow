@@ -1019,12 +1019,8 @@ pub async fn open(
         }
         _ => primary::admit_workspace(store, target).await?,
     };
-    let intent = invocation_intent(
-        &session,
-        &current_summary(store, &session.id)?,
-        false,
-        false,
-    );
+    let summary = current_summary(store, &session.id)?;
+    let intent = invocation_intent(&session, &summary, false, false);
     drop(progress);
     // Another harness starts a new thread from the log. So does a thread whose
     // transcript is gone, which cannot resume: one request per lost thread, so
@@ -1032,7 +1028,7 @@ pub async fn open(
     let fresh = if intent == NewThread {
         Some((handoff_agent(&session), uuid::Uuid::new_v4().to_string()))
     } else {
-        lost_thread(store, &session, held_elsewhere)?
+        lost_thread(store, &session, &summary, held_elsewhere)?
     };
     if let Some((agent, request_id)) = fresh {
         drop(launch_lock);
@@ -1115,8 +1111,12 @@ pub async fn open(
 fn lost_thread(
     store: &SharedStore,
     session: &LfSession,
+    summary: &crate::session::SessionSummary,
     held_elsewhere: bool,
 ) -> Result<Option<(Option<String>, String)>> {
+    if held_elsewhere || is_running(session_state(summary)) {
+        return Ok(None);
+    }
     let (Some(key), Some(provider)) =
         (session.artifact_key.as_deref(), session.provider.as_deref())
     else {
@@ -1125,17 +1125,7 @@ fn lost_thread(
     let Some(thread) = store.sqlite.input_provider_session(key)? else {
         return Ok(None);
     };
-    let running = store
-        .sqlite
-        .session_attachment(&session.id)?
-        .is_some_and(|attachment| {
-            crate::journal::agent_evidence(&store.sqlite, &attachment.agent_process_id)
-                == crate::journal::ProcessIdentityEvidence::Live
-        });
-    if held_elsewhere
-        || running
-        || !crate::transcript::thread_lost(&store.sqlite, provider, &thread.agent_session)?
-    {
+    if !crate::transcript::thread_lost(&store.sqlite, provider, &thread.agent_session)? {
         return Ok(None);
     }
     crate::journal::request::diagnostic(format_args!(

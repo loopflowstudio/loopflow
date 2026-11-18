@@ -942,10 +942,11 @@ pub fn subscribe_task_status(
 }
 
 /// A connection to the server of the Machine that runs the Task `issue`
-/// names, and the `task.status` read to send it; `None` when it runs here.
+/// names, and the `task.status` read to send it; `None` when it runs here or
+/// a move from here has not arrived, whose progress only this Machine knows.
 fn task_machine(repo: &Path, issue: &str) -> Result<Option<TaskMachine>> {
     use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-    let Some(route) = loopflow_execution::machine::task::remote_task(issue)? else {
+    let Some(route) = loopflow_execution::machine::task::remote_ownership_writer(issue)? else {
         return Ok(None);
     };
     let machine = super::write::find_machine(route.machine_id.as_str())?;

@@ -2178,7 +2178,10 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
         .output()
         .unwrap();
     let status = String::from_utf8_lossy(&status.stdout);
-    assert!(status.contains("Runs on mini since"), "{status}");
+    assert!(
+        status.contains("Runs on mini; read from its server."),
+        "{status}"
+    );
 }
 
 #[test]
@@ -2343,7 +2346,10 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
         .unwrap();
     assert_success(&status);
     let status = String::from_utf8_lossy(&status.stdout);
-    assert!(status.contains("Runs on mini since"), "{status}");
+    assert!(
+        status.contains("Runs on mini; read from its server."),
+        "{status}"
+    );
     assert!(!status.contains("Moving to mini"), "{status}");
 }
 
@@ -2772,7 +2778,9 @@ fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
 
     let status = laptop(&["task", "status", task.as_str()]);
     assert!(
-        status.contains(&format!("{identifier}  Runs on mini since ")),
+        status.contains(&format!(
+            "· {identifier}\nRuns on mini; read from its server."
+        )),
         "{status}"
     );
     let list = laptop(&["task", "list"]);
@@ -3469,9 +3477,28 @@ fn a_moved_task_comes_back_with_the_same_command() {
         String::from_utf8_lossy(&output.stdout).into_owned()
     };
     on_mini(&["machine", "add", "laptop"]);
+    // On mini, status reads the laptop's server, where the Task runs.
+    fs::create_dir_all(local_home.join(".local/bin")).unwrap();
+    executable(
+        &local_home.join(".local/bin/lf"),
+        &format!(
+            "#!/bin/sh\nexport LF_HOME='{}' LF_BIN='{lf}'\nexec '{lf}' \"$@\"\n",
+            local_home.display(),
+        ),
+    );
+    executable(
+        &fixture.root.path().join("remote/.local/bin/ssh"),
+        &format!(
+            "#!/bin/sh\nfor arg in \"$@\"; do remote_command=\"$arg\"; done\ncd '{}' || exit 1\nexec env -i HOME='{}' PATH=/usr/bin:/bin bash -c \"$remote_command\"\n",
+            local_home.display(),
+            local_home.display()
+        ),
+    );
     let there = on_mini(&["task", "status", task.as_str()]);
     assert!(
-        there.contains(&format!("{identifier}  Runs on laptop since ")),
+        there.contains(&format!(
+            "· {identifier}\nRuns on laptop; read from its server."
+        )),
         "{there}"
     );
 }
@@ -3605,7 +3632,10 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
         .unwrap();
     assert_success(&status);
     let status = String::from_utf8_lossy(&status.stdout);
-    assert!(status.contains("Runs on mini since"), "{status}");
+    assert!(
+        status.contains("Runs on mini; read from its server."),
+        "{status}"
+    );
     let arrived = plan.remote.session(&session).unwrap().unwrap();
     assert_eq!(arrived.task_id.as_ref(), Some(&task));
     // The move was sent from the laptop and arrived on mini.

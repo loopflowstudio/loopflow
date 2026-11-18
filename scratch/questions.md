@@ -43,3 +43,12 @@ Made without anyone to ask; each is reversible.
 - **`.lf/qa/hooks.md` says dead AgentProcesses are reaped by `lf process
   prune`, not by `lf session list`**; `ops/recovery.rs` reaps on that read.
   Not checked by running it.
+
+## From human review (2026-11-18, nobody present)
+
+- **Went on to gate with every question open.** `scratch/human-review.html`
+  section 6 lists seven; none changes what a Session reads. No reply was
+  given to any of them.
+- **The Task brief names `store::query_plans::tests::` for the plan test**;
+  the trace lives in `session_projection.rs` in `loopflow-execution`. Left
+  where it is: it fails on the old statement, and compress removed the copy.

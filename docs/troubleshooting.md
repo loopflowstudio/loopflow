@@ -312,9 +312,6 @@ The first word of the reason is what the provider said went wrong:
 | `provider_capacity:` | The provider is overloaded | Retries the same conversation |
 | `codex_error:` | Nothing about the cause | Goes by the message; one Loopflow doesn't recognize stops the step |
 
-A step that ran on a provider you didn't expect has a reason here too: a
-misspelled model in `agents` reads `provider_model_unavailable:` and moves on.
-
 ```bash
 lf set --global agents claude,codex
 lf config settings --skill gate --explain

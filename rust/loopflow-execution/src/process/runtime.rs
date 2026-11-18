@@ -358,9 +358,7 @@ impl LfProcessRuntime {
             resume_thread,
             || close_session_agent_process(store, session),
         )?;
-        if moved || runtime.model != model {
-            store.record_session_agent(session, &next, &provider, model.as_deref())?;
-        }
+        store.record_session_agent(session, &next, &provider, model.as_deref())?;
         runtime.owner = Some(crate::harness::Recording {
             store: store.clone(),
             session: session.clone(),

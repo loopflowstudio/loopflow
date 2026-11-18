@@ -985,9 +985,9 @@ impl SqliteStore {
         Ok(())
     }
 
-    /// The agent the Session's current AgentProcess runs on, after a retry
-    /// moved the conversation to another provider or model. Closing the
-    /// process and routing a steer both go by the recorded provider.
+    /// The agent the Session's current AgentProcess runs on; a retry may move
+    /// the conversation to another provider or model. Closing the process and
+    /// routing a steer both go by the recorded provider.
     pub fn record_session_agent(
         &self,
         session: &str,

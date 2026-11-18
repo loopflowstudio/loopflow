@@ -1312,7 +1312,6 @@ fn _model_unavailable(text: &str) -> Option<()> {
 pub(crate) fn credential_invalidated_failure(text: &str) -> Option<()> {
     let text = _provider_words(text);
     (text.contains("token_invalidated")
-        || text.contains("refresh_token_invalidated")
         || text.contains("refresh token was revoked")
         || text.contains("access token could not be refreshed")
         || text.contains("your session has ended. please log in again"))

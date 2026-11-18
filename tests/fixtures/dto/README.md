@@ -45,11 +45,6 @@ backlog, completion, external and review waits, local recovery blockers, and
 unavailable evidence. Rust and Swift decode the same Task rows; consumers never
 reconstruct the condition from process flags.
 
-`activity_snapshot.json` pins `lf process list --json`: exact live Process and provider
-processes carry OS-derived state, while a provider without exact ownership
-stays separate from the call tree. Desktop receives the same wire type through
-the Work observation stream; it does not poll `lf process list`.
-
 `session_history_summary.json` and `wave_detail.json` pin the `SessionHistory`
 shape used by `lf session usage --json` and Wave detail. Captured event sequences
 and native thread/turn references retain distinct outcomes. Optional counters,

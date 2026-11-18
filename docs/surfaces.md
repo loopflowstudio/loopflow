@@ -230,7 +230,7 @@ of never-started work; `selection_states` supplies the same lifecycle, board
 section and conversation activity used by Dashboard filters;
 `next_move.owner` (`user`, `wave`, `task`, `ci`, `external`) says who moves it
 on. `lf task status <issue> --json` prints one
-Task as a row, each fact once, with its Sessions, Graph processes and
+Task as a row, each fact once, with its Sessions, Graph runs and
 thread.
 
 A Session record:

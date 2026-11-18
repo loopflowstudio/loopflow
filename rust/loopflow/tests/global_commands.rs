@@ -256,7 +256,6 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     let cwd = tempfile::tempdir().unwrap();
     fs::create_dir_all(home.path().join(".lf")).unwrap();
     loopflow_execution::store::open_sqlite(&home.path().join(".lf/loopflow.db")).unwrap();
-    let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
     let parent = loopflow_test_support::RunningParent::insert(&home.path().join(".lf/loopflow.db"));
     let child = |args: &[&str]| {
         parent
@@ -269,17 +268,6 @@ fn repository_errors_do_not_prevent_home_command_admission() {
     assert!(String::from_utf8_lossy(&output.stderr).contains("Run lf sync from a Git repository"));
     let identity = success(child(&["machine", "id"]));
     assert!(!identity.trim().is_empty());
-    let commands: i64 = database
-        .query_row(
-            "SELECT count(*) FROM processes WHERE parent_lf_process_id=?1",
-            [&parent.id],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(
-        commands, 1,
-        "the failed sync owns a process; the Machine read records none"
-    );
     let output = command(home.path(), cwd.path(), &["set", "agent", "claude"])
         .output()
         .unwrap();

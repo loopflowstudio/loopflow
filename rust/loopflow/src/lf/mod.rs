@@ -945,7 +945,7 @@ lf desktop do page -p tiles page=2\n  lf desktop do filter -p board days=14"
         #[command(flatten)]
         target: DesktopTargetArgs,
     },
-    /// Show the Task's Graph processes in the browser
+    /// Show the Task's Graph runs in the browser
     GraphLog {
         #[command(flatten)]
         target: DesktopTargetArgs,
@@ -2081,7 +2081,7 @@ pub struct SyncArgs {
     /// Explicitly claim a raw sync that has no Loopflow owner
     #[arg(long, conflicts_with_all = ["plan", "manual"])]
     pub adopt: bool,
-    /// Branch to sync onto; naming the default branch detaches a stacked Task
+    /// Branch or Task to sync onto; another open Task stacks this one on it, the default branch detaches
     pub onto: Option<String>,
     /// Print the plan, or what the sync did
     #[arg(long)]
@@ -2997,7 +2997,7 @@ pub enum MachineCommand {
     /// Name this Machine for teammates, or `off` to make it private again.
     /// A private Machine's ownership entries carry only its id.
     Public { name: String },
-    /// Diagnose installation, storage and Process integrity
+    /// Diagnose installation, storage and stray lf processes
     Doctor {
         /// Diagnose repository planning without changing it
         #[arg(long = "plan")]
@@ -3006,8 +3006,8 @@ pub enum MachineCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Apply store retention: close dead Processes, forget finished ones,
-    /// expire Session history past 90 days and reclaim the space
+    /// Apply store retention: end runs and agents nobody saw exit, expire
+    /// Session history past 90 days and reclaim the space
     #[command(
         after_help = "The Machine server runs this every hour. Turns are kept; history an earlier \
                       lf wrote into loopflow.db moves to history.db."

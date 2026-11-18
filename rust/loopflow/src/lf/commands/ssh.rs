@@ -143,11 +143,8 @@ pub(super) fn run_with_io(
         ))?
     };
     let target = if preview || resident_operation {
-        let store = loopflow_execution::store::read_existing_registry()?
-            .ok_or_else(|| anyhow!("Machine unavailable: local registry is absent"))?;
-        runtime.block_on(loopflow_execution::machine::connection::find_machine(
-            &store, target,
-        ))?
+        runtime
+            .block_on(loopflow_execution::machine::connection::find_registered_machine(target))?
     } else {
         runtime.block_on(resolve_target(target, forward_agent))?
     };

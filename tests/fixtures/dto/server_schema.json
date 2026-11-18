@@ -13871,6 +13871,17 @@
           ],
           "description": "The stop that keeps a run from approving Auto-Ship, until `lf ship`."
         },
+        "stack_parent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TaskStackParent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The Task this one is stacked on."
+        },
         "started_by": {
           "anyOf": [
             {
@@ -13950,7 +13961,34 @@
         "actions",
         "started_by",
         "ship_approval",
-        "ship_stop"
+        "ship_stop",
+        "stack_parent"
+      ],
+      "type": "object"
+    },
+    "TaskStackParent": {
+      "description": "The Task a stacked Task builds on, as people name it.",
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "identifier": {
+          "type": "string"
+        },
+        "pr_number": {
+          "description": "`None` until the parent opens its PR.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "identifier",
+        "branch",
+        "pr_number"
       ],
       "type": "object"
     },

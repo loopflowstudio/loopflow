@@ -331,13 +331,10 @@ fn two_people_share_one_repository() {
                 rusqlite::Connection::open(pair.home(person).join("home/loopflow.db")).unwrap();
             let mut query = db
                 .prepare(
-                    // A Task conversation is held: its process is the holder.
-                    "SELECT DISTINCT p.pid FROM processes p
-                 WHERE p.completed_at IS NULL AND p.pid IS NOT NULL
-                     AND p.command='[\"lf\",\"holder\",\"run\"]'
-                     AND EXISTS (SELECT 1 FROM agent_sessions s
-                         JOIN held_terminals t ON t.id=s.held_terminal_id
-                         WHERE t.ended_at IS NULL)",
+                    // A Task conversation is held: its attachment names the holder.
+                    "SELECT DISTINCT s.attached_pid FROM agent_sessions s
+                     JOIN held_terminals t ON t.id=s.held_terminal_id
+                     WHERE t.ended_at IS NULL AND s.attached_pid IS NOT NULL",
                 )
                 .unwrap();
             let owners = query

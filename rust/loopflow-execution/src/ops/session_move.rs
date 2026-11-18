@@ -129,7 +129,7 @@ impl StoppedRun {
                 ships,
                 ..
             }) => {
-                eprintln!("Running on {} as Graph process {graph_process}", self.place);
+                eprintln!("Running on {} as Graph run {graph_process}", self.place);
                 eprintln!("  follow: lf task status {name}");
                 if ships {
                     eprintln!("  ships:  no interactive step is left, so this run may merge the PR; `lf task hold {name}` withdraws");

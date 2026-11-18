@@ -136,7 +136,7 @@ pub fn plan_sync(
     // Stacked children retain their history when integrating the parent.
     let persistent = crate::git::worktrees::is_persistent_worktree(repo)?;
     let replay_stack = match &fork_base {
-        Some(base) => !crate::git::is_ancestor(repo, base, &base_ref)?,
+        Some(base) => crate::git::stack_needs_fork_comparison(repo, base, &base_ref)?,
         None => false,
     };
     let strategy = if fork_base.is_some() || persistent {
@@ -444,7 +444,7 @@ fn record_control_task_state(repo: &Path, owner: &GitOperationOwner) -> OpsResul
     };
     if let Some(stacked) = crate::ops::task::task_stack(repo)? {
         let default = get_default_branch(repo)?;
-        let clear_parent = stacked.parent_branch.is_none()
+        let clear_parent = stacked.parent_merged
             || owner.target_ref == default
             || owner.target_ref == format!("origin/{default}");
         if clear_parent {

@@ -530,7 +530,7 @@ fn task_run_open_while_running(fail_open: bool) {
     };
     let text = fs::read_to_string(&out).unwrap();
     assert_eq!(status.success(), !fail_open, "{text}");
-    let launched = text.find("running as Graph process").unwrap();
+    let launched = text.find("running as Graph run").unwrap();
     let opened = text
         .find(if fail_open {
             "Conversation exited"
@@ -810,10 +810,10 @@ fn task_run_returns_while_its_graph_keeps_running() {
     }
     let printed = fs::read_to_string(&out).unwrap();
     let graph = printed
-        .split("Graph process ")
+        .split("Graph run ")
         .nth(1)
         .and_then(|rest| rest.split_whitespace().next())
-        .unwrap_or_else(|| panic!("no Graph process named: {printed}"))
+        .unwrap_or_else(|| panic!("no Graph run named: {printed}"))
         .to_string();
     assert!(printed.contains(&format!("graph-{graph}.log")), "{printed}");
     assert!(
@@ -1297,7 +1297,7 @@ os.execv({binary}, [{binary}, *sys.argv[1:]])
                 .and_then(|rest| rest.split_whitespace().next())
                 .map(str::to_owned)
         };
-        let (Some(graph), Some(log)) = (printed("running as Graph process "), printed("log:    "))
+        let (Some(graph), Some(log)) = (printed("running as Graph run "), printed("log:    "))
         else {
             return Ran {
                 code: output.status.code(),

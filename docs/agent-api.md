@@ -95,6 +95,7 @@ lf task run INF-123                    # place an existing Task, start its Graph
 lf task create --wave <wave> --title "add passkeys"  # file the issue; run it with `lf task run`
 pbpaste | lf task create --wave <wave>               # report from stdin; first line is the title
 lf task run INF-124 --stack-on INF-123 # dependent work before the parent lands
+lf sync INF-123                        # stack the Task you are in on INF-123
 ```
 
 The contract every agent runs under: **delegation must make the problem
@@ -116,6 +117,12 @@ in the parent's checkout to include them. Scratch follows the same Git
 merge behavior as other content, including edits to existing notes. The child's PR targets the parent's branch until
 merge, then `lf sync` merges main using the recorded fork as the comparison base.
 Child edits survive the parent's squash landing without replay.
+
+To build on another open Task from the Task you are already in, run
+`lf sync <its ID>`: it records the stack, moves your PR's base to the parent's
+branch and merges it. `lf sync main` undoes it. Never `git merge` another
+Task's branch or `gh pr edit --base`; lf reads neither, and `lf pr publish`
+reports the disagreement instead of fixing it.
 
 ## Run a child agent
 

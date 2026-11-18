@@ -29,8 +29,13 @@ final class HeldMachine {
     }
 
     private func nextReply() async -> CheckedContinuation<Revisions?, any Error> {
-        if replies.isEmpty { await withCheckedContinuation { waiting.append($0) } }
+        await nextSend()
         return replies.removeFirst()
+    }
+
+    /// Waits until a write is waiting for its reply.
+    func nextSend() async {
+        if replies.isEmpty { await withCheckedContinuation { waiting.append($0) } }
     }
 
     /// Lets the change's task run to its next suspension.
@@ -226,6 +231,8 @@ struct PendingChangesTests {
         } else {
             await machine.fail(RegistryQueryError(ServerLink.disconnected))
         }
+        // The change sends again only after it marked the link lost.
+        await machine.nextSend()
         #expect(changes.link == .blip)
         #expect(changes.acceptsChanges)
         // The answer goes to the second send, under the first one's request ID.

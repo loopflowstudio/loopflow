@@ -1286,7 +1286,7 @@ final class WorkModel {
     private(set) var comments = TaskReadings<TaskComments>()
     /// The shown Task's work, from the workspace reader's `task` part.
     private(set) var taskWork = TaskReadings<TaskOverview>()
-    /// Its recorded Sessions, Processes and Auto-Ship marks, from the same part.
+    /// Its recorded Sessions and Auto-Ship marks, from the same part.
     private(set) var taskExecution = TaskReadings<TaskExecution>()
     /// That Task's Graph processes keyed by Graph process, from the same part.
     private(set) var graphProcesses: [String: GraphProcessDetail] = [:]

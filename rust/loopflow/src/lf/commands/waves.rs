@@ -1244,6 +1244,9 @@ pub(crate) async fn task_detail(
     Ok(TaskDetail {
         summary,
         conversation: conversation_id,
+        stack_parent: status
+            .execution
+            .and_then(|execution| execution.stack_parent),
         task: TaskNames::read(Some(store)).await?.row(row),
         sessions,
         graph_processes: status

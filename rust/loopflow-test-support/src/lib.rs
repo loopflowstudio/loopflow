@@ -61,9 +61,20 @@ impl RunningParent {
     }
 }
 
-/// End running fixture Processes and wait for completed ones to finish exiting.
-/// A completion receipt can precede the owner's final screen write. Detached
-/// owners leave the test's process group and must settle before removing `home`.
+/// Owner rows keep a pid only while their process runs.
+const RUNNING_OWNERS: &str = "SELECT pid,1 FROM (
+    SELECT agent_pid pid FROM agent_sessions UNION SELECT attached_pid FROM agent_sessions
+    UNION SELECT pid FROM graph_processes UNION SELECT pid FROM graph_process_steps
+    UNION SELECT run_pid FROM task_graphs UNION SELECT pid FROM task_ship_events
+    UNION SELECT project_activation_pid FROM waves UNION SELECT repair_pid FROM ci_incidents
+) WHERE pid IS NOT NULL";
+/// Rows a released lf or a fixture wrote, finished ones included.
+const PROCESS_ROWS: &str = "SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL";
+
+/// End running fixture processes their records name, and wait for completed
+/// ones to finish exiting. A completion receipt can precede the owner's final
+/// screen write. Detached owners leave the test's process group and must
+/// settle before removing `home`.
 #[cfg(unix)]
 pub fn end_recorded_processes(home: &Path, lf: &Path) {
     let Ok(sql) = rusqlite::Connection::open_with_flags(
@@ -72,15 +83,16 @@ pub fn end_recorded_processes(home: &Path, lf: &Path) {
     ) else {
         return;
     };
-    let Ok(mut rows) =
-        sql.prepare("SELECT pid,completed_at IS NULL FROM processes WHERE pid IS NOT NULL")
-    else {
-        return;
-    };
-    let pids: Vec<(libc::pid_t, bool)> = rows
-        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
-        .map(|rows| rows.flatten().collect())
-        .unwrap_or_default();
+    let mut pids: Vec<(libc::pid_t, bool)> = Vec::new();
+    for query in [RUNNING_OWNERS, PROCESS_ROWS] {
+        if let Ok(mut rows) = sql.prepare(query) {
+            pids.extend(
+                rows.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                    .map(|rows| rows.flatten().collect::<Vec<_>>())
+                    .unwrap_or_default(),
+            );
+        }
+    }
     let home = home.to_string_lossy().into_owned();
     let lf = lf.to_string_lossy().into_owned();
     let ours = |pid: libc::pid_t| {

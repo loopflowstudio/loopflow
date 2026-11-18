@@ -1,64 +1,59 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8">
-<title>LOO-959 concept review (after qa)</title>
+<title>LOO-959 concept review, after the crash</title>
 <style>
-:root{color-scheme:light dark;--bg:#fff;--fg:#1d1d1f;--mute:#6e6e73;--line:#e5e5ea;--code:#f5f5f7;--yes:#1a7f37;--no:#cf222e;--prop:#0969da;--propbg:#ddf4ff}
-@media (prefers-color-scheme:dark){:root{--bg:#161618;--fg:#f2f2f7;--mute:#a1a1a6;--line:#2c2c2e;--code:#232326;--yes:#3fb950;--no:#ff7b72;--prop:#58a6ff;--propbg:#0c2d4a}}
-body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,system-ui,sans-serif;max-width:960px;margin:2rem auto;padding:0 1rem}
-h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2.2rem;border-top:1px solid var(--line);padding-top:1rem}
-code,pre{font:13px ui-monospace,Menlo,monospace;background:var(--code);border-radius:4px}code{padding:0 .25rem}pre{padding:.7rem;overflow-x:auto}
-table{border-collapse:collapse;width:100%}td,th{padding:.4rem .55rem;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
-.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}
-.prop{border-left:3px solid var(--prop);background:var(--propbg);padding:.5rem .8rem;border-radius:4px}
-.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.mute{color:var(--mute)}
+:root{color-scheme:light dark;--fg:#1b1b1b;--bg:#fbfbf8;--mute:#666;--yes:#1f7a3a;--no:#b3261e;--prop:#2457c5;--line:#ddd}
+@media(prefers-color-scheme:dark){:root{--fg:#e8e8e3;--bg:#151515;--mute:#9a9a9a;--yes:#6fcf8a;--no:#ff8a80;--prop:#8fb0ff;--line:#333}}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;color:var(--fg);background:var(--bg);max-width:960px;margin:2rem auto;padding:0 1rem}
+table{border-collapse:collapse;width:100%;margin:1rem 0}td,th{border-bottom:1px solid var(--line);padding:.45rem .5rem;text-align:left;vertical-align:top}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.prop{border-left:3px solid var(--prop);padding-left:.8rem}
+code{font-size:.9em}pre{background:rgba(127,127,127,.12);padding:.7rem;overflow:auto}.mute{color:var(--mute)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
 </style></head><body>
-<h1>Do the product's recovery concepts and the code's line up?</h1>
-<p><b>Area taken:</b> everything that keeps a Task's work alive on one Machine: its conversation (primary Session), its run (the carrier of <code>lf task run</code>/<code>lf ship</code>), the server's recovery pass that settles and restarts them, and the lines <code>lf task status</code> and Desktop print about them. Reviewed as built on <code>3479fc1548</code> against base <code>2593c489d7</code>, with <code>scratch/qa.html</code>'s live run. The earlier page (answered "1) a 2) a 3) b") reviewed the plan; this one reviews the result.</p>
+<h1>Do the concepts line up? LOO-959 after the crash</h1>
+<p class="mute">Area: recovery of a Task's conversation and its run after a kill, a reboot or a server restart, reviewed against base <code>2593c489</code> with slices 1–5 and the post-crash qa fixes in it (HEAD <code>5354b604</code>). Taken because the last qa was a real Machine crash, which is the case this Task exists for.</p>
 
-<h2>One interaction, with its failure and recovery</h2>
-<pre>kill -9 &lt;claude&gt;           Conversation: died 15:31 (exit 137) · starting again
-                           Conversation: running (started again 15:31, attempt 1)
-… dies 3 more times …      attempt 4
-lf resume --task X; /exit  Conversation: quit 15:47; `lf resume --task X` opens it
-lf resume --task X         Conversation: running (started again 15:39, attempt 3)   <span class="no">← the person's resume kept the deaths</span>
-kill -9 &lt;claude&gt; ×2        Conversation: died … · started 5 times; `lf resume …`   <span class="no">← gives up after 2 deaths, not 5</span></pre>
-<p>A person who resumes has vouched for the conversation the same way a finished turn does. The code resets the count only on a finished turn (<code>steers.rs:195</code>), so the person's start inherits the deaths before it.</p>
-
-<h2>Concepts, paired</h2>
+<h2>Pairings</h2>
 <table>
-<tr><th>What a person knows / does</th><th>What the code has</th><th></th><th>What is wrong</th></tr>
-<tr><td>The Task's <b>conversation</b></td><td>primary Session: <code>task_primary_sessions</code>, <code>TaskStatus.conversation</code></td><td class="yes">yes</td><td>One name for the person, one for the code, mapped once in status.</td></tr>
-<tr><td>It <b>died</b> / I <b>quit</b> it</td><td><code>SessionRecord.ended.by</code> from the launcher's exit (0/130 = person)</td><td class="yes">yes</td><td>Open window: a provider that exits 0 on SIGTERM before its holder records reads as quit (qa §9). Real Claude unchecked.</td></tr>
-<tr><td>"<b>starting again</b>" / "starts again 15:41"</td><td><code>start.next_at</code> from <code>next_start_at</code></td><td class="no">no</td><td>The line promises a start the server makes, and prints it with no server running (qa: <code>closed · starting again</code>).</td></tr>
-<tr><td>"<b>started 5 times</b>", then it waits for me</td><td><code>agent_sessions.starts_since_turn</code></td><td class="no">no</td><td>The count means "since a turn"; a person reads "since I last touched it". A person's resume is a start the pass did not make and does not reset it.</td></tr>
-<tr><td>Why it <b>couldn't start</b></td><td><code>start.failure</code> ← <code>agent_sessions.start_failure</code></td><td class="yes">yes</td><td></td></tr>
-<tr><td>The run <b>died at implement</b>, carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, the died line on the run</td><td class="no">no (small)</td><td>"One restart schedule" (<code>bef7fbb94b</code>) has two wakers: conversations wake at their <code>next_at</code>, runs wait for the 60 s tick (qa: 25 s late).</td></tr>
-<tr><td>The Machine <b>comes back</b> after a reboot</td><td><code>server/recovery.rs</code> <code>Watcher</code>: first reading settles and starts</td><td class="yes">yes</td><td>One owner; the lazy <code>recover()</code> on reads is gone.</td></tr>
-<tr><td>Nothing to clean by hand</td><td><code>ops::recovery::retain</code> hourly; <code>lf process prune</code> gone</td><td class="yes">yes</td><td>File growth is out of scope (retention Task in <code>questions.md</code>).</td></tr>
+<tr><th>What a person knows</th><th>In the code</th><th></th><th>Where it's wrong</th></tr>
+<tr><td>The Task's conversation</td><td>primary Session (<code>task_primary_sessions</code>); status field <code>conversation</code></td><td class="yes">yes</td><td></td></tr>
+<tr><td>It died / I quit it</td><td><code>ended.by: died | person</code> from launcher exit (0/130 = person)</td><td class="yes">yes</td><td>SIGTERM window still unmeasured on real Claude (a person's Machine).</td></tr>
+<tr><td>It's starting again, attempt k, next at</td><td><code>start {attempts, last_started_at, next_at, gave_up, failure}</code>; one rule <code>next_start_at</code> for pass and line</td><td class="yes">yes</td><td></td></tr>
+<tr><td>I started it myself, so the count starts over</td><td><code>record_persons_start</code>: count 0, <code>last_started_at</code> = now</td><td class="yes">yes</td><td>Small: <code>starts_since_turn</code> counts only the pass's starts while <code>last_started_at</code> also holds a person's. One idea ("starts since it last worked"), two rules. Recorded.</td></tr>
+<tr><td><b>It comes back from its saved thread</b></td><td><code>continuing()</code> → <code>lf session resume</code> → <code>adopt_native</code>, which errors when the transcript is missing</td><td class="no">no</td><td><b>"Saved thread" is a provider thread id, not a thread.</b> After the crash 11 had no transcript. The pass burns 5 starts, then offers <code>lf resume --task X</code>, which fails the same way.</td></tr>
+<tr><td>The run died at a step and is carried again</td><td><code>restart_runs</code>, <code>task_graphs.restarts</code>, <code>died_run</code></td><td class="yes">yes</td><td>Noticed on the 60 s read only (50–65 s in qa). Acceptable.</td></tr>
+<tr><td>After a reboot things come back in order</td><td><code>Registry::open</code> settles adoption's ends, then the pass, one start at a time</td><td class="yes">yes</td><td>The same reap-before-settle order can in principle happen at runtime; never seen. Recorded.</td></tr>
+<tr><td>"Starts again when the server runs"</td><td><code>conversation_line(server_runs)</code></td><td class="yes">yes</td><td></td></tr>
 </table>
 
-<h2>Biggest mismatch: what the restart count counts</h2>
+<h2>The biggest mismatch: the line's one command doesn't work</h2>
 <div class="cols">
-<div><b>Before (built)</b><p><code>starts_since_turn</code>: the pass adds one per start; a finished turn sets it to 0. A person's <code>lf resume</code> leaves it. After a quit and resume, the next deaths have fewer starts left, and the "attempt 3" line describes deaths the person already answered.</p></div>
-<div class="prop"><b>Proposed</b><p>The count is the pass's starts since the conversation was last vouched for: a finished turn <i>or a start the pass did not make</i>. A start whose request is not <code>recover:…</code> sets it to 0 and clears <code>last_started_at</code>'s backoff. The column keeps its name; the rule in <code>docs/sessions.md</code> gains one clause.</p></div>
+<div><h3>Before (built)</h3>
+<pre>crash → transcript gone
+pass: resume → "cannot resume claude
+  conversation X: its transcript is missing"
+  … ×5, backoff 1→16 min
+status: died · started 5 times;
+  `lf resume --task X` opens it
+lf resume --task X → same error</pre>
+<p>Eleven Tasks, each needing a person who then hits an error.</p></div>
+<div class="prop"><h3>After (proposed, slice 6)</h3>
+<pre>crash → transcript gone
+pass: thread_lost? → new_thread(same Session,
+  seeded with lf's log) → continuing()
+  request recover:&lt;s&gt;:&lt;agent&gt;:fresh
+status: running (fresh thread; the old
+  one's transcript was gone)
+lf resume --task X → same rule, opens fresh</pre>
+<p>One rule in the start path both starters share. <code>adopt_native</code>'s <code>ensure!</code> becomes the branch, not the error.</p></div>
 </div>
-<p>Counterexample tried: a person who resumes into a conversation that crashes on start. It dies, the pass starts it up to 5 times, then waits for them — the same as a fresh conversation. Nothing loops.</p>
-
-<h2>The two smaller ones</h2>
-<div class="prop"><p><b>One waker.</b> <code>restart_runs</code> returns its soonest run <code>next_at</code>, and the watcher waits for the earlier of that and the conversations'. Runs come back on time, like conversations.</p>
-<p><b>A promise only when someone keeps it.</b> With no server answering, status prints <code>died 15:31 (exit 137) · starts again when the server runs</code> (<code>lf::commands::session</code> line 472), not "starting again".</p></div>
-
-<h2>Recorded, not acted on here</h2>
-<ul>
-<li>A resume with no transcript (killed before its first turn) fails five times; a fresh start would serve better. Real Claude: unchecked.</li>
-<li>The SIGTERM quit window and <code>holder_stopping</code>: unbuilt until real Claude is seen exiting 0 on TERM.</li>
-<li>Delivery still waits on LOO-953's Session columns; two reads join <code>processes</code> until then.</li>
-</ul>
+<p>Counterexample checked: a transcript that is only in an account's home, not the native one, is found by <code>conversation_home</code> and copied, as today; only "no home holds it" starts fresh. A fresh thread that dies again is an ordinary death on the same count.</p>
+<p>Chosen for review: <b>1b</b>. Passed over: 1a keeps 3a and changes the give-up line to <code>lf session new</code>. Honest, but every Task the crash hit still waits for a person.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>A person's <code>lf resume</code> of a died conversation: (a) resets the restart count (chosen) · (b) keeps it.</li>
-<li>With no server running, the line says: (a) "starts again when the server runs" (chosen) · (b) "starting again" as now · (c) nothing about starting.</li>
-<li>A died conversation with no transcript: (a) leave as is, recorded (chosen) · (b) start it fresh instead of resuming.</li>
+<li>A conversation whose provider transcript is gone: (a) leave it, and make the give-up line offer <code>lf session new</code> · <b>(b) start it on a fresh thread of the same Session, for the pass and for <code>lf resume</code> (chosen, slice 6)</b> · (c) fresh only for the pass; <code>lf resume</code> keeps erroring.</li>
+<li>The fresh start's status line: (a) text only, while no turn has finished (chosen) · (b) a <code>start.fresh_thread</code> wire field Desktop shows.</li>
+<li>The runtime reap-before-settle race: (a) leave recorded (chosen) · (b) make "a reaped attachment is not a move" in <code>attachment_lost</code> now.</li>
 </ol>
 </body></html>

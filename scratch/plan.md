@@ -565,9 +565,45 @@ Must survive:
    before its first turn) fails five times (3a); the SIGTERM quit window
    (`holder_stopping`) waits on real Claude's SIGTERM exit code.
 
+6. **A conversation whose thread is gone comes back on a fresh one**
+   (concept review after the crash, `scratch/concept-review.html`, choice 1b
+   made for review; supersedes 3a). qa after the real crash: 11 loopflow Task
+   conversations had no Claude transcript at their recorded thread. Today the
+   pass starts each, `transcript::adopt_native` fails "cannot resume claude
+   conversation X: its transcript is missing", the start counts as a death,
+   and after 5 the line offers `lf resume --task X`, which fails the same way.
+   The promise "one command continues it" is false for exactly the crash case.
+   To build:
+   - `ops::recovery`: beside `launch_failure`, `thread_lost(conversation)`:
+     the Session names a provider thread and no home lf knows
+     (`conversation_home`, the native home) holds its transcript
+     (`transcript::transcript`). Read only for a due conversation, never on a
+     status read.
+   - `server/recovery.rs`: a due conversation whose thread is lost is started
+     with `human_session::new_thread(store, id, None, false, false,
+     "recover:<session>:<agent>:fresh")` (fresh thread on the same Session,
+     seeded with lf's log of the old one; the creation receipt dedupes across
+     a server restart), then `continuing()` as usual. It counts as one start;
+     a fresh thread that dies again is an ordinary death.
+   - `lf session resume` (a person's start) does the same when the thread is
+     lost, instead of failing: one rule for both starters, in the start path
+     they share (`adopt_native`'s missing-transcript `ensure!` becomes the
+     fresh-thread branch's trigger, not an error). Then the five-starts line's
+     `lf resume --task X` is true.
+   - The Session's `start` shows it: `start.failure` stays null; the
+     conversation line reads `running (fresh thread; the old one's transcript
+     was gone)` until its first finished turn. Keep it to the text form; no
+     new wire field if `ended`/`start` already say it, else one nullable
+     `start.fresh_thread: bool` in the DTO fixtures.
+   - Test: `server::recovery::tests::a_conversation_whose_transcript_is_gone_starts_on_a_fresh_thread`
+     (one start, request `…:fresh`, a second pass starts nothing while it
+     runs) and a `session::tests::` case that `lf resume` of a lost thread
+     opens a fresh one instead of erroring. Break check: restore the `ensure!`
+     and both fail.
+
 ## Remaining
 
-Nothing left to implement in this Task's scope. Left for later steps:
+Slice 6. Then, left for later steps:
 - gate: the named checks under Checks, and CI's full matrix;
 - a person: acceptance check 5 against real Claude (does a SIGTERM'd provider
   exit 0?), and the real reboot with three Tasks;

@@ -233,3 +233,13 @@ Slice 5 (implement):
 - The real crash lost 11 loopflow Task conversations' Claude transcripts. The
   pass would fail to resume each five times. That makes 3a (no transcript: start
   fresh) more pressing than it looked.
+
+## Concept review after the crash (2026-11-17, `scratch/concept-review.html`)
+
+- 1b chosen for review over 3a: a lost provider thread starts fresh on the
+  same Session, for the pass and for `lf resume`. Passed over: keep 3a and
+  change the give-up line to `lf session new` (honest, but the crash case
+  still needs a person per Task, 11 times).
+- Not built, recorded: the runtime reap-before-settle race ("a reaped
+  attachment is not a move" in `attachment_lost`); `starts_since_turn` counts
+  only the pass's starts while `last_started_at` also holds a person's.

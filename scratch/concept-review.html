@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>LOO-937 concept review: where a Task's facts live</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+:root{--bg:#fbfaf7;--fg:#1d1c1a;--mute:#6b675f;--line:#dedad2;--card:#fff;--yes:#2f7d4a;--no:#b23a2b;--part:#a86a12;--prop:#2952a3;--propbg:#eef2fb;--code:#f1eee8}
+@media (prefers-color-scheme:dark){:root{--bg:#161514;--fg:#ebe8e2;--mute:#9c978d;--line:#34312d;--card:#1f1d1b;--yes:#6cc28a;--no:#f08a7a;--part:#e3b25a;--prop:#8fb0ff;--propbg:#1c2438;--code:#2a2724}}
+body{background:var(--bg);color:var(--fg);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:980px;margin:2.5rem auto;padding:0 1.25rem}
+h1{font-size:1.6rem;margin:.2rem 0 .4rem}h2{font-size:1.2rem;margin:2.2rem 0 .6rem;border-bottom:1px solid var(--line);padding-bottom:.3rem}
+p.lede{color:var(--mute);margin-top:0}
+code{background:var(--code);padding:.05rem .3rem;border-radius:3px;font-size:.88em}
+table{border-collapse:collapse;width:100%;margin:.6rem 0;background:var(--card)}
+th,td{border:1px solid var(--line);padding:.45rem .55rem;vertical-align:top;text-align:left}
+th{font-weight:600}
+.yes{color:var(--yes);font-weight:600}.no{color:var(--no);font-weight:600}.part{color:var(--part);font-weight:600}
+.prop{border-left:3px solid var(--prop);background:var(--propbg);padding:.6rem .9rem;margin:.8rem 0;border-radius:0 4px 4px 0}
+.prop b.tag{color:var(--prop)}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media (max-width:720px){.cols{grid-template-columns:1fr}}
+.box{background:var(--card);border:1px solid var(--line);border-radius:6px;padding:.7rem .9rem}
+.box h3{margin:.1rem 0 .5rem;font-size:1rem}
+pre{background:var(--code);padding:.7rem .9rem;border-radius:5px;overflow-x:auto;font-size:.85em;line-height:1.45}
+del{color:var(--no)}ins{color:var(--yes);text-decoration:none}
+ol.q li{margin:.5rem 0}
+</style>
+</head>
+<body>
+
+<h1>Where a Task's facts live</h1>
+<p class="lede">LOO-937 concept review, 2026-11-17, before any code. Area taken: every fact a person reads about a Task (title, URL, branch, order, its Sessions and Processes) and the tables and reads behind them, because the plan touches all of them through one rule, "one home per fact". Not taken: the outgoing queues (LOO-938) and naming (LOO-939).</p>
+
+<h2>Do the product's concepts and the code's line up?</h2>
+<table>
+<tr><th>What a person knows</th><th>Behind it today</th><th>Lines up?</th><th>After the plan</th></tr>
+<tr><td>A Task: its title, state, rank</td><td><code>tasks.issue_title</code>, <code>planning_*</code></td><td class="part">names only</td><td>same columns; names to LOO-939</td></tr>
+<tr><td>"Linear disagrees with my edit"</td><td><code>pm_items</code> as merge base, <code>tracker_actions.base_json</code></td><td class="yes">yes</td><td>unchanged; desired vs observed is a real split</td></tr>
+<tr><td>The Task's URL and team</td><td><code>tasks.planning_url/team_id</code> + <code>pm_items.url/team_id</code></td><td class="yes">yes</td><td><b>stays on <code>tasks</code></b> (plan said leave; reversed, see below)</td></tr>
+<tr><td>The Task's branch</td><td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code>, <code>pm_items.branch_name</code>, <code>tasks.branch</code> (leaving)</td><td class="no">no: one idea, five homes</td><td>three homes with three meanings (Task's, checkout's, PR's); whether they can differ goes to LOO-934</td></tr>
+<tr><td>The Task's Processes</td><td>path match on <code>cwd</code> − <code>relocated_task_processes</code> + receipts + four Session-derived unions, behind a <code>sqlite_master</code> probe</td><td class="no">no: an action (moving a repo) changes membership</td><td><b><code>processes.task_id</code></b>, set once at insert</td></tr>
+<tr><td>The Task's Sessions</td><td><code>agent_sessions.task_id</code> OR cwd inside a checkout</td><td class="no">no: two rules</td><td><code>agent_sessions.task_id</code> only</td></tr>
+<tr><td>The Task's conversation</td><td><code>task_primary_sessions</code> + <code>tasks.primary_session_id</code> (leaving)</td><td class="yes">yes, once LOO-935's leftovers stop</td><td>3 disagreeing rows reconciled to <code>task_primary_sessions</code></td></tr>
+<tr><td>Order of Tasks</td><td><code>planning_rank</code>, <code>task_orders</code>, <code>pm_projects.task_order_json</code>, <code>pm_items.rank</code></td><td class="no">no: three orders, one seen only on the board</td><td>desired <code>planning_rank</code>, observed <code>pm_items.rank</code></td></tr>
+<tr><td>Move a repository on disk</td><td><code>relocate_repository</code> rewrites addresses and freezes path pairs</td><td class="no">no: a side record the person never sees</td><td>rewrites addresses; nothing else to do</td></tr>
+<tr><td>"The definition changed" steer</td><td><code>task_linear_observations.last_title</code></td><td class="no">no: third copy</td><td>compare with the prior <code>pm_items</code> row</td></tr>
+<tr><td>Filing the same Task twice</td><td><code>task_creation_intents.title</code> compare + <code>creation_receipts.fingerprint</code></td><td class="no">no: two checks</td><td>fingerprint only</td></tr>
+</table>
+
+<h2>The biggest mismatch: a Process's Task is computed, not recorded</h2>
+<p>Walk it. You open LOO-937 in <code>lf task status</code>. Its Processes come from <code>lf_process_ids</code> (<code>task_work.rs:102</code>): every Process whose <code>cwd</code> sits under the checkout, minus pairs frozen when the repository moved, plus those pairs, plus anything that wrote an event, history row, or turn into one of the Task's Sessions, plus agent attachments. Five sources. Move the repo, then reuse the old path for a new clone: the right answer depends on the frozen table and a <code>sqlite_master</code> probe on every read.</p>
+
+<div class="cols">
+<div class="box"><h3>Before</h3>
+<pre>Task ← cwd under worktree
+     − relocated_task_processes
+     + relocated_task_processes
+     + session_events.lf_process_id
+     + history.session_history
+     + history.turns
+     + agent attachments</pre>
+</div>
+<div class="box prop"><h3><b class="tag">Proposed</b></h3>
+<pre>at insert, first that answers:
+ 1 the named Task
+ 2 caller Session's task_id
+ 3 parent Process's task_id
+ 4 deepest checkout holding cwd
+read: WHERE task_id = ?</pre>
+</div>
+</div>
+
+<p>The kickoff plan already adds the column, but resolves it at insert only by path, and is silent on the four Session-derived unions. Path alone would mark a hook <code>lf</code> invoked from outside the checkout as nobody's, so the unions would have to stay and the read stays five-way. Rules 2 and 3 are primary-key probes on columns <code>processes</code> already has (<code>caller_session_id</code>, <code>parent_lf_process_id</code>). With them, <code>task_of_process</code> becomes a row read and <code>lf_process_ids</code> one index probe.</p>
+<p>What would break it: a Process reached today only through <code>session_events</code> with no <code>caller_session_id</code>. The plan now says to count those on the <code>/tmp</code> copy before deleting the unions; if any survive the prune, the backfill gets a clause, and the read still never keeps them.</p>
+
+<h2>A counterexample that reversed one verdict</h2>
+<p>The plan sent URL, branch and team to <code>pm_items</code> as "provider facts nobody edits locally". <code>record_task_branch_in</code> (<code>children.rs:154</code>) says otherwise:</p>
+<pre>/// Git planning carries the Task's branch, so whoever runs it next checks out
+/// the same branch and finds the same PR.</pre>
+<p>lf writes the branch when no provider is connected, and every new checkout reads it (<code>ops/task.rs:1045</code>). On the live store, 4 Tasks hold a branch with no <code>pm_items</code> row. Moving it would send their next checkout to a fresh branch and lose the PR. The rule that falls out is the one the plan already uses for title: <code>tasks</code> holds what people see on any Machine; <code>pm_items</code> holds what the provider last said. Only observation bookkeeping leaves (<code>planning_provider_revision</code>, 421 rows differ; <code>pm_snapshot_synced_at</code>; <code>planning_completed</code>). The "peer-only Machines lose the URL" question disappears with it.</p>
+
+<h2>Two mechanics the plan had wrong</h2>
+<table>
+<tr><th>Plan said</th><th>What happens</th><th>Now</th></tr>
+<tr><td>A released-lf trigger fills <code>processes.task_id</code> with the checkout probe</td><td>SQLite does not allow a <code>WITH</code> clause inside <code>CREATE TRIGGER</code>; the recursive probe can't go there</td><td class="prop">No trigger. The batched maintenance backfill already handles <code>task_id IS NULL</code>; it picks up old binaries' rows too. One less shim for LOO-877.</td></tr>
+<tr><td>The test authorizer denies every read of a leaving column</td><td><code>store_revision_tasks_update</code>, <code>task_update_tasks_update</code>, <code>cancel_task_retirement</code> name leaving columns; every Task update would fail in tests</td><td class="prop">Authorizer installed after migrations, allows accesses whose accessor is a trigger.</td></tr>
+</table>
+
+<h2>Order: kept as chosen, with its cost shown</h2>
+<p><code>task_orders</code> holds 2 rows, 17 Task ids, keyed by repository, not person. The plan makes a Working-board drag write <code>planning_rank</code> through <code>reorder_in</code>. Two places that bites: a drag onto a Task in another Project has no rank meaning and snaps back; and with several people on one deployment, one person's board drag reorders the shared Linear order for everyone. Today's table is wrong for that future too (one order per repository, shared by everyone), so the plan's choice is no worse; it is just visible.</p>
+
+<h2>Questions</h2>
+<ol class="q">
+<li>Process membership at insert:
+ <br>a) four rules (named Task, caller Session, parent, checkout), reads use only the column <i>(written into the plan)</i>
+ <br>b) path only, keep the Session-derived unions in reads</li>
+<li>Task URL, branch, team:
+ <br>a) stay on <code>tasks</code>; only observation bookkeeping leaves <i>(written into the plan)</i>
+ <br>b) move to <code>pm_items</code>, and Git planning gets its own home for the branch</li>
+<li>Working-board drag:
+ <br>a) writes Project rank; cross-Project drops answer "nothing changed" <i>(plan)</i>
+ <br>b) drag removed from the Working board; it sorts by rank, no manual order
+ <br>c) a per-person order, kept on the client like pane layouts</li>
+<li>Released binaries' Processes until a maintenance pass runs:
+ <br>a) absent from their Task's list for one pass interval <i>(plan)</i>
+ <br>b) a non-recursive trigger scanning <code>task_checkouts</code> (~1.4k rows) per insert</li>
+</ol>
+
+</body>
+</html>

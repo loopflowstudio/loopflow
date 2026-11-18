@@ -105,3 +105,8 @@
 ## Picks made headless (QA, 2026-11-17)
 
 - **A losing concurrent launch's view joins the running terminal only in plain terminals.** Desktop relays (`LF_SERVER_STATUS`) report the end and are assumed to reopen by Session; not checked with a window.
+
+## Picks made headless (QA decision, 2026-11-17)
+
+- **Take over of a plain (non-Task) Session continues unheld**, so hanging up ends it. Plan item 4 says "continue here held". docs/sessions.md says plain Sessions have no holder and closing the terminal ends the agent, so this pass reads "held" as Work-only. Open: should a taken-over plain Session be held?
+- **"Left … (Ctrl+] steps away without stopping)"** after the provider exits (`native_return` in `harness/native_session.rs`) still shows the detach hint for a view that has already ended. It is cosmetic and was there before this branch. Gate can drop the parenthetical, or it can go in a follow-up.

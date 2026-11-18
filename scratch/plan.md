@@ -80,7 +80,7 @@ Three choices made for review:
 Into `rust/loopflow-harness/src/`, with unit tests and testdata:
 
 - `harness/{claude,codex,opencode,pi}_decode.rs`, `fact.rs`, `lf_tag.rs`,
-  `harness/testdata`
+  the recorded traces in `harness/testdata` (done, slice 1)
 - `transcript/{claude,codex,opencode,pi}.rs` (the readers; OpenCode's opens
   the client's own SQLite file with `rusqlite`, not Loopflow's store)
 - From `transcript/mod.rs`: `Turn`, `Receipt`, `TurnItem`, `Request`,
@@ -254,16 +254,36 @@ measured compile share: `ops` above the rest, not another leaf.
 
 ## Slices
 
-1. **Spike: the leaves.** Create `loopflow-harness` with the four decoders,
-   `fact`, `lf_tag`, their tests and `testdata`; execution depends on it; the
-   old files are gone. Run `cargo test -p loopflow-harness`, the `cargo tree`
-   check, execution's `harness::conformance_tests` (the mixed fixture:
-   decoders across the crate line into `FactWriter` and a store) and one
-   application launch test. Time the owner's test build before and after with
-   a single message edit. This is the slice that can prove the plan wrong: it
-   shows whether a sibling's test loop is as short as predicted, how much
-   surface must become `pub`, and whether mixed fixtures compile without a
-   shim.
+1. **Spike: the leaves. Built (`5848e85bea`).** The four decoders, `fact`,
+   `lf_tag`, their tests and the seven recorded traces are in
+   `loopflow-harness`; execution depends on it and the old files are gone.
+   What a run showed, 2026-11-18, this Machine, default Cargo jobs, sccache on:
+   - `cargo test -p loopflow-harness`: 62 passed. `cargo tree` check: 0.
+   - Owner's test build after a one-string decoder edit
+     (`cargo test -p loopflow-harness --no-run`): 0.63 s, and 0.88 s with
+     `RUSTC_WRAPPER=`. The same loop through execution's test binary after an
+     execution edit: 34.1 s. Neither is `run.py`'s one-job number; slice 3
+     measures those.
+   - Execution's `harness::conformance_tests`, `fact_writer` and `pi_tests`:
+     40 passed against the crate.
+   What it taught:
+   - Surface that became `pub`: the three decoder structs with their methods,
+     `ReaderState`'s four readers, `codex_decode::{turn_request, rpc_error}`,
+     and all of `fact`. Nine Codex mapping functions and `ItemPhase` became
+     private instead: nothing outside the file read them.
+   - Mixed fixtures need one thing: `fact::trace` behind the crate's
+     `test-support` feature, which execution's dev-dependency and its own
+     `test-support` feature enable. No shim, no second copy of the traces.
+   - Two upward references the table missed: `opencode_decode` called
+     `opencode::sanitize_error_message` (moved down with its tests; needs
+     `regex`), and the decoders use `uuid` and `tracing`. The crate's
+     dependencies are model, `anyhow`, `regex`, `serde_json`, `tracing`, `uuid`.
+   - `pi_rpc.py` did not move: it is a stand-in Pi process for launch fixtures
+     (`pi_tests`, the launch matrix, two application test binaries), not a
+     recorded stream. It stays in execution's `src/harness/testdata/`.
+   - `scripts/check_architecture.py` and `scripts/check_migrations.py` now
+     scan the crate; both pass. The third-party inventory was refreshed for
+     the `Cargo.lock` change.
 2. **Split the trait, move the readers.** `HarnessKind`, the unit structs and
    `Harness` move; execution gets `Launcher: Harness`; the table's rows are
    resolved; the transcript readers and the store-free half of

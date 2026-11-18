@@ -1,0 +1,71 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>LOO-938 QA: Git-only journal and the 5 s exchange</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2em auto;padding:0 1em;color:#222}
+pre{background:#f5f5f2;padding:.8em;overflow-x:auto;font-size:13px}
+h2{margin-top:2em;border-bottom:1px solid #ddd}
+td,th{padding:.3em .8em;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+.ok{color:#176b2c;font-weight:600}.note{color:#8a5a00;font-weight:600}
+</style>
+<h1>LOO-938 QA: Git-only journal and the 5 s exchange</h1>
+<p>Branch <code>lf</code> (debug build at 47c2305fdf), three private Machines
+(<code>LF_HOME</code> a, b, c) on one bare planning remote, a <code>git</code>
+shim logging every invocation, and a sleeping stand-in <code>claude</code> to
+hold foreground Sessions open. Nothing was fixed: every scenario behaved as
+planned.</p>
+
+<h2>Scenarios</h2>
+<table>
+<tr><th>#</th><th>What I did</th><th>What I saw</th><th></th></tr>
+<tr><td>1</td><td>Linear repository (<code>provider: linear</code>): <code>lf task create</code>, then <code>lf task edit --title</code></td>
+<td><code>planning_tracker = linear</code>; <code>planning_peer_changes</code> 0 → 0; <code>tracker_actions</code> create + field queued; no Git exchange ran</td><td class="ok">ok</td></tr>
+<tr><td>2</td><td>Git repository: create + edit on Machine A</td>
+<td>tracker <code>git</code>; journal 16 → 17 rows; one push per save, right after the answer</td><td class="ok">ok</td></tr>
+<tr><td>3</td><td>Machine B clones, <code>lf task sync &lt;id&gt;</code></td>
+<td><code>fce4ea · Git renamed</code> after one exchange</td><td class="ok">ok</td></tr>
+<tr><td>4</td><td>Foreground Session on B for 60 s; A renames a second Task at +10 s</td>
+<td>one <code>ls-remote</code> + one <code>fetch</code> every 5.5–6 s, no push; A's title present on B by the next tick</td><td class="ok">ok</td></tr>
+<tr><td>5</td><td>Foreground Session on A for 90 s: a save in the Linear repository at +10 s; remote made read-only, Git save at +13 s; remote restored at +24 s</td>
+<td>see transcript: the Linear save caused no Git exchange; the save's own push failed, tick +4 s retried (failed), the first tick after restore pushed; then acquire-only for 65 s. <code>publication_state = confirmed</code>, B reads "Git while offline"</td><td class="ok">ok</td></tr>
+<tr><td>6</td><td>Foreground Session in the Linear repository, 12 s</td><td>zero <code>ls-remote</code>/<code>fetch</code>/<code>push</code> in the git log</td><td class="ok">ok</td></tr>
+<tr><td>7</td><td>Switch the Linear repository's config to Git, <code>lf task sync</code>; fresh Machine C clones and syncs</td>
+<td>tracker → <code>git</code>, journal 0 → 32, sync 2.5 s; C lists both Tasks with current titles ("Linear again", "Linear two")</td><td class="ok">ok</td></tr>
+<tr><td>8</td><td>Git → Linear → Git: switch back to Linear, two saves; peer C edits the other Task; switch to Git, sync</td>
+<td>first Linear-era save journals (drain records <code>linear</code> after it), second doesn't (68 → 68); after the switch A and C both show "Linear era 2" and "Peer edit of two"; no lost lines</td><td class="ok">ok</td></tr>
+<tr><td>9</td><td>Migration on a <code>.backup</code> of <code>~/.lf/loopflow.db</code> (1.0 GB), opened with the branch</td>
+<td>changes 44,120 → 17,496; observed 32,839 → 12,903; routes 6,665 kept; <code>/Users/jack/src/loopflow</code> has 0 left. Remaining: manabot 8,936, etude 1,843, kata 592, etude-studio 392, two QA worlds 17 each</td><td class="ok">ok</td></tr>
+</table>
+
+<h2>Transcript: scenario 5 (Machine A, network git ops by second)</h2>
+<pre>…935 ls-remote fetch          tick
+…941 ls-remote fetch          tick
+…944                          Linear save (no Git exchange)
+…947 ls-remote fetch          tick
+…947                          remote read-only; Git save
+…948 ls-remote fetch push…950 after-reply publication (push refused)
+…953 ls-remote fetch push…954 tick retries (refused)
+…959                          remote restored
+…960 ls-remote fetch push…961 tick publishes
+…967 … …026 ls-remote fetch   acquire only, every ~6 s</pre>
+
+<h2>What works now</h2>
+<p>Linear repositories write no journal and start no exchange thread. Git
+repositories journal every save, publish right after the answer, and a
+foreground Session makes one acquisition per tick and pushes only when its
+outbox holds something. A switch to Git publishes the whole plan; a switch
+back and forth keeps Linear-era values and peers' edits. The live store
+migration drops loopflow's 26k rows in place.</p>
+
+<h2>Couldn't reach</h2>
+<ul>
+<li>A real Linear drain recording <code>linear</code> for manabot, kata and etude-studio: the migration marks them <code>git</code> (they still have destinations) and they keep journaling until their next save drains. Driving that on the copy would send to the real Linear workspace. The same transition was checked on the private Machine (scenario 8).</li>
+<li>The seed's duration at loopflow's size (3k Tasks): not measured; scenario 7 seeded 2 Tasks in 2.5 s including the network.</li>
+</ul>
+
+<h2>Still wrong or worth a look, worst first</h2>
+<ol>
+<li class="note">Every tick runs <code>fetch</code> after <code>ls-remote</code> even when the remote ref equals the retained import. Within the plan's bar (one fetch per tick), but an idle Session still spawns two git processes every ~6 s; skipping the fetch on an unchanged ref would make the idle tick one <code>ls-remote</code>.</li>
+<li class="note">On a Machine that never imported a Task, <code>lf task show &lt;full id&gt;</code> answers "is not registered" without acquiring; <code>lf task sync &lt;id&gt;</code> does acquire. Predates this branch.</li>
+<li>The tick period is 5 s after each attempt, so 5.5–6 s between acquisitions in practice. As documented.</li>
+</ol>

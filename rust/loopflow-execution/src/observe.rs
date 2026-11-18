@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 use std::sync::{Arc, LazyLock, Mutex, Weak};
 use std::time::{Duration, SystemTime};
 
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum Fact {
@@ -513,7 +513,8 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{file_bytes, git, inherit, read_to_string, Cache, Source};
-    use crate::journal::{process_identity_evidence as process, ProcessIdentityEvidence};
+    use crate::process::os_process::process_identity_evidence as process;
+    use crate::store::ProcessIdentityEvidence;
 
     fn refresh(cache: &Cache) {
         for entry in cache.entries.lock().unwrap().values() {
@@ -725,7 +726,9 @@ mod tests {
             .spawn()
             .unwrap();
         let pid = child.id();
-        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let started = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         let cache = Arc::new(Cache::default());
         let (before, dependencies) = cache.capture(|| process(pid, started));
         child.kill().unwrap();
@@ -761,7 +764,6 @@ mod tests {
             "session",
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         store
@@ -769,7 +771,9 @@ mod tests {
                 "session",
                 &attachment,
                 pid,
-                crate::journal::process_started_at(pid).unwrap().unwrap(),
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap(),
             )
             .unwrap();
         store

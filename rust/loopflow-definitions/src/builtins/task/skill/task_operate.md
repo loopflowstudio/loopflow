@@ -6,20 +6,20 @@ action_style: procedural
 ---
 Move the Task as far forward as its Graph allows.
 
-With no live Graph process, nobody else takes this Task's next step, so it is
+With no live Graph run, nobody else takes this Task's next step, so it is
 yours. Make routine decisions yourself, ask for judgment in this conversation,
 then continue. Headless, exit when done or stuck. A Task with no owner is
 nobody's to move: read and discuss it, but don't launch or ship it.
 
-**Never start a second Graph process.** A live one is left running, and unknown
-liveness is not permission. A run listed in status is not a live process: check
-each Graph and unfinished Process against `lf process list`.
+**Never start a second Graph run.** A live one is left running, and unknown
+liveness is not permission. A run listed in status is not a live process: its
+`running` in `lf task status <issue> --json` is read from the run's own pid.
 
 ## Method
 
 1. **Read the work.** `lf task status <issue> --json`, then the brief, design
    and `scratch/` in its checkout, telling decisions from drafts.
-   `lf session list --json` and `lf process show <graph-id>` say what each
+   `lf session list --json` and `lf graph show <graph-id>` say what each
    Graph finished, how it ended and what it changed. If the Task is missing or
    ambiguous, ask; headless, say so and stop.
 
@@ -63,7 +63,7 @@ each Graph and unfinished Process against `lf process list`.
 
 Finish with one, and what showed it:
 
-- **moving** — a live Graph process, left alone.
+- **moving** — a live Graph run, left alone.
 - **acted** — you continued, repaired or delivered it, and reread status.
 - **available** — a review, demo, choice or merge click someone can take up,
   with its conversation link or PR.

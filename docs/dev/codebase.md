@@ -74,7 +74,7 @@ Graphs may invoke the named internal operations that own their exact boundary.
 | `lf session` | durable Sessions and resolution |
 | `lf wt`, `commit`, `sync`, `pr`, `repo ci` | worktree and delivery operations |
 | `lf session history`, `session history show`, `session usage` | durable execution/history projections |
-| `lf process list`, `process top`, `process prune`, `machine doctor` | local OS and command-journal observation |
+| `lf machine doctor` | local OS observation: strays, live lf binaries, store contention |
 | `lf machine`, `lf --machine` | Machine identity and execution-destination routing |
 | `lf server` | Client API serving and observational readiness |
 | `lf account` | service authentication and browser consent |

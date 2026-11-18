@@ -595,7 +595,6 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
         "selection-session",
         None,
         &store.test_lf_process(),
-        true,
     )
     .unwrap();
     store
@@ -603,7 +602,7 @@ fn query_selection_uses_current_reported_attention_and_prunes_ended_activity() {
             "selection-session",
             &attachment,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -699,14 +698,9 @@ fn stale_conversations_leave_task_activity_known() {
             .unwrap();
     }
     let unattached = selections::resolve_selection(&store, &repo, &running).unwrap();
-    let attachment = attachment::claim_session_attachment(
-        &store,
-        "before-boot",
-        None,
-        &store.test_lf_process(),
-        true,
-    )
-    .unwrap();
+    let attachment =
+        attachment::claim_session_attachment(&store, "before-boot", None, &store.test_lf_process())
+            .unwrap();
     let started: i64 = store
         .conn
         .lock()
@@ -717,11 +711,11 @@ fn stale_conversations_leave_task_activity_known() {
             |row| row.get(0),
         )
         .unwrap();
-    crate::journal::set_test_machine_booted_at(Some(started - 1));
+    crate::process::os_process::set_test_machine_booted_at(Some(started - 1));
     let unknown = selections::resolve_selection(&store, &repo, &running).unwrap();
-    crate::journal::set_test_machine_booted_at(Some(started + 1));
+    crate::process::os_process::set_test_machine_booted_at(Some(started + 1));
     let restarted = selections::resolve_selection(&store, &repo, &running).unwrap();
-    crate::journal::set_test_machine_booted_at(None);
+    crate::process::os_process::set_test_machine_booted_at(None);
     // Only the attached Process without OS identity, begun since boot, is unknown.
     assert!(unattached.unavailable.is_empty());
     assert_eq!(unknown.unavailable, ["Task FIX-2 activity is unavailable"]);

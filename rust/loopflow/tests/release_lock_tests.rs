@@ -847,7 +847,9 @@ fn surviving_release_notes_provider_retains_target_checkout_and_context() {
             let database = rusqlite::Connection::open(home.path().join(".lf/loopflow.db")).unwrap();
             let executor: i32 = database
                 .query_row(
-                    "SELECT p.pid FROM processes p JOIN session_events e ON e.lf_process_id=p.id WHERE e.kind='captured'",
+                    "SELECT s.attached_pid FROM agent_sessions s
+                     JOIN session_events e ON e.session_id=s.id AND e.lf_process_id=s.attached_lf_process_id
+                     WHERE e.kind='captured'",
                     [],
                     |row| row.get(0),
                 )

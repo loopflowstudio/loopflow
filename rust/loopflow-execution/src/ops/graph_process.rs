@@ -1,5 +1,5 @@
 //! A Graph process is one lf Process and the step Processes it starts. It writes
-//! a GraphProcess: the Graph's name and graph as compiled at launch, then one row
+//! a GraphExecution: the Graph's name and graph as compiled at launch, then one row
 //! per step it starts. The record is append-only and only the Graph process writes
 //! it. Each step is an ordinary command that knows nothing of its Graph; whether
 //! the Graph or a step is running, finished or failed is read from their Processes.
@@ -9,17 +9,32 @@
 pub const GRAPH_ID_ENV: &str = "LF_GRAPH_ID";
 
 /// Whether this process is a Graph's step. A session a transport owner serves
-/// starts without the Graph's environment, so the Process ancestry decides.
+/// starts without the Graph's environment; the step it serves is its parent.
 pub fn in_graph() -> bool {
-    let Some(process) = crate::journal::current_lf_process_id() else {
+    if crate::journal::graph_step() {
+        return true;
+    }
+    let processes: Vec<_> = [
+        crate::journal::current_lf_process_id(),
+        crate::journal::current_parent_lf_process_id(),
+    ]
+    .into_iter()
+    .flatten()
+    .collect();
+    if processes.is_empty() {
         return false;
+    }
+    let step = || -> anyhow::Result<bool> {
+        let store = crate::store::open_sqlite(&crate::store::database_path_from_env()?)?;
+        for process in &processes {
+            if store.graph_of_step(process)?.is_some() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     };
-    let under_graph = || -> anyhow::Result<bool> {
-        let path = crate::store::database_path_from_env()?;
-        Ok(crate::store::open_sqlite(&path)?.process_under_graph(&process)?)
-    };
-    under_graph().unwrap_or_else(|error| {
-        tracing::warn!(%error, "could not read this process's ancestry");
+    step().unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not read whether this process is a Graph step");
         false
     })
 }

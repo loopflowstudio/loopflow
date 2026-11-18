@@ -23,7 +23,7 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
             .unwrap();
     }
     let attachment =
-        attachment::claim_session_attachment(&store, &session.id, None, &first, false).unwrap();
+        attachment::claim_session_attachment(&store, &session.id, None, &first).unwrap();
     store.record_session_turn_origin(
         &"thread".into(),
         "turn",
@@ -42,8 +42,7 @@ fn native_usage_survives_attachment_and_input_replacement_without_double_countin
         None,
     )
     .unwrap();
-    attachment::claim_session_attachment(&store, &session.id, Some(&attachment), &second, true)
-        .unwrap();
+    attachment::claim_session_attachment(&store, &session.id, Some(&attachment), &second).unwrap();
     // The replacement AgentProcess observes the first one's surviving turn.
     store.record_turn_usage(
         &session.id,

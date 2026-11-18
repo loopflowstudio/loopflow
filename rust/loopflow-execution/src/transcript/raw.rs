@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use super::Source;
 use crate::harness::HarnessKind;
-use crate::journal::OsProcess;
+use crate::process::OsProcess;
 
 /// A transcript or owner file this far from its process start still counts:
 /// clocks and first writes are coarse.

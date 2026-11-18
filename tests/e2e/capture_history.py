@@ -90,7 +90,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
     provider_source = (ROOT / "rust/loopflow-execution/tests/support/opencode_server.py").read_text()
     provider = bin_dir / "opencode"
     provider.write_text(
-        provider_source.replace("__WAIT__", "False").replace("LF_CAPTURE_KEY", "LF_RUN_ID")
+        provider_source.replace("__WAIT__", "False").replace("LF_CAPTURE_KEY", "LF_EXECUTION_ID")
     )
     provider.chmod(0o755)
     tmux = bin_dir / "tmux"
@@ -133,7 +133,7 @@ def _prove(archive: Path, candidate: Path, root: Path) -> None:
         ).fetchone()
     review_env = {
         **env,
-        "LF_RUN_ID": review_capture,
+        "LF_EXECUTION_ID": review_capture,
         "LF_HUMAN_SESSION": json.dumps({"kind": "standalone_graph", "id": review}),
     }
     _command(prior, review_env, repo, "session", "ready", "Keep this released feedback")

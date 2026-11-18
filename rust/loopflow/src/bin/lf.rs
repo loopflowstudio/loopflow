@@ -791,7 +791,7 @@ fn print_task_snapshot(
                 },
             );
         }
-        // A run that let its launcher go named this log after its Graph or skill Process.
+        // A run that let its launcher go named this log after its Graph run.
         let log = |id: &str| {
             let path = loopflow_execution::process::launch_log::graph_log_path(id);
             if path.exists() {
@@ -807,15 +807,6 @@ fn print_task_snapshot(
                 graph.summary.name,
                 graph.summary.state,
                 log(&graph.summary.id),
-            );
-        }
-        for process in &snapshot.work.processes {
-            println!(
-                "  Process: {}  {}  {}{}",
-                process.id(),
-                process.command().unwrap_or("unknown command"),
-                process.outcome().unwrap_or("unknown"),
-                log(process.id()),
             );
         }
         if let Some(project) = &snapshot.project_id {
@@ -1154,7 +1145,7 @@ fn run_task_command(cli: &Cli, repo: &Path, command: &TaskCommand) -> anyhow::Re
         }
         TaskCommand::Runs { issue, after, json } => loopflow::lf::commands::graph_inventory::list(
             &loopflow::lf::commands::graph_inventory::GraphProcessInventoryArgs {
-                processes: true,
+                runs: true,
                 for_task: Some(issue.clone()),
                 after: after.clone(),
                 ..Default::default()
@@ -1498,7 +1489,7 @@ fn print_thread(result: &loopflow_model::comment::TaskComments, json: bool) -> a
 fn main() -> std::process::ExitCode {
     loopflow::build_info::initialize();
     loopflow_execution::transport::initialize();
-    // The holder outlives servers and installs. It records no Process itself
+    // The holder outlives servers and installs. It writes no journal trace
     // and opens no store, so it runs before any of that is set up.
     if std::env::args().skip(1).eq(["holder", "run"]) {
         return match loopflow_execution::terminal_holder::run() {
@@ -1589,8 +1580,7 @@ fn configuration_directory(cli: &Cli) -> anyhow::Result<std::path::PathBuf> {
 fn checkout_task(directory: &Path, wave: Option<&str>) -> anyhow::Result<Option<String>> {
     use loopflow_execution::ops::context::ContextFact;
 
-    let resolution =
-        loopflow::lf::commands::context::explain_in(directory, wave, None, None, None)?;
+    let resolution = loopflow::lf::commands::context::explain_in(directory, wave, None, None)?;
     match resolution.task {
         ContextFact::Bound { value, .. } => Ok(Some(value)),
         ContextFact::Unbound => Ok(None),
@@ -1863,8 +1853,8 @@ fn run() -> anyhow::Result<()> {
             return Err(loopflow_execution::process::CommandExit(code).into());
         }
     };
-    // Only a command that changes Work records a Process, and a Graph step
-    // always does: the Graph reads its result from it.
+    // Only a command that changes Work writes a journal trace, and a Graph
+    // step always does.
     if !journal::take_graph_step() && !cli.command.as_ref().is_none_or(Commands::changes_work) {
         journal::mark_read();
     }
@@ -2047,7 +2037,6 @@ fn run() -> anyhow::Result<()> {
                 cli.wave.as_deref(),
                 cli.task.as_deref(),
                 None,
-                None,
             )?;
             match context.wave {
                 loopflow_execution::ops::context::ContextFact::Bound { value, .. } => Some(
@@ -2081,7 +2070,6 @@ fn run() -> anyhow::Result<()> {
             },
     }) = &cli.command
     {
-        journal::observe_process(&args);
         return loopflow::lf::commands::doctor::run(*json);
     }
 
@@ -2163,7 +2151,6 @@ fn run() -> anyhow::Result<()> {
                 candidate,
             }) => loopflow::lf::commands::install::rollback(cli_target, candidate),
         };
-        journal::observe_process(&args);
         return result;
     }
 
@@ -2431,7 +2418,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
         return Ok(());
     }
     let wave = cli.wave.as_deref();
-    let mut process = None;
+    let mut session = None;
     match &cli.command {
         Some(Commands::Task { .. } | Commands::Inline { .. }) | None => {}
         Some(Commands::Session {
@@ -2440,7 +2427,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
                     cmd: Some(loopflow::lf::commands::history::HistoryCommand::Show { id, .. }),
                     ..
                 },
-        }) => process = Some(id.as_str()),
+        }) => session = Some(id.as_str()),
         _ if invocation.is_some() => {}
         _ => anyhow::bail!(
             "invocation preview is not supported for this command (nothing was executed)"
@@ -2448,7 +2435,7 @@ fn preview_invocation(cli: &Cli, args: &[String]) -> anyhow::Result<()> {
     }
     let explanation = cli
         .explain
-        .then(|| loopflow::lf::commands::context::explain(wave, task, None, process))
+        .then(|| loopflow::lf::commands::context::explain(wave, task, session))
         .transpose()?;
     let input = cli
         .context
@@ -2718,9 +2705,6 @@ fn dispatch_here(
         return loopflow::lf::commands::desktop::run(&cli, cmd);
     }
     if let Some(Commands::Open(open)) = &cli.command {
-        // Bounded observation records this Process and the calling
-        // conversation, which tells a link to the caller's own Work apart.
-        journal::observe_process(args);
         let _cwd = cli
             .wt
             .as_deref()
@@ -2776,11 +2760,10 @@ fn dispatch_here(
         }) | Some(Commands::Plan {
             cmd: loopflow::lf::PlanCommand::List { .. }
         }) | Some(Commands::Session {
-            cmd: loopflow::lf::SessionCommand::History {
-                cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
-                ..
-            },
-        }) | Some(Commands::Process { .. })
+            cmd: loopflow::lf::SessionCommand::History { cmd: None, .. },
+        }) | Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::List(_)
+        })
     ) {
         loopflow_execution::ops::recovery::recover();
     }
@@ -3410,7 +3393,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Process { cmd }) => loopflow::lf::commands::process::run(cmd),
         Some(Commands::Discord {
             cmd: loopflow::lf::DiscordCommand::Serve { wave },
         }) => in_repo_runtime(args, |repo| {
@@ -3428,7 +3410,7 @@ fn execute_command(
                     loopflow::lf::commands::graph::run_task_graph(cli, &repo_root, binding)
                 })
             }
-            GraphCommand::List { json, inventory } if inventory.processes => {
+            GraphCommand::List { json, inventory } if inventory.runs => {
                 loopflow::lf::commands::graph_inventory::list(inventory, *json)
             }
             _ => anyhow::bail!("not a Graph inspection command: {cmd:?}"),

@@ -47,19 +47,15 @@ fn lf_json(repo: &Path, home: &Path, args: &[&str]) -> serde_json::Value {
     serde_json::from_slice(&output.stdout).unwrap()
 }
 
-/// Every Graph on this Machine as `lf graph show --processes --json` reads it back.
+/// Every Graph on this Machine as `lf graph show --json` reads it back.
 fn graph_details(repo: &Path, home: &Path) -> Vec<serde_json::Value> {
-    lf_json(
-        repo,
-        home,
-        &["graph", "list", "--processes", "--all", "--json"],
-    )["entries"]
+    lf_json(repo, home, &["graph", "list", "--runs", "--all", "--json"])["entries"]
         .as_array()
         .unwrap()
         .iter()
         .map(|entry| {
             let id = entry["id"].as_str().unwrap();
-            lf_json(repo, home, &["graph", "show", id, "--processes", "--json"])
+            lf_json(repo, home, &["graph", "show", id, "--json"])
         })
         .collect()
 }
@@ -75,12 +71,13 @@ fn step_fields(graph: &serde_json::Value, field: &str) -> Vec<serde_json::Value>
 }
 
 fn kill_recorded_graph(home: &Path, id: &str) {
-    let store = loopflow_execution::store::open_sqlite(&home.join("loopflow.db")).unwrap();
-    let pid = store
-        .lf_process(&id.parse().unwrap())
+    let pid: u32 = rusqlite::Connection::open(home.join("loopflow.db"))
         .unwrap()
-        .unwrap()
-        .pid
+        .query_row(
+            "SELECT pid FROM graph_processes WHERE lf_process_id=?1",
+            [id],
+            |row| row.get(0),
+        )
         .unwrap();
     // SAFETY: this is the recorded live Graph created by this fixture.
     assert_eq!(unsafe { libc::kill(pid as i32, libc::SIGKILL) }, 0);
@@ -154,20 +151,17 @@ PYTHON
         assert_eq!(graphs.len(), 1);
         let (outcome, steps) = &graphs[0];
         assert_eq!(steps.len(), if upgrade { 1 } else { 2 });
-        let executables: Vec<String> = conn
-            .prepare(
-                "SELECT json_extract(e.command,'$[0]') FROM processes e
-                 JOIN graph_process_steps s ON s.lf_process_id=e.id WHERE e.outcome='succeeded'",
+        let succeeded: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM graph_process_steps WHERE ended_at IS NOT NULL AND exit_code=0",
+                [],
+                |row| row.get(0),
             )
-            .unwrap()
-            .query_map([], |row| row.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
             .unwrap();
         assert_eq!(
-            executables,
-            vec![loopflow_test_support::lf_binary(); steps.len()],
-            "the wrapper delegated each step to these actual bytes"
+            succeeded as usize,
+            steps.len(),
+            "each step the wrapper delegated succeeded"
         );
         assert_eq!(
             fs::read_to_string(home.path().join("selected"))
@@ -195,7 +189,7 @@ PYTHON
         let inspection = run_lf(
             repo.path(),
             home.path(),
-            &["graph", "show", &graph_process, "--processes", "--json"],
+            &["graph", "show", &graph_process, "--json"],
             None,
         );
         assert!(
@@ -267,6 +261,51 @@ fn a_step_that_finishes_before_the_graph_looks_keeps_its_result() {
         ["sync --plan", "sync --no-such-flag"]
     );
     assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "failed"]);
+}
+
+#[test]
+fn a_step_that_dies_before_writing_its_end_ends_as_its_graph_saw_it() {
+    let repo = loopflow_test_support::TestRepo::new();
+    let home = TempDir::new().unwrap();
+    write_graph(
+        repo.path(),
+        "dying-step",
+        "- cmd: sync --plan\n- cmd: die-unrecorded\n",
+    );
+    // The step's lf is killed before it can record anything of itself.
+    let bin = home.path().join("lf-or-die");
+    write_executable(
+        &bin,
+        &format!(
+            "#!/bin/sh\ncase \"$*\" in *die-unrecorded*) kill -9 $$;; esac\nexec '{}' \"$@\"\n",
+            loopflow_test_support::lf_binary()
+        ),
+    );
+    let output = lf_command(
+        repo.path(),
+        home.path(),
+        &["graph", "dying-step", "--batch"],
+        None,
+    )
+    .env("LF_BIN", &bin)
+    .output()
+    .unwrap();
+    assert!(!output.status.success());
+    let graphs = graph_details(repo.path(), home.path());
+    assert_eq!(graphs.len(), 1);
+    assert_eq!(
+        step_fields(&graphs[0], "label"),
+        ["sync --plan", "die-unrecorded"]
+    );
+    // Killed by a signal, its Graph saw no exit code: it ended, outcome unknown.
+    assert_eq!(step_fields(&graphs[0], "outcome"), ["succeeded", "unknown"]);
+    assert!(step_fields(&graphs[0], "completed_at")
+        .iter()
+        .all(serde_json::Value::is_i64));
+    assert_eq!(
+        step_fields(&graphs[0], "exit_code")[1],
+        serde_json::Value::Null
+    );
 }
 
 fn expand_named_graph(repo: &Path, name: &str) -> Vec<ConcreteStep> {
@@ -1477,7 +1516,7 @@ fn bound_graphs_keep_task_context_and_leave_other_graphs_and_shared_edits_alone(
         lf_json(
             repo.path(),
             home.path(),
-            &["graph", "show", &earlier, "--processes", "--json"],
+            &["graph", "show", &earlier, "--json"],
         )
     };
     let stopped = earlier_graph();
@@ -2011,11 +2050,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
     let record = &graph["latest_graph_process"];
     assert_eq!(record["entry"]["id"], id);
     assert_eq!(graph["execution"]["state"], "blocked");
-    let shown = lf_json(
-        repo.path(),
-        home.path(),
-        &["graph", "show", id, "--processes", "--json"],
-    );
+    let shown = lf_json(repo.path(), home.path(), &["graph", "show", id, "--json"]);
     for read in [record, &shown] {
         assert_eq!(
             labels(&read["compiled"]),
@@ -2089,11 +2124,7 @@ fn task_graph_read_keeps_captured_topology_and_counts_both_returns() {
 
     // Its YAML changed since: the past Graph keeps the graph it launched with.
     write_graph(repo.path(), "two-loops", "- implement-proof\n");
-    let redrawn = lf_json(
-        repo.path(),
-        home.path(),
-        &["graph", "show", id, "--processes", "--json"],
-    );
+    let redrawn = lf_json(repo.path(), home.path(), &["graph", "show", id, "--json"]);
     assert_eq!(redrawn["compiled"], shown["compiled"]);
     assert_eq!(redrawn["current"], shown["current"]);
     assert_eq!(redrawn["completed"], shown["completed"]);
@@ -2182,13 +2213,7 @@ fn three_nested_loops_each_return_to_their_own_first_step() {
     let shown = lf_json(
         repo.path(),
         home.path(),
-        &[
-            "graph",
-            "show",
-            graphs[0]["id"].as_str().unwrap(),
-            "--processes",
-            "--json",
-        ],
+        &["graph", "show", graphs[0]["id"].as_str().unwrap(), "--json"],
     );
     assert_eq!(
         step_fields(&shown, "key"),

@@ -644,12 +644,9 @@ impl World {
         let trace = TraceId::new();
         let issue = task.identifier.as_str();
         let argv = vec!["lf", "task", "run", issue, requested];
-        let (started, ended) = self.span(&steps, ended_days_ago, minutes, outcome)?;
+        let (started, _) = self.span(&steps, ended_days_ago, minutes, outcome)?;
         // The Task run starts its Graph, which starts the first step.
-        // Each Process is recorded running, then finished once its references
-        // exist, as live commands do; otherwise its exit would forget it.
-        let mut run = self.process(&trace, None, &checkout, argv, started - 2);
-        store.sqlite.record_process(&run)?;
+        let run = self.process(&trace, None, &checkout, argv, started - 2);
         if take_up {
             loopflow_execution::store::task_work::take_up_task_graph(
                 &store.sqlite,
@@ -664,7 +661,10 @@ impl World {
             &task.id,
             &row,
             &start.cursor,
-            &run.id,
+            (
+                &run.id,
+                &loopflow_storage::graph_process::ExecutionStart::reserved(run.started_at),
+            ),
             stops_at == END,
         )? {
             bail!("Task {issue} moved while starting {requested}");
@@ -680,9 +680,6 @@ impl World {
                 .sqlite
                 .arrive_task_graph(&task.id, &run.id, &stops_at)?;
         }
-        run.completed_at = Some(ended);
-        outcome.complete(&mut run);
-        store.sqlite.record_process(&run)?;
         Ok(run.id)
     }
 
@@ -761,20 +758,43 @@ impl World {
                 break;
             }
         }
-        // Its steps finish while it runs, so exit forgets none of them.
-        store.sqlite.record_process(&graph)?;
-        store
-            .sqlite
-            .record_graph_process(&graph.id, &compiled, Some(task))?;
+        let start = |process: &loopflow_storage::process::LfProcess| {
+            loopflow_storage::graph_process::ExecutionStart::reserved(process.started_at)
+        };
+        let finish = |owner, process: &loopflow_storage::process::LfProcess| {
+            store.sqlite.finish_run(
+                owner,
+                &process.id,
+                process.completed_at.expect("a recorded step has ended"),
+                process.exit_code,
+                process.error.as_deref(),
+            )
+        };
+        store.sqlite.record_graph(
+            &graph.id,
+            &compiled,
+            Some(task),
+            &start(&graph),
+            graph.repo.as_deref(),
+            graph.cwd.as_deref(),
+            None,
+        )?;
         for (process, key) in records {
-            store.sqlite.record_process(&process)?;
-            store
-                .sqlite
-                .record_graph_step(&graph.id, &process.id, key, &[Vec::new()])?;
+            store.sqlite.record_graph_step(
+                &graph.id,
+                &process.id,
+                key,
+                &[Vec::new()],
+                &start(&process),
+            )?;
+            finish(
+                loopflow_storage::graph_process::RunOwner::GraphStep,
+                &process,
+            )?;
         }
         graph.completed_at = Some(begin);
         outcome.complete(&mut graph);
-        store.sqlite.record_process(&graph)?;
+        finish(loopflow_storage::graph_process::RunOwner::GraphRun, &graph)?;
         Ok(())
     }
 

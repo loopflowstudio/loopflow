@@ -258,7 +258,7 @@ mod tests {
         );
         let process = store.test_lf_process();
         let claim =
-            attachment::claim_session_attachment(&store, "session", None, &process, false).unwrap();
+            attachment::claim_session_attachment(&store, "session", None, &process).unwrap();
         store
             .record_agent_process_identity("session", &claim, std::process::id(), 1)
             .unwrap();
@@ -268,7 +268,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET agent_interactive=1 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_interactive=1 WHERE agent_process_id=?1",
                 [&adapter.agent_process_id],
             )
             .unwrap();

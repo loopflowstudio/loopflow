@@ -307,8 +307,10 @@ impl LfProcessRuntime {
         {
             environment.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone().into()))
-                    .expect("caller provenance serializes"),
+                serde_json::to_string(
+                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
+                )
+                .expect("caller provenance serializes"),
             );
         }
         environment
@@ -572,14 +574,9 @@ mod tests {
             [],
         )
         .unwrap();
-        let attached = attachment::claim_session_attachment(
-            &store,
-            "resume",
-            None,
-            &store.test_lf_process(),
-            true,
-        )
-        .unwrap();
+        let attached =
+            attachment::claim_session_attachment(&store, "resume", None, &store.test_lf_process())
+                .unwrap();
         let detached = store
             .release_session_attachment("resume", &attached)
             .unwrap();
@@ -634,7 +631,6 @@ mod tests {
             "resume",
             Some(&detached),
             &store.test_lf_process(),
-            false,
         )
         .unwrap();
         // These children have no local lifeline writer, as when a different
@@ -646,7 +642,9 @@ mod tests {
             .unwrap();
         let mut leader = Child(command.spawn().unwrap());
         let pid = leader.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -692,7 +690,7 @@ mod tests {
             .agent_process(&attached.agent_process_id)
             .unwrap()
             .unwrap();
-        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
+        assert!(!crate::process::OsProcess::group(pid).unwrap().is_empty());
         let test = if exits {
             "resume_waits_for_a_dead_owners_helpers_without_lifeline_authority"
         } else {
@@ -777,7 +775,6 @@ mod tests {
             "resume",
             Some(&detached),
             &LfProcessId::new(),
-            false,
         )
         .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
@@ -874,14 +871,15 @@ mod tests {
             "resume",
             Some(&detached),
             &store.test_lf_process(),
-            false,
         )
         .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -911,8 +909,8 @@ mod tests {
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
         let ended = store
             .agent_process(&attached.agent_process_id)
@@ -945,7 +943,7 @@ mod tests {
             )
             .unwrap();
         let attached =
-            attachment::claim_session_attachment(&store, "resume", Some(&detached), &owner, false)
+            attachment::claim_session_attachment(&store, "resume", Some(&detached), &owner)
                 .unwrap();
         let session = store.session("resume").unwrap().unwrap();
         let agent = store.agent_process(&attached.agent_process_id).unwrap();
@@ -984,7 +982,6 @@ mod tests {
             "resume",
             Some(&detached),
             &LfProcessId::new(),
-            false,
         )
         .unwrap();
         store
@@ -1034,14 +1031,15 @@ mod tests {
             "resume",
             Some(&detached),
             &store.test_lf_process(),
-            false,
         )
         .unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         let mut child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -1062,7 +1060,6 @@ mod tests {
             "duplicate",
             None,
             &store.test_lf_process(),
-            true,
         )
         .unwrap();
         store
@@ -1089,7 +1086,6 @@ mod tests {
             "resume",
             Some(&detached),
             &LfProcessId::new(),
-            false,
         )
         .unwrap();
         let mut child = Child(
@@ -1100,7 +1096,9 @@ mod tests {
                 .unwrap(),
         );
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -1110,8 +1108,8 @@ mod tests {
         child.0.kill().unwrap();
         // Observe this fixture's zombie without reaping it through Child::wait.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while crate::journal::process_identity_evidence(pid, birth)
-            != crate::journal::ProcessIdentityEvidence::Dead
+        while crate::process::os_process::process_identity_evidence(pid, birth)
+            != crate::store::ProcessIdentityEvidence::Dead
         {
             assert!(
                 std::time::Instant::now() < deadline,
@@ -1142,7 +1140,6 @@ mod tests {
             "resume",
             Some(&detached),
             &LfProcessId::new(),
-            false,
         )
         .unwrap();
         store
@@ -1170,7 +1167,6 @@ mod tests {
                         "resume",
                         Some(expected),
                         &LfProcessId::new(),
-                        false,
                     );
                     finished.send(result).unwrap();
                 });
@@ -1206,7 +1202,7 @@ mod tests {
     }
 
     #[test]
-    fn headless_close_obeys_the_current_attachment_for_every_provider() {
+    fn headless_close_ends_the_attached_agent_for_every_provider() {
         let _ambient = crate::test_ambient::EnvGuard::new();
         for provider in ["claude", "opencode", "codex"] {
             let (home, store, detached) = resume_fixture();
@@ -1215,25 +1211,18 @@ mod tests {
                 .execute("UPDATE agent_sessions SET provider=?1", [provider])
                 .unwrap();
             let launch = LfProcessId::new();
-            let takeover = LfProcessId::new();
-            let sql = rusqlite::Connection::open(home.path().join("store.db")).unwrap();
-            for process in [&launch, &takeover] {
-                sql.execute(
+            rusqlite::Connection::open(home.path().join("store.db"))
+                .unwrap()
+                .execute(
                     "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,1)",
-                    [process],
+                    [&launch],
                 )
                 .unwrap();
-            }
             // A fresh AgentProcess records the provider at launch, not the
             // Session's mutable next-launch settings.
-            let first = attachment::claim_session_attachment(
-                &store,
-                "resume",
-                Some(&detached),
-                &launch,
-                true,
-            )
-            .unwrap();
+            let first =
+                attachment::claim_session_attachment(&store, "resume", Some(&detached), &launch)
+                    .unwrap();
             let mut command = std::process::Command::new("/bin/sleep");
             command.env_clear().arg("60").process_group(0);
             store
@@ -1241,7 +1230,9 @@ mod tests {
                 .unwrap();
             let child = Child(command.spawn().unwrap());
             let pid = child.0.id();
-            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            let birth = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             store
                 .record_agent_process_identity("resume", &first, pid, birth)
                 .unwrap();
@@ -1255,50 +1246,10 @@ mod tests {
                     )
                     .unwrap();
             }
-            let second = attachment::claim_session_attachment(
-                &store,
-                "resume",
-                Some(&first),
-                &takeover,
-                false,
-            )
-            .unwrap();
-            assert_eq!(first.agent_process_id, second.agent_process_id);
-            assert!(
-                super::finish_session_attachment(&store, "resume", &first, "interrupted").is_err()
-            );
+            super::finish_session_attachment(&store, "resume", &first, "interrupted").unwrap();
             assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Live
-            );
-            assert_eq!(
-                store.session_attachment("resume").unwrap(),
-                Some(second.clone())
-            );
-            let returned = attachment::claim_session_attachment(
-                &store,
-                "resume",
-                Some(&second),
-                &launch,
-                false,
-            )
-            .unwrap();
-            assert_eq!(returned.agent_process_id, first.agent_process_id);
-            assert_ne!(returned.token, first.token);
-            for stale in [&first, &second] {
-                assert!(
-                    super::finish_session_attachment(&store, "resume", stale, "interrupted")
-                        .is_err()
-                );
-            }
-            assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Live
-            );
-            super::finish_session_attachment(&store, "resume", &returned, "interrupted").unwrap();
-            assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Dead
+                crate::process::os_process::process_identity_evidence(pid, birth),
+                crate::store::ProcessIdentityEvidence::Dead
             );
             assert!(store
                 .agent_process(&first.agent_process_id)
@@ -1326,7 +1277,6 @@ mod tests {
                 "resume",
                 Some(&detached),
                 &store.test_lf_process(),
-                true,
             )
             .unwrap();
             let mut command = std::process::Command::new("/bin/sleep");
@@ -1336,7 +1286,9 @@ mod tests {
                 .unwrap();
             let mut child = Child(command.spawn().unwrap());
             let pid = child.0.id();
-            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            let birth = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             store
                 .record_agent_process_identity("resume", &attachment, pid, birth)
                 .unwrap();
@@ -1346,8 +1298,8 @@ mod tests {
                 })
                 .unwrap());
             assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Live
+                crate::process::os_process::process_identity_evidence(pid, birth),
+                crate::store::ProcessIdentityEvidence::Live
             );
             assert_eq!(
                 store.session_attachment("resume").unwrap(),
@@ -1392,7 +1344,7 @@ mod tests {
         )
         .unwrap();
         let attachment =
-            attachment::claim_session_attachment(&store, "retry", None, &parent, true).unwrap();
+            attachment::claim_session_attachment(&store, "retry", None, &parent).unwrap();
         let mut command = std::process::Command::new("/bin/sleep");
         command.env_clear().arg("60").process_group(0);
         store
@@ -1400,7 +1352,9 @@ mod tests {
             .unwrap();
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("retry", &attachment, pid, birth)
             .unwrap();
@@ -1428,8 +1382,8 @@ mod tests {
         .unwrap();
         assert_ne!(next.agent_process_id, attachment.agent_process_id);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
         assert!(store
             .agent_process(&attachment.agent_process_id)

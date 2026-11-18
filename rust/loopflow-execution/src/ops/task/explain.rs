@@ -98,7 +98,7 @@ pub async fn explain_task_run(
     through: bool,
     merges: fn(&[String]) -> bool,
 ) -> TaskRunExplanation {
-    let resolution = crate::ops::context::explain_context(store, cwd, selection, None, None).await;
+    let resolution = crate::ops::context::explain_context(store, cwd, selection, None).await;
     let mut report = TaskRunExplanation {
         resolution,
         action: None,

@@ -26,6 +26,8 @@ pub struct SessionProcessIdentity {
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
     pub started_at: i64,
+    /// The OS process of the lf holding the attachment; `None` when released.
+    pub holder: Option<crate::process::AttachmentHolder>,
 }
 
 /// Explicit observed inputs for one pinned Session reading. SQL performs no OS acquisition.
@@ -34,6 +36,10 @@ pub struct SessionProjection {
     pub now: i64,
     pub live_agents: String,
     pub evidence: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
+    /// Whether the lf holding each agent's attachment runs, by agent.
+    pub holders: std::collections::HashMap<String, crate::ProcessIdentityEvidence>,
+    /// Each of `graph_runs`' results as this Machine observes it.
+    pub graph_results: std::collections::HashMap<String, crate::graph_process::ExecutionResult>,
 }
 
 impl SessionProjection {
@@ -45,6 +51,25 @@ impl SessionProjection {
             .copied()
             .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
     }
+
+    fn holder(
+        &self,
+        id: Option<&loopflow_model::id::AgentProcessId>,
+    ) -> crate::ProcessIdentityEvidence {
+        id.and_then(|id| self.holders.get(id.as_str()))
+            .copied()
+            .unwrap_or(crate::ProcessIdentityEvidence::Unknown)
+    }
+
+    fn graph_result(
+        &self,
+        run: &crate::graph_process::Execution,
+    ) -> crate::graph_process::ExecutionResult {
+        self.graph_results
+            .get(run.id.as_str())
+            .copied()
+            .unwrap_or_else(|| run.result())
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -52,6 +77,8 @@ pub struct SessionProjectionInputs {
     read_at: i64,
     session: Option<String>,
     pub identities: Vec<SessionProcessIdentity>,
+    /// The unended Graph runs whose steps captured these Sessions' inputs.
+    pub graph_runs: Vec<crate::graph_process::Execution>,
     pub deadlines: Vec<i64>,
 }
 
@@ -66,8 +93,9 @@ pub(crate) fn session_projection_inputs_in(
         "completed_at IS NULL AND ?1 IS NULL"
     };
     let mut query = conn.prepare(&format!(
-        "SELECT id,completed_at,pid,os_started_at,started_at FROM processes
-         WHERE id IN (SELECT agent_process_id FROM agent_sessions WHERE {predicate}) ORDER BY id"
+        "SELECT agent_process_id,agent_ended_at,agent_pid,agent_os_started_at,agent_started_at,
+         attached_lf_process_id IS NOT NULL,attached_pid,attached_os_started_at
+         FROM agent_sessions WHERE {predicate} AND agent_started_at IS NOT NULL ORDER BY agent_process_id"
     ))?;
     let identities = query
         .query_map([session], |row| {
@@ -77,8 +105,26 @@ pub(crate) fn session_projection_inputs_in(
                 pid: row.get(2)?,
                 os_started_at: row.get(3)?,
                 started_at: row.get(4)?,
+                holder: row
+                    .get::<_, bool>(5)?
+                    .then(|| -> rusqlite::Result<_> {
+                        Ok(crate::process::AttachmentHolder {
+                            pid: row.get(6)?,
+                            os_started_at: row.get(7)?,
+                        })
+                    })
+                    .transpose()?,
             })
         })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    let mut query = conn.prepare(&format!(
+        "SELECT {} FROM graph_processes g WHERE g.ended_at IS NULL
+         AND g.lf_process_id IN (SELECT {SESSION_GRAPH} FROM agent_sessions s WHERE s.{predicate})
+         ORDER BY g.lf_process_id",
+        super::graph_inventory::run_columns("g")
+    ))?;
+    let graph_runs = query
+        .query_map([session], super::graph_inventory::read_run)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     let mut query = conn.prepare(
         "SELECT DISTINCT observed_at + ?1 FROM session_activity
@@ -94,6 +140,7 @@ pub(crate) fn session_projection_inputs_in(
         read_at: now,
         session: session.map(str::to_owned),
         identities,
+        graph_runs,
         deadlines,
     })
 }
@@ -166,10 +213,9 @@ pub(super) const SESSION_GRAPH: &str = session_graph!();
 /// Current provider work or a viewed terminal's working status holds Session `s`.
 /// Terminal idle cannot settle owned work; unviewed status is only history.
 const TURN_LIVE: &str = "EXISTS(SELECT 1 FROM session_activity act
-    JOIN processes p ON p.id=s.agent_process_id
     WHERE act.session_id=s.id AND act.agent_process_id IS s.agent_process_id
-    AND p.completed_at IS NULL
-    AND ((act.attachment_token IS p.attachment_token
+    AND s.agent_ended_at IS NULL
+    AND ((act.attachment_token IS s.attachment_token
             AND (act.open_tools>0 OR act.pending_input>0 OR act.yielded=0))
         OR (act.program_status IS NOT NULL
             AND EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=s.held_terminal_id AND t.viewed=1)
@@ -261,15 +307,14 @@ pub(super) fn session_in(conn: &Connection, id: &str) -> StoreResult<Option<LfSe
 fn available_sql(session: &str, now: i64) -> String {
     format!(
         "EXISTS(SELECT 1 FROM session_activity act
-            JOIN processes p ON p.id={session}.agent_process_id
             WHERE act.session_id={session}.id
             AND {session}.completed_at IS NULL AND act.agent_process_id IS {session}.agent_process_id
-            AND p.completed_at IS NULL
+            AND {session}.agent_ended_at IS NULL
             AND CASE WHEN act.program_status IS NOT NULL THEN
                 EXISTS(SELECT 1 FROM json_each(act.program_status,'$.records') r
                     WHERE json_extract(r.value,'$.state')='blocked'
                     OR ({session}.interactive=1 AND json_extract(r.value,'$.state')='idle'))
-            ELSE act.attachment_token=p.attachment_token
+            ELSE act.attachment_token={session}.attachment_token
                 AND (act.pending_input>0 OR (act.open_tools=0 AND (({session}.interactive=1 AND act.yielded=1)
                     OR {now}-act.observed_at>={quiet}))) END)",
         quiet = crate::session::AVAILABILITY_QUIET_SECONDS
@@ -371,7 +416,7 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
     let order = if by_id { "s.id" } else { "s.title,s.id" };
     // A Graph is the Graph process above the step that captured the current input.
     format!("WITH page AS MATERIALIZED ({page})
-        SELECT s.id,s.artifact_key,s.title,s.title_source,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph_process.id,graph.graph,graph_process.outcome,graph_process.completed_at,step.started_at,
+        SELECT s.id,s.artifact_key,s.title,s.title_source,s.completed_at,s.interactive,s.task_id,s.wave_id,s.graph_lf_process_id,s.cwd,s.skill,s.provider,s.model,s.node,s.iterations,s.current_capture,graph.lf_process_id,graph.graph,graph.started_at,graph.ended_at,COALESCE(gs.started_at,graph.started_at),
         (gs.seq=(SELECT MAX(later.seq) FROM graph_process_steps later WHERE later.graph_lf_process_id=gs.graph_lf_process_id)),
         w.slug,
         COALESCE(captured.independent=1,0),
@@ -380,21 +425,19 @@ fn summary_query(page: &str, by_id: bool, now: i64) -> String {
         {available},
         COALESCE(({task_state}) IN ('done','abandoned'),0),
         s.id IN (SELECT session_id FROM task_primary_sessions),
-        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,(SELECT terminal_id FROM processes WHERE id=p.attached_lf_process_id AND completed_at IS NULL),
+        (SELECT act.program_status FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id),a.agent_process_id,CASE WHEN a.attached_lf_process_id IS NOT NULL THEN a.attached_terminal_id END,
         (SELECT act.preview FROM session_activity act WHERE act.session_id=s.id AND act.agent_process_id IS a.agent_process_id
          AND json_extract(act.preview,'$.provider_thread')=a.provider_thread
-         AND act.attachment_token=p.attachment_token AND p.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
+         AND act.attachment_token=a.attachment_token AND a.attached_lf_process_id IS NOT NULL AND a.completed_at IS NULL),
         COALESCE((SELECT t.viewed IS NOT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),0),
         (SELECT pin.account_id FROM provider_session_accounts pin WHERE pin.provider=s.provider AND pin.provider_session_id=a.provider_thread),
         COALESCE(captured.provider_thread IS NOT NULL,0),
-        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL)
+        EXISTS(SELECT 1 FROM held_terminals t WHERE t.id=a.held_terminal_id AND t.ended_at IS NULL),
+        graph.pid,graph.os_started_at,graph.exit_code,graph.error,a.attached_pid,a.attached_os_started_at
         FROM page s JOIN agent_sessions a ON a.id=s.id
-        LEFT JOIN processes p ON p.id=a.agent_process_id
         LEFT JOIN session_events captured ON captured.seq=s.current_capture
         LEFT JOIN graph_process_steps gs ON gs.lf_process_id=captured.lf_process_id
         LEFT JOIN graph_processes graph ON graph.lf_process_id=gs.graph_lf_process_id
-        LEFT JOIN processes step ON step.id=gs.lf_process_id
-        LEFT JOIN processes graph_process ON graph_process.id=gs.graph_lf_process_id
         LEFT JOIN wave_addresses w ON w.id=s.wave_id
         LEFT JOIN tasks t ON t.id=s.task_id
         ORDER BY {order}", super::task_work::session_tasks("a"),
@@ -418,22 +461,28 @@ fn read_summary(
             .map(|id| loopflow_model::id::WaveId::parse(&id))
             .transpose()
             .map_err(invalid)?;
-        let graph = match row.get::<_, Option<String>>(16)? {
-            Some(graph_process) => {
-                let completed: Option<i64> = row.get(19)?;
-                let name: String = row.get(17)?;
+        let graph = match row.get::<_, Option<loopflow_model::id::LfProcessId>>(16)? {
+            Some(id) => {
+                let run = crate::graph_process::Execution {
+                    id,
+                    started_at: row.get::<_, Option<i64>>(18)?.unwrap_or_default(),
+                    ended_at: row.get(19)?,
+                    pid: row.get(37)?,
+                    os_started_at: row.get(38)?,
+                    exit_code: row.get(39)?,
+                    error: row.get(40)?,
+                };
                 Some(crate::session::GraphProcessSummary {
-                    id: graph_process,
-                    name,
-                    state: crate::session::GraphProcessSummaryState::of_process(
-                        row.get::<_, Option<String>>(18)?.as_deref(),
-                        completed,
+                    id: run.id.to_string(),
+                    name: row.get(17)?,
+                    state: crate::session::GraphProcessSummaryState::of_run(
+                        projection.graph_result(&run),
                     ),
                     task_id: task_id.clone(),
                     wave_id: wave_id.clone(),
-                    updated_at: match completed {
-                        Some(completed) => completed,
-                        None => row.get(20)?,
+                    updated_at: match run.ended_at {
+                        Some(ended) => ended,
+                        None => row.get::<_, Option<i64>>(20)?.unwrap_or(run.started_at),
                     },
                 })
             }
@@ -457,9 +506,11 @@ fn read_summary(
                 .transpose()?
                 .filter(|_| live),
             // A terminal no viewer occupies is gone, whatever its launch recorded.
-            terminal_id: row
-                .get::<_, Option<String>>(31)?
-                .filter(|_| live && !unviewed),
+            terminal_id: row.get::<_, Option<String>>(31)?.filter(|_| {
+                live && !unviewed
+                    && projection.holder(agent_process_id.as_ref())
+                        != crate::ProcessIdentityEvidence::Dead
+            }),
             unviewed,
             held: live && row.get(36)?,
             task_ids: serde_json::from_str(&row.get::<_, String>(24)?)?,
@@ -552,7 +603,7 @@ pub(super) fn claim_session_input_in(
     mut next: LfSession,
     expected: Option<&crate::process::SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&crate::process::LfProcessStart>,
+    start: Option<&crate::process::AttachingLf>,
 ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
     let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     if next.task_id == previous.task_id && next.task_id.is_some() {
@@ -569,7 +620,7 @@ pub(super) fn claim_session_input_in(
         ));
     }
     replace_input_in(tx, &mut next, Some(process))?;
-    let attachment = super::processes::attach_in(tx, &next.id, expected, process, true, start)?;
+    let attachment = super::processes::attach_in(tx, &next.id, expected, process, start)?;
     let next = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     Ok((next, attachment))
 }
@@ -783,25 +834,9 @@ impl SqliteStore {
         Ok(conn
             .query_row(
                 "SELECT t.id FROM agent_sessions s
-                 JOIN processes p ON p.id=s.agent_process_id
                  JOIN held_terminals t ON t.id=s.held_terminal_id
-                 WHERE s.id=?1 AND p.completed_at IS NULL AND t.ended_at IS NULL",
-                [canonical.as_str()],
-                |row| row.get(0),
-            )
-            .optional()?)
-    }
-
-    /// The `lf session serve` owner an earlier build recorded as hosting the
-    /// Session, while that owner's row says it runs. Only `lf resume` reads
-    /// it, to end the owner before resuming the conversation held.
-    pub fn session_owner(&self, session: &str) -> StoreResult<Option<LfProcessId>> {
-        let canonical = loopflow_model::id::canonical_session(session);
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT o.id FROM agent_sessions s JOIN processes o ON o.id=s.transport_lf_process_id
-                 WHERE s.id=?1 AND s.held_terminal_id IS NULL AND o.completed_at IS NULL",
+                 WHERE s.id=?1 AND s.agent_started_at IS NOT NULL AND s.agent_ended_at IS NULL
+                 AND t.ended_at IS NULL",
                 [canonical.as_str()],
                 |row| row.get(0),
             )
@@ -825,8 +860,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn
             .query_row(
-                "SELECT agent_session_id FROM processes
-                     WHERE kind='agent' AND attached_lf_process_id=?1 AND agent_session_id IS NOT NULL
+                "SELECT id FROM agent_sessions WHERE attached_lf_process_id=?1
                  UNION ALL SELECT session_id FROM session_events WHERE lf_process_id=?1
                  UNION ALL SELECT session_id FROM history.session_history WHERE lf_process_id=?1
                  UNION ALL SELECT session_id FROM history.turns WHERE lf_process_id=?1
@@ -844,25 +878,15 @@ impl SqliteStore {
         terminal: &TerminalId,
     ) -> StoreResult<Option<TerminalRetention>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        // A terminal is not a process: the lf processes running in it name it.
-        // A running Graph started inside one, as from a terminal, holds its
-        // steps there. CROSS JOIN seeds the walk from the few Graphs, not
-        // every Process.
+        // A running Graph started inside the terminal, or a Session's Graph
+        // shown in it, holds its steps there.
         Ok(conn.query_row(
             &format!(
-                "WITH RECURSIVE graph_ancestors(id) AS (
-                     SELECT p.parent_lf_process_id FROM graph_processes f
-                         CROSS JOIN processes p ON p.id=f.lf_process_id
-                         WHERE p.completed_at IS NULL
-                     UNION SELECT p.parent_lf_process_id FROM processes p
-                         JOIN graph_ancestors a ON p.id=a.id)
-                 SELECT EXISTS(SELECT 1 FROM processes a WHERE a.held_terminal_id=?1 AND (
-                         a.id IN (SELECT id FROM graph_ancestors WHERE id IS NOT NULL)
-                         OR (a.completed_at IS NULL
-                             AND a.id IN (SELECT lf_process_id FROM graph_processes))))
+                "SELECT EXISTS(SELECT 1 FROM graph_processes g INDEXED BY graph_processes_unended
+                         WHERE g.held_terminal_id=?1 AND g.ended_at IS NULL)
                      OR EXISTS(SELECT 1 FROM agent_sessions s
-                         JOIN processes g ON g.id={SESSION_GRAPH}
-                         WHERE s.held_terminal_id=?1 AND g.completed_at IS NULL)
+                         JOIN graph_processes g ON g.lf_process_id={SESSION_GRAPH}
+                         WHERE s.held_terminal_id=?1 AND g.ended_at IS NULL)
                      AS running_graph,
                  NOT EXISTS(SELECT 1 FROM agent_sessions s
                      WHERE s.held_terminal_id=?1 AND s.completed_at IS NULL)
@@ -1126,19 +1150,22 @@ impl SqliteStore {
                     AND o.observed_at>=?5 AND (?6 OR o.kind='manifest')
                 UNION SELECT +captured_event FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND ended_at>=?5 AND +captured_event IS NOT NULL
-                UNION SELECT +ran.seq FROM processes exited CROSS JOIN session_events ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.kind='captured'
-                UNION SELECT +ran.captured_event FROM processes exited CROSS JOIN history.turns ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5),
+                UNION SELECT +ran.seq FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN session_events ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.kind='captured'
+                UNION SELECT +ran.captured_event FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5),
             -- Turns no input started: one that started or ended in the window,
-            -- or whose Process completed in it, though it started earlier.
+            -- or whose launcher's agent ended in it, though it started earlier.
             turns(id) AS (
                 SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND started_at>=?5 AND +captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND ?3 IS NULL AND ended_at>=?5 AND +captured_event IS NULL
-                UNION SELECT +ran.id FROM processes exited CROSS JOIN history.turns ran ON ran.lf_process_id=exited.id
-                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.completed_at>=?5 AND ran.captured_event IS NULL
+                UNION SELECT +ran.id FROM agent_sessions exited INDEXED BY agent_sessions_agent_ended
+                    CROSS JOIN history.turns ran ON ran.lf_process_id=exited.agent_launcher_lf_process_id
+                    WHERE ?7 IS NULL AND ?3 IS NULL AND ?5>0 AND ?6 AND exited.agent_ended_at>=?5 AND ran.captured_event IS NULL
                 UNION SELECT id FROM history.turns
                     WHERE ?7 IS NULL AND task_id=?3 AND captured_event IS NULL),
             inputs AS (
@@ -1146,7 +1173,13 @@ impl SqliteStore {
                     COALESCE(m.observed_at,i.observed_at) AS started,
                     CASE WHEN m.seq IS NOT NULL THEN m.task_id ELSE i.task_id END AS task_id,
                     CASE WHEN m.seq IS NOT NULL THEN m.wave_id ELSE i.wave_id END AS wave_id,
-                    CASE WHEN attached.completed_at IS NOT NULL THEN attached.completed_at
+                    -- An input ends when its lf's agent does: the Session's
+                    -- current launcher's at that agent's end, an earlier
+                    -- launcher's by the time the next agent started.
+                    CASE WHEN COALESCE(latest_turn.lf_process_id,i.lf_process_id) IS NOT NULL
+                        AND (s.agent_launcher_lf_process_id IS NOT COALESCE(latest_turn.lf_process_id,i.lf_process_id) OR s.agent_ended_at IS NOT NULL)
+                    THEN CASE WHEN s.agent_launcher_lf_process_id IS COALESCE(latest_turn.lf_process_id,i.lf_process_id)
+                        THEN s.agent_ended_at ELSE s.agent_started_at END
                     WHEN terminal.seq IS NOT NULL AND NOT (
                         json_valid(terminal.payload) AND CASE WHEN json_valid(terminal.payload) THEN
                         COALESCE(json_type(terminal.payload,'$.evidence.outcome')='text',0)
@@ -1167,8 +1200,6 @@ impl SqliteStore {
                 LEFT JOIN history.turns latest_turn ON latest_turn.id=(
                     SELECT origin.id FROM history.turns origin WHERE origin.session_id=i.session_id
                     AND origin.captured_event=i.seq ORDER BY origin.id DESC LIMIT 1)
-                LEFT JOIN processes attached ON attached.id=CASE WHEN latest_turn.id IS NULL
-                    THEN i.lf_process_id ELSE latest_turn.lf_process_id END
                 LEFT JOIN history.session_history m ON m.session_id=s.id
                     AND m.receipt_key=i.receipt_key||':manifest.json'
                 LEFT JOIN history.session_history terminal ON terminal.session_id=s.id
@@ -1183,10 +1214,12 @@ impl SqliteStore {
                         AND origin.captured_event=i.seq))
                 UNION ALL
                 SELECT NULL,NULL,t.session_id,NULL,COALESCE(t.started_at,t.usage_at,t.ended_at),t.task_id,t.wave_id,
-                    COALESCE(attached.completed_at,t.ended_at),t.provider_thread,t.provider_turn,
+                    COALESCE(CASE WHEN t.lf_process_id IS NULL THEN NULL
+                        WHEN ts.agent_launcher_lf_process_id IS t.lf_process_id THEN ts.agent_ended_at
+                        ELSE ts.agent_started_at END,t.ended_at),t.provider_thread,t.provider_turn,
                     MAX(COALESCE(t.started_at,0),COALESCE(t.usage_at,0),COALESCE(t.ended_at,0))
                 FROM turns CROSS JOIN history.turns t ON t.id=turns.id
-                LEFT JOIN processes attached ON attached.id=t.lf_process_id
+                LEFT JOIN agent_sessions ts ON ts.id=t.session_id
                 WHERE t.captured_event IS NULL AND (?6 OR COALESCE(t.started_at,t.usage_at,t.ended_at)>=?5))
                 , eligible AS MATERIALIZED (
                 SELECT captured,input_id,session_id,caller_input_id,started,task_id,wave_id,ended,thread,turn,latest, SUM(ended IS NULL) OVER () AS unfinished,
@@ -1938,10 +1971,9 @@ pub(super) fn require_current_actor_in(
         .filter(|caller| caller.session_id == id)
     {
         let current: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM agent_sessions s JOIN processes p ON p.id=s.agent_process_id WHERE s.id=?1
-                AND p.id=?2 AND p.parent_lf_process_id=?3
-                AND p.attached_lf_process_id IS NOT NULL)",
-            params![id, caller.agent_process_id, caller.origin_lf_process_id],
+            "SELECT EXISTS(SELECT 1 FROM agent_sessions WHERE id=?1
+                AND agent_process_id=?2 AND attached_lf_process_id IS NOT NULL)",
+            params![id, caller.agent_process_id],
             |row| row.get(0),
         )?;
         if !current {

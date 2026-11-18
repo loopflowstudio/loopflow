@@ -86,7 +86,7 @@ pub async fn explain_task_checkout(
     options: &TaskProcessOptions,
 ) -> TaskCheckoutExplanation {
     let mut report = TaskCheckoutExplanation {
-        resolution: crate::ops::context::explain_context(store, cwd, selection, None, None).await,
+        resolution: crate::ops::context::explain_context(store, cwd, selection, None).await,
         action: None,
         impediments: Vec::new(),
         unavailable: Vec::new(),

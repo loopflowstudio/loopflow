@@ -870,8 +870,7 @@ fn view_plan(
             .ok_or(loopflow_execution::store::StoreError::NotFound)
             .context("Work registry is unavailable")?;
         let repository = selection_repository(cli, &store.sqlite)?;
-        let resolution =
-            super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None, None)?;
+        let resolution = super::context::explain(cli.wave.as_deref(), cli.task.as_deref(), None)?;
         let expression = if cli.task.is_some() {
             SelectionExpression::Work {
                 work: WorkWorkspaceKey {
@@ -973,8 +972,7 @@ pub fn saved_layout(
 /// `lf desktop dashboard <verb>`: save the
 /// arrangement in `selected` or the repository containing `directory`,
 /// reading a layout or slots from `input`, and return what the command
-/// prints. Renaming a Task is a Work change; the rest are arrangement and
-/// record no Process.
+/// prints. Renaming a Task is a Work change; the rest are arrangement.
 pub fn save_arrangement(
     selected: Option<&loopflow_model::durable::RepositoryId>,
     directory: &std::path::Path,

@@ -510,7 +510,7 @@ the removed rotation; nothing infers that their uncertain effects settled.
 
 ```bash
 lf graph build
-lf process show GRAPH_PROCESS --json
+lf graph show GRAPH_RUN --json
 ```
 
 A Graph is one lf process and the step processes it starts; its ID is the Graph
@@ -636,7 +636,7 @@ or resumes a stopped Graph.
 
 ```bash
 lf task status INF-124
-lf process show GRAPH_PROCESS --json
+lf graph show GRAPH_RUN --json
 lf task interrupt INF-124
 lf task run INF-124 --reason "take the smaller approach"
 ```

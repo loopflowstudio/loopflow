@@ -2142,13 +2142,6 @@ fn insert_session_in(
             session.model
         ],
     )?;
-    // The lf Process starting a Task's Session is that Task's work.
-    if let (Some(process), Some(task)) = (process, &session.task_id) {
-        conn.execute(
-            "UPDATE processes SET task_id=?2 WHERE id=?1",
-            params![process, task.as_str()],
-        )?;
-    }
     session.captured = session
         .artifact_key
         .as_ref()

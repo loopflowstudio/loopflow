@@ -321,9 +321,7 @@ BEGIN
     WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
     UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
         wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id IS NULL;
-    UPDATE agent_sessions SET primary_scope='task'
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id=NEW.task_id;
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND (task_id IS NULL OR task_id=NEW.task_id);
 END;
 CREATE TRIGGER task_primary_sessions_mark_update AFTER UPDATE ON task_primary_sessions
 BEGIN
@@ -331,9 +329,7 @@ BEGIN
     WHERE primary_scope='task' AND task_id=NEW.task_id AND id IS NOT NEW.session_id;
     UPDATE agent_sessions SET primary_scope='task', task_id=NEW.task_id,
         wave_id=(SELECT p.wave_id FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=NEW.task_id)
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id IS NULL;
-    UPDATE agent_sessions SET primary_scope='task'
-    WHERE id=NEW.session_id AND primary_scope IS NULL AND task_id=NEW.task_id;
+    WHERE id=NEW.session_id AND primary_scope IS NULL AND (task_id IS NULL OR task_id=NEW.task_id);
 END;
 CREATE TRIGGER agent_sessions_task_primary_row AFTER UPDATE OF primary_scope ON agent_sessions
 WHEN NEW.primary_scope IS NOT OLD.primary_scope AND (NEW.primary_scope IS 'task' OR OLD.primary_scope IS 'task')

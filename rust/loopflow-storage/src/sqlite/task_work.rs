@@ -60,6 +60,12 @@ pub(super) fn session_tasks(session: &str) -> String {
     )
 }
 
+/// SQL: directory `cwd` is `root` or below it. Whole path components:
+/// `/repo.task` does not hold `/repo.task-other`.
+pub(super) fn within(cwd: &str, root: &str) -> String {
+    format!("({cwd}=rtrim({root},'/') OR instr({cwd},rtrim({root},'/')||'/')=1)")
+}
+
 /// The Task whose checkout here is the deepest one holding `cwd`, as a scalar
 /// subquery. Probes checkout roots from the cwd outward, so each ancestor is
 /// one index seek; relative paths walk the same way as absolute ones.
@@ -654,14 +660,13 @@ fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> Sto
 /// out of the Task's history and still keeps a second run from starting
 /// beside it. The few unended runs seed it.
 pub(super) fn task_open_graph_pairs(selector: &str) -> String {
-    // Whole path components: `/repo.task` does not hold `/repo.task-other`.
     format!(
         "SELECT tw.id AS task_id,g.lf_process_id AS graph
          FROM graph_processes g INDEXED BY graph_processes_unended
          JOIN tasks tw ON tw.id IN ({selector}) AND (g.task_id=tw.id OR (g.task_id IS NULL
-            AND EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id
-                AND (g.cwd=rtrim(c.worktree,'/') OR instr(g.cwd,rtrim(c.worktree,'/')||'/')=1))))
-         WHERE g.ended_at IS NULL"
+            AND EXISTS(SELECT 1 FROM task_checkouts c WHERE c.task_id=tw.id AND {})))
+         WHERE g.ended_at IS NULL",
+        within("g.cwd", "c.worktree")
     )
 }
 
@@ -930,12 +935,10 @@ impl SqliteStore {
     pub fn checkout_open_work(&self, worktree: &std::path::Path) -> StoreResult<Vec<OpenWork>> {
         let mut connection = self.conn.lock().expect("store mutex poisoned");
         let conn = connection.savepoint()?;
-        let within =
-            |cwd: &str| format!("{cwd}=rtrim(?1,'/') OR instr({cwd},rtrim(?1,'/')||'/')=1");
         open_work_in(
             &conn,
-            &within("a.cwd"),
-            &within("g.cwd"),
+            &within("a.cwd", "?1"),
+            &within("g.cwd", "?1"),
             &[&worktree.to_string_lossy()],
         )
     }

@@ -366,7 +366,7 @@ mod tests {
             )
             .unwrap();
             conn.execute_batch("CREATE TRIGGER interrupt_move BEFORE UPDATE OF worktree ON task_checkouts BEGIN SELECT RAISE(ABORT,'interrupted'); END;").unwrap();
-        };
+        }
         assert!(store.relocate_repository(&id, "/after").is_err());
         assert_eq!(
             store.repository_path(&id).unwrap().as_deref(),

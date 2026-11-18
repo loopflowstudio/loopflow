@@ -1295,11 +1295,11 @@ mod tests {
                 .map(|session| session.id.to_string())
                 .collect::<Vec<_>>()
         };
-        assert_eq!(sessions(&first), [conversation.clone()]);
-        assert_eq!(sessions(&second), [later_conversation.clone()]);
+        assert_eq!(sessions(&first), std::slice::from_ref(&conversation));
+        assert_eq!(sessions(&second), [later_conversation]);
         assert_eq!(
             store.session_task_ids(&conversation).unwrap(),
-            [first.clone()]
+            std::slice::from_ref(&first)
         );
         let processes = |task: &TaskId| {
             let mut ids: Vec<String> = store

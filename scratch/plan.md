@@ -325,6 +325,18 @@ every Process/Session association, conflict answers.
    `TASK_CHECKOUTS` are gone. No path matching is left in membership.
    Demo: `work_keeps_its_task_when_a_checkout_path_is_reused` (Processes and
    Sessions stay with the first Task when a second clone takes the path).
+   Learned: recording at insert alone misses adoption, where `place_task`
+   gives a Task a checkout a taskless Graph is already running in (the Process
+   half had broken `adopting_a_checkout_with_a_running_graph_prevents_another_run`).
+   `write_task_checkout_in` now gives unfinished taskless Processes and open
+   taskless Sessions inside the new checkout its Task, once, by the
+   `processes_unfinished`/`open_sessions` indexes. A Session in a nested
+   checkout now belongs to the deepest Task only (it used to count for every
+   enclosing one too), and a Task keeps its Sessions after its checkout goes.
+   Left for gate: `session_lifecycle_tests`, `two_people`, `performance_tests::`,
+   `session_cli_tests::` and the `loopflow` crate's fixtures, which insert
+   `agent_sessions` rows by SQL; any that relied on a path match need a
+   `task_id`.
 2. **The guard.** Authorizer in test stores, leaving list from `build.rs`.
    Fix the reads it catches (the `ship_lf_process_id` prune clause, the
    registry fallback). Every later slice lands under it.

@@ -9,7 +9,8 @@ lifetime and attachment cuts of slice 3, the handoff deletion, the lf-row
 readers, and now the journal stop below. History of each pass, with its
 checks: `git show fbcf0091f2:scratch/loo-953-remove-processes.md`.
 
-Next, in order: (3) slices 4–6 below, slice 5 testing only the old → new
+Next, in order: (3) slices 4–6 below. Slice 4 also does the two cuts in
+"Concept review after the journal stop". Slice 5 tests only the old → new
 bridge. Contract Task: LOO-965 ("Drop the Process table LOO-953 marked
 leaving"). Quotes and the OS-scan measurement: `questions.md`.
 
@@ -83,6 +84,33 @@ Gate/CI: `binary(session_lifecycle_tests)`, `process_ownership_tests`,
 `session_cli_tests`, `work_open_tests`, `binary(two_people)`,
 `binary(transport_tests)`, `test(transport::)`, `test(performance_tests::)`,
 `binary(lf)`, `local_planning`.
+
+**Concept review after the journal stop (2026-11-18): fold into slice 4.**
+The journal stop left two row-shaped leftovers, and slice 4 removes both:
+
+- *The attaching lf is described as a Process row.* `attach_in` reads three
+  fields of `LfProcessStart { process: LfProcess, terminal }` (id, pid, OS
+  start). To provide them, `journal::start_record` fills a whole `LfProcess`
+  (command, cwd, via_agent, completed_at…) and `current_start_record` hands it
+  to `attachment::current_start`. Replace it with what attaching records: the
+  holder (`lf_process_id`, `AttachmentHolder { pid, os_started_at }`,
+  `terminal`). The journal exposes that directly. Delete `start_record`,
+  `current_start_record` and `LfProcessStart.process`.
+- *Owner liveness lives in the journal* (`journal/mod.rs:1104–1290`), which is
+  now only the trace log. Nine functions apply one rule: ended → dead; pid and
+  OS start → one OS lookup; pid without OS start → unknown; no pid → dead if
+  started before boot, else unknown. Each owner changes the no-pid case on
+  purpose: a reserved step follows its Graph run, a reserved agent its
+  holder, a carrier with no pid is dead. Move them beside `OsProcess`: one
+  rule plus those three owner cases. `recorded_process_evidence` goes with
+  `lf ps`. `lf_process_evidence` stays only for `binaries.rs`' released-lf
+  arm (LOO-965) and calls the shared rule.
+- After slice 4, no production code builds `LfProcess`, `ProcessEntry` or
+  `AgentProcess`. Each stays only if the released-lf arm, `canonical_ids`,
+  `query_plans` or a fixture still reads it, and goes in LOO-965.
+
+No open product choice. Questions.md's "`lf ps` lists only released-lf
+rows" is settled by deleting `lf ps`.
 
 **Decisions still live** (concept reviews, 2026-11-17/18; detail in git):
 

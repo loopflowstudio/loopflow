@@ -99,6 +99,20 @@ lf sync main        <span class="dim"># undo: detach, PR back to main</span></pr
 <h2>What the plan now says</h2>
 <p><code>scratch/plan.md</code> gained: the "<code>lf sync &lt;Task&gt;</code> stacks" design section, two passed-over entries, fixture step 6, the refusal under "What goes", slice 2 renamed, <code>pr_number</code> nullable, teaching that names <code>lf sync &lt;ID&gt;</code>, and a "Larger than this work" note on the duplicated placement columns. Slice order is unchanged: publish keeps the base first, then the verb.</p>
 
+<h2>As built (review after QA, 2026-11-18)</h2>
+<p>Read against <code>main</code> as a whole, not the last pass. The concepts now line up the way the proposal drew them:</p>
+<table>
+<tr><th>Person knows</th><th>Code has</th><th></th><th>Note</th></tr>
+<tr><td>"stack it on that Task"</td><td><code>lf sync &lt;Task&gt;</code> → <code>open_task_named</code> → <code>stack_task</code> → <code>stack_existing_task</code>, then the stacked sync</td><td class="yes">yes</td><td>One owner. <code>--stack-on</code> goes through the same function and now moves the PR too.</td></tr>
+<tr><td>"the PR targets the parent"</td><td><code>create_pr</code> on create; <code>retarget_pr</code> only from a recording verb or a merged parent; <code>update_pr</code> has no base</td><td class="yes">yes</td><td>Disagreement prints both and the command for each; nothing moves silently.</td></tr>
+<tr><td>"which parent is this?"</td><td><code>TaskStackParent</code> on <code>TaskSnapshot</code> and <code>TaskDetail</code>; status line; Desktop label</td><td class="yes">yes</td><td>One wire shape for status, <code>--json</code> and Desktop.</td></tr>
+<tr><td>"parent landed"</td><td><code>StackedSync.parent_merged</code>, <code>live_parent_branch()</code></td><td class="yes">yes</td><td>Was an <code>Option</code> that hid the parent's name once merged; publish needs the name to recognise the old base.</td></tr>
+<tr><td>"detach it, then build on it again"</td><td><code>lf sync main</code>, then <code>lf sync &lt;Task&gt;</code> with <code>git::stack_needs_fork_comparison</code></td><td class="yes">yes</td><td>QA found the restack skipped the parent's work; fixed and in the fixture.</td></tr>
+<tr><td>"preview syncing onto LOO-953"</td><td><code>lf sync LOO-953 --plan</code> plans the literal ref</td><td class="no">no</td><td>Preview and action read the argument differently. Small; already in <code>scratch/questions.md</code>.</td></tr>
+<tr><td>"the detached child's PR holds only its work"</td><td>Git's merge base after the parent lands with a merge commit</td><td class="no">no</td><td>A detached child that syncs <code>main</code> without restacking would show the parent's changes as deletions. Squash and rebase landings are unaffected. Larger than this work: detaching would have to rewrite the child onto <code>main</code> or record a fork the main merge compares from.</td></tr>
+</table>
+<p>Nothing in scope changes. The two <span class="no">no</span> rows are carried as questions 6 and 7; neither is a patch on the concept, both are places where Git's view and the record's view of "the fork" still differ.</p>
+
 <h2>Questions</h2>
 <ol class="q">
 <li><code>lf sync &lt;open Task&gt;</code> stacks.
@@ -111,6 +125,10 @@ lf sync main        <span class="dim"># undo: detach, PR back to main</span></pr
   <ol><li>File a Task for the staged contract.</li><li>Leave it; triggers keep it honest.</li></ol></li>
 <li>The wire Task's raw <code>parent_pr_id</code> once <code>stack_parent</code> exists.
   <ol><li>Keep both for now (plan).</li><li>Drop <code>parent_pr_id</code> from the wire in this Task.</li></ol></li>
+<li>A detached child after its parent lands with a merge commit.
+  <ol><li>File a Task: detaching rewrites the child onto <code>main</code>.</li><li>File a Task: record a fork the <code>main</code> merge compares from.</li><li>Leave it; this repository squash-lands.</li></ol></li>
+<li><code>lf sync &lt;Task&gt; --plan</code>.
+  <ol><li>Resolve the Task's branch for the preview.</li><li>Leave it planning the literal ref.</li></ol></li>
 </ol>
 </main>
 </body>

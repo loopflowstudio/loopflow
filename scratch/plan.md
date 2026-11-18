@@ -232,6 +232,8 @@ and `< /dev/null`.
   missing from `lf task status --json`; added to `TaskDetail` and
   `task_detail.json`.
 
+- Concept review after QA (`scratch/concept-review.html`, "As built"): nothing in scope changes; the detached-child merge-commit case and `--plan` preview stay open questions.
+
 Remaining: nothing in scope. All four slices are built; gate runs the suites.
 `lf sync <Task> --plan` still plans the literal ref (open question, not this Task).
 

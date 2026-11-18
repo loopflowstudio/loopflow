@@ -26,3 +26,17 @@ Made without anyone to ask; each is reversible.
   driver the design names; drop it if the planner should be free to choose.
 - **A possibly order-dependent test**, `resuming_an_ended_conversation_launches_its_provider_as_the_session`,
   failed once under threaded `cargo test` and not alone. Not investigated.
+
+## From QA (2026-11-18)
+
+- **A read on a copy of the Machine's store acts on the real Machine.**
+  `lf session list` under a private `LF_HOME` holding a backup of
+  `~/.lf/loopflow.db` ran recovery and started `lf --task LOO-921 ship` in
+  LOO-921's real checkout, once with the installed `lf` and once with the
+  branch. Both stopped at "Graph is blocked" before any step. Same on main;
+  not this change. Recovery trusts the worktree paths and PIDs in whatever
+  store it opens; whether a store should act only on the home that wrote it is
+  a product question, larger than this Task.
+- **`.lf/qa/hooks.md` says dead AgentProcesses are reaped by `lf process
+  prune`, not by `lf session list`**; `ops/recovery.rs` reaps on that read.
+  Not checked by running it.

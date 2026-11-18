@@ -511,7 +511,7 @@ identity. Persisted artifacts name their participant; conversation replies use
 | Behavior | CLI Flag | Config |
 |----------|----------|--------|
 | Agent | `-a claude:opus` | `agent: claude:opus` |
-| [Tracker](work.md#share-the-plan) | — | `tracker`: `{linear: {team: "<id>"}}` or `{asana: {team: "<gid-or-url>"}}`; without one, the plan is on your [hub](work.md#share-the-plan) |
+| [Tracker](work.md#share-the-plan) | — | `tracker`: `{linear: {team: "<id>"}}` or `{asana: {team: "<gid-or-url>"}}`; without one, the plan [travels with the repository](work.md#share-the-plan) |
 | Interactive terminal | direct TTY or `-i` | — |
 | Include docs | `--docs README.md,docs/` | `context: {docs: [README.md, docs/]}` |
 | Include branch files | `--diff files` | `context: {diff_files: true}` |

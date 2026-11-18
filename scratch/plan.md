@@ -183,12 +183,32 @@ and leaves Git unsent until the server or `lf task sync`. *Made for review:*
 - `machine/wire.rs` `PlanApply` / `PlanChanges`, `server_schema.json`,
   Swift `ServerProtocol`.
 - `lf task sync`: prints what is unsent by each carrier.
-- Docs written for hub-owns on this branch: `docs/work.md` ("Share the
-  plan"), `docs/ops.md`, `docs/config.md`, `docs/glossary.md`,
-  `docs/dev/planning.md`, `docs/dev/machines.md`. "To share a plan with
-  coworkers, use Linear or Asana" goes: they clone. The word "open" for the
-  hub goes; `docs/dev/planning.md`'s Words table keeps "action" for trackers
-  only and gains "unsent".
+- Docs, written ahead of the build (write-docs, 2026-11-18) and describing
+  the behavior above: `docs/work.md` ("Share the plan", the Sync reference),
+  `docs/ops.md`, `docs/config.md`, `docs/glossary.md`, `docs/dev/planning.md`
+  (Words; "Without a tracker: stamps and carriers"), `docs/dev/machines.md`,
+  `docs/dev/reference.md` ("Shared plan" row), `docs/dev/data.md`,
+  `rust/loopflow/src/server/README.md`. Implement reads them as the spec for
+  wording: `Plan: Git origin, 1 unsent.`, `Hub mini.`, records listed by
+  identifier, Git's own reason on the error line. Still naming the old test
+  (`…shows_the_change_sent_last…`): `rust/loopflow/tests/README.md`,
+  `scripts/testing.md`; rename with the test. Code links in the reference
+  row (`HubPlan`) follow the types.
+
+  Assumed by the docs, to undo there if the build decides otherwise:
+  - The repository id check passes, so a clone with a remote needs no
+    `lf config repo --bind`. The docs keep `--bind` only for a hub on a
+    repository with no remote.
+  - `lf task claim` / `lf task run` exchange first (slice 3) and the losing
+    claim's run stops, keeping its work.
+
+  Questions writing exposed:
+  - A teammate who can fetch but not push sees the plan and every save of
+    theirs stays unsent, with a push error on the line for good. Should a
+    clone that has never pushed successfully read differently (say
+    `Plan: Git origin, read only.`) instead of an error?
+  - `docs/work.md` now says "anyone who can push to it can change any Task".
+    Does `docs/security.md` need the same sentence?
 
 ## Absent and error states
 

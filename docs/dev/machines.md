@@ -206,16 +206,19 @@ use the same binding, and `lf repo` covers repositories without Work.
 The same table retains prior IDs as local locators and exactly one selected ID
 per path; Work, provider mappings, pending effects and execution are untouched.
 An ID already bound to another local path is not reassigned. Binding selects no
-planning destination and publishes nothing. A shared code remote
-or equal clone name supplies no identity. `--repository ID` resolves at the target
+planning destination and publishes nothing. An equal clone name supplies no
+identity; a shared remote does only through the ID its plan refs carry. `--repository ID` resolves at the target
 before Process admission, so SSH need not change the Machine's saved default.
 Ownership entries travel as marked Task comments ("Jack Heart claimed this on
 mini" plus a `loopflow-ownership` HTML comment carrying the entry) through the
-ordinary comment delivery to Linear or the hub; arriving comments are parsed
+ordinary comment delivery to Linear, the plan ref or the hub; arriving comments are parsed
 into the log with the Machine that wrote them. An unknown Machine remains an
 entry reference, never an invented SSH route.
-The hub reaches a repository by its RepositoryId, so its clone is bound to the
-same ID (`lf config repo --bind <id>`). Explicit association converges
+Plan refs and the hub address a repository by its RepositoryId. A plan ref
+carries it: a clone that fetches a ref naming another ID takes the lower of the
+two, so every clone of one remote converges without a command. A repository
+with no remote binds each clone by hand (`lf config repo --bind <id>`) before a
+hub can reach it. Explicit association converges
 established roots on a selected ID without rewriting Work; Desktop reassociates retained windows on opening/restoration. This associates repository roots, not divergent
 Task/Wave IDs for one provider object; provider correspondence and uncertain
 effect ownership remain with the common planning writer.

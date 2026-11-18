@@ -27,3 +27,13 @@
   (the Task's branch, shared), `task_checkouts.branch` (this Machine's
   checkout), `task_prs.branch` (the PR's head). Whether they can
   ever differ, and so whether one "the Task's branch" suffices, is LOO-934's.
+- **Checkout before caller for a Process's Task.** Chosen from the live copy:
+  a command run inside a checkout is that Task's work whoever ran it
+  (`session serve`, `pr land`, `--task X ship` from another Task's agent).
+  Passed over: the kickoff's caller/parent-first order, which gave 6,687 such
+  Processes to the calling agent's Task.
+- **`observed`-only Processes leave their Task's list.** 166 pairs where a
+  Process only wrote an observation into a Session; not treated as the Task's
+  work. Passed over: a backfill clause for them.
+- **`process_task_backfill` cursor table** so a Process with no Task is
+  examined once per store rather than every hourly pass. Drops with LOO-877.

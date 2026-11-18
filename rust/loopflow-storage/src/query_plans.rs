@@ -44,6 +44,8 @@ const GROWING: [&str; 16] = [
 /// `task_ship_events` counts the 396 rows that store's 174 shipping and 12
 /// stopped Tasks backfill to, 216 of them naming a Process.
 /// `task_ownership` counts November 13's 895 entries over 880 Tasks.
+/// `processes_task` counts the 161,718 of November 17's 187,600 Processes the
+/// first backfill gave a Task, over 649 Tasks.
 /// `session_capture_provider_thread` counts the 21,078 inputs with a resume
 /// reference on November 16's store. `session_capture_turn` is estimated from
 /// that store's 28,791 `completed` rows over 21,601 inputs: about 19,000
@@ -82,6 +84,7 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('processes','processes_held_terminal','135 3'),
          ('processes','processes_parent','169394 7 1 1'),
          ('processes','processes_receipt_locator','169394 1'),
+         ('processes','processes_task','161718 249'),
          ('processes','processes_recent','169394 2 1'),
          ('processes','processes_trace','169394 81 2 1'),
          ('processes','processes_unfinished','768 2 1'),

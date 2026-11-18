@@ -143,12 +143,29 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 One rule, applied once, when the row is written. A Process's Task is, in
 order:
 
-1. the Task the launch names (`--task`, a Graph step, a Task's agent);
-2. its caller Session's `task_id` (`caller_session_id`; hooks and `lf`
-   commands an agent runs);
-3. its parent Process's `task_id` (`parent_lf_process_id`);
-4. the deepest `task_checkouts` row containing `cwd`;
+1. the Task the launch names: a Graph (`record_graph_process`), a Session the
+   Process creates with a Task (`insert_session_in`) or attaches to
+   (`attach_in`) — written on the Process's row by that call;
+2. the deepest `task_checkouts` row containing `cwd`;
+3. its caller's: the caller agent Process's `task_id`, else the caller
+   Session's `task_id` (`caller_session_id`, non-primary);
+4. its parent Process's `task_id` (`parent_lf_process_id`);
 5. else NULL.
+
+The checkout outranks inheritance (built, changed from the kickoff order). On
+the 187,600-row copy, caller/parent-first gave 6,687 Processes that ran inside
+one Task's checkout to the Task of the agent that ran them: 5,672 `lf session
+serve`, plus `commit`, `pr publish`, `pr land`, `lf --task LOO-921 ship` from
+LOO-959's agent. Those are the checkout's Task's work. Inheritance covers what
+runs outside any checkout (repo root, `/tmp`).
+
+Measured before deleting the Session-event unions: 386 of 22,378 event-linked
+(Task, Process) pairs were reached by no rule; nearly all the lf Process that
+captured or started a Task's Session from outside its checkout (`lf session
+resume --task EXP-49` from the repo root). Rule 1's Session writes cover those
+going forward; the backfill reads `session_events` `captured`/`started` for
+old rows. The 166 `observed`-only pairs (a Process that only wrote an
+observation into a Session) are no longer its Task's work.
 
 An agent Process copies `agent_sessions.task_id`. A Session's Task is the
 named Task, else the deepest checkout containing its cwd at creation.
@@ -280,7 +297,30 @@ every Process/Session association, conflict answers.
 
 ## Slices
 
-1. **Process and Session record their Task.** Migration adds
+1. **Process and Session record their Task.** *Process half built
+   (`process_task.sql`); Session half next.* Built: `processes.task_id` +
+   `processes_task`, relocation receipts copied in and the table marked
+   leaving, the freeze in `relocate_repository` and `has_relocations` gone,
+   `lf_process_ids`/`task_open_process_pairs`/`task_of_process`/performed-work
+   read the column (plus agent rows of the Task's Sessions, which can be bound
+   after they start), the prune clause for relocations gone. The backfill is
+   `assign_process_tasks` in `retention::prune` behind a one-row cursor table
+   `process_task_backfill` (a NULL row is examined once; drops with LOO-877
+   once no released lf writes rows). On the copy: 161,718 of 187,600 assigned,
+   38 batches, 10.8 s total, about 0.28 s write lock per batch (debug build);
+   149,984 agree with path matching, 6,687 differ only by the precedence fix
+   above being absent (now 0 by construction), 5,047 newly reached by
+   inheritance. Insert-time probe is index seeks
+   (`recording_and_reading_a_process_task_probe_indexes`).
+   Remaining in this slice: Sessions. Writing a cwd-inferred
+   `agent_sessions.task_id` at creation also changes what a bound Session
+   means to its other readers (`bound_at`/`work_source`, prompt context, Wave
+   attribution in `capture_in`); check those reads before writing it, then
+   backfill the 2,659, reconcile the 3 primaries, and make
+   `session_membership`/`session_tasks` read `task_id` only. Until then
+   Sessions keep binding-or-path membership (paths already move with
+   `relocate_repository`).
+   Original scope: Migration adds
    `processes.task_id` + index, backfills Sessions, marks
    `relocated_task_processes` leaving; the maintenance pass backfills
    Processes. Writers apply the five rules; membership reads the column;

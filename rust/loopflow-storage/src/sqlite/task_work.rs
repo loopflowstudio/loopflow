@@ -643,8 +643,8 @@ pub(super) fn task_open_process_pairs(selector: &str, filter: &str) -> String {
         "WITH open AS MATERIALIZED (SELECT p.id,p.task_id,p.kind,p.agent_session_id,p.attached_lf_process_id
             FROM processes p INDEXED BY processes_unfinished WHERE p.completed_at IS NULL AND ({filter})),
         agents AS MATERIALIZED (SELECT tw.id AS task_id,open.id,open.attached_lf_process_id FROM open
-            JOIN agent_sessions a ON a.id=open.agent_session_id
-            JOIN tasks tw ON tw.id IN ({selector}) AND ({})
+            CROSS JOIN agent_sessions a ON a.id=open.agent_session_id
+            CROSS JOIN tasks tw ON tw.id IN ({selector}) AND ({})
             WHERE open.kind='agent')
         SELECT open.task_id AS task_id,open.id AS process FROM open WHERE open.task_id IN ({selector})
         UNION SELECT task_id,id FROM agents

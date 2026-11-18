@@ -32,7 +32,6 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 ## Task
 
-- `relocated_task_processes`: task_id, process_id
 - `task_changes`: seq, id, task_id, field, value_json, base_json, conflict_json, attempted, error, acknowledged_revision, acknowledged
 - `task_checkouts`: task_id, worktree, branch, base_commit, parent_pr_id
 - `task_comment_deliveries`: comment_id, comment_json, acknowledged, error, conflicting_comment_json
@@ -119,7 +118,8 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 ## LfProcess
 
 - `agent_limit_recoveries`: lf_process_id, provider, reason, retry_at, agent, updated_at
-- `processes`: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id
+- `process_task_backfill`: id, after_rowid
+- `processes`: id, trace_id, parent_lf_process_id, via_agent, caller_session_id, caller_provider_generation, command, repo, cwd, started_at, completed_at, outcome, exit_code, error, signal, pid, kind, agent_session_id, os_started_at, endpoint, agent_provider, agent_interactive, caller_agent_process_id, attached_lf_process_id, attachment_token, attachment_exit_seq, spawn_state, terminal_id, receipt_locator, journal_trace_locator, ~~viewed~~ (leaving → LOO-954, unused_store_members), ~~native_input~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold~~ (leaving → LOO-954, unused_store_members), ~~viewer_hold_at~~ (leaving → LOO-954, unused_store_members), inbox, held_terminal_id, task_id
 
 ## Provider authentication
 
@@ -164,8 +164,12 @@ to one. `uv run python scripts/due_removals.py` prints when each may drop.
 
 - `dashboard_arrangements`: repository_id, dashboard_id, expression_key, selection_json, arrangement_json
 - `dashboards`: repository_id, id, revision, expression_key, name, pinned, slots_json
-- `task_orders`: repository_id, task_ids_json
 
 ## Desktop shell
 
 - `desktop_shells`: id, task_id, checkout, owner, created_at, jobs_settled, ~~close_requested~~ (leaving → LOO-954, unused_store_members), terminal_id, launcher_lf_process_id
+
+## Not in the ownership map
+
+- `relocated_task_processes` — **leaving → LOO-877, process_task**: task_id, process_id
+- `task_orders`: repository_id, task_ids_json

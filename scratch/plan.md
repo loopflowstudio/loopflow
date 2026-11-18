@@ -91,7 +91,7 @@ Into `rust/loopflow-harness/src/`, with unit tests and testdata:
   `read_current`, `claude_project`, `MARKERS`
 - `HarnessKind` (`parse`, `as_str`, `ALL`, `harness()`), the four unit
   structs, and trait `Harness` with: `kind`, `recognizes_driver`,
-  `recognizes` (taking the command string), `title_args`, `model_rungs`,
+  `title_args`, `model_rungs`,
   `sign_in_advice`, `provider_env`, `api_key_env`, `transcript_home`,
   `transcript_reader`, `transcript_id`, `transcript_root`,
   `transcript_watch_store`, `direct_transcript`, `transcript_siblings`,
@@ -103,7 +103,7 @@ Into `rust/loopflow-harness/src/`, with unit tests and testdata:
 Stays in execution:
 
 - `harness::Launcher` with `capabilities`, `open`, `driver`,
-  `validate_agent_process_close`, `provider`, `locate_transcript`,
+  `validate_agent_process_close`, `provider`, `recognizes`, `locate_transcript`,
   `transcript_retention`, `recent_transcripts`, `conversation_owners`,
   `terminal_error`. `Capabilities` stays with it: every reader is launch,
   prompt or skill code, and it names `skills::catalog::SkillDialect`.
@@ -132,7 +132,7 @@ re-exports nothing from it.
 |---|-----------|------------|
 | 1 | `HarnessKind::harness()` returns the launch implementation (≈60 callers in execution, 4 in the application) | Format callers keep `kind.harness()`; callers that need capabilities or launch use `harness::launcher(kind)` |
 | 2 | `transcript/claude.rs:117` calls `harness::claude::usage` | Done in slice 1: `usage` is in the crate, ahead of the reader |
-| 3 | `Harness::recognizes(&process::OsProcess)` | Takes the command it reads |
+| 3 | `Harness::recognizes(&process::OsProcess)` | On `Launcher`: Claude's reads the process's executable and Pi's its arguments, both from the process table |
 | 4 | `Harness::transcript_home` default goes through storage's `Provider` and `transcript::native_home` | Claude and Codex name their own home variable and directory in the crate; `native_home(provider)` in execution calls them |
 | 5 | Trait methods that take the store, the process table or storage's `Provider` | On `Launcher` (list above) |
 | 6 | `pub(crate)` items execution still reads (`fact`, decoders, `find`, `json_lines`) | `pub` in the crate |
@@ -290,23 +290,52 @@ measured compile share: `ops` above the rest, not another leaf.
    - `scripts/check_architecture.py` and `scripts/check_migrations.py` now
      scan the crate; both pass. The third-party inventory was refreshed for
      the `Cargo.lock` change.
-2. **Split the trait, move the readers.** `HarnessKind`, the unit structs and
-   `Harness` move; execution gets `Launcher: Harness`; the table's rows are
-   resolved; the transcript readers and the store-free half of
-   `transcript/mod.rs` and `live.rs` move. Run the launch matrix and one
-   application resume test. Inherited from slice 1 and a read of the code,
-   2026-11-18:
-   - Rows 1 and 3-6 of the table are open; row 2 is done.
-   - The crate gains `rusqlite` (OpenCode's reader) and `schemars`:
-     `live::SessionTurn`, `TurnState` and `TurnUsage` derive `JsonSchema`.
-   - Two types are named `TurnUsage`: `loopflow_model::chat::types::TurnUsage`
-     (optional fields, what decoders and `claude::usage` produce) and
-     `transcript::live::TurnUsage` (three plain counts, a wire type). Once
-     both are reachable from one crate, the live one needs a name that says
-     what it is, or to be folded into the model's. Renaming keeps the wire
-     shape; folding changes it, so folding is a question, not this slice.
-   - `main` has not moved past `7bb879aff4` and #1967, #1968, #1972 and #1976
-     are still open, so the rename conflicts are all still ahead.
+2. **Split the trait, move the readers. Built (`8ac692465f`).** Rows 1 and
+   3-6 are resolved. `HarnessKind`, the four structs and `Harness` are in the
+   crate with the readers, `Turn`, `Source`, the file walk and
+   `live::read_current`; execution has `Launcher: Harness`,
+   `harness::launcher(kind)` and `harness::from_provider`. The crate is 7,236
+   lines. What a run showed, 2026-11-18, this Machine:
+   - `cargo test -p loopflow-harness`: 82 passed. `cargo tree` check: 0.
+     `cargo clippy -p loopflow-harness --all-targets -- -D warnings`: clean.
+   - `cargo check --workspace --all-targets`: clean.
+   - Execution, `cargo test -p loopflow-execution --lib -- harness::launch_matrix
+     harness::conformance_tests harness::dispatch_tests harness::tests
+     transcript:: provider_conversation`: 44 passed.
+   - Application through a real `lf`
+     (`cargo test -p loopflow --test session_launch_contract terminal_launch_and_resume_use_current_policy_and_preserve_native_identity`):
+     passed.
+   - `scripts/check_architecture.py` and `python/tests/test_third_party.py`
+     pass; the inventory was refreshed for the `Cargo.lock` change.
+   - Not run here, for gate: clippy over execution and the application,
+     `documented_commands::` (README edit), `binary(golden_prompt)`.
+   What it taught:
+   - Row 3 was wrong. `recognizes` cannot take a command string: Claude's
+     checks the process's executable path and Pi's its arguments. It stays on
+     `Launcher` with `OsProcess`; `recognizes_driver`, which does read only a
+     command, is on `Harness`.
+   - `HarnessKind` lost `#[non_exhaustive]`. Across a crate line it forces a
+     wildcard arm on every match in execution, `launcher()` included, and a
+     new harness would then compile without a launcher. The application's
+     matches needed no change.
+   - Also moved, not in the list above: the launch-turn parser
+     `transcript::Launch` (two readers call it), `transcript::home`,
+     `command_program`, Claude's and Codex's input-time readers, OpenCode's
+     model check, and `config::CLAUDE_MODEL_RUNGS`, now
+     `loopflow_harness::claude::MODEL_RUNGS`.
+   - `transcript_home` has no default: each struct names its own variable and
+     directory, and execution's `native_home(provider)` asks the harness.
+   - Mixed fixtures: `transcript::testdata(name)` behind `test-support`, as
+     `fact::trace` is. Execution's `answer` and `facts` tests read the same two
+     files.
+   - The crate gained `dirs`, `rusqlite`, `schemars`, `serde`, `time` and
+     dev-only `tempfile`.
+   - The live `TurnUsage` kept its name. It derives `JsonSchema`, so a rename
+     changes the generated schema; the two types sit in different modules and
+     only `transcript::Calls::add` names both.
+   - Application imports changed in 6 files; `history_transcript.rs` is the
+     only one that needed more than a path.
+   - `main` and the four open PRs were not rechecked in this pass.
 3. **Measure and document.** `run.py` cases, `results/loo-923.html`, scripts,
    READMEs and `AGENTS.md` paths.
 

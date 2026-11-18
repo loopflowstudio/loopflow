@@ -21,3 +21,9 @@ Write-docs, 2026-11-18:
 Realign, 2026-11-18:
 
 - `transcript::live::TurnUsage` and `loopflow_model::chat::types::TurnUsage` are two types with one name. Slice 2 puts both within reach of `loopflow-harness`. Assumed: the live one keeps its wire shape and its fields; whether it should become the model's type is not decided here.
+
+Implement, slice 2, 2026-11-18:
+
+- `HarnessKind` is no longer `#[non_exhaustive]`, against the style guide's rule for public enums that may grow. Assumed: in a private workspace crate an exhaustive match is worth more, since a fifth harness then fails to compile until it has a launcher. Keep the attribute and a wildcard arm instead?
+- `recognizes(&OsProcess)` stayed on `Launcher`. The alternative keeps it on `Harness` by passing the command, executable path and arguments in, which reads the process table for every candidate before asking. Not done.
+- The live `TurnUsage` was not renamed: the rename reaches the generated server schema.

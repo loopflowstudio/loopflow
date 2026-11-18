@@ -3,11 +3,11 @@
 //! transcript is and how long its provider keeps it are derived here when
 //! read; which Session a conversation belongs to is execution's to say.
 
-pub mod claude;
-pub mod codex;
+pub(crate) mod claude;
+pub(crate) mod codex;
 pub mod live;
 pub mod opencode;
-pub mod pi;
+pub(crate) mod pi;
 
 use std::collections::{BTreeMap, HashMap};
 use std::fs;
@@ -21,8 +21,6 @@ use serde_json::Value;
 
 use crate::HarnessKind;
 use loopflow_model::chat::types::{ConversationItem, Lifecycle};
-
-pub use claude::is_user_input;
 
 /// One turn: from what woke the agent until it hands back, across every
 /// request, model call and tool between.
@@ -135,12 +133,6 @@ impl Source {
             Self::OpenCode { store, id } => opencode::last_written(store, id),
         }
     }
-}
-
-/// Where a harness keeps its conversations on this Machine, for the shared
-/// home. Pi honors `PI_CODING_AGENT_DIR`, OpenCode `XDG_DATA_HOME`.
-pub fn home(harness: HarnessKind) -> PathBuf {
-    harness.harness().transcript_home()
 }
 
 /// Where each conversation's transcript was found; a transcript never moves,

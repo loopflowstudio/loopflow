@@ -175,8 +175,7 @@ uv run python scripts/test.py --reuse-passing --rust-filter 'package(loopflow-ha
 The crate's tests are not under `harness::`, so the filter names the package.
 The rebuild comparison is not rerun at gate: it ran once (slice 3) and its
 results are committed under `scripts/benchmarks/crate-rebuild/results/`.
-Also for gate, none run on this branch: clippy over execution and the
-application, `documented_commands::` (README and docs edits),
+Also for gate, none run on this branch: `documented_commands::` (README and docs edits),
 `binary(golden_prompt)`, and `uv run pytest python/tests` if a test imports
 the benchmark scripts. The PR body states that no LOO-921 or LOO-922 number
 existed to compare against.
@@ -308,10 +307,9 @@ measured compile share: `ops` above the rest, not another leaf.
      new harness would then compile without a launcher. The application's
      matches needed no change.
    - Also moved, not in the list above: the launch-turn parser
-     `transcript::Launch` (two readers call it), `transcript::home`,
-     `command_program`, Claude's and Codex's input-time readers, OpenCode's
-     model check, and `config::CLAUDE_MODEL_RUNGS`, now
-     `loopflow_harness::claude::MODEL_RUNGS`.
+     `transcript::Launch` (two readers call it), `command_program`, Claude's
+     and Codex's input-time readers, OpenCode's model check, and
+     `config::CLAUDE_MODEL_RUNGS`, now the body of Claude's `model_rungs`.
    - `transcript_home` has no default: each struct names its own variable and
      directory, and execution's `native_home(provider)` asks the harness.
    - Mixed fixtures: `transcript::testdata(name)` behind `test-support`, as
@@ -369,7 +367,22 @@ measured compile share: `ops` above the rest, not another leaf.
      harness README, `docs/dev/codebase.md`. `docs/dev/reference*.md` and
      execution's README already matched.
 
-All three slices are built. Nothing remains for implement; gate is next.
+4. **Compress. Built.** The crate's public surface is what execution and the
+   application name: the per-harness modules (`claude`, `codex`, `opencode`,
+   `pi`) are private, the three file readers, `fact::activity`,
+   `opencode::messages`, `live::MARKERS` and `claude::usage` are crate-only,
+   and `transcript::home(kind)` is gone in favour of
+   `kind.harness().transcript_home()`. What a run showed, 2026-11-18:
+   - `cargo clippy --all-targets -- -D warnings` over harness, execution and
+     the application: clean, after the test modules in execution's
+     `harness/codex.rs` and `harness/opencode.rs` moved to the end of their
+     files. `items_after_test_module` fired on both once the `#[derive]`d
+     struct that followed the tests on main had moved to the crate.
+   - `cargo test -p loopflow-harness`: 82 passed. Execution's `transcript::`,
+     `harness::codex::tests`, `harness::opencode::tests` and
+     `harness::conformance_tests`: 56 passed.
+
+All four slices are built. Nothing remains for implement; gate is next.
 
 ## Open choice the measurement raised
 

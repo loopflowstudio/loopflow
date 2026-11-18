@@ -1222,6 +1222,187 @@ impl Driver {
     }
 }
 
+impl super::Launcher for loopflow_harness::Codex {
+    fn validate_agent_process_close(
+        &self,
+        store: &loopflow_storage::sqlite::SqliteStore,
+        session: &str,
+        process: &loopflow_model::id::AgentProcessId,
+    ) -> crate::store::StoreResult<()> {
+        // The server may host conversations outside this AgentProcess.
+        let endpoint = store.agent_endpoint(process)?.ok_or_else(|| {
+            crate::store::StoreError::InvalidAuthority(
+                "Codex AgentProcess connection is unavailable".into(),
+            )
+        })?;
+        let thread = store.session_thread(session)?;
+        super::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
+            .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
+    }
+
+    fn provider(&self) -> Option<crate::provider_auth::Provider> {
+        Some(crate::provider_auth::Provider::Codex)
+    }
+    fn terminal_error(&self, code: &str) -> bool {
+        matches!(code, "codex_disconnected" | "codex_dispatch_rejected")
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Reported,
+                managed: super::ThreadName::Reported,
+            },
+            initial_prompt_on_resume: true,
+            supports_execution_boundary: true,
+            classifies_failures: true,
+            native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint:
+                "Install it with `npm install -g @openai/codex`, then sign in with `codex login`.",
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events, approval))
+    }
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        let (mut args, input) = launch.terminal_input()?;
+        let mut client = super::native_session::NativeClient::new(launch)?;
+        if !launch.kind.is_managed() {
+            args.extend(crate::agent::codex_terminal_options(
+                launch.config,
+                launch.kind,
+            )?);
+            if let super::Start::Resume { thread } = launch.start {
+                args.extend(["resume".into(), "--".into(), thread.to_string()]);
+            } else {
+                args.push("--".into());
+            }
+            args.extend(input.filter(|input| !input.is_empty()));
+            if let Some(context) = &launch.config.conversation_context {
+                let delivery = context.configure_hooks(&mut client.process)?;
+                if client.thread.is_none() {
+                    client.reported_thread =
+                        Some(crate::context_block::reported_thread_path(&delivery))
+                            .filter(|path| std::fs::write(path, "").is_ok());
+                }
+            }
+        } else {
+            let mut config = launch.config.clone();
+            config.task_prompt = input.unwrap_or_default();
+            if matches!(launch.start, super::Start::New) {
+                config.skill_invocation = None;
+            }
+            let opened = std::thread::scope(|scope| {
+                scope
+                    .spawn(|| {
+                        tokio::runtime::Builder::new_current_thread()
+                            .enable_all()
+                            .build()?
+                            .block_on(open_native(&super::Launch {
+                                config: &config,
+                                ..*launch
+                            }))
+                    })
+                    .join()
+                    .map_err(|_| anyhow!("Codex startup worker panicked"))?
+            })?;
+            args = vec![
+                "--remote".into(),
+                format!("unix://{}", opened.endpoint.display()),
+                "resume".into(),
+                "--".into(),
+                opened.thread.to_string(),
+            ];
+            client.thread = Some(opened.thread);
+            client.remote = Some(opened.endpoint);
+        }
+        client.process.args(args);
+        Ok(client)
+    }
+}
+
+struct OpenedCodex {
+    thread: AgentSessionId,
+    endpoint: std::path::PathBuf,
+}
+
+/// Start the app-server and open the conversation with lf's configuration, so
+/// the native client only joins it. Nothing here outlives the client's start.
+async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
+    use crate::harness::{codex_connection, ApprovalPolicy};
+
+    let Recording {
+        store,
+        session,
+        attachment,
+    } = launch.recording;
+    let saved = launch.start.thread().or(store.session_thread(session)?);
+    let (events, _events) = tokio::sync::mpsc::unbounded_channel();
+    let launch_value = super::Launch {
+        start: super::Start::from_thread(saved.as_ref()),
+        ..*launch
+    };
+    let mut harness = Driver::new(&launch_value, events, ApprovalPolicy::NativeClient);
+
+    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start()).await {
+        Ok(result) => result?,
+        Err(_) => {
+            harness.stop().await?;
+            bail!("Codex app-server did not open the conversation within 20s; the owned provider was stopped");
+        }
+    }
+    let (endpoint, params) = harness
+        .native_start()
+        .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
+    harness.stop().await?;
+    // Recover saved history before opening the UI, without replaying its input.
+    let turns = match &saved {
+        Some(thread) => tokio::time::timeout(
+            std::time::Duration::from_secs(20),
+            codex_connection::recover_history(store, session, thread, &endpoint),
+        )
+        .await
+        .context("Codex native history recovery timed out")??,
+        None => 0,
+    };
+    let title = store
+        .session(session)?
+        .map(|session| session.title)
+        .filter(|title| !title.is_empty())
+        .unwrap_or_else(|| "Loopflow".to_string());
+    let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
+    store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
+    if let Some(context) = &launch.config.conversation_context {
+        // Hooks run on the app-server, which never inherits the terminal's
+        // launch file. Bind before the client can send a turn.
+        let mut context = context.clone();
+        context.identify(store, session)?;
+        context.bind_codex_session(thread.as_str())?;
+    }
+    if turns == 0 && !launch.config.task_prompt.is_empty() {
+        // Provider history settles on the next read whether it ran, so a
+        // broken store cannot stop the turn.
+        codex_connection::start_turn(
+            store,
+            session,
+            attachment,
+            &endpoint,
+            &thread,
+            &launch.config.task_prompt,
+        )
+        .await
+        .context("Codex first turn was not sent")?;
+    }
+    Ok(OpenedCodex { thread, endpoint })
+}
+
 #[cfg(test)]
 mod tests {
     use crate::process::attachment;
@@ -1696,185 +1877,4 @@ mod tests {
             }
         );
     }
-}
-
-impl super::Launcher for loopflow_harness::Codex {
-    fn validate_agent_process_close(
-        &self,
-        store: &loopflow_storage::sqlite::SqliteStore,
-        session: &str,
-        process: &loopflow_model::id::AgentProcessId,
-    ) -> crate::store::StoreResult<()> {
-        // The server may host conversations outside this AgentProcess.
-        let endpoint = store.agent_endpoint(process)?.ok_or_else(|| {
-            crate::store::StoreError::InvalidAuthority(
-                "Codex AgentProcess connection is unavailable".into(),
-            )
-        })?;
-        let thread = store.session_thread(session)?;
-        super::codex_connection::validate_agent_process_close(&endpoint, thread.as_ref())
-            .map_err(|error| crate::store::StoreError::InvalidAuthority(error.to_string()))
-    }
-
-    fn provider(&self) -> Option<crate::provider_auth::Provider> {
-        Some(crate::provider_auth::Provider::Codex)
-    }
-    fn terminal_error(&self, code: &str) -> bool {
-        matches!(code, "codex_disconnected" | "codex_dispatch_rejected")
-    }
-    fn capabilities(&self) -> super::Capabilities {
-        super::Capabilities {
-            thread: super::ThreadNaming {
-                bare: super::ThreadName::Reported,
-                managed: super::ThreadName::Reported,
-            },
-            initial_prompt_on_resume: true,
-            supports_execution_boundary: true,
-            classifies_failures: true,
-            native_skills: Some(crate::skills::catalog::SkillDialect::Codex),
-            turn_limit: false,
-            output_schema: false,
-            respawns_after_crash: false,
-            install_hint:
-                "Install it with `npm install -g @openai/codex`, then sign in with `codex login`.",
-        }
-    }
-    fn driver(
-        &self,
-        launch: &super::Launch<'_>,
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        approval: super::ApprovalPolicy,
-    ) -> Box<dyn super::Driver> {
-        Box::new(Driver::new(launch, events, approval))
-    }
-    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        let (mut args, input) = launch.terminal_input()?;
-        let mut client = super::native_session::NativeClient::new(launch)?;
-        if !launch.kind.is_managed() {
-            args.extend(crate::agent::codex_terminal_options(
-                launch.config,
-                launch.kind,
-            )?);
-            if let super::Start::Resume { thread } = launch.start {
-                args.extend(["resume".into(), "--".into(), thread.to_string()]);
-            } else {
-                args.push("--".into());
-            }
-            args.extend(input.filter(|input| !input.is_empty()));
-            if let Some(context) = &launch.config.conversation_context {
-                let delivery = context.configure_hooks(&mut client.process)?;
-                if client.thread.is_none() {
-                    client.reported_thread =
-                        Some(crate::context_block::reported_thread_path(&delivery))
-                            .filter(|path| std::fs::write(path, "").is_ok());
-                }
-            }
-        } else {
-            let mut config = launch.config.clone();
-            config.task_prompt = input.unwrap_or_default();
-            if matches!(launch.start, super::Start::New) {
-                config.skill_invocation = None;
-            }
-            let opened = std::thread::scope(|scope| {
-                scope
-                    .spawn(|| {
-                        tokio::runtime::Builder::new_current_thread()
-                            .enable_all()
-                            .build()?
-                            .block_on(open_native(&super::Launch {
-                                config: &config,
-                                ..*launch
-                            }))
-                    })
-                    .join()
-                    .map_err(|_| anyhow!("Codex startup worker panicked"))?
-            })?;
-            args = vec![
-                "--remote".into(),
-                format!("unix://{}", opened.endpoint.display()),
-                "resume".into(),
-                "--".into(),
-                opened.thread.to_string(),
-            ];
-            client.thread = Some(opened.thread);
-            client.remote = Some(opened.endpoint);
-        }
-        client.process.args(args);
-        Ok(client)
-    }
-}
-
-struct OpenedCodex {
-    thread: AgentSessionId,
-    endpoint: std::path::PathBuf,
-}
-
-/// Start the app-server and open the conversation with lf's configuration, so
-/// the native client only joins it. Nothing here outlives the client's start.
-async fn open_native(launch: &super::Launch<'_>) -> Result<OpenedCodex> {
-    use crate::harness::{codex_connection, ApprovalPolicy};
-
-    let Recording {
-        store,
-        session,
-        attachment,
-    } = launch.recording;
-    let saved = launch.start.thread().or(store.session_thread(session)?);
-    let (events, _events) = tokio::sync::mpsc::unbounded_channel();
-    let launch_value = super::Launch {
-        start: super::Start::from_thread(saved.as_ref()),
-        ..*launch
-    };
-    let mut harness = Driver::new(&launch_value, events, ApprovalPolicy::NativeClient);
-
-    match tokio::time::timeout(std::time::Duration::from_secs(20), harness.start()).await {
-        Ok(result) => result?,
-        Err(_) => {
-            harness.stop().await?;
-            bail!("Codex app-server did not open the conversation within 20s; the owned provider was stopped");
-        }
-    }
-    let (endpoint, params) = harness
-        .native_start()
-        .ok_or_else(|| anyhow!("Codex startup ended without its native launch configuration"))?;
-    harness.stop().await?;
-    // Recover saved history before opening the UI, without replaying its input.
-    let turns = match &saved {
-        Some(thread) => tokio::time::timeout(
-            std::time::Duration::from_secs(20),
-            codex_connection::recover_history(store, session, thread, &endpoint),
-        )
-        .await
-        .context("Codex native history recovery timed out")??,
-        None => 0,
-    };
-    let title = store
-        .session(session)?
-        .map(|session| session.title)
-        .filter(|title| !title.is_empty())
-        .unwrap_or_else(|| "Loopflow".to_string());
-    let thread = codex_connection::open_thread(&endpoint, params, &title).await?;
-    store.record_session_connection(session, attachment, &endpoint.to_string_lossy(), &thread)?;
-    if let Some(context) = &launch.config.conversation_context {
-        // Hooks run on the app-server, which never inherits the terminal's
-        // launch file. Bind before the client can send a turn.
-        let mut context = context.clone();
-        context.identify(store, session)?;
-        context.bind_codex_session(thread.as_str())?;
-    }
-    if turns == 0 && !launch.config.task_prompt.is_empty() {
-        // Provider history settles on the next read whether it ran, so a
-        // broken store cannot stop the turn.
-        codex_connection::start_turn(
-            store,
-            session,
-            attachment,
-            &endpoint,
-            &thread,
-            &launch.config.task_prompt,
-        )
-        .await
-        .context("Codex first turn was not sent")?;
-    }
-    Ok(OpenedCodex { thread, endpoint })
 }

@@ -863,6 +863,231 @@ fn parse_data_frame(frame: &str) -> Option<String> {
     }
 }
 
+fn environment(
+    config: &AgentConfig,
+    context_file: Option<&std::path::Path>,
+    kind: LaunchKind,
+) -> Result<std::collections::BTreeMap<String, String>> {
+    let mut environment = config.env.clone();
+    {
+        let mut settings: serde_json::Value = environment
+            .get("OPENCODE_CONFIG_CONTENT")
+            .cloned()
+            .or_else(|| std::env::var("OPENCODE_CONFIG_CONTENT").ok())
+            .map(|value| serde_json::from_str(&value))
+            .transpose()?
+            .unwrap_or_else(|| serde_json::json!({}));
+        if !settings.is_object() {
+            bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
+        }
+        if config.write_scope == crate::agent::AgentWriteScope::Worktree {
+            settings["permissions"] = serde_json::json!([
+                {"action":"*","resource":"*","effect":"allow"},
+                {"action":"external_directory","resource":"*","effect":"deny"}
+            ]);
+        } else if config.skip_permissions {
+            settings["permissions"] =
+                serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
+        }
+        if config.conversation_context.is_none() {
+            let instructions = if let Some(path) = context_file {
+                Some(path.to_owned())
+            } else {
+                crate::agent::write_system_prompt_file(config, "opencode")?
+            };
+            if let Some(path) = instructions {
+                settings
+                    .as_object_mut()
+                    .expect("configuration is an object")
+                    .entry("instructions")
+                    .or_insert_with(|| serde_json::json!([]))
+                    .as_array_mut()
+                    .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
+                    .push(serde_json::json!(path));
+            }
+        }
+        if let Some(context) = &config.conversation_context {
+            crate::harness::context::add_opencode_context(
+                &mut settings,
+                context,
+                &crate::agent::system_prompt_with_structured_replies(config),
+                kind,
+            )?;
+        }
+        environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
+    }
+    Ok(environment)
+}
+
+impl super::Launcher for loopflow_harness::OpenCode {
+    fn locate_transcript(
+        &self,
+        _store: &loopflow_storage::sqlite::SqliteStore,
+        id: &AgentSessionId,
+        _cwd: &std::path::Path,
+    ) -> Result<crate::transcript::Located> {
+        let home = self.transcript_home();
+        let store = loopflow_harness::transcript::opencode::store(&home);
+        Ok(if store.is_file() {
+            crate::transcript::Located::Found {
+                source: loopflow_harness::transcript::Source::OpenCode {
+                    store,
+                    id: id.to_string(),
+                },
+                home: Some(home),
+            }
+        } else {
+            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
+        })
+    }
+    fn recent_transcripts(
+        &self,
+        home: &std::path::Path,
+        cwd: &std::path::Path,
+        since: i64,
+        _owned: &std::collections::HashSet<&str>,
+    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
+        let store = loopflow_harness::transcript::opencode::store(home);
+        loopflow_harness::transcript::opencode::written_in(&store, cwd, since)
+            .into_iter()
+            .map(|(id, at)| {
+                (
+                    id.clone(),
+                    loopflow_harness::transcript::Source::OpenCode {
+                        store: store.clone(),
+                        id,
+                    },
+                    at,
+                )
+            })
+            .collect()
+    }
+    fn capabilities(&self) -> super::Capabilities {
+        super::Capabilities {
+            thread: super::ThreadNaming {
+                bare: super::ThreadName::Reported,
+                managed: super::ThreadName::Reported,
+            },
+            initial_prompt_on_resume: false,
+            supports_execution_boundary: false,
+            classifies_failures: false,
+            native_skills: None,
+            turn_limit: false,
+            output_schema: false,
+            respawns_after_crash: false,
+            install_hint: concat!(
+                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
+                "the `opencode-ai` package stops at 1.x.",
+            ),
+        }
+    }
+    fn driver(
+        &self,
+        launch: &super::Launch<'_>,
+        events: mpsc::UnboundedSender<ConversationEvent>,
+        approval: super::ApprovalPolicy,
+    ) -> Box<dyn super::Driver> {
+        Box::new(Driver::new(launch, events, approval))
+    }
+
+    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+        open_native(launch)
+    }
+}
+
+fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
+    let (_, input) = launch.terminal_input()?;
+    let prompt = input.unwrap_or_default();
+    crate::agent::validate_terminal_turn(&prompt)?;
+    let mut config = launch.config.clone();
+    config.task_prompt = prompt.clone();
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let mut driver = Driver::new(
+        &super::Launch {
+            config: &config,
+            ..*launch
+        },
+        tx,
+        super::ApprovalPolicy::AutoApprove,
+    );
+    let diagnostics = config
+        .env
+        .get(crate::session_record::CAPTURE_KEY_ENV)
+        .map(|key| crate::session_record::capture_dir(key))
+        .transpose()?
+        .map(|dir| dir.join("opencode.stderr.log"));
+    let observer_diagnostics = diagnostics.clone();
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
+    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
+    let worker = std::thread::spawn(crate::observe::inherit(move || -> Result<()> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        runtime.block_on(async move {
+            driver.prepare_terminal();
+            // The private server receives the original config and adds its plugin once.
+            driver.start().await?;
+            let (endpoint, password) = driver.terminal_connection()?;
+            let id = driver.agent_session().expect("server confirmed native identity");
+            let _ = ready_tx.send((endpoint.to_owned(), password.to_owned(), id));
+            tokio::pin!(closed_rx);
+            loop {
+                tokio::select! {
+                    _ = &mut closed_rx => break,
+                    event = rx.recv() => {
+                        if let Some(ConversationEvent::Error { message, .. }) = event {
+                            if let Some(path) = &observer_diagnostics {
+                                use std::io::Write;
+                                if let Ok(mut log) = std::fs::OpenOptions::new().append(true).open(path) {
+                                    let _ = writeln!(log, "OpenCode native observer: {message}");
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            driver.stop().await
+        })
+    }));
+    let mut companion = super::native_session::Companion {
+        closed: Some(closed_tx),
+        worker: Some(worker),
+    };
+    let ready = ready_rx.recv();
+    if ready.is_err() {
+        companion.finish()?;
+    }
+    let (endpoint, password, id) =
+        ready.map_err(|_| anyhow!("OpenCode private server failed to start"))?;
+    let mut client = super::native_session::NativeClient::new(launch)?;
+    client.process.env("OPENCODE_PASSWORD", password).args([
+        "--server",
+        &endpoint,
+        "--session",
+        id.as_str(),
+    ]);
+    if !prompt.is_empty() {
+        client.process.args(["--prompt", &prompt]);
+    }
+    if let Some(path) = diagnostics {
+        let mut options = std::fs::OpenOptions::new();
+        options.create(true).append(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        client.stderr = Some(
+            options
+                .open(&path)
+                .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?,
+        );
+    }
+    client.thread = Some(id);
+    client.companion = Some(companion);
+    Ok(client)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::harness::LaunchKind;
@@ -1179,229 +1404,4 @@ mod tests {
 
         harness.stop().await.expect("stop");
     }
-}
-
-fn environment(
-    config: &AgentConfig,
-    context_file: Option<&std::path::Path>,
-    kind: LaunchKind,
-) -> Result<std::collections::BTreeMap<String, String>> {
-    let mut environment = config.env.clone();
-    {
-        let mut settings: serde_json::Value = environment
-            .get("OPENCODE_CONFIG_CONTENT")
-            .cloned()
-            .or_else(|| std::env::var("OPENCODE_CONFIG_CONTENT").ok())
-            .map(|value| serde_json::from_str(&value))
-            .transpose()?
-            .unwrap_or_else(|| serde_json::json!({}));
-        if !settings.is_object() {
-            bail!("OPENCODE_CONFIG_CONTENT must be a JSON object");
-        }
-        if config.write_scope == crate::agent::AgentWriteScope::Worktree {
-            settings["permissions"] = serde_json::json!([
-                {"action":"*","resource":"*","effect":"allow"},
-                {"action":"external_directory","resource":"*","effect":"deny"}
-            ]);
-        } else if config.skip_permissions {
-            settings["permissions"] =
-                serde_json::json!([{ "action":"*", "resource":"*", "effect":"allow" }]);
-        }
-        if config.conversation_context.is_none() {
-            let instructions = if let Some(path) = context_file {
-                Some(path.to_owned())
-            } else {
-                crate::agent::write_system_prompt_file(config, "opencode")?
-            };
-            if let Some(path) = instructions {
-                settings
-                    .as_object_mut()
-                    .expect("configuration is an object")
-                    .entry("instructions")
-                    .or_insert_with(|| serde_json::json!([]))
-                    .as_array_mut()
-                    .ok_or_else(|| anyhow::anyhow!("OpenCode instructions must be an array"))?
-                    .push(serde_json::json!(path));
-            }
-        }
-        if let Some(context) = &config.conversation_context {
-            crate::harness::context::add_opencode_context(
-                &mut settings,
-                context,
-                &crate::agent::system_prompt_with_structured_replies(config),
-                kind,
-            )?;
-        }
-        environment.insert("OPENCODE_CONFIG_CONTENT".into(), settings.to_string());
-    }
-    Ok(environment)
-}
-
-impl super::Launcher for loopflow_harness::OpenCode {
-    fn locate_transcript(
-        &self,
-        _store: &loopflow_storage::sqlite::SqliteStore,
-        id: &AgentSessionId,
-        _cwd: &std::path::Path,
-    ) -> Result<crate::transcript::Located> {
-        let home = self.transcript_home();
-        let store = loopflow_harness::transcript::opencode::store(&home);
-        Ok(if store.is_file() {
-            crate::transcript::Located::Found {
-                source: loopflow_harness::transcript::Source::OpenCode {
-                    store,
-                    id: id.to_string(),
-                },
-                home: Some(home),
-            }
-        } else {
-            crate::transcript::Located::Gone(crate::transcript::Gap::FileMissing { home })
-        })
-    }
-    fn recent_transcripts(
-        &self,
-        home: &std::path::Path,
-        cwd: &std::path::Path,
-        since: i64,
-        _owned: &std::collections::HashSet<&str>,
-    ) -> Vec<(String, loopflow_harness::transcript::Source, i64)> {
-        let store = loopflow_harness::transcript::opencode::store(home);
-        loopflow_harness::transcript::opencode::written_in(&store, cwd, since)
-            .into_iter()
-            .map(|(id, at)| {
-                (
-                    id.clone(),
-                    loopflow_harness::transcript::Source::OpenCode {
-                        store: store.clone(),
-                        id,
-                    },
-                    at,
-                )
-            })
-            .collect()
-    }
-    fn capabilities(&self) -> super::Capabilities {
-        super::Capabilities {
-            thread: super::ThreadNaming {
-                bare: super::ThreadName::Reported,
-                managed: super::ThreadName::Reported,
-            },
-            initial_prompt_on_resume: false,
-            supports_execution_boundary: false,
-            classifies_failures: false,
-            native_skills: None,
-            turn_limit: false,
-            output_schema: false,
-            respawns_after_crash: false,
-            install_hint: concat!(
-                "Install OpenCode 2 or later with `npm install -g @opencode/cli`; ",
-                "the `opencode-ai` package stops at 1.x.",
-            ),
-        }
-    }
-    fn driver(
-        &self,
-        launch: &super::Launch<'_>,
-        events: mpsc::UnboundedSender<ConversationEvent>,
-        approval: super::ApprovalPolicy,
-    ) -> Box<dyn super::Driver> {
-        Box::new(Driver::new(launch, events, approval))
-    }
-
-    fn open(&self, launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-        open_native(launch)
-    }
-}
-
-fn open_native(launch: &super::Launch<'_>) -> Result<super::native_session::NativeClient> {
-    let (_, input) = launch.terminal_input()?;
-    let prompt = input.unwrap_or_default();
-    crate::agent::validate_terminal_turn(&prompt)?;
-    let mut config = launch.config.clone();
-    config.task_prompt = prompt.clone();
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-    let mut driver = Driver::new(
-        &super::Launch {
-            config: &config,
-            ..*launch
-        },
-        tx,
-        super::ApprovalPolicy::AutoApprove,
-    );
-    let diagnostics = config
-        .env
-        .get(crate::session_record::CAPTURE_KEY_ENV)
-        .map(|key| crate::session_record::capture_dir(key))
-        .transpose()?
-        .map(|dir| dir.join("opencode.stderr.log"));
-    let observer_diagnostics = diagnostics.clone();
-    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
-    let (closed_tx, closed_rx) = tokio::sync::oneshot::channel();
-    let worker = std::thread::spawn(crate::observe::inherit(move || -> Result<()> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        runtime.block_on(async move {
-            driver.prepare_terminal();
-            // The private server receives the original config and adds its plugin once.
-            driver.start().await?;
-            let (endpoint, password) = driver.terminal_connection()?;
-            let id = driver.agent_session().expect("server confirmed native identity");
-            let _ = ready_tx.send((endpoint.to_owned(), password.to_owned(), id));
-            tokio::pin!(closed_rx);
-            loop {
-                tokio::select! {
-                    _ = &mut closed_rx => break,
-                    event = rx.recv() => {
-                        if let Some(ConversationEvent::Error { message, .. }) = event {
-                            if let Some(path) = &observer_diagnostics {
-                                use std::io::Write;
-                                if let Ok(mut log) = std::fs::OpenOptions::new().append(true).open(path) {
-                                    let _ = writeln!(log, "OpenCode native observer: {message}");
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            driver.stop().await
-        })
-    }));
-    let mut companion = super::native_session::Companion {
-        closed: Some(closed_tx),
-        worker: Some(worker),
-    };
-    let ready = ready_rx.recv();
-    if ready.is_err() {
-        companion.finish()?;
-    }
-    let (endpoint, password, id) =
-        ready.map_err(|_| anyhow!("OpenCode private server failed to start"))?;
-    let mut client = super::native_session::NativeClient::new(launch)?;
-    client.process.env("OPENCODE_PASSWORD", password).args([
-        "--server",
-        &endpoint,
-        "--session",
-        id.as_str(),
-    ]);
-    if !prompt.is_empty() {
-        client.process.args(["--prompt", &prompt]);
-    }
-    if let Some(path) = diagnostics {
-        let mut options = std::fs::OpenOptions::new();
-        options.create(true).append(true);
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            options.mode(0o600);
-        }
-        client.stderr = Some(
-            options
-                .open(&path)
-                .with_context(|| format!("open OpenCode diagnostics {}", path.display()))?,
-        );
-    }
-    client.thread = Some(id);
-    client.companion = Some(companion);
-    Ok(client)
 }

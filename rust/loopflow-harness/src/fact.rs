@@ -120,7 +120,7 @@ impl From<ConversationEvent> for Decoded {
 }
 
 /// Availability facts for a batch of signals.
-pub fn activity(signals: impl IntoIterator<Item = Signal>) -> Vec<Decoded> {
+pub(crate) fn activity(signals: impl IntoIterator<Item = Signal>) -> Vec<Decoded> {
     signals
         .into_iter()
         .map(|signal| ProviderFact::Activity(signal).into())

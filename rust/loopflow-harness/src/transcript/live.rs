@@ -23,7 +23,7 @@ const TAIL: u64 = 8 * 1024 * 1024;
 /// Turn boundaries, usage and assistant prose; user/context payloads in Codex
 /// response_item rows are skipped before parsing. Every Pi row is parsed:
 /// its entries chain through parents.
-pub const MARKERS: [&[u8]; 6] = [
+pub(crate) const MARKERS: [&[u8]; 6] = [
     b"\"type\":\"user\"",
     b"\"type\":\"assistant\"",
     b"\"type\":\"system\"",

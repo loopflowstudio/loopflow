@@ -104,13 +104,13 @@ pub fn discover() -> Vec<RawDirectory> {
             (
                 kind,
                 crate::harness::launcher(kind)
-                    .conversation_owners(&loopflow_harness::transcript::home(kind), &by_pid),
+                    .conversation_owners(&kind.harness().transcript_home(), &by_pid),
             )
         })
         .collect::<BTreeMap<_, _>>();
     let mut found = Vec::new();
     for ((harness, cwd), open) in open(&processes, &by_pid) {
-        let home = loopflow_harness::transcript::home(harness);
+        let home = harness.harness().transcript_home();
         let owners = &owners[&harness];
         let owned = owners.values().map(String::as_str).collect::<HashSet<_>>();
         let mut named = Vec::new();

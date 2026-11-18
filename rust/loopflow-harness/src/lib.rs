@@ -3,15 +3,15 @@
 //! Nothing here opens Loopflow's store, starts a process or reads the process
 //! table; `loopflow-execution` does that with what these modules decode.
 
-pub mod claude;
+mod claude;
 pub mod claude_decode;
-pub mod codex;
+mod codex;
 pub mod codex_decode;
 pub mod fact;
 mod lf_tag;
-pub mod opencode;
+mod opencode;
 pub mod opencode_decode;
-pub mod pi;
+mod pi;
 pub mod pi_decode;
 pub mod transcript;
 
@@ -76,7 +76,7 @@ pub struct OpenCode;
 pub struct Pi;
 
 /// Whether `command` runs the program named `program`, at any path.
-pub fn command_program(command: &str, program: &str) -> bool {
+fn command_program(command: &str, program: &str) -> bool {
     command.split_whitespace().any(|part| {
         Path::new(part)
             .file_name()

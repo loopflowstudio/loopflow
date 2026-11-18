@@ -28,7 +28,7 @@ fn open(store: &Path) -> Result<Connection> {
 }
 
 /// Conversation `id`'s messages, oldest first.
-pub fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
+pub(crate) fn messages(store: &Path, id: &str) -> Result<Vec<Value>> {
     let connection = open(store)?;
     let mut statement = connection
         .prepare("SELECT id, type, data FROM session_message WHERE session_id=?1 ORDER BY seq")?;

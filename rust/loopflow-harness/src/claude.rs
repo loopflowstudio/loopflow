@@ -7,11 +7,12 @@ use std::path::{Path, PathBuf};
 use loopflow_model::chat::types::TurnUsage;
 use serde_json::Value;
 
-use crate::transcript::{self, is_user_input, json_lines, ExpiryPolicy, Turn};
+use crate::transcript::claude::is_user_input;
+use crate::transcript::{self, json_lines, ExpiryPolicy, Turn};
 use crate::{Claude, Harness, HarnessKind};
 
 /// Claude's token fields, shared by live stream and saved transcript decoding.
-pub fn usage(value: &serde_json::Value) -> TurnUsage {
+pub(crate) fn usage(value: &serde_json::Value) -> TurnUsage {
     let tokens = |key: &str| value.get(key).and_then(serde_json::Value::as_u64);
     let input_tokens = tokens("input_tokens");
     let cache_read_tokens = tokens("cache_read_input_tokens");
@@ -27,10 +28,6 @@ pub fn usage(value: &serde_json::Value) -> TurnUsage {
         ..TurnUsage::default()
     }
 }
-
-/// The models a bare `claude` step falls through to when the one it runs
-/// hits a scoped limit, best first.
-pub const MODEL_RUNGS: [&str; 3] = ["opus", "sonnet", "haiku"];
 
 fn input_time(path: &Path, id: &str) -> Option<i64> {
     json_lines(path)
@@ -55,8 +52,10 @@ impl Harness for Claude {
     fn title_args(&self, name: &str) -> Vec<String> {
         vec!["--name".into(), name.into()]
     }
+    /// The models a bare `claude` step falls through to when the one it runs
+    /// hits a scoped limit, best first.
     fn model_rungs(&self) -> &'static [&'static str] {
-        &MODEL_RUNGS
+        &["opus", "sonnet", "haiku"]
     }
     fn sign_in_advice(&self) -> &'static str {
         "run `claude`, then /login"

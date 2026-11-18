@@ -25,7 +25,7 @@ pub fn watch(cache: &Arc<Cache>) -> Vec<notify::RecommendedWatcher> {
         .into_iter()
         .map(|kind| {
             let harness = kind.harness();
-            let home = loopflow_harness::transcript::home(kind);
+            let home = harness.transcript_home();
             (
                 harness.transcript_root(&home).0,
                 harness.transcript_watch_store(&home),

@@ -204,11 +204,19 @@ impl Connection {
     fn start(carrier: Carrier, client: ClientIdentity, within: Duration) -> Result<Self> {
         let mut socket = carrier.open(64 * 1024)?;
         socket.set_read_timeout(Some(within))?;
-        socket.send(&ClientMessage::Hello(Hello {
+        let hello = socket.send(&ClientMessage::Hello(Hello {
             revision: REVISION,
             min_revision: MIN_REVISION,
             client,
-        }))?;
+        }));
+        // A destination that exits before reading, as SSH does when it cannot
+        // connect, closes the pipe under the hello: its exit says why.
+        if let Err(error) = hello {
+            return Err(match resets(&error) {
+                true => socket.ended(OLDER_PROTOCOL, ErrorCode::Unavailable),
+                false => error,
+            });
+        }
         let answer = socket.receive().map_err(|error| match &carrier {
             Carrier::Ssh(machine, _) => unanswered(error, machine, within, ErrorCode::Unavailable),
             Carrier::Socket(_) => stalled(error, "welcome the connection", within),

@@ -3083,7 +3083,40 @@ mod tests {
             }
             assert!(refused > 0);
             let mut writer = writer.await.unwrap();
-            let id = subscription.expect("at least one subscription was admitted");
+            // Requests still in flight can fill every slot while the flood's
+            // subscriptions arrive; with none admitted, every slot is free now.
+            let id = match subscription {
+                Some(id) => id,
+                None => {
+                    let line = serde_json::to_string(&ClientMessage::Subscribe {
+                        id: "after".into(),
+                        operation: Read::ProcessList,
+                        select: None,
+                        resume: None,
+                        sender: None,
+                    })
+                    .unwrap()
+                        + "\n";
+                    writer.write_all(line.as_bytes()).await.unwrap();
+                    loop {
+                        let mut line = String::new();
+                        tokio::time::timeout(
+                            Duration::from_secs(10),
+                            client.reader.read_line(&mut line),
+                        )
+                        .await
+                        .unwrap()
+                        .unwrap();
+                        if let ServerMessage::Response { id, result, .. } =
+                            serde_json::from_str(&line).unwrap()
+                        {
+                            assert_eq!(id, "after");
+                            assert!(result.is_null());
+                            break id;
+                        }
+                    }
+                }
+            };
             let line = serde_json::to_string(&ClientMessage::Checkpoint {
                 id: id.clone(),
                 checkpoint: 42,

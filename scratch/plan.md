@@ -46,9 +46,9 @@ reads is camelCase: `codex app-server generate-ts` (0.170.0),
 `v2/CodexErrorInfo.ts`: `"usageLimitExceeded" | "rateLimitExceeded" |
 "serverOverloaded" | "modelNotFound" | …`, on `error` notifications and on
 `turn/completed`'s `turn.error` (`harness/testdata/codex_error.jsonl`, where
-it is `null`). Not captured: the app-server's own JSON for one of these
-failures. Confirm the `unauthorized` spelling against `generate-ts` before
-writing the table.
+it is `null`). `generate-ts` on 2026-11-18 lists `usageLimitExceeded`,
+`modelNotFound`, `unauthorized` and `serverOverloaded` as spelled in the
+decoder. Not captured: the app-server's own JSON for one of these failures.
 
 ## Design
 

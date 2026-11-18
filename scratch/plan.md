@@ -370,8 +370,9 @@ ship the release whose peer protocol accepts a `Disposition` without
 
 ## Next: gate
 
-Every slice is built and pushed (PR #1973, head `02ba29cceb`, which merges
-main through #1977). Nothing remains for implement.
+Every slice is built and pushed (PR #1973, head `2448546730`, which merges
+main through #1980; the acceptance check passed there, 10 tests, and
+`cargo check --all-targets` is clean). Nothing remains for implement.
 
 Run on that head (2026-11-18, clean `LF_*`):
 `cargo test -p loopflow-storage --lib -- task_work:: leaving_members_are_unreadable`

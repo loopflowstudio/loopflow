@@ -192,9 +192,12 @@ Checked: putting `t.worktree` back in `TASK_COLUMNS` fails 5 of 11
 ```bash
 cargo test -p loopflow-storage --lib task_work::              # membership by task_id, move and path reuse
 cargo test -p loopflow-storage --lib leaving_members_are_unreadable
-# against a copy of the live store
-cp ~/.lf/loopflow.db /tmp/lf937.db && LF_HOME=… lf task status LOO-937 --json   # same title/url/sessions/graph runs as released lf
 ```
+
+Never open a copy of the live store with `lf` (reads run recovery against the
+real checkouts). QA applied the migration to a `VACUUM INTO` snapshot with
+`sqlite3` and compared a private home built by the installed lf before and
+after the branch opened it (`scratch/qa.html`, `.lf/qa/server.md`).
 
 Report before/after in the PR: tables, columns, store size, `pub fn` count in
 `loopflow-storage` (900 at kickoff), SQL call sites outside it (`rg` count,
@@ -331,9 +334,14 @@ every Process/Session association, conflict answers.
    so every write clears the old mark first. `task_primary_sessions` is
    leaving, kept in step by `task_primary_sessions_mark_insert`,
    `task_primary_sessions_mark_update` and `agent_sessions_task_primary_row`.
-   In the window a released lf process still running after the migration
-   fails `primary_scope()` ("unsupported primary scope") on a Task primary
-   until it exits.
+   In the window, any lf older than this change that reads the migrated
+   store (QA, installed `0.16.0+7bb879aff`): leaves each Task's primary out
+   of the Task's Sessions (`task_ids: []` in `lf session list --json`, absent
+   from `lf task show`), and `lf session resume` in the checkout fails with
+   "is not an unfinished interactive conversation of this Task", because its
+   membership requires `primary_scope IS NULL`. It can open a new Task's
+   conversation once. Nothing in the store can change that; it ends when
+   every lf process on the Machine is this build or newer.
 
 ## Docs
 

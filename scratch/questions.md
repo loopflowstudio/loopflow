@@ -81,9 +81,18 @@
   primary_scope='task'`, no `completed_at` filter: a Task has one primary, as
   the table's primary key said. `check_migrations.py` refuses a new unique
   index while older writers run, so it is plain now and every write clears the
-  old mark first; LOO-877 makes it unique. Cost in the window: a released lf process
-  still running after the migration fails `primary_scope()` ("unsupported
-  primary scope") on a Task primary until it exits.
+  old mark first; LOO-877 makes it unique. Cost in the window, as QA saw it
+  with the installed lf on a migrated home: an older lf leaves every Task's
+  primary out of the Task's Sessions and cannot reopen it (`lf session resume`:
+  "is not an unfinished interactive conversation of this Task"), whether it
+  was running before the migration or started after. Passed over: keeping the
+  mark in `task_primary_sessions` until LOO-877, which older lf reads
+  correctly. Open for a person: whether that window is acceptable for work
+  in flight on the day of `lf install`.
+- **The board order someone dragged before upgrade is not carried into rank**
+  (QA). `task_orders` is no longer read, so the Working board returns to rank
+  order. Live store: two rows, 3 open Tasks named. Passed over: seeding ranks
+  from it in the migration, which would send `order` actions to the tracker.
 ## Concept review answers (human review, 2026-11-18)
 
 "1 (a) 2(a) 3(a) 4(a)", against scratch/concept-review.html's questions:

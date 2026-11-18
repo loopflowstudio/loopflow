@@ -212,26 +212,56 @@ the headless stand-in is slice 1's timing.
 
 ## Slices
 
-1. **`observe::derived` and settings (1).** `Derived`, nested `Dependencies`
-   and the slot, with unit tests in `observe.rs` (hit, invalidation by a
-   changed fact, a nested value waking the outer reading, bare call computes
-   inline, concurrent callers compute once, a panic leaves the slot usable).
-   Then `Outside`, `resolve_with` and `config::resolved` under
-   `load_wave_config`. Timing in the acceptance test's shape: 1,000 forced
-   readings of `load_wave_config` over three layers, before and after, and how
-   much of one cold resolve is `validate_value`. This is the slice that could
-   prove the plan wrong: if a "changes reach" case fails, an input is
-   unobserved and belongs in `Outside` or behind `observe`.
-2. **Task agents and Wave setup (1 for Tasks, 2)**, deleting
-   `PersonalSettings`, the `_with` variants and both `waves.rs` maps in the
-   same change.
-3. **Skill catalog (3)**, then a `sample` of a locally run server reading a
-   seeded store to see what of `validate_value` and `collect` is left. Derive
-   placement only if it shows. The `observe` line in `AGENTS.md` gains derived
-   values.
+All three are built and committed on this branch.
 
-Checks: slice tests run locally by the implementing step; clippy and the full
-matrix at gate/CI; the live `sample` by a person.
+1. `observe::derived`, nested `Dependencies`, `Outside`, `resolve_with`,
+   `config::resolved` under `load_wave_config`.
+2. Task agents read `config::resolved`; a Wave's skill agents are a derived
+   value over it. `PersonalSettings`, the `_with` loaders and both `waves.rs`
+   maps are deleted.
+3. `SkillCatalog::load` returns the shared `Arc<SkillCatalog>`.
+
+Where the code differs from the design above:
+
+- `Outside.environment` and `.invocation` are `serde_yaml_ng::Value` (it is
+  `Hash + Eq`), not serialized strings.
+- The second variant is `Derived::SkillAgents`, not `WaveSetup`: graph and
+  agent come straight from the `Settings` value, so only the per-skill agents
+  needed their own. Its computation calls `config::resolved_with`, so the
+  nesting is used by real code and not only by tests.
+- `Derived::SkillAgents` loads skills, which reads `LF_PERSONAL_PROFILE`
+  (in `Outside`), `HOME` and the provider directories (process-wide in a
+  server) outside its key.
+
+What a run showed (2026-11-18, debug build, 1,000 readings of
+`load_wave_config` over three layers of eight leaves): 8.9 s resolving every
+time, 22 ms through one `Cache`. Filtering the same three layers 1,000 times
+(`filter_file_preferences`, which is `validate_value` per leaf) took 4.4 s:
+about half of a cold resolve.
+
+Still paid on every call, as before this change: `outside()` reads the
+environment and looks for each harness on `PATH` (`default_agent`).
+
+A reading's first resolve is now once per Task checkout, where the deleted
+`waves.rs` memo resolved once per distinct configuration within a reading.
+After a server start that is one cold resolve per worktree, then none.
+
+Left:
+
+- The live `sample` under load (Demo above), by a person.
+- A `sample` of a locally run server reading a seeded store, to see what of
+  `validate_value` and `collect` is left, and whether placement
+  (`store/placement.rs`) needs a fourth variant. Not run here.
+
+Checks run by this step, all passing:
+
+- `cargo test -p loopflow-execution --lib -- observe::tests:: work::wave::setup:: read_stream::tests:: config:: ops::task::tests:: skills:: graph::`
+- `cargo test -p loopflow --test integration wave_setup_tests::` and `discovery_tests::`
+- `cargo test -p loopflow --lib lf::commands::waves::`
+- `cargo clippy --all-targets -- -D warnings`
+
+For gate/CI: the full matrix; `test(performance_tests::)` and
+`test(documented_commands::)` were not run here.
 
 ## Larger than this Task
 

@@ -186,6 +186,14 @@ pub enum Derived {
         wave: String,
         outside: crate::config::settings::Outside,
     },
+    /// The skills found under a checkout, a home and the providers' own
+    /// directories when the environment moves them.
+    SkillCatalog {
+        repo: Option<PathBuf>,
+        home: Option<PathBuf>,
+        claude: Option<PathBuf>,
+        codex: Option<PathBuf>,
+    },
 }
 
 /// The entries and revisions read by one invocation, including bounded workers.

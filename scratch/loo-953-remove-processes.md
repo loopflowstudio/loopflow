@@ -1,6 +1,6 @@
 # LOO-953: no Process table; liveness on Sessions and Graph runs
 
-## Status (2026-11-17, realigned at `cea000fd54`)
+## Status (2026-11-17, realigned at `9a369536ae`)
 
 Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
 main at `2593c489d7`; that merge touched nothing this plan depends on.
@@ -14,8 +14,9 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 os_started_at }`, so `engine::launch` waits on its child without the store;
 the three owner items below ("Owner slices as built").
 
-Next, in order: the Task-run and ship carriers (each adds its `RunOwner`
-variant and `finish_run` arm); the Session slice (slice 3, with
+Next, in order: one observed result (`journal::observed_result`, below);
+the Task carrier, then the ship carrier (each adds its `RunOwner` variant
+and `finish_run` arm, read through `observed_result`); the Session slice (slice 3, with
 the retirement-by-terminal gap); the expand migration's foreign-key
 rebuild together with stopping the journal writer; slices 4–6. When
 LOO-936 merges: rebase, rerun `python3 -I scratch/process_sql_scan.py rust`

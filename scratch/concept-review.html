@@ -2,7 +2,7 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-955 concept review: one tracker vocabulary, third pass after build</title>
+<title>LOO-955 concept review: one tracker vocabulary, fourth pass after build</title>
 <style>
 :root{color-scheme:light dark;--bg:#fbfaf7;--fg:#1c1b19;--mute:#6a665e;--line:#dcd8cf;--card:#fff;--yes:#1f7a45;--no:#b3261e;--part:#9a6200;--prop:#2456c4;--code:#f1eee7}
 @media(prefers-color-scheme:dark){:root{--bg:#161614;--fg:#ebe8e1;--mute:#a09b90;--line:#35332e;--card:#1e1d1b;--yes:#6fcf97;--no:#ff8a80;--part:#f0b455;--prop:#8fb0ff;--code:#262522}}
@@ -25,10 +25,10 @@ ol.q>li{margin:10px 0}ol.q ol{list-style:lower-alpha}
 </style>
 <main>
 <h1>One tracker vocabulary, as built: do the words line up?</h1>
-<p class="mute">LOO-955, third review after implementation (HEAD <code>62faf689</code>). Area taken: the whole planning surface a person touches, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store, Desktop and the docs. This pass read what the commands print, not only what the types are called.</p>
+<p class="mute">LOO-955, fourth review after implementation (HEAD <code>d480d4a4</code>), read against the base and not only the last pass. Area taken: the whole planning surface a person touches, meaning the shared plan, the tracker it mirrors to, and the changes going out and coming in, across the CLI, <code>.lf/config.yaml</code>, the wire, the store, Desktop and the docs. This pass read every sentence the planning commands print and every doc comment that still says the retired words. Outcome: nothing to change in the plan.</p>
 
 <h2>Product concepts against code concepts</h2>
-<p class="mute"><span class="tag yes">yes</span> lines up as built. <span class="tag part">partly</span> lines up where people look, not underneath. <span class="tag no">no</span> a mismatch still in the tree. <span class="tag prop">proposed</span> marks what this review adds to the plan.</p>
+<p class="mute"><span class="tag yes">yes</span> lines up as built. <span class="tag part">partly</span> lines up where people look, not underneath. <span class="tag no">no</span> a mismatch still in the tree. <span class="tag prop">proposed</span> marks a design that does not exist; this pass adds nothing to the plan.</p>
 <table>
 <tr><th style="width:21%">What a person knows</th><th style="width:33%">Code behind it, as built</th><th style="width:8%"></th><th>What is wrong</th></tr>
 <tr><td><b>the plan</b>: Waves, Projects, Tasks</td><td><code>lf wave plan</code>, <code>planning_write</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
@@ -36,79 +36,69 @@ ol.q>li{margin:10px 0}ol.q ol{list-style:lower-alpha}
 <tr><td><b>tracker</b>: Git, Linear or Asana</td><td><code>lf repo tracker</code>, <code>TrackerConfig</code>, <code>tracker:</code> read spelling, <code>tracker_*</code> tables with mirrors</td><td><span class="tag yes">yes</span></td><td></td></tr>
 <tr><td><b>destination</b>: one Git ref the plan is exchanged with</td><td><code>GitDestination</code>, <code>GitDestinationConflict</code>, <code>git_tracker.rs</code> in three crates, wire <code>fetch_error</code>, Swift <code>GitDestinationsView</code>; glossary row</td><td><span class="tag yes">yes</span></td><td>Last pass's biggest mismatch. Gone: "peer" now means only another Machine. One leftover a person never sees: the lock directory <code>locks/planning-peers</code>, shared with the released lf like <code>chapter-locks</code>.</td></tr>
 <tr><td><b>action</b>: one outgoing change</td><td><code>tracker_actions</code>, <code>TrackerActionStatus</code>, <code>lf repo tracker answer</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
-<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>fetch_issue</code>, <code>fetch_task</code>, <code>fetch_from_tracker</code></td><td><span class="tag part">partly</span></td><td>Types and functions line up. What <code>lf --explain task …</code> prints does not: five lines still say acquisition, acquired and Provider. The biggest mismatch, below.</td></tr>
+<tr><td><b>event</b>: one incoming change</td><td><code>TrackerEvent</code>, <code>fetch_issue</code>, <code>fetch_task</code>, <code>fetch_from_tracker</code></td><td><span class="tag yes">yes</span></td><td>Last pass's biggest mismatch. Gone: <code>lf --explain task …</code> says fetched and tracker on all three paths, and three tests assert the sentences. No quoted string in <code>rust/*/src</code> or Swift says acquisition, planning provider, peer plan, chapter or acceptance.</td></tr>
 <tr><td><b>when a Task last synced</b></td><td>Task and explanation JSON share <code>tracker_synced_at</code>.</td><td><span class="tag yes">yes</span></td><td>The explanation reads the timestamp from the Task.</td></tr>
-<tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type holding an Asana gid is named for Linear. Larger than this work, below.</td></tr>
+<tr><td><b>a record's ID in the tracker</b></td><td><code>tracker_id: Option&lt;LinearIssueId&gt;</code>, <code>LinearWritebackState</code></td><td><span class="tag part">partly</span></td><td>The wire is neutral; the Rust type holding an Asana gid is named for Linear. The biggest mismatch left, below, and larger than this work.</td></tr>
 <tr><td><b>sync</b> (verb)</td><td><code>lf wave sync</code>, <code>planning_sync</code></td><td><span class="tag yes">yes</span></td><td></td></tr>
 <tr><td><b>provider</b>: claude, codex</td><td>every <code>provider</code> key in the server schema is the agent's; kept: columns <code>provider</code> / <code>planning_provider_revision</code>, config tag <code>planning.provider</code></td><td><span class="tag part">partly</span></td><td>Deliberate and written down. LOO-784 flips the config writer.</td></tr>
 </table>
 
-<h2>Biggest mismatch: the explanation still speaks the retired words</h2>
-<div class="big"><p>Slice 6 gave the explanation one name for its sync time. The sentences around that field were not read. A person who asks what a Task command would do is told, in the product's own voice, about "planning acquisition" and "Provider freshness": the two words the glossary retires, on the surface whose job is to explain.</p></div>
-<p><b>The walk.</b> <code>lf --explain task move LOO-1 --wave product</code> on a saved Task prints the report; with no saved Task it fails; with a Wave that isn't registered it fails differently. All three paths end in a retired word.</p>
+<h2>Biggest mismatch left: the record ID is named for one tracker</h2>
+<div class="big"><p>Everything a person reads now says tracker. The largest gap left is one a person never sees: a Task's ID in its tracker is <code>tracker_id</code> on the wire and <code>LinearIssueId</code> in Rust, whichever tracker issued it. One name for two ideas, and the reason Asana's tests still live under <code>ops/linear/</code>.</p></div>
+<p><b>The walk.</b> A repository on Asana creates a Task. The action is sent, Asana answers with a gid, and the store binds it. <code>lf task show --json</code> prints <code>"tracker_id": "1209…"</code>. A person reading the code to find out why a bind failed lands in <code>LinearIssueId::new</code> and <code>LinearBindingError</code> for a record Linear never saw. Recovery (rebinding after a lost action) goes through the same type.</p>
 <div class="pair">
 <div class="box"><h3>As built</h3>
-<pre>Tracker synced: 1794962032
-Unavailable: Provider freshness, synchronization
-  delivery and concurrent saves are not observed
-  or reserved
-Observation only; execution re-reads planning.
-  Nothing was saved, acquired or synchronized.
-
-error: No saved Task selected; no planning
-  acquisition was performed
-error: …; Wave registration/acquisition was not
-  performed
-
-lf.log: planning acquisition after creation failed</pre>
-<p class="mute"><code>ops/task/planning_explain.rs:127,283,296,299,361</code>, <code>ops/task.rs:1919</code>. "Provider" here is the tracker, which the plan's Done-when rules out in <code>ops</code>.</p></div>
-<div class="box proposed"><h3><span class="tag prop">proposed</span> slice 7</h3>
-<pre>Tracker synced: 1794962032
-Unavailable: Tracker freshness, queued tracker
-  actions and concurrent saves are not read or
-  reserved
-Observation only; execution re-reads planning.
-  Nothing was saved, fetched or synchronized.
-
-error: No saved Task selected; nothing was
-  fetched from the tracker
-error: …; the Wave was not registered and nothing
-  was fetched from the tracker
-
-lf.log: tracker fetch after creation failed</pre>
-<p class="mute">"Observation only" stays: three explain reports share it and it means the explanation itself, not a tracker event (the plan's scope rule).</p></div>
+<pre>pub struct Task {
+    tracker_id: Option&lt;LinearIssueId&gt;,
+    tracker_writeback: LinearWritebackState,
+}</pre>
+<p class="mute"><code>LinearIssueId</code>: 37 uses in 15 files. <code>LinearWritebackState</code>: 37 uses in 18 files. <code>LinearProjectId</code> beside them.</p></div>
+<div class="box proposed"><h3><span class="tag prop">proposed</span>, not in this plan</h3>
+<pre>pub struct Task {
+    tracker_id: Option&lt;TrackerRecordId&gt;,
+    tracker_writeback: TrackerWritebackState,
+}</pre>
+<p class="mute">A rename with no wire, SQL or stored-receipt change, since the keys are already neutral. It touches every planning signature, so it is its own Task and not an eighth slice of this one. <code>LinearIssueState</code> keeps its name: it is Linear's.</p></div>
 </div>
-<p><b>Failure and recovery.</b> The failing paths are the ones that carry the words, so they are the ones a confused person reads. Nothing stored or on the wire holds these sentences except the <code>unavailable</code> array of <code>lf --explain --json</code>, which is prose; no reader parses it. <b>Counterexample checked:</b> is "acquisition" a different idea from fetch here, such as taking a lock or a claim? No: each site sits beside <code>fetch_repository</code> / <code>fetch_from_tracker</code> and says that call did not run.</p>
-<p><b>Size.</b> Five strings and one log line; three assertions in <code>rust/loopflow/tests/global_commands.rs</code> (2038, 2053, 2269) and the message at <code>planning_foreground_tests.rs:257</code>; three doc comments that say "planning acquisition" (<code>sqlite/children.rs:156,1499</code>, <code>lf/commands/work_route.rs:68</code>). No type, wire key or SQL.</p>
+<p><b>Counterexample checked:</b> does the Linear name guard a Linear-only rule, such as UUID validation? It would have to pass Asana gids and Git Task IDs today, so no. <b>Why it stays out:</b> this change set out to make people and the wire say one vocabulary, and they do; three passes each found a smaller ring of leftovers and this one found none a person can read.</p>
+
+<h2>Left in comments</h2>
+<p>Nine maintainer-facing lines still narrate with the retired words. None reaches help, output, the wire or the store. Listed so gate's review can reword them while it reads the diff; not a slice.</p>
+<ul>
+<li><code>rust/loopflow-storage/src/sqlite/linear_issue_state.rs:1</code>: "Retained Linear acquisition evidence, independent of accepted Work and delivery." The module this change named, described in three retired words.</li>
+<li><code>rust/loopflow/src/lf/commands/work_route.rs:230</code> and <code>:559</code>: "Unknown provider aliases retain ordinary acquisition", "Provider acquisition and plan exchange".</li>
+<li><code>rust/loopflow/src/lf/mod.rs:664</code>: the hidden <code>__context-block</code> hook's doc says "Linear acquisition at turn end".</li>
+<li><code>rust/loopflow-model/src/comment.rs:14</code>, <code>rust/loopflow-model/README.md:9</code>: "provider acquisition".</li>
+<li><code>docs/dev/delivery.md:55</code>: "an unknown tracker alias needs initial acquisition". <code>rust/loopflow/tests/README.md:401</code>: "Linear acquisition". <code>docs/dev/codebase.md:25</code>, <code>rust/loopflow-execution/README.md:9</code>: "acquisition" as the layer above storage.</li>
+</ul>
+<p class="mute">Not leftovers: the <code>acquisition</code> parameter holding <code>PlanningLocks</code> (<code>ops/task.rs</code>, <code>ops/project.rs</code>, <code>store/children.rs</code>) is a lock being held, and <code>acquire_worktree_lease</code> is a lease.</p>
 
 <h2>Larger than this work</h2>
 <ul>
 <li><b>"action" also names what a command would do.</b> <code>TaskPlanningAction</code> and the <code>"action"</code> key in <code>lf --explain --json task …</code> (create, edit, move, save, comment) predate this change. The glossary already sets Desktop's buttons apart from tracker actions; this is a third sense. Renaming it (<code>change</code>? <code>request</code>?) is a choice about the explain surface, not a leftover.</li>
 <li><b>The design doc still narrates with the old verbs.</b> <code>docs/dev/planning.md</code> says "acquire" for fetching at lines 196, 321, 418, 479, 570 and 605, and "observed"/"accepted" throughout its Linear sections. Its glossary is right; its prose predates it. A rewrite of that document, not a rename.</li>
-<li><b>"Effect:" in the explanation.</b> The label for what a command would do, beside <code>TaskPlanningAction</code>. Same third sense as the next item.</li>
+<li><b>"Effect:" in the explanation.</b> The label for what a command would do, beside <code>TaskPlanningAction</code>. Same third sense as the first item.</li>
 <li><b>Applying an event is still "accept".</b> <code>accept_linear_issue_in</code>, <code>accept_linear_project_in</code>, <code>project_accepted_planning</code>: about 60 call sites. As a verb for what the store does with an event it reads fine; as the retired noun it doesn't appear. Noted in <code>scratch/questions.md</code> for a follow-up.</li>
 <li><b>Two sync times on one Task.</b> <code>tracker_state.synced_at</code> and <code>tracker_synced_at</code> may be one fact. Settling it means reading every writer of both.</li>
-<li><b><code>LinearIssueId</code> holds Asana gids</b>, <code>LinearWritebackState</code> describes any tracker, and Asana's tests live under <code>ops/linear/</code>. A neutral record ID touches every planning signature.</li>
 <li><b>Git has no actions.</b> "action" and "lost" on <code>lf repo tracker</code> describe two of three trackers; Git conflicts are a third thing.</li>
 <li><b>Columns</b> <code>provider</code>, <code>planning_provider_revision</code>, <code>observed_at</code>, <code>pm_snapshot_synced_at</code>, <code>pm_writeback_json</code>: each a staged rebuild. LOO-960 could carry them with the contract migration.</li>
 </ul>
 
 <h2>What held since the last pass</h2>
 <ul>
-<li>Slice 6 landed as planned: <code>tracker_synced_at</code> from Task row to explanation in Rust, Swift and five fixtures; <code>fetch_task</code> and one <code>fetch_from_tracker</code> serve run, moves and saved-Task lookup. No "planning observed" remains.</li>
-<li>Both "no" rows from the first after-build review are "yes": Git destinations and the Task JSON prefix.</li>
-<li>The plan's Done-when grep finds old table names only in upgrade fixtures, mirror tests and the revision list that counts released writers.</li>
-<li>The server schema has no tracker-meaning <code>provider</code>, <code>peer</code>, <code>acquisition</code>, <code>pm_</code> or <code>chapter</code> key.</li>
-<li>Swift has no <code>Peer*</code>, <code>Chapter</code>, <code>linearId</code> or <code>pmWriteback</code> outside a test's sample title.</li>
+<li>Slice 7 landed as written: the six strings in the plan's table read as planned, <code>global_commands.rs</code> asserts four of them, and QA walked the previews in an isolated repository.</li>
+<li>QA found the post-creation warning <code>tracker fetch after creation failed</code> is not reachable through a bad remote: <code>fetch_repository</code> stores the failure on the destination as <code>fetch_error</code> and returns Ok. The person sees it on <code>lf repo tracker</code>, which is the right place.</li>
+<li>Every "no" and "partly" from the three earlier after-build reviews that this work owned is "yes": Git destinations, the Task JSON prefix, the explanation's sync time, the explanation's sentences.</li>
+<li>The two rows still "partly" are deliberate: kept column names and the released config tag (LOO-784, LOO-960), and the Linear-named ID type above.</li>
 </ul>
 
 <h2>Questions</h2>
 <ol class="q">
-<li>The explanation's wording (slice 7, written into the plan as a choice made for review): <ol><li>as proposed above;</li><li>keep "Observation only" out too and say "Nothing ran";</li><li>leave the sentences, they are prose.</li></ol></li>
+<li>The record ID type: <ol><li>file a Task for <code>TrackerRecordId</code> and <code>TrackerWritebackState</code>;</li><li>leave it, the wire is what people read.</li></ol></li>
+<li>The nine comment lines: <ol><li>gate rewords them with the review;</li><li>they go with the <code>docs/dev/planning.md</code> rewrite;</li><li>leave them.</li></ol></li>
 <li><code>docs/dev/planning.md</code> prose: <ol><li>file a Task to rewrite it in the glossary's words;</li><li>leave it until the next change to that design.</li></ol></li>
 <li>"action" in <code>--explain</code> output: <ol><li>leave it, the glossary's action is the tracker's;</li><li>file a Task to rename the explain key;</li><li>add a line to the glossary's action row, as it has for Desktop.</li></ol></li>
 <li><code>accept_*</code> function names: <ol><li>leave them, "accept an event" is the verb;</li><li>file the follow-up rename.</li></ol></li>
-<li><code>LinearIssueId</code> for every tracker's record ID: <ol><li>file a Task for a neutral type;</li><li>leave it.</li></ol></li>
 </ol>
 </main>
 </html>

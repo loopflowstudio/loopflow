@@ -25,3 +25,4 @@
 - Larger than this change, on `scratch/concept-review.html`: `TaskPlanningAction` and the `action` key in `lf --explain --json` use "action" for what a command would do, a third sense beside the tracker's and Desktop's.
 - Concept review, third pass after build: `lf --explain task …` sentences say fetch and tracker (slice 7, exact text in the plan). "Observation only;" and the `Effect:` label stay. Passed over: leaving them as prose.
 - Larger than this change, on `scratch/concept-review.html`: `docs/dev/planning.md` prose still narrates with acquire/observed/accepted under a correct glossary; a rewrite of that document.
+- Concept review, fourth pass after build: nothing to change in the plan. Nine comment and README lines still say acquisition or provider for the tracker (list on `scratch/concept-review.html` § Left in comments); left for gate's review to reword, not a slice. The `acquisition` parameter holding `PlanningLocks` is a held lock and keeps its name.

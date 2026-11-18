@@ -38,9 +38,8 @@ fn prune(json: bool) -> anyhow::Result<()> {
         println!("{}", serde_json::to_string_pretty(&report)?);
     } else {
         println!(
-            "closed {} dead Processes · forgot {} finished · moved {} observations · converted {} turns · forgot {} history rows{}",
-            report.closed_processes,
-            report.forgotten_processes,
+            "ended {} runs and agents nobody saw exit · moved {} observations · converted {} turns · forgot {} history rows{}",
+            report.ended_owners,
             report.moved_observations,
             report.converted_turns,
             report.forgotten_history,
@@ -130,7 +129,11 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
         }
         _ => {}
     }
-    let store = existing_store().await?;
+    // Changes to the registry start it on a fresh home.
+    let store = loopflow_execution::store::open_store(
+        &loopflow_execution::store::storage_config_from_env()?,
+    )
+    .await?;
     match cmd {
         MachineCommand::Public { name } => {
             let name = (name != "off").then_some(name.as_str());

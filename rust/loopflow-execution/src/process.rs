@@ -2,6 +2,7 @@
 
 pub mod attachment;
 pub mod launch_log;
+pub mod os_process;
 mod runtime;
 pub use runtime::LfProcessRuntime;
 pub use runtime::{
@@ -9,6 +10,7 @@ pub use runtime::{
 };
 
 pub use loopflow_storage::process::*;
+pub use os_process::{OsProcess, RecordedProcess};
 
 pub const AGENT_CALLER_ENV: &str = "LF_AGENT_CALLER";
 

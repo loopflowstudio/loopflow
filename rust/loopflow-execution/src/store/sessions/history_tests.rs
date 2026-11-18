@@ -161,7 +161,8 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=100 WHERE id IN (SELECT lf_process_id FROM history.turns WHERE session_id='conversation-1')",
+                "UPDATE agent_sessions SET agent_launcher_lf_process_id=(SELECT lf_process_id FROM history.turns WHERE session_id='conversation-1' LIMIT 1),
+                    agent_started_at=1,agent_ended_at=100 WHERE id='conversation-1'",
                 [],
             )
             .unwrap();
@@ -186,7 +187,7 @@ fn history_limits_precede_payload_reads_and_keep_unfinished_work_and_exact_calle
     .is_err());
 }
 #[test]
-fn process_completion_ends_inputs_without_exit_events() {
+fn an_agent_end_ends_its_launchers_inputs_without_exit_events() {
     for captured in [true, false] {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("store.db")).unwrap();
@@ -252,7 +253,8 @@ fn process_completion_ends_inputs_without_exit_events() {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE processes SET completed_at=30 WHERE id=?1",
+                "UPDATE agent_sessions SET agent_launcher_lf_process_id=?1,agent_started_at=1,agent_ended_at=30
+                 WHERE id='conversation'",
                 [&process],
             )
             .unwrap();

@@ -70,10 +70,10 @@ pub struct TaskDetail {
     pub stack_parent: Option<loopflow_execution::ops::task::TaskStackParent>,
 }
 
-/// One of the Task's Graph processes; `lf graph show <id> --processes` draws it.
+/// One of the Task's Graph runs; `lf graph show <id>` draws it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskGraphRow {
-    /// The Graph process.
+    /// The Graph run.
     pub id: String,
     pub name: String,
     pub state: GraphProcessSummaryState,

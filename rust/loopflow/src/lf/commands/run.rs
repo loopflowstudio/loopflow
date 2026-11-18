@@ -115,11 +115,7 @@ pub fn resume(id: &str, message: &str, cli: &Cli, kind: LaunchKind) -> Result<()
         .ok_or_else(|| anyhow!("session {id:?} was not found"))?;
     // A Graph corrects its own step's answer in that step's Run; nobody else
     // continues a Run.
-    let caller_graph = loopflow_execution::journal::current_lf_process_id()
-        .map(|process| store.lf_process(&process))
-        .transpose()?
-        .flatten()
-        .and_then(|process| process.parent_lf_process_id);
+    let caller_graph = loopflow_execution::journal::current_parent_lf_process_id();
     let own_step = caller_graph
         .is_some_and(|graph| session.graph_lf_process_id.as_deref() == Some(graph.as_str()));
     if !own_step {

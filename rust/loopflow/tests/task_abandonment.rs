@@ -71,10 +71,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
             .block_on(store.session("retained-session"))
             .unwrap()
             .unwrap();
-        let unresolved = runtime
-            .block_on(store.lf_process(&process))
-            .unwrap()
-            .unwrap();
+        let unresolved = store.sqlite.lf_process(&process).unwrap().unwrap();
         let authored = repo.path().join("unfinished.txt");
         std::fs::write(&authored, "Retain unfinished work\n").unwrap();
         registered.pr.publication = Some(PrPublication {
@@ -142,10 +139,7 @@ fn task_abandonment_cli_saves_offline_and_preserves_unresolved_work() {
                 .unwrap();
             assert!(abandoned);
             assert_eq!(
-                runtime
-                    .block_on(store.lf_process(&process))
-                    .unwrap()
-                    .unwrap(),
+                store.sqlite.lf_process(&process).unwrap().unwrap(),
                 unresolved
             );
             assert_eq!(

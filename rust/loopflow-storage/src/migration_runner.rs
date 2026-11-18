@@ -1957,6 +1957,319 @@ mod tests {
     }
 
     #[test]
+    fn run_owners_carry_their_process_lifecycle_after_upgrade() {
+        let conn = open();
+        apply_before_migration(&observers(), &build(), &conn, "process_rows_on_owners");
+        conn.execute_batch(include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/migrations/process_rows_on_owners_released.sql"
+        )))
+        .unwrap();
+        apply_pending_migrations(&observers(), &build(), &conn);
+
+        type Run = (
+            String,
+            i64,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let runs = |sql: &str| -> Vec<Run> {
+            conn.prepare(sql)
+                .unwrap()
+                .query_map([], |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                    ))
+                })
+                .unwrap()
+                .collect::<rusqlite::Result<_>>()
+                .unwrap()
+        };
+        let select = "SELECT lf_process_id,started_at,ended_at,pid,exit_code,error FROM";
+        assert_eq!(
+            runs(&format!("{select} graph_processes ORDER BY lf_process_id")),
+            [
+                (
+                    "graph-done".into(),
+                    10,
+                    Some(30),
+                    None,
+                    Some(1),
+                    Some("the run failed".into())
+                ),
+                ("graph-live".into(), 40, None, Some(4001), None, None),
+            ]
+        );
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps ORDER BY lf_process_id"
+            )),
+            [
+                (
+                    "step-done".into(),
+                    11,
+                    Some(29),
+                    None,
+                    Some(1),
+                    Some("gate: tests failed".into())
+                ),
+                ("step-live".into(), 41, None, Some(4002), None, None),
+            ]
+        );
+        let wait: i64 = conn
+            .query_row("SELECT count(*) FROM agent_limit_recoveries", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(wait, 1);
+
+        // A released runner still alive after install: its step's end reaches
+        // the step row, and a step it records after the Process row is filled.
+        conn.execute_batch(
+            "INSERT INTO processes(id,trace_id,parent_lf_process_id,started_at,completed_at,outcome,exit_code)
+                 VALUES('step-next','trace','graph-live',50,51,'succeeded',0);
+             INSERT INTO graph_process_steps(graph_lf_process_id,lf_process_id,node,iterations)
+                 VALUES('graph-live','step-next',0,'[[1]]');
+             UPDATE processes SET completed_at=60,outcome='failed',exit_code=1,error='boom' WHERE id='step-live';",
+        )
+        .unwrap();
+        assert_eq!(
+            runs(&format!(
+                "{select} graph_process_steps WHERE graph_lf_process_id='graph-live' ORDER BY seq"
+            )),
+            [
+                (
+                    "step-live".into(),
+                    41,
+                    Some(60),
+                    None,
+                    Some(1),
+                    Some("boom".into())
+                ),
+                ("step-next".into(), 50, Some(51), None, Some(0), None),
+            ]
+        );
+        // What a run launched with stays fixed.
+        assert!(conn
+            .execute("UPDATE graph_processes SET task_id=NULL,graph='other'", [])
+            .is_err());
+
+        // A Project activation's run is on its Wave, backfilled and bridged
+        // from a released activating lf.
+        type Activation = (
+            String,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<i64>,
+            Option<String>,
+        );
+        let activations = || -> Vec<Activation> {
+            conn.prepare(
+                "SELECT id,project_activation_started_at,project_activation_pid,
+                    project_activation_os_started_at,project_activation_ended_at,
+                    project_activation_exit_code,project_activation_error
+                 FROM waves WHERE id LIKE 'wave-%' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get(0)?,
+                    row.get(1)?,
+                    row.get(2)?,
+                    row.get(3)?,
+                    row.get(4)?,
+                    row.get(5)?,
+                    row.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        let failed: Activation = (
+            "wave-done".into(),
+            Some(20),
+            None,
+            None,
+            Some(25),
+            Some(1),
+            Some("provider unavailable".into()),
+        );
+        assert_eq!(
+            activations(),
+            [
+                failed.clone(),
+                (
+                    "wave-live".into(),
+                    Some(42),
+                    Some(4003),
+                    Some(41),
+                    None,
+                    None,
+                    None
+                ),
+            ]
+        );
+        conn.execute(
+            "UPDATE processes SET completed_at=45,outcome='succeeded',exit_code=0 WHERE id='activation-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            activations()[1],
+            (
+                "wave-live".into(),
+                Some(42),
+                None,
+                None,
+                Some(45),
+                Some(0),
+                None
+            )
+        );
+        // A released lf activating again brings the new run's start, not the
+        // last one's end.
+        conn.execute(
+            "UPDATE waves SET project_activation_lf_process_id='activation-next' WHERE id='wave-done'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            activations()[0],
+            (
+                "wave-done".into(),
+                Some(46),
+                Some(4004),
+                Some(45),
+                None,
+                None,
+                None
+            )
+        );
+
+        // A repair's run is on its incident; a released launcher's handoff
+        // brings the worker's start and pid from its Process row.
+        type Repair = (String, Option<i64>, Option<i64>, Option<i64>);
+        let repairs = || -> Vec<Repair> {
+            conn.prepare(
+                "SELECT identity,repair_started_at,repair_pid,repair_os_started_at
+                 FROM ci_incidents ORDER BY identity",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            repairs(),
+            [
+                ("incident-done".into(), Some(60), None, None),
+                ("incident-live".into(), Some(80), Some(5001), Some(79)),
+            ]
+        );
+        conn.execute(
+            "UPDATE ci_incidents SET repair_lf_process_id='repair-worker' WHERE identity='incident-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(
+            repairs()[1],
+            ("incident-live".into(), Some(90), Some(5002), Some(89))
+        );
+
+        // A Task's carrier and its ship carrier record the OS process they
+        // run as; a released carrier's end clears both and ends the ship run.
+        let carrier = || -> (Option<String>, Option<i64>, Option<i64>) {
+            conn.query_row(
+                "SELECT lf_process_id,run_pid,run_os_started_at FROM task_graphs WHERE task_id='task-live'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap()
+        };
+        type ShipRun = (String, Option<i64>, Option<i64>, Option<i64>);
+        let ship = || -> Vec<ShipRun> {
+            conn.prepare(
+                "SELECT lf_process_id,pid,ended_at,exit_code FROM task_ship_events
+                 WHERE task_id='task-live' ORDER BY id",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
+            })
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+        };
+        assert_eq!(
+            carrier(),
+            (Some("carrier-live".into()), Some(6001), Some(99))
+        );
+        assert_eq!(ship(), [("carrier-live".into(), Some(6001), None, None)]);
+        conn.execute(
+            "UPDATE processes SET completed_at=105,outcome='failed',exit_code=1 WHERE id='carrier-live'",
+            [],
+        )
+        .unwrap();
+        assert_eq!(carrier(), (Some("carrier-live".into()), None, None));
+        assert_eq!(ship(), [("carrier-live".into(), None, Some(105), Some(1))]);
+        conn.execute_batch(
+            "UPDATE task_graphs SET lf_process_id='carrier-next' WHERE task_id='task-live';
+             INSERT INTO task_ship_events(task_id,kind,at,lf_process_id)
+                 VALUES('task-live','carried',110,'carrier-next');",
+        )
+        .unwrap();
+        assert_eq!(
+            carrier(),
+            (Some("carrier-next".into()), Some(6002), Some(109))
+        );
+        assert_eq!(ship()[1], ("carrier-next".into(), Some(6002), None, None));
+        // What an Auto-Ship event says stays as written.
+        assert!(conn
+            .execute("UPDATE task_ship_events SET kind='stopped'", [])
+            .is_err());
+
+        // A Session carries its current agent's lifetime, backfilled and
+        // bridged from the agent row a released launcher writes.
+        type Agent = (Option<i64>, Option<i64>, Option<i64>, Option<i64>);
+        let agent = |session: &str| -> Agent {
+            conn.query_row(
+                "SELECT agent_started_at,agent_pid,agent_ended_at,agent_exit_code
+                 FROM agent_sessions WHERE id=?1",
+                [session],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap()
+        };
+        assert_eq!(agent("session-live"), (Some(120), Some(7001), None, None));
+        assert_eq!(agent("session-done"), (Some(121), None, Some(130), Some(0)));
+        conn.execute_batch(
+            "UPDATE processes SET completed_at=140,exit_code=1
+             WHERE id='00000000-0000-4000-8000-00000000a001';
+             INSERT INTO processes(id,trace_id,kind,started_at,spawn_state)
+             VALUES('00000000-0000-4000-8000-00000000a003','00000000-0000-4000-8000-00000000a003','agent',150,'reserved');
+             UPDATE agent_sessions SET agent_process_id='00000000-0000-4000-8000-00000000a003'
+             WHERE id='session-done';",
+        )
+        .unwrap();
+        assert_eq!(agent("session-live"), (Some(120), None, Some(140), Some(1)));
+        assert_eq!(agent("session-done"), (Some(150), None, None, None));
+        validate_foreign_keys(&conn).unwrap();
+    }
+
+    #[test]
     fn a_newer_tail_changes_nothing_this_build_validates() {
         for sql in [
             "CREATE TABLE newer_table (id TEXT);",

@@ -6,8 +6,8 @@
 //! agent the waiting step was explicitly given, not the one of whoever's read
 //! happened to trigger it.
 
-use crate::journal::ProcessIdentityEvidence;
 use crate::ops::task_execution::task_execution_blockers;
+use crate::store::ProcessIdentityEvidence;
 use crate::store::StoreResult;
 use loopflow_model::durable::TaskId;
 use loopflow_storage::sqlite::{AgentLimitRecovery, SqliteStore};
@@ -48,11 +48,13 @@ pub fn ended_step_recovery(
     let Some(step) = graph.latest() else {
         return Ok(None);
     };
-    if crate::journal::lf_evidence(store, &step.process.id) != ProcessIdentityEvidence::Dead {
+    if crate::process::os_process::step_evidence(&step.run, &graph.run)
+        != ProcessIdentityEvidence::Dead
+    {
         return Ok(None);
     }
     Ok(store
-        .agent_limit_recovery(&step.process.id)?
+        .agent_limit_recovery(&step.run.id)?
         .map(|recovery| (graph.label(step), recovery)))
 }
 

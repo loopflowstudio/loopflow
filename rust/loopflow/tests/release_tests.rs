@@ -2548,8 +2548,8 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
         let gh_script = write_gh_merge_wait_script(&log_path.to_string_lossy(), wait);
         let _env = EnvGuard::new(&[("gh", gh_script.as_str())]);
         if repairing {
-            // A repair reservation whose Process has no recorded death is live;
-            // the disarm falls inside its lifetime.
+            // A repair reserved this boot with no recorded end is live; the
+            // disarm falls inside its lifetime.
             let config = storage_config_from_env().unwrap();
             tokio::runtime::Runtime::new()
                 .unwrap()
@@ -2559,14 +2559,9 @@ fn release_run_waits_out_a_repair_disarm_but_stops_on_a_persons() {
             let conn = rusqlite::Connection::open(path).unwrap();
             let started = now.unix_timestamp() - 60;
             conn.execute(
-                "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,'fixture',?2)",
-                rusqlite::params![REPAIR, started],
-            )
-            .unwrap();
-            conn.execute(
                 "INSERT INTO ci_incidents(identity,repo,pr_number,failed_head_sha,failure_set_json,
-                 poll_observed_at,created_at,updated_at,repair_lf_process_id)
-                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,?3)",
+                 poll_observed_at,created_at,updated_at,repair_lf_process_id,repair_started_at)
+                 VALUES('incident',?1,1176,'old-head','[]',?2,?2,?2,?3,?2)",
                 rusqlite::params![
                     RepoId::discover(repo.path()).unwrap().as_str(),
                     started,

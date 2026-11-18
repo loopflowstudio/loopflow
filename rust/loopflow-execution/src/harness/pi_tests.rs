@@ -428,55 +428,6 @@ fn pi_model_selection_native_resume_and_credentials_keep_their_owners() {
     }
 }
 
-#[tokio::test]
-async fn pi_stale_attachment_cannot_send_or_stop_the_provider() {
-    let mut config = crate::agent::AgentConfig::default();
-    let (_ledger, _env, recording) = fixture(&mut config);
-    let (tx, _rx) = mpsc::unbounded_channel();
-
-    let mut pi = PiDriver::new(
-        &crate::harness::launch_for_test(crate::harness::HarnessKind::Pi, &config, &recording),
-        tx,
-    );
-    pi.start().await.unwrap();
-    let crate::harness::Recording {
-        store,
-        session,
-        attachment: previous,
-    } = recording.clone();
-    let current = attachment::claim_session_attachment(
-        &store,
-        &session,
-        Some(&previous),
-        previous.lf_process_id.as_ref().unwrap(),
-        false,
-    )
-    .unwrap();
-    assert!(pi.send_input("stale direction").await.is_err());
-    assert!(pi.stop().await.is_err());
-    let pid = pi.pid().unwrap();
-    let process = store
-        .agent_process(&current.agent_process_id)
-        .unwrap()
-        .unwrap();
-    assert_eq!(
-        crate::journal::process_identity_evidence(pid, process.os_started_at.unwrap()),
-        crate::journal::ProcessIdentityEvidence::Live
-    );
-    super::agent_process::stop(&crate::harness::Recording {
-        store: store.clone(),
-        session: session.clone(),
-        attachment: current,
-    })
-    .unwrap();
-    assert!(store
-        .session(&session)
-        .unwrap()
-        .unwrap()
-        .completed_at
-        .is_none());
-}
-
 #[test]
 fn pi_empty_final_answers_fail_but_tool_steps_and_internal_retries_can_recover() {
     for (text, stop) in [

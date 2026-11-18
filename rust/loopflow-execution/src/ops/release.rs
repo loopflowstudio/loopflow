@@ -1976,7 +1976,7 @@ fn wait_for_release_repair(landing: &loopflow_storage::pr_landing::PrLanding) ->
                     landing.pr_number
                 ),
                 continuation: format!(
-                    "observe landing {} and retry after its repair Process exits",
+                    "observe landing {} and retry after its repair run exits",
                     landing.id
                 ),
             });

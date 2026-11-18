@@ -1645,6 +1645,17 @@ mod tests {
     use tokio::sync::Semaphore;
     use tokio_util::codec::{Framed, LinesCodec};
 
+    /// A subscription that needs no directory and reads an empty home.
+    fn history() -> Read {
+        Read::SessionHistory(crate::lf::commands::activity::HistoryWindow {
+            since: "7d".into(),
+            limit: 50,
+            wave: None,
+            project: None,
+            task: None,
+        })
+    }
+
     // Hold a worker after it queues its response, before the JoinSet can reap it.
     static REQUEST_COMPLETIONS: LazyLock<
         Mutex<HashMap<String, tokio::sync::oneshot::Receiver<()>>>,
@@ -2444,7 +2455,7 @@ mod tests {
             first
                 .send(&ClientMessage::Subscribe {
                     id: "first".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select: None,
                     resume: None,
                     sender: None,
@@ -2470,7 +2481,7 @@ mod tests {
             next.hello(REVISION, REVISION).await;
             next.send(&ClientMessage::Subscribe {
                 id: "new-id".into(),
-                operation: Read::ProcessList,
+                operation: history(),
                 select: None,
                 resume: Some(checkpoint.clone()),
                 sender: None,
@@ -2514,7 +2525,7 @@ mod tests {
             ] {
                 next.send(&ClientMessage::Subscribe {
                     id: id.into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select,
                     resume,
                     sender: None,
@@ -2562,7 +2573,7 @@ mod tests {
         );
         for changed in [
             scope("restarted-server", &query, None),
-            scope("first-server", &Read::ProcessList, None),
+            scope("first-server", &history(), None),
             scope(
                 "first-server",
                 &Read::SessionList {
@@ -2595,7 +2606,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     resume: None,
                     select: None,
                     sender: None,
@@ -2764,7 +2775,7 @@ mod tests {
             client
                 .send(&ClientMessage::Subscribe {
                     id: "ps".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     resume: None,
                     select: Some(vec!["absent".into()]),
                     sender: None,
@@ -3031,7 +3042,7 @@ mod tests {
                     } else {
                         ClientMessage::Subscribe {
                             id: n.to_string(),
-                            operation: Read::ProcessList,
+                            operation: history(),
                             select: None,
                             resume: None,
                             sender: None,
@@ -3090,7 +3101,7 @@ mod tests {
                 None => {
                     let line = serde_json::to_string(&ClientMessage::Subscribe {
                         id: "after".into(),
-                        operation: Read::ProcessList,
+                        operation: history(),
                         select: None,
                         resume: None,
                         sender: None,
@@ -3246,7 +3257,7 @@ mod tests {
                     .send(&ClientMessage::Subscribe {
                         resume: None,
                         id: "slow".into(),
-                        operation: Read::ProcessList,
+                        operation: history(),
                         select: None,
                         sender: None,
                     })
@@ -3262,7 +3273,7 @@ mod tests {
                     .send(&ClientMessage::Subscribe {
                         resume: None,
                         id: "peer".into(),
-                        operation: Read::ProcessList,
+                        operation: history(),
                         select: Some(vec!["id".into()]),
                         sender: None,
                     })
@@ -3338,7 +3349,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     resume: None,
                     id: "shared".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select: None,
                     sender: None,
                 })
@@ -3348,7 +3359,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     resume: None,
                     id: "same-socket".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select: None,
                     sender: None,
                 })
@@ -3357,7 +3368,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     resume: None,
                     id: "shared".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select: None,
                     sender: None,
                 })
@@ -3448,7 +3459,7 @@ mod tests {
                 .send(&ClientMessage::Subscribe {
                     resume: None,
                     id: "queued".into(),
-                    operation: Read::ProcessList,
+                    operation: history(),
                     select: None,
                     sender: None,
                 })

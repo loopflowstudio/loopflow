@@ -793,10 +793,10 @@ mod tests {
             capture_key: None,
         };
         let old = store
-            .attach_session("editor", None, &process, true, None, &caller)
+            .attach_session("editor", None, &process, None, &caller)
             .unwrap();
         store
-            .attach_session("editor", Some(&old), &process, true, None, &caller)
+            .attach_session("editor", Some(&old), &process, None, &caller)
             .unwrap();
         let mut conn = store.conn.lock().unwrap();
         let tx = conn.transaction().unwrap();

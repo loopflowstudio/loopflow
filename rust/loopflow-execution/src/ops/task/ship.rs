@@ -9,11 +9,12 @@
 use serde::{Deserialize, Serialize};
 
 use crate::durable::TaskState;
-use crate::journal::ProcessIdentityEvidence;
 use crate::ops::error::OpsResult;
 use crate::ops::pr::PrReadFreshness;
+use crate::store::ProcessIdentityEvidence;
 use crate::task_graph::{TaskGraph, TaskGraphPosition, END};
 use loopflow_model::id::LfProcessId;
+use loopflow_storage::graph_process::{ExecutionResult, RunOwner};
 use loopflow_storage::pr_landing::{PrLanding, PrLandingState};
 use loopflow_storage::sqlite::TaskShipping;
 use loopflow_storage::work::task::{PrPhase, Task};
@@ -75,42 +76,30 @@ async fn task_by_issue(store: &SharedStore, issue: &str) -> OpsResult<Task> {
         .ok_or_else(|| task_error(format!("no Task exists for {issue:?}")))
 }
 
-/// Who started `process`, read from its ancestry, with the person named as
-/// in `repo`; no process leaves attribution unresolved.
+/// Who started a run: the Session whose agent started it, with the person
+/// named as in `repo`.
 pub fn starter(
     sqlite: &loopflow_storage::sqlite::SqliteStore,
     repo: &std::path::Path,
-    process: Option<&LfProcessId>,
+    session: Option<&loopflow_model::id::LfSessionId>,
 ) -> crate::store::StoreResult<crate::process::Starter> {
-    let Some(process) = process else {
-        return Ok(crate::process::Starter::Person { name: None });
-    };
     let person = crate::config::participant_name_in(repo).ok().flatten();
-    sqlite.process_starter(process, person.as_deref())
+    sqlite.starter(session, person.as_deref())
 }
 
-/// A served stop retains the person at admission, independent of later settings.
+/// A stop names the person as it was at admission, independent of later settings.
 pub fn stopper(
     sqlite: &loopflow_storage::sqlite::SqliteStore,
-    repo: &std::path::Path,
     stop: &loopflow_storage::sqlite::task_work::ShipStop,
 ) -> crate::store::StoreResult<crate::process::Starter> {
-    match stop.by.as_ref() {
-        Some(process) => starter(sqlite, repo, Some(process)),
-        None => Ok(crate::process::Starter::Person {
-            name: stop.person.clone(),
-        }),
-    }
+    sqlite.starter(stop.session.as_ref(), stop.person.as_deref())
 }
 
-/// Whether the process carrying a shipping Task has exited. Unknown evidence
-/// is never read as a dead process; no carrier at all is.
-fn carrier_evidence(
-    sqlite: &loopflow_storage::sqlite::SqliteStore,
-    shipping: &TaskShipping,
-) -> ProcessIdentityEvidence {
-    match &shipping.process {
-        Some(process) => crate::journal::lf_evidence(sqlite, process),
+/// Whether the run carrying a shipping Task has exited. Unknown evidence is
+/// never read as a dead process; no carrier at all is.
+fn ship_carrier_evidence(shipping: &TaskShipping) -> ProcessIdentityEvidence {
+    match &shipping.carrier {
+        Some(carrier) => crate::process::RecordedProcess::from(carrier).evidence(),
         None => ProcessIdentityEvidence::Dead,
     }
 }
@@ -121,15 +110,28 @@ fn restart_due(shipping: &TaskShipping, failed_at: i64) -> i64 {
     failed_at + crate::ops::pr_landing::repair_backoff(shipping.restarts.saturating_add(1))
 }
 
-/// When the ship process failed, and the error that caused it.
+/// When the ship process failed, and the error that caused it: its Task's
+/// latest Graph run's cause when that run failed, else its own error.
 fn carrier_failure(
     sqlite: &loopflow_storage::sqlite::SqliteStore,
+    task: &loopflow_storage::work::task::TaskId,
     shipping: &TaskShipping,
 ) -> crate::store::StoreResult<Option<(i64, String)>> {
-    match &shipping.process {
-        Some(process) => sqlite.failure_cause(process),
-        None => Ok(None),
-    }
+    let Some(carrier) = shipping.carrier.as_ref().filter(|carrier| {
+        crate::process::os_process::observed_result(carrier) == ExecutionResult::Failed
+    }) else {
+        return Ok(None);
+    };
+    let at = carrier.ended_at.expect("a failed run has ended");
+    let graph = match sqlite.latest_task_graphs(&[task])?.remove(task) {
+        Some(graph) => sqlite.graph_failure_cause(graph.id())?,
+        None => None,
+    };
+    let error = graph
+        .map(|(_, error)| error)
+        .or_else(|| carrier.error.clone())
+        .unwrap_or_else(|| "it failed".into());
+    Ok(Some((at, error)))
 }
 
 /// The Task's shipping, when it is shipping. `owned` is whether anyone owns
@@ -217,8 +219,8 @@ pub fn read_shipping(
     let Some(shipping) = sqlite.task_shipping(task)? else {
         return Ok(None);
     };
-    let alive = carrier_evidence(sqlite, &shipping);
-    let failure = carrier_failure(sqlite, &shipping)?;
+    let alive = ship_carrier_evidence(&shipping);
+    let failure = carrier_failure(sqlite, task, &shipping)?;
     let landing = sqlite.pending_task_landing(task)?;
     Ok(shipping_snapshot(
         graph,
@@ -257,15 +259,15 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             .sqlite
             .task_shipping(&task.id)
             .map_err(task_error)?
-            .and_then(|shipping| shipping.process)
+            .and_then(|shipping| shipping.carrier)
         {
-            if carrier != process
-                && crate::journal::lf_evidence(&store.sqlite, &carrier)
+            if carrier.id != process
+                && crate::process::RecordedProcess::from(&carrier).evidence()
                     != ProcessIdentityEvidence::Dead
             {
                 return Ok(ShipStart::AlreadyShipping {
                     issue,
-                    process: carrier,
+                    process: carrier.id,
                 });
             }
         }
@@ -294,7 +296,12 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
             return Ok(ShipStart::AtEnd { issue });
         }
         let repo = super::repository_for_task(&store, &task)?;
-        let by = starter(&store.sqlite, &repo, Some(&process)).map_err(task_error)?;
+        let by = starter(
+            &store.sqlite,
+            &repo,
+            crate::journal::caller_session_id().as_ref(),
+        )
+        .map_err(task_error)?;
         let mut handoff = format!("{by} shipped it");
         if let Some(graph) = graph {
             handoff.push_str(&format!(" with {graph}"));
@@ -307,10 +314,13 @@ pub fn ship_begin(issue: &str, graph: Option<&str>, note: Option<&str>) -> OpsRe
         if !store.sqlite.task_owned(&task.id).map_err(task_error)? {
             crate::store::ownership::claim_task(&store.sqlite, &task.id).map_err(task_error)?;
         }
+        let start = crate::journal::current_execution_start()
+            .ok_or_else(|| task_error("lf ship requires a registered Process"))?;
         store
             .sqlite
-            .ship_task(&task.id, &process, &handoff)
+            .ship_task(&task.id, (&process, &start), &handoff)
             .map_err(task_error)?;
+        crate::journal::mark_run_owner(RunOwner::ShipCarrier);
         Ok(ShipStart::Begun(Box::new(task)))
     })
 }
@@ -348,17 +358,13 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
         let (note, stopped_by) = match &withdrawal {
             Withdrawal::Stop { process, note } => {
                 let repo = super::repository_for_task(&store, &task)?;
-                let person = if process.is_none() {
-                    crate::config::participant_name_in(&repo).ok().flatten()
-                } else {
-                    None
-                };
                 let stop = loopflow_storage::sqlite::task_work::ShipStop {
                     at: loopflow_storage::rows::now_unix(),
                     by: process.clone(),
-                    person,
+                    person: crate::config::participant_name_in(&repo).ok().flatten(),
+                    session: crate::journal::caller_session_id(),
                 };
-                let by = stopper(&store.sqlite, &repo, &stop).map_err(task_error)?;
+                let by = stopper(&store.sqlite, &stop).map_err(task_error)?;
                 let note = match note {
                     Some(note) => format!("{by}: {note}"),
                     None => by.to_string(),
@@ -371,20 +377,15 @@ fn withdraw(issue: &str, withdrawal: Withdrawal<'_>) -> OpsResult<bool> {
             .sqlite
             .stop_shipping(&task.id, &note, stopped_by)
             .map_err(task_error)?;
-        if let Some(process) = stopped
+        if let Some(carrier) = stopped
             .as_ref()
-            .and_then(|shipping| shipping.process.as_ref())
-            .filter(|process| current.as_ref() != Some(*process))
+            .and_then(|shipping| shipping.carrier.as_ref())
+            .filter(|carrier| current.as_ref() != Some(&carrier.id))
         {
-            if crate::journal::lf_evidence(&store.sqlite, process) == ProcessIdentityEvidence::Live
+            if crate::process::RecordedProcess::from(carrier).evidence()
+                == ProcessIdentityEvidence::Live
             {
-                if let Some(pid) = store
-                    .sqlite
-                    .lf_process(process)
-                    .ok()
-                    .flatten()
-                    .and_then(|record| record.pid)
-                {
+                if let Some(pid) = carrier.pid {
                     crate::platform::kill_process(pid);
                 }
             }
@@ -593,7 +594,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             let state = store.sqlite.task_state(&id).map_err(task_error)?;
             if state.is_terminal()
                 || !store.sqlite.task_claimed_here(&id).map_err(task_error)?
-                || carrier_evidence(&store.sqlite, &shipping) != ProcessIdentityEvidence::Dead
+                || ship_carrier_evidence(&shipping) != ProcessIdentityEvidence::Dead
             {
                 continue;
             }
@@ -607,7 +608,7 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
             {
                 continue;
             }
-            let failure = carrier_failure(&store.sqlite, &shipping).map_err(task_error)?;
+            let failure = carrier_failure(&store.sqlite, &id, &shipping).map_err(task_error)?;
             if let Some((failed_at, _)) = &failure {
                 if restart_due(&shipping, *failed_at) > now {
                     continue;
@@ -643,9 +644,8 @@ pub(crate) fn restart_ships() -> OpsResult<()> {
 mod tests {
     use super::{next_step, shipping_snapshot, ShipStep, ShippingState};
     use crate::durable::TaskState;
-    use crate::journal::ProcessIdentityEvidence;
+    use crate::store::ProcessIdentityEvidence;
     use crate::task_graph::{CapturedGraph, TaskGraph, TaskGraphPosition};
-    use loopflow_model::id::LfProcessId;
     use loopflow_storage::pr_landing::{NewPrLanding, PrLanding, PrLandingState};
     use loopflow_storage::sqlite::TaskShipping;
 
@@ -666,7 +666,8 @@ mod tests {
         let mut handoff = TaskShipping {
             shipped_at: 5,
             approved_by: None,
-            process: Some(LfProcessId::new()),
+            approving_session: None,
+            carrier: None,
             restarts: 0,
         };
         let minutes = |handoff: &TaskShipping| super::restart_due(handoff, 0) / 60;
@@ -742,7 +743,8 @@ mod tests {
         let handoff = TaskShipping {
             shipped_at: 5,
             approved_by: None,
-            process: Some(LfProcessId::new()),
+            approving_session: None,
+            carrier: None,
             restarts: 0,
         };
         let read = |status, alive, landing: Option<&PrLanding>| {

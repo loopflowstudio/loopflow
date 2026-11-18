@@ -72,15 +72,18 @@ conversation and Graph attributed to it is part of its work. The Task has one
 captured graph and position, advanced by `lf task run` and `lf ship`; independent
 Graph runs do not move that position.
 
-Process records an actual lf command process. LfSession keeps a continuable
-conversation, whether interactive or headless. A Graph is one lf process and
-the step processes it starts. Provider turns and retries remain history
-inside the conversation; they do not create another generic execution object.
+LfSession keeps a continuable conversation, whether interactive or headless,
+and records the lf attached to it and the agent it runs: pid, OS start time and
+exit. A Graph run is one lf process and the steps it starts; the run and each
+step record their own pid, start, end, exit code and error. No table records lf
+commands themselves: one an agent issues is a tool call in its transcript.
+Alive means the OS still has the recorded pid with the recorded start time.
+Provider turns and retries remain history inside the conversation; they do not
+create another generic execution object.
 
-A child command records its causal parent and, when issued by an agent, its
-calling conversation and AgentProcess. That evidence grants neither
-process-control authority nor permission to move a Graph cursor. An attachment
-handoff retains conversation identity while fencing the old writer.
+A recorded pid grants neither process-control authority nor permission to move
+a Graph cursor. Each attachment starts a new agent with a fresh token, which
+fences out the old writer; the conversation keeps its identity.
 Passive observation acquires no claim. See the [contract and cutover status](dev/reference-cutover.md#cutover-status)
 for the remaining reader, wire and lifecycle conversion.
 
@@ -198,9 +201,9 @@ Loopflow never guesses signal authority from a conversation ID, Work ID, PID, or
 tmux name. Wave operations are ordinary finite conversations; they have no long-running
 process to interrupt, resume, wait for, or attach to.
 
-Work survives its provider process. A Graph whose process died leaves its Processes
-as history; nothing resumes it. Inspect
-`lf task status ISSUE` and `lf process show ID --json`, then launch
+Work survives its provider process. A Graph whose process died stays as history,
+ended with an unknown result; nothing resumes it. Inspect
+`lf task status ISSUE` and `lf graph show RUN_ID --json`, then launch
 fresh work with `lf task run INF-123`. The Task keeps its durable
 direction, worktree and PR. `task run` never reopens terminal Work; create a
 new Task for new work.
@@ -253,12 +256,11 @@ lf wave status <wave> --json           # hierarchy plus one Rust-derived metric_
 lf wave show --json                      # every Wave repeats that required portfolio envelope
 lf session history --task INF-123 --json
 lf session usage --wave parser --json
-lf session history list --task INF-123 --json
 lf session usage --days 30 --json   # recorded provider usage, newest first
 lf session usage --task INF-123 --json # the same evidence drilled to one Task
 lf session usage --weekly --json   # context cost and turn time by week since 2026-09-30
 lf session usage --binds --json    # Task and Wave totals under prospective and post-hoc bind attribution
-lf process list --json                # one OS-live process frame
+lf graph list --runs --state current --json   # live Graph runs, each OS-confirmed
 lf session list --json --select id,title,state   # only those fields of each Session
 ```
 

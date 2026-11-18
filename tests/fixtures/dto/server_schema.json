@@ -115,100 +115,6 @@
         }
       ]
     },
-    "ActivityNode": {
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "kind": {
-          "$ref": "#/$defs/ActivityNodeKind"
-        },
-        "label": {
-          "type": "string"
-        },
-        "parent_id": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "type": "string"
-        },
-        "state": {
-          "$ref": "#/$defs/ActivityState"
-        },
-        "wave": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "worktree": {
-          "type": [
-            "string",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "parent_id",
-        "kind",
-        "label",
-        "repo",
-        "worktree",
-        "wave",
-        "pid",
-        "started_at",
-        "state"
-      ],
-      "type": "object"
-    },
-    "ActivityNodeKind": {
-      "enum": [
-        "process",
-        "agent_process"
-      ],
-      "type": "string"
-    },
-    "ActivitySnapshot": {
-      "properties": {
-        "nodes": {
-          "items": {
-            "$ref": "#/$defs/ActivityNode"
-          },
-          "type": "array"
-        }
-      },
-      "required": [
-        "nodes"
-      ],
-      "type": "object"
-    },
-    "ActivityState": {
-      "enum": [
-        "working",
-        "waiting",
-        "stalled",
-        "unknown"
-      ],
-      "type": "string"
-    },
     "AgeBucket": {
       "description": "Time since a Session's transcript was last written, or its last activity.",
       "enum": [
@@ -218,117 +124,6 @@
         "older"
       ],
       "type": "string"
-    },
-    "AgentProcess": {
-      "description": "One recorded provider OS process, launched under the lf process that\nreserved it. It never has a receipt or an agent caller of its own.",
-      "properties": {
-        "agent_session_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfSessionId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "command": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "id": {
-          "$ref": "#/$defs/AgentProcessId"
-        },
-        "os_started_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "parent_lf_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "trace_id": {
-          "$ref": "#/$defs/TraceId"
-        }
-      },
-      "required": [
-        "id",
-        "pid",
-        "os_started_at",
-        "agent_session_id",
-        "trace_id",
-        "parent_lf_process_id",
-        "command",
-        "repo",
-        "cwd",
-        "started_at",
-        "completed_at",
-        "exit_code",
-        "signal",
-        "error"
-      ],
-      "type": "object"
     },
     "AgentProcessId": {
       "type": "string"
@@ -2056,7 +1851,7 @@
           ]
         },
         "graph_processes": {
-          "description": "`lf graph show --processes` for each of `overview`'s Graphs, in order.",
+          "description": "`lf graph show` for each of `overview`'s Graphs, in order.",
           "items": {
             "$ref": "#/$defs/GraphProcessDetail"
           },
@@ -2270,18 +2065,12 @@
           },
           "type": "array"
         },
-        "rows": {
-          "format": "uint",
-          "minimum": 0,
-          "type": "integer"
-        },
         "store": {
           "$ref": "#/$defs/StoreReport"
         }
       },
       "required": [
         "store",
-        "rows",
         "checks"
       ],
       "type": "object"
@@ -3355,6 +3144,13 @@
             "null"
           ]
         },
+        "error": {
+          "description": "Why the step failed, as the step recorded it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "exit_code": {
           "format": "int32",
           "type": [
@@ -3403,7 +3199,8 @@
         "started_at",
         "completed_at",
         "outcome",
-        "exit_code"
+        "exit_code",
+        "error"
       ],
       "type": "object"
     },
@@ -3671,7 +3468,7 @@
     },
     "Launched": {
       "additionalProperties": false,
-      "description": "What a detached operation set going: the `lf` Process that carries it.\n`process.get` reads how it is going; `log` is its output.",
+      "description": "What a detached operation set going: the `lf` that carries it, and `log`,\nits output.",
       "properties": {
         "lf_process_id": {
           "$ref": "#/$defs/LfProcessId"
@@ -3681,7 +3478,7 @@
           "type": "string"
         },
         "operation": {
-          "description": "The operation the Process carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
+          "description": "The operation that `lf` carries: `checkout.sync`, `pr.land`,\n`repo.release`, `graph.run`, `skill.run`.",
           "type": "string"
         },
         "run": {
@@ -3694,142 +3491,6 @@
         "lf_process_id",
         "run",
         "log"
-      ],
-      "type": "object"
-    },
-    "LfProcess": {
-      "description": "One recorded lf process. Unknown historical caller and exit evidence stays absent.",
-      "properties": {
-        "caller_agent_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/AgentProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "caller_session_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfSessionId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "command": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "completed_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "cwd": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "error": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "exit_code": {
-          "format": "int32",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "id": {
-          "$ref": "#/$defs/LfProcessId"
-        },
-        "os_started_at": {
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "outcome": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "parent_lf_process_id": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/LfProcessId"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
-        "pid": {
-          "format": "uint32",
-          "minimum": 0,
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "repo": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "signal": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "started_at": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "trace_id": {
-          "$ref": "#/$defs/TraceId"
-        },
-        "via_agent": {
-          "type": [
-            "boolean",
-            "null"
-          ]
-        }
-      },
-      "required": [
-        "id",
-        "pid",
-        "os_started_at",
-        "trace_id",
-        "parent_lf_process_id",
-        "via_agent",
-        "caller_session_id",
-        "caller_agent_process_id",
-        "command",
-        "repo",
-        "cwd",
-        "started_at",
-        "completed_at",
-        "outcome",
-        "exit_code",
-        "signal",
-        "error"
       ],
       "type": "object"
     },
@@ -6136,37 +5797,6 @@
       ],
       "type": "object"
     },
-    "ProcessEntry": {
-      "description": "One row of the process inventory: both kinds share one history and paging order.",
-      "oneOf": [
-        {
-          "$ref": "#/$defs/LfProcess",
-          "properties": {
-            "kind": {
-              "const": "lf",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        },
-        {
-          "$ref": "#/$defs/AgentProcess",
-          "properties": {
-            "kind": {
-              "const": "agent",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Project": {
       "properties": {
         "created_at": {
@@ -6640,13 +6270,13 @@
       "oneOf": [
         {
           "additionalProperties": false,
-          "description": "The CLI's retained process or Session history, as display text.",
+          "description": "`lf session history show <id>`: one Session's history, as display text.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "process.history",
+              "const": "session.history.get",
               "type": "string"
             }
           },
@@ -6685,23 +6315,6 @@
                 "type": "null"
               }
             ]
-          }
-        },
-        {
-          "additionalProperties": false,
-          "description": "`lf process list`: live Loopflow call trees.",
-          "properties": {
-            "kind": {
-              "const": "process.list",
-              "type": "string"
-            }
-          },
-          "required": [
-            "kind"
-          ],
-          "type": "object",
-          "x-result": {
-            "$ref": "#/$defs/ActivitySnapshot"
           }
         },
         {
@@ -7380,13 +6993,13 @@
         },
         {
           "additionalProperties": false,
-          "description": "`lf process show <id>`: one Graph that ran, with its steps.",
+          "description": "`lf graph show <id>`: one Graph that ran, with its steps.",
           "properties": {
             "id": {
               "type": "string"
             },
             "kind": {
-              "const": "process.get",
+              "const": "graph.run.get",
               "type": "string"
             }
           },
@@ -11259,7 +10872,7 @@
     },
     "SteerAdapter": {
       "additionalProperties": false,
-      "description": "Survives attachment-only handoff; replacement creates another capability.",
+      "description": "Belongs to one agent; replacement creates another capability.",
       "properties": {
         "agent_process_id": {
           "$ref": "#/$defs/AgentProcessId"
@@ -13207,7 +12820,7 @@
       ]
     },
     "TaskOverview": {
-      "description": "Workspace facts needed before opening diagnostic Process history.",
+      "description": "Workspace facts without the Task's full history.",
       "properties": {
         "graph": {
           "anyOf": [
@@ -14390,12 +14003,6 @@
           },
           "type": "array"
         },
-        "processes": {
-          "items": {
-            "$ref": "#/$defs/ProcessEntry"
-          },
-          "type": "array"
-        },
         "sessions": {
           "items": {
             "$ref": "#/$defs/TaskSession"
@@ -14406,7 +14013,6 @@
       "required": [
         "sessions",
         "graph_processes",
-        "processes",
         "graph"
       ],
       "type": "object"

@@ -141,7 +141,6 @@ pub async fn explain_resume(
             cwd,
             WorkSelection { task, wave },
             selector.as_deref(),
-            None,
         )
         .await,
         action: None,

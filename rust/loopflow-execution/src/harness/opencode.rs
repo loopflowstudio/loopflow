@@ -284,7 +284,9 @@ impl StreamDriver for Driver {
             };
             self.config.env.insert(
                 crate::process::AGENT_CALLER_ENV.into(),
-                serde_json::to_string(&attachment.caller(session.clone().into()))?,
+                serde_json::to_string(
+                    &attachment.caller(session.clone().into(), crate::journal::current_trace_id()),
+                )?,
             );
         }
         let owner = self.owner.clone();
@@ -455,8 +457,7 @@ mod tests {
             [],
         )
         .unwrap();
-        let first =
-            attachment::claim_session_attachment(&store, "stop", None, &process, true).unwrap();
+        let first = attachment::claim_session_attachment(&store, "stop", None, &process).unwrap();
         let owner = crate::harness::Recording {
             store: store.clone(),
             session: "stop".to_string(),
@@ -467,7 +468,9 @@ mod tests {
         let child =
             super::super::agent_process::spawn(command, None, &owner, LaunchKind::Batch).unwrap();
         let pid = child.id().unwrap();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
@@ -479,23 +482,12 @@ mod tests {
         );
         harness.pid = Some(pid);
         assert_eq!(harness.process_group_id(), Some(pid));
-        let current =
-            attachment::claim_session_attachment(&store, "stop", Some(&first), &process, false)
-                .unwrap();
-        assert!(harness.stop().await.is_err());
-        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
-        harness.pid = Some(pid);
-        harness.owner = crate::harness::Recording {
-            store,
-            session: "stop".into(),
-            attachment: current,
-        };
         harness.stop().await.unwrap();
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
         drop(child);
     }

@@ -613,9 +613,9 @@ pub fn observe_native(
 pub struct Pi;
 
 impl super::Harness for Pi {
-    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+    fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         process.command == "node"
-            && crate::journal::OsProcess::arguments(process.pid)
+            && crate::process::OsProcess::arguments(process.pid)
                 .ok()
                 .flatten()
                 .is_some_and(|args| runs_pi(&args))

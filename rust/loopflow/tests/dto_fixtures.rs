@@ -24,25 +24,6 @@ fn roadmap_requires_shared_lifecycle_and_selection_states() {
 }
 
 #[test]
-fn activity_retains_unknown_record_identity_without_a_pid() {
-    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
-    let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/activity_snapshot.json"
-    ))
-    .unwrap();
-    let unknown = &snapshot.nodes[2];
-    assert_eq!(unknown.state, ActivityState::Unknown);
-    assert_eq!(unknown.pid, None);
-    assert_eq!(unknown.parent_id.as_ref(), Some(&snapshot.nodes[0].id));
-    assert_eq!(unknown.id, "33333333-3333-4333-8333-333333333333");
-    assert_eq!(
-        serde_json::from_str::<ActivitySnapshot>(&serde_json::to_string(&snapshot).unwrap())
-            .unwrap(),
-        snapshot
-    );
-}
-
-#[test]
 fn task_comments_keep_authorship_and_require_every_field() {
     use loopflow_execution::work::task::comment::TaskCommentAuthor;
     use loopflow_execution::work::task::comment::TaskComments;
@@ -329,31 +310,6 @@ fn task_files_share_exact_bases_rename_paths_and_lossless_revisions() {
 }
 
 #[test]
-fn process_page_retains_outcomes_unknowns_and_continuation() {
-    let json = include_str!("../../../tests/fixtures/dto/process_page.json");
-    let page: loopflow_execution::process::ProcessPage = serde_json::from_str(json).unwrap();
-    let loopflow_execution::process::ProcessEntry::Lf(lf) = &page.entries[0] else {
-        panic!("first entry is an lf Process")
-    };
-    let loopflow_execution::process::ProcessEntry::Agent(agent) = &page.entries[1] else {
-        panic!("second entry is an AgentProcess")
-    };
-    assert_eq!(lf.exit_code, Some(42));
-    assert_eq!(lf.via_agent, None);
-    assert_eq!(lf.pid, None);
-    assert_eq!(agent.pid, Some(4242));
-    assert_eq!(agent.agent_session_id.as_deref(), Some("conversation"));
-    assert_eq!(agent.os_started_at, Some(1790640000));
-    assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&lf.id));
-    assert_eq!(page.next.as_ref().unwrap().id, agent.id.as_str());
-    assert_eq!(
-        serde_json::to_value(page).unwrap(),
-        serde_json::from_str::<serde_json::Value>(json).unwrap()
-    );
-    assert!(serde_json::from_str::<loopflow_execution::process::ProcessPage>("{}").is_err());
-}
-
-#[test]
 fn session_input_history_retains_distinct_native_results_and_unknown_process() {
     let value: loopflow::lf::commands::session_history::SessionHistory = serde_json::from_str(
         include_str!("../../../tests/fixtures/dto/session_history_summary.json"),
@@ -510,12 +466,11 @@ fn prepared_checkout_retains_owning_home_without_starting_execution() {
 }
 
 #[test]
-fn task_work_preserves_all_owners() {
+fn task_work_preserves_sessions_graph_runs_and_graph() {
     let input = include_str!("../../../tests/fixtures/dto/task_work.json");
     let work: loopflow_execution::task_work::TaskWork = serde_json::from_str(input).unwrap();
     assert_eq!(work.sessions.len(), 2);
     assert_eq!(work.graph_processes.len(), 1);
-    assert!(!work.processes.is_empty());
     let graph = work.graph.as_ref().expect("fixture Task has a graph");
     assert_eq!(
         graph.position,
@@ -648,7 +603,6 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "work_activity" => {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
-            "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "git_destinations" => {
                 read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
                 assert_eq!(body["tracker"], "git");

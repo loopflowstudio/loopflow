@@ -122,7 +122,7 @@ pub fn resolve_manifest(
         }
     }
     let database = database_in(lf_home).map_err(std::io::Error::other)?;
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database,
         crate::store::token_key::encryption_key,
     )
@@ -150,7 +150,7 @@ pub fn resolve_manifest(
 
 pub fn read_provider_session(dir: &Path) -> std::io::Result<Option<ProviderSessionRef>> {
     let input = input_id_from_dir(dir)?;
-    loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    loopflow_storage::sqlite::SqliteStore::open_read_only(
         &row_database(dir).map_err(std::io::Error::other)?,
         crate::store::token_key::encryption_key,
     )
@@ -617,7 +617,7 @@ fn resolve_capture(key: &str) -> StoreResult<(PathBuf, crate::session::LfSession
     let home = crate::store::lf_home_dir();
     let dir = record_dir(&home, key)
         .ok_or_else(|| record_error(std::io::Error::other("invalid capture key")))?;
-    let store = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+    let store = loopflow_storage::sqlite::SqliteStore::open_read_only(
         &database_in(&home)?,
         crate::store::token_key::encryption_key,
     )?;

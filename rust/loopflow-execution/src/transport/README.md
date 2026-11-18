@@ -81,9 +81,8 @@ its terminal too.
 
 A held terminal is a `TerminalId`, not an LfProcess: Session → TerminalId →
 holder (build, pid) + PTY + child AgentProcess. A holder is one LfProcess
-however many terminals it holds, and `lf process list` shows it once. Launcher
-LfProcess rows and capture attachment keep describing the processes that
-really ran. The registry is live state the server rebuilds from holder
+however many terminals it holds. Each Session's attachment records the holder
+that holds it. The registry is live state the server rebuilds from holder
 inventory, the per-terminal files below and the store; it is not a second
 record of Work.
 

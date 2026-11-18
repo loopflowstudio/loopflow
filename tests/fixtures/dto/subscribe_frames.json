@@ -258,22 +258,6 @@
     }
   },
   {
-    "read": "lf monitor ps --json --subscribe",
-    "part": "activity",
-    "frame": {
-      "answers": 7,
-      "unavailable": null,
-      "body": {
-        "nodes": []
-      },
-      "work": null,
-      "read_at": {
-        "planning": 12,
-        "sessions": 41
-      }
-    }
-  },
-  {
     "read": "lf desktop task LOO-1 --json --subscribe",
     "part": "task",
     "frame": {

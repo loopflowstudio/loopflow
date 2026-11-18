@@ -7,15 +7,15 @@ use std::collections::HashSet;
 use serde::{Deserialize, Serialize};
 
 use crate::durable::GraphProcessDetail;
-use crate::graph::process::GraphProcess;
-use crate::journal::ProcessIdentityEvidence;
-use crate::process::ProcessEntry;
 use crate::session::GraphProcessSummaryState;
 use crate::session_record::activity::{self, Activity};
+use crate::store::ProcessIdentityEvidence;
 use crate::store::{SharedStore, StoreResult};
 use loopflow_model::durable::TaskId;
+use loopflow_model::id::{LfProcessId, LfSessionId};
+use loopflow_storage::graph_process::GraphExecution;
 use loopflow_storage::sqlite::{
-    entry_of, AgentLimitRecovery, GraphExecutionFacts, SqliteStore, UnrunGraph,
+    entry_of, AgentLimitRecovery, GraphExecutionFacts, OpenWork, SqliteStore, UnrunGraph,
 };
 use loopflow_storage::work::task::Task;
 
@@ -62,7 +62,7 @@ pub async fn task_execution(
 pub async fn execution_of_latest_graph(
     sqlite: &SqliteStore,
     task: &Task,
-    graph: Option<&GraphProcess>,
+    graph: Option<&GraphExecution>,
     facts: &GraphExecutionFacts,
 ) -> StoreResult<(TaskExecutionSnapshot, Option<GraphProcessDetail>)> {
     let Some(graph) = graph else {
@@ -73,29 +73,15 @@ pub async fn execution_of_latest_graph(
         ));
     };
     let entry = entry_of(graph, Some(task.id.clone()), task.wave_id.clone())?;
-    let evidence = |process: &crate::process::LfProcess| match process.completed_at {
-        Some(_) => ProcessIdentityEvidence::Dead,
-        None => crate::journal::lf_process_evidence(
-            process,
-            &match facts.receipts.get(&process.id) {
-                Some(locator) => match facts.receipt_home.as_deref() {
-                    Some(home) => crate::journal::read_process_receipt(
-                        &crate::journal::process_receipt_path(home, locator),
-                    ),
-                    None => Ok(None),
-                },
-                None => Ok(None),
-            },
-            crate::journal::process_identity_evidence,
-        ),
-    };
-    let step = graph.latest().map(|step| &step.process);
+    let step = graph.latest().map(|step| &step.run);
     let input = step.and_then(|step| facts.inputs.get(&step.id));
     let mut snapshot = project_execution(
         graph,
         entry.summary.state,
-        evidence(&graph.process),
-        step.map_or(ProcessIdentityEvidence::Dead, evidence),
+        crate::process::RecordedProcess::from(&graph.run).evidence(),
+        step.map_or(ProcessIdentityEvidence::Dead, |step| {
+            crate::process::os_process::step_evidence(step, &graph.run)
+        }),
     );
     snapshot.captured = input.map(|(_, _, captured)| *captured);
     if let Some(recovery) = step.and_then(|step| facts.limit_recoveries.get(&step.id)) {
@@ -178,25 +164,13 @@ fn open_graph_execution_from_facts(
     task: &TaskId,
     facts: &GraphExecutionFacts,
 ) -> Option<TaskExecutionSnapshot> {
-    for (graph, process) in facts.open_processes.get(task).into_iter().flatten() {
-        let receipt = match facts.receipts.get(&process.id) {
-            Some(locator) => match facts.receipt_home.as_deref() {
-                Some(home) => crate::journal::read_process_receipt(
-                    &crate::journal::process_receipt_path(home, locator),
-                ),
-                None => Ok(None),
-            },
-            None => Ok(None),
-        };
-        let state = match crate::journal::lf_process_evidence(
-            process,
-            &receipt,
-            crate::journal::process_identity_evidence,
-        ) {
+    for run in facts.open_graphs.get(task).into_iter().flatten() {
+        let state = match crate::process::RecordedProcess::from(run).evidence() {
             ProcessIdentityEvidence::Live => TaskExecutionState::Running,
             ProcessIdentityEvidence::Unknown => TaskExecutionState::Unknown,
             ProcessIdentityEvidence::Dead => continue,
         };
+        let graph = &run.id;
         return Some(TaskExecutionSnapshot {
             state,
             reason: format!("Graph {graph} has live or unresolved execution in the Task's work; inspect `lf history show {graph}` before launching further work"),
@@ -271,7 +245,7 @@ fn apply_limit_recovery(
 /// A Graph runs while a process of its own does; with both gone, how its
 /// latest step ended says why it stopped.
 fn project_execution(
-    graph: &GraphProcess,
+    graph: &GraphExecution,
     state: GraphProcessSummaryState,
     graph_process: ProcessIdentityEvidence,
     step: ProcessIdentityEvidence,
@@ -284,16 +258,16 @@ fn project_execution(
             captured: None,
         };
     }
-    // A Graph process that has started no step is the Graph's only Process so far.
+    // A Graph that has started no step is its only run so far.
     let (label, process) = match graph.latest() {
-        Some(latest) => (graph.label(latest), &latest.process),
-        None => (graph.name.clone(), &graph.process),
+        Some(latest) => (graph.label(latest), &latest.run),
+        None => (graph.name.clone(), &graph.run),
     };
     let label = &label;
     let (state, reason) = match (graph_process, step) {
         (_, ProcessIdentityEvidence::Live) => (
             TaskExecutionState::Running,
-            format!("Step Process {} is running {label}", process.id),
+            format!("Step {} is running {label}", process.id),
         ),
         (ProcessIdentityEvidence::Live, _) => (
             TaskExecutionState::Starting,
@@ -301,10 +275,10 @@ fn project_execution(
         ),
         (ProcessIdentityEvidence::Unknown, _) | (_, ProcessIdentityEvidence::Unknown) => (
             TaskExecutionState::Unknown,
-            format!("Graph Processes at {label} have unknown process identity; inspect their effects before launching further work"),
+            format!("Graph run at {label} has unknown process identity; inspect its effects before launching further work"),
         ),
         (ProcessIdentityEvidence::Dead, ProcessIdentityEvidence::Dead) => {
-            if process.outcome.as_deref() == Some("succeeded") {
+            if process.result() == loopflow_storage::graph_process::ExecutionResult::Succeeded {
                 (
                     TaskExecutionState::Idle,
                     format!("Graph stopped after {label}; inspect its history and effects before launching fresh work"),
@@ -336,58 +310,101 @@ fn error(error: impl std::fmt::Display) -> OpsError {
     OpsError::Message(error.to_string())
 }
 
-/// Whether anything is executing is asked only of the OS, about recorded
-/// Processes. Unknown evidence blocks. The caller's lineage waits on the caller,
-/// so it never does; that exempts waiting and grants no authority.
-pub(crate) fn execution_blockers(
-    store: &SqliteStore,
-    processes: &[ProcessEntry],
-) -> OpsResult<Vec<String>> {
-    Ok(unresolved_processes(store, processes)?
+/// Whether anything is executing is asked only of the OS, by each open
+/// Session's and Graph run's own pid. Unknown evidence blocks. The caller's
+/// own work waits on the caller, so it never does; that exempts waiting and
+/// grants no authority.
+pub(crate) fn execution_blockers(store: &SqliteStore, work: &[OpenWork]) -> OpsResult<Vec<String>> {
+    Ok(unresolved_work(store, work)?
         .into_iter()
-        .map(|(process, _)| {
-            let id = process.id();
-            format!("Process {id} has live or unresolved execution; inspect `lf history show {id}`")
+        .map(|(work, _)| {
+            format!(
+                "{} has live or unresolved execution; inspect `lf history show {}`",
+                work.label(),
+                work_id(work)
+            )
         })
         .collect())
 }
 
-/// Open Processes outside the caller's own lineage that are not known dead,
-/// with their liveness evidence.
-pub(crate) fn unresolved_processes<'a>(
-    store: &SqliteStore,
-    processes: &'a [ProcessEntry],
-) -> OpsResult<Vec<(&'a ProcessEntry, ProcessIdentityEvidence)>> {
-    let mut lineage = HashSet::new();
-    let mut next = crate::journal::current_lf_process_id();
-    while let Some(id) = next.filter(|id| lineage.insert(id.clone())) {
-        next = store
-            .lf_process(&id)
-            .map_err(error)?
-            .and_then(|process| process.parent_lf_process_id);
+fn work_id(work: &OpenWork) -> String {
+    match work {
+        OpenWork::Session { id, .. } => id.to_string(),
+        OpenWork::Graph { run, .. } => run.id.to_string(),
     }
-    Ok(processes
+}
+
+/// Open work outside the caller's own that is not known dead, with its
+/// liveness evidence.
+pub(crate) fn unresolved_work<'a>(
+    store: &SqliteStore,
+    work: &'a [OpenWork],
+) -> OpsResult<Vec<(&'a OpenWork, ProcessIdentityEvidence)>> {
+    let own = OwnWork::of_caller(store)?;
+    Ok(work
         .iter()
-        .filter(|process| {
-            process.completed_at().is_none()
-                && !process
-                    .as_lf()
-                    .is_some_and(|process| lineage.contains(&process.id))
-        })
-        .map(|process| {
-            (
-                process,
-                crate::journal::process_entry_evidence(store, process),
-            )
-        })
+        .filter(|work| !own.contains(work))
+        .map(|work| (work, work_evidence(store, work)))
         .filter(|(_, evidence)| *evidence != ProcessIdentityEvidence::Dead)
         .collect())
 }
 
-/// A Task's work is every Process in its checkout or bound through a Session.
+fn work_evidence(store: &SqliteStore, work: &OpenWork) -> ProcessIdentityEvidence {
+    match work {
+        OpenWork::Session { agent, .. } => crate::process::os_process::agent_evidence(store, agent),
+        OpenWork::Graph { run, .. } => crate::process::RecordedProcess::from(run).evidence(),
+    }
+}
+
+/// What the caller runs as and under: this lf, the lf it inherited, the
+/// agent conversation that issued it and the Graph runs those are steps of.
+struct OwnWork {
+    processes: HashSet<LfProcessId>,
+    graphs: HashSet<LfProcessId>,
+    session: Option<LfSessionId>,
+}
+
+impl OwnWork {
+    fn of_caller(store: &SqliteStore) -> OpsResult<Self> {
+        let caller = crate::journal::agent_caller();
+        let processes: HashSet<_> = [
+            crate::journal::current_lf_process_id(),
+            crate::journal::current_parent_lf_process_id(),
+            caller
+                .as_ref()
+                .map(|caller| caller.origin_lf_process_id.clone()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        let mut graphs = processes.clone();
+        for process in &processes {
+            graphs.extend(store.graph_of_step(process).map_err(error)?);
+        }
+        Ok(Self {
+            processes,
+            graphs,
+            session: caller.map(|caller| caller.session_id),
+        })
+    }
+
+    fn contains(&self, work: &OpenWork) -> bool {
+        match work {
+            OpenWork::Session { id, launcher, .. } => {
+                self.session.as_ref() == Some(id)
+                    || launcher
+                        .as_ref()
+                        .is_some_and(|launcher| self.processes.contains(launcher))
+            }
+            OpenWork::Graph { run, .. } => self.graphs.contains(&run.id),
+        }
+    }
+}
+
+/// A Task's work is every Session and Graph run in its checkout or bound to it.
 pub fn task_execution_blockers(store: &SqliteStore, task: &TaskId) -> OpsResult<Vec<String>> {
-    let processes = store.task_open_processes(task).map_err(error)?;
-    execution_blockers(store, &processes)
+    let work = store.task_open_work(task).map_err(error)?;
+    execution_blockers(store, &work)
 }
 
 #[cfg(test)]
@@ -395,8 +412,8 @@ mod tests {
     use super::{
         apply_limit_recovery, project_execution, TaskExecutionSnapshot, TaskExecutionState,
     };
-    use crate::journal::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use crate::session::GraphProcessSummaryState;
+    use crate::store::ProcessIdentityEvidence::{Dead, Live, Unknown};
     use loopflow_storage::sqlite::AgentLimitRecovery;
 
     fn snapshot(state: TaskExecutionState) -> TaskExecutionSnapshot {

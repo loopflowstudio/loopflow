@@ -250,7 +250,7 @@ for line in sys.stdin:
         let source_id = source.artifact_key();
         source.finish("completed").unwrap();
 
-        let session = loopflow_storage::sqlite::SqliteStore::open_processes_read_only(
+        let session = loopflow_storage::sqlite::SqliteStore::open_read_only(
             &registry,
             loopflow_execution::store::token_key::encryption_key,
         )

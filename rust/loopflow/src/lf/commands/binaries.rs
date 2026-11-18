@@ -1,7 +1,8 @@
 //! Live lf processes by the binary they run.
 //!
 //! A running lf keeps its binary across a promote, so a hotfix reaches only new
-//! processes. The inventory names every recorded, live lf Process by executable
+//! processes. The inventory names every live lf its records name (owner
+//! records for this lf, Process rows for a released one) by executable
 //! and version, and flags the ones a launch through the entry no longer runs
 //! (`installation::superseded`). A superseded process keeps running on its
 //! own; `lf resume` of a conversation an earlier build's owner runs ends that
@@ -16,9 +17,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use loopflow_execution::journal::{
-    lf_process_evidence, recorded_process_receipt, OsProcess, ProcessIdentityEvidence,
-};
+use loopflow_execution::process::{OsProcess, RecordedProcess};
+use loopflow_execution::store::ProcessIdentityEvidence;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -112,7 +112,7 @@ pub fn inventory() -> Result<BinaryInventory> {
         .ok();
     let processes = if database.exists() {
         live_lf_processes(
-            &SqliteStore::open_processes_read_only(
+            &SqliteStore::open_read_only(
                 &database,
                 loopflow_execution::store::token_key::encryption_key,
             )?,
@@ -167,6 +167,38 @@ fn live_lf_processes(
         })
         .collect();
     let mut live = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let confirmed = |pid: u32, started_at: i64| {
+        by_pid
+            .get(&pid)
+            .is_some_and(|process| process.evidence(started_at) == ProcessIdentityEvidence::Live)
+    };
+    // This lf records each run on its owner and each attachment on its Session.
+    for recorded in store.recorded_lfs()? {
+        let Some(os_started_at) = recorded.os_started_at else {
+            continue;
+        };
+        if current.as_ref().map(LfProcessId::as_str) == Some(recorded.id.as_str())
+            || providers.contains(&(recorded.pid, os_started_at))
+            || !confirmed(recorded.pid, os_started_at)
+            || !seen.insert(recorded.pid)
+        {
+            continue;
+        }
+        let Ok(id) = LfProcessId::parse(&recorded.id) else {
+            continue;
+        };
+        live.push((
+            RunningLfProcess {
+                label: recorded.what,
+                id,
+                pid: recorded.pid,
+                started_at: recorded.started_at.unwrap_or(os_started_at),
+            },
+            OsProcess::executable(recorded.pid),
+        ));
+    }
+    // A released lf still records itself as a Process row.
     for record in records {
         let loopflow_execution::process::ProcessEntry::Lf(record) = record else {
             continue;
@@ -182,20 +214,26 @@ fn live_lf_processes(
             continue;
         }
         let mut live_pid = None;
-        let receipt = recorded_process_receipt(store, &record);
-        let evidence = lf_process_evidence(&record, &receipt, |pid, started_at| {
-            let Some(process) = by_pid.get(&pid) else {
-                return ProcessIdentityEvidence::Dead;
-            };
-            let evidence = process.evidence(started_at);
-            if evidence == ProcessIdentityEvidence::Live {
+        let recorded = RecordedProcess {
+            ended: record.completed_at.is_some(),
+            pid: record.pid,
+            os_started_at: record.os_started_at,
+            started_at: Some(record.started_at),
+        };
+        let evidence = recorded.evidence_by(|pid, started_at| {
+            if confirmed(pid, started_at) {
                 live_pid = Some(pid);
+                ProcessIdentityEvidence::Live
+            } else {
+                ProcessIdentityEvidence::Dead
             }
-            evidence
         });
         let (ProcessIdentityEvidence::Live, Some(pid)) = (evidence, live_pid) else {
             continue;
         };
+        if !seen.insert(pid) {
+            continue;
+        }
         live.push((
             RunningLfProcess {
                 label: loopflow_execution::command::lf_command_label(record.command.as_deref()),
@@ -426,7 +464,7 @@ mod tests {
         let store =
             loopflow_execution::store::opening::open_ephemeral(&directory.path().join("lf.db"))
                 .unwrap();
-        let me = loopflow_execution::journal::OsProcess::read(std::process::id())
+        let me = loopflow_execution::process::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();
         let launcher = LfProcessId::new();

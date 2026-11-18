@@ -15,7 +15,7 @@ use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
-use crate::journal::ProcessIdentityEvidence;
+use crate::store::ProcessIdentityEvidence;
 use loopflow_model::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
@@ -24,12 +24,12 @@ static REPORT: Mutex<Option<PathBuf>> = Mutex::new(None);
 const CREATION_ENV: &str = "LF_CREATION_REQUEST";
 static CREATION: Mutex<Option<String>> = Mutex::new(None);
 
-/// What a detached operation set going: the `lf` Process that carries it.
-/// `process.get` reads how it is going; `log` is its output.
+/// What a detached operation set going: the `lf` that carries it, and `log`,
+/// its output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Launched {
-    /// The operation the Process carries: `checkout.sync`, `pr.land`,
+    /// The operation that `lf` carries: `checkout.sync`, `pr.land`,
     /// `repo.release`, `graph.run`, `skill.run`.
     pub operation: String,
     #[serde(rename = "lf_process_id")]
@@ -43,10 +43,8 @@ pub struct Launched {
 impl Launched {
     pub fn render(&self) -> String {
         format!(
-            "{} running as process {}\n  follow: lf process show {}\n  log:    {}",
+            "{} running in the background\n  log:    {}",
             self.run,
-            self.process,
-            self.process,
             self.log.display()
         )
     }
@@ -189,16 +187,7 @@ fn start_reported<T: DeserializeOwned>(
         Ok((path, process))
     })();
     let (path, process) = launched.map_err(|error| Error::outcome_unknown(&error))?;
-    wait(&path, args, || process_evidence(&process), SystemTime::now)
-}
-
-fn process_evidence(process: &LfProcessId) -> ProcessIdentityEvidence {
-    crate::store::read_existing_registry()
-        .ok()
-        .flatten()
-        .map_or(ProcessIdentityEvidence::Unknown, |store| {
-            crate::journal::lf_evidence(&store.sqlite, process)
-        })
+    wait(&path, args, || process.evidence(), SystemTime::now)
 }
 
 fn wait<T: DeserializeOwned>(
@@ -257,9 +246,10 @@ fn read<T: DeserializeOwned>(path: &Path) -> Result<Option<Result<T>>> {
 mod tests {
     use std::time::{Duration, SystemTime};
 
-    use super::{process_evidence, wait, write, UNKNOWN_GRACE};
+    use super::{wait, write, UNKNOWN_GRACE};
     use crate::engine::{Error, ErrorCode};
-    use crate::journal::{ProcessIdentityEvidence, TestLedgerGuard};
+    use crate::os_process::detached::Started;
+    use crate::store::ProcessIdentityEvidence;
 
     use loopflow_model::id::LfProcessId;
 
@@ -382,38 +372,20 @@ mod tests {
     }
 
     #[test]
-    fn polling_recovers_when_a_missing_or_unreadable_registry_returns() {
-        for unreadable in [false, true] {
-            let ledger = TestLedgerGuard::new();
-            let database = ledger.home().join("loopflow.db");
-            let path = ledger.home().join("report.json");
-            let process = LfProcessId::new();
-            if unreadable {
-                std::fs::write(&database, "not a database").unwrap();
-            }
-            let mut recovered = false;
-            let error = wait::<String>(
-                &path,
-                &[],
-                || process_evidence(&process),
-                || {
-                    assert!(!recovered, "the next poll must see the finished process");
-                    recovered = true;
-                    if unreadable {
-                        std::fs::remove_file(&database).unwrap();
-                    }
-                    let _store = crate::store::opening::open_ephemeral(&database).unwrap();
-                    let connection = rusqlite::Connection::open(&database).unwrap();
-                    connection.execute(
-                        "INSERT INTO processes(id,trace_id,started_at,completed_at) VALUES(?1,?1,1,2)",
-                        [&process],
-                    ).unwrap();
-                    SystemTime::UNIX_EPOCH
-                },
-            )
-            .unwrap_err();
-            assert_eq!(error.code, ErrorCode::OutcomeUnknown);
-            assert!(error.message.contains("ended without a result"));
-        }
+    fn a_child_that_exits_without_a_report_ended_without_a_result() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("report.json");
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let pid = child.id();
+        child.wait().unwrap();
+        // No store: liveness is the child's own pid.
+        let started = Started {
+            id: LfProcessId::new(),
+            pid,
+            os_started_at: Some(1),
+        };
+        let error = wait::<String>(&path, &[], || started.evidence(), SystemTime::now).unwrap_err();
+        assert_eq!(error.code, ErrorCode::OutcomeUnknown);
+        assert!(error.message.contains("ended without a result"));
     }
 }

@@ -1445,6 +1445,7 @@ impl MachineCommand {
                 | OndemandCommand::Rent { .. }
                 | OndemandCommand::Remove { .. } => true,
             },
+            Self::Hub { machine, clear } => machine.is_some() || *clear,
             Self::Prune { .. }
             | Self::Connect { .. }
             | Self::Public { .. }
@@ -3056,6 +3057,14 @@ pub enum MachineCommand {
         label: Option<String>,
         #[arg(long)]
         json: bool,
+    },
+    /// Keep this Machine's plan on an added machine, for every repository
+    /// without Linear or Asana; bare, show where it is
+    Hub {
+        machine: Option<String>,
+        /// Keep the plan on this Machine again
+        #[arg(long, conflicts_with = "machine")]
+        clear: bool,
     },
     /// Change a saved machine's label
     Rename { label: String, name: String },

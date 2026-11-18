@@ -34,7 +34,7 @@ address and its lock remain stable so already-running relays can recover across
 the rename. There is one listener, with no alias or alternate protocol path.
 Work and credentials stay in place.
 
-## Local protocol, revision 8
+## Local protocol, revision 9
 
 One connection per client over the same-user Unix socket. Every message is one
 JSON object per line (`serde_json` never emits a raw newline). Control messages
@@ -68,7 +68,7 @@ subscriptions carry `sender`, what the receiving server cannot know; a
 Machine's null `sender` is `invalid`, and a client on this Machine sends null:
 
 ```text
-→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"machine",…}}
+→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"machine",…}}
 ← {"type":"welcome",…}
 → {"type":"request","id":"…","operation":{"kind":"task.hold","directory":"/laptop/repo",…},"select":null,"sender":{"repository":"repo_…","selection":{"profile":{…},"participant":"…","agent":null,"settings":null,"source":null},"secrets":{}}}
 ← {"type":"response","id":"…","result":{…}}
@@ -121,8 +121,8 @@ a described kind with exactly its fields, every client fixture must be encoded
 by a test and every server fixture must decode.
 
 ```text
-→ {"type":"hello","revision":8,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
-← {"type":"welcome","client_id":"…","revision":8,"server_revision":8,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
+→ {"type":"hello","revision":9,"min_revision":8,"client":{"kind":"desktop","platform":"macos","name":"Loopflow","version":"0.15.1"}}
+← {"type":"welcome","client_id":"…","revision":9,"server_revision":9,"min_revision":8,"instance":"…","build":"0.15.1","executable_sha256":"…","machine":{…},"limits":{"max_message":1048576,"max_connections":64,"max_open":256,"max_retained_bytes":67108864}}
 → {"type":"request","id":"a","operation":{"kind":"plan.list","directory":"/","wave":null,"task":null,"all":true},"select":null,"request_id":null}
 → {"type":"subscribe","id":"b","operation":{"kind":"session.list","directory":"/repo","headless":false,"after":null,"limit":null,"task":null},"select":["id","title","state"],"resume":null}
 ← {"type":"response","id":"a","trace_id":"…","result":{…}}
@@ -146,7 +146,7 @@ unavailable or uninitialized) and limits. The negotiated revision is the whole
 compatibility check: a server that speaks it offers every operation below, so
 no capability list travels. With no revision in
 common it answers `error {code: incompatible}` naming the side to update in
-its message and in `data.update` (`client` or `server`), then closes. This build speaks revision 8; the shape lets a later server speak
+its message and in `data.update` (`client` or `server`), then closes. This build speaks revisions 8 and 9; the shape lets a later server speak
 two. A revision-1 client's four-byte length prefix starts below `0x20`; the
 server answers it a revision-1 framed `incompatible` error carrying `instance`
 and closes. That sniff is the whole compatibility layer and goes with revision 1.
@@ -293,6 +293,7 @@ case names one operation, including distinct claim/unassign and pin/unpin writes
 | `session.rename`, `.bind`, `.resume`, `.new` | `lf session <verb>`, `lf resume` | write |
 | `session.steer` | `lf [--wave <wave>] steer [<id>] <message>` | write; `engine::session::steer` |
 | `session.boundary` | none; provider hooks through `lf __context-block` ([Turn and tool boundaries](#turn-and-tool-boundaries)) | server |
+| `plan.changes`, `plan.apply` | none; another Machine whose hub this is (`lf machine hub`), over `lf server connect` | server; `ops::plan_hub::changes_here`, `apply_here` (revision 9) |
 | `session.status` | `lf session observe-status <id> --terminal <terminal> --stream <stream> --sequence <n>`, the snapshot on stdin | write; one Program Status reading from the terminal showing a Session. A stream's first reading replaces any earlier stream; a late reading never replaces a newer one |
 | `wave.list`, `wave.graph` | `lf wave list`, `lf wave graph show` | read |
 | `wave.plan` | `lf wave plan <wave>` | read |

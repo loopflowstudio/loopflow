@@ -335,6 +335,17 @@ async fn exchange_repository(store: &Store, repo: &str, exchange: Exchange) -> O
     if EXCHANGE_DEFERRED.load(Ordering::SeqCst) {
         return Ok(());
     }
+    if let Some(hub) = super::plan_hub::hub(&store.sqlite).map_err(message)? {
+        let sqlite = store.sqlite.clone();
+        let repo = repo.to_owned();
+        let send_only = matches!(exchange, Exchange::Publish { .. });
+        return crate::journal::request::spawn_blocking(move || {
+            super::plan_hub::exchange(&sqlite, &repo, &hub, send_only)
+        })
+        .await
+        .map_err(message)?
+        .map_err(message);
+    }
     let Some(destination) = configured_destination(store, repo).await? else {
         return Ok(());
     };

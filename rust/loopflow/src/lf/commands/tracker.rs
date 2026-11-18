@@ -301,6 +301,9 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         }
         Status::Git(destinations, lost) => (destinations, lost),
     };
+    if let Some(hub) = loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
+        return print_hub(store, repo, &hub);
+    }
     if !destinations.iter().any(|d| d.active) {
         println!("Tracker: git. Saves stay on this Machine until its remote takes them.");
     }
@@ -358,6 +361,90 @@ async fn print_status(store: &Store, repo: &str, json: bool) -> Result<()> {
         print_actions(store, &lost)?;
     }
     Ok(())
+}
+
+/// `Plan: hub mini. 2 open.`, then each open value under its owner's name.
+fn print_hub(store: &Store, repo: &str, hub: &loopflow_model::durable::Machine) -> Result<()> {
+    let plan = store.sqlite.hub_plan(repo)?;
+    let sends = store.sqlite.open_hub_sends(repo)?;
+    let failing = plan.as_ref().and_then(|plan| {
+        plan.failing_since
+            .map(|since| (since, plan.error.clone().unwrap_or_default()))
+    });
+    let place = match &failing {
+        Some((since, _)) => format!(
+            "hub {}, unreachable since {}",
+            hub.name(),
+            loopflow_execution::output::format_time(*since)
+        ),
+        None => format!("hub {}", hub.name()),
+    };
+    if sends.is_empty() {
+        println!("Plan: {place}. Nothing open.");
+        return Ok(());
+    }
+    println!("Plan: {place}. {} open.", sends.len());
+    let lines = sends
+        .iter()
+        .map(|send| {
+            // `task_title` reads `title` under its Task.
+            let field = send.edit.change.field();
+            let field = ["task_", "wave_", "project_", "comment_"]
+                .iter()
+                .find_map(|prefix| field.strip_prefix(prefix))
+                .unwrap_or(field);
+            let mut line = format!(
+                "{field} · {}",
+                if send.sent_at.is_some() {
+                    "sent"
+                } else {
+                    "queued"
+                }
+            );
+            if let Some((_, error)) = &failing {
+                line.push_str(&format!(" · {error}"));
+            }
+            Ok((hub_owner_name(store, send)?, line))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let width = lines
+        .iter()
+        .map(|(owner, _)| owner.len())
+        .max()
+        .unwrap_or(0);
+    for (owner, line) in lines {
+        println!("  {owner:width$}  {line}");
+    }
+    Ok(())
+}
+
+/// A Task's identifier, `wave <name>`, `project <name>` or `comment <id>`.
+fn hub_owner_name(
+    store: &Store,
+    send: &loopflow_execution::store::sqlite::plan_hub::HubSend,
+) -> Result<String> {
+    let id = &send.edit.target;
+    Ok(match send.owner_table.as_str() {
+        "tasks" => store
+            .sqlite
+            .task(&loopflow_model::durable::TaskId::from_raw(id))?
+            .map_or_else(|| id.clone(), |task| task.identifier),
+        "waves" => format!(
+            "wave {}",
+            store
+                .sqlite
+                .get_wave(&loopflow_model::id::WaveId::parse(id)?)?
+                .map_or_else(|| id.clone(), |wave| wave.name().to_owned())
+        ),
+        "projects" => format!(
+            "project {}",
+            store
+                .sqlite
+                .project(&loopflow_model::durable::ProjectId::from_raw(id))?
+                .map_or_else(|| id.clone(), |project| project.name)
+        ),
+        _ => format!("comment {}", short_id(id)),
+    })
 }
 
 /// One line per action under its owner's name, and how to answer a lost one.

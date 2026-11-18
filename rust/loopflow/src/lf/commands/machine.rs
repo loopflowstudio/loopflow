@@ -72,6 +72,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
     if label.is_none() && defaults.iter().any(|d| d.machine_id == local.id) {
         machines.insert(0, local);
     }
+    let hub = loopflow_execution::ops::plan_hub::hub(&store.sqlite)?.map(|hub| hub.id);
     let mut listed = Vec::new();
     for machine in machines {
         let mut tasks = Vec::new();
@@ -85,6 +86,7 @@ async fn listings(store: &Store, label: Option<&str>) -> anyhow::Result<Vec<Mach
             }
         }
         listed.push(MachineListing {
+            hub: hub.as_ref() == Some(&machine.id),
             defaults: defaults
                 .iter()
                 .filter(|d| d.machine_id == machine.id)
@@ -207,6 +209,27 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             }
             print_machine(&machine, *json)?;
         }
+        MachineCommand::Hub { machine, clear } => {
+            let selected = match machine {
+                Some(machine) => Some(find_machine(&store, machine).await?),
+                None if *clear => None,
+                None => {
+                    match loopflow_execution::ops::plan_hub::hub(&store.sqlite)? {
+                        Some(hub) => println!("Plan: hub {}.", hub.name()),
+                        None => println!("Plan: this Machine."),
+                    }
+                    return Ok(());
+                }
+            };
+            loopflow_execution::ops::plan_hub::set_hub(
+                &store.sqlite,
+                selected.as_ref().map(|machine| &machine.id),
+            )?;
+            match selected {
+                Some(hub) => println!("This Machine keeps its plan on {}.", hub.name()),
+                None => println!("This Machine keeps its plan here."),
+            }
+        }
         MachineCommand::List { label, json } => {
             let listings = listings(&store, label.as_deref()).await?;
             if *json {
@@ -214,6 +237,9 @@ async fn run_async(cmd: &MachineCommand, batch: bool) -> anyhow::Result<()> {
             } else {
                 for listing in &listings {
                     print_machine(&listing.machine, false)?;
+                    if listing.hub {
+                        println!("  hub: holds this Machine's plan");
+                    }
                     for default in &listing.defaults {
                         let scope = match &default.scope {
                             DefaultScope::Wave(_) => "Wave",
@@ -348,6 +374,8 @@ pub struct MachineListing {
     #[serde(flatten)]
     machine: Machine,
     defaults: Vec<MachineDefault>,
+    /// It holds this Machine's plan (`lf machine hub`).
+    hub: bool,
     /// Unfinished Tasks it owns, as this Machine reads their ownership.
     tasks: Vec<HeldTask>,
 }

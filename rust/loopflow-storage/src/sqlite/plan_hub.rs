@@ -30,6 +30,8 @@ pub struct HubPlan {
 #[derive(Debug, Clone, PartialEq)]
 pub struct HubSend {
     pub seq: i64,
+    /// `waves`, `projects`, `tasks` or `task_comments`.
+    pub owner_table: String,
     pub edit: WorkEdit,
     pub sent_at: Option<i64>,
 }
@@ -176,8 +178,9 @@ impl SqliteStore {
             .query_and_then([repo], |row| -> StoreResult<HubSend> {
                 Ok(HubSend {
                     seq: row.get(0)?,
-                    edit: serde_json::from_str(&row.get::<_, String>(1)?)?,
-                    sent_at: row.get(2)?,
+                    owner_table: row.get(1)?,
+                    edit: serde_json::from_str(&row.get::<_, String>(2)?)?,
+                    sent_at: row.get(3)?,
                 })
             })?
             .collect();

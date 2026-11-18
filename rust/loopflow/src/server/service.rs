@@ -1453,6 +1453,20 @@ async fn served(
         Operation::Server(ServerOperation::SessionBoundary(_)) => {
             unreachable!("request dispatches boundaries")
         }
+        Operation::Server(ServerOperation::PlanApply { repository, edits }) => {
+            plan_here(reservation, move |store| {
+                loopflow_execution::ops::plan_hub::apply_here(store, &repository, &edits)
+            })
+            .await
+        }
+        Operation::Server(ServerOperation::PlanChanges { repository, since }) => {
+            plan_here(reservation, move |store| {
+                Ok(serde_json::to_value(
+                    loopflow_execution::ops::plan_hub::changes_here(store, &repository, since)?,
+                )?)
+            })
+            .await
+        }
         Operation::Write(_) | Operation::Measured(super::wire::MeasuredOperation::Write { .. }) => {
             unreachable!("operate answers writes")
         }
@@ -1497,6 +1511,26 @@ async fn mobile_control(
         .await
         .map_err(|_| Error::new(ErrorCode::Unavailable, "mobile listener is not running"))?;
     Ok(())
+}
+
+/// The hub's answer to another Machine's plan exchange, from this Machine's store.
+async fn plan_here(
+    reservation: Arc<Reservation>,
+    answer: impl FnOnce(&loopflow_execution::store::sqlite::SqliteStore) -> Result<serde_json::Value>
+        + Send
+        + 'static,
+) -> Result<serde_json::Value, Error> {
+    tokio::task::spawn_blocking(move || {
+        let _held = reservation;
+        loopflow_execution::journal::request::isolate(|| {
+            let path = loopflow_execution::store::default_db_path();
+            anyhow::ensure!(path.exists(), "Machine registry is absent");
+            answer(&loopflow_execution::store::open_sqlite(&path)?)
+        })
+    })
+    .await
+    .map_err(unavailable)?
+    .map_err(unavailable)
 }
 
 /// Record a hook's boundary and answer its steers. A `stop`'s planning refresh

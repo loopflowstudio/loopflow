@@ -290,6 +290,7 @@ definitions! {
     machine: placement::Placement = "{}", PersonalScoped, Merge, Portable, NextLaunch, Machines, "Preferred durable Machine IDs or local capacity; existing Task assignments survive";
     machines: BTreeMap<String, placement::MachineDeclaration> = "{}", Personal, Merge, Portable, NextRead, Machines, "Aliases for durable Machine identities";
     connections: HashMap<loopflow_model::durable::MachineId, String> = "{}", Personal, Merge, HostLocal, NextRead, Machines, "This host's connection address for each durable Machine ID";
+    hub: Option<loopflow_model::durable::MachineId> = "null", Personal, Replace, HostLocal, NextRead, Machines, "The Machine holding the plan of every repository without Linear or Asana; unset keeps it here";
     auth_browsers: BTreeMap<String, placement::AuthBrowsers> = "{}", Personal, Merge, HostLocal, DomainAction, Accounts, "Ordered local browser profiles for authentication; discovered browser identities stay local";
     repo_root: Option<PathBuf> = "null", Personal, Replace, HostLocal, NextRead, Desktop, "Local repository discovery directory";
     theme: Option<String> = "null", Personal, Replace, ReferencedAssets, NextRead, Desktop, "Appearance theme or light:name,dark:name pair";

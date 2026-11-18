@@ -1,4 +1,4 @@
-//! Carrier-independent server protocol, revision 8: one connection per client,
+//! Carrier-independent server protocol, revision 9: one connection per client,
 //! negotiated revision, requests multiplexed by id. Local admission is
 //! same-user only; the remote carrier admits the Machine owner's other
 //! Tailscale devices. Each carrier delimits messages its own way: the Unix
@@ -11,7 +11,10 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The newest revision this build speaks.
-pub const REVISION: u32 = 8;
+pub const REVISION: u32 = 9;
+/// The first revision that holds a plan for other Machines (`plan.apply`,
+/// `plan.changes`).
+pub const PLAN_REVISION: u32 = 9;
 /// The oldest revision this build speaks. Revision 8 requires `sender` on
 /// `request` and `subscribe`; it keeps 7's write revisions and request IDs.
 pub const MIN_REVISION: u32 = 8;
@@ -257,6 +260,38 @@ pub enum ServerOperation {
     #[serde(rename = "session.boundary")]
     #[schemars(extend("x-result" = generator.subschema_for::<SessionBoundaryAnswer>()))]
     SessionBoundary(SessionBoundary),
+    /// The hub's side of a plan exchange: write another Machine's saves of
+    /// `repository`'s plan here, in one transaction, as this Machine's own.
+    /// Repeating it changes nothing. Answers `{}`.
+    #[serde(rename = "plan.apply")]
+    #[schemars(extend("x-result" = schemars::json_schema!({"type": "object", "additionalProperties": false})))]
+    PlanApply {
+        repository: loopflow_model::durable::RepositoryId,
+        #[schemars(with = "Vec<Untyped>")]
+        edits: Vec<loopflow_storage::work::edit::WorkEdit>,
+    },
+    /// Every current value of each Wave, Project, Task and comment of
+    /// `repository`'s plan here that changed after the watermark `since`;
+    /// null reads the whole plan.
+    #[serde(rename = "plan.changes")]
+    #[schemars(extend("x-result" = generator.subschema_for::<PlanChanges>()))]
+    PlanChanges {
+        repository: loopflow_model::durable::RepositoryId,
+        #[serde(deserialize_with = "Option::deserialize")]
+        since: Option<i64>,
+    },
+}
+
+/// What `plan.changes` answers.
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct PlanChanges {
+    #[schemars(with = "Vec<Untyped>")]
+    pub edits: Vec<loopflow_storage::work::edit::WorkEdit>,
+    /// The watermark to read from next.
+    pub seq: i64,
+    /// More changes follow `seq`; read again from it.
+    pub more: bool,
 }
 
 /// What a hook says at a turn or tool boundary.

@@ -43,7 +43,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
             let mut stdout = String::new();
             let mut stderr = String::new();
             let mut exit_code = None;
-            let mut limited = false;
+            let mut failure = None;
             let mut input_tick = tokio::time::interval(Duration::from_millis(250));
             input_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
             let mut activity_tick = tokio::time::interval(crate::session_record::activity::SAMPLE_INTERVAL);
@@ -78,7 +78,7 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                             }
                             ConversationEvent::Error { code, message, .. } => {
                                 stderr.push_str(&format!("{code}: {message}\n"));
-                                limited |= code == "provider_rate_limited";
+                                failure = failure.or(AgentFailure::from_code(&code));
                                 if launch.harness.terminal_error(&code)
                                 {
                                     exit_code = Some(1);
@@ -111,9 +111,9 @@ pub fn run(launch: &Launch<'_>, process: &ProcessConfig) -> Result<AgentProcessR
                 stdout,
                 stderr,
                 agent_session: harness.agent_session(),
-                // A turn the provider finished was served, whatever a rate
-                // limit event said along the way.
-                failure: (limited && exit_code != 0).then_some(AgentFailure::UsageLimit),
+                // A turn the provider finished was served, whatever an error
+                // said along the way.
+                failure: failure.filter(|_| exit_code != 0),
             })
         };
         let result = match process.timeout {

@@ -155,18 +155,12 @@ What it taught:
   the provider names; lf's names keep their coverage from the `managed` hook
   assertions.
 
-Remaining: the Demo, run by hand.
-
-1. Rename and extend the list, the function, the five sites, and the
-   launch-matrix assertion.
-   This is the whole change; the matrix run shows whether any of the 16 cells
-   reaches a provider some other way.
-2. If a cell still sees a marker, follow that path to its spawn and route it
-   through the function rather than adding a fourth call.
+Remaining: the Demo, run by hand (demo or gate step; a headless run
+here can't show a person the transcript). Nothing remains to build.
 
 ## Docs
 
 Written ahead of the build: `docs/sessions.md` ("Run one headless", one
 paragraph) and `docs/dev/environment.md` ("The caller's session", the list and
-the passthrough names). Slice 1 keeps the table in step with
-`CALLER_SESSION_ENV`.
+the passthrough names). The table in `environment.md` matches
+`CALLER_SESSION_ENV` (checked 2026-11-17).

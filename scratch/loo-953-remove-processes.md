@@ -15,18 +15,19 @@ CI repair runs on `ci_incidents.repair_{started_at,pid,os_started_at}`
 os_started_at }`, so `engine::launch` waits on its child without the store;
 the owner items, carriers and the first Session cut below.
 
-Next, in order: (1) the rest of slice 3: attachment (`attachment_token`,
-`attached_lf_process_id`, `endpoint`, `inbox`, `terminal_id`) onto
-`agent_sessions`, the agent writers moved onto the Session (flipping the
-bridge below to old → new only, plus new → old for released readers), the
-`prepare_resume` beside path ended, then `task_open_process_pairs` as live
-Sessions + Graph runs (Graph runs gain `held_terminal_id`) and with it the
-retirement-by-terminal gap; (2) the expand migration's foreign-key rebuild
-together with stopping the journal writer **and the owner liveness pass**
-(see "Concept review after the carrier slices"); (3) slices 4–6. Still
-reading `processes` beside the carriers: `process_starter` (ship "started
-by"), `run_task_graph`'s parent check (`graph.rs:79`) and `task_state_sql`'s
-`open_processes` arm. When LOO-936 merges: rebase, rerun
+Next, in order (why this order: "Concept review after the Session
+lifetime cut"): (1) the attachment cut: `attachment_token`,
+`attached_lf_process_id`, `attached_pid`, `attached_os_started_at`,
+`endpoint`, `inbox`, `terminal_id` onto `agent_sessions`, the agent writers
+moved onto the Session, readers of the attached lf's row repointed, a
+reserved agent taking its holder's liveness, the `prepare_resume` beside
+path ended; (2) the lf-row readers: `task_open_process_pairs` and
+`task_state_sql`'s `open_processes` arm as live Sessions + Graph runs,
+retirement by terminal (Graph runs gain `held_terminal_id`),
+`process_starter`, `run_task_graph`'s parent check (`graph.rs:79`);
+(3) the expand migration's foreign-key rebuild together with stopping the
+journal writer **and the owner liveness pass** (see "Concept review after
+the carrier slices"); (4) slices 4–6. When LOO-936 merges: rebase, rerun
 `python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
 Quotes and the OS-scan measurement: `questions.md`.
 
@@ -63,6 +64,55 @@ also fails at `38aa184ae5` (gate); new
 `session_metadata_reads_its_graph_from_the_process_that_captured_its_input`
 (dead Graph pid → stopped) → pass; `loopflow` `server::wake::`,
 `server::boundary::` → pass; clippy → clean.
+
+**Concept review after the Session lifetime cut (2026-11-17): next implement direction.**
+
+A Process row is two things: an lf row (written by the journal) and an agent
+row (written by the attachment writers). They leave in two cuts, and the
+order is forced, not chosen:
+
+- **The attachment cut comes first, because lf rows are read through the
+  agent's attachment.** The summary's terminal is the attached lf's
+  `processes.terminal_id` while its row is unfinished (`sessions.rs:407`);
+  `UNRECORDED_ANCESTRY` (`processes.rs:534`) and `attachment_in` treat a
+  missing lf row as released; `session_turn_origin` (`session_events.rs:559`),
+  `process_session` (`sessions.rs:841`) and provider transitions
+  (`provider_transitions.rs:182`) match on `attached_lf_process_id`. If the
+  journal stopped first, every attached agent would read released and lose
+  its terminal. So the cut puts `attachment_token`, `attached_lf_process_id`,
+  `attached_pid`, `attached_os_started_at`, `endpoint`, `inbox`,
+  `terminal_id` on `agent_sessions`, and those readers read the holder's
+  liveness from `attached_pid` through `journal::pid_evidence`, never from an
+  lf row. `require_current_actor_in`'s parent check becomes
+  `attached_lf_process_id` = the caller's launcher (approach 3).
+- **A reserved agent takes its holder's liveness.** Reserved (started, no
+  `agent_pid`) reads Unknown today; when its holder died before spawning,
+  nothing ever ends it. As `step_evidence` does for a reserved step, a
+  reserved agent's evidence is `pid_evidence(attached_pid, ..)`, and the
+  liveness pass ends it (`agent_ended_at`, no exit) when that reads Dead.
+  Test with the attachment cut: reserve an agent under a SIGKILLed holder →
+  `lf session list` does not show it live, and the next pass ends it.
+- **The bridge flips per column set.** After the cut lf writes no agent row;
+  `session_agent_from_process_*` then fire only for a released writer
+  (unchanged), and Session-update triggers write the agent row a released
+  reader joins. Each trigger's `WHEN` compares every column it writes, so
+  the pair cannot ping-pong.
+- **Then the lf-row readers, then the journal stop.** In one change before
+  the journal stop: `task_open_process_pairs` and `task_state_sql`'s
+  `open_processes` arm become the Task's live Sessions (`agent_started_at`
+  set, `agent_ended_at` NULL) and unended Graph runs; retirement by
+  terminal (Graph runs gain `held_terminal_id` from `transport::current()`,
+  which the journal passes to `record_process_within` today; `unsettled_work`'s
+  ancestry walk, `held_terminal_processes` and `launcher_lf_process_id`
+  reads go); `process_starter` from the ship event's `caller_session_id`;
+  `run_task_graph`'s parent check compares the carrier id with the parent
+  id the journal already inherits from the env, not a store row. The
+  journal-stop change (foreign-key rebuild, liveness pass, new → old lf-row
+  bridge) follows with the tests already named. A carrier waiting between
+  retries has no live Graph run; it is still "moving" by `run_pid`, so the
+  Task cannot retire then, as today.
+
+No open product choice.
 
 **Carrier slices as built.**
 

@@ -38,9 +38,16 @@ pub(super) fn reorder_in(conn: &Connection, task: &Task, rank: u32) -> StoreResu
 /// `task` takes `target`'s place among its Project's Tasks, or among the
 /// repository's standalone Tasks. Rank has no meaning across Projects.
 pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreResult<Vec<String>> {
-    if (&task.repository_id, &task.project_id) != (&target.repository_id, &target.project_id) {
+    let apart = if task.repository_id != target.repository_id {
+        Some("repositories")
+    } else if task.project_id != target.project_id {
+        Some("Projects")
+    } else {
+        None
+    };
+    if let Some(apart) = apart {
         return Err(StoreError::InvalidData(format!(
-            "{} and {} are in different Projects, and ranks order Tasks within one; nothing changed.",
+            "{} and {} are in different {apart}, and ranks order Tasks within one Project; nothing changed.",
             task.identifier, target.identifier
         )));
     }
@@ -52,11 +59,12 @@ pub(super) fn move_in(conn: &Connection, task: &Task, target: &Task) -> StoreRes
     siblings_in(conn, task)
 }
 
-/// The Tasks `task` is ranked among, in rank order.
+/// The Tasks `task` is ranked among, in rank order. Ties break by id, as
+/// `TaskOrder::key` does on every board, so a Move lands where it was dropped.
 fn siblings_in(conn: &Connection, task: &Task) -> StoreResult<Vec<String>> {
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE repository_id=?1 AND project_id IS ?2
-         AND planning_deleted_at IS NULL ORDER BY planning_rank,created_at,id",
+         AND planning_deleted_at IS NULL ORDER BY planning_rank,id",
     )?;
     let rows = query.query_map(
         params![
@@ -171,7 +179,7 @@ fn unconfirmed_orders(
 fn project_members(conn: &Connection, project: &ProjectId) -> StoreResult<Vec<String>> {
     let mut query = conn.prepare(
         "SELECT id FROM tasks WHERE project_id=?1 AND planning_deleted_at IS NULL
-         ORDER BY planning_rank,created_at,id",
+         ORDER BY planning_rank,id",
     )?;
     let rows = query.query_map([project.as_str()], |row| row.get(0))?;
     rows.collect::<Result<_, _>>().map_err(Into::into)

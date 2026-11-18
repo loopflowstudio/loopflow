@@ -77,3 +77,7 @@
   included; the board offers only Working tiles, and `lf desktop dashboard
   move working-tasks/...` with a done Task now changes its rank instead of
   refusing.
+- **Rank ties break by id** (QA). The board key already did; `siblings_in`
+  and `project_members` used `created_at`, so a drag among rank-0 Tasks (73
+  standalone loopflow Tasks on the live store) landed elsewhere. Passed over:
+  `created_at` in `TaskOrder::key`, which needs it on the `TaskSummary` wire DTO.

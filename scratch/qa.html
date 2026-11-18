@@ -1,0 +1,99 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>LOO-937 QA</title>
+<style>
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:920px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-bottom:1px solid #ddd;padding-bottom:.2rem}
+pre{background:#f5f5f7;padding:.7rem;overflow-x:auto;font-size:12.5px}
+table{border-collapse:collapse;font-size:13.5px}td,th{border:1px solid #ddd;padding:.25rem .5rem;text-align:left}
+.ok{color:#1a7f37}.bad{color:#b42318}.meh{color:#9a6700}
+</style></head><body>
+<h1>LOO-937 QA: one home per Task fact</h1>
+<p>Branch <code>lf</code> (debug build, HEAD 9ffada248 + fixes below) against the installed
+<code>lf 0.16.0+e66b21801</code>, on a <code>.backup</code> copy of the live store
+(1,396 Tasks, 187,967 Processes) and on a fresh private home. No display: Desktop
+was driven through its CLI (<code>lf desktop dashboard move</code>), not a window.</p>
+
+<h2>1. Returning user: upgrade a copy of the live store</h2>
+<p>Branch <code>lf task status LOO-937 --json</code> on the copy: migration plus read took 12.4 s wall.
+Output byte-identical to the installed <code>lf</code> on the unupgraded copy (8,478 bytes, empty <code>diff</code>).</p>
+<p>Before the first maintenance pass, only 2 Processes carry a Task; LOO-937 shows 22 of its 66 Processes
+(the agent rows of its Sessions). <code>lf machine prune --json</code> then ran the backfill:</p>
+<pre>"assigned_processes": 161985      39.1 s wall for the whole prune (debug build)
+processes 187,861, with task_id 161,987; Processes in a checkout without a Task: 0</pre>
+<p class="ok">Released <code>lf</code> reads the upgraded store (<code>task list --json</code> exit 0).</p>
+
+<h2>2. Same Task membership as released lf</h2>
+<p><code>lf task show &lt;id&gt;</code> on both copies, comparing <code>execution.work.processes</code>
+and <code>sessions</code> by id, for the 12 Tasks with most Processes plus random ones (21 readable; MTG/EXP/KAT Tasks
+belong to repositories not registered on the copy).</p>
+<table><tr><th>Task</th><th>Processes old → new</th><th>only old</th><th>only new</th><th>Sessions</th></tr>
+<tr><td>LOO-497</td><td>3611 → 3857</td><td>1 (pruned)</td><td>247</td><td>116 = 116</td></tr>
+<tr><td>LOO-809</td><td>2742 → 2741</td><td>1</td><td>0</td><td>694 = 694</td></tr>
+<tr><td>LOO-412</td><td>2357 → 2357</td><td>0</td><td>0</td><td>290 = 290</td></tr>
+<tr><td>LOO-523</td><td>2278 → 2325</td><td>0</td><td>47</td><td>26 = 26</td></tr>
+<tr><td>LOO-416</td><td>1621 → 1751</td><td>0</td><td>130</td><td>29 = 29</td></tr>
+<tr><td>LOO-604</td><td>715 → 753</td><td>1</td><td>39</td><td>75 = 75</td></tr>
+<tr><td>LOO-462</td><td>1799 → 1801</td><td>1</td><td>3</td><td>74 = 74</td></tr>
+<tr><td>13 more</td><td colspan="4">identical, or only-new by inheritance</td></tr></table>
+<p class="ok">Sessions identical everywhere. "Only new" is inheritance: lf commands run from the repository root by the
+Task's agent (e.g. 123 <code>lf</code> Processes in <code>/Users/jack/src/loopflow</code> for LOO-497).</p>
+<p class="meh">"Only old", besides pruned rows: LOO-809 lost <code>lf session resume &lt;its Session&gt;</code> run inside LOO-813's
+checkout (checkout-first precedence, as chosen); LOO-462 lost <code>lf session ensure --task LOO-489</code>, now LOO-489's;
+LOO-604 lost a failed <code>lf session connect --task LOO-604</code> from the repository root, which no rule reaches
+(no events, no attachment left). On the copy, 1 of 80 current attachers has no Task.</p>
+
+<h2>3. Fresh install: move a repository, then reuse its path</h2>
+<pre>lf task create 'Task A…' --worktree repo.a ; lf -b graph qa (in repo.a)   → 2 Processes, task_id set at insert
+git worktree add moved/wt-b ; Task B ; lf -b graph qa (in wt-b)
+mv moved moved2 ; lf task list (from moved2)   → task_checkouts: moved2/wt-b; Processes keep cwd moved/wt-b
+git clone moved2 moved ; worktree moved/wt-b ; Task C adopts it</pre>
+<p class="ok">Task B lists its 2 Processes (cwd <code>/private/tmp/lf937r/moved/wt-b</code>); Task C, at that same path, lists none.
+No relocation table involved.</p>
+
+<h2>4. Released lf writing into the upgraded store</h2>
+<p>Installed <code>lf -b graph qa</code> in Task B's checkout writes Processes with no Task; branch
+<code>lf machine prune</code> assigns them (2), and the branch server's start-up pass assigns them within a second
+(3 trials, plus one from a rewound cursor).</p>
+<p class="bad">Seen once, not reproduced: on the first server start, the pass assigned 1 of 2 released-lf rows; the released
+<code>-b graph</code> Process (rowid 7, cwd inside wt-b, its <code>graph_processes</code> row naming Task B) stayed NULL
+with the cursor past it, so no later pass would revisit it. Rewinding the cursor and pruning assigned it. The probe and
+the graph rule both resolve it by hand.</p>
+
+<h2>5. Working board drag</h2>
+<pre>lf desktop dashboard move working-tasks/task:B --destination task:A   → ["B","A"]; lf task list: B, A</pre>
+<p>Wrong input, before → after the fixes:</p>
+<table><tr><th>Move</th><th>Before</th><th>After</th></tr>
+<tr><td>onto a Task that doesn't exist</td><td>"task_a169… <i>(the moved tile)</i> is not a tile here"</td><td>"task_0000… is no Task; nothing changed." exit 2</td></tr>
+<tr><td>onto a standalone Task in another repository</td><td>"… are in different Projects" (neither has one)</td><td>"… are in different repositories, and ranks order Tasks within one Project; nothing changed."</td></tr>
+<tr><td>onto itself</td><td colspan="2">order unchanged, exit 0</td></tr></table>
+<p class="bad">Fixed: <b>a drag among equal ranks landed elsewhere.</b> On the live copy all 73 standalone loopflow Tasks
+have rank 0. The board breaks ties by id (<code>TaskOrder::key</code>); the Move computed the target's position by
+<code>created_at</code>. Dragging LOO-843 onto the top tile LOO-733 gave
+<code>LOO-560, LOO-603, LOO-660, LOO-663…</code>: the whole list reshuffled into creation order and LOO-843 was not on top.
+After <code>siblings_in</code>/<code>project_members</code> order by <code>planning_rank,id</code>:
+<code>LOO-843, LOO-733, LOO-959, LOO-663…</code>. Test
+<code>a_move_among_equal_ranks_lands_where_the_board_shows_its_target</code> fails without the fix.</p>
+<p>Released <code>lf</code> on the same store after the drag shows <code>LOO-938, LOO-843, LOO-733…</code>: its own
+<code>task_orders</code> order, the window skew questions.md accepts.</p>
+
+<h2>6. Task list</h2>
+<p>226 Tasks, same ids, titles, states, ranks, Projects and sections between installed and branch on the same pruned copy.
+Order differs by design (Project rank, then Task rank, standalone last).</p>
+
+<h2>Checks run</h2>
+<pre>cargo nextest run -p loopflow-execution --lib selections::                       23 passed
+cargo nextest run -p loopflow-storage --lib planning_order task_content leaving_members   4 passed</pre>
+
+<h2>Where it stands</h2>
+<p><b>Works:</b> upgrade, backfill, membership through moves and path reuse, released lf on the upgraded store,
+board drag with ties, refusal messages.</p>
+<p><b>Not reached:</b> a live Desktop window (headless run); <code>DashboardWorkspaceTests</code> after its expected-string
+edit (a fixture string, left to gate); a running agent's caller inheritance end to end (needs a provider login).</p>
+<p><b>Still wrong, worst first:</b></p>
+<ol>
+<li>One unreproduced backfill miss (section 4). If real, a row the cursor skipped stays out of its Task's list for good.</li>
+<li>Until the first maintenance pass after upgrade, a Task lists only its Sessions' agent Processes (22 of 66 for LOO-937).
+The server runs the pass at start, so this lasts seconds on a Machine with a running server.</li>
+<li>Within standalone Tasks, the board's order is by id, which reads as random until someone drags.</li>
+</ol>
+</body></html>

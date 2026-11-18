@@ -104,7 +104,7 @@ struct DashboardWorkspaceTests {
         resolution["members"] = ids.map { ["source": ["repository-default"], "work": ["repository": "repo_11111111111111111111111111111111", "kind": "task", "id": $0]] }
         json["resolution"] = resolution
         let plan = String(decoding: try JSONSerialization.data(withJSONObject: json), as: UTF8.self)
-        let reason = "FIX-2 and FIX-1 are in different Projects, and ranks order Tasks within one; nothing changed."
+        let reason = "FIX-2 and FIX-1 are in different Projects, and ranks order Tasks within one Project; nothing changed."
         let query = RegistryQuery { args, _ in
             switch args {
             case ["desktop", "dashboard", "move", "working-tasks/task:task_b", "--destination", "task:task_a"]: throw RegistryQueryError(reason)

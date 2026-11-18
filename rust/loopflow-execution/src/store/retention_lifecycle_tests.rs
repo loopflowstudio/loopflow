@@ -20,9 +20,11 @@ fn a_killed_runner_ends_unknown_and_its_task_stops_moving() {
     let path = store.path().unwrap();
     let conn = Connection::open(&path).unwrap();
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    crate::journal::set_test_machine_booted_at(Some(now - 3_600));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 3_600));
     let own = std::process::id();
-    let own_start = crate::journal::process_started_at(own).unwrap().unwrap();
+    let own_start = crate::process::os_process::process_started_at(own)
+        .unwrap()
+        .unwrap();
     let dead = exited_pid();
     let run = |id: &str, pid: Option<u32>, os: Option<i64>, at: i64| {
         conn.execute(

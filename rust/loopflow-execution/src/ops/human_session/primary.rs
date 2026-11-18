@@ -314,7 +314,7 @@ pub async fn admit_workspace(store: &SharedStore, session: LfSession) -> Result<
     )?;
     if summary.as_ref().is_some_and(|summary| {
         summary.agent_process_id.is_some()
-            && summary.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+            && summary.agent_process_evidence != crate::store::ProcessIdentityEvidence::Dead
     }) {
         return Ok(session);
     }

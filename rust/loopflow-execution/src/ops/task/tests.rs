@@ -234,7 +234,9 @@ fn task_decision_preserves_unknown_history_and_live_process_protection() {
             rusqlite::params![
                 graph,
                 pid,
-                crate::journal::process_started_at(pid).unwrap().unwrap()
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap()
             ],
         )
         .unwrap();
@@ -513,7 +515,7 @@ fn adopting_a_checkout_with_a_running_graph_prevents_another_run() {
     // Use this process's identity without launching a provider or a watcher.
     let live = rusqlite::params![
         std::process::id(),
-        crate::journal::process_started_at(std::process::id())
+        crate::process::os_process::process_started_at(std::process::id())
             .unwrap()
             .unwrap(),
         graph
@@ -682,11 +684,11 @@ fn a_dead_graph_is_history_while_a_live_graph_process_retains_the_checkout() {
             rusqlite::params![session.id, now - 100],
         )
         .unwrap();
-    crate::journal::set_test_machine_booted_at(Some(now - 200));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 200));
     let unresolved = blockers();
-    crate::journal::set_test_machine_booted_at(Some(now - 50));
+    crate::process::os_process::set_test_machine_booted_at(Some(now - 50));
     let after_boot = blockers();
-    crate::journal::set_test_machine_booted_at(None);
+    crate::process::os_process::set_test_machine_booted_at(None);
     // The stalled Session's unanswered turn is history, not execution.
     assert_eq!(unresolved.len(), 1, "{unresolved:?}");
     assert!(unresolved[0].contains(stale.as_str()));

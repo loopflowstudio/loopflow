@@ -131,10 +131,7 @@ fn explicit_home_ignores_retired_control_home_pins() {
         "proof",
     )
     .unwrap();
-    for args in [
-        vec!["machine", "rename", "proof", "renamed"],
-        vec!["monitor", "ps", "--json"],
-    ] {
+    for args in [vec!["machine", "rename", "proof", "renamed"]] {
         let output = command(home.path(), home.path(), &args)
             .env("LF_RUN_DIR", source.path().join("runs/parent"))
             .env("LF_CAPTURE_KEY", "run_parent")
@@ -233,7 +230,6 @@ fn machine_commands_and_catalog_work_without_git_or_a_repository() {
         vec!["help", "graph", "pursue"],
         vec!["account"],
         vec!["wave", "list", "--json"],
-        vec!["monitor", "ps", "--json"],
     ] {
         let output = command(home.path(), cwd.path(), &args)
             .env("PATH", no_tools.path())

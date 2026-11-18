@@ -29,13 +29,13 @@ pub(crate) fn process_evidence(
     _database: Option<&Path>,
     process: &MigrationProcess,
 ) -> ProcessIdentityEvidence {
-    crate::journal::agent_process_evidence(
-        process.completed_at,
-        process.pid,
-        process.os_started_at,
-        (process.kind != "agent").then_some(process.started_at),
-        crate::journal::process_identity_evidence,
-    )
+    crate::process::RecordedProcess {
+        ended: process.completed_at.is_some(),
+        pid: process.pid,
+        os_started_at: process.os_started_at,
+        started_at: (process.kind != "agent").then_some(process.started_at),
+    }
+    .evidence()
 }
 
 pub fn apply_sqlite(conn: &rusqlite::Connection) -> StoreResult<()> {

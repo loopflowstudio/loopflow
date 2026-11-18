@@ -124,10 +124,6 @@ pub fn page(directory: &Path, args: &GraphProcessInventoryArgs) -> Result<GraphP
     })
 }
 
-pub fn inspect(selector: &str, json: bool) -> Result<()> {
-    print(&detail(selector)?, json)
-}
-
 /// Prints one Graph that ran, with each step and how it exited.
 pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     if json {
@@ -147,7 +143,7 @@ pub fn print(detail: &GraphProcessDetail, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// `lf process show <selector>`: one Graph that ran, with its steps.
+/// `lf graph show <selector>`: one Graph that ran, with its steps.
 pub fn detail(selector: &str) -> Result<GraphProcessDetail> {
     find(selector)?.context("no Graph has that Graph process")
 }

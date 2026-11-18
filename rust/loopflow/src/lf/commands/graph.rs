@@ -933,7 +933,9 @@ impl RunningGraph<'_> {
         };
         drop(admission);
         if let (Some(step), Some(pid)) = (&step, child.id()) {
-            let birth = journal::process_started_at(pid).ok().flatten();
+            let birth = loopflow_execution::process::os_process::process_started_at(pid)
+                .ok()
+                .flatten();
             self.store.sqlite.record_graph_step_pid(step, pid, birth)?;
         }
         let mut watch = tokio::time::interval(std::time::Duration::from_secs(1));

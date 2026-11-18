@@ -42,7 +42,7 @@ fn dead_agent_never_waits_for_approval_quiet_or_blocked_report() {
                     "session",
                     &attachment,
                     child.0.id(),
-                    crate::journal::process_started_at(child.0.id())
+                    crate::process::os_process::process_started_at(child.0.id())
                         .unwrap()
                         .unwrap(),
                 )
@@ -155,7 +155,7 @@ fn program_status_overrides_inference_before_paging_and_ends_with_its_agent() {
             "session",
             &first,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -318,7 +318,7 @@ fn program_status_overrides_inference_before_paging_and_ends_with_its_agent() {
             "session",
             &third,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )

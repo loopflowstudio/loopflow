@@ -268,7 +268,7 @@ mod tests {
                 session,
                 &claim,
                 pid,
-                loopflow_execution::journal::process_started_at(pid)
+                loopflow_execution::process::os_process::process_started_at(pid)
                     .unwrap()
                     .unwrap(),
             )

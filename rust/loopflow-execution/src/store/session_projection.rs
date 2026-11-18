@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use crate::journal::{holder_evidence, session_agent_evidence, ProcessIdentityEvidence};
+use crate::process::os_process::session_agent_evidence;
+use crate::process::RecordedProcess;
+use crate::store::ProcessIdentityEvidence;
 use crate::store::StoreResult;
 use loopflow_storage::sqlite::sessions::{SessionProjection, SessionProjectionInputs};
 use loopflow_storage::sqlite::SqliteStore;
@@ -21,10 +23,12 @@ impl Reading {
         let mut live = Vec::new();
         for identity in &inputs.identities {
             let observed = session_agent_evidence(
-                identity.completed_at,
-                identity.pid,
-                identity.os_started_at,
-                Some(identity.started_at),
+                RecordedProcess {
+                    ended: identity.completed_at.is_some(),
+                    pid: identity.pid,
+                    os_started_at: identity.os_started_at,
+                    started_at: Some(identity.started_at),
+                },
                 identity.holder.as_ref(),
             );
             // Summary IDs canonicalize UUID case; SQL still matches saved bytes.
@@ -34,7 +38,9 @@ impl Reading {
                 identity
                     .holder
                     .as_ref()
-                    .map_or(ProcessIdentityEvidence::Dead, holder_evidence),
+                    .map_or(ProcessIdentityEvidence::Dead, |holder| {
+                        RecordedProcess::from(holder).evidence()
+                    }),
             );
             if observed == ProcessIdentityEvidence::Live {
                 live.push(identity.id.clone());
@@ -43,7 +49,12 @@ impl Reading {
         let graph_results = inputs
             .graph_runs
             .iter()
-            .map(|run| (run.id.to_string(), crate::journal::observed_result(run)))
+            .map(|run| {
+                (
+                    run.id.to_string(),
+                    crate::process::os_process::observed_result(run),
+                )
+            })
             .collect();
         if crate::observe::active() {
             for deadline in &inputs.deadlines {
@@ -160,7 +171,9 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::store::opening::open_ephemeral(&home.path().join("db")).unwrap();
         let pid = std::process::id();
-        let started = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let started = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         for (id, identity) in [
             ("a-dead", Some(started + 60)),
             ("b-unknown", None),
@@ -255,7 +268,9 @@ mod tests {
                 "session",
                 &attachment,
                 pid,
-                crate::journal::process_started_at(pid).unwrap().unwrap(),
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap(),
             )
             .unwrap();
         assert_eq!(lifetime(), (Some(pid), true, false));
@@ -282,7 +297,9 @@ mod tests {
                 "session",
                 &attachment,
                 pid,
-                crate::journal::process_started_at(pid).unwrap().unwrap(),
+                crate::process::os_process::process_started_at(pid)
+                    .unwrap()
+                    .unwrap(),
             )
             .unwrap();
         store

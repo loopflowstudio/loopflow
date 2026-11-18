@@ -1017,7 +1017,7 @@ fn conversation_view(target: &Resolved) -> Result<Option<ConversationView>> {
         (
             !summary.unviewed
                 && summary.agent_process_evidence
-                    == loopflow_execution::journal::ProcessIdentityEvidence::Live,
+                    == loopflow_execution::store::ProcessIdentityEvidence::Live,
             true,
         )
     };

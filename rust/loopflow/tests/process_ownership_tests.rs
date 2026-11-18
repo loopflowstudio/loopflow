@@ -16,10 +16,8 @@ use loopflow_model::id::LfProcessId;
 use loopflow_test_support::{RunningParent, TestRepo};
 
 #[tokio::test]
-async fn agent_settlement_on_read_reports_failed_observation_and_recovers_without_losing_history() {
+async fn agent_settlement_on_read_ends_a_detached_provider_without_losing_history() {
     use std::os::unix::process::CommandExt;
-
-    use loopflow::lf::commands::top::ActivitySnapshot;
 
     struct Agent(Child);
     impl Drop for Agent {
@@ -76,7 +74,7 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         rusqlite::params![attachment.agent_process_id, agent.0.id(), started],
     )
     .unwrap();
-    let _detached = store
+    store
         .release_session_attachment("orphan", &attachment)
         .unwrap();
     let before = store
@@ -84,66 +82,8 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .unwrap()
         .unwrap();
     let history = store.session_history("orphan", 0, 0).unwrap();
-    let snapshot = || {
-        let output = command(home.path(), repo.path(), &["monitor", "ps", "--json"])
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        serde_json::from_slice::<ActivitySnapshot>(&output.stdout).unwrap()
-    };
-    let id = attachment.agent_process_id.to_string();
-    // Every read of this Machine's processes recovers first, so the orphan is
-    // checked in the store here rather than in a `monitor ps` row.
     assert!(before.completed_at.is_none());
     assert!(agent.0.try_wait().unwrap().is_none());
-
-    // Only the portable reader invokes ps; macOS observes the kernel directly.
-    #[cfg(not(target_os = "macos"))]
-    {
-        let bin = home.path().join("bin");
-        std::fs::create_dir(&bin).unwrap();
-        let ps = bin.join("ps");
-        for (args, single_pid_reads) in [
-            (["monitor", "prune", "--json"], false),
-            // Exact leader observation succeeds, but descendant inventory fails.
-            // The reaper must refuse before signaling, not assume no descendants.
-            (["monitor", "prune", "--json"], true),
-        ] {
-            let forward = if single_pid_reads {
-                "if [ \"$1\" = -p ]; then exec /bin/ps \"$@\"; fi\n"
-            } else {
-                ""
-            };
-            std::fs::write(
-                &ps,
-                format!("#!/bin/sh\n{forward}printf 'fixture sampling unavailable' >&2\nexit 2\n"),
-            )
-            .unwrap();
-            std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let output = command(home.path(), repo.path(), &args)
-                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
-                .output()
-                .unwrap();
-            assert!(
-                !output.status.success(),
-                "failed observation was reported successful: {output:?}"
-            );
-            assert!(
-                String::from_utf8_lossy(&output.stderr).contains("fixture sampling unavailable"),
-                "{output:?}"
-            );
-            assert!(agent.0.try_wait().unwrap().is_none());
-            assert_eq!(
-                store.agent_process(&attachment.agent_process_id).unwrap(),
-                Some(before.clone())
-            );
-            assert_eq!(
-                store.session_attachment("orphan").unwrap(),
-                Some(_detached.clone())
-            );
-            assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
-        }
-    }
 
     // An ordinary read of this Machine's Tasks settles a detached row without receipts.
     let output = command(home.path(), repo.path(), &["task", "list"])
@@ -156,7 +96,6 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
         .unwrap()
         .expect("reconciled provider exited")
         .success());
-    assert!(snapshot().nodes.iter().all(|row| row.id != id));
     let ended = store
         .agent_process(&attachment.agent_process_id)
         .unwrap()
@@ -167,12 +106,9 @@ async fn agent_settlement_on_read_reports_failed_observation_and_recovers_withou
     assert_eq!(store.session_history("orphan", 0, 0).unwrap(), history);
 }
 
-/// The Task gate and the activity list read one inventory: a held checkout
-/// never names a Process the list omits, including an agent with no OS identity.
+/// A held checkout names the Session's agent, including one with no OS identity.
 #[test]
-fn task_checkout_blockers_are_rows_in_the_activity_list() {
-    use loopflow::lf::commands::top::{ActivityNodeKind, ActivitySnapshot};
-
+fn task_checkout_blockers_name_the_held_agent() {
     let home = tempfile::tempdir().unwrap();
     let repo = TestRepo::new();
     let lf = |cwd: &Path, args: &[&str]| {
@@ -206,16 +142,6 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
             .unwrap();
     let agent = attachment.agent_process_id.as_str();
 
-    let output = lf(repo.path(), &["monitor", "ps", "--json"]);
-    assert!(output.status.success(), "{output:?}");
-    let listed: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
-    let row = listed
-        .nodes
-        .iter()
-        .find(|row| row.id == agent)
-        .expect("reserved AgentProcess is listed");
-    assert_eq!(row.kind, ActivityNodeKind::AgentProcess);
-
     let status = json(repo.path(), &["desktop", "task", id, "--json"]);
     assert!(status.to_string().contains(agent), "{status}");
 
@@ -229,81 +155,7 @@ fn task_checkout_blockers_are_rows_in_the_activity_list() {
         .filter_map(|rest| rest.split_whitespace().next())
         .collect::<Vec<_>>();
     assert!(named.contains(&agent), "{reason}");
-    for id in named {
-        assert!(
-            listed.nodes.iter().any(|row| row.id == id),
-            "blocker {id} is not a listed row: {reason}"
-        );
-    }
     assert!(worktree.exists());
-}
-
-#[cfg(not(target_os = "macos"))] // Failure injection replaces the portable ps reader.
-#[tokio::test]
-async fn activity_lists_unresolved_records_without_receipts_or_os_sampling() {
-    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
-
-    let home = tempfile::tempdir().unwrap();
-    let database = home.path().join("loopflow.db");
-    let _store = open_ephemeral_store(&StorageConfig::sqlite(database.clone()))
-        .await
-        .unwrap();
-    let sql = rusqlite::Connection::open(database).unwrap();
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let parent = LfProcessId::new();
-    let agent = LfProcessId::new();
-    sql.execute(
-        "INSERT INTO processes(id,trace_id,started_at) VALUES(?1,?1,?2)",
-        rusqlite::params![parent, now],
-    )
-    .unwrap();
-    sql.execute(
-        "INSERT INTO processes(id,trace_id,kind,parent_lf_process_id,started_at,pid,os_started_at)
-         VALUES(?1,?1,'agent',?2,?3,4242,?3)",
-        rusqlite::params![agent, parent, now],
-    )
-    .unwrap();
-    let bin = home.path().join("bin");
-    std::fs::create_dir(&bin).unwrap();
-    let ps = bin.join("ps");
-    std::fs::write(
-        &ps,
-        "#!/bin/sh\nprintf 'sampling unavailable' >&2\nexit 2\n",
-    )
-    .unwrap();
-    std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
-
-    let output = command(home.path(), home.path(), &["monitor", "ps", "--json"])
-        .env("PATH", &bin)
-        .output()
-        .unwrap();
-    assert!(output.status.success(), "{output:?}");
-    let snapshot: ActivitySnapshot = serde_json::from_slice(&output.stdout).unwrap();
-    for id in [&parent, &agent] {
-        let node = snapshot
-            .nodes
-            .iter()
-            .find(|node| node.id == id.as_str())
-            .unwrap();
-        assert_eq!(node.state, ActivityState::Unknown);
-    }
-    assert_eq!(
-        snapshot
-            .nodes
-            .iter()
-            .find(|node| node.id == agent.as_str())
-            .unwrap()
-            .parent_id,
-        Some(parent.to_string())
-    );
-    let retained: i64 = sql
-        .query_row(
-            "SELECT count(*) FROM processes WHERE id IN (?1,?2) AND completed_at IS NULL",
-            rusqlite::params![parent, agent],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(retained, 2, "observation grants no settlement authority");
 }
 
 #[tokio::test]
@@ -939,15 +791,6 @@ async fn historical_sessions_are_not_live_availability() {
         let session = &card["session"];
         assert!(session["availability"].is_null(), "{session}");
         assert_ne!(session["state"], "active", "{session}");
-    }
-    for args in [
-        vec!["process", "list", "--help"],
-        vec!["process", "top", "--help"],
-        vec!["process", "--help"],
-    ] {
-        let help = command(home.path(), home.path(), &args).output().unwrap();
-        assert!(help.status.success(), "{help:?}");
-        assert!(String::from_utf8_lossy(&help.stdout).contains("process"));
     }
 }
 

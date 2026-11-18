@@ -37,7 +37,6 @@ public typealias RegistryRunner = @Sendable (_ lfArgs: [String], _ cwd: String?)
 public enum ServedRead: Equatable, Sendable, Encodable {
     case processHistory(id: String)
     case creationGet(requestID: String)
-    case processList
     case desktopViewList(directory: String)
     case sessionList(directory: String, headless: Bool, after: String?, limit: Int?, task: String?)
     case taskGet(directory: String, issue: String)
@@ -94,8 +93,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         switch self {
         case .processHistory(let id): return ["session", "history", "show", id]
         case .creationGet(let requestID): return ["server", "receipt", requestID, "--json"]
-        case .processList:
-            return ["process", "list", "--json"]
         case .desktopViewList:
             return ["desktop", "view", "list", "--json"]
         case .sessionList(_, let headless, let after, let limit, let task):
@@ -143,7 +140,7 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .taskRuns(_, let task, let after):
             return ["task", "runs", task] + (after.map { ["--after", $0] } ?? []) + ["--json"]
         case .processGet(let id):
-            return ["process", "show", id, "--json"]
+            return ["graph", "show", id, "--json"]
         case .sessionUsage(let days, let wave, let project, let task):
             return ["session", "usage", "--days", String(days)] + Self.work(wave: wave, project: project, task: task) + ["--json"]
         case .taskContext(let task):
@@ -208,7 +205,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         switch self {
         case .processHistory(let id): TaggedFields("process.history", ["id": id])
         case .creationGet(let requestID): TaggedFields("creation.get", ["request_id": requestID])
-        case .processList: TaggedFields("process.list")
         case .desktopViewList(let directory): TaggedFields("desktop.view.list", ["directory": directory])
         case .sessionList(let directory, let headless, let after, let limit, let task):
             TaggedFields("session.list", ["directory": directory, "headless": headless, "after": after, "limit": limit, "task": task])

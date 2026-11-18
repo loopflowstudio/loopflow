@@ -147,7 +147,7 @@ fn write_task(store: &SqliteStore, task: &TaskId) -> StoreResult<()> {
         let run = RunObservation {
             name: graph.entry.summary.name,
             outcome: store.graph_process(id.as_str())?.and_then(|(graph, _)| {
-                crate::journal::observed_result(&graph.run)
+                crate::process::os_process::observed_result(&graph.run)
                     .outcome()
                     .map(str::to_owned)
             }),

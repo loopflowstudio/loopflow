@@ -71,7 +71,7 @@ public enum WorkRequest: Equatable, Sendable {
 
 /// One subscription a window runs, and the read behind it.
 public enum WorkPart: String, CaseIterable, Sendable {
-    case task, sessions, planning, selections, activity
+    case task, sessions, planning, selections
     case taskList = "task_list"
     case gitDestinations = "git_destinations"
     case workActivity = "work_activity"
@@ -80,7 +80,6 @@ public enum WorkPart: String, CaseIterable, Sendable {
     public func read(for scope: WorkScope) -> ServedRead? {
         switch self {
         case .planning: return .allPlans
-        case .activity: return .processList
         case .selections: return scope.repo.map { .desktopViewList(directory: $0) }
         case .taskList:
             return scope.repo.map { .desktopViewGet(directory: $0, expression: TaskList.started.expression(wave: scope.taskListWave)) }
@@ -143,7 +142,6 @@ public struct WorkFrame: Sendable {
         case sessions(Sessions?)
         case task(TaskPart?)
         case workActivity(WorkActivityPart?)
-        case activity(ActivitySnapshot?)
         case checkpoint
 
         public var part: String {
@@ -155,7 +153,6 @@ public struct WorkFrame: Sendable {
             case .sessions: WorkPart.sessions.rawValue
             case .task: WorkPart.task.rawValue
             case .workActivity: WorkPart.workActivity.rawValue
-            case .activity: WorkPart.activity.rawValue
             case .checkpoint: "checkpoint"
             }
         }
@@ -295,9 +292,6 @@ public struct WorkFrame: Sendable {
             return frame(read, .workActivity(zip(scope.activity, read.body).map {
                 WorkActivityPart(scope: $0, snapshot: $1)
             }))
-        case .activity:
-            let read = try envelope(ActivitySnapshot.self)
-            return frame(read, .activity(read.body))
         }
     }
 }

@@ -8,7 +8,7 @@ use rusqlite::types::Value;
 use rusqlite::{params, params_from_iter, OptionalExtension, TransactionBehavior};
 
 use crate::process::{
-    AgentProcess, LfProcess, LfProcessStart, ProcessCursor, ProcessEntry, ProcessFilter,
+    AgentProcess, AttachingLf, LfProcess, ProcessCursor, ProcessEntry, ProcessFilter,
     ProcessOutcomeFilter, ProcessPage, ProcessWorkFilter, SessionAttachment,
 };
 use crate::{StoreError, StoreResult};
@@ -63,7 +63,7 @@ impl SessionTransfer<'_> {
         self,
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         self.commit(previous, |tx| {
@@ -77,7 +77,7 @@ impl SessionTransfer<'_> {
         next: crate::session::LfSession,
         process: &LfProcessId,
         previous: PreviousAgentDisposition,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<(crate::session::LfSession, SessionAttachment)> {
         if loopflow_model::id::canonical_session(&next.id) != self.session {
@@ -111,7 +111,7 @@ impl SessionTransfer<'_> {
         self,
         resume_thread: Option<&AgentSessionId>,
         reserved: bool,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let session = self.session.as_str();
@@ -645,7 +645,7 @@ pub(super) fn attach_in(
     session: &str,
     expected: Option<&SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&LfProcessStart>,
+    start: Option<&AttachingLf>,
 ) -> StoreResult<SessionAttachment> {
     let current = attachment_in(tx, session)?;
     if current.as_ref() != expected {
@@ -659,9 +659,9 @@ pub(super) fn attach_in(
         launcher_lf_process_id: process.clone(),
     };
     // The holder's OS process and terminal, when the attaching lf is this one.
-    let holder = start.filter(|start| &start.process.id == process);
-    let holder_pid = holder.and_then(|start| start.process.pid);
-    let holder_started = holder.and_then(|start| start.process.os_started_at);
+    let holder = start.filter(|start| &start.lf_process_id == process);
+    let holder_pid = holder.and_then(|start| start.holder.pid);
+    let holder_started = holder.and_then(|start| start.holder.os_started_at);
     let terminal = holder.and_then(|start| start.terminal.as_ref());
     if let Some(previous) = &current {
         // A Session runs one agent: a replaced one has ended, or never spawned.
@@ -707,34 +707,6 @@ pub(super) fn attach_in(
 impl SqliteStore {
     pub fn unfinished_processes(&self) -> StoreResult<Vec<ProcessEntry>> {
         unfinished_processes(&self.conn.lock().expect("store mutex poisoned"))
-    }
-
-    /// The unfinished rows not in `skip`, reading only the index for those in
-    /// it. `skip` forgets rows that are no longer unfinished.
-    pub fn unfinished_processes_except(
-        &self,
-        skip: &mut std::collections::HashSet<String>,
-    ) -> StoreResult<Vec<ProcessEntry>> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        let ids = conn
-            .prepare(
-                "SELECT id FROM processes INDEXED BY processes_unfinished
-                 WHERE completed_at IS NULL ORDER BY started_at DESC,id",
-            )?
-            .query_map([], |row| row.get::<_, String>(0))?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        let mut read = conn.prepare(&format!("{PROCESS_SELECT} WHERE e.id=?1"))?;
-        let mut records = Vec::new();
-        let mut skipped = std::collections::HashSet::new();
-        for id in ids {
-            if skip.contains(&id) {
-                skipped.insert(id);
-            } else {
-                records.extend(read.query_row([&id], read_process).optional()?);
-            }
-        }
-        *skip = skipped;
-        Ok(records)
     }
 
     /// Every lf an owner record says runs, with the OS process it recorded:
@@ -1393,7 +1365,7 @@ impl SqliteStore {
         session: &str,
         expected: Option<&SessionAttachment>,
         process: &LfProcessId,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
         caller: &SessionCaller,
     ) -> StoreResult<SessionAttachment> {
         let canonical = loopflow_model::id::canonical_session(session);
@@ -1453,7 +1425,7 @@ impl SqliteStore {
         &self,
         session: &str,
         expected: &SessionAttachment,
-        start: Option<&LfProcessStart>,
+        start: Option<&AttachingLf>,
     ) -> StoreResult<SessionAttachment> {
         let _dispatch = self.lock_session_attachment(session)?;
         let mut conn = self.conn.lock().expect("store mutex poisoned");
@@ -2127,13 +2099,14 @@ mod attachment_tests {
         let home = tempfile::tempdir().unwrap();
         let store = crate::test_fixture::open(&home.path().join("store.db")).unwrap();
         store.test_session("conversation", &crate::session_record::new_artifact_key());
-        let seed = insert_process(&store, 1, 1);
-        let mut process = store.lf_process(&seed).unwrap().unwrap();
-        process.id = LfProcessId::new();
         let terminal = loopflow_model::id::TerminalId::new();
         store.create_terminal(&terminal, "fixture").unwrap();
-        let start = crate::process::LfProcessStart {
-            process,
+        let start = crate::process::AttachingLf {
+            lf_process_id: LfProcessId::new(),
+            holder: crate::process::AttachmentHolder {
+                pid: Some(1),
+                os_started_at: Some(1),
+            },
             terminal: Some(terminal.clone()),
         };
         store
@@ -2149,7 +2122,7 @@ mod attachment_tests {
             .attach_session(
                 "conversation",
                 None,
-                &start.process.id,
+                &start.lf_process_id,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2157,7 +2130,7 @@ mod attachment_tests {
                 }
             )
             .is_err());
-        assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
+        assert_eq!(store.lf_process(&start.lf_process_id).unwrap(), None);
         assert_eq!(store.session_attachment("conversation").unwrap(), None);
         store
             .conn
@@ -2169,7 +2142,7 @@ mod attachment_tests {
             .attach_session(
                 "conversation",
                 None,
-                &start.process.id,
+                &start.lf_process_id,
                 Some(&start),
                 &SessionCaller {
                     agent: None,
@@ -2180,12 +2153,15 @@ mod attachment_tests {
         // No lf writes its own Process row: the attachment and its terminal
         // are on the Session, and the agent row a released reader joins
         // names its launcher.
-        assert_eq!(store.lf_process(&start.process.id).unwrap(), None);
+        assert_eq!(store.lf_process(&start.lf_process_id).unwrap(), None);
         let agent = store
             .agent_process(&attached.agent_process_id)
             .unwrap()
             .unwrap();
-        assert_eq!(agent.parent_lf_process_id.as_ref(), Some(&start.process.id));
+        assert_eq!(
+            agent.parent_lf_process_id.as_ref(),
+            Some(&start.lf_process_id)
+        );
         let placement: loopflow_model::id::TerminalId = store
             .conn
             .lock()

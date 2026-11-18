@@ -15,7 +15,7 @@ use anyhow::Context;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use super::{Error, ErrorCode, Result};
-use crate::journal::ProcessIdentityEvidence;
+use crate::store::ProcessIdentityEvidence;
 use loopflow_model::id::LfProcessId;
 
 const REPORT_ENV: &str = "LF_LAUNCH_REPORT";
@@ -250,8 +250,8 @@ mod tests {
 
     use super::{wait, write, UNKNOWN_GRACE};
     use crate::engine::{Error, ErrorCode};
-    use crate::journal::ProcessIdentityEvidence;
     use crate::os_process::detached::Started;
+    use crate::store::ProcessIdentityEvidence;
 
     use loopflow_model::id::LfProcessId;
 

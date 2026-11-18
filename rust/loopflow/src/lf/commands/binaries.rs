@@ -17,7 +17,8 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use time::OffsetDateTime;
 
-use loopflow_execution::journal::{lf_process_evidence, OsProcess, ProcessIdentityEvidence};
+use loopflow_execution::process::{OsProcess, RecordedProcess};
+use loopflow_execution::store::ProcessIdentityEvidence;
 use loopflow_model::id::LfProcessId;
 use loopflow_storage::sqlite::SqliteStore;
 
@@ -213,7 +214,13 @@ fn live_lf_processes(
             continue;
         }
         let mut live_pid = None;
-        let evidence = lf_process_evidence(&record, |pid, started_at| {
+        let recorded = RecordedProcess {
+            ended: record.completed_at.is_some(),
+            pid: record.pid,
+            os_started_at: record.os_started_at,
+            started_at: Some(record.started_at),
+        };
+        let evidence = recorded.evidence_by(|pid, started_at| {
             if confirmed(pid, started_at) {
                 live_pid = Some(pid);
                 ProcessIdentityEvidence::Live
@@ -457,7 +464,7 @@ mod tests {
         let store =
             loopflow_execution::store::opening::open_ephemeral(&directory.path().join("lf.db"))
                 .unwrap();
-        let me = loopflow_execution::journal::OsProcess::read(std::process::id())
+        let me = loopflow_execution::process::OsProcess::read(std::process::id())
             .unwrap()
             .unwrap();
         let launcher = LfProcessId::new();

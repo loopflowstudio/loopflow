@@ -391,17 +391,6 @@ struct DTOFixtureTests {
         #expect(try JSONDecoder().decode([WorkAuthor].self, from: JSONEncoder().encode(authors)) == authors)
     }
 
-    @Test("Activity retains unknown record identity without a PID")
-    func activityFixture() throws {
-        let snapshot = try JSONDecoder().decode(ActivitySnapshot.self, from: loadFixtureData("activity_snapshot.json"))
-        let unknown = snapshot.nodes[2]
-        #expect(unknown.state == .unknown)
-        #expect(unknown.pid == nil)
-        #expect(unknown.parentId == snapshot.nodes[0].id)
-        #expect(unknown.id == "33333333-3333-4333-8333-333333333333")
-        #expect(try JSONDecoder().decode(ActivitySnapshot.self, from: JSONEncoder().encode(snapshot)) == snapshot)
-    }
-
     @Test("Composed delivery keeps completion independent of the running Graph and its arrival")
     func composedTaskLifecycle() throws {
         let snapshots = try TaskLifecycleCapture.load(loadFixtureData("task_lifecycle.json"))
@@ -1035,14 +1024,14 @@ struct DTOFixtureTests {
             try WorkFrame.decode(part: entry.0, scope: scope, sequence: index + 1, line: entry.1)
         }
         #expect(frames.map(\.content.part) == ["planning", "selections", "sessions", "task", "work_activity",
-                                                "activity", "task", "git_destinations"])
+                                                "task", "git_destinations"])
         #expect(frames[0].answers == nil)
         #expect(frames[2].answers == 7)
         guard case .planning(let planning?) = frames[0].content,
               case .selections(let plans?) = frames[1].content,
               case .sessions(let sessions?) = frames[2].content,
               case .workActivity(let activity?) = frames[4].content,
-              case .gitDestinations(let reading?) = frames[7].content else {
+              case .gitDestinations(let reading?) = frames[6].content else {
             Issue.record("fixture parts changed shape")
             return
         }
@@ -1058,7 +1047,7 @@ struct DTOFixtureTests {
             return
         }
         #expect(frames[3].unavailable == "Task LOO-1 is not registered")
-        guard case .task(let read?) = frames[6].content else {
+        guard case .task(let read?) = frames[5].content else {
             Issue.record("a read Task part carries its work and Graph processes")
             return
         }

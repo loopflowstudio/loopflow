@@ -24,25 +24,6 @@ fn roadmap_requires_shared_lifecycle_and_selection_states() {
 }
 
 #[test]
-fn activity_retains_unknown_record_identity_without_a_pid() {
-    use loopflow::lf::commands::top::{ActivitySnapshot, ActivityState};
-    let snapshot: ActivitySnapshot = serde_json::from_str(include_str!(
-        "../../../tests/fixtures/dto/activity_snapshot.json"
-    ))
-    .unwrap();
-    let unknown = &snapshot.nodes[2];
-    assert_eq!(unknown.state, ActivityState::Unknown);
-    assert_eq!(unknown.pid, None);
-    assert_eq!(unknown.parent_id.as_ref(), Some(&snapshot.nodes[0].id));
-    assert_eq!(unknown.id, "33333333-3333-4333-8333-333333333333");
-    assert_eq!(
-        serde_json::from_str::<ActivitySnapshot>(&serde_json::to_string(&snapshot).unwrap())
-            .unwrap(),
-        snapshot
-    );
-}
-
-#[test]
 fn task_comments_keep_authorship_and_require_every_field() {
     use loopflow_execution::work::task::comment::TaskCommentAuthor;
     use loopflow_execution::work::task::comment::TaskComments;
@@ -645,7 +626,6 @@ fn subscribe_frames_carry_each_reads_json_result() {
             "work_activity" => {
                 read::<loopflow::lf::commands::activity::WorkActivitySnapshot>(&body)
             }
-            "activity" => read::<loopflow::lf::commands::top::ActivitySnapshot>(&body),
             "git_destinations" => {
                 read::<Vec<loopflow_execution::store::GitDestination>>(&body["destinations"]);
                 assert_eq!(body["tracker"], "git");

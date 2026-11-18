@@ -642,7 +642,9 @@ mod tests {
             .unwrap();
         let mut leader = Child(command.spawn().unwrap());
         let pid = leader.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -688,7 +690,7 @@ mod tests {
             .agent_process(&attached.agent_process_id)
             .unwrap()
             .unwrap();
-        assert!(!crate::journal::OsProcess::group(pid).unwrap().is_empty());
+        assert!(!crate::process::OsProcess::group(pid).unwrap().is_empty());
         let test = if exits {
             "resume_waits_for_a_dead_owners_helpers_without_lifeline_authority"
         } else {
@@ -875,7 +877,9 @@ mod tests {
         command.env_clear().arg("60").process_group(0);
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -905,8 +909,8 @@ mod tests {
         .unwrap();
         assert_ne!(next.agent_process_id, attached.agent_process_id);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
         let ended = store
             .agent_process(&attached.agent_process_id)
@@ -1033,7 +1037,9 @@ mod tests {
         command.env_clear().arg("60").process_group(0);
         let mut child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -1090,7 +1096,9 @@ mod tests {
                 .unwrap(),
         );
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("resume", &attached, pid, birth)
             .unwrap();
@@ -1100,8 +1108,8 @@ mod tests {
         child.0.kill().unwrap();
         // Observe this fixture's zombie without reaping it through Child::wait.
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while crate::journal::process_identity_evidence(pid, birth)
-            != crate::journal::ProcessIdentityEvidence::Dead
+        while crate::process::os_process::process_identity_evidence(pid, birth)
+            != crate::store::ProcessIdentityEvidence::Dead
         {
             assert!(
                 std::time::Instant::now() < deadline,
@@ -1222,7 +1230,9 @@ mod tests {
                 .unwrap();
             let child = Child(command.spawn().unwrap());
             let pid = child.0.id();
-            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            let birth = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             store
                 .record_agent_process_identity("resume", &first, pid, birth)
                 .unwrap();
@@ -1238,8 +1248,8 @@ mod tests {
             }
             super::finish_session_attachment(&store, "resume", &first, "interrupted").unwrap();
             assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Dead
+                crate::process::os_process::process_identity_evidence(pid, birth),
+                crate::store::ProcessIdentityEvidence::Dead
             );
             assert!(store
                 .agent_process(&first.agent_process_id)
@@ -1276,7 +1286,9 @@ mod tests {
                 .unwrap();
             let mut child = Child(command.spawn().unwrap());
             let pid = child.0.id();
-            let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+            let birth = crate::process::os_process::process_started_at(pid)
+                .unwrap()
+                .unwrap();
             store
                 .record_agent_process_identity("resume", &attachment, pid, birth)
                 .unwrap();
@@ -1286,8 +1298,8 @@ mod tests {
                 })
                 .unwrap());
             assert_eq!(
-                crate::journal::process_identity_evidence(pid, birth),
-                crate::journal::ProcessIdentityEvidence::Live
+                crate::process::os_process::process_identity_evidence(pid, birth),
+                crate::store::ProcessIdentityEvidence::Live
             );
             assert_eq!(
                 store.session_attachment("resume").unwrap(),
@@ -1340,7 +1352,9 @@ mod tests {
             .unwrap();
         let child = Child(command.spawn().unwrap());
         let pid = child.0.id();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         store
             .record_agent_process_identity("retry", &attachment, pid, birth)
             .unwrap();
@@ -1368,8 +1382,8 @@ mod tests {
         .unwrap();
         assert_ne!(next.agent_process_id, attachment.agent_process_id);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
         assert!(store
             .agent_process(&attachment.agent_process_id)

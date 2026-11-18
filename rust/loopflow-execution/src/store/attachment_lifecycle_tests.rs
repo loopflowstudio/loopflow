@@ -33,7 +33,7 @@ fn ended_agent_socket_cannot_be_adopted() {
             "session",
             &attachment,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )
@@ -107,7 +107,7 @@ fn losing_input_claim_rolls_back_capture_and_provider_reservation() {
         Some(attachment.clone())
     );
     next.completed_at = Some(10);
-    let birth = crate::journal::process_started_at(std::process::id())
+    let birth = crate::process::os_process::process_started_at(std::process::id())
         .unwrap()
         .unwrap();
     store.test_set_holder(&session.id, std::process::id(), birth);
@@ -479,7 +479,7 @@ fn returning_to_the_same_lf_process_does_not_revive_its_previous_attachment() {
             "conversation",
             &third,
             std::process::id(),
-            crate::journal::process_started_at(std::process::id())
+            crate::process::os_process::process_started_at(std::process::id())
                 .unwrap()
                 .unwrap(),
         )

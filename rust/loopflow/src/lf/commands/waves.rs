@@ -3443,7 +3443,7 @@ mod tests {
                 "bound",
                 &attachment,
                 std::process::id(),
-                loopflow_execution::journal::process_started_at(std::process::id())
+                loopflow_execution::process::os_process::process_started_at(std::process::id())
                     .unwrap()
                     .unwrap(),
             )

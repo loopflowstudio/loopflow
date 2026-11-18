@@ -328,7 +328,7 @@ pub(crate) fn resume_intent(session: &crate::session::SessionSummary) -> Session
     if session.held {
         SessionResumeIntent::View
     } else if session.agent_process_id.is_some()
-        && session.agent_process_evidence != crate::journal::ProcessIdentityEvidence::Dead
+        && session.agent_process_evidence != crate::store::ProcessIdentityEvidence::Dead
     {
         SessionResumeIntent::TakeOver
     } else if session.has_provider_history {
@@ -454,14 +454,12 @@ pub enum SessionAvailability {
 
 pub(crate) fn session_state(session: &crate::session::SessionSummary) -> SessionState {
     match session.agent_process_evidence {
-        crate::journal::ProcessIdentityEvidence::Live
-            if session.interactive && session.unviewed =>
-        {
+        crate::store::ProcessIdentityEvidence::Live if session.interactive && session.unviewed => {
             SessionState::Detached
         }
-        crate::journal::ProcessIdentityEvidence::Live => SessionState::Active,
-        crate::journal::ProcessIdentityEvidence::Dead => SessionState::Closed,
-        crate::journal::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
+        crate::store::ProcessIdentityEvidence::Live => SessionState::Active,
+        crate::store::ProcessIdentityEvidence::Dead => SessionState::Closed,
+        crate::store::ProcessIdentityEvidence::Unknown => SessionState::Unknown,
     }
 }
 
@@ -1112,7 +1110,7 @@ pub fn run_refusal(store: &SqliteStore, session: &LfSession) -> Result<Option<St
     )?
     .ok_or_else(|| session_not_found(&session.id))?;
     let running = summary.completed_at.is_none()
-        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live;
+        && summary.agent_process_evidence == crate::store::ProcessIdentityEvidence::Live;
     let mut what: Vec<&str> = Vec::new();
     what.extend(summary.task_identifier.as_deref());
     what.extend(summary.graph.as_ref().map(|graph| graph.name.as_str()));
@@ -1400,7 +1398,7 @@ pub(crate) fn viewed_summary(
         return Ok(None);
     };
     let released = !summary.unviewed
-        && summary.agent_process_evidence == crate::journal::ProcessIdentityEvidence::Live
+        && summary.agent_process_evidence == crate::store::ProcessIdentityEvidence::Live
         && store
             .session_terminal(id)?
             .is_some_and(|terminal| !matches!(crate::transport::viewed(&terminal), Ok(true)));

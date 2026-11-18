@@ -283,7 +283,7 @@ pub fn readiness(
     store: &loopflow_storage::sqlite::SqliteStore,
     wave: &loopflow_model::id::WaveId,
 ) -> crate::store::StoreResult<loopflow_storage::sqlite::ProjectReadiness> {
-    store.project_readiness(wave, crate::journal::observed_result)
+    store.project_readiness(wave, crate::process::os_process::observed_result)
 }
 
 #[cfg(test)]
@@ -314,7 +314,7 @@ mod readiness_tests {
             let start = ExecutionStart {
                 started_at: 1,
                 pid: Some(pid),
-                os_started_at: crate::journal::process_started_at(pid).unwrap(),
+                os_started_at: crate::process::os_process::process_started_at(pid).unwrap(),
                 caller_session: None,
             };
             store
@@ -335,7 +335,7 @@ mod readiness_tests {
         let start = ExecutionStart {
             started_at: 1,
             pid: Some(pid),
-            os_started_at: crate::journal::process_started_at(pid).unwrap(),
+            os_started_at: crate::process::os_process::process_started_at(pid).unwrap(),
             caller_session: None,
         };
         child.kill().unwrap();

@@ -136,10 +136,10 @@ pub struct Started {
 
 impl Started {
     /// Whether it still runs: one OS lookup against its pid and start.
-    pub fn evidence(&self) -> crate::journal::ProcessIdentityEvidence {
+    pub fn evidence(&self) -> crate::store::ProcessIdentityEvidence {
         match self.os_started_at {
-            Some(at) => crate::journal::process_identity_evidence(self.pid, at),
-            None => crate::journal::ProcessIdentityEvidence::Unknown,
+            Some(at) => crate::process::os_process::process_identity_evidence(self.pid, at),
+            None => crate::store::ProcessIdentityEvidence::Unknown,
         }
     }
 }
@@ -164,7 +164,9 @@ impl Launched {
             format!("The process acknowledged {:?}, not a Process", line.trim())
         })?;
         // The shell execs lf, so the child's pid is lf's.
-        let os_started_at = crate::journal::process_started_at(pid).ok().flatten();
+        let os_started_at = crate::process::os_process::process_started_at(pid)
+            .ok()
+            .flatten();
         Ok(Started {
             id,
             pid,

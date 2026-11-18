@@ -603,7 +603,7 @@ pub(super) fn claim_session_input_in(
     mut next: LfSession,
     expected: Option<&crate::process::SessionAttachment>,
     process: &LfProcessId,
-    start: Option<&crate::process::LfProcessStart>,
+    start: Option<&crate::process::AttachingLf>,
 ) -> StoreResult<(LfSession, crate::process::SessionAttachment)> {
     let previous = session_in(tx, &next.id)?.ok_or(StoreError::NotFound)?;
     if next.task_id == previous.task_id && next.task_id.is_some() {

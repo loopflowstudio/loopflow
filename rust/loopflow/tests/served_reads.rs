@@ -445,34 +445,31 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     conforms(&declared("config.catalog"), &answer["result"]);
 
     write(
-        serde_json::json!({"type": "subscribe", "id": "processes", "operation": {"kind": "process.list"}, "select": null, "resume": null, "sender": null}),
+        serde_json::json!({"type": "subscribe", "id": "history", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "resume": null, "sender": null}),
         true,
     );
     let mut subscribed = false;
     let mut answered = false;
     while !(subscribed && answered) {
         let message = receive().unwrap();
-        assert_eq!(message["id"], "processes", "{message}");
+        assert_eq!(message["id"], "history", "{message}");
         match message["type"].as_str().unwrap() {
             "response" => {
                 assert!(message["result"].is_null());
                 subscribed = true;
                 write(
-                    serde_json::json!({"type": "checkpoint", "id": "processes", "checkpoint": 1}),
+                    serde_json::json!({"type": "checkpoint", "id": "history", "checkpoint": 1}),
                     true,
                 );
             }
             "reading" => {
-                conforms(&declared("process.list"), &message["frame"]["body"]);
+                conforms(&declared("session.history"), &message["frame"]["body"]);
                 answered |= message["frame"]["answers"] == 1;
             }
             other => panic!("unexpected {other}: {message}"),
         }
     }
-    write(
-        serde_json::json!({"type": "cancel", "id": "processes"}),
-        true,
-    );
+    write(serde_json::json!({"type": "cancel", "id": "history"}), true);
 
     // An operation this server lacks fails alone; the connection keeps working.
     write(
@@ -485,7 +482,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
             break message;
         }
         assert_eq!(
-            message["id"], "processes",
+            message["id"], "history",
             "only the cancelled subscription may still speak"
         );
     };
@@ -495,7 +492,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
     );
     assert_eq!(refused["data"]["kind"], "task.teleport");
     write(
-        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "process.list"}, "select": null, "sender": null, "request_id": null}),
+        serde_json::json!({"type": "request", "id": "after", "operation": {"kind": "session.history", "since": "7d", "limit": 50, "wave": null, "project": null, "task": null}, "select": null, "sender": null, "request_id": null}),
         true,
     );
     let after = loop {
@@ -505,7 +502,7 @@ fn a_client_built_from_the_description_alone_speaks_the_protocol() {
         }
     };
     assert_eq!(after["type"], "response", "{after}");
-    conforms(&declared("process.list"), &after["result"]);
+    conforms(&declared("session.history"), &after["result"]);
 }
 
 #[test]
@@ -918,7 +915,6 @@ fn server_operations_match_their_lf_commands() {
     let (reads, subscriptions) = match task_diff(None, None) {
         Read::ProcessHistory { .. }
         | Read::CreationGet { .. }
-        | Read::ProcessList
         | Read::DesktopViewList { .. }
         | Read::ViewSelect { .. }
         | Read::SessionList { .. }
@@ -964,7 +960,6 @@ fn server_operations_match_their_lf_commands() {
         | Read::PrReviews { .. }
         | Read::TaskWait { .. } => (
             [
-                Read::ProcessList,
                 plans(),
                 sessions(true),
                 task_pane(),
@@ -1138,7 +1133,6 @@ fn server_operations_match_their_lf_commands() {
             ],
             [
                 history(),
-                Read::ProcessList,
                 all_plans(),
                 Read::ViewSelect {
                     expression: Some("kind:task state:open".into()),

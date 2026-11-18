@@ -532,11 +532,6 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: DesktopCommand,
     },
-    /// Live Loopflow processes: call trees, Graphs that ran and pruning
-    Process {
-        #[command(subcommand)]
-        cmd: commands::process::ProcessCommand,
-    },
     /// Plans across Waves: what Desktop shows of each Wave's Projects and Tasks
     Plan {
         #[command(subcommand)]
@@ -1148,7 +1143,6 @@ impl Commands {
             Self::Graph { cmd } => cmd.changes_work(),
             Self::Skill { cmd } => cmd.changes_work(),
             Self::Desktop { cmd } => cmd.changes_work(),
-            Self::Process { cmd } => cmd.changes_work(),
             Self::Plan { cmd } => cmd.changes_work(),
             Self::Pr { cmd } => pr_changes_work(cmd.as_ref()),
             Self::Wt { cmd } => cmd.changes_work(),

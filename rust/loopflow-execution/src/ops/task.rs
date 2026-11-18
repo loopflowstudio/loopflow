@@ -3099,14 +3099,17 @@ pub fn task_interrupt(issue: &str) -> OpsResult<TaskControlResult> {
 /// work, such as a Task run between Graph attempts or a Task Session. Unknown
 /// liveness counts as live.
 async fn live_execution(store: &SharedStore, task: &Task) -> OpsResult<Option<String>> {
-    use crate::journal::ProcessIdentityEvidence;
     use crate::ops::task_execution::TaskExecutionState;
+    use crate::store::ProcessIdentityEvidence;
     let graph = store
         .sqlite
         .task_graphs(&task.id)
         .map_err(task_error)?
         .pop()
-        .filter(|graph| crate::journal::run_evidence(&graph.run) != ProcessIdentityEvidence::Dead);
+        .filter(|graph| {
+            crate::process::RecordedProcess::from(&graph.run).evidence()
+                != ProcessIdentityEvidence::Dead
+        });
     if let Some(graph) = graph {
         let name = graph.name.clone();
         let facts = store

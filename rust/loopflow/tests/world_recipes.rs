@@ -325,13 +325,12 @@ fn task_list_subscribe_sends_a_frame_only_when_the_list_changes() {
 }
 
 #[test]
-fn session_list_task_status_and_top_subscribe_answer_requests() {
+fn session_list_and_task_status_subscribe_answer_requests() {
     let built = Built::new("one-task");
     let issue = built.issue_named("Search Session transcripts");
     for args in [
         vec!["session", "list", "--all", "--subscribe"],
         vec!["task", "status", issue.as_str(), "--subscribe"],
-        vec!["monitor", "ps", "--json", "--subscribe"],
     ] {
         let mut subscription = built
             .command(&args)

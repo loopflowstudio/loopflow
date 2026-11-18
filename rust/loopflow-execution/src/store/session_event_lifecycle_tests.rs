@@ -100,7 +100,7 @@ fn session_exit_closes_its_agent_process() {
         .process_group(0)
         .spawn()
         .unwrap();
-    let started = crate::journal::process_started_at(child.id())
+    let started = crate::process::os_process::process_started_at(child.id())
         .unwrap()
         .unwrap();
     store
@@ -118,7 +118,7 @@ fn session_exit_closes_its_agent_process() {
     crate::process::finish_session_attachment(&store, &session.id, &original, "completed").unwrap();
     // Close leaves reaping to the parent; an unreaped zombie is dead.
     assert_eq!(
-        crate::journal::process_identity_evidence(child.id(), started),
+        crate::process::os_process::process_identity_evidence(child.id(), started),
         crate::store::ProcessIdentityEvidence::Dead
     );
     let _ = child.wait();

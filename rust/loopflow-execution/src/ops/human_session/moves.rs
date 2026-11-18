@@ -18,12 +18,12 @@ use serde::{Deserialize, Serialize};
 
 use super::{provider_conversation, session_by_id, session_not_found};
 use crate::harness::HarnessKind;
-use crate::journal::ProcessIdentityEvidence;
 use crate::process::Departure;
 use crate::provider_auth::Provider;
 use crate::repository::CanonicalRepo;
 use crate::session::{LfSession, PrimaryScope, TitleSource, WorkSource};
 use crate::store::task_work::TaskGraphRecord;
+use crate::store::ProcessIdentityEvidence;
 use crate::store::SharedStore;
 use crate::transcript::{Located, Source};
 use loopflow_model::durable::{MachineId, RepositoryId, TaskId, TaskOwnershipEntry, WorkRef};
@@ -349,7 +349,7 @@ async fn await_provider_identity(store: &SqliteStore, session: &str) -> Result<(
         let starting = store
             .session_attachment(session)?
             .is_some_and(|attachment| {
-                crate::journal::agent_evidence(store, &attachment.agent_process_id)
+                crate::process::os_process::agent_evidence(store, &attachment.agent_process_id)
                     == ProcessIdentityEvidence::Unknown
             });
         if !starting || std::time::Instant::now() >= deadline {
@@ -410,7 +410,9 @@ fn claim_for(store: &SqliteStore, task: &Task, to: &MachineId) -> Result<TaskOwn
 /// only once its pid is proven to be that recorded Process. Returns the
 /// stopped Graph, if one was running.
 async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedGraph>> {
-    let live = |run: &Execution| crate::journal::run_evidence(run) == ProcessIdentityEvidence::Live;
+    let live = |run: &Execution| {
+        crate::process::RecordedProcess::from(run).evidence() == ProcessIdentityEvidence::Live
+    };
     let graphs: Vec<_> = store
         .sqlite
         .task_graphs(&task.id)?
@@ -438,7 +440,7 @@ async fn stop_graphs(store: &SharedStore, task: &Task) -> Result<Option<StoppedG
         .await?;
     for process in &processes {
         if let Some((pid, birth)) = process.pid.zip(process.os_started_at) {
-            if crate::journal::process_identity_evidence(pid, birth)
+            if crate::process::os_process::process_identity_evidence(pid, birth)
                 == ProcessIdentityEvidence::Live
             {
                 // SAFETY: the pid was just proven to be the recorded Process.

@@ -708,25 +708,6 @@ fn history_owns_recorded_reads_and_replay_without_changing_live_monitoring() {
             cmd: loopflow::lf::SessionCommand::Usage(_)
         })
     ));
-    for verb in ["ps", "top"] {
-        assert!(matches!(
-            parse(&["lf", verb]).command,
-            Some(Commands::Process { .. })
-        ));
-    }
-    assert!(matches!(
-        parse(&["lf", "monitor", "ps"]).command,
-        Some(Commands::Process {
-            cmd: loopflow::lf::commands::process::ProcessCommand::List { .. }
-        })
-    ));
-    // `lf monitor <retired verb>` moves to `lf process list` and fails there
-    // instead of running a skill named `monitor`.
-    for verb in ["activity", "active"] {
-        let args = normalize_args(["lf", "monitor", verb].map(str::to_owned).to_vec()).unwrap();
-        assert_eq!(args, ["lf", "process", "list", verb]);
-        assert!(Cli::try_parse_from(args).is_err());
-    }
     assert!(Cli::command().find_subcommand("replay").is_none());
 }
 
@@ -873,7 +854,6 @@ fn moved_commands_have_one_owner_and_keep_their_short_names() {
     for (old, path) in [
         (vec!["planning", "key"], vec!["repo", "tracker", "key"]),
         (vec!["planning"], vec!["repo", "tracker"]),
-        (vec!["monitor", "ps"], vec!["process", "list"]),
         (vec!["ship", "--stop"], vec!["task", "hold"]),
         (vec!["desktop", "task"], vec!["task", "show"]),
         (vec!["wave", "status", "--sync"], vec!["wave", "sync"]),

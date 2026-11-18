@@ -88,10 +88,6 @@ pub enum Read {
     #[serde(rename = "creation.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<Option<loopflow_storage::sqlite::creation::CreationReceipt>>()))]
     CreationGet { request_id: String },
-    /// `lf process list`: live Loopflow call trees.
-    #[serde(rename = "process.list")]
-    #[schemars(extend("x-result" = generator.subschema_for::<crate::lf::commands::top::ActivitySnapshot>()))]
-    ProcessList,
     /// `lf --cwd <directory> desktop view list`: the plans a repository window shows.
     #[serde(rename = "desktop.view.list")]
     #[schemars(extend("x-result" = generator.subschema_for::<Vec<loopflow_storage::work::selection::ViewPlan>>()))]
@@ -235,7 +231,7 @@ pub enum Read {
         task: String,
         after: Option<String>,
     },
-    /// `lf process show <id>`: one Graph that ran, with its steps.
+    /// `lf graph show <id>`: one Graph that ran, with its steps.
     #[serde(rename = "process.get")]
     #[schemars(extend("x-result" = generator.subschema_for::<loopflow_execution::durable::GraphProcessDetail>()))]
     ProcessGet { id: String },
@@ -378,7 +374,6 @@ impl Read {
         match self {
             Self::ProcessHistory { id } => words(&["session", "history", "show", id]),
             Self::CreationGet { request_id } => words(&["server", "receipt", request_id, "--json"]),
-            Self::ProcessList => words(&["process", "list", "--json"]),
             Self::DesktopViewList { directory } => {
                 at(directory, &["desktop", "view", "list", "--json"])
             }
@@ -498,7 +493,7 @@ impl Read {
                 argv.push("--json".into());
                 argv
             }
-            Self::ProcessGet { id } => words(&["process", "show", id, "--json"]),
+            Self::ProcessGet { id } => words(&["graph", "show", id, "--json"]),
             Self::SessionUsage {
                 days,
                 wave,
@@ -674,7 +669,6 @@ impl Read {
                 value(&super::screens::task_detail(directory, issue)?)
             }
             Self::SessionCard { id } => value(&super::screens::session_card(id)?),
-            Self::ProcessList => value(&super::top::load_snapshot()?),
             Self::DesktopViewList { directory } => {
                 value(&super::desktop::read_plans(None, directory)?)
             }
@@ -925,7 +919,6 @@ impl Read {
             | Self::PrReviews { directory, .. } => Some(directory),
             Self::ProcessHistory { .. }
             | Self::CreationGet { .. }
-            | Self::ProcessList
             | Self::ViewSelect { .. }
             | Self::SessionCard { .. }
             | Self::TaskChanges { .. }
@@ -979,7 +972,6 @@ impl Read {
             events,
         };
         let subscription = match self {
-            Self::ProcessList => super::top::subscribe_ps(transport),
             Self::DesktopViewList { directory } => {
                 super::desktop::subscribe_plans(None, directory, transport)
             }

@@ -6,7 +6,10 @@
 
 /// Recover this Machine's work. Failures are logged, never fatal to the read.
 pub fn recover() {
-    if let Err(error) = crate::harness::agent_process::reap_agent_processes(false) {
+    let reaped = crate::store::database_path_from_env()
+        .map_err(anyhow::Error::from)
+        .and_then(|database| crate::harness::agent_process::reap_agent_processes(&database));
+    if let Err(error) = reaped {
         tracing::warn!("AgentProcess settlement: {error}");
     }
     if let Err(error) = crate::ops::task::ship::restart_ships() {

@@ -25,10 +25,11 @@ pub struct LfProcess {
     pub error: Option<String>,
 }
 
-/// A process start receipt with its terminal placement, supplied before SQL.
+/// The lf taking a Session's attachment: what attaching records of it.
 #[derive(Debug, Clone)]
-pub struct LfProcessStart {
-    pub process: LfProcess,
+pub struct AttachingLf {
+    pub lf_process_id: LfProcessId,
+    pub holder: AttachmentHolder,
     pub terminal: Option<loopflow_model::id::TerminalId>,
 }
 

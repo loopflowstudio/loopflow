@@ -197,7 +197,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
             unsafe {
                 libc::waitpid(group, std::ptr::null_mut(), libc::WNOHANG);
             }
-            survivors = crate::journal::OsProcess::group(pgid)
+            survivors = crate::process::OsProcess::group(pgid)
                 .map_err(|error| anyhow!("cannot observe process group {pgid}: {error}"))?;
             if survivors.is_empty() {
                 return Ok(());
@@ -210,7 +210,7 @@ pub(crate) fn terminate_process_group(pgid: u32) -> Result<()> {
     }
     Err(anyhow!(
         "process group {pgid} survives SIGKILL: {}",
-        crate::journal::OsProcess::describe(&survivors)
+        crate::process::OsProcess::describe(&survivors)
     ))
 }
 
@@ -409,7 +409,7 @@ fn terminate_terminal_jobs(session: u32) -> std::io::Result<()> {
     }
     let deadline = Instant::now() + Duration::from_secs(3);
     loop {
-        let members = crate::journal::OsProcess::session(session)?;
+        let members = crate::process::OsProcess::session(session)?;
         if members.is_empty() {
             return Ok(());
         }
@@ -479,7 +479,7 @@ mod terminal_jobs_tests {
         jobs.terminate().unwrap();
         shell.wait().unwrap();
         for pid in pids {
-            assert!(crate::journal::OsProcess::read(pid)
+            assert!(crate::process::OsProcess::read(pid)
                 .unwrap()
                 .is_none_or(|p| p.has_exited()));
         }

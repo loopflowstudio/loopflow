@@ -774,7 +774,6 @@ fn reads_record_no_process_and_wake_no_reader() {
     let before = processes_revision(home.path());
     for args in [
         &["history", "--json"][..],
-        &["monitor", "ps", "--json"],
         &["wave", "list", "--all", "--json"],
         &["desktop", "plan", "--all", "--json"],
         &["history", "list", "--json", "--all"],

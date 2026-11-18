@@ -509,7 +509,7 @@ pub trait Harness: Sync + std::fmt::Debug {
     fn conversation_owners(
         &self,
         _home: &std::path::Path,
-        _processes: &std::collections::HashMap<u32, &crate::journal::OsProcess>,
+        _processes: &std::collections::HashMap<u32, &crate::process::OsProcess>,
     ) -> std::collections::HashMap<u32, String> {
         std::collections::HashMap::new()
     }
@@ -530,7 +530,7 @@ pub trait Harness: Sync + std::fmt::Debug {
         Vec::new()
     }
 
-    fn recognizes(&self, process: &crate::journal::OsProcess) -> bool {
+    fn recognizes(&self, process: &crate::process::OsProcess) -> bool {
         process.command == self.kind().as_str()
     }
     fn model_rungs(&self) -> &'static [&'static str] {

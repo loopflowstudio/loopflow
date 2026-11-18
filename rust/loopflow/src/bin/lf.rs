@@ -2784,7 +2784,9 @@ fn dispatch_here(
                 cmd: None | Some(loopflow::lf::commands::history::HistoryCommand::List { .. }),
                 ..
             },
-        }) | Some(Commands::Process { .. })
+        }) | Some(Commands::Session {
+            cmd: loopflow::lf::SessionCommand::List(_)
+        })
     ) {
         loopflow_execution::ops::recovery::recover();
     }
@@ -3414,7 +3416,6 @@ fn execute_command(
         Some(Commands::List { .. } | Commands::Help { .. }) => {
             unreachable!("inspection returned before execution")
         }
-        Some(Commands::Process { cmd }) => loopflow::lf::commands::process::run(cmd),
         Some(Commands::Discord {
             cmd: loopflow::lf::DiscordCommand::Serve { wave },
         }) => in_repo_runtime(args, |repo| {

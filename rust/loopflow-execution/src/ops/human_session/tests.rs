@@ -223,7 +223,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
         program_status: None,
         agent_process_id: None,
         primary_scope: None,
-        agent_process_evidence: crate::journal::ProcessIdentityEvidence::Unknown,
+        agent_process_evidence: crate::store::ProcessIdentityEvidence::Unknown,
         available: false,
         terminal_id: None,
         unviewed: false,
@@ -266,7 +266,7 @@ fn summary_fixture() -> crate::session::SessionSummary {
 /// A summary whose projected state is `state`: a running one has an agent
 /// process, a detached one is held and unviewed.
 fn summary_in(state: super::SessionState, interactive: bool) -> crate::session::SessionSummary {
-    use crate::journal::ProcessIdentityEvidence::*;
+    use crate::store::ProcessIdentityEvidence::*;
     let mut summary = summary_fixture();
     summary.interactive = interactive;
     summary.agent_process_evidence = match state {
@@ -348,15 +348,15 @@ fn session_metadata_keeps_unknown_position_visible() {
     // Session completion does not override its recorded provider's life.
     for (evidence, expected) in [
         (
-            crate::journal::ProcessIdentityEvidence::Live,
+            crate::store::ProcessIdentityEvidence::Live,
             super::SessionState::Active,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Dead,
+            crate::store::ProcessIdentityEvidence::Dead,
             super::SessionState::Closed,
         ),
         (
-            crate::journal::ProcessIdentityEvidence::Unknown,
+            crate::store::ProcessIdentityEvidence::Unknown,
             super::SessionState::Unknown,
         ),
     ] {
@@ -832,7 +832,7 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
         let summary = super::current_summary(&store, &session.id).unwrap();
         assert_eq!(
             summary.agent_process_evidence,
-            crate::journal::ProcessIdentityEvidence::Unknown
+            crate::store::ProcessIdentityEvidence::Unknown
         );
         assert_eq!(
             listed_session(&store, &session.id).action.unwrap().label,

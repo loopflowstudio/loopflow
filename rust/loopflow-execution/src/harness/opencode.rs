@@ -948,7 +948,9 @@ mod tests {
         let child =
             super::super::agent_process::spawn(command, None, &owner, LaunchKind::Batch).unwrap();
         let pid = child.id().unwrap();
-        let birth = crate::journal::process_started_at(pid).unwrap().unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)
+            .unwrap()
+            .unwrap();
         let (tx, _rx) = mpsc::unbounded_channel();
         let mut harness = Driver::new(
             &crate::harness::launch_for_test(
@@ -966,8 +968,8 @@ mod tests {
         assert_eq!(harness.pid(), None);
         assert_eq!(harness.process_group_id(), None);
         assert_eq!(
-            crate::journal::process_identity_evidence(pid, birth),
-            crate::journal::ProcessIdentityEvidence::Dead
+            crate::process::os_process::process_identity_evidence(pid, birth),
+            crate::store::ProcessIdentityEvidence::Dead
         );
     }
     #[test]

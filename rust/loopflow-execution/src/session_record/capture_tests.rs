@@ -195,14 +195,14 @@ fn a_failed_terminal_receipt_still_closes_the_provider() {
         store.record_agent_process_launch(&session, &attachment, &command, false)?;
         let mut child = command.spawn()?;
         let pid = child.id();
-        let birth = crate::journal::process_started_at(pid)?.unwrap();
+        let birth = crate::process::os_process::process_started_at(pid)?.unwrap();
         store.record_agent_process_identity(&session, &attachment, pid, birth)?;
         // A directory at the receipt path makes the write fail independently
         // of the store that owns the still-running provider.
         let receipt = capture.artifact_dir().join("terminal.json");
         fs::create_dir(&receipt)?;
         let result = capture.finish("interrupted");
-        let life = crate::journal::process_identity_evidence(pid, birth);
+        let life = crate::process::os_process::process_identity_evidence(pid, birth);
         let current = store.session_attachment(&session);
         let _ = child.kill();
         let _ = child.wait();
@@ -211,7 +211,7 @@ fn a_failed_terminal_receipt_still_closes_the_provider() {
             result.is_err(),
             "the missing receipt remains a caller error"
         );
-        assert_eq!(life, crate::journal::ProcessIdentityEvidence::Dead);
+        assert_eq!(life, crate::store::ProcessIdentityEvidence::Dead);
         assert!(current?.unwrap().lf_process_id.is_none());
         assert!(capture.finish("failed").is_err());
         assert!(crate::harness::agent_process::spawn_native(
@@ -849,7 +849,7 @@ fn continuation_resumes_the_saved_thread_on_a_fresh_agent_process() {
             &session.id,
             &attachment,
             provider.id(),
-            crate::journal::process_started_at(provider.id())?.unwrap(),
+            crate::process::os_process::process_started_at(provider.id())?.unwrap(),
         )?;
         provider.kill()?;
         provider.wait()?;
@@ -1020,7 +1020,7 @@ fn attached_session(
     store.test_set_holder(
         "conversation",
         process.id(),
-        crate::journal::process_started_at(process.id())
+        crate::process::os_process::process_started_at(process.id())
             .unwrap()
             .unwrap(),
     );
@@ -1039,7 +1039,7 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
         .process_group(0)
         .spawn()
         .unwrap();
-    let started = crate::journal::process_started_at(agent_process.id())
+    let started = crate::process::os_process::process_started_at(agent_process.id())
         .unwrap()
         .unwrap();
     store
@@ -1071,8 +1071,8 @@ fn resume_dead_attachment_ends_its_agent_before_starting_another() {
     let replacement =
         crate::process::resume_session_agent_process(&store, "conversation", &next).unwrap();
     assert_eq!(
-        crate::journal::process_identity_evidence(agent_process.id(), started),
-        crate::journal::ProcessIdentityEvidence::Dead,
+        crate::process::os_process::process_identity_evidence(agent_process.id(), started),
+        crate::store::ProcessIdentityEvidence::Dead,
     );
     // Ending the AgentProcess may already have reaped this exact child.
     let _ = agent_process.wait();
@@ -1109,7 +1109,7 @@ fn resume_refuses_live_agent_that_cannot_be_ended() {
         .arg("30")
         .spawn()
         .unwrap();
-    let started = crate::journal::process_started_at(provider.id())
+    let started = crate::process::os_process::process_started_at(provider.id())
         .unwrap()
         .unwrap();
     store

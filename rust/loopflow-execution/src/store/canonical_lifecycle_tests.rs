@@ -17,7 +17,9 @@ fn released() -> (tempfile::TempDir, Connection) {
 fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
     let (_home, conn) = released();
     let pid = std::process::id();
-    let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started_at = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     let process = PROCESS.to_ascii_lowercase();
     let trace = TRACE.to_ascii_lowercase();
     let session = SESSION.to_ascii_lowercase();
@@ -52,7 +54,9 @@ fn canonical_ids_changed_claim_waits_for_canonical_live_caller() {
 fn canonical_ids_canonical_live_claim_does_not_defer_upgrade() {
     let (home, conn) = released();
     let pid = std::process::id();
-    let started_at = crate::journal::process_started_at(pid).unwrap().unwrap();
+    let started_at = crate::process::os_process::process_started_at(pid)
+        .unwrap()
+        .unwrap();
     conn.execute("UPDATE agent_sessions SET id=lower(id)", [])
         .unwrap();
     conn.execute("UPDATE processes SET id=lower(id),trace_id=lower(trace_id),pid=?1,started_at=?2,completed_at=NULL", params![pid,started_at]).unwrap();

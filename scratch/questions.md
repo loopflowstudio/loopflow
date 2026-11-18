@@ -148,3 +148,15 @@ commands in a checkout are not listed as Task work; LOO-965 owns
   later), so it selected the same rows; it now reads as the membership rule,
   and both the upgrade test and the membership test start a run from a Task
   primary.
+
+## Concept review as built (0ef1ad038a, 2026-11-18)
+
+- **Advance to gate without unifying the two checkout lookups.** The launch
+  (`counted_task`, Git worktree root, error on two claimants) and the store
+  (`deepest_checkout`, path ancestor, deepest wins) each define "the Task
+  holding this directory". Chosen: say so in the plan and on the page, leave
+  the code. Passed over: one storage function both call, in this PR; it
+  changes what every launch resolves.
+- Four questions on `scratch/concept-review.html` are unanswered: adoption
+  for Sessions vs runs, where Mismatch A goes, the primary mark's upgrade
+  day, `work_source='inherited'`.

@@ -140,8 +140,13 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 
 ## Session and Graph run membership
 
-One rule, one function (`task_work::starting_task_in`), applied once when the
-row is written:
+One rule in the store (`task_work::starting_task_in`), applied once when the
+row is written. The launch decides first and names the Task it found
+(`select_execution_work` → `counted_task`, by Git worktree root); the store
+fills in only what the launch left empty. Same order, two definitions of "the
+checkout holding this directory": they differ in a worktree nested inside a
+checkout and where two Tasks hold one root. Not built here (concept review,
+Mismatch A).
 
 > the Task it names, else the deepest checkout holding its directory on this
 > Machine, else the Task of the Session that started it.
@@ -153,16 +158,19 @@ Processes to the calling agent's Task; 5,672 `lf session serve`, plus `commit`,
 
 - `record_graph` applies all three clauses (`ExecutionStart.caller_session`).
 - Session creation (`resolve_ancestry_in`) applies the first two; the Task of
-  the Session that started it arrives named, as `work_source='inherited'`,
-  from `select_work`.
+  the agent that started it arrives named, as `work_source='declared'`,
+  through `LF_AS`, which the launch reads after the checkout
+  (`select_execution_work`). `'inherited'` has no production writer.
 - Adoption: `write_task_checkout_in` gives open taskless Sessions inside a
   newly placed checkout its Task. A Graph run already there keeps no Task
   (`graph_processes_launch_is_immutable` stands as main wrote it) and stays
   out of the Task's history; it still blocks a second run (questions.md).
 - Readers: `session_membership`, `session_tasks` and `task_graph_pairs` read
-  `task_id` only. Two path matches remain, both about what occupies a
+  `task_id` only. Three path matches remain, all about what occupies a
   directory now: `task_open_graph_pairs` for unended runs that recorded no
-  Task, and `checkout_open_work` for a checkout no Task holds.
+  Task, `checkout_open_work` for a checkout no Task holds, and
+  `counted_task` for a launch and for provider conversations lf has no
+  Session for (`human_session/turns.rs`).
 - Backfill in `task_facts_once.sql`: the 3 primaries from
   `task_primary_sessions`, the deepest checkout for Sessions naming nothing
   (22,342 live Sessions: 0.19 s), then Graph runs with no Task by the rule.
@@ -395,6 +403,12 @@ backfill (0.19 s for 22,342 live Sessions).
 Open, for a person (questions.md): an open Session in a checkout a Task takes
 joins the Task; a Graph run there does not. Whether they should differ.
 
-Concept review (2026-11-18, `scratch/concept-review.html`) and its four
-answers are in questions.md; all four are applied or handed on (LOO-877,
-LOO-934).
+Concept review of the first build (2026-11-18) and its four answers are in
+questions.md; all four are applied or handed on (LOO-877, LOO-934).
+
+Concept review as built at `0ef1ad038a` (`scratch/concept-review.html`):
+nothing for implement. Stated there, larger than this Task, and for the PR
+body: launch and store each define "the checkout holding this directory"
+(Mismatch A, fits LOO-934); adoption treats Sessions and runs differently
+(B, already open above); the primary mark's upgrade day; the unwritten
+`work_source='inherited'`. Its four questions are unanswered.

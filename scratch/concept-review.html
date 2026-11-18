@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>LOO-937 concept review: a Task's facts on today's main</title>
+<title>LOO-937 concept review: a Task's facts, as built</title>
 <style>
 :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbf8; --mute:#6b6b6b; --line:#d9d6cc;
   --yes:#1f7a3a; --no:#b3261e; --prop:#7a4fb3; --card:#f2efe6; }
@@ -8,7 +8,7 @@
   :root { --fg:#ecebe6; --bg:#18181a; --mute:#9a9a9a; --line:#3a3a3e; --yes:#5cc97e; --no:#ff7b72;
     --prop:#c3a3f0; --card:#232327; } }
 body { font: 15px/1.55 -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg);
-  max-width: 920px; margin: 2.5rem auto; padding: 0 1rem; }
+  max-width: 940px; margin: 2.5rem auto; padding: 0 1rem; }
 h1 { font-size: 1.5rem; margin-bottom:.2rem } h2 { font-size:1.15rem; margin-top:2.2rem }
 code { font: 13px ui-monospace, Menlo, monospace; overflow-wrap:anywhere }
 table { border-collapse: collapse; width:100%; margin:.6rem 0 }
@@ -21,74 +21,121 @@ th { font-weight:600 }
 .ba { display:grid; grid-template-columns: 1fr 1fr; gap:.8rem }
 @media (max-width: 640px) { .ba { grid-template-columns: 1fr } }
 .mute { color:var(--mute) }
-ol li { margin:.35rem 0 }
+ol li { margin:.45rem 0 }
 </style></head><body>
 
 <h1>Do a Task's concepts and the store's concepts line up?</h1>
-<p class="mute">LOO-937 at <code>a3639aa8f2</code>, reviewed as it would stand merged onto <code>origin/main</code>
-after #1974 (Sessions and Graph runs track their own processes; <code>processes</code> is leaving). 2026-11-18.</p>
-<p><b>Area taken:</b> everything a person knows about one Task: what it is (title, state, rank, Project),
-which conversations and runs are its work, which conversation is its own, and where it sits in a list,
-plus the records behind each. Not the branch against its old base: #1974 changed what "a Task's work" is made of,
-so that comparison answers a question nobody will ask again.</p>
+<p class="mute">LOO-937 at <code>0ef1ad038a</code> (PR #1973), against its base <code>a0548bfe28</code>
+(main through #1977). 2026-11-18. Replaces the page written at <code>a3639aa8f2</code>, whose four questions
+were answered and applied.</p>
+<p><b>Area taken:</b> everything a person knows about one Task and the record behind each piece: what it is
+(title, state, rank, Project, branch), which conversations and runs are its work, which conversation is its own,
+where it sits in a list, and what happens to all of that across a move, a reused path and an upgrade. Wider than
+the diff on one side: the launch code that decides a Task before the store records it is unchanged by this PR
+and is part of the same answer.</p>
 
-<h2>One interaction, walked on the merged frontier</h2>
+<h2>One interaction, walked</h2>
 <div class="card">
-<p><b>Normal.</b> <code>lf task run LOO-937</code> starts a Graph run; its <code>graph_processes</code> row names
-<code>task_id</code> at launch (main). Its review step opens a conversation; that Session's row names
-<code>task_id</code> at creation (this PR). <code>lf resume --task LOO-937</code> finds the Session marked
-<code>primary_scope='task'</code> (this PR). The Task page lists both by one indexed read each.</p>
-<p><b>Failure.</b> The repository moves on disk, then a second clone takes the old checkout path.
-Graph runs and Sessions keep the Task they recorded; nothing is matched by path.
-On <code>main</code> alone, Sessions still also join any Task whose checkout holds their cwd, so the reused path
-would pull the second clone's conversations into the old Task. This PR is what closes that.</p>
-<p><b>Recovery.</b> A released lf still running after the upgrade keeps writing <code>processes</code> rows
-(main bridges them) and <code>task_primary_sessions</code> rows (this PR mirrors them onto the mark).
-Both are window-only and drop with their contracts.</p>
+<p><b>Normal.</b> In the LOO-937 checkout, with no <code>--task</code>: <code>lf implement</code> opens a
+conversation and <code>lf graph code</code> starts a run. The launch finds the checkout's Task
+(<code>counted_task</code>) and names it; the store writes <code>agent_sessions.task_id</code> and
+<code>graph_processes.task_id</code>. Had the launch named none, the store would find it itself
+(<code>starting_task_in</code>). <code>lf task show</code> and Desktop list both by that column.
+A tile dragged in Desktop's Working board changes <code>tasks.planning_rank</code>, which Linear and
+<code>lf task</code> show too.</p>
+<p><b>Failure.</b> The repository moves on disk and a second clone takes the old checkout path. Each Task
+lists exactly its own Sessions and runs; no read matches a path
+(<code>work_keeps_its_task_when_its_repository_moves_and_its_path_is_reused</code>).</p>
+<p><b>Recovery.</b> <code>lf install</code> migrates the store while an older lf is still running (a Desktop
+app not yet updated, a long-lived process). That lf reads <code>primary_scope='task'</code> as "not this
+Task's conversation": the Task's primary conversation disappears from its Sessions there and cannot be
+reopened from it, until that process is the new build. Nothing is lost; QA saw it with
+<code>0.16.0+7bb879aff</code> on a migrated home.</p>
 </div>
 
 <h2>Pairings</h2>
 <table>
-<tr><th>Product concept</th><th>Code concept (merged)</th><th></th><th>What is wrong, where no</th></tr>
-<tr><td>A Task's title, description, state, rank, URL, branch, team</td><td><code>tasks</code> (desired); <code>tracker_items</code> (what the tracker last said)</td><td class="yes">yes</td><td>Desired vs observed, the merge base for conflicts. Names are LOO-939's.</td></tr>
-<tr><td>Where a Task sits in a list; dragging a tile</td><td><code>tasks.planning_rank</code>; <code>reorder_task → move_in → reorder_in</code></td><td class="yes">yes</td><td>One order, one owner. A drop among another Project's Tasks moves it there (answer 2a), through the same <code>move_task_in</code> as <code>lf task move</code>.</td></tr>
-<tr><td>The Task's conversations</td><td><code>agent_sessions.task_id</code>, set at creation</td><td class="yes">yes</td><td>Only once this PR's rule replaces main's path-or-id <code>session_membership</code> in the merge.</td></tr>
-<tr><td>The Task's primary conversation</td><td><code>agent_sessions.primary_scope='task'</code></td><td class="yes">yes</td><td>One mark for every scope; the wire's <code>task_primary</code> is gone (answer 1a).</td></tr>
-<tr><td>The Task's runs</td><td><code>graph_processes.task_id</code>, set at launch (main)</td><td class="yes">yes</td><td>Same rule as Sessions: the record names its Task when it starts.</td></tr>
-<tr><td>(nothing a person sees)</td><td><code>processes.task_id</code>, <code>process_task_backfill</code>, <code>process_task()</code> resolution, <code>relocated_task_processes</code> reads removed</td><td class="no">no</td><td>This PR's Process half answers "which Task is this lf command's" on a table main no longer writes. Merged, it is a third home for "which Task is this run's", on rows nobody creates. <b>Mismatch A.</b></td></tr>
-<tr><td>(nothing)</td><td><code>-- leaving: relocated_task_processes LOO-877</code> here, <code>LOO-965</code> on main</td><td class="no">no</td><td>One member, two contracts. LOO-965 owns <code>processes</code> and its relocation table; this PR's mark and its LOO-877 steer for it should go.</td></tr>
-<tr><td>The branch</td><td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td><td class="no">no</td><td>Sent to LOO-934 (answer 3a).</td></tr>
-<tr><td>"This Task is done"</td><td><code>planning_state='completed'</code></td><td class="yes">yes</td><td>The wire's <code>planning_completed</code> goes with LOO-877's release (answer 4a).</td></tr>
+<tr><th>Product concept</th><th>Code concept</th><th></th><th>What is wrong, where no</th></tr>
+<tr><td>A Task's title, description, state, rank, URL, team</td>
+ <td><code>tasks</code> (what lf shows and edits); <code>tracker_items</code> (what the tracker last said)</td>
+ <td class="yes">yes</td><td>Two values on purpose: the second is the merge base for a conflict answer. The names are LOO-939's.</td></tr>
+<tr><td>"This Task is done"</td><td><code>tasks.planning_state='completed'</code></td>
+ <td class="yes">yes</td><td>The boolean follows it by trigger for released lf, and leaves with LOO-877.</td></tr>
+<tr><td>Where a Task sits; dragging a tile</td>
+ <td><code>tasks.planning_rank</code>; <code>reorder_task → move_in → reorder_in</code></td>
+ <td class="yes">yes</td><td>One order, one path, shared with <code>lf task move</code>.</td></tr>
+<tr><td>The Task's conversations and runs</td>
+ <td><code>agent_sessions.task_id</code>, <code>graph_processes.task_id</code>; readers use the column only</td>
+ <td class="yes">yes</td><td>The reading side is one idea, one place.</td></tr>
+<tr><td>"Work started in a Task's checkout is that Task's"</td>
+ <td>launch: <code>select_execution_work → counted_task</code> (execution; same Git worktree root, two claimants is an error)<br>
+     record: <code>starting_task_in → deepest_checkout</code> (storage; path ancestor, deepest wins)</td>
+ <td class="no">no</td><td>One idea, two owners, each documented as the only one. <b>Mismatch A.</b></td></tr>
+<tr><td>A Task takes a checkout that work is already running in</td>
+ <td>open Sessions there take the Task (<code>write_task_checkout_in</code>); a Graph run there never does, yet
+     blocks a second run (<code>task_open_graph_pairs</code>'s path clause)</td>
+ <td class="no">no</td><td>One event, two outcomes. A person can see a Task held by a run that is not in the Task's runs.
+     And the upgrade does the opposite for runs: the backfill attaches earlier taskless runs by today's checkouts. <b>Mismatch B.</b></td></tr>
+<tr><td>The Task's primary conversation</td>
+ <td><code>agent_sessions.primary_scope='task'</code>; <code>task_primary_sessions</code> mirrored by three triggers until LOO-877</td>
+ <td class="yes">yes</td><td>One mark for repository, Wave and Task. The cost is the recovery case above. <b>Question 3.</b></td></tr>
+<tr><td>The Task's branch</td>
+ <td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td>
+ <td class="no">no</td><td>Three homes. Already with LOO-934.</td></tr>
+<tr><td>(nothing a person sees)</td>
+ <td><code>agent_sessions.work_source</code>: <code>'inherited'</code> has no production writer; a child of a Task's
+     agent arrives <code>'declared'</code> through <code>LF_AS</code></td>
+ <td class="no">no</td><td>A value the code has and nothing writes. The column is leaving (LOO-836); the value can go with it.</td></tr>
+<tr><td>"A removed duplicate stays removed"</td>
+ <td><code>leaving_guard.rs</code>: storage-crate test stores refuse SQL naming a leaving member</td>
+ <td class="yes">yes</td><td>Reaches storage tests only, and not direct reads of leaving foreign-key columns. Stated in the plan.</td></tr>
 </table>
 
-<h2>Biggest mismatch: A, this PR's Process half</h2>
+<h2>Biggest mismatch: A, two owners for "which Task is this directory's"</h2>
 <div class="ba">
-<div class="card"><b>Merged naively</b><br>
-<code>processes.task_id</code> (this PR, backfilled hourly)<br>
-<code>graph_processes.task_id</code> (main)<br>
-<code>agent_sessions.task_id</code> (both)<br>
-<span class="mute">Three columns answer "whose work is this", and the first sits on a table marked leaving,
-filled by a maintenance pass for rows released lf writes and main bridges.</span></div>
-<div class="card prop"><span class="tag">proposed</span><br>
-A Task's work is its Sessions and its Graph runs, each naming its Task when it starts.
-Drop <code>processes.task_id</code>, <code>processes_task</code>, <code>process_task_backfill</code>, the
-<code>process_task()</code> resolution and its tests; take main's Graph-run membership.<br>
-<span class="mute">What survives: every Session and Graph run keeps its Task across a move or a reused path.
-What changes on purpose: an lf command run inside a checkout (<code>lf commit</code>) is no longer listed as the
-Task's work; main already stopped recording it as a Process. Counterexample not yet checked: a Graph run
-launched inside a checkout without <code>--task</code>. Main's <code>record_graph</code> takes the Task from its
-caller, so whether that run is the Task's depends on the launcher; the merge must confirm it or give it the
-checkout's Task the way Sessions get theirs.</span></div>
+<div class="card"><b>As built</b><br>
+The launch asks <code>counted_task(cwd)</code>: load every <code>task_checkouts</code> row (969 on the live
+store), canonicalize each, compare Git worktree roots. Its comment: "decided by changing this function alone".<br>
+The store asks <code>deepest_checkout(cwd)</code>: walk the stored path's ancestors against an index. The plan:
+"One rule, one function".<br>
+<span class="mute">They agree on order (named, then checkout, then the caller) and on almost every directory, because the
+launch names the Task and the store only fills in what the launch left empty. They differ in a Git worktree nested
+inside a checkout: the launch finds no Task, so the agent gets no Task context and no usage rows, and the store
+then files its Session under the outer Task. And where two Tasks hold one root: the launch refuses, the store
+picks one.</span></div>
+<div class="card prop"><span class="tag">proposed, not in this PR</span><br>
+One function in storage answers "the Task holding this directory on this Machine", and
+<code>counted_task</code> calls it with the worktree root it already computes. The scan of every checkout goes;
+so does the second definition.<br>
+<span class="mute">Survives: a symlinked or <code>/private</code> path still resolves, because the caller canonicalizes
+before asking. Changes on purpose: nested worktrees get one answer (the choice is which), and "Multiple Tasks
+claim this checkout" becomes a fact the store can or cannot hold, decided once. Counterexample to check first:
+<code>task_checkouts.worktree</code> rows stored uncanonicalized, which the scan tolerates today.</span></div>
 </div>
-<p>The rest of this PR carries over: Session Task at creation, the primary mark (its <code>agent_sessions</code>
-rebuild redone on main's 46-column shape), one order, the move rule, dropping wire <code>task_primary</code>, the
-tracker revision and completion columns.</p>
+<p>This PR did what it set out to on the reading side, and the move-and-reuse failure is closed. A is older than
+the PR (<code>counted_task</code> came with #1954) and touches every launch, so it is stated here, corrected in the
+plan's wording, and not built at gate. LOO-934 ("reduce the store's reads to what the product needs") is where
+it fits.</p>
+
+<h2>Choices made for review</h2>
+<ul>
+<li><b>Advance to gate without building A or B.</b> Passed over: unifying the two lookups now. It changes what
+every launch resolves, on a 105-file PR whose suites have not run since two merges.</li>
+<li><b>B stays as main wrote it</b> (a run already in an adopted checkout keeps no Task), with the upgrade
+backfill's opposite answer left in. Passed over: removing the Graph-run backfill clause for ended runs, which
+would leave pre-upgrade <code>lf graph</code> runs out of their Task's history.</li>
+</ul>
 
 <h2>Questions</h2>
 <ol>
-<li>This PR's Process half: (a) drop it for main's Sessions-and-Graph-runs membership; (b) keep <code>processes.task_id</code> until LOO-965 drops the table; (c) keep it and move it onto <code>graph_processes</code>.</li>
-<li>lf commands run in a checkout (<code>lf commit</code>, <code>lf pr land</code>): (a) not a Task's work any more; (b) file a Task to record them where a person sees them (the Session that ran them).</li>
-<li><code>relocated_task_processes</code>: (a) LOO-965 owns it; remove this PR's leaving mark and correct the LOO-877 steer; (b) keep both marks.</li>
-<li>Who does the merge: (a) this conversation; (b) a fresh build run from <code>implement</code> with this page as direction.</li>
+<li>Work already running in a checkout when a Task takes it: (a) Sessions join, runs do not, as built;
+(b) both join, and the Task shows the run it is waiting on; (c) neither joins, and the Task starts clean.</li>
+<li>Mismatch A: (a) hand it to LOO-934 with this page; (b) its own Task before LOO-939; (c) build it in this PR.</li>
+<li>The primary mark's upgrade day: (a) ship as built, and the release note says to update Desktop and restart
+long-lived lf with the install; (b) this release keeps writing <code>task_primary_sessions</code> as the home and
+only learns to read the mark, and LOO-877 flips it; (c) as (a), plus lf says so when it meets an older reader's
+symptom.</li>
+<li><code>work_source='inherited'</code>: (a) leaves with the column under LOO-836; (b) remove the value and its
+fixtures now.</li>
 </ol>
 </body></html>

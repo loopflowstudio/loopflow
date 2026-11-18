@@ -13,12 +13,12 @@ Graph step waits for capacity.
 `skill.pr-message.default_agent: claude:haiku` leads PR copy, and the rest of
 the order follows it, the way `commit-message` already works.
 
-## Finding that reshapes the work: Codex's refusal is not classified at all
+## Why the fix is wider than the brief: Codex's refusal never classified
 
-The brief's change (drop the early return in `_fallthrough_rungs`) is needed
-but would not fix the reported case. Codex's message uses a typographic
-apostrophe (`You’ve`, U+2019); `subscription_limit_text`
-(`rust/loopflow-execution/src/agent/mod.rs:1352`) matches `you've` with `'`.
+Dropping the early return in `_fallthrough_rungs`, as the brief had it, would
+not have fixed the reported case. Codex's message uses a typographic
+apostrophe (`You’ve`, U+2019) and the text classifier matched `you've` with
+`'`. What showed it, before the change:
 
 - `~/.lf/logs`: 81 occurrences of `You’ve hit your usage limit`, none with `'`.
 - Graph steps hit it too: `~/.lf/logs/graph-f5c090aa-….log` (2026-11-18) ends
@@ -31,177 +31,112 @@ apostrophe (`You’ve`, U+2019); `subscription_limit_text`
   not by text.
 - Both errors quoted in the brief lack the advice line `_run_with_retries`
   appends to a classified limit, so they were unclassified as well.
-- Every test spells the message with `'` (`agent/mod.rs:2232`,
-  `ops/task_execution.rs:459`, `tests/work/task_graph_launch_tests.rs:1878`),
-  which is why nothing caught it.
+- Every test spelled the message with `'`, which is why nothing caught it.
 
-Codex states the cause in a field. `codex app-server generate-json-schema`
-(codex-cli 0.170.0): `TurnError.codexErrorInfo` is an enum with
-`usageLimitExceeded`, `modelNotFound` and `unauthorized`.
-`harness/codex_decode.rs` reads only `/error/message` (the `error`
-notification, line 870) and `/turn/error/message` (`turn/completed`, line 749).
-The checked-in traces have `codexErrorInfo: null` for a stream disconnect; no
-trace of a live usage refusal exists, so the field being set on one is
-unobserved.
+Codex also states the cause in a field. `codex app-server
+generate-json-schema` (codex-cli 0.170.0): `TurnError.codexErrorInfo` is an
+enum with `usageLimitExceeded`, `modelNotFound` and `unauthorized`. Both are
+read: the fold is what the logs prove, the field is what the schema promises.
 
-Decision: do both. The decoder reads `codexErrorInfo` at both sites and emits
-`provider_rate_limited` for `usageLimitExceeded`, the code `drive.rs` already
-turns into `AgentFailure::UsageLimit`. The text classifiers fold `’` to `'`
-before matching, which is the part the logs prove. `ops/release.rs:2468` keeps
-its own copy of the phrase list with the same `'`; it uses the shared
-classifier or gets the same fold.
+## What exists
 
-## Design
+**One rule, one order, one loop.** A headless launch follows its agent order
+when a provider refuses it; only a Graph step also waits for capacity.
 
-**One rule.** A headless launch follows its agent order when a provider
-refuses it. Only a Graph step also waits for capacity. Three things carry that
-rule today (the shared loop behind a flag named for waiting, a second loop in
-`ops/commit.rs`, nothing in `ops/pr.rs`) and two places work out the order.
-After this change there is one of each.
+- **Order.** `Config::resolve_agents` gives the launch agent and its
+  fallbacks, including a bare harness's other models. `_run_with_retries`
+  (`agent/mod.rs`) walks `launch.agent`, then `launch.fallback_agents`,
+  deduplicated. `_fallthrough_rungs` is deleted. A caller that builds
+  `AgentConfig::new(agent)` by hand (`lf replay`) runs that agent only.
+- **Waiting.** `ProcessConfig.wait_for_capacity` gates only the
+  5/15/30/60-minute wait; `commands/run.rs` sets it for a Graph step alone.
+- **Classification.** `codex_decode::turn_error_code` reads `codexErrorInfo`
+  at both sites (`error`, `turn/completed`) and emits `provider_rate_limited`
+  for `usageLimitExceeded`. The text classifier (`agent/mod.rs`) and
+  `ops/release.rs` fold `’` to `'` before matching.
+- **PR copy and commit messages** build their launch in
+  `ops::commit::message_launch`: the skill's settings, the chosen agent, then
+  `resolve_agents`. The commit loop over agents is deleted. `-a` pins;
+  `MessageAgent::Fallback(Some(agent))` is the skill's own order, else the
+  run's agent. A step commit with no message still commits as
+  `lf <step>: checkpoint`.
+- **Moving provider before any reply.**
+  `conversation_log::continuation_of_work` returns `None` when the transcript
+  holds no agent item, and `_climb` then gives the next provider the launch's
+  own `task_prompt` and `skill_invocation`. A transcript with replies imports
+  as before; one that cannot be read gets `AGENT_FAILOVER_PROMPT` plus the
+  original task. `continuation` keeps its signature for `lf session new -a`
+  and resume. The reason: a PR prompt carries up to 20,000 characters of diff
+  and the import keeps the log's first 6,000 and last 14,000.
+- **The Session follows the agent.** A retry that changes provider writes
+  the Session's provider and model (`SqliteStore::record_session_agent`,
+  called from `LfProcessRuntime::retry_agent_process`). Before this a move
+  from Codex to Claude could not finish: stopping the Claude that followed
+  asked Codex's close check for an endpoint and failed with `Codex
+  AgentProcess connection is unavailable`. Claude to Codex had worked only
+  because the default close check asks nothing.
+- **Recording.** `record_agent_limit_recovery` inserts only for a Graph
+  step's Process. A command's move is the stderr line and nothing in the
+  store.
+- **Docs** (`docs/config.md`, `subscriptions.md`, `troubleshooting.md`,
+  `orchestration.md`) and the `agents` setting description say headless work
+  moves and only a Graph step waits.
 
-**The order is resolved once, in `Config::resolve_agents`.** It already
-returns the launch agent and its fallbacks, and already gives a bare harness
-with no order its other models (`config.rs:522`). `_fallthrough_rungs`
-repeats that expansion (`agent/mod.rs:1183`) and disagrees with it: it tests
-`model.is_none()` after `with_configured_model`, `resolve_agents` before. So
-`_fallthrough_rungs` goes whole. The loop walks `launch.agent`, then
-`launch.fallback_agents`, deduplicated, and nothing else. Every caller that
-wants moves gets them by resolving: `prompt/process.rs:98` already does
-(`lf -b <skill>`, Graph steps, sync conflicts), PR copy and commit messages
-start to. A caller that builds `AgentConfig::new(agent)` by hand runs that
-agent only.
-
-**`wait_for_capacity` means what it says.** It gates only the
-5/15/30/60-minute wait, which `_run_with_retries` already checks on its own
-(`agent/mod.rs:1110`). Its doc comment (`agent/mod.rs:451`) loses the half
-about moving.
-
-**PR copy** (`ops/pr.rs` `generate_pr_copy`, line 543). Resolve the
-`pr-message` skill's settings with `config::settings::resolve(&config,
-Some(&skill))`. An agent passed in (`PrOptions.agent`, from `-a`) becomes the
-resolved config's `agent`. Then one `config.resolve_agents()` gives the launch
-agent and its fallbacks, so `-a` and `agent:` stay pinned through
-`Config::fallback_agents` with no branch in `pr.rs`.
-
-**Commit messages** (`ops/commit.rs` `generate_commit_message`, line 256). The
-`for agent in agents` loop goes; one `run_agent` with `fallback_agents` from
-the same resolution replaces it. `MessageAgent::Chosen(Some)` pins.
-`MessageAgent::Fallback(Some(agent))` keeps its meaning: the skill's own order,
-else the run's agent.
-
-Made for review: the commit loop moved to the next agent on any failure (a
-timeout, a non-zero exit, a reply with no message). After the fold it moves on
-a usage limit, an unavailable model or a revoked login only; transient
-failures still retry four times on the same agent. Passed over: keeping the
-outer loop, which would run each agent's whole fallback order once per outer
-agent. A step commit that gets no message still commits as
-`lf <step>: checkpoint`.
-
-**Moving provider when nothing has been said.** Every command has a Session:
-`run_admitted_agent` begins one when the caller passes no runtime
-(`agent/mod.rs:992`) and claims its attachment, so `_history_import` runs for
-PR copy and commit messages too. What it returns for a turn refused before any
-reply is the wrong first turn for a one-shot prompt: either the transcript is
-missing and the next agent is told to "finish any interrupted work", or it is
-found and `conversation_log::continuation` sends `Pick up where it left off`
-with the log's first 6,000 and last 14,000 characters. A PR prompt carries up
-to 20,000 characters of diff, so the middle of the diff is cut and the agent is
-pointed at a file under `~/.lf`.
-
-The rule: a conversation with no agent reply has nothing to continue, so the
-next provider gets the launch's own `task_prompt` and `skill_invocation`,
-unchanged. `continuation` reports "no reply yet" as its own answer
-(`Ok(None)`), read from the rendered turns; `_climb` then copies the original
-launch's prompt. A transcript with replies imports as now; one that cannot be
-read keeps `AGENT_FAILOVER_PROMPT` plus the original task. This holds for a
-Graph step refused on its first turn as well, which is the same situation.
-
-Unobserved: a move inside Codex (`codex:a → codex:b`) resumes the refused
-thread with `LIMIT_FAILOVER_PROMPT`. No Codex move has ever run, because no
-Codex refusal classified. Whether a thread whose first turn was refused holds
-the task is unknown; noted in `scratch/questions.md`.
-
-**Recording.** `record_agent_limit_recovery` inserts only for a Graph step's
-Process (`rust/loopflow-storage/src/sqlite/graph_inventory.rs:325`). A
-command's move is the stderr line and nothing in the store.
-
-## Surfaces
-
-| Caller | Today | After |
-| --- | --- | --- |
-| Graph step | moves (Claude only, see finding), waits | moves on Codex too, waits |
-| `lf -b <skill>`, `lf -b graph` chats and batches | stops | moves, never waits |
-| `lf pr open` / `lf pr submit` copy | stops; ignores `skill.pr-message.*` | moves; skill settings lead |
-| `lf commit`, step commits | own loop over the order | shared loop |
-| `lf sync` conflict resolution | stops | moves |
-| `-a` or `agent:` | pinned; bare harness tries its models only in a Graph step | pinned; bare harness tries its models everywhere |
-| `lf replay` (`commands/replay.rs`) | the recorded agent | the recorded agent, nothing else: it builds its launch by hand |
-| Interactive Sessions | refusal stays visible | unchanged, never reach `run_agent` |
+| Caller | Behavior |
+| --- | --- |
+| Graph step | moves, on Codex too; waits |
+| `lf -b <skill>`, `lf -b graph` chats and batches | moves, never waits |
+| `lf pr open` / `lf pr submit` copy | moves; `skill.pr-message.*` leads |
+| `lf commit`, step commits | shared loop; `skill.commit-message.*` leads |
+| `lf sync` conflict resolution | moves |
+| `-a` or `agent:` | pinned; a bare harness tries its other models |
+| `lf replay` | the recorded agent, nothing else |
+| Interactive Sessions | never reach `run_agent` |
 
 Pi and OpenCode do not classify failures (`classifies_failures: false`), so a
-refusal there still stops. An order that leads with one of them never moves.
+refusal there stops, and an order that leads with one never moves.
 
-## Absent and error states
+Stops:
 
 - Order spent: exit non-zero; stderr is the provider's reason, then
   `Nothing is left in its order after a, b, c; add another agent to \`agents\``.
-- Pinned: the reason, then the existing `No fallback remains…` advice.
+- Pinned: the reason, then the `No fallback remains…` advice.
 - Revoked login: skips that provider's other models; with no other provider,
   the sign-in advice.
 - Codex's usage limit is account-wide, so `codex:a → codex:b → claude` spends
   one extra refused launch on `codex:b`. Same as a Graph step; left alone.
 
-## Exclusions
+Tests: `agent::tests::headless_work_outside_a_graph_moves_through_its_order_and_never_waits`,
+`codex_decode::tests::a_spent_quota_is_a_usage_limit_wherever_codex_reports_it`,
+`agent_tests` (`a_command_refused…`, `model_unavailable…`), `commit_tests::a_commit_message…`
+and `pr_tests` (a PR whose title came from the Claude stand-in after the Codex
+stand-in refused). Every test spells the refusal `You’ve`. The Codex stand-in
+(`support::refused_codex_script`) leaves `codexErrorInfo` null, so the
+integration tests cover the apostrophe fold and the unit test covers the field.
+
+Changed for review: commit messages used to move to the next agent on any
+failure (timeout, non-zero exit, a reply with no message). They now move on a
+usage limit, an unavailable model or a revoked login only; transient failures
+retry four times on the same agent.
+
+## Outside this change
 
 - Waiting for capacity outside a Graph step.
 - Recording command moves in the store or showing them in `lf task status`.
 - Failure classification for Pi and OpenCode.
 - Interactive Sessions.
 
-## What goes
+## What remains
 
-- `_fallthrough_rungs`, whole. Unit tests in `agent/mod.rs` that leaned on
-  its bare-harness expansion (the `pinned` cases near line 2466) pass the
-  fallbacks `resolve_agents` would give, or move beside `resolve_agents`.
-- The `for agent in agents` loop, `configured` closure and `failure` string in
-  `ops/commit.rs`.
-- `headless_work_outside_a_graph_stops_at_a_usage_limit_without_moving_or_waiting`
-  (`agent/mod.rs:2339`): rewritten as "moves, never waits".
-- The `("bare", false, …)` case of
-  `model_unavailable_result_falls_through_or_stops_without_spending_quota`
-  (`rust/loopflow/tests/agent_tests.rs:193`): it now reaches Opus.
-- Doc text saying only a Graph step moves: `agent/mod.rs` comments at 204, 451
-  and 1171; `docs/config.md:60`; `docs/troubleshooting.md:289`; the
-  `docs/subscriptions.md:62` table row; `docs/orchestration.md:90` if it reads
-  as Graph-only. The `agents` description in `config/catalog.rs:274` says "a
-  headless step"; reword to cover commands.
+No building. Lint and gate run the checks below that implement did not.
 
-Survives: the Graph step's waits and recorded recoveries, pinning by `-a` and
-`agent:`, the revoked-login skip, the `checkpoint` step commit.
+Unobserved against the provider, each noted in `scratch/questions.md`:
 
-## Built
-
-All four slices are in. What building them taught:
-
-- **A move from Codex to Claude had never completed.** The Session kept
-  `provider='codex'` after the move, so stopping the Claude that followed asked
-  Codex's close check for an endpoint and failed with `Codex AgentProcess
-  connection is unavailable`. A retry that changes provider now records the
-  provider and model on the Session (`record_session_agent`). Claude to Codex
-  worked only because the default close check asks nothing.
-- **"No reply yet" is its own function, not a changed `continuation`.**
-  `conversation_log::continuation_of_work` returns `None` when the transcript
-  holds no agent item; `continuation` keeps its signature for `lf session new
-  -a` and resume, which want the log either way.
-- **PR copy and commit messages share `ops::commit::message_launch`**: skill
-  settings, the chosen agent, then `resolve_agents`.
-- The Codex stand-in (`support::refused_codex_script`) leaves `codexErrorInfo`
-  null, so the integration tests cover the apostrophe fold; the field is
-  covered in `codex_decode`'s unit test.
-- `bare_interactive_returns_a_quota_refusal_without_retry` is deleted: it
-  drove the headless loop, which interactive Sessions never reach.
-
-Left for later steps: clippy (lint), the suites (gate).
+- Whether a live Codex usage refusal sets `codexErrorInfo`. No trace of one
+  exists; the checked-in traces have `null` for a stream disconnect.
+- A move inside Codex (`codex:a → codex:b`) resumes the refused thread with
+  `LIMIT_FAILOVER_PROMPT`. No Codex refusal classified before this change, so
+  that path has never run against the provider.
 
 ## Demo
 

@@ -2324,6 +2324,8 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_some());
 
     executable(&remote_lf, &working);
+    // The claim and the status read reach mini's server, where the Task runs.
+    let _mini = served_mini(&fixture);
     let claimed = fixture
         .command(&["task", "claim", task.as_str()])
         .current_dir(&plan.local_path)
@@ -2341,8 +2343,6 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
         .unwrap();
     assert_eq!(local.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
-    // Status reads mini's server, where the Task runs.
-    let _mini = served_mini(&fixture);
     let status = fixture
         .command(&["task", "status", task.as_str()])
         .current_dir(&plan.local_path)

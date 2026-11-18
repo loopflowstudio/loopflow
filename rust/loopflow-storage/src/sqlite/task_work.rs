@@ -197,7 +197,7 @@ fn task_graph_row(
     use rusqlite::OptionalExtension;
     let Some((graph, step, start, carrier)) = conn
         .query_row(
-            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at
+            "SELECT graph,step,run_start,lf_process_id,run_pid,run_os_started_at,run_died_at
              FROM task_graphs WHERE task_id=?1",
             [task.as_str()],
             |row| {
@@ -211,6 +211,7 @@ fn task_graph_row(
                                 id,
                                 pid: row.get(4)?,
                                 os_started_at: row.get(5)?,
+                                died_at: row.get(6)?,
                             })
                         })
                         .transpose()?,
@@ -240,7 +241,7 @@ fn start_run_in(
 ) -> StoreResult<bool> {
     let left = tx.execute(
         "UPDATE task_graphs SET run_start=?2,lf_process_id=?3,run_pid=?7,run_os_started_at=?8,
-            updated_at=?4
+            run_died_at=NULL,updated_at=?4
          WHERE task_id=?1 AND step=?5 AND lf_process_id IS ?6",
         rusqlite::params![
             task.as_str(),
@@ -613,6 +614,7 @@ fn arrive_in(
         .optional()?;
     let arrived = tx.execute(
         "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
              updated_at=?3,restarts=0,restarted_at=NULL
          WHERE task_id=?1 AND lf_process_id=?4",
         rusqlite::params![
@@ -644,6 +646,7 @@ fn arrive_in(
 fn set_step_in(tx: &rusqlite::Transaction<'_>, task: &TaskId, step: &str) -> StoreResult<bool> {
     Ok(tx.execute(
         "UPDATE task_graphs SET step=?2,run_start=NULL,lf_process_id=NULL,run_pid=NULL,run_os_started_at=NULL,
+             run_died_at=NULL,
              updated_at=?3,restarts=0,restarted_at=NULL WHERE task_id=?1",
         rusqlite::params![task.as_str(), step, crate::rows::now_unix()],
     )? > 0)
@@ -1185,11 +1188,11 @@ impl SqliteStore {
     }
 
     /// Tasks checked out here whose run's carrier has not cleared its OS
-    /// process, shipping or not.
+    /// process, or was found dead, shipping or not.
     pub fn local_task_runs(&self) -> StoreResult<Vec<TaskId>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let mut query = conn.prepare(
-            "SELECT task_id FROM task_graphs WHERE run_pid IS NOT NULL
+            "SELECT task_id FROM task_graphs WHERE (run_pid IS NOT NULL OR run_died_at IS NOT NULL)
              AND task_id IN (SELECT task_id FROM task_checkouts)",
         )?;
         let rows = query.query_map([], |row| row.get::<_, String>(0))?;

@@ -590,11 +590,12 @@ fn session_ending(
         left_alone()
     };
     // A start counted after the agent ended is the one under way: it was due
-    // then. The backoff names the start after the next death.
+    // then. The backoff names the start after the next death, or after a
+    // start that failed before any agent ran.
     let starting = session
         .last_started_at
         .zip(session.agent_end)
-        .filter(|(started, end)| *started >= end.at)
+        .filter(|(started, end)| *started >= end.at && failure.is_none())
         .map(|(started, _)| started);
     // The server starts it, at `at`, or leaves it to its command.
     let (at, command) = match left {

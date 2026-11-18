@@ -642,8 +642,10 @@ pub fn died_run(
         return Ok(None);
     };
     // A carrier that exited on its own (failed, interrupted, waiting on a
-    // limit) cleared its OS process; one that died left it behind.
-    let died = carrier.pid.is_some() && !crate::store::task_work::carrier_may_run(&carrier);
+    // limit) cleared its OS process; one that died left it behind, until
+    // retention cleared it and recorded the death.
+    let died = carrier.died_at.is_some()
+        || (carrier.pid.is_some() && !crate::store::task_work::carrier_may_run(&carrier));
     if !died
         || sqlite.task_shipping(task)?.is_some()
         || crate::ops::task_execution::open_graph_execution(sqlite, task)?.is_some()

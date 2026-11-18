@@ -326,3 +326,20 @@ Slice 5 (implement):
 - `PtyUsage.in_use` on macOS counts `/dev/ttysNNN` nodes; "none left" is
   `in_use >= max`. Not checked against a real exhaustion (which errno
   `openpty` returns there).
+
+## qa after slice 7 (2026-11-18, headless)
+
+- Chosen: a carrier's death is its own column (`task_graphs.run_died_at`),
+  written by retention when it clears a dead carrier's pid. Passed over:
+  leaving carriers out of retention (the Task would read `moving` in SQL
+  until someone carried it) and reading the death off the Graph run's
+  missing exit (a carrier killed between Graph runs has none to read).
+- Open: a Task conversation that is down with no recorded end (killed while
+  no server ran) has no outlook. Should "closed" with no end count as died in
+  the fold, as the pass already counts it?
+- Open: `Conversation: unknown` while a start is in flight and before the
+  first start. A word for "starting" needs the fold to know a start is under
+  way without an agent end.
+- On a Machine that upgrades to this, the first pass starts every Task
+  conversation that died earlier on an open Task checked out here, however
+  long ago (seven on this Machine on 2026-11-17, one dead since 2026-10-22).

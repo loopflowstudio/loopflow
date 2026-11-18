@@ -11,3 +11,6 @@ ALTER TABLE agent_sessions ADD COLUMN start_failure TEXT;
 -- when it last started one (`restarted_at`).
 ALTER TABLE task_graphs ADD COLUMN restarts INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE task_graphs ADD COLUMN restarted_at INTEGER;
+-- A carrier that exits clears its OS process. One found dead has it cleared
+-- for it, and `run_died_at` keeps that it died until the next run starts.
+ALTER TABLE task_graphs ADD COLUMN run_died_at INTEGER;

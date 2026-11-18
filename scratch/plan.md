@@ -134,9 +134,9 @@ inventory". **Nothing removes:**
 - Other: owners left by earlier `session serve` builds; Codex, Pi and OpenCode
   transcripts.
 
-Store retention (`close_dead_processes`, `forget_processes`, receipt pruning)
-ran only through `lf process prune`, by hand; the server pass now runs it hourly
-(`ops::recovery::retain`, slice 3) and the command is gone. Worktree retirement
+Store retention ran only through `lf process prune`, by hand; the server's
+maintenance thread now runs it at start and hourly (`server/maintenance.rs`,
+from main's #1965) and the command is gone. Worktree retirement
 runs every minute, from `lf install schedule`'s `lf task retire` job.
 
 Also seen: **31 `lf server run` processes from `target/debug` builds of other
@@ -159,8 +159,9 @@ No new registry. The pass reads three things:
 - **Task run:** the carrier that makes the Task `moving` or `shipping`:
   `task_graphs.run_pid`/`run_os_started_at`, or the ship event's carrier. A
   carrier that exits on its own clears `run_pid`; one that died leaves it
-  (`ship::died_run`). The Graph run under it (`graph_processes`) names the
-  step reached.
+  until store retention clears it and writes `run_died_at`
+  (`ship::died_run` reads either). The Graph run under it
+  (`graph_processes`) names the step reached.
 - **Task:** open and claimed on this Machine (`task_claimed_here`), and started
   (it has taken up a Graph).
 
@@ -363,7 +364,7 @@ check 4 is `task_graph_launch_tests::a_task_run_whose_carrier_died_is_carried_ag
 - `start_in_background`, `start_task_conversation` and the start half of
   `start_conversation_beside`.
 - `restart_ships` as a ship-only loop: it becomes `restart_runs`.
-- `lf process prune` / `lf monitor prune`: gone (slice 3); the pass does their work.
+- `lf process prune` / `lf monitor prune`: gone (slice 3); the server's maintenance thread does their work.
 - `exit_of` mapping every signal to 130. It becomes SIGINT/SIGTERM/SIGHUP
   interrupted, and anything else a failure the carrier retries
   (`graph.rs:374`, the predicate at `:254`).
@@ -694,6 +695,42 @@ at interactive steps) and runs it; the carrier is always `lf task run`, so
 `restart_ship`, the ship log's carrier and restart rows, and the separate
 restart rule go.
 
+## qa after slice 7 (2026-11-18, `scratch/qa.html`)
+
+Private lf-world Machine, branch `lf`. Two fixes:
+
+- **A run that died in a reboot was never carried again.** Main's
+  maintenance thread (#1965) runs store retention before the server is ready.
+  Retention ended the dead carrier by clearing `task_graphs.run_pid`, the one
+  thing `died_run` read, so the Task read "process left no exit record" and
+  stayed there. The same happened to a run waiting its backoff, or given up
+  on, at each hourly retention. Retention now writes `task_graphs.run_died_at`
+  when it clears a dead carrier (`sqlite/retention.rs` `end_dead_owners`);
+  `died_run` and `local_task_runs` read it; a new run, an arrival and a step
+  move clear it. `store::retention_lifecycle_tests::` covers it.
+- The pass's own hourly retention (`ops::recovery::retain`, slice 3) was a
+  second caller of the same prune; it is deleted.
+- **A start that failed before any agent ran read "starting again"** for the
+  whole backoff (`died … · starting again · last start failed: claude is not
+  installed…`). `session_ending` now takes a start as under way only when it
+  left no failure: `· starts again 14:59 · last start failed: …`.
+- `rust/loopflow-storage/SCHEMA.md` regenerated: it lacked this branch's
+  columns.
+
+Seen, left as it is:
+- With the server up, a carrier's death is noticed on the minute tick, not at
+  once (nothing writes when a process dies); a server start reads at once.
+- For about a second while a start is in flight, and after `lf task checkout`
+  before the pass's first start, the line reads `Conversation: unknown`.
+- A conversation killed while no server runs has no recorded end, so it reads
+  `closed; \`lf resume --task X\` opens it` with no outlook. `waiting_for_you`
+  "no server runs here to start it" shows only for an end a server settled
+  before it stopped.
+- After failed first starts, the first one that succeeds keeps the failed
+  count: `running (started again 14:58, attempt 3)`.
+- "Run died at implement; the server's next pass carries it again" prints
+  with no server running too.
+
 ## Remaining
 
 Every slice is built and the code backs each one; nothing is left for
@@ -808,6 +845,13 @@ retention; fixture servers and holders left running).
   `binary(session_lifecycle_tests)` (`work_first_entry.json`), `test(performance_tests::)`
   (`summary_query` gained a correlated subquery), `test(transport::)` and `binary(transport_tests)`
   (the store watch changed), `test(session_cli_tests::)`, `test(lf::tests::)`.
+
+- qa after slice 7: storage `sqlite::task_work::`, `sqlite::retention::`,
+  `query_plans::`, `migration` (158); execution `ship::tests::`, `retention_`,
+  `ops::human_session::tests::`, `store::task_work` (57); `server::recovery::tests::` (9),
+  `task_graph_launch_tests::a_task_run_whose_carrier_died`, `…::a_killed_graph`;
+  clippy `--all-targets` and fmt clean. Gate: `context_launch_tests::a_killed_task_conversation`
+  (not rerun after these fixes), `binary(served_reads)` (migration changed).
 
 - Compress after slice 7: `count_task_run_restart` takes the seen count (a ship uses the
   one it already read); one outlook constructor in `session_ending`; `select` records a

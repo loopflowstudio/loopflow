@@ -3,7 +3,7 @@
 //! ancestry that was never recorded, carries a Task's run again
 //! when its ship process exited or its `lf task run` died, starts a run that ended waiting on
 //! a usage limit, and gives back rented Machines whose work drained or whose
-//! soft deadline came. [`retain`] keeps the store to what is still needed.
+//! soft deadline came.
 //! [`due_task_conversations`] names the Task conversations to start, and
 //! [`launch_failure`] what would stop one.
 
@@ -38,21 +38,6 @@ pub fn settle() -> Option<i64> {
         tracing::warn!("Rentals: {error:#}");
     }
     runs_due
-}
-
-/// End owners whose OS process is gone, forget finished rows nothing needs
-/// and reclaim pages. Failures are logged; the next pass tries again.
-pub fn retain() {
-    let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    match crate::store::database_path_from_env() {
-        Ok(database) if database.exists() => {
-            if let Err(error) = crate::store::retention::prune(&database, now) {
-                tracing::warn!(%error, "store retention");
-            }
-        }
-        Ok(_) => {}
-        Err(error) => tracing::warn!(%error, "store retention has no store"),
-    }
 }
 
 /// How the recovery pass names each start it makes:

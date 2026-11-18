@@ -1,72 +1,144 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><title>LOO-959 qa: lost threads</title>
+<html><head><meta charset="utf-8"><title>LOO-959 qa after slice 7</title>
 <style>
-body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f}
+body{font:15px/1.5 -apple-system,system-ui,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem;color:#1d1d1f;background:#fff}
 h1{font-size:1.5rem}h2{font-size:1.15rem;margin-top:2rem;border-top:1px solid #ddd;padding-top:1rem}
 pre{background:#f5f5f7;padding:.75rem;overflow-x:auto;font-size:13px;border-radius:6px}
+code{font-size:13px}
 .ok{color:#1a7f37;font-weight:600}.fix{color:#9a6700;font-weight:600}.open{color:#cf222e;font-weight:600}
+@media (prefers-color-scheme: dark){body{background:#1d1d1f;color:#f5f5f7}pre{background:#2c2c2e}h2{border-color:#444}}
 </style></head><body>
-<h1>LOO-959 qa after slice 6: a conversation whose transcript is gone</h1>
-<p>Branch <code>lf</code> at 4f8a1743d plus the fix below, on a private lf-world Machine at
-<code>/tmp/lfq959b</code> with its own <code>lf server run</code> and the world's stand-in
-<code>claude</code>. Tasks a9e364 (Design transcript search) and 85af23 (Second conversation).
-Status lines are <code>lf task status &lt;task&gt; | grep Conversation</code>. The thread a start used is read from
-the provider's argv (<code>--resume</code> means it continued, <code>--session-id</code> means a new thread).</p>
+<h1>LOO-959 qa after slice 7: kill, quit, restart, reboot, runs</h1>
+<p>Branch <code>lf</code> at 9bd82e340f plus the two fixes below, on a private lf-world Machine at
+<code>/tmp/lf-qa-959g</code> with its own <code>lf server run</code> and the world's stand-in <code>claude</code>.
+Status lines are <code>lf task status &lt;task&gt;</code>; the JSON is the Task's conversation in
+<code>lf task status --json</code>. A "reboot" is SIGKILL to the server, every holder, every provider and the run's
+processes, then a new server. Times are local (UTC−8).</p>
 
-<h2>1. Crash lost the transcript, then the provider is killed <span class="ok">works</span></h2>
-<pre>mv …/48024041-….jsonl away; kill -9 &lt;claude&gt;
-23:29:32 died 23:29 (exit 137) · starting again
-23:29:35 running (started again 23:29, attempt 1)
-argv: … --session-id 7161a088-…        (fresh thread, same Session)
-lf resume --task a9e364, type hello → reply 7161a088-…: hello</pre>
-<p>Before slice 6 this start failed five times and gave up. Now the first start comes back.</p>
+<h2>1. A reboot with three Tasks: the run was never carried again <span class="fix">fixed</span></h2>
+<p>Three Tasks: two with conversations, one also mid-Graph at <code>implement</code> with an interactive step ahead.
+Before the fix, after the new server started:</p>
+<pre>fe9aaa Conversation: running (started again 14:44, attempt 2)
+2895db Conversation: running (started again 14:44, attempt 1)      (fresh thread: its transcript was removed)
+c9dfe6 Conversation: running (started again 14:44, attempt 1)
+c9dfe6   latest Graph: implement: process left no exit record. Inspect its history and effects, then launch fresh work
+         (unchanged 100 s later; no `lf task run` process)</pre>
+<p>While the server was down the same Task read <code>Run died at implement; the server's next pass carries it again</code>.
+The server's log shows why: main's maintenance thread ran store retention before the server was ready
+(<code>store retention report=RetentionReport { ended_owners: 7, … }</code>). Retention ends a dead carrier by clearing
+<code>task_graphs.run_pid</code>, and a pid left behind was the only thing that told "died" from "exited". The same
+erasure would hit a run waiting its backoff, or one given up on, at each hourly retention.</p>
+<p>Fix: retention writes <code>task_graphs.run_died_at</code> when it clears a dead carrier; <code>died_run</code> and
+<code>local_task_runs</code> read it; a new run, an arrival and a step move clear it. The pass's own hourly retention was a
+second caller of the same prune and is deleted. After the fix, on a fresh world:</p>
+<pre>--- down 14:53:01
+9286d0 Conversation: closed; `lf resume --task 9286d0` opens it
+54c776 Conversation: closed; `lf resume --task 54c776` opens it
+61f4bf Conversation: closed; `lf resume --task 61f4bf` opens it
+61f4bf   latest Graph: Run died at implement; the server's next pass carries it again
+-- up 14:53:03
+9286d0 Conversation: died 14:53 (exit 137) · starting again
+54c776 Conversation: running (started again 14:53, attempt 1)
+61f4bf Conversation: running (started again 14:53, attempt 1)
+61f4bf   latest Graph: Step c5c2f86e-… is running implement
+-- up 14:53:05   all three: running (started again 14:53, attempt 1)
 
-<h2>2. Quit stays quit, and a person reopens a lost one <span class="fix">fixed</span></h2>
-<pre>type quit → Conversation: quit 23:30; `lf resume --task a9e364` opens it
-(65 s later, after a pass) still quit
-lf resume --task a9e364
-  The claude transcript of this conversation is gone; continuing on a fresh thread.
-  Started a new claude thread for Design transcript search, seeded with what the claude thread knew.</pre>
-<p>The second line was false: no thread was read, and the new one carries the original request.
-<code>new_thread</code> (<code>ops/human_session.rs</code>) now says so:</p>
-<pre>Started a new claude thread for 85af23 Second conversation, seeded with its original request.</pre>
-<p>The skill was kept: the fresh thread opened with <code>&lt;lf:skill:task-session&gt;</code>.</p>
+--name 61f4bf  --resume deddad34-…         (same thread)
+--name 54c776  --session-id 6d725a4e-…     (fresh thread, transcript was gone)
+--name 9286d0  --resume e01ae174-…
+33273 33229 lf task run 61f4bf             (parent: the server)</pre>
+<p>Released, the carried run finished <code>implement</code> and stopped at <code>human-review</code>; the Task is not
+shipping, <code>restarts</code> is back to 0, and no second run started on later passes.</p>
 
-<h2>3. Transcript present: a kill still resumes the same thread <span class="ok">works</span></h2>
-<pre>23:33:20 died 23:33 (exit 137) · starting again
-23:33:21 running (started again 23:33, attempt 1)
-argv: --resume 6cb92570-…</pre>
+<h2>2. A run killed twice, with a server restart during its backoff <span class="ok">works</span></h2>
+<pre>killed 14:54:16
+  latest Graph: Run died at implement; it is carried again in 1 min (restart 2 of 5)
+server restarted 14:54:21      task_graphs: run_pid NULL, run_died_at set, restarts 1
+14:54:21   Run died at implement; it is carried again in 1 min (restart 2 of 5)
+14:55:01   Step 080d8b89-… is running implement        (restarted_at 14:54:01 + 60 s)</pre>
+<p>This is the case the fix in 1 also covers: the start-up retention cleared the pid and the line and the restart held.</p>
 
-<h2>4. Simulated reboot, one kept thread and one lost <span class="ok">works</span></h2>
-<p>SIGKILL to the server, holders and providers, binary swapped for the fix, new server.</p>
-<pre>23:33:55 a9e364 closed · starts again 23:34          | 85af23 died 23:33 (no exit recorded) · starting again
-23:33:58 a9e364 died 23:33 (no exit recorded) · …   | 85af23 running (started again 23:33, attempt 1)   --session-id 4620bc22 (fresh)
-23:34:49 a9e364 running (started again 23:34, attempt 2)                                               --resume 6cb92570 (kept)</pre>
-<p>a9e364 waited the 1-minute backoff because it had died once already with no finished turn (scenario 3).
-One provider survived the kill (pid-list split), so its holder's death took it down instead. It reads "no exit
-recorded", which is the same as a reboot.</p>
+<h2>3. Kill, backoff, quit, a person's resume <span class="ok">works</span></h2>
+<pre>kill -9 &lt;claude&gt;
+14:40:18 Conversation: died 14:40 (exit 137) · starting again
+14:40:21 Conversation: running (started again 14:40, attempt 1)          --resume 9f58524d-…
+second kill, no finished turn
+14:40:35 Conversation: died 14:40 (exit 137) · starts again 14:41
+         outlook {"kind":"coming_back","at":"…22:41:20Z","reason":null,"command":null}
+14:41:20 Conversation: running (started again 14:41, attempt 2)
+type `quit` through `lf resume --task fe9aaa`
+14:42:27 Conversation: quit 14:42; `lf resume --task fe9aaa` opens it    (no provider; still quit after a tick)
+         outlook {"kind":"quit","command":"lf resume --task fe9aaa"}  ended {"by":"person","exit_code":0}  start null
+`lf resume --task fe9aaa`, type a line        Conversation: running      (count back to zero)
+kill within a minute of that resume
+14:42:45 Conversation: died 14:42 (exit 137) · starts again 14:43
+14:43:40 Conversation: running (started again 14:43, attempt 1)</pre>
+<p>The pass holds off one backoff after a person's start, so a kill inside that minute waits it out.</p>
 
-<h2>5. Attaching to a running conversation with no transcript <span class="ok">works</span></h2>
-<pre>lf resume --task 85af23 (running d8b37dbb, no transcript file) → reply d8b37dbb-…: x   (viewed, no new thread)</pre>
+<h2>4. Server killed and restarted under a live conversation <span class="ok">works</span></h2>
+<p><code>kill -9</code> the server, start a new one: the line stays <code>running</code>, one provider, one holder.</p>
+
+<h2>5. The provider is missing <span class="fix">fixed</span></h2>
+<p>Server started with no <code>claude</code> on its <code>PATH</code>. A conversation that had died, and a Task checked out
+for the first time. Before the fix the died one read, for the whole backoff:</p>
+<pre>Conversation: died 14:56 (exit 137) · starting again · last start failed: claude is not installed on this Machine's PATH</pre>
+<p>The fold took any start counted after the death as one under way. It now does so only when that start left no failure:</p>
+<pre>Conversation: died 14:56 (exit 137) · starts again 14:59 · last start failed: claude is not installed on this Machine's PATH
+Conversation: could not start: claude is not installed on this Machine's PATH · tries again 15:00
+  outlook {"kind":"could_not_start","at":"…23:00:35Z","reason":"claude is not installed on this Machine's PATH"}</pre>
+<p>With <code>claude</code> back on the server's <code>PATH</code>, the first started at 14:59:25 and the second at 15:00:35,
+the times their lines gave.</p>
+
+<h2>6. Five starts, then it waits for a person <span class="ok">works</span></h2>
+<p>Shortcut: <code>starts_since_turn=4</code> set in the store to skip 15 minutes of backoff; then two kills.</p>
+<pre>Conversation: running (started again 15:01, attempt 5)
+Conversation: died 15:01 (exit 137) · started 5 times; `lf resume --task 9286d0` opens it
+  outlook {"kind":"waiting_for_you","reason":"started 5 times","command":"lf resume --task 9286d0"}
+(a full tick later: the same line, no provider)
+`lf resume --task 9286d0`      Conversation: running</pre>
+
+<h2>7. A returning user: a home made by the installed lf <span class="ok">works</span></h2>
+<p>Installed <code>lf 0.16.0+7bb879aff</code> ran the server, created two Tasks and checked them out. One provider killed
+there stays <code>closed</code>. Then the branch server on the same home:</p>
+<pre>4c9861 Conversation: running (started again 15:03, attempt 1)     --resume 3f802e7b-…
+cd2ed3 Conversation: running                                      same provider, under the installed build's holder</pre>
 
 <h2>What it leaves behind</h2>
-<p>Still two Sessions, one per Task. <code>creation_receipts</code> holds one
-<code>fresh-thread:&lt;session&gt;:&lt;lost thread&gt;</code> per fresh start (5 here), with no duplicates.
-Every server, holder and stand-in was stopped at the end.</p>
+<ul>
+<li><code>task_graphs</code>: a carried run has <code>run_pid</code> of the new carrier, <code>run_died_at</code> NULL,
+<code>restarts</code> counted; all three clear when the run arrives.</li>
+<li><code>lf machine doctor</code>: <code>ok ptys 87 of 511 PTYs in use (kern.tty.ptmx_max), 424 left; each Task conversation holds one</code>.</li>
+<li><code>lf session list --json</code> carries <code>outlook</code> and <code>start</code> on every Session; <code>lf session card</code> does not.</li>
+<li>Every server, holder and stand-in of both QA homes was stopped by pid.</li>
+</ul>
 
 <h2>What works now</h2>
-<p>A lost transcript no longer strands a conversation. The pass's restart and a person's resume each go on in a
-fresh thread on the same Session, at the first attempt. Kept threads resume as before, and quit stays quit.</p>
+<p>After a kill, a quit, a server restart or a simulated reboot, each of three Tasks either runs again or says what
+stopped it and gives one command: conversations in about two seconds, a died run on the server's first reading, both on
+the backoff their lines print.</p>
 
 <h2>Not reached</h2>
-<p>Real Claude: its SIGTERM exit code (acceptance check 5's quit window) and a real reboot with three Tasks
-need a person's Machine and login. Died carriers and the five-start give-up were not re-run. Slice 6 does not
-touch them, and earlier qa covered them.</p>
+<ul>
+<li>A real Machine reboot (launchd bringing the server back). A person runs it.</li>
+<li>Real Claude: whether it exits 0 on SIGTERM, which decides the shutdown-as-quit window.</li>
+<li>Desktop's conversation line on a running app. Its printer was not changed here; the Swift fixture suites run at gate.</li>
+<li><code>context_launch_tests::a_killed_task_conversation</code> was not rerun after these two fixes; gate runs it.</li>
+</ul>
 
 <h2>Still wrong or open, worst first</h2>
-<p><span class="open">The pass's fresh start is silent to a later viewer.</span> The notice goes to the starting
-terminal before the provider draws. Someone who attaches later sees only the new conversation, and status reads
-<code>running (started again …, attempt 1)</code> with nothing about the fresh thread. This is already in
-<code>questions.md</code> (no status line for a fresh thread).</p>
-<p>Transient <code>closed · starts again</code> on the first read after a reboot, before the died line (one read).</p>
+<ol>
+<li><span class="open">open</span> With the server up, a run whose carrier dies is noticed on the minute tick, not at once: the line read
+"the server's next pass carries it again" for 14 s and more. Conversations come back in two seconds because their
+holder reports the end; nothing reports a carrier's.</li>
+<li><span class="open">open</span> <code>Conversation: unknown</code> for about a second while a start is in flight, and after
+<code>lf task checkout</code> until the first start.</li>
+<li><span class="open">open</span> A conversation killed while no server runs has no recorded end, so it reads
+<code>closed; `lf resume --task X` opens it</code> with <code>outlook</code> null. "no server runs here to start it"
+shows only for an end a server settled before stopping.</li>
+<li><span class="open">open</span> After failed first starts, the start that succeeds keeps their count and time:
+<code>running (started again 14:58, attempt 3)</code> for a conversation that started once, at 15:00.</li>
+<li><span class="open">open</span> "the server's next pass carries it again" prints with no server running.</li>
+<li>On upgrade, the first pass starts every Task conversation that died earlier on an open Task checked out here,
+however long ago.</li>
+</ol>
 </body></html>

@@ -312,9 +312,14 @@ fn a_task_conversation_says_how_it_ended_and_what_happens_next() {
         crate::transcript::rfc3339(2_000),
         "a start counted after the death is under way"
     );
+    summary.start_failure = Some("no PTY left: 511 in use (kern.tty.ptmx_max)".into());
+    assert_eq!(
+        outlook(&summary).unwrap().at,
+        crate::transcript::rfc3339(2_000 + crate::ops::pr_landing::repair_backoff(2)),
+        "a start that failed is not under way: the next waits its backoff"
+    );
 
     summary.agent_end = died(2_500);
-    summary.start_failure = Some("no PTY left: 511 in use (kern.tty.ptmx_max)".into());
     let next = outlook(&summary).unwrap();
     assert_eq!(
         (next.kind, next.at),

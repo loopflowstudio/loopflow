@@ -70,14 +70,14 @@ first reading after start is the restart and reboot case. Each reading:
    clears `start_failure`.
 3. **Carries Task runs.** A shipping or moving Task whose recorded carrier is
    dead gets `lf --task <ID> ship` or `lf task run <ID>` again, from its
-   checkpoint. A carrier that exits on its own writes an outcome on its
-   process row; a dead carrier with none died. One count serves both
-   (`task_graphs.restarts`, `restarted_at`), reset when the run finishes a
-   step.
-4. **Retains**, at most every hour: closes Process rows whose OS process is
-   gone, forgets finished ones nothing references, merges per-receipt usage,
-   reclaims pages, then removes receipts of Processes proven dead
-   (`ops::recovery::retain`).
+   checkpoint. A carrier that exits on its own clears its OS process; one
+   found dead died, and retention, which clears it too, records when
+   (`task_graphs.run_died_at`). One count serves both (`task_graphs.restarts`,
+   `restarted_at`), reset when the run finishes a step.
+
+Store retention runs beside the pass, on the maintenance thread
+(`maintenance.rs`): at start and every hour it ends owners whose OS process
+is gone.
 
 One start is in flight at a time: the next begins when the last one's
 agent attaches, or after 3 seconds, most recently updated Task first. Sessions

@@ -1,5 +1,4 @@
-//! The recovery pass: this Machine's work settles, its store keeps only what
-//! is needed, and Task conversations that died, or were prepared and never
+//! The recovery pass: this Machine's work settles, and Task conversations that died, or were prepared and never
 //! started, come back. One watcher reads
 //! the store when its planning, Session or process revisions move, and at
 //! least every minute for backoffs and deaths nothing recorded. Each due
@@ -24,9 +23,6 @@ const UNREAD: Duration = Duration::from_secs(60);
 /// The shortest time between two settlements: each one writes what it
 /// settles, which moves the revisions the watcher reads.
 const SETTLE_EVERY: Duration = Duration::from_secs(10);
-/// The shortest time between two retention passes over the store. The first
-/// reading runs one; each is a few short transactions and, rarely, a VACUUM.
-const RETAIN_EVERY: Duration = Duration::from_secs(60 * 60);
 /// The longest one start holds the next: after a reboot, conversations come
 /// back one at a time rather than all at once.
 const PACE: Duration = Duration::from_secs(3);
@@ -57,8 +53,8 @@ fn watch(terminals: &Registry) {
     }
 }
 
-/// The watcher's store, what it read last and when, when it last settled
-/// and retained, and when the pass must read again though nothing moved: a
+/// The watcher's store, what it read last and when, when it last settled,
+/// and when the pass must read again though nothing moved: a
 /// due conversation's terminal was still ending, or a conversation's or a
 /// run's backoff comes due.
 #[derive(Default)]
@@ -66,7 +62,6 @@ struct Watcher {
     store: Option<SqliteStore>,
     seen: Option<(StoreRevisions, SystemTime)>,
     settled: Option<SystemTime>,
-    retained: Option<SystemTime>,
     conversations_due: Option<SystemTime>,
     runs_due: Option<SystemTime>,
 }
@@ -155,11 +150,6 @@ impl Watcher {
                 self.conversations_due = None;
                 tracing::warn!(error = %format!("{error:#}"), "recovery pass failed; it runs again at the next change");
             }
-        }
-        // After the starts, so a VACUUM never holds a conversation back.
-        if due(self.retained, now, RETAIN_EVERY) {
-            self.retained = Some(now);
-            loopflow_execution::ops::recovery::retain();
         }
     }
 }

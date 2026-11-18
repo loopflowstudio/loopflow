@@ -106,6 +106,8 @@ pub struct TaskCarrier {
     pub id: LfProcessId,
     pub pid: Option<u32>,
     pub os_started_at: Option<i64>,
+    /// When retention found its OS process gone, having never exited itself.
+    pub died_at: Option<i64>,
 }
 
 /// One step its Graph run started.

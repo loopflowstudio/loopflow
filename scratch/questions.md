@@ -1,0 +1,15 @@
+# Open choices (LOO-938 kickoff, 2026-11-18, headless)
+
+- Hub setting lives on the Machine (`lf machine hub mini`), not in
+  `.lf/config.yaml`. Passed over: `tracker: { hub: <machine> }` per
+  repository. Reversible.
+- Should the hub also run the Linear/Asana `tracker_actions` drain, so only
+  one Machine talks to each tracker (and webhooks land where the drain runs)?
+  Left per Machine in this Task.
+- First contact queues `create` for every unbound local Project/Task in a hub
+  repository. Alternative: the cutover is by hand only and unbound rows stay
+  local. Chosen for the 22 personal-ref records.
+- Personal Git plans (`users/<key>`) have no hub equivalent: one plan per
+  repository on the hub.
+- mini's etude checkout and `lf` version were not verified (mini unreachable
+  during kickoff).

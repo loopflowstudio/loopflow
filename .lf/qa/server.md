@@ -83,10 +83,19 @@ service alone; stop and reap the foreground server when finished.
 
 Drive newline-delimited JSON over that socket, using the hello, subscription,
 request and checkpoint shapes in `rust/loopflow/src/server/README.md`.
-For returning-state checks, a consistent SQLite backup of the existing store
-keeps real Task records without writing the original database. Never seed rows
-through internal APIs. Use only reads against that backup, keep probe files in
-the current checkout, and restore its prior file bytes and index entries.
+Never open a copy of the Machine's own store with `lf`, a read included:
+`lf session list`, `lf session history`, `lf task status|list|show`,
+`lf wave status|list|show` and `lf plan list` run recovery first
+(`ops/recovery.rs`), which follows the real worktrees and PIDs the copy
+records. It starts `lf --task <id> ship` in the real checkout of any approved
+Task whose ship process has exited, and can stop a headless agent the stale
+copy takes for orphaned. A copy
+(`sqlite3 "file:$HOME/.lf/loopflow.db?mode=ro" ".backup <copy>"`) is for
+`sqlite3` only: counts, `EXPLAIN QUERY PLAN`, timing a statement. For
+returning-state checks, build the earlier state in a private home with the
+installed `lf`, then open that home with the branch. Never seed rows through
+internal APIs, keep probe files in the current checkout, and restore its prior
+file bytes and index entries.
 Comparison bases accept `parent`, `head` or a resolved commit SHA, not `HEAD`.
 
 For typed subscription events, open `task.get` with `resume: null`, then use

@@ -153,11 +153,30 @@ stay as they are.
 
 ## Slices
 
-1. `codex_decode.rs` reads `codexErrorInfo`; the code → failure lookup;
-   `drive.rs`; the decode tests and the `agent_tests.rs` demo. Shows first
-   whether the app-server payload carries what the rollouts do.
-2. The exact-line unit test, the folding helper, the four classifiers.
+All three are built (2026-11-18); nothing in the design remains.
+
+1. `codex_decode.rs` reads `codexErrorInfo`; `AgentFailure::from_code`;
+   `drive.rs`; the decode tests and the `agent_tests.rs` demo
+   (`codex_usage_limit_goes_on_under_the_next_agent`).
+2. The exact-line unit test, `_provider_words`, the four classifiers.
 3. `release.rs` reads `subscription_limit_text`.
+
+What the demo showed: a headless step had never moved from Codex to another
+provider and finished. The Session row kept `provider='codex'` after the move,
+so stopping Claude ran Codex's close check on Claude's process and the step
+failed with `invalid control authority: Codex AgentProcess connection is
+unavailable`, after Claude had answered. `retry_agent_process` now records the
+provider and model the retry moved to (`SqliteStore::record_session_agent`),
+which is one write outside `loopflow-execution`.
+
+Ran here: `cargo test -p loopflow-execution --lib -- agent::
+harness::codex_decode:: harness::conformance_tests:: ops::release::
+process::runtime::tests:: store::attachment_lifecycle_tests::
+store::provider_transition_lifecycle_tests::` (pass), `cargo test -p loopflow
+--test agent_tests -- codex_usage_limit model_unavailable_result` (pass),
+`cargo clippy --all-targets -- -D warnings` (clean). Left to gate and CI:
+`release_tests` ("agent stopped after provider usage limit"), `binary(two_people)`
+and `binary(session_lifecycle_tests)` for the new Session write.
 
 ## Exclusions
 
@@ -187,6 +206,6 @@ Open, found while writing them:
 - `provider_rate_limited` is the code for a spent usage limit, while Codex's
   own `rateLimitExceeded` stays untyped. The docs table has to explain that
   "rate limited" means usage spent.
-- The table says a typed `provider_capacity` retries the same conversation,
-  as the text-classified capacity failure does today. Confirm when slice 1
-  lands.
+- Confirmed in code: a typed `provider_capacity` takes the same retry branch
+  of `_run_with_retries` as the text-classified one. No test drives it end to
+  end.

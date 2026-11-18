@@ -19,3 +19,13 @@
   reported (`codex_error`, `claude_exit`) and what happened
   (`provider_rate_limited`). A typed field on the wire event is a DTO change
   across Rust and Swift.
+- The stored Session provider now follows a headless retry that moves
+  provider or model. `lf session list` and steer routing read that column, so
+  a step that moved shows the agent it is running on. The same gap in the
+  other direction (Claude to Codex leaves `provider='claude'`, so Codex's
+  close check was skipped) is closed by the same write; no test drives that
+  direction.
+- `release.rs` now counts every `subscription_limit_text` phrase as spent
+  quota, which adds "you've hit your …" (any Claude window),
+  "subscription limit" and `rate_limit_reached` to what release notes report
+  as quota.

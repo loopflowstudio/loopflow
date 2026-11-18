@@ -40,8 +40,7 @@ impl Drop for Fixture {
         };
         let holders: Vec<libc::pid_t> = sql
             .prepare(
-                r#"SELECT pid FROM processes WHERE command='["lf","holder","run"]'
-                   AND completed_at IS NULL AND pid IS NOT NULL"#,
+                "SELECT DISTINCT attached_pid FROM agent_sessions WHERE attached_pid IS NOT NULL",
             )
             .and_then(|mut query| {
                 query
@@ -634,12 +633,15 @@ fn first_native_launch_keeps_only_valid_desktop_terminal_placement() {
         let terminal = Terminal::spawn_with_placement(command, Some(valid));
         let launch = fixture.launches(1).pop().unwrap();
         let session = session_of(&fixture.sql(), &launch);
-        // The launching lf, which stays recorded after the provider exits and
-        // its attachment is released.
-        let placement: Option<String> = fixture.sql().query_row(
-            "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.parent_lf_process_id WHERE s.id=?1",
-            [&session], |row| row.get(0),
-        ).unwrap();
+        // The launching lf's placement, recorded on the attachment it holds.
+        let placement: Option<String> = fixture
+            .sql()
+            .query_row(
+                "SELECT attached_terminal_id FROM agent_sessions WHERE id=?1",
+                [&session],
+                |row| row.get(0),
+            )
+            .unwrap();
         terminal.stop();
         assert_eq!(placement.as_deref(), valid.then_some("desktop-shell"));
     }
@@ -764,10 +766,14 @@ fn held_desktop_launch_links_its_session_to_the_pane() {
     let launch = fixture.launches(1).pop().unwrap();
     let session = session_of(&fixture.sql(), &launch);
     let held = fixture.terminal_of(&session);
-    let placement: Option<String> = fixture.sql().query_row(
-        "SELECT p.terminal_id FROM agent_sessions s JOIN processes a ON a.id=s.agent_process_id JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
-        [&session], |row| row.get(0),
-    ).unwrap();
+    let placement: Option<String> = fixture
+        .sql()
+        .query_row(
+            "SELECT attached_terminal_id FROM agent_sessions WHERE id=?1",
+            [&session],
+            |row| row.get(0),
+        )
+        .unwrap();
     terminal.stop();
     let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
     // SAFETY: the pid the fixture's provider recorded for itself.
@@ -792,17 +798,6 @@ fn a_held_conversation_outlives_its_view() {
     let _provider = KillOnDrop(provider);
     let session = session_of(&fixture.sql(), &launch);
     let held = fixture.terminal_of(&session);
-    let named: Option<String> = fixture
-        .sql()
-        .query_row(
-            "SELECT p.held_terminal_id FROM agent_sessions s
-             JOIN processes a ON a.id=s.agent_process_id
-             JOIN processes p ON p.id=a.attached_lf_process_id WHERE s.id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(named.as_deref(), Some(held.as_str()));
     view.stop();
     std::thread::sleep(Duration::from_secs(5));
     let ended: bool = fixture
@@ -1264,17 +1259,39 @@ fn headless_run(command: &[&str], resume: bool) {
     let launched = fixture.wait_file("launched");
     let sql = rusqlite::Connection::open(fixture.home.path().join("loopflow.db")).unwrap();
     let (session, step): (String,String) = sql.query_row("SELECT session_id,lf_process_id FROM session_events WHERE kind='captured' AND receipt_key=?1", [launched.trim()], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
-    let outcome = |id: &str| -> Option<String> {
-        sql.query_row("SELECT outcome FROM processes WHERE id=?1", [id], |r| {
-            r.get(0)
-        })
+    // A Graph step or run settles on its own row with its exit; a bare run
+    // ends with its agent, whose exit lf may not see.
+    let graph_row = |id: &str| -> bool {
+        sql.query_row(
+            "SELECT EXISTS(SELECT 1 FROM graph_process_steps WHERE lf_process_id=?1)
+                 OR EXISTS(SELECT 1 FROM graph_processes WHERE lf_process_id=?1)",
+            [id],
+            |r| r.get(0),
+        )
         .unwrap()
+    };
+    let outcome = |id: &str| -> Option<Option<i64>> {
+        let (ended, exit): (bool, Option<i64>) = sql
+            .query_row(
+                "SELECT ended_at IS NOT NULL,exit_code FROM (
+                     SELECT ended_at,exit_code FROM graph_process_steps WHERE lf_process_id=?1
+                     UNION ALL SELECT ended_at,exit_code FROM graph_processes WHERE lf_process_id=?1
+                     UNION ALL SELECT agent_ended_at,agent_exit_code FROM agent_sessions
+                         WHERE agent_launcher_lf_process_id=?1)
+                 LIMIT 1",
+                [id],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        ended.then_some(exit)
     };
     let settles = |id: &str, what: &str| {
         let deadline = Instant::now() + Duration::from_secs(30);
         loop {
-            if let Some(outcome) = outcome(id) {
-                assert_eq!(outcome, "succeeded");
+            if let Some(exit) = outcome(id) {
+                if graph_row(id) {
+                    assert_eq!(exit, Some(0), "{what} failed");
+                }
                 return;
             }
             assert!(Instant::now() < deadline, "{what} did not settle");
@@ -3417,69 +3434,6 @@ read -r answer < /dev/tty
     fixture.held_ends(&held);
 }
 
-/// A Session an earlier build's `lf session serve` owner still runs restarts
-/// held when resumed: that owner, found by its recorded pid and birth, ends
-/// first, so no second agent runs on its thread.
-#[test]
-fn resume_ends_an_earlier_builds_owner_and_continues_held() {
-    use std::os::unix::process::ExitStatusExt;
-    let fixture = Fixture::new();
-    let _server = fixture.machine_server();
-    let path = fixture.waiting_provider();
-    let prepared = fixture
-        .command(&["-a", "claude", "resume", "--prepare", "--json"])
-        .env("PATH", &path)
-        .output()
-        .unwrap();
-    assert!(prepared.status.success(), "{prepared:?}");
-    let prepared: Value = serde_json::from_slice(&prepared.stdout).unwrap();
-    let session = prepared["id"].as_str().unwrap().to_owned();
-    // The earlier build's owner: a plain process its row names by pid and birth.
-    let mut stand_in = Command::new("/bin/sleep").arg("600").spawn().unwrap();
-    let born = time::OffsetDateTime::now_utc().unix_timestamp();
-    let pid = stand_in.id();
-    let (exited, reaped) = std::sync::mpsc::channel();
-    std::thread::spawn(move || exited.send(stand_in.wait().unwrap()));
-    let owner = "00000000-0000-4000-8000-0000000008a1";
-    let sql = fixture.sql();
-    sql.execute(
-        r#"INSERT INTO processes(id,trace_id,command,started_at,pid,os_started_at)
-           VALUES(?1,?1,'["lf","session","serve","--terminal","--","lf"]',?2,?3,?2)"#,
-        rusqlite::params![owner, born, pid],
-    )
-    .unwrap();
-    sql.execute(
-        "UPDATE agent_sessions SET transport_lf_process_id=?1,held_terminal_id=NULL WHERE id=?2",
-        rusqlite::params![owner, session],
-    )
-    .unwrap();
-    let mut command = fixture.command(&["resume", &session]);
-    command.env("PATH", path);
-    let view = Terminal::spawn_with_placement(command, Some(true));
-    let launch = fixture.launches(1).pop().unwrap();
-    let provider: libc::pid_t = launch.split(':').next().unwrap().parse().unwrap();
-    let _provider = KillOnDrop(provider);
-    let status = reaped
-        .recv_timeout(Duration::from_secs(10))
-        .expect("the earlier owner outlived the resume");
-    assert_eq!(status.signal(), Some(libc::SIGTERM));
-    let held = fixture.terminal_of(&session);
-    assert!(fixture.held_running(&held));
-    let owner_after: Option<String> = sql
-        .query_row(
-            "SELECT transport_lf_process_id FROM agent_sessions WHERE id=?1",
-            [&session],
-            |r| r.get(0),
-        )
-        .unwrap();
-    assert_eq!(owner_after, None);
-    assert_eq!(fixture.launches(1).len(), 1);
-    view.stop();
-    // SAFETY: the pid the fixture's provider recorded for itself.
-    unsafe { libc::kill(provider, libc::SIGKILL) };
-    fixture.held_ends(&held);
-}
-
 #[test]
 fn continuing_a_session_starts_one_held_terminal() {
     let fixture = Fixture::new();
@@ -3897,25 +3851,6 @@ fn a_held_view_waits_for_a_holder_stopped_at_server_startup() {
         )
         .unwrap();
     assert_eq!(code, None, "nobody saw the agent exit");
-    let unfinished = || {
-        fixture
-            .sql()
-            .query_row(
-                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
-                   AND pid=?1 AND completed_at IS NULL"#,
-                [holder],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap()
-    };
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while unfinished() > 0 {
-        assert!(
-            Instant::now() < deadline,
-            "the gone holder's row never ended"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
     assert_eq!(fixture.held_entrance(&terminal).1, "ended");
     assert!(!view.wait_exit().success());
 }
@@ -4171,91 +4106,4 @@ fn task_cleanup_ends_an_abandoned_tasks_held_terminal() {
         .unwrap();
     let _ = fixture.command(&["task", "retire", task]).output().unwrap();
     fixture.held_ends(&terminal);
-}
-
-/// Every held terminal shares its build's one holder across a server
-/// restart; no owner process runs per terminal.
-#[test]
-fn held_terminals_list_one_holder_process() {
-    let fixture = Fixture::new();
-    let mut service = ServerProof::start(&fixture, false);
-    let home = fixture.home.path();
-    let start = |service: &ServerProof, request: &str| {
-        let script = format!("while [ ! -e {}/stop ]; do sleep 0.1; done", home.display());
-        let started = service
-            .connect()
-            .request(loopflow::server::wire::Operation::Server(
-                loopflow::server::wire::ServerOperation::SessionStart {
-                    session: None,
-                    request: request.into(),
-                    argv: vec!["/bin/sh".into(), "-c".into(), script],
-                    cwd: home.to_path_buf(),
-                    env: vec![("PATH".into(), "/usr/bin:/bin".into())],
-                    rows: 24,
-                    cols: 80,
-                    placement: None,
-                },
-            ))
-            .unwrap();
-        started.result["terminal_id"].as_str().unwrap().to_owned()
-    };
-    let terminals = [start(&service, "first"), start(&service, "second")];
-    let listed = |service: &ServerProof| {
-        let output = service
-            .command(&["process", "list", "--json"])
-            .stdin(Stdio::null())
-            .output()
-            .unwrap();
-        assert!(output.status.success(), "{output:?}");
-        let snapshot: Value = serde_json::from_slice(&output.stdout).unwrap();
-        snapshot["nodes"].as_array().unwrap().clone()
-    };
-    let holders = |nodes: &[Value]| -> Vec<u64> {
-        nodes
-            .iter()
-            .filter(|node| node["label"] == "lf holder")
-            .map(|node| node["pid"].as_u64().unwrap())
-            .collect()
-    };
-    let nodes = listed(&service);
-    let first = holders(&nodes);
-    assert_eq!(first.len(), 1, "{nodes:#?}");
-    assert!(command_line(first[0] as libc::pid_t)
-        .1
-        .contains("holder run"));
-    // A new server takes up the same holder and records nothing new.
-    service.stop();
-    service.child = Some(service.launch());
-    service.ready();
-    assert_eq!(holders(&listed(&service)), first);
-
-    std::fs::write(home.join("stop"), "").unwrap();
-    for terminal in &terminals {
-        fixture.held_ends(terminal);
-    }
-    // The holder leaves, as it would after idling: the server that adopted it
-    // settles its row, though only the server that started it saw the exit.
-    let holder = first[0] as libc::pid_t;
-    // SAFETY: the holder this fixture's servers recorded.
-    unsafe { libc::kill(holder, libc::SIGKILL) };
-    // A settled holder row is completed, then forgotten: none stays unfinished.
-    let unfinished = || {
-        fixture
-            .sql()
-            .query_row(
-                r#"SELECT COUNT(*) FROM processes WHERE command='["lf","holder","run"]'
-                   AND pid=?1 AND completed_at IS NULL"#,
-                [holder],
-                |r| r.get::<_, i64>(0),
-            )
-            .unwrap()
-    };
-    let deadline = Instant::now() + Duration::from_secs(20);
-    while unfinished() > 0 {
-        assert!(
-            Instant::now() < deadline,
-            "the adopted holder's row never ended"
-        );
-        std::thread::sleep(Duration::from_millis(50));
-    }
 }

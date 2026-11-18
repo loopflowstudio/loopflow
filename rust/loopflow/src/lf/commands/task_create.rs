@@ -144,23 +144,33 @@ pub fn create(
                 .ok_or_else(|| {
                     anyhow::anyhow!("created Task {} is unknown", receipt.task.identifier)
                 })?;
-                // The run is over once its carrier no longer runs; its last
-                // Graph run says how it went.
-                while store
-                    .sqlite
-                    .task_graph_row(&task)?
-                    .and_then(|row| row.run)
-                    .is_some_and(|(_, carrier)| {
-                        loopflow_execution::process::os_process::carrier_evidence(&carrier)
-                            != loopflow_execution::store::ProcessIdentityEvidence::Dead
-                    })
-                {
+                // The run is over once neither its carrier nor its last Graph
+                // run still runs; that Graph run says how it went. A carrier
+                // between attempts records no pid while its last run ends.
+                let (last, result) = loop {
+                    let carrying = store
+                        .sqlite
+                        .task_graph_row(&task)?
+                        .and_then(|row| row.run)
+                        .is_some_and(|(_, carrier)| {
+                            loopflow_execution::process::os_process::carrier_evidence(&carrier)
+                                != loopflow_execution::store::ProcessIdentityEvidence::Dead
+                        });
+                    let last = store.sqlite.task_graphs(&task)?.pop().ok_or_else(|| {
+                        anyhow::anyhow!("creation Graph {graph_process} is unavailable")
+                    })?;
+                    let result =
+                        loopflow_execution::process::os_process::observed_result(&last.run);
+                    if !carrying
+                        && !matches!(
+                            result,
+                            loopflow_storage::graph_process::ExecutionResult::Running
+                        )
+                    {
+                        break (last, result);
+                    }
                     std::thread::sleep(std::time::Duration::from_millis(50));
-                }
-                let last = store.sqlite.task_graphs(&task)?.pop().ok_or_else(|| {
-                    anyhow::anyhow!("creation Graph {graph_process} is unavailable")
-                })?;
-                let result = loopflow_execution::process::os_process::observed_result(&last.run);
+                };
                 if !matches!(
                     result,
                     loopflow_storage::graph_process::ExecutionResult::Succeeded

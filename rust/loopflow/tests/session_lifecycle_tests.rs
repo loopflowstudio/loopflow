@@ -2105,11 +2105,7 @@ fn failed_taskless_decision_stops_and_keeps_its_history() {
     assert_eq!(stopped["iterations"], serde_json::json!([[0]]));
     let error: String = fixture
         .db()
-        .query_row(
-            "SELECT error FROM graph_processes",
-            [],
-            |row| row.get(0),
-        )
+        .query_row("SELECT error FROM graph_processes", [], |row| row.get(0))
         .unwrap();
     assert!(error.contains("Release target is missing"), "{error}");
     assert!(fixture.sessions().is_empty());

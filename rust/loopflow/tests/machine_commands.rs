@@ -454,7 +454,8 @@ fn explicit_machine_dispatch_requires_registration_but_does_not_preflight_identi
     let fixture = Machines::uninitialized();
     let unregistered = fixture.run(&["--machine", "mini", "session", "list"]);
     assert!(!unregistered.status.success());
-    assert!(String::from_utf8_lossy(&unregistered.stderr).contains("not added"));
+    let error = String::from_utf8_lossy(&unregistered.stderr);
+    assert!(error.contains("not added"), "{error}");
     assert_success(&fixture.run(&["machine", "add", "mini"]));
     fixture.remote(
         loopflow::build_info::BUILD_VERSION,
@@ -3143,10 +3144,10 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let laptop = gethostname::gethostname().to_string_lossy().into_owned();
     move_to(laptop.split('.').next().unwrap());
 
-    // Each process read on mini runs its recovery, which restarts ship processes.
+    // Each Session read on mini runs its recovery, which restarts ship processes.
     for _ in 0..5 {
         let read = fixture
-            .command(&["process", "list", "--json"])
+            .command(&["session", "list", "--json"])
             .env("HOME", fixture.root.path().join("remote"))
             .env("LF_HOME", &remote_home)
             .current_dir(fixture.root.path().join("remote"))
@@ -3161,7 +3162,7 @@ fn mini_starts_nothing_for_a_task_that_moved_back() {
     let ships: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM processes WHERE command LIKE '%\"ship\"%'",
+            "SELECT count(*) FROM task_ship_events WHERE pid IS NOT NULL OR ended_at IS NOT NULL",
             [],
             |row| row.get(0),
         )
@@ -3249,8 +3250,7 @@ fn task_move_leaves_a_live_graph_running_on_mini() {
     let first_steps: i64 = rusqlite::Connection::open(&remote_db)
         .unwrap()
         .query_row(
-            "SELECT count(*) FROM graph_process_steps s JOIN processes p ON p.id=s.lf_process_id
-             WHERE s.graph_lf_process_id=?1 AND p.command LIKE '%\"status\"%'",
+            "SELECT count(*) FROM graph_process_steps WHERE graph_lf_process_id=?1 AND node=0",
             [&graph],
             |row| row.get(0),
         )
@@ -3534,8 +3534,7 @@ fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<S
     rusqlite::Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT p.id FROM task_graphs g JOIN processes p ON p.id=g.lf_process_id
-             WHERE g.task_id=?1 AND p.completed_at IS NULL",
+            "SELECT lf_process_id FROM task_graphs WHERE task_id=?1 AND run_pid IS NOT NULL",
             [task.as_str()],
             |row| row.get(0),
         )
@@ -3543,14 +3542,16 @@ fn live_graph(db: &Path, task: &loopflow_execution::durable::TaskId) -> Option<S
         .unwrap()
 }
 
-/// Whether a `task wait` step recorded in `db` is running within a minute.
+/// Whether the hold Graph's `task wait` step (node 1) recorded in `db` is
+/// running within a minute.
 fn wait_step_live(db: &Path) -> bool {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
     while std::time::Instant::now() < deadline {
         let waiting: i64 = rusqlite::Connection::open(db)
             .and_then(|sql| {
                 sql.query_row(
-                    "SELECT count(*) FROM processes WHERE command LIKE '%\"wait\"%' AND completed_at IS NULL",
+                    "SELECT count(*) FROM graph_process_steps
+                     WHERE node=1 AND pid IS NOT NULL AND ended_at IS NULL",
                     [],
                     |row| row.get(0),
                 )

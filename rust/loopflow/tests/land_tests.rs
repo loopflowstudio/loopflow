@@ -1790,7 +1790,9 @@ fn lf_pr_land_returns_before_a_later_check_observes_merge() {
         }
         let conn = rusqlite::Connection::open(&database).unwrap();
         let initial: Option<i64> = conn
-            .query_row("SELECT exit_code FROM graph_processes", [], |row| row.get(0))
+            .query_row("SELECT exit_code FROM graph_processes", [], |row| {
+                row.get(0)
+            })
             .optional()
             .unwrap()
             .flatten();
@@ -2015,10 +2017,28 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     let fixture = register_task_with_pr(home.path(), &worktree, "waited-repair", &base);
     support::seed_store(home.path());
     let db = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-    // The Task's own Session stays open in the checkout for the whole landing.
-    let session = loopflow_model::id::LfProcessId::new();
-    db.execute("INSERT INTO processes(id,trace_id,pid,cwd,command,started_at) VALUES(?1,?2,?3,?4,'task-session',?5)",
-        rusqlite::params![session, loopflow_model::id::TraceId::new(), std::process::id(), worktree.to_str().unwrap(), time::OffsetDateTime::now_utc().unix_timestamp()]).unwrap();
+    // The Task's own Session stays open in the checkout for the whole landing,
+    // its agent this live process.
+    let session = "session_waited_repair";
+    let agent = loopflow_execution::process::OsProcess::read(std::process::id())
+        .unwrap()
+        .unwrap();
+    db.execute(
+        "INSERT INTO agent_sessions(id,title,title_source,created_at,cwd,input_published,task_id,wave_id,
+             interactive,agent_process_id,agent_started_at,agent_pid,agent_os_started_at)
+         SELECT ?1,'Task','generated',?2,?3,1,t.id,p.wave_id,1,?5,?2,?6,?7
+         FROM tasks t LEFT JOIN projects p ON p.id=t.project_id WHERE t.id=?4",
+        rusqlite::params![
+            session,
+            time::OffsetDateTime::now_utc().unix_timestamp(),
+            worktree.to_str().unwrap(),
+            fixture.task.id.as_str(),
+            loopflow_model::id::AgentProcessId::new().to_string(),
+            agent.pid,
+            agent.started_at
+        ],
+    )
+    .unwrap();
     let command = || {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_lf"));
         for (name, _) in
@@ -2103,16 +2123,16 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
         }
         (fs::read_to_string(&out).unwrap(), error)
     };
-    // The run's carrier: this process, or the bare run's Graph process's parent.
+    // The Graph run a bare run hands off, once it ends.
     let carrier_exit = || -> Option<i64> {
         let graph = printed("running as Graph run ")?;
         db.query_row(
-            "SELECT c.exit_code FROM processes g JOIN processes c ON c.id=g.parent_lf_process_id
-             WHERE g.id=?1 AND c.completed_at IS NOT NULL",
+            "SELECT exit_code FROM graph_processes WHERE lf_process_id=?1 AND ended_at IS NOT NULL",
             [graph],
             |row| row.get(0),
         )
         .ok()
+        .flatten()
     };
     let wait_for = |reported: &str| {
         let deadline = Instant::now() + Duration::from_secs(60);
@@ -2170,8 +2190,8 @@ git rev-parse HEAD > "$LF_TEST_REPAIR_PROOF"
     assert_eq!(fs::read_to_string(&launches).unwrap().lines().count(), 1);
     let session_open: bool = db
         .query_row(
-            "SELECT completed_at IS NULL FROM processes WHERE id=?1",
-            [&session],
+            "SELECT completed_at IS NULL FROM agent_sessions WHERE id=?1",
+            [session],
             |row| row.get(0),
         )
         .unwrap();

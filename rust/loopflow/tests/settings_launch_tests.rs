@@ -862,12 +862,11 @@ def run(*args):
 def worker(task):
     text = run('task', 'run', task, 'proof', '--from', 'implement')
     graph = text.split('running as Graph run ')[1].split()[0]
-    carrier = db.execute('SELECT parent_lf_process_id FROM processes WHERE id=?', (graph,)).fetchone()[0]
     deadline = time.monotonic() + 90
     while True:
-        done, code = db.execute('SELECT completed_at, exit_code FROM processes WHERE id=?', (carrier,)).fetchone()
+        done, code = db.execute('SELECT ended_at, exit_code FROM graph_processes WHERE lf_process_id=?', (graph,)).fetchone()
         if done:
-            assert code == 0, text + '\n' + str(list(db.execute('SELECT error FROM processes WHERE parent_lf_process_id=?', (carrier,))))
+            assert code == 0, text + '\n' + str(list(db.execute('SELECT error FROM graph_process_steps WHERE graph_lf_process_id=?', (graph,))))
             return
         if time.monotonic() > deadline:
             raise TimeoutError(text)

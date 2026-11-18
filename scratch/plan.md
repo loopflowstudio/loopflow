@@ -71,17 +71,11 @@ OpenCode `external_directory` deny `opencode.rs:1272`, Pi's `ensure!`
 Task input; `agent/session.rs:101-137` decides it again for batch resume from
 the stored request and the Session's cwd, and sets no `skip_permissions`.
 
-**Three attempts come from one blind loop.** `TASK_RUN_ATTEMPTS = 3`
-(`rust/loopflow/src/lf/commands/graph.rs:147`, loop 209-307) retries any Graph
-child that exits 1. It stops early only for an interrupt, retained edits or a
-limit row.
-
-**A missing CLI is already refused before launch, with the hint.**
-`run.rs:751` returns `missing_agent_message` before the step's runtime begins,
-so no AgentProcess exists. The loop then repeats it twice. "Is this harness
-installed" is asked in five places (`run.rs:751`, `replay.rs:58`,
-`ops/human_session/primary.rs:148`, `harness/native_session.rs:647,682`,
-`config.rs:173`).
+**Before slice 2, three attempts came from one blind loop** (`TASK_RUN_ATTEMPTS`,
+`rust/loopflow/src/lf/commands/graph.rs:146`) and a missing CLI was refused at
+`run.rs` before any AgentProcess, then repeated twice. "Is this harness
+installed" is still asked in several places (`replay.rs`,
+`ops/human_session/primary.rs`, `harness/native_session.rs`, `config.rs`).
 
 **One place already moves a step to its next agent.** `_run_with_retries`
 (`agent/mod.rs:1045`) walks `_fallthrough_rungs` (`agent/mod.rs:1171`) and
@@ -305,6 +299,7 @@ The docs commit the implementation to three things the plan had left open:
      Auto-Ship approval like the other stops.
    - A missing agent later in the order is dropped without a record: one
      recovery row per step holds the move that happened, not ones that might.
+   - Both tests passed locally, 2026-11-18 (`cargo test -p loopflow --lib`, 104s).
 3. **A worker's question ends the turn** on OpenCode, matching Pi. What
    `opencode run` prints or does when the model asks a question with `--auto`
    is unknown; record a real trace first.

@@ -1,108 +1,94 @@
 <!doctype html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<title>LOO-937 concept review: where a Task's facts live (as built)</title>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>LOO-937 concept review: a Task's facts on today's main</title>
 <style>
-  :root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbf8; --mute:#6b6b6b; --line:#d9d6cc;
-          --yes:#1f7a3a; --no:#b3261e; --prop:#7a4fb3; --card:#f2efe6; }
-  @media (prefers-color-scheme: dark) {
-    :root { --fg:#ecebe6; --bg:#18181a; --mute:#9a9a9a; --line:#3a3a3e; --yes:#5cc97e; --no:#ff7b72;
-            --prop:#c3a3f0; --card:#232327; } }
-  body { font: 15px/1.55 -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg);
-         max-width: 920px; margin: 2.5rem auto; padding: 0 1.25rem; }
-  h1 { font-size: 1.5rem; margin-bottom:.2rem } h2 { font-size:1.15rem; margin-top:2.2rem }
-  code { font: 13px ui-monospace, Menlo, monospace; }
-  table { border-collapse: collapse; width:100%; margin:.6rem 0 }
-  th, td { text-align:left; vertical-align:top; padding:.45rem .55rem; border-bottom:1px solid var(--line) }
-  th { font-weight:600 }
-  .yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
-  .card { background:var(--card); border-radius:8px; padding: .8rem 1rem; margin:.8rem 0 }
-  .prop { border-left:4px solid var(--prop); }
-  .tag { display:inline-block; font-size:12px; padding:0 .45rem; border-radius:4px; border:1px solid var(--prop); color:var(--prop) }
-  .ba { display:grid; grid-template-columns: 1fr 1fr; gap: .8rem }
-  .mute { color:var(--mute) }
-  ol li { margin:.35rem 0 }
-</style>
-</head>
-<body>
-<h1>Do a Task's concepts and the store's concepts line up?</h1>
-<p class="mute">LOO-937 as built (HEAD <code>fc60387a99</code> against <code>origin/main</code>), reviewed 2026-11-18.
-Area taken: everything a person knows about one Task across surfaces — its definition (title, state, rank, URL, branch),
-which conversations and Processes are its work, and the order Tasks appear in — plus the records behind them
-(<code>tasks</code>, <code>tracker_items</code>/<code>pm_items</code>, <code>task_checkouts</code>,
-<code>task_primary_sessions</code>, <code>processes.task_id</code>, <code>agent_sessions.task_id</code>, rank).
-The kickoff version of this page reviewed the plan; this one reviews the built change.</p>
+:root { color-scheme: light dark; --fg:#1d1d1f; --bg:#fbfbf8; --mute:#6b6b6b; --line:#d9d6cc;
+  --yes:#1f7a3a; --no:#b3261e; --prop:#7a4fb3; --card:#f2efe6; }
+@media (prefers-color-scheme: dark) {
+  :root { --fg:#ecebe6; --bg:#18181a; --mute:#9a9a9a; --line:#3a3a3e; --yes:#5cc97e; --no:#ff7b72;
+    --prop:#c3a3f0; --card:#232327; } }
+body { font: 15px/1.55 -apple-system, system-ui, sans-serif; color:var(--fg); background:var(--bg);
+  max-width: 920px; margin: 2.5rem auto; padding: 0 1rem; }
+h1 { font-size: 1.5rem; margin-bottom:.2rem } h2 { font-size:1.15rem; margin-top:2.2rem }
+code { font: 13px ui-monospace, Menlo, monospace; overflow-wrap:anywhere }
+table { border-collapse: collapse; width:100%; margin:.6rem 0 }
+th, td { text-align:left; vertical-align:top; padding:.45rem .55rem; border-bottom:1px solid var(--line) }
+th { font-weight:600 }
+.yes { color:var(--yes); font-weight:700 } .no { color:var(--no); font-weight:700 }
+.card { background:var(--card); border-radius:8px; padding:.8rem 1rem; margin:.8rem 0 }
+.prop { border-left:4px solid var(--prop) }
+.tag { display:inline-block; font-size:12px; padding:0 .45rem; border-radius:4px; border:1px solid var(--prop); color:var(--prop) }
+.ba { display:grid; grid-template-columns: 1fr 1fr; gap:.8rem }
+@media (max-width: 640px) { .ba { grid-template-columns: 1fr } }
+.mute { color:var(--mute) }
+ol li { margin:.35rem 0 }
+</style></head><body>
 
-<h2>One interaction, walked</h2>
+<h1>Do a Task's concepts and the store's concepts line up?</h1>
+<p class="mute">LOO-937 at <code>a3639aa8f2</code>, reviewed as it would stand merged onto <code>origin/main</code>
+after #1974 (Sessions and Graph runs track their own processes; <code>processes</code> is leaving). 2026-11-18.</p>
+<p><b>Area taken:</b> everything a person knows about one Task: what it is (title, state, rank, Project),
+which conversations and runs are its work, which conversation is its own, and where it sits in a list,
+plus the records behind each. Not the branch against its old base: #1974 changed what "a Task's work" is made of,
+so that comparison answers a question nobody will ask again.</p>
+
+<h2>One interaction, walked on the merged frontier</h2>
 <div class="card">
-<p><b>Normal.</b> <code>lf task run LOO-937</code> starts a Graph. Its Process row is written with
-<code>task_id=LOO-937</code> (rule 1: the launch names it). The agent runs <code>lf commit</code> inside the
-checkout; that Process takes LOO-937 from the deepest checkout (rule 2). A helper "Generate PR title" Session
-started there records LOO-937 at creation. <code>lf task status LOO-937</code> lists them by one indexed read.</p>
-<p><b>Failure.</b> The repository is moved on disk, then a second clone takes the old checkout path.
-Before: membership was a path match minus/plus a frozen-pair table, probed through <code>sqlite_master</code>.
-Now: nothing is re-matched; every row keeps its <code>task_id</code>, and the second clone's new work takes
-the new Task (<code>work_keeps_its_task_when_a_checkout_path_is_reused</code>).</p>
-<p><b>Recovery.</b> A released <code>lf</code> on the same Machine inserts Processes with no <code>task_id</code>
-during the window. They are missing from the Task's list until the server's maintenance pass assigns them
-by the same rules (cursor <code>process_task_backfill</code>, 5,000 per write). A Task that gains a checkout
-a taskless Graph is already running in adopts that work once (<code>write_task_checkout_in</code>).</p>
-<p><b>Order.</b> Dragging a Working-board tile above another Task of its Project writes that Task's rank
-(<code>reorder_task</code> → <code>reorder_in</code>), which reaches Linear as an <code>order</code> action;
-<code>lf task</code> and Linear show the same order. Dropping it on another Project's Task changes nothing
-and says why.</p>
+<p><b>Normal.</b> <code>lf task run LOO-937</code> starts a Graph run; its <code>graph_processes</code> row names
+<code>task_id</code> at launch (main). Its review step opens a conversation; that Session's row names
+<code>task_id</code> at creation (this PR). <code>lf resume --task LOO-937</code> finds the Session marked
+<code>primary_scope='task'</code> (this PR). The Task page lists both by one indexed read each.</p>
+<p><b>Failure.</b> The repository moves on disk, then a second clone takes the old checkout path.
+Graph runs and Sessions keep the Task they recorded; nothing is matched by path.
+On <code>main</code> alone, Sessions still also join any Task whose checkout holds their cwd, so the reused path
+would pull the second clone's conversations into the old Task. This PR is what closes that.</p>
+<p><b>Recovery.</b> A released lf still running after the upgrade keeps writing <code>processes</code> rows
+(main bridges them) and <code>task_primary_sessions</code> rows (this PR mirrors them onto the mark).
+Both are window-only and drop with their contracts.</p>
 </div>
 
 <h2>Pairings</h2>
 <table>
-<tr><th>Product concept (what a person knows / does)</th><th>Code concept</th><th></th><th>What is wrong, where no</th></tr>
-<tr><td>A Task's title, description, state, URL, branch, team</td><td><code>tasks</code> (desired), one row</td><td class="yes">yes</td><td>Names (<code>issue_title</code>, <code>planning_*</code>) are LOO-939's.</td></tr>
-<tr><td>What Linear last said about it (seen only as a conflict)</td><td><code>tracker_items</code> (+ <code>pm_items</code> mirror)</td><td class="yes">yes</td><td>The merge base, not a copy. Its revision now has one home.</td></tr>
-<tr><td>"This Task is done"</td><td><code>planning_state = 'completed'</code></td><td class="yes">yes</td><td>The boolean follows by trigger for released lf; on the wire <code>Disposition.planning_completed</code> is still a second key for one fact until a release accepts its absence.</td></tr>
-<tr><td>Where a Task sits in a list</td><td><code>tasks.planning_rank</code> within Project; board key Project rank → Project → rank → id</td><td class="yes">yes</td><td><code>task_orders</code> and the observed order list are leaving.</td></tr>
-<tr><td>Drag a tile to reorder</td><td><code>SqliteStore::reorder_task</code> → <code>move_in</code> → <code>reorder_in</code></td><td class="yes">yes</td><td>One owner.</td></tr>
-<tr><td>Drag a tile onto another Project's Task</td><td><code>InvalidData</code> refusal</td><td class="no">no</td><td>A person sees one board; the code has a precondition the person must learn. See mismatch B.</td></tr>
-<tr><td>The Task's work: its Processes</td><td><code>processes.task_id</code>, set once</td><td class="yes">yes</td><td>Path matching and <code>relocated_task_processes</code> are gone from membership.</td></tr>
-<tr><td>The Task's conversations</td><td><code>agent_sessions.task_id</code></td><td class="yes">yes</td><td>A nested checkout's Session now belongs to the deepest Task only.</td></tr>
-<tr><td>The Task's primary conversation</td><td><code>agent_sessions.primary_scope='task'</code> on the row whose <code>task_id</code> names it</td><td class="yes">yes</td><td>Fixed at human review (<code>a3e6e71981</code>), was Mismatch A. One mark for every scope; "which Task" lives in <code>task_id</code> only. <code>task_primary_sessions</code> is leaving (LOO-877), mirrored by triggers for released lf until then.</td></tr>
-<tr><td>The branch</td><td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td><td class="no">no</td><td>One name for what a person sees as one thing, three homes. Already LOO-934's (questions.md). Mismatch C.</td></tr>
-<tr><td>(nothing)</td><td><code>process_task_backfill</code>, <code>tasks_completed_follows_state_*</code></td><td class="yes">yes</td><td>Window-only machinery, each marked to drop with LOO-877. Not a concept, correctly.</td></tr>
-<tr><td>A duplicate can't come back</td><td><code>leaving_guard.rs</code> authorizer in storage test stores</td><td class="yes">yes</td><td>Blind to FK-column reads and to other crates' stores; stated in the plan.</td></tr>
+<tr><th>Product concept</th><th>Code concept (merged)</th><th></th><th>What is wrong, where no</th></tr>
+<tr><td>A Task's title, description, state, rank, URL, branch, team</td><td><code>tasks</code> (desired); <code>tracker_items</code> (what the tracker last said)</td><td class="yes">yes</td><td>Desired vs observed, the merge base for conflicts. Names are LOO-939's.</td></tr>
+<tr><td>Where a Task sits in a list; dragging a tile</td><td><code>tasks.planning_rank</code>; <code>reorder_task → move_in → reorder_in</code></td><td class="yes">yes</td><td>One order, one owner. A drop among another Project's Tasks moves it there (answer 2a), through the same <code>move_task_in</code> as <code>lf task move</code>.</td></tr>
+<tr><td>The Task's conversations</td><td><code>agent_sessions.task_id</code>, set at creation</td><td class="yes">yes</td><td>Only once this PR's rule replaces main's path-or-id <code>session_membership</code> in the merge.</td></tr>
+<tr><td>The Task's primary conversation</td><td><code>agent_sessions.primary_scope='task'</code></td><td class="yes">yes</td><td>One mark for every scope; the wire's <code>task_primary</code> is gone (answer 1a).</td></tr>
+<tr><td>The Task's runs</td><td><code>graph_processes.task_id</code>, set at launch (main)</td><td class="yes">yes</td><td>Same rule as Sessions: the record names its Task when it starts.</td></tr>
+<tr><td>(nothing a person sees)</td><td><code>processes.task_id</code>, <code>process_task_backfill</code>, <code>process_task()</code> resolution, <code>relocated_task_processes</code> reads removed</td><td class="no">no</td><td>This PR's Process half answers "which Task is this lf command's" on a table main no longer writes. Merged, it is a third home for "which Task is this run's", on rows nobody creates. <b>Mismatch A.</b></td></tr>
+<tr><td>(nothing)</td><td><code>-- leaving: relocated_task_processes LOO-877</code> here, <code>LOO-965</code> on main</td><td class="no">no</td><td>One member, two contracts. LOO-965 owns <code>processes</code> and its relocation table; this PR's mark and its LOO-877 steer for it should go.</td></tr>
+<tr><td>The branch</td><td><code>tasks.planning_branch_name</code>, <code>task_checkouts.branch</code>, <code>task_prs.branch</code></td><td class="no">no</td><td>Sent to LOO-934 (answer 3a).</td></tr>
+<tr><td>"This Task is done"</td><td><code>planning_state='completed'</code></td><td class="yes">yes</td><td>The wire's <code>planning_completed</code> goes with LOO-877's release (answer 4a).</td></tr>
 </table>
 
-<h2>A, the primary conversation (fixed in this PR)</h2>
-<p>At human review: "i think mismatch A should bei nthis PR". Built as proposed, with one change: the index is
-plain until LOO-877, because <code>check_migrations.py</code> refuses a new unique index while older writers run;
-every write clears the old mark first.</p>
+<h2>Biggest mismatch: A, this PR's Process half</h2>
 <div class="ba">
-<div class="card"><b>Before</b><br>
-<code>agent_sessions.primary_scope = 'repository' | 'wave'</code><br>
-<code>task_primary_sessions(task_id PK, session_id UNIQUE)</code><br>
-<code>agent_sessions.task_id</code> (must equal the row's task_id)<br>
-<span class="mute">Three places answer "is this the primary, and of what".</span></div>
-<div class="card"><b>Now</b><br>
-<code>agent_sessions.primary_scope = 'task' | 'repository' | 'wave'</code>,
-with an index on <code>(task_id) WHERE primary_scope='task'</code>, unique once LOO-877 drops the table.<br>
-<span class="mute">Still open: the wire carries both <code>task_primary</code> and <code>primary_scope="task"</code>; a released lf process still running after the upgrade fails <code>primary_scope()</code> on a Task primary until it exits.</span></div>
+<div class="card"><b>Merged naively</b><br>
+<code>processes.task_id</code> (this PR, backfilled hourly)<br>
+<code>graph_processes.task_id</code> (main)<br>
+<code>agent_sessions.task_id</code> (both)<br>
+<span class="mute">Three columns answer "whose work is this", and the first sits on a table marked leaving,
+filled by a maintenance pass for rows released lf writes and main bridges.</span></div>
+<div class="card prop"><span class="tag">proposed</span><br>
+A Task's work is its Sessions and its Graph runs, each naming its Task when it starts.
+Drop <code>processes.task_id</code>, <code>processes_task</code>, <code>process_task_backfill</code>, the
+<code>process_task()</code> resolution and its tests; take main's Graph-run membership.<br>
+<span class="mute">What survives: every Session and Graph run keeps its Task across a move or a reused path.
+What changes on purpose: an lf command run inside a checkout (<code>lf commit</code>) is no longer listed as the
+Task's work; main already stopped recording it as a Process. Counterexample not yet checked: a Graph run
+launched inside a checkout without <code>--task</code>. Main's <code>record_graph</code> takes the Task from its
+caller, so whether that run is the Task's depends on the launcher; the merge must confirm it or give it the
+checkout's Task the way Sessions get theirs.</span></div>
 </div>
-
-<h2>B, the cross-Project drop</h2>
-<p>The board is grouped by Project, so dropping a tile among another Project's Tasks reads as "put it there".
-The code refuses with a reason. Moving it instead would be: set <code>project_id</code> (a Linear project
-change, already an exchanged fact), then <code>move_in</code>. That is new behavior, so it is scope, not a fix here;
-the refusal is honest and visible.</p>
-
-<h2>Verdict for this Task</h2>
-<p><b>Nothing to change.</b> Every fact the brief named has one home or is explained as desired-vs-observed;
-membership is a column; one order; one primary mark (A, fixed here). B and C are larger than this work and are written above with what they take.</p>
+<p>The rest of this PR carries over: Session Task at creation, the primary mark (its <code>agent_sessions</code>
+rebuild redone on main's 46-column shape), one order, the move rule, dropping wire <code>task_primary</code>, the
+tracker revision and completion columns.</p>
 
 <h2>Questions</h2>
 <ol>
-<li>Wire <code>task_primary</code>, now beside <code>primary_scope="task"</code>: (a) drop it in this PR (~80 Swift and fixture sites); (b) drop it in its own Task; (c) keep both.</li>
-<li>Cross-Project drop on the Working board: (a) moves the Task into that Project at that position; (b) keeps refusing with the reason; (c) the board stops accepting the drop at all.</li>
-<li>The branch's three homes: (a) LOO-934 decides whether one "the Task's branch" suffices; (b) file it as its own Task now.</li>
-<li><code>Disposition.planning_completed</code> on the wire: (a) file the release that accepts its absence with LOO-877; (b) leave it until the peer protocol next changes.</li>
+<li>This PR's Process half: (a) drop it for main's Sessions-and-Graph-runs membership; (b) keep <code>processes.task_id</code> until LOO-965 drops the table; (c) keep it and move it onto <code>graph_processes</code>.</li>
+<li>lf commands run in a checkout (<code>lf commit</code>, <code>lf pr land</code>): (a) not a Task's work any more; (b) file a Task to record them where a person sees them (the Session that ran them).</li>
+<li><code>relocated_task_processes</code>: (a) LOO-965 owns it; remove this PR's leaving mark and correct the LOO-877 steer; (b) keep both marks.</li>
+<li>Who does the merge: (a) this conversation; (b) a fresh build run from <code>implement</code> with this page as direction.</li>
 </ol>
-</body>
-</html>
+</body></html>

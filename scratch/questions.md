@@ -28,6 +28,20 @@ Made for review in `scratch/plan.md`; each is reversible before release.
 - First-wins claims add "the last entry I had seen" to the ownership marker.
   Entries a released `lf` wrote have none and read as having seen everything.
 
+- Slice 1 (implement, 2026-11-18), each reversible before release:
+  - Tracker observations are stamped too, as the plan says. On a Linear
+    repository nothing reads those rows (about 15 per Task). Keep, or stamp
+    only repositories without a tracker?
+  - A Wave's cleared `current_project` or `retired_at` still does not travel:
+    the record omits those fields when empty, as before stamps. Stamps would
+    now make sending the empty value safe.
+  - `lf repo tracker --json` names at most twenty unsent records
+    (`records`) beside the count (`unsent`); the docs said only `unsent`.
+  - `lf task sync` without a tracker prints `<id>: nothing unsent` or
+    `<id>: hub, N unsent` for the whole repository, not that Task's fields.
+  - The hub acceptance test took 136 s on a loaded Machine (nextest kills at
+    300 s). Not measured before this slice, so unknown whether it grew.
+
 Still open from before:
 
 - Should one Machine run the Linear/Asana drain for all of a person's

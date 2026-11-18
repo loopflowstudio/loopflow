@@ -353,6 +353,13 @@ etude checkout and `lf` version are unknown.
 
 ## Checks
 
-- Slice 1: `cargo nextest … -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::) | test(revisions::)'`, then `--test integration -E 'test(machine_commands::)'`: implement runs.
-- Gate: `server::schema::tests::`, `dto_fixtures::`, `documented_commands::`, Swift `DTOFixtureTests|DesktopHeadlessTests|WorkModelTests`.
-- Swift view tests for `RepositoryPlanView`: once locally at gate; CI owns the rest.
+- Slice 1, run by implement, passed 2026-11-18:
+  `cargo nextest run -p loopflow-storage --lib -E 'test(sqlite::plan_carriers::) | test(sqlite::planning_write::) | test(query_plans::) | test(migration_runner::) | test(revisions::)'`;
+  `cargo nextest run -p loopflow -p loopflow-execution --lib --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(store::children_tests::) | test(store::ownership_lifecycle_tests::) | test(planning_setup_tests::) | test(dto_fixtures::subscribe_frames) | test(server::schema::tests::)'`;
+  `cargo clippy -p loopflow-storage -p loopflow-execution -p loopflow --all-targets -- -D warnings`.
+- Not run, for gate: the rest of `machine_commands::`, `transport::`,
+  `binary(transport_tests)`, `documented_commands::`, `performance_tests::`,
+  and Swift `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
+  (`RepositoryPlan.swift`, `RepositoryPlanView.swift` and three test files
+  changed with the `--json` shape and were not compiled here).
+- Next: slice 2, Git refs.

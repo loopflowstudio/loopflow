@@ -147,7 +147,7 @@ fi
     std::env::set_var("PATH", std::env::join_paths(paths).unwrap());
     // The delivery run holds at a skill step whose provider waits until released.
     let claude = home.path().join("bin/claude");
-    fs::write(&claude, crate::test_support::task_graph::HOLDING_CLAUDE).unwrap();
+    fs::write(&claude, crate::test_support::task_graph::holding_claude()).unwrap();
     fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
     crate::config::files::update(&home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();

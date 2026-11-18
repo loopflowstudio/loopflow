@@ -630,7 +630,6 @@ fn screen_reads_are_compact_passive_and_match_cli() {
             title: "Recorded conversation".into(),
             title_source: loopflow_execution::session::TitleSource::Generated,
             request: None,
-            ready_summary: None,
             completed_at: None,
             created_at: 1,
         },

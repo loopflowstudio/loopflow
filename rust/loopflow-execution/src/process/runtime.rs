@@ -364,12 +364,6 @@ impl LfProcessRuntime {
         self.record_best_effort(|execution| execution.observe_provider(session_id));
     }
 
-    pub fn final_answer(&self) -> StoreResult<Option<String>> {
-        let runtime = self.0.lock().expect("Process runtime mutex poisoned");
-        row_store(&runtime.recorder.dir)?
-            .input_final_answer(&runtime.recorder.manifest.artifact_key)
-    }
-
     pub fn finish(&self, outcome: &str) -> StoreResult<()> {
         self.0
             .lock()

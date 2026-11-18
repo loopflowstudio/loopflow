@@ -640,14 +640,18 @@ pub const CLOSED_TASK_PAGE: usize = 50;
 /// `lf wave status --subscribe`: `lf wave status --json` now and each time it
 /// changes. The subscription reads the store; it does not observe the tracker.
 pub fn subscribe_status(wave: Option<String>) -> Result<()> {
-    loopflow_execution::read_stream::run((), |store, ()| {
-        let wave = wave.clone();
-        async move {
-            let store = loopflow_execution::read_stream::require_store(store)?;
-            let wave = resolve_status_wave(&store, wave.as_deref()).await?;
-            Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        (),
+        |store, ()| {
+            let wave = wave.clone();
+            async move {
+                let store = loopflow_execution::read_stream::require_store(store)?;
+                let wave = resolve_status_wave(&store, wave.as_deref()).await?;
+                Ok(serde_json::to_value(wave_detail(&store, &wave).await?)?)
+            }
+        },
+    )
 }
 
 /// One Wave's `lf wave status` reading.
@@ -738,6 +742,7 @@ pub fn subscribe_show(
     transport: loopflow_execution::read_stream::Transport,
 ) -> Result<Option<loopflow_execution::read_stream::Subscription>> {
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::State,
         (),
         move |store, ()| {
             let (wave, task, directory) = (wave.clone(), task.clone(), directory.clone());
@@ -913,15 +918,19 @@ pub fn list_tasks(repo: &Path, query: &TaskListArgs, json: bool) -> Result<()> {
 
 /// `lf task list --subscribe`: `lf task list --json` now and each time it changes.
 pub fn subscribe_tasks(repo: &Path, args: TaskListArgs) -> Result<()> {
-    loopflow_execution::read_stream::run(args, |store, args| {
-        let repo = repo.to_owned();
-        async move {
-            let Some(store) = store else {
-                return Ok(Vec::new());
-            };
-            open_tasks(&store, &repo, &args).await
-        }
-    })
+    loopflow_execution::read_stream::run(
+        loopflow_execution::read_stream::Watch::State,
+        args,
+        |store, args| {
+            let repo = repo.to_owned();
+            async move {
+                let Some(store) = store else {
+                    return Ok(Vec::new());
+                };
+                open_tasks(&store, &repo, &args).await
+            }
+        },
+    )
 }
 
 /// What a `lf task status --subscribe` request can select instead.
@@ -972,6 +981,7 @@ where
 {
     let repo = repo.to_owned();
     loopflow_execution::read_stream::start(
+        loopflow_execution::read_stream::Watch::History,
         TaskStatusArgs { issue },
         move |store, args| {
             let repo = repo.to_owned();

@@ -64,6 +64,8 @@ pub fn read(rows: &[Value]) -> Vec<Turn> {
 struct Tally {
     /// The total when the turn started; absent until one is known.
     before: Option<Value>,
+    /// `before` was taken from the turn's first report, not its start.
+    partial: bool,
     total: Value,
     last: Value,
     window: Value,
@@ -73,6 +75,7 @@ struct Tally {
 impl Tally {
     fn start(&mut self) {
         self.before = Some(self.total.clone());
+        self.partial = false;
         self.peak = 0;
     }
 
@@ -85,6 +88,7 @@ impl Tally {
             self.before = Some(counters(total, |key, now| {
                 now.saturating_sub(last[key].as_u64().unwrap_or(0))
             }));
+            self.partial = true;
         }
         self.peak = self.peak.max(last["input_tokens"].as_u64().unwrap_or(0));
         self.total = total.clone();
@@ -123,6 +127,7 @@ impl Tally {
                 "total": camel(total),
                 "modelContextWindow": self.window,
                 "peakInputTokens": self.peak,
+                "partial": self.partial,
             }),
         )
     }

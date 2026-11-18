@@ -33,5 +33,5 @@ pub fn prune(database: &Path, now: i64) -> StoreResult<retention::RetentionRepor
             .unwrap_or(now);
         dead.push((process, locator, at));
     }
-    retention::prune(database, &dead)
+    retention::prune(database, &dead, now)
 }

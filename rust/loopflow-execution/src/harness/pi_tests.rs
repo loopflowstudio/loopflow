@@ -444,7 +444,7 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
     let (store, session, _) =
         super::agent_process::open_owner(config.session_attachment.as_ref()).unwrap();
     let thread = pi.agent_session().unwrap();
-    let origin = store.session_history(&session, 0, 0).unwrap();
+    let origin = store.session_turns(&session).unwrap();
     assert!(matches!(
         pi.send_current("reject").await,
         SendCurrentOutcome::Failed { .. }
@@ -479,29 +479,16 @@ async fn pi_steering_receipts_preserve_one_turn_and_distinguish_uncertainty() {
     assert_eq!(pi.agent_session().unwrap(), thread);
     let start = origin
         .iter()
-        .find(|e| e.kind == crate::session::SessionEventKind::Started)
+        .find(|turn| turn.started_at.is_some())
         .unwrap();
-    let done = store
-        .session_history(&session, 0, 0)
-        .unwrap()
-        .into_iter()
-        .find(|e| e.kind == crate::session::SessionEventKind::Completed)
-        .unwrap();
+    let turns = store.session_turns(&session).unwrap();
+    let done = turns.iter().find(|turn| turn.ended_at.is_some()).unwrap();
+    // The end completes the turn the start began, keeping its origin.
+    assert_eq!(done.id, start.id);
     assert_eq!(done.lf_process_id, start.lf_process_id);
     assert_eq!(done.agent_process_id, start.agent_process_id);
     assert_eq!(done.task_id, start.task_id);
-    assert_eq!(done.provider_turn, start.provider_turn);
-    let history = store.session_history(&session, 0, 0).unwrap();
-    assert_eq!(
-        history
-            .iter()
-            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
-            .count(),
-        origin
-            .iter()
-            .filter(|e| e.kind == crate::session::SessionEventKind::Started)
-            .count()
-    );
+    assert_eq!(turns.len(), origin.len());
     pi.send_input("wait").await.unwrap();
     assert!(matches!(
         pi.send_current("late").await,

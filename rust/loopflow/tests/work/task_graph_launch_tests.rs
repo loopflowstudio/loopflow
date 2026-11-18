@@ -1,6 +1,6 @@
 use crate::test_linear_input::SeedLinear;
 use crate::test_support as support;
-use loopflow_execution::test_support::task_graph::HOLDING_CLAUDE;
+use loopflow_execution::test_support::task_graph::holding_claude;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -336,8 +336,6 @@ impl Drop for HeldGraph {
     }
 }
 
-/// A Claude stand-in for a held Graph step: it announces `ready` in LF_HOME,
-/// then waits there for `release` before it answers.
 /// The skill step `holding_task`'s stand-in holds until `release`.
 const HOLD_STEP: &str = "- step: {name: hold}\n";
 const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
@@ -345,8 +343,7 @@ const HOLD_SKILL: (&str, &str) = (".lf/skills/hold.md", "Hold.");
 /// The fixture with a `hold` skill whose provider holds its step open until
 /// the test writes `release` in the home.
 fn holding_task() -> GraphTask {
-    let task = GraphTask::with_tools(&[("claude", HOLDING_CLAUDE)]);
-
+    let task = GraphTask::with_tools(&[("claude", holding_claude().as_str())]);
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())
@@ -3128,15 +3125,17 @@ message['session_id'] = 'stand-in'
 print(json.dumps(message), flush=True)
 print(json.dumps({'type': 'system', 'subtype': 'init', 'session_id': 'stand-in'}), flush=True)
 summary = 'Main-source checks pass; the installed release must be checked first.'
-print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': summary, 'structured_output': {'decision': 'blocked', 'summary': None, 'reason': summary}}), flush=True)
+decision = {'decision': 'blocked', 'summary': None, 'reason': summary}
+keep_claude_turn(message, summary, decision)
+print(json.dumps({'type': 'result', 'uuid': 'stand-in-result', 'session_id': 'stand-in', 'subtype': 'success', 'is_error': False, 'result': summary, 'structured_output': decision}), flush=True)
 for line in sys.stdin:
     pass
 "#;
 
 #[test]
 fn task_ship_blocked_at_verification_waits_there_without_building_again() {
-    let task = GraphTask::with_tools(&[("claude", BLOCKED_CLAUDE)]);
-
+    let task =
+        GraphTask::with_tools(&[("claude", support::claude_stand_in(BLOCKED_CLAUDE).as_str())]);
     loopflow_execution::config::files::update(&task.home.path().join("config.yaml"), |value| {
         value["agent"] = "claude".into();
         Ok(())

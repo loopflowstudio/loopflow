@@ -408,10 +408,10 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
         ] if turn_id == &request && tool_turn == &request));
 
     assert!(store
-        .session_history(&session, 0, 0)
+        .session_turns(&session)
         .unwrap()
         .iter()
-        .all(|row| row.kind != crate::session::SessionEventKind::Completed));
+        .all(|turn| turn.ended_at.is_none()));
 
     message["content"][0]["state"] = json!({"status":"completed","input":{"command":"echo ok"},"content":[{"type":"text","text":"ok"}],"metadata":{"exit":0},"time":{"start":1,"end":2}});
     message["content"].as_array_mut().unwrap().push(json!({"id":"answer","sessionID":session,"messageID":"assistant","type":"text","text":"Final answer"}));
@@ -435,10 +435,10 @@ fn opencode_native_history_preserves_output_and_tools_and_leaves_usage_to_the_tr
     );
     assert!(opencode_display(&mut decoder, &mut writer, &[user, message, idle]).is_empty());
     assert!(store
-        .session_history(&session, 0, 0)
+        .session_turns(&session)
         .unwrap()
         .iter()
-        .all(|row| row.kind != crate::session::SessionEventKind::Usage));
+        .all(|turn| turn.usage.is_none()));
     let usage = crate::store::sessions::input_history(&store, input.as_str())
         .unwrap()
         .usage;

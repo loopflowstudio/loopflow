@@ -505,7 +505,6 @@ pub struct SessionRecord {
     pub model: Option<String>,
     pub cwd: String,
     pub state: SessionState,
-    pub ready_summary: Option<String>,
     pub open_argv: Vec<String>,
     pub terminal_ids: Vec<String>,
     /// Its current or last turn while it is live; `null` when nothing says.
@@ -830,7 +829,6 @@ fn summary_surface(session: &crate::session::SessionSummary) -> SessionRecord {
         model: session.model.clone(),
         cwd: session.cwd.display().to_string(),
         state,
-        ready_summary: session.ready_summary.clone(),
         open_argv,
         terminal_ids: session.terminal_id.clone().into_iter().collect(),
         turn: None,
@@ -1263,7 +1261,6 @@ async fn fork(
             title: format!("{} (fork)", source.title),
             title_source: crate::session::TitleSource::Generated,
             request: Some(request),
-            ready_summary: None,
             completed_at: None,
             created_at: loopflow_storage::rows::now_unix(),
             ..source.clone()
@@ -1742,7 +1739,6 @@ pub async fn surface(store: &SharedStore, session: &LfSession) -> Result<Session
         model: session.model.clone(),
         cwd: session.cwd.display().to_string(),
         state,
-        ready_summary: session.ready_summary.clone(),
         terminal_ids: metadata.terminal_id.clone().into_iter().collect(),
         open_argv,
         turn: None,

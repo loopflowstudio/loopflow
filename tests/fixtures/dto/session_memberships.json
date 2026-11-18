@@ -12,7 +12,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "active",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -86,7 +85,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -160,7 +158,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "active",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -226,7 +223,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -287,7 +283,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -358,7 +353,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "closed",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "session",
@@ -424,7 +418,6 @@
     "model": null,
     "cwd": "/src/loopflow.task",
     "state": "unknown",
-    "ready_summary": null,
     "open_argv": [
       "lf",
       "ssh",

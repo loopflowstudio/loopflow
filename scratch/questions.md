@@ -49,3 +49,21 @@ Choices made for review; `scratch/concept-review.html` shows each one.
 11. **The parity table's "no" cells name no Task** for idle steer wake
     (OpenCode, Pi) or Pi limit classification; only LOO-518 exists. File them,
     or leave the cause in the cell?
+
+12. **Do OpenCode work sessions need a server at all?** Chosen: no. Every
+    OpenCode terminal launch is `opencode --standalone`; nothing keeps
+    `opencode serve` or `--server`. Idle steer wake for OpenCode (question 5)
+    would bring one back, or use `opencode api` against the TUI's own server.
+
+13. **Should a failed OpenCode start print its reason?** It now prints only the
+    exit status; the reason sits in `opencode.stderr.log`. Printing the log's
+    last line on a failed start is the alternative.
+
+14. **`tests/fixtures/dto/work_first_entry.json` still quotes the deleted
+    refusal** ("does not support a managed execution boundary") as an OpenCode
+    Task's reason. Regenerating it (`LOOPFLOW_UPDATE_WORK_FIRST_FIXTURE=1`)
+    also rewrites key order, new fields and checkout paths that drifted before
+    this Task, and reaches the Swift fixture tests. Left as committed.
+
+15. **Steers to a running headless OpenCode turn** now rely on the plugin's
+    between-tool check alone. Not seen working on the real CLI yet.

@@ -275,36 +275,81 @@ The docs commit the implementation to three things the plan had left open:
 
 ## Slices
 
-1. **Admit OpenCode and see what else breaks.** Delete the capability and the
-   boundary types, give rule 1 its one owner, add the four-harness worker test
-   and the README table with honest cells. Then run the real `implement` step on
-   `opencode/gemini-4-carbon` and a Pi model. This is the slice that can prove
-   the plan wrong: it shows whether the plugin's turn reports, turn completion,
-   usage, steers and Graph advancement hold for a worker, which no test has
-   exercised. A cell that fails is fixed here or written as "no" with its cause.
-2. **A step that cannot launch.** Rules 2 and 3 and their three tests.
-3. **A worker's question ends the turn** on OpenCode, matching Pi.
-4. **Cancel and resume, on both.** Interrupt a running worker and resume a
-   stopped Task Session per harness; OpenCode's interrupt has no test today.
-5. **Align OpenCode launches with Claude and Codex (`opencode --standalone` and
-   `opencode run`).** Today `rust/loopflow-execution/src/harness/opencode.rs`
-   (~1,500 lines) boots `opencode serve --stdio --hostname 127.0.0.1 --port 0`
-   with Basic auth, `reqwest` HTTP calls, an SSE `/event` loop, and a companion
-   Rust thread in `open_native` across all four launch kinds. Split it the way
-   PR #1895 split Codex:
-   - **Chats (`!launch.kind.is_managed()` interactive):** exec
-     `opencode --standalone` directly as the terminal's foreground program (with
-     `OPENCODE_CONFIG_CONTENT` loading `context_opencode.js`), with no companion
-     thread or server wrapper.
-   - **Headless batches and workers (`Driver`):** run
-     `opencode run --standalone --format json --auto` (with `--session` on
-     resume and `--model`), reading NDJSON from stdout until exit like
-     `claude -p --output-format stream-json`, while `context_opencode.js`
-     continues supplying instructions, `__context-block`, compaction refreshes,
-     `server.boundary` turn reports, and between-tool `ownNews` steers.
-   - **Work sessions:** keep `opencode serve` + `--server` only if retained for
-     waking idle OpenCode TUI sessions; delete every unused `opencode serve`
-     HTTP/SSE path.
+1. **Admit OpenCode. Built.** The capability and boundary types are gone;
+   `agent::headless_task_checkout` is the one owner of rule 1, called by
+   `run.rs` and batch resume. `a_task_step_runs_as_a_worker_on_every_harness`
+   runs `implement` as a worker on all four stand-ins and reads back one
+   settled step, the Graph at `review`, a recorded native thread and the final
+   answer through `lf history show --final`.
+   - Not asserted by that test yet: the context the stand-in received, a steer
+     sent mid-step, recorded usage. The README table's "same" cells for those
+     rows are unshown. On OpenCode, context and steers travel through the JS
+     plugin, which a Python stand-in never runs; see "Seen on the real CLI".
+   - Not run: `lf task run` on a real Task with real OpenCode or Pi. A worker
+     needs the Machine server, and the branch `lf` was only run against an
+     isolated `LF_HOME`. Demo owns it.
+2. **A step that cannot launch.** Rules 2 and 3 and their three tests. Next.
+3. **A worker's question ends the turn** on OpenCode, matching Pi. What
+   `opencode run` prints or does when the model asks a question with `--auto`
+   is unknown; record a real trace first.
+4. **Cancel and resume, on both.** OpenCode's interrupt now stops the run's
+   process group and the turn settles `Interrupted`
+   (`a_stopped_run_is_interrupted_whatever_it_printed` covers the decoder);
+   no test interrupts a running worker on either harness yet.
+5. **OpenCode launches match Claude and Codex. Built.**
+   - Headless (`harness/opencode.rs` `Driver`): each turn is one
+     `opencode run --standalone --format json --auto [--model m] --session ses_…`
+     process with the prompt on stdin. `opencode_decode::Turn` decodes its
+     lines; the process exit settles the turn. A second turn is another run on
+     the same `--session`, as a new AgentProcess of the Session.
+   - Terminal (`Harness::open`): `opencode --standalone --session ses_…
+     [--prompt p]`, exec'd like Claude. Work sessions take the same path: no
+     server is kept, because nothing wakes an idle OpenCode TUI today (its row
+     in the table is "no").
+   - lf names the conversation. `Harness::thread_name` turns the assigned UUID
+     into `ses_<uuid>`; OpenCode's naming is `Assigned` for every launch kind.
+   - Deleted: the `opencode serve` child, Basic auth, the `reqwest` client and
+     SSE reader, `open_agent_session` and its `/move` and `/model` calls,
+     `native_session::Companion`, `OpenCodeDecoder` and its snapshot tests,
+     `opencode_question.jsonl`, the permission auto-reply.
+   - The stand-in is `rust/loopflow-execution/tests/support/opencode_cli.py`.
+   - Steers to a running headless turn are no longer posted by lf
+     (`send_current` is `NotSteerable`); the plugin's between-tool check
+     delivers them, and one that arrives after the last tool seeds the next turn.
+
+## Seen on the real CLI (OpenCode 2.2.1, 2026-11-18)
+
+- `opencode run --standalone --format json --auto -m opencode/gemini-4-carbon`
+  prints `step_start`, `tool_use`, `step_finish` and `text` lines, each with
+  `sessionID` and a `part`; a refusal is one `error` line and exit 1. The trace
+  is `harness/testdata/opencode_run.jsonl`.
+- It reads the message from stdin when none is on argv.
+- `--session` accepts any id starting with `ses` and creates the conversation;
+  a bare UUID is refused ("Expected a string starting with \"ses\"").
+- A run in another directory continues the same conversation; nothing needs
+  moving first.
+- The store names a turn by its `user` row. `run` gives no way to choose that
+  id, so the driver reads the newest `user` row of the conversation when the
+  first line arrives (`transcript::opencode::last_request`).
+- Through the branch `lf` with an isolated `LF_HOME`:
+  `lf -b -a opencode:opencode/gemini-4-carbon : "…"` answered, exited 0,
+  recorded thread `ses_<capture>` and read usage from OpenCode's store
+  (23,839 input tokens, $0.048). Asked which tool its instructions say launched
+  it, the model answered "lf": the context plugin loads under `opencode run`.
+- Not seen: a steer landing mid-run, turn reports from a worker to the Machine
+  server, the terminal client with `--prompt`, any Pi run.
+
+## What the rewrite changed for people
+
+- A failed OpenCode start in a terminal prints `opencode exited with exit
+  status: N`; the reason is in `opencode.stderr.log` beside the capture. The
+  old "private server failed to start: <stderr>" line is gone.
+- Reopening a conversation whose first launch failed continues the same
+  capture, since lf named the conversation before it started.
+- A run that dies mid-turn records the turn `failed`, where the server's
+  dropped stream recorded `interrupted`.
+- Headless OpenCode passes `--auto` always; lf no longer answers permission
+  asks one at a time.
 
 ## Done when
 

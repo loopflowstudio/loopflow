@@ -300,3 +300,15 @@ every Process/Session association, conflict answers.
 4. **One order.** Working board sorts by rank; tile Move calls `reorder_in`;
    `task_orders` and `task_order_json` leave. Swift Working board test
    updated.
+
+## Docs (written ahead of the code)
+
+`swift/README.md` (Working order, conversation membership, sidebar drag),
+`docs/surfaces.md` (drag changes rank), `docs/dev/reference-code.md` and
+`docs/dev/reference.md` (`processes.task_id`; `relocated_task_processes` and
+`task_orders` gone). `rust/loopflow-storage/SCHEMA.md` regenerates from the
+migration (`scripts/schema_page.py`) once slice 1 writes it.
+
+Open: where do Tasks with no Project sit in the Working sidebar, before every
+Project, after, or by their own rank interleaved? The README says "Tasks follow
+their Project's rank, then their own" and leaves it unsaid.

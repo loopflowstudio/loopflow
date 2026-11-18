@@ -47,11 +47,10 @@ kernel locks                 live local exclusion authority
 | Graph processes | `graph_processes`, `graph_process_steps` | One append-only row per Graph process and per step it started |
 | Task graphs | `task_graphs` | The graph a Task took up, the step it stands at and the run carrying it |
 | Task on this Machine | `task_checkouts`, `task_primary_sessions`, `task_ship_events`, `task_moves` | Machine-local only: the checkout (worktree path, branch, base commit, parent PR) where this Machine has one, the Task's conversation here, Auto-Ship approvals and stops (who, when, which process), and each move this Machine sent or received (`sent`, `arrived`) |
-| CLI processes | `processes` | Indexed command lifecycle and immutable causal ancestry, written by command start and completion |
-| Repository relocation | `relocated_task_processes` | Retains Task membership for Processes whose cwd names a repository directory before it moved on this Machine; separate from moves between Machines |
+| CLI processes | `processes` | Indexed command lifecycle, immutable causal ancestry and the Task each Process belongs to (`task_id`, set at insert: the named Task, else its caller Session's, else its parent's, else the deepest checkout containing its cwd), written by command start and completion |
 | Task delivery | `task_prs`, `task_pr_repair_incidents`, `task_linear_observations`, `task_linear_ingested_comments` | Optional PR, retained historical PRs and provider observations |
 | Work adjuncts | `tool_responses`, `task_ownership`, `people` | `tool_responses` is leaving (never had a caller); the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by planning-provider identity |
-| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order and the repository's Task order; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
+| Desktop arrangement | `dashboards`, `dashboard_arrangements`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order; Task order is `tasks.planning_rank`; `work_pane_layouts` is leaving, since Desktop keeps pane layouts per Mac |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
 | Linear acquisition | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |

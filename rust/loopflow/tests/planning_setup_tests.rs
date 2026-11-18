@@ -169,9 +169,11 @@ fn unavailable_linear_saves_locally_without_publishing_a_git_plan() {
         .unwrap();
     assert_eq!(title, "Buffered follow-up");
     assert_eq!(
-        conn.query_row("SELECT count(*) FROM planning_destinations", [], |r| r
-            .get::<_, i64>(0))
-            .unwrap(),
+        conn.query_row("SELECT count(*) FROM git_tracker_destinations", [], |r| r
+            .get::<_, i64>(
+            0
+        ))
+        .unwrap(),
         0
     );
     assert_eq!(
@@ -216,7 +218,7 @@ fn git_checkout_miss_does_not_fall_back_to_retained_linear_bindings() {
         0
     );
     assert_eq!(
-        conn.query_row("SELECT count(*) FROM pm_items", [], |row| row
+        conn.query_row("SELECT count(*) FROM tracker_items", [], |row| row
             .get::<_, i64>(0))
             .unwrap(),
         0

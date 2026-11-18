@@ -1336,7 +1336,7 @@ fn project_reads_keep_canonical_identity_and_authored_order_after_edits() {
                     ],
                 );
                 // Missing provider inventory is not a missing saved due date or Task.
-                conn.execute("DELETE FROM pm_items", []).unwrap();
+                conn.execute("DELETE FROM tracker_items", []).unwrap();
             }
             let status = lf(
                 repo.path(),
@@ -2135,7 +2135,7 @@ fn moving_saves_membership_offline_and_retains_inbound_changes() {
             .unwrap()
         };
         let before = revision();
-        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
+        db.execute_batch("CREATE TRIGGER fail_refile BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected receipt failure'); END;").unwrap();
         assert!(!command(repo.path(), home.path(), &args)
             .output()
             .unwrap()
@@ -3087,11 +3087,11 @@ fn canonical_status_retains_content_and_execution_across_acquisition_states() {
     let initial = read();
     for (state, statement) in [
         ("available", "SELECT 1"),
-        ("invalid", "UPDATE pm_items SET needs_refresh=1"),
-        ("available", "UPDATE pm_items SET needs_refresh=0"),
+        ("invalid", "UPDATE tracker_items SET needs_refresh=1"),
+        ("available", "UPDATE tracker_items SET needs_refresh=0"),
         (
             "invalid",
-            "UPDATE pm_items SET project_id='another-project',claimed_project_id='another-project'",
+            "UPDATE tracker_items SET project_id='another-project',claimed_project_id='another-project'",
         ),
     ] {
         db.execute_batch(statement).unwrap();

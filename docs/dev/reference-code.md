@@ -53,7 +53,7 @@ kernel locks                 live local exclusion authority
 | Work adjuncts | `tool_responses`, `task_ownership`, `people` | Tool answers, the append-only Task ownership log (each entry names the Machine that wrote it) and the people it names, keyed by planning-provider identity |
 | Desktop arrangement | `dashboards`, `dashboard_arrangements`, `task_orders`, `work_pane_layouts` | Saved Dashboard queries and their occurrence order, the repository's Task order, and portable pane layouts |
 | Historical Ask | `ask_exchanges`, `ask_linear_comment_outbox` | Retained exchange/publication facts; former Ask rows are ordinary conversations in `agent_sessions` |
-| Linear acquisition | `pm_projects`, `pm_items`, `pm_wave_projects`, `pm_wave_sync`, `pm_issue_changes`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
+| Linear acquisition | `tracker_projects`, `tracker_items`, `tracker_wave_projects`, `tracker_wave_sync`, `tracker_events`, `linear_team_checks` | Provider observations, shared attempt freshness and successful team watermark |
 | Metrics | `metric_instruments`, `metric_observations` | Registered producers and accepted measurements |
 | PR landing | `pr_landings`, `ci_incidents` | Exact PR-head delivery intent, claims, and repair admission |
 | Rental | `ondemands`, `pools`, `pool_machines`, `rentals`, `machine_records` | Creation receipts, owned machine commitments with their cost and expiry, admitted rentals with caps and deadlines, and records copied back before a machine is given back; templates, availability and admission limits live in personal configuration |

@@ -1508,12 +1508,12 @@ pub(super) fn task_acquisitions_in(
          OR COALESCE(changes.removed,0),
          changes.issue_id IS NOT NULL
          FROM tasks t JOIN repository_plans w ON w.id=t.repository_id LEFT JOIN projects p ON p.id=t.project_id
-         LEFT JOIN pm_items i ON i.repo=w.repo AND i.provider IN ('linear','asana') AND i.id=t.external_issue_id
-         LEFT JOIN pm_projects parent ON parent.repo=w.repo AND parent.provider IN ('linear','asana')
+         LEFT JOIN tracker_items i ON i.repo=w.repo AND i.tracker IN ('linear','asana') AND i.id=t.external_issue_id
+         LEFT JOIN tracker_projects parent ON parent.repo=w.repo AND parent.tracker IN ('linear','asana')
                                      AND parent.id=p.external_project_id
-         LEFT JOIN pm_projects observed ON observed.repo=i.repo AND observed.provider=i.provider
+         LEFT JOIN tracker_projects observed ON observed.repo=i.repo AND observed.tracker=i.tracker
                                        AND observed.id=i.project_id
-         LEFT JOIN pm_issue_changes changes ON changes.issue_id=t.external_issue_id
+         LEFT JOIN tracker_events changes ON changes.issue_id=t.external_issue_id
          WHERE t.id IN (SELECT value FROM json_each(?1))",
     )?;
     let rows = statement.query_map(params![ids, allow_pending_membership], |row| {

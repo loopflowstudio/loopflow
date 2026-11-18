@@ -544,7 +544,7 @@ async fn repositories_own_same_named_waves_and_relocation_preserves_identity() {
     let conn = rusqlite::Connection::open(&database).unwrap();
     assert_eq!(
         conn.query_row(
-            "SELECT initiative FROM pm_wave_sync WHERE wave_id=?1",
+            "SELECT initiative FROM tracker_wave_sync WHERE wave_id=?1",
             [alpha.id().as_str()],
             |r| r.get::<_, String>(0)
         )

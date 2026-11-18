@@ -17,7 +17,7 @@ impl SqliteStore {
         let mut conn = self.conn.lock().expect("store mutex poisoned");
         let tx = conn.transaction()?;
         tx.execute(
-            "INSERT INTO pm_issue_changes(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
+            "INSERT INTO tracker_events(issue_id,revision_ns,removed) VALUES(?1,?2,?3)
              ON CONFLICT(issue_id) DO UPDATE SET
              revision_ns=CASE WHEN excluded.revision_ns > revision_ns OR revision_ns IS NULL
                  THEN excluded.revision_ns ELSE revision_ns END,
@@ -41,7 +41,7 @@ impl SqliteStore {
             }
         }
         let mut query = tx.prepare(
-            "SELECT repo,revision FROM pm_items WHERE provider IN ('linear','asana') AND id=?1",
+            "SELECT repo,revision FROM tracker_items WHERE tracker IN ('linear','asana') AND id=?1",
         )?;
         let rows = query
             .query_map([issue_id], |row| {
@@ -51,7 +51,7 @@ impl SqliteStore {
         for (repo, cached_revision) in rows {
             let cached = revision_nanos(cached_revision.as_deref())?;
             if removed || revision.is_none() || cached < revision {
-                tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider IN ('linear','asana') AND id=?2", params![repo,issue_id])?;
+                tx.execute("UPDATE tracker_items SET needs_refresh=1 WHERE repo=?1 AND tracker IN ('linear','asana') AND id=?2", params![repo,issue_id])?;
             }
         }
         drop(query);
@@ -68,7 +68,7 @@ impl SqliteStore {
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
         conn.execute(
-            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider IN ('linear','asana') AND id=?2
+            "UPDATE tracker_items SET needs_refresh=1 WHERE repo=?1 AND tracker IN ('linear','asana') AND id=?2
             AND observed_at=?3 AND revision IS ?4",
             params![
                 repo,
@@ -95,10 +95,10 @@ impl SqliteStore {
              OR (i.project_id IS NOT NULL AND p.id IS NULL),
              EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
                     WHERE w.repo=i.repo AND d.issue_id=i.id)
-             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id
-             FROM pm_items i LEFT JOIN pm_projects p
-             ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-             WHERE i.repo=?1 AND i.provider IN ('linear','asana') AND (i.id=?2 OR i.identifier=?2)",
+             OR EXISTS(SELECT 1 FROM tracker_events c WHERE c.issue_id=i.id AND c.removed=1),p.id
+             FROM tracker_items i LEFT JOIN tracker_projects p
+             ON p.repo=i.repo AND p.tracker=i.tracker AND p.id=i.project_id
+             WHERE i.repo=?1 AND i.tracker IN ('linear','asana') AND (i.id=?2 OR i.identifier=?2)",
         )?;
         let rows = query
             .query_map(params![repo, selector], |row| {
@@ -133,10 +133,10 @@ impl SqliteStore {
         )) = rows.into_iter().next()
         else {
             let (removed, changed) = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1)
+                "SELECT EXISTS(SELECT 1 FROM tracker_events WHERE issue_id=?1 AND removed=1)
                  OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
                            WHERE w.repo=?2 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
-                 EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1)",
+                 EXISTS(SELECT 1 FROM tracker_events WHERE issue_id=?1)",
                 params![selector, repo],
                 |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
             )?;
@@ -195,7 +195,7 @@ impl SqliteStore {
         for (wave_id, wave) in waves {
             let metadata = conn
                 .query_row(
-                    "SELECT w.repo,s.provider,s.initiative FROM pm_wave_sync s
+                    "SELECT w.repo,s.tracker,s.initiative FROM tracker_wave_sync s
                  JOIN waves w ON w.id=s.wave_id WHERE s.wave_id=?1",
                     [wave_id.as_str()],
                     |row| {
@@ -215,8 +215,8 @@ impl SqliteStore {
             let observations = (|| -> StoreResult<_> {
                 let mut query = conn.prepare(
                     "SELECT p.id,p.initiative_ids,p.team_ids
-                     FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
-                     WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3
+                     FROM tracker_wave_projects m JOIN tracker_projects p ON p.id=m.project_id
+                     WHERE m.wave_id=?1 AND p.repo=?2 AND p.tracker=?3
                      AND p.archived=0 AND p.membership_unresolved=0 ORDER BY m.position,p.id",
                 )?;
                 let mut project_claims = query
@@ -239,9 +239,9 @@ impl SqliteStore {
                 project_claims.retain(|(_, initiatives, _)| initiatives.contains(&initiative));
                 let mut query = conn.prepare(
                     "SELECT i.id,i.identifier,i.project_id,i.team_id
-                     FROM pm_items i JOIN pm_wave_projects m ON m.project_id=i.project_id
-                     JOIN pm_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.provider=i.provider
-                     WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
+                     FROM tracker_items i JOIN tracker_wave_projects m ON m.project_id=i.project_id
+                     JOIN tracker_projects p ON p.id=i.project_id AND p.repo=i.repo AND p.tracker=i.tracker
+                     WHERE m.wave_id=?1 AND i.repo=?2 AND i.tracker=?3 AND i.needs_refresh=0
                      AND p.archived=0 AND p.membership_unresolved=0
                      AND EXISTS(SELECT 1 FROM json_each(p.initiative_ids) WHERE value=?4)
                      AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id

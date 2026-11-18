@@ -831,10 +831,10 @@ fn provider_inventory_loss_preserves_saved_planning_in_both_views() {
         let before = status_json(home.path(), &["product"], None);
         let conn = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
         if let Some(payload) = payload {
-            conn.execute("UPDATE pm_projects SET team_ids=?1", [payload])
+            conn.execute("UPDATE tracker_projects SET team_ids=?1", [payload])
                 .unwrap();
         } else {
-            conn.execute("DELETE FROM pm_wave_sync", []).unwrap();
+            conn.execute("DELETE FROM tracker_wave_sync", []).unwrap();
         }
         let status = status_json(home.path(), &["product"], None);
         let roadmap = roadmap_json(home.path(), "product");
@@ -943,7 +943,7 @@ fn persisted_merge_request_without_copy_keeps_status_and_roadmap_readable() {
         seed_persisted_merge_request_without_copy(home.path());
         if missing_provider_task {
             let connection = rusqlite::Connection::open(home.path().join("loopflow.db")).unwrap();
-            connection.execute("DELETE FROM pm_items", []).unwrap();
+            connection.execute("DELETE FROM tracker_items", []).unwrap();
         }
 
         let status = status_json(home.path(), &["product"], None);

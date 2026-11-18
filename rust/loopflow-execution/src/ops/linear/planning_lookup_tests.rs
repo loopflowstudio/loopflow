@@ -1086,7 +1086,7 @@ async fn project_revisions_order_shared_facts_and_an_initiative_move_stays_unres
                 crate::store::PlanningState::Available
             );
             fixture.store.sqlite.conn.lock().unwrap().execute(
-                "UPDATE pm_projects SET archived=1 WHERE repo=?1 AND provider='linear' AND id=?2",
+                "UPDATE tracker_projects SET archived=1 WHERE repo=?1 AND tracker='linear' AND id=?2",
                 rusqlite::params![repo.to_string_lossy(), newer.project.unwrap().id],
             ).unwrap();
             list.snapshot.projects.clear();
@@ -1161,7 +1161,7 @@ async fn cold_detail_resolves_configured_wave_before_projecting() {
                 // Evict normalized provider facts, retaining durable work as on a cold detail read.
                 let conn = rusqlite::Connection::open(&fixture.database).unwrap();
                 conn.execute_batch(
-                    "DELETE FROM pm_wave_projects; DELETE FROM pm_items; DELETE FROM pm_projects;",
+                    "DELETE FROM tracker_wave_projects; DELETE FROM tracker_items; DELETE FROM tracker_projects;",
                 )
                 .unwrap();
                 drop(conn);
@@ -1455,12 +1455,12 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
             let wave_age = fixture.wave_refresh_at(&wave);
             let conn = rusqlite::Connection::open(&fixture.database).unwrap();
             conn.execute(
-                "UPDATE pm_items SET name='[]',rank='unrelated bad content' WHERE id='issue-1'",
+                "UPDATE tracker_items SET name='[]',rank='unrelated bad content' WHERE id='issue-1'",
                 [],
             )
             .unwrap();
             conn.execute(
-                "UPDATE pm_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
+                "UPDATE tracker_projects SET name='[]',krs='unrelated bad content' WHERE id='project-1'",
                 [],
             )
             .unwrap();
@@ -1480,7 +1480,7 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
             );
             for column in ["membership_unresolved", "archived"] {
                 conn.execute(
-                    &format!("UPDATE pm_projects SET {column}=1 WHERE id='project-1'"),
+                    &format!("UPDATE tracker_projects SET {column}=1 WHERE id='project-1'"),
                     [],
                 )
                 .unwrap();
@@ -1496,7 +1496,7 @@ async fn acquisition_reads_ownership_without_reconstructing_provider_content() {
                 );
                 assert_eq!(rejected.observation.observed_at, before.observed_at);
                 conn.execute(
-                    &format!("UPDATE pm_projects SET {column}=0 WHERE id='project-1'"),
+                    &format!("UPDATE tracker_projects SET {column}=0 WHERE id='project-1'"),
                     [],
                 )
                 .unwrap();

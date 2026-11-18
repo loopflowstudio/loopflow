@@ -920,7 +920,7 @@ mod tests {
         rusqlite::Connection::open(directory.join("registry.db"))
             .unwrap()
             .query_row(
-                "SELECT synced_at FROM pm_wave_sync WHERE wave_id=?1",
+                "SELECT synced_at FROM tracker_wave_sync WHERE wave_id=?1",
                 [wave.id().as_str()],
                 |r| r.get(0),
             )
@@ -1177,8 +1177,9 @@ mod tests {
                 expected
             );
             let conn = rusqlite::Connection::open(directory.path().join("registry.db")).unwrap();
-            conn.execute("DELETE FROM pm_wave_projects", []).unwrap();
-            conn.execute("DELETE FROM pm_projects", []).unwrap();
+            conn.execute("DELETE FROM tracker_wave_projects", [])
+                .unwrap();
+            conn.execute("DELETE FROM tracker_projects", []).unwrap();
             if !mapped {
                 conn.execute(
                     "UPDATE projects SET external_project_id=NULL WHERE id=?1",
@@ -1226,11 +1227,11 @@ mod tests {
     #[tokio::test]
     async fn selected_project_retains_provider_invalidation() {
         for change in [
-            "UPDATE pm_projects SET archived=1",
-            "UPDATE pm_projects SET membership_unresolved=1",
-            "UPDATE pm_projects SET initiative_ids='malformed'",
-            "UPDATE pm_projects SET observed_at=18",
-            "UPDATE pm_wave_sync SET initiative='different-initiative'",
+            "UPDATE tracker_projects SET archived=1",
+            "UPDATE tracker_projects SET membership_unresolved=1",
+            "UPDATE tracker_projects SET initiative_ids='malformed'",
+            "UPDATE tracker_projects SET observed_at=18",
+            "UPDATE tracker_wave_sync SET initiative='different-initiative'",
         ] {
             let (directory, store, wave) = planning_store().await;
             let project = make_project(&wave);
@@ -1271,7 +1272,7 @@ mod tests {
         let before = crate::ops::project::current_project(&store, &wave).unwrap();
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute_batch("DELETE FROM pm_wave_projects")
+            .execute_batch("DELETE FROM tracker_wave_projects")
             .unwrap();
         assert_eq!(
             crate::ops::project::current_project(&store, &wave).unwrap(),
@@ -1406,7 +1407,7 @@ mod tests {
             .unwrap();
         rusqlite::Connection::open(directory.path().join("registry.db"))
             .unwrap()
-            .execute("DELETE FROM pm_issue_changes", [])
+            .execute("DELETE FROM tracker_events", [])
             .unwrap();
         let result = store
             .place_task(

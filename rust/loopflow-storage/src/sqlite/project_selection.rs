@@ -352,8 +352,8 @@ fn readiness_in(conn: &Connection, wave: &WaveId) -> StoreResult<ProjectReadines
              (SELECT successor_id FROM project_transitions WHERE wave_id=w.id AND settled_at IS NULL),
              e.id,e.completed_at,e.outcome,e.error
              FROM waves w LEFT JOIN projects p ON p.id=w.current_project_id
-             LEFT JOIN pm_wave_sync s ON s.wave_id=w.id
-             LEFT JOIN pm_projects f ON f.repo=w.repo AND f.provider=COALESCE(s.provider,'linear') AND f.id=p.external_project_id
+             LEFT JOIN tracker_wave_sync s ON s.wave_id=w.id
+             LEFT JOIN tracker_projects f ON f.repo=w.repo AND f.tracker=COALESCE(s.tracker,'linear') AND f.id=p.external_project_id
              LEFT JOIN processes e ON e.id=w.project_activation_lf_process_id WHERE w.id=?1",
             [wave], |row| {
                 let state: String = row.get(2)?;

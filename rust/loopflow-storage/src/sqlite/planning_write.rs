@@ -320,8 +320,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
         };
         let saved: Option<String> = conn
             .query_row(
-                "SELECT mutation FROM planning_peer_changes WHERE object_id=?1 AND field=?2
-             AND id IN (SELECT id FROM planning_peer_observed)
+                "SELECT mutation FROM git_tracker_changes WHERE object_id=?1 AND field=?2
+             AND id IN (SELECT id FROM git_tracker_seen)
              ORDER BY clock DESC,id DESC LIMIT 1",
                 params![target, edit.change.field()],
                 |row| row.get(0),
@@ -334,8 +334,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
         }
         let parents = {
             let mut query = conn.prepare(
-                "SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2
-                 AND id IN (SELECT id FROM planning_peer_observed)",
+                "SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2
+                 AND id IN (SELECT id FROM git_tracker_seen)",
             )?;
             let parents = query
                 .query_map(params![target, edit.change.field()], |row| row.get(0))?
@@ -351,8 +351,8 @@ pub(crate) fn capture(conn: &Connection, table: &str, target: &str) -> StoreResu
 /// competing values resolve to it. Nothing when the field has one head.
 pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
     let mut query = conn.prepare(
-        "SELECT c.id FROM planning_peer_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
-             SELECT 1 FROM planning_peer_changes child,json_each(child.mutation,'$.parents') parent
+        "SELECT c.id FROM git_tracker_changes c WHERE c.object_id=?1 AND c.field=?2 AND NOT EXISTS(
+             SELECT 1 FROM git_tracker_changes child,json_each(child.mutation,'$.parents') parent
              WHERE child.object_id=c.object_id AND child.field=c.field AND parent.value=c.id)",
     )?;
     let heads = query
@@ -366,7 +366,7 @@ pub(crate) fn settle(conn: &Connection, edit: &WorkEdit) -> StoreResult<()> {
 
 fn record(conn: &Connection, edit: WorkEdit, parents: BTreeSet<String>) -> StoreResult<()> {
     let clock = conn.query_row(
-        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM planning_peer_changes",
+        "SELECT max(CAST(unixepoch('subsec')*1000 AS INTEGER),COALESCE(max(clock)+1,0)) FROM git_tracker_changes",
         [], |row| row.get(0),
     )?;
     let mutation = PlanningMutation {
@@ -383,7 +383,7 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
     // An import retains thousands of changes under the write lock; preparing
     // an insert compiles the table's triggers, so prepare each statement once.
     let existing: Option<String> = conn
-        .prepare_cached("SELECT mutation FROM planning_peer_changes WHERE id=?1")?
+        .prepare_cached("SELECT mutation FROM git_tracker_changes WHERE id=?1")?
         .query_row([id], |row| row.get(0))
         .optional()?;
     if let Some(existing) = existing {
@@ -395,7 +395,7 @@ pub(crate) fn retain(conn: &Connection, id: &str, change: &PlanningMutation) -> 
         return Ok(());
     }
     conn.prepare_cached(
-        "INSERT INTO planning_peer_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
+        "INSERT INTO git_tracker_changes(id,record_table,mutation) VALUES(?1,?2,?3)",
     )?
     .execute(params![
         id,
@@ -411,12 +411,12 @@ pub(crate) fn observe<'a>(
     ids: impl IntoIterator<Item = &'a str>,
 ) -> StoreResult<()> {
     conn.prepare_cached(
-        "DELETE FROM planning_peer_observed WHERE id IN
-         (SELECT id FROM planning_peer_changes WHERE object_id=?1 AND field=?2)",
+        "DELETE FROM git_tracker_seen WHERE id IN
+         (SELECT id FROM git_tracker_changes WHERE object_id=?1 AND field=?2)",
     )?
     .execute(params![edit.target, edit.change.field()])?;
     let mut insert =
-        conn.prepare_cached("INSERT OR IGNORE INTO planning_peer_observed(id) VALUES(?1)")?;
+        conn.prepare_cached("INSERT OR IGNORE INTO git_tracker_seen(id) VALUES(?1)")?;
     for id in ids {
         insert.execute([id])?;
     }
@@ -880,7 +880,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE planning_peer_changes SET mutation=?1 WHERE field='task_regressed_in'",
+                "UPDATE git_tracker_changes SET mutation=?1 WHERE field='task_regressed_in'",
                 [&stored],
             )
             .unwrap();
@@ -978,7 +978,7 @@ mod tests {
         let pending = a
             .pending_project_changes(project.as_ref().unwrap())
             .unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
+        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_project_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected failure'); END;").unwrap();
         assert!(a
             .edit_project(project.as_ref().unwrap(), Some("Renamed"), None, None)
             .is_err());
@@ -1151,7 +1151,7 @@ mod tests {
         );
         drop(conn);
         let before = a.export_peer_planning("/repo", &route.id()).unwrap();
-        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_capture BEFORE INSERT ON planning_peer_changes BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
+        a.conn.lock().unwrap().execute_batch("CREATE TRIGGER fail_capture BEFORE INSERT ON git_tracker_changes BEGIN SELECT RAISE(ABORT,'injected journal failure'); END;").unwrap();
         let current = a.task(&task).unwrap().unwrap();
         let pending = a.pending_task_changes(&task).unwrap();
         assert!(a
@@ -1243,7 +1243,7 @@ mod tests {
         assert!(values.contains(&Edit::WaveProject(serde_json::from_value(prior).unwrap())));
         assert_eq!(
             conn.query_row(
-                "SELECT count(*) FROM planning_peer_observed WHERE id='rejected'",
+                "SELECT count(*) FROM git_tracker_seen WHERE id='rejected'",
                 [],
                 |r| r.get::<_, i64>(0)
             )

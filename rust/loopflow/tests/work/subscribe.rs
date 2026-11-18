@@ -752,7 +752,7 @@ fn peer_planning_receipts_reach_an_open_watch() {
 
     home.raw()
         .execute(
-            "UPDATE planning_destinations SET fetched_revision='fetched',
+            "UPDATE git_tracker_destinations SET fetched_revision='fetched',
          publication_revision='attempted',publication_state='unconfirmed',
          publication_error='reply lost' WHERE id=?1",
             [&id],

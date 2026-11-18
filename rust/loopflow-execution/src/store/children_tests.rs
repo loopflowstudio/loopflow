@@ -835,7 +835,7 @@ fn local_planning_migration_preserves_released_links_and_orphan_deletion_evidenc
     upgrade_from_migration(&conn, "optional_task_pr");
     let order: String = conn
         .query_row(
-            "SELECT task_order_json FROM pm_projects WHERE id='current'",
+            "SELECT task_order_json FROM tracker_projects WHERE id='current'",
             [],
             |row| row.get(0),
         )

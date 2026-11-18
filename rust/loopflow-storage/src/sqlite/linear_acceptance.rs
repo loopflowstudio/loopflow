@@ -70,7 +70,7 @@ pub fn reconcile_linear_project_teams_in(
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let previous: Option<String> = tx
         .query_row(
-            "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![repo, provider, project.id],
             |row| row.get(0),
         )
@@ -84,8 +84,8 @@ pub fn reconcile_linear_project_teams_in(
         }
         // Reteam orders Team relationships only. Retain independently newer entity facts.
         tx.execute(
-            "UPDATE pm_projects SET team_ids=?4,membership_unresolved=0
-             WHERE repo=?1 AND provider=?2 AND id=?3",
+            "UPDATE tracker_projects SET team_ids=?4,membership_unresolved=0
+             WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![
                 repo,
                 provider,
@@ -126,7 +126,7 @@ pub fn accept_linear_issue_in(
     let mut item = issue.clone();
     // Detail queries do not observe relative list order.
     if let Some(rank) = tx.query_row(
-        "SELECT rank FROM pm_items WHERE repo=?1 AND provider=?2 AND id=?3 AND project_id IS ?4",
+        "SELECT rank FROM tracker_items WHERE repo=?1 AND tracker=?2 AND id=?3 AND project_id IS ?4",
         params![repo,provider,item.id,item.project_id], |row| row.get::<_,u32>(0),
     ).optional()? {
         item.rank = rank;
@@ -137,7 +137,7 @@ pub fn accept_linear_issue_in(
     }
     if put_item(&tx, repo, observed_at, &item, provider)? {
         tx.execute(
-            "UPDATE pm_items SET needs_refresh=0 WHERE repo=?1 AND provider=?2 AND id=?3",
+            "UPDATE tracker_items SET needs_refresh=0 WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![repo, provider, issue.id],
         )?;
     }
@@ -181,8 +181,8 @@ pub fn accept_linear_inventory_in(
     let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
     let known = {
         let mut query = tx.prepare(
-            "SELECT m.project_id FROM pm_wave_projects m JOIN pm_projects p ON p.id=m.project_id
-             WHERE m.wave_id=?1 AND p.repo=?2 AND p.provider=?3 AND p.archived=0",
+            "SELECT m.project_id FROM tracker_wave_projects m JOIN tracker_projects p ON p.id=m.project_id
+             WHERE m.wave_id=?1 AND p.repo=?2 AND p.tracker=?3 AND p.archived=0",
         )?;
         let rows = query
             .query_map(params![wave, repo, provider], |row| row.get::<_, String>(0))?
@@ -205,14 +205,14 @@ pub fn accept_linear_inventory_in(
         put_item(&tx, &repo, observed_at, item, provider)?;
     }
     tx.execute(
-        "INSERT INTO pm_wave_sync(wave_id,provider,initiative,synced_at) VALUES(?1,?2,?3,?4)
-         ON CONFLICT(wave_id) DO UPDATE SET provider=excluded.provider,
-         initiative=excluded.initiative,synced_at=MAX(pm_wave_sync.synced_at,excluded.synced_at)",
+        "INSERT INTO tracker_wave_sync(wave_id,tracker,initiative,synced_at) VALUES(?1,?2,?3,?4)
+         ON CONFLICT(wave_id) DO UPDATE SET tracker=excluded.tracker,
+         initiative=excluded.initiative,synced_at=MAX(tracker_wave_sync.synced_at,excluded.synced_at)",
         params![wave, provider, initiative, observed_at],
     )?;
     for (position, project) in projects.iter().enumerate() {
         tx.execute(
-            "INSERT INTO pm_wave_projects(wave_id,project_id,position) VALUES(?1,?2,?3)
+            "INSERT INTO tracker_wave_projects(wave_id,project_id,position) VALUES(?1,?2,?3)
              ON CONFLICT(wave_id,project_id) DO NOTHING",
             params![wave, project.id, position as i64],
         )?;
@@ -283,7 +283,7 @@ fn validate_project_membership(
     // recorded even when rejecting the incoming facts rolls that transaction back.
     let previous = conn
         .query_row(
-            "SELECT revision,initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT revision,initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![repo, provider, project.id],
             |row| Ok((row.get::<_, Option<String>>(0)?, row.get::<_, String>(1)?)),
         )
@@ -301,7 +301,7 @@ fn validate_project_membership(
         &project.initiative_ids,
         &serde_json::from_str::<Vec<String>>(&initiatives)?,
     ) {
-        conn.execute("UPDATE pm_projects SET membership_unresolved=1 WHERE repo=?1 AND provider=?2 AND id=?3",
+        conn.execute("UPDATE tracker_projects SET membership_unresolved=1 WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![repo, provider, project.id])?;
         return Err(StoreError::InvalidData(format!(
             "Project {} moved to another Initiative in Linear; move it back, then run `lf wave sync`",
@@ -324,7 +324,7 @@ fn put_project(
     let team_ids = serde_json::to_string(&project.team_ids)?;
     let status = project.status.as_str();
     let values = named_params! {
-        ":repo": repo, ":provider": provider, ":id": &project.id,
+        ":repo": repo, ":tracker": provider, ":id": &project.id,
         ":observed_at": observed_at,
         ":slug": &project.slug,
         ":name": &project.name,
@@ -340,8 +340,8 @@ fn put_project(
     let revision = revision_nanos(project.revision.as_deref())?;
     let previous = conn
         .query_row(
-            "SELECT revision,observed_at,archived FROM pm_projects
-             WHERE repo=?1 AND provider=?2 AND id=?3",
+            "SELECT revision,observed_at,archived FROM tracker_projects
+             WHERE repo=?1 AND tracker=?2 AND id=?3",
             params![repo, provider, project.id],
             |row| {
                 Ok((
@@ -362,14 +362,14 @@ fn put_project(
         }
     }
     conn.execute(
-        "INSERT INTO pm_projects(repo,provider,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
-         VALUES(:repo,:provider,:id,:observed_at,:slug,:name,:summary,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
+        "INSERT INTO tracker_projects(repo,tracker,id,observed_at,slug,name,summary,status,krs,metric_targets,initiative_ids,team_ids,description,revision,description_revision,description_observed_at)
+         VALUES(:repo,:tracker,:id,:observed_at,:slug,:name,:summary,:status,:krs,:metric_targets,:initiative_ids,:team_ids,:description,:revision,
              CASE WHEN :description IS NOT NULL THEN :revision END,
              CASE WHEN :description IS NOT NULL THEN :observed_at END)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET
+         ON CONFLICT(repo,tracker,id) DO UPDATE SET
          observed_at=excluded.observed_at,revision=excluded.revision,membership_unresolved=0,
          slug=excluded.slug,name=excluded.name,summary=excluded.summary,status=excluded.status,krs=excluded.krs,metric_targets=excluded.metric_targets,initiative_ids=excluded.initiative_ids,team_ids=excluded.team_ids,
-         description=COALESCE(excluded.description,pm_projects.description),
+         description=COALESCE(excluded.description,tracker_projects.description),
          description_revision=CASE WHEN excluded.description IS NOT NULL THEN excluded.revision ELSE description_revision END,
          description_observed_at=COALESCE(excluded.description_observed_at,description_observed_at)", values,
     )?;
@@ -386,7 +386,7 @@ fn put_item(
     let revision = revision_nanos(item.revision.as_deref())?;
     let change: Option<(Option<i64>, bool)> = conn
         .query_row(
-            "SELECT revision_ns,removed FROM pm_issue_changes WHERE issue_id=?1",
+            "SELECT revision_ns,removed FROM tracker_events WHERE issue_id=?1",
             [&item.id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
@@ -397,8 +397,8 @@ fn put_item(
     let previous = conn
         .query_row(
             "SELECT revision,observed_at,state IS NOT :state OR completed IS NOT :completed
-             FROM pm_items WHERE repo=:repo AND provider=:provider AND id=:id",
-            named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+             FROM tracker_items WHERE repo=:repo AND tracker=:tracker AND id=:id",
+            named_params! { ":repo": repo, ":tracker": provider, ":id": &item.id,
                 ":completed": &item.completed,
                 ":state": &item.state,
             },
@@ -421,12 +421,12 @@ fn put_item(
         status_changed = changed;
     }
     conn.execute(
-        "INSERT INTO pm_items(repo,provider,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed)
-         VALUES(:repo,:provider,:id,:observed_at,:identifier,:project_id,:revision,:branch_name,:url,:name,:description,:rank,:completed,:completed_at,:due_date,:state,:team_id,:assignee,:project_id,1,1,1,1)
-         ON CONFLICT(repo,provider,id) DO UPDATE SET observed_at=excluded.observed_at,
+        "INSERT INTO tracker_items(repo,tracker,id,observed_at,identifier,project_id,revision,branch_name,url,name,description,rank,completed,completed_at,due_date,state,team_id,assignee,claimed_project_id,completed_at_observed,due_date_observed,project_id_observed,assignee_observed)
+         VALUES(:repo,:tracker,:id,:observed_at,:identifier,:project_id,:revision,:branch_name,:url,:name,:description,:rank,:completed,:completed_at,:due_date,:state,:team_id,:assignee,:project_id,1,1,1,1)
+         ON CONFLICT(repo,tracker,id) DO UPDATE SET observed_at=excluded.observed_at,
          identifier=excluded.identifier,project_id=excluded.project_id,revision=excluded.revision,branch_name=excluded.branch_name,url=excluded.url,name=excluded.name,description=excluded.description,rank=excluded.rank,completed=excluded.completed,completed_at=excluded.completed_at,due_date=excluded.due_date,state=excluded.state,team_id=excluded.team_id,assignee=excluded.assignee,
          claimed_project_id=excluded.claimed_project_id,completed_at_observed=1,due_date_observed=1,project_id_observed=1,assignee_observed=1",
-        named_params! { ":repo": repo, ":provider": provider, ":id": &item.id,
+        named_params! { ":repo": repo, ":tracker": provider, ":id": &item.id,
             ":observed_at": observed_at, ":rank": item.rank, ":revision": &item.revision,
             ":identifier": &item.identifier,
             ":project_id": &item.project_id,
@@ -481,8 +481,8 @@ fn observe_order(
         // An older list must not order a mixture of old and retained newer facts.
         let retained = conn.query_row(
             "SELECT t.id,i.revision,i.rank,i.project_id
-             FROM pm_items i JOIN tasks t ON t.external_issue_id=i.id
-             WHERE i.repo=?1 AND i.provider=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
+             FROM tracker_items i JOIN tasks t ON t.external_issue_id=i.id
+             WHERE i.repo=?1 AND i.tracker=?2 AND i.id=?3 AND i.needs_refresh=0 AND t.project_id=?4 AND t.planning_deleted_at IS NULL",
             params![repo,provider,item.id,project.as_str()], |row| Ok((
                 row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?,
                 row.get::<_, u32>(2)?, row.get::<_, Option<String>>(3)?,
@@ -501,11 +501,11 @@ fn observe_order(
 // Both durable projections require the same confirmed Initiative/Wave association.
 // A partial read supplies that association without advancing full-Wave freshness.
 const ACCEPTED_WAVE_PROJECTS: &str = "
-    SELECT p.repo,p.provider,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM pm_projects p
-    JOIN pm_wave_projects m ON m.project_id=p.id
-    LEFT JOIN pm_wave_sync sync ON sync.wave_id=m.wave_id AND sync.provider=p.provider
+    SELECT p.repo,p.tracker,p.id,p.observed_at,p.archived,p.membership_unresolved,p.task_order_json,p.revision,p.slug,p.name,p.summary,p.status,p.krs,p.metric_targets,p.initiative_ids,p.team_ids,p.description,p.description_revision,p.description_observed_at,m.wave_id FROM tracker_projects p
+    JOIN tracker_wave_projects m ON m.project_id=p.id
+    LEFT JOIN tracker_wave_sync sync ON sync.wave_id=m.wave_id AND sync.tracker=p.tracker
     JOIN waves w ON w.id=m.wave_id AND w.repo=p.repo
-    WHERE p.repo=?1 AND p.provider=?2 AND p.archived=0 AND p.membership_unresolved=0
+    WHERE p.repo=?1 AND p.tracker=?2 AND p.archived=0 AND p.membership_unresolved=0
     AND json_array_length(p.initiative_ids)=1
     AND json_extract(p.initiative_ids,'$[0]')=
         CASE WHEN m.wave_id=?4 THEN ?5 ELSE sync.initiative END";
@@ -593,7 +593,7 @@ fn project_accepted_planning(
         };
         let rank: Option<u32> = tx
             .query_row(
-                "SELECT position FROM pm_wave_projects WHERE wave_id=?1 AND project_id=?2",
+                "SELECT position FROM tracker_wave_projects WHERE wave_id=?1 AND project_id=?2",
                 params![wave_id, external],
                 |r| r.get(0),
             )
@@ -617,8 +617,8 @@ fn project_accepted_planning(
     }
     let mut query = tx.prepare(
         "SELECT i.id,i.revision,i.name,i.description,i.assignee,p.id,i.assignee_observed,i.project_id_observed,i.claimed_project_id
-         FROM pm_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
-         WHERE i.repo=?1 AND i.provider=?3 AND i.needs_refresh=0
+         FROM tracker_items i LEFT JOIN projects p ON p.external_project_id=i.project_id
+         WHERE i.repo=?1 AND i.tracker=?3 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?2))",
     )?;
     let observed = query
@@ -657,19 +657,19 @@ fn project_accepted_planning(
              i.branch_name,i.team_id,
              i.assignee,i.due_date,
              i.state,i.completed,
-             i.completed_at FROM pm_items i
+             i.completed_at FROM tracker_items i
          LEFT JOIN projects p ON p.external_project_id=i.project_id
          LEFT JOIN accepted observed ON observed.id=i.project_id AND observed.wave_id=p.wave_id
          LEFT JOIN tasks target ON target.external_issue_id=i.id
          LEFT JOIN projects current ON current.id=target.project_id
-         WHERE i.repo=?1 AND i.provider=?2 AND i.needs_refresh=0
+         WHERE i.repo=?1 AND i.tracker=?2 AND i.needs_refresh=0
          AND i.id IN (SELECT value FROM json_each(?3))
          AND ((observed.id IS NOT NULL AND observed.wave_id=p.wave_id)
               OR (i.project_id_observed=1 AND i.claimed_project_id IS NULL))
          AND (target.id IS NULL OR target.repository_id=(SELECT id FROM repository_plans WHERE repo=?1 AND selected=1))
          AND NOT EXISTS(SELECT 1 FROM task_deletions d
              WHERE d.issue_id=i.id AND EXISTS(SELECT 1 FROM waves dw WHERE dw.id=d.wave_id AND dw.repo=?1))
-         AND NOT EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id
+         AND NOT EXISTS(SELECT 1 FROM tracker_events c WHERE c.issue_id=i.id
              AND c.removed=1)"
     ))?;
     let observations = query
@@ -803,8 +803,8 @@ fn associate_project(
         ));
     }
     tx.execute(
-        "INSERT INTO pm_wave_projects(wave_id,project_id,position)
-         VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM pm_wave_projects WHERE wave_id=?1))
+        "INSERT INTO tracker_wave_projects(wave_id,project_id,position)
+         VALUES(?1,?2,(SELECT COALESCE(MAX(position)+1,0) FROM tracker_wave_projects WHERE wave_id=?1))
          ON CONFLICT(wave_id,project_id) DO NOTHING",
         params![wave, project_id],
     )?;
@@ -819,7 +819,7 @@ fn require_accepted_initiative(
     provider: &str,
 ) -> StoreResult<()> {
     let initiatives: String = conn.query_row(
-        "SELECT initiative_ids FROM pm_projects WHERE repo=?1 AND provider=?2 AND id=?3",
+        "SELECT initiative_ids FROM tracker_projects WHERE repo=?1 AND tracker=?2 AND id=?3",
         params![repo, provider, project_id],
         |row| row.get(0),
     )?;
@@ -870,13 +870,15 @@ mod tests {
                 params![project.id, serde_json::to_string(&project).unwrap()],
             )
             .unwrap();
-            conn.execute_batch(&crate::migration_runner::migration_section_sql(
+            crate::migration_runner::upgrade_from_migration(
+                &crate::test_fixture::observers(),
+                &crate::test_fixture::build(),
+                &conn,
                 "planning_peers",
-            ))
-            .unwrap();
+            );
             let stored = |conn: &Connection| -> (String, String, Option<String>) {
                 conn.query_row(
-                    "SELECT name,summary,description FROM pm_projects",
+                    "SELECT name,summary,description FROM tracker_projects",
                     [],
                     |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
@@ -942,14 +944,16 @@ mod tests {
             ],
         )
         .unwrap();
-        conn.execute_batch(&crate::migration_runner::migration_section_sql(
+        crate::migration_runner::upgrade_from_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
             "planning_peers",
-        ))
-        .unwrap();
+        );
         assert!(!super::put_item(&conn, "/repo", 16, item, "linear").unwrap());
         let read = || {
             conn.query_row(
-                "SELECT project_id,claimed_project_id,observed_at FROM pm_items",
+                "SELECT project_id,claimed_project_id,observed_at FROM tracker_items",
                 [],
                 |row| {
                     Ok((
@@ -1008,13 +1012,17 @@ mod tests {
             params![item.id, item.identifier, item.project_id, old.to_string()],
         )
         .unwrap();
-        conn.execute_batch(&crate::migration_runner::migration_section_sql(
+        crate::migration_runner::upgrade_from_migration(
+            &crate::test_fixture::observers(),
+            &crate::test_fixture::build(),
+            &conn,
             "planning_peers",
-        ))
-        .unwrap();
+        );
         assert!(super::put_item(&conn, "/repo", 2, &item, "linear").unwrap());
         let observed: Option<String> = conn
-            .query_row("SELECT completed_at FROM pm_items", [], |row| row.get(0))
+            .query_row("SELECT completed_at FROM tracker_items", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(observed, item.completed_at);
         item.completed_at = None;
@@ -1026,7 +1034,9 @@ mod tests {
         item.completed_at = Some("2026-10-01T12:00:00Z".into());
         assert!(super::put_item(&conn, "/repo", 6, &item, "linear").unwrap());
         let observed: Option<String> = conn
-            .query_row("SELECT completed_at FROM pm_items", [], |row| row.get(0))
+            .query_row("SELECT completed_at FROM tracker_items", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(observed, item.completed_at);
     }
@@ -1062,13 +1072,13 @@ mod tests {
         item.due_date = Some("2026-10-08".into());
         assert!(super::put_item(&conn, "/repo", 2, &item, "linear").unwrap());
         let observed: Option<String> = conn
-            .query_row("SELECT due_date FROM pm_items", [], |row| row.get(0))
+            .query_row("SELECT due_date FROM tracker_items", [], |row| row.get(0))
             .unwrap();
         assert_eq!(observed, item.due_date);
         item.due_date = None;
         assert!(super::put_item(&conn, "/repo", 3, &item, "linear").unwrap());
         let observed: Option<String> = conn
-            .query_row("SELECT due_date FROM pm_items", [], |row| row.get(0))
+            .query_row("SELECT due_date FROM tracker_items", [], |row| row.get(0))
             .unwrap();
         assert_eq!(observed, None);
     }
@@ -1090,8 +1100,10 @@ mod tests {
         item.branch_name = Some(long.into());
         assert!(super::put_item(&conn, "/repo", 1, &item, "linear").unwrap());
         let branch = || -> Option<String> {
-            conn.query_row("SELECT branch_name FROM pm_items", [], |row| row.get(0))
-                .unwrap()
+            conn.query_row("SELECT branch_name FROM tracker_items", [], |row| {
+                row.get(0)
+            })
+            .unwrap()
         };
         item.branch_name = Some("jack/loo-403-make-the-mac-apps-shortcuts-findable-and-put".into());
         assert!(super::put_item(&conn, "/repo", 2, &item, "linear").unwrap());

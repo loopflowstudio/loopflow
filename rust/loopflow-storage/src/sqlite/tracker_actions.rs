@@ -366,7 +366,7 @@ pub(crate) fn owner_tracker(
     let bound: Option<Option<String>> = match owner {
         ActionOwner::Task(id) => conn
             .query_row(
-                "SELECT (SELECT o.provider FROM pm_items o JOIN repository_plans r ON r.repo=o.repo
+                "SELECT (SELECT o.tracker FROM tracker_items o JOIN repository_plans r ON r.repo=o.repo
                     WHERE r.id=t.repository_id AND o.id=t.external_issue_id LIMIT 1)
                  FROM tasks t WHERE t.id=?1 AND t.external_issue_id IS NOT NULL",
                 [id.as_str()],
@@ -375,7 +375,7 @@ pub(crate) fn owner_tracker(
             .optional()?,
         ActionOwner::Project(id) => conn
             .query_row(
-                "SELECT (SELECT o.provider FROM pm_projects o JOIN waves w ON w.repo=o.repo
+                "SELECT (SELECT o.tracker FROM tracker_projects o JOIN waves w ON w.repo=o.repo
                     WHERE w.id=p.wave_id AND o.id=p.external_project_id LIMIT 1)
                  FROM projects p WHERE p.id=?1 AND p.external_project_id IS NOT NULL",
                 [id.as_str()],
@@ -513,12 +513,12 @@ fn observation_source(owner: &ActionOwner) -> Option<&'static str> {
     match owner {
         ActionOwner::Task(_) => Some(
             "tasks t JOIN repository_plans w ON w.id=t.repository_id
-             JOIN pm_items o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=t.external_issue_id
+             JOIN tracker_items o ON o.repo=w.repo AND o.tracker IN ('linear','asana') AND o.id=t.external_issue_id
              WHERE t.id=?1",
         ),
         ActionOwner::Project(_) => Some(
             "projects p JOIN waves w ON w.id=p.wave_id
-             JOIN pm_projects o ON o.repo=w.repo AND o.provider IN ('linear','asana') AND o.id=p.external_project_id
+             JOIN tracker_projects o ON o.repo=w.repo AND o.tracker IN ('linear','asana') AND o.id=p.external_project_id
              WHERE p.id=?1",
         ),
         ActionOwner::Wave(_) => None,

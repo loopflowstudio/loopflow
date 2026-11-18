@@ -15,8 +15,8 @@ use super::sqlite::SqliteStore;
 /// Tables that grow with every Task, Session, turn, steer or Process.
 const GROWING: [&str; 16] = [
     "agent_sessions",
-    "planning_peer_changes",
-    "planning_peer_routes",
+    "git_tracker_changes",
+    "git_tracker_routes",
     "processes",
     "session_events",
     "steer_delivered",
@@ -47,7 +47,7 @@ const GROWING: [&str; 16] = [
 const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          'agent_sessions','processes','session_events','tasks','steer_delivered',
          'steer_adapters','projects','waves',
-         'planning_peer_changes','planning_peer_routes','repository_plans','steers',
+         'git_tracker_changes','git_tracker_routes','repository_plans','steers',
          'task_retirements','task_checkouts','task_primary_sessions','task_ship_events',
          'task_ownership','task_update_readings');
      INSERT INTO sqlite_stat1(tbl,idx,stat) VALUES
@@ -64,11 +64,11 @@ const MEASURED: &str = "DELETE FROM sqlite_stat1 WHERE tbl IN (
          ('agent_sessions','session_repo_inventory','17206 101 58 1 1 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_1','17206 1'),
          ('agent_sessions','sqlite_autoindex_agent_sessions_2','17206 1'),
-         ('planning_peer_changes','planning_peer_changes_clock','37312 1'),
-         ('planning_peer_changes','planning_peer_changes_object','37312 3 2'),
-         ('planning_peer_changes','sqlite_autoindex_planning_peer_changes_1','37312 1'),
-         ('planning_peer_routes','planning_peer_routes_mutation','4220 1'),
-         ('planning_peer_routes','sqlite_autoindex_planning_peer_routes_1','4220 401 267 1'),
+         ('git_tracker_changes','git_tracker_changes_clock','37312 1'),
+         ('git_tracker_changes','git_tracker_changes_object','37312 3 2'),
+         ('git_tracker_changes','sqlite_autoindex_git_tracker_changes_1','37312 1'),
+         ('git_tracker_routes','git_tracker_routes_mutation','4220 1'),
+         ('git_tracker_routes','sqlite_autoindex_git_tracker_routes_1','4220 401 267 1'),
          ('processes','agent_process_attachment','17979 4'),
          ('processes','agent_process_unfinished','77 1'),
          ('processes','processes_agent_session','18327 1'),
@@ -596,7 +596,7 @@ mod tests {
         });
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("planning_peer_changes") || scan.contains("SCAN tasks"))
+            .filter(|scan| scan.contains("git_tracker_changes") || scan.contains("SCAN tasks"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

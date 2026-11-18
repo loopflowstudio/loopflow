@@ -50,7 +50,7 @@ $ lf wave plan product          # unchanged: the Wave's Projects and Tasks, the 
 - `git grep -nwiE 'chapters?'` finds only released migrations, release notes, stored fixtures of released schemas and authored Wave files (`.lf/wave/**`: people's own words, listed in `scratch/questions.md`, not rewritten).
 - `provider` never names a tracker in `rust/**/{linear,asana,ops,store,config}`, `docs/`, CLI help, except the kept column names (`planning_provider_revision`) and the released config tag `planning.provider`.
 - `edit-plan` / `update-plan` / `WavePlanTarget` are gone; `docs/dev/planning.md` § Words and AGENTS.md no longer call the current Project "the plan".
-- `git grep -E 'TrackerObservation|linear_acceptance|Acquisition|pm_(items|projects|issue_changes|wave_projects|wave_sync)'` outside migrations/fixtures is empty.
+- `git grep -E 'TrackerObservation|linear_acceptance|Acquisition|pm_(items|projects|issue_changes|wave_projects|wave_sync)'` outside migrations, historical upgrade fixtures, and compatibility tests for released writers is empty.
 - `lf repo tracker` (and `key`, `journal`, `answer`) works; `lf repo plan` is gone; Desktop's sync view calls the new path; `documented_commands` passes.
 - A repo with `tracker: {linear: {team: X}}` and a repo with released `planning: {provider: linear}` + `linear: {team: X}` resolve to the same `TrackerConfig`; `lf config set` still writes the released shape.
 
@@ -191,12 +191,12 @@ rebuild each and are noted in `scratch/questions.md`.
 
 ## Slices
 
-1. **Tables (first: it can prove the plan wrong).** `tracker_tables.sql`,
+1. **Tables (implemented).** `tracker_tables.sql`,
    runtime SQL switched, one storage test that writes through each old name and
    reads the new (and back), `check_migrations.py` green, `EXPLAIN QUERY PLAN`
    on the renamed hot reads (`query_plans.rs`). Shows whether mirror triggers
    coexist with the canonical-identity and revision triggers.
-2. **CLI + config.** `lf repo tracker`, `lf wave edit-project` /
+2. **CLI + config (next).** `lf repo tracker`, `lf wave edit-project` /
    `update-project`, `TrackerConfig`, `tracker:` / `repo.tracker` fold and
    dotted-key rule with tests for each spelling, Desktop caller, docs,
    glossary; steer LOO-784.
@@ -217,7 +217,10 @@ names. Released migrations, release notes and released-schema fixtures under
 
 ## Checks
 
-- slice 1: `cargo test -p loopflow-storage` mirror test + `check_migrations.py` — implement
+- Slice 1: `cargo clippy --all-targets -- -D warnings` and ten focused storage tests passed (both mirrors, revision columns, indexed clock, historical journal seeding and five Linear upgrades). `check_migrations.py` accepted the expand migration.
+- Installed lf created a Task, candidate edited its title, installed lf read and edited it again, and candidate read that edit. Both journals held 18 mutations.
+- In-memory SQLite with 10,000 existing items: expand took 21.8 ms. 1,000 identifier lookups took 1.0 ms through `tracker_items_identifier`. Disk and lock wait are outside these timings.
+- Historical upgrades seed at their original migration, through temporary views for the two journal tables. Upgrading an existing journal copies its rows once. Mirror comparisons use binary collation for case-only identifier edits.
 - full suites — CI at gate
 - Desktop DTO fixture tests — gate (`swift test`)
 

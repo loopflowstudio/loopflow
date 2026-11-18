@@ -50,7 +50,7 @@ pub(super) fn observed_order(
 ) -> StoreResult<Option<Vec<String>>> {
     let body: Option<String> = conn.query_row(
         "SELECT o.task_order_json FROM projects p JOIN waves w ON w.id=p.wave_id
-         JOIN pm_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.provider IN ('linear','asana') WHERE p.id=?1",
+         JOIN tracker_projects o ON o.id=p.external_project_id AND o.repo=w.repo AND o.tracker IN ('linear','asana') WHERE p.id=?1",
         [project.as_str()], |row| row.get(0)).optional()?.flatten();
     body.map(|body| serde_json::from_str(&body).map_err(Into::into))
         .transpose()
@@ -89,7 +89,7 @@ pub(crate) fn observe_in(
         }
     }
     conn.execute(
-        "UPDATE pm_projects SET task_order_json=?4 WHERE repo=?1 AND provider=?2 AND id=?3",
+        "UPDATE tracker_projects SET task_order_json=?4 WHERE repo=?1 AND tracker=?2 AND id=?3",
         params![repo, "linear", external, serde_json::to_string(&observed)?],
     )?;
     // The provider's complete list answers an attempted order the way the

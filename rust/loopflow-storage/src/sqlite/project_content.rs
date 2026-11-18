@@ -107,7 +107,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE pm_projects SET task_order_json='{}' WHERE id='linear-project'",
+                "UPDATE tracker_projects SET task_order_json='{}' WHERE id='linear-project'",
                 [],
             )
             .unwrap();
@@ -129,7 +129,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT task_order_json,observed_at FROM pm_projects WHERE id='linear-project'",
+                "SELECT task_order_json,observed_at FROM tracker_projects WHERE id='linear-project'",
                 [],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
@@ -247,7 +247,7 @@ mod tests {
             .lock()
             .unwrap()
             .query_row(
-                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM pm_projects WHERE id='linear-project'",
+                "SELECT json_object('value',description,'revision',description_revision,'observed_at',description_observed_at) FROM tracker_projects WHERE id='linear-project'",
                 [],
                 |r| r.get(0),
             )

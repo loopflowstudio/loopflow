@@ -23,7 +23,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE planning_destinations SET fetched_revision=?3
+            "UPDATE git_tracker_destinations SET fetched_revision=?3
             WHERE repo=?1 AND id=?2 AND fetched_revision IS NOT ?3",
             params![repo, destination, revision],
         )?;
@@ -38,13 +38,13 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let column = if acquisition {
-            "acquisition_error"
+            "fetch_error"
         } else {
             "publication_error"
         };
         conn.execute(
             &format!(
-                "UPDATE planning_destinations SET {column}=?3
+                "UPDATE git_tracker_destinations SET {column}=?3
                 WHERE repo=?1 AND id=?2 AND {column} IS NOT ?3"
             ),
             params![repo, destination, error],
@@ -61,7 +61,7 @@ impl SqliteStore {
     ) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         conn.execute(
-            "UPDATE planning_destinations SET publication_revision=?3,publication_state=?4,
+            "UPDATE git_tracker_destinations SET publication_revision=?3,publication_state=?4,
                 publication_digest=?5,publication_error=NULL
             WHERE repo=?1 AND id=?2 AND (publication_revision IS NOT ?3
                 OR publication_state IS NOT ?4 OR publication_digest IS NOT ?5
@@ -143,7 +143,7 @@ impl SqliteStore {
         }
         let id = destination.id();
         tx.execute(
-            "INSERT INTO planning_destinations(repo,id,endpoint,reference) VALUES(?1,?2,?3,?4)
+            "INSERT INTO git_tracker_destinations(repo,id,endpoint,reference) VALUES(?1,?2,?3,?4)
             ON CONFLICT(repo,id) DO NOTHING",
             params![repo, id, destination.endpoint(), destination.reference()],
         )?;
@@ -158,7 +158,7 @@ impl SqliteStore {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let row: Option<(String, String)> = conn
             .query_row(
-                "SELECT endpoint,reference FROM planning_destinations WHERE repo=?1 AND id=?2",
+                "SELECT endpoint,reference FROM git_tracker_destinations WHERE repo=?1 AND id=?2",
                 params![repo, id],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
@@ -200,8 +200,8 @@ impl SqliteStore {
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
-                AND NOT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            "SELECT EXISTS(SELECT 1 FROM git_tracker_imports WHERE repo=?1 AND destination=?2 AND revision=?3)
+                AND NOT EXISTS(SELECT 1 FROM git_tracker_conflicts WHERE repo=?1 AND active=1)",
             params![repo, destination, revision], |row| row.get(0),
         )?)
     }
@@ -218,7 +218,7 @@ impl SqliteStore {
         active: Option<&str>,
     ) -> StoreResult<Vec<PeerPlanningStatus>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query=conn.prepare("SELECT d.id,d.reference,d.id IS ?2,d.fetched_revision,d.acquisition_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM planning_destinations d LEFT JOIN planning_peer_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
+        let mut query=conn.prepare("SELECT d.id,d.reference,d.id IS ?2,d.fetched_revision,d.fetch_error,d.publication_revision,d.publication_state,d.publication_error,d.publication_digest,i.revision FROM git_tracker_destinations d LEFT JOIN git_tracker_imports i ON i.repo=d.repo AND i.destination=d.id WHERE d.repo=?1 ORDER BY d.id")?;
         let rows = query.query_map(params![repo, active], |r| {
             Ok((
                 r.get::<_, String>(0)?,
@@ -251,7 +251,7 @@ impl SqliteStore {
             let pending_local = digest.as_deref() != Some(planning_digest(&snapshot)?.as_str());
             let selected_records = touched_records(&snapshot).len() as u64;
             let mut conflicts = conn.prepare(
-                "SELECT object_id,reason FROM planning_peer_conflicts WHERE repo=?1 AND active=1",
+                "SELECT object_id,reason FROM git_tracker_conflicts WHERE repo=?1 AND active=1",
             )?;
             let conflicts = conflicts
                 .query_and_then([repo], |row| -> StoreResult<_> {
@@ -285,7 +285,7 @@ impl SqliteStore {
     ) -> StoreResult<Vec<PlanningJournal>> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         let destinations = conn
-            .prepare("SELECT id FROM planning_destinations WHERE repo=?1 ORDER BY id")?
+            .prepare("SELECT id FROM git_tracker_destinations WHERE repo=?1 ORDER BY id")?
             .query_map([repo], |row| row.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         destinations
@@ -353,7 +353,7 @@ impl PeerImport<'_> {
         let (repo, destination) = (self.repo, self.destination);
         let revision = planning_revision(conn)?;
         let in_conflict: bool = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM planning_peer_conflicts WHERE repo=?1 AND active=1)",
+            "SELECT EXISTS(SELECT 1 FROM git_tracker_conflicts WHERE repo=?1 AND active=1)",
             [repo],
             |row| row.get(0),
         )?;
@@ -388,7 +388,7 @@ impl PeerImport<'_> {
     }
 
     fn record_revision(&self, conn: &Connection) -> StoreResult<()> {
-        conn.execute("INSERT INTO planning_peer_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![self.repo,self.destination,self.revision])?;
+        conn.execute("INSERT INTO git_tracker_imports(repo,destination,revision) VALUES(?1,?2,?3) ON CONFLICT(repo,destination) DO UPDATE SET revision=excluded.revision WHERE revision IS NOT excluded.revision",params![self.repo,self.destination,self.revision])?;
         Ok(())
     }
 
@@ -566,11 +566,11 @@ impl PeerImport<'_> {
         }
 
         tx.execute(
-            "UPDATE planning_peer_conflicts SET active=0 WHERE repo=?1",
+            "UPDATE git_tracker_conflicts SET active=0 WHERE repo=?1",
             [repo],
         )?;
         for ((table, target), reason) in conflicts {
-            tx.execute("INSERT INTO planning_peer_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,table,target,reason])?;
+            tx.execute("INSERT INTO git_tracker_conflicts(repo,kind,object_id,reason,active) VALUES(?1,?2,?3,?4,1) ON CONFLICT(kind,object_id,reason) DO UPDATE SET active=1",params![repo,table,target,reason])?;
         }
         self.record_revision(&tx)?;
         tx.commit()?;
@@ -599,7 +599,7 @@ fn planning_digest(snapshot: &PlanningSnapshot) -> StoreResult<String> {
 }
 fn require_destination(conn: &Connection, repo: &str, destination: &str) -> StoreResult<()> {
     if !conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM planning_destinations WHERE repo=?1 AND id=?2)",
+        "SELECT EXISTS(SELECT 1 FROM git_tracker_destinations WHERE repo=?1 AND id=?2)",
         params![repo, destination],
         |r| r.get::<_, bool>(0),
     )? {
@@ -638,9 +638,9 @@ fn unrouted_changes(conn: &Connection, repo: &str, destination: &str) -> StoreRe
         "{OWNED_CHANGES}
         SELECT c.id FROM owned o
             -- Each owned record's history by index, never every record's.
-            CROSS JOIN planning_peer_changes c
+            CROSS JOIN git_tracker_changes c
                 ON c.object_id=o.object_id AND c.record_table=o.record_table
-            WHERE NOT EXISTS(SELECT 1 FROM planning_peer_routes r
+            WHERE NOT EXISTS(SELECT 1 FROM git_tracker_routes r
                 WHERE r.mutation_id=c.id AND r.repo=?1 AND r.destination=?2)"
     ))?;
     let ids = query
@@ -655,7 +655,7 @@ fn route_changes<'a>(
     ids: impl IntoIterator<Item = &'a String>,
 ) -> StoreResult<()> {
     let mut route = conn.prepare_cached(
-        "INSERT OR IGNORE INTO planning_peer_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
+        "INSERT OR IGNORE INTO git_tracker_routes(mutation_id,repo,destination) VALUES(?1,?2,?3)",
     )?;
     for id in ids {
         route.execute(params![id, repo, destination])?;
@@ -674,7 +674,7 @@ fn unseen_in(
     incoming: &PlanningSnapshot,
 ) -> StoreResult<PlanningSnapshot> {
     let mut routed = conn.prepare_cached(
-        "SELECT 1 FROM planning_peer_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
+        "SELECT 1 FROM git_tracker_routes WHERE repo=?1 AND destination=?2 AND mutation_id=?3",
     )?;
     let mut fields = BTreeSet::new();
     for (id, change) in &incoming.changes {
@@ -709,8 +709,8 @@ fn export_rows(
 ) -> StoreResult<Vec<(String, String)>> {
     let mut query = conn.prepare(
         &format!("{OWNED_CHANGES}
-            SELECT c.id,c.mutation FROM planning_peer_changes c
-            WHERE c.id IN (SELECT mutation_id FROM planning_peer_routes WHERE repo=?1 AND destination=?2)
+            SELECT c.id,c.mutation FROM git_tracker_changes c
+            WHERE c.id IN (SELECT mutation_id FROM git_tracker_routes WHERE repo=?1 AND destination=?2)
             OR (?3 AND EXISTS(SELECT 1 FROM owned o WHERE o.record_table=c.record_table AND o.object_id=c.object_id))"),
     )?;
     let rows = query
@@ -735,9 +735,9 @@ fn record_rows(
         .query_row([target], |row| row.get(0))
         .optional()?;
     let mut query = conn.prepare_cached(
-        "SELECT c.id,c.mutation FROM planning_peer_changes c
+        "SELECT c.id,c.mutation FROM git_tracker_changes c
         WHERE c.object_id=?1 AND c.record_table=?2
-            AND (?3 OR EXISTS(SELECT 1 FROM planning_peer_routes r
+            AND (?3 OR EXISTS(SELECT 1 FROM git_tracker_routes r
                 WHERE r.mutation_id=c.id AND r.repo=?4 AND r.destination=?5))",
     )?;
     let rows = query
@@ -1001,7 +1001,7 @@ mod tests {
                 .conn
                 .lock()
                 .unwrap()
-                .query_row("SELECT count(*) FROM planning_peer_observed", [], |r| r
+                .query_row("SELECT count(*) FROM git_tracker_seen", [], |r| r
                     .get::<_, i64>(0))
                 .unwrap(),
             0
@@ -1134,7 +1134,7 @@ mod tests {
         assert_eq!(store.get_wave(wave.id()).unwrap().unwrap().name(), "remote");
         let scans: Vec<_> = growing_scans(&store, &traced)
             .into_iter()
-            .filter(|scan| scan.contains("planning_peer_changes"))
+            .filter(|scan| scan.contains("git_tracker_changes"))
             .collect();
         assert!(scans.is_empty(), "{}", scans.join("\n"));
     }

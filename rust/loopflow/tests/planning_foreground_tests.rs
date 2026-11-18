@@ -938,7 +938,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     // or overwrite the bytes needed for repair. Work frames carry that read error.
     let conn = Connection::open(home.path().join("loopflow.db")).unwrap();
     conn.execute(
-        "UPDATE planning_peer_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
+        "UPDATE git_tracker_changes SET mutation=json_set(mutation,'$.parents',json('[\"missing\"]')) WHERE id=?1",
         [current_id],
     )
     .unwrap();
@@ -951,7 +951,7 @@ fn planning_journal_reads_retained_changes_without_inventing_recovery_records() 
     assert!(String::from_utf8_lossy(&failed.stderr).contains("missing planning predecessor"));
     let retained: String = conn
         .query_row(
-            "SELECT mutation -> '$.parents' FROM planning_peer_changes WHERE id=?1",
+            "SELECT mutation -> '$.parents' FROM git_tracker_changes WHERE id=?1",
             [current_id],
             |row| row.get(0),
         )

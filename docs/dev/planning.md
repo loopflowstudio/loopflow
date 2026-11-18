@@ -199,7 +199,7 @@ creation recovery or receipt-settlement protocol. No designated publisher exists
 
 Git imports retain immutable mutations before projection. Field causality precedes
 logical clocks and stable mutation-ID ties. All losing values remain inspectable.
-`planning_peer_observed` records only successfully applied heads: a rejected import
+`git_tracker_seen` records only successfully applied heads: a rejected import
 cannot become the causal parent of a later local save. Projection uses per-object
 savepoints so a conflicting parent preserves that object's history while independent
 objects advance. Wave selection follows Project projection. Invalid documents,
@@ -208,7 +208,7 @@ imports create no echo edits. Fetch, import and publication have distinct receip
 a lost push reply requires readback before publication is reported confirmed.
 
 Current Work ownership selects new Git exports. Each exported or imported mutation
-retains its repository and destination in `planning_peer_routes`, independently of
+retains its repository and destination in `git_tracker_routes`, independently of
 live Work rows. Switching refs, moving Work or deleting a row cannot erase earlier
 routing or rejected imports. Status derives the active destination from configuration;
 there is no stored selection or per-Work membership inventory. These routes are

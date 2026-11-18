@@ -130,7 +130,7 @@ mod tests {
             .lock()
             .unwrap()
             .execute(
-                "UPDATE pm_items SET project_id=NULL,claimed_project_id=NULL,project_id_observed=0",
+                "UPDATE tracker_items SET project_id=NULL,claimed_project_id=NULL,project_id_observed=0",
                 [],
             )
             .unwrap();
@@ -257,7 +257,7 @@ mod tests {
             assert_eq!(store.task(&task).unwrap().unwrap(), saved);
             let conn = store.conn.lock().unwrap();
             let after: Vec<(String, String, i64)> = conn
-                .prepare("SELECT 'issue:'||id,json_array(team_id,claimed_project_id,needs_refresh),observed_at FROM pm_items UNION ALL SELECT 'project:'||id,json_array(json(team_ids),archived,membership_unresolved),observed_at FROM pm_projects ORDER BY 1")
+                .prepare("SELECT 'issue:'||id,json_array(team_id,claimed_project_id,needs_refresh),observed_at FROM tracker_items UNION ALL SELECT 'project:'||id,json_array(json(team_ids),archived,membership_unresolved),observed_at FROM tracker_projects ORDER BY 1")
                 .unwrap()
                 .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
                 .unwrap()
@@ -305,36 +305,36 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             // Foreign evidence blocks its Task, not the repository inventory.
-            conn.execute("UPDATE pm_items SET team_id='foreign'", [])
+            conn.execute("UPDATE tracker_items SET team_id='foreign'", [])
                 .unwrap();
         }
         validate().unwrap();
         assert!(store.validate_task_planning(&task).is_err());
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_projects SET team_ids='[\"foreign\"]'", [])
+            conn.execute("UPDATE tracker_projects SET team_ids='[\"foreign\"]'", [])
                 .unwrap();
         }
         validate().unwrap();
         assert!(store.validate_task_planning(&task).is_err());
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_items SET needs_refresh=1", [])
+            conn.execute("UPDATE tracker_items SET needs_refresh=1", [])
                 .unwrap();
         }
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
-            conn.execute("UPDATE pm_items SET needs_refresh=0", [])
+            conn.execute("UPDATE tracker_items SET needs_refresh=0", [])
                 .unwrap();
-            conn.execute("UPDATE pm_projects SET membership_unresolved=1", [])
+            conn.execute("UPDATE tracker_projects SET membership_unresolved=1", [])
                 .unwrap();
         }
         validate().unwrap();
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET membership_unresolved=0,archived=1",
+                "UPDATE tracker_projects SET membership_unresolved=0,archived=1",
                 [],
             )
             .unwrap();
@@ -343,7 +343,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET archived=0,initiative_ids='[\"removed\"]'",
+                "UPDATE tracker_projects SET archived=0,initiative_ids='[\"removed\"]'",
                 [],
             )
             .unwrap();
@@ -352,7 +352,7 @@ mod tests {
         {
             let conn = store.conn.lock().unwrap();
             conn.execute(
-                "UPDATE pm_projects SET initiative_ids=?1",
+                "UPDATE tracker_projects SET initiative_ids=?1",
                 [serde_json::to_string(&project.initiative_ids).unwrap()],
             )
             .unwrap();
@@ -363,7 +363,7 @@ mod tests {
         assert_eq!(store.task(&task.id).unwrap().unwrap(), task);
         let conn = store.conn.lock().unwrap();
         let ages: (i64, i64) = conn.query_row(
-            "SELECT p.observed_at,i.observed_at FROM pm_projects p JOIN pm_items i ON i.project_id=p.id",
+            "SELECT p.observed_at,i.observed_at FROM tracker_projects p JOIN tracker_items i ON i.project_id=p.id",
             [], |row| Ok((row.get(0)?,row.get(1)?)),
         ).unwrap();
         assert_eq!(ages, (42, 42));
@@ -510,7 +510,9 @@ mod tests {
                 .conn
                 .lock()
                 .unwrap()
-                .query_row("SELECT team_ids FROM pm_projects", [], |row| row.get(0))
+                .query_row("SELECT team_ids FROM tracker_projects", [], |row| {
+                    row.get(0)
+                })
                 .unwrap()
         };
 

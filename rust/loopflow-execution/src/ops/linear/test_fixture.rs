@@ -48,7 +48,7 @@ impl Fixture {
         rusqlite::Connection::open(&self.database)
             .unwrap()
             .query_row(
-                "SELECT synced_at FROM pm_wave_sync WHERE wave_id=?1",
+                "SELECT synced_at FROM tracker_wave_sync WHERE wave_id=?1",
                 [wave.id().as_str()],
                 |r| r.get(0),
             )

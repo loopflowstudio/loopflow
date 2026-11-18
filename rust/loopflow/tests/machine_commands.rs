@@ -2115,6 +2115,8 @@ fn a_move_that_did_not_arrive_shows_in_status_and_the_same_command_delivers_it()
     let take_back = format!("take back: lf task claim {name}");
     assert!(stderr.contains(&take_back), "{stderr}");
 
+    // Status reads mini's server, where the Task runs.
+    let _mini = served_mini(&fixture);
     let status = fixture
         .command(&["task", "status", task.as_str()])
         .current_dir(&plan.local_path)
@@ -2339,6 +2341,8 @@ fn claiming_back_a_task_whose_arrival_answer_was_lost_leaves_it_on_its_target() 
         .unwrap();
     assert_eq!(local.machine.id, Some(mini));
     assert!(plan.local.task_move_in_flight(&task).unwrap().is_none());
+    // Status reads mini's server, where the Task runs.
+    let _mini = served_mini(&fixture);
     let status = fixture
         .command(&["task", "status", task.as_str()])
         .current_dir(&plan.local_path)
@@ -2776,6 +2780,8 @@ fn the_laptop_says_where_a_moved_task_runs_and_prunes_its_checkout() {
 
     laptop(&["task", "move", task.as_str(), "--machine", "mini"]);
 
+    // Status reads mini's server, where the Task runs.
+    let _mini = served_mini(&fixture);
     let status = laptop(&["task", "status", task.as_str()]);
     assert!(
         status.contains(&format!(
@@ -3625,6 +3631,8 @@ fn resuming_a_task_conversation_on_mini_moves_its_task() {
             .machine_id,
         mini
     );
+    // Status reads mini's server, where the Task runs.
+    let _mini = served_mini(&fixture);
     let status = fixture
         .command(&["task", "status", task.as_str()])
         .current_dir(&plan.local_path)

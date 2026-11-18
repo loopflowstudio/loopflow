@@ -1550,7 +1550,9 @@ struct SessionsContentView: View {
 
     private var mainPane: some View {
         ZStack {
-            if navigation.showsSelection {
+            if let starting = navigation.startingTask {
+                StartingTaskView(model: model, starting: starting)
+            } else if navigation.showsSelection {
                 DashboardView(model: model, workspaces: workspaces, sessions: store)
             } else if let key = workspaces.selectedWork {
                 VStack(spacing: 0) {
@@ -1922,6 +1924,16 @@ private struct SidebarDivider: View {
 #endif
 
 extension SessionsWorkspace {
+    /// A Work created in this window has no saved layout: it starts saving
+    /// edits without reading one.
+    func startNewLayout(layouts: PaneLayoutStore, query: RegistryQuery) {
+        guard persistenceQuery == nil, localMachineId != nil else { return }
+        persistenceQuery = query
+        paneLayouts = layouts
+        persistenceLoaded = true
+        observePaneIntent()
+    }
+
     /// Restore this Mac's saved layout for the Work, then save each change to it.
     func startPersistence(layouts: PaneLayoutStore, query: RegistryQuery) {
         guard persistenceQuery == nil, localMachineId != nil else { return }

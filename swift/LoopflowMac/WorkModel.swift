@@ -83,6 +83,15 @@ struct TaskReadings<Value> {
     }
 }
 
+/// A New Task submission from the click until its conversation is installed.
+struct StartingTask: Equatable {
+    let id: String
+    let request: String
+    let wave: WaveSnapshot?
+    let graph: String?
+    var error: String?
+}
+
 /// One resolved opening: its companion must never outlive or drift from the Session.
 struct LinkedSession {
     let generation: Int
@@ -2313,7 +2322,11 @@ final class WorkModel {
 
     private func select(_ requested: WorkReference?, preservingOpening: Bool, recordingHistory: Bool = true) {
         if navigation.palette == .search || navigation.palette == .sidebarSearch { navigation.palette = nil }
-        if !preservingOpening { dismissTaskLink() }
+        if !preservingOpening {
+            dismissTaskLink()
+            // Going elsewhere leaves a submitted New Task to its row and recovery.
+            if navigation.startingTask != nil { navigation.startingTask = nil }
+        }
         historyLookup?.cancel()
         historyLookup = nil
         if let requested, requested.kind == .task {
@@ -2536,8 +2549,8 @@ final class WorkModel {
     /// refusal is kept on that Task's draft and changes nothing else.
     func startTaskFromInput(_ graph: String?, from step: String? = nil, task: RoadmapTask) {
         let owner = navigation.performanceOwner
-        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id,
-                        repository: repoPath, liveSessions: liveSessionCount, owner: owner) {
+        Perf.userAction(.startTask, scenario: "start_to_typing", id: task.id, repository: repoPath,
+                        machine: machineKind, liveSessions: liveSessionCount, owner: owner) {
             Perf.acknowledged(.startTask, id: task.id, owner: owner)
             startTask(graph, from: step, task: task) {
                 Perf.finish(.startTask, id: task.id, owner: owner, outcome: .failed)
@@ -2605,31 +2618,79 @@ final class WorkModel {
     }
 
     /// New Task: one `lf task create REQUEST --run` files it in `wave` (nil: the
-    /// repository), starts its workflow and admits its conversation with the
-    /// request as the first turn; this window then shows that conversation.
-    /// Storage failure keeps the sheet; a submitted request hands uncertainty to recovery.
-    func createTask(request: String, wave: WaveSnapshot?, graph: String?) async throws {
-        let requestID = InteractionTrace.current?.id.uuidString ?? UUID().uuidString
+    /// repository) with its conversation admitted. The click has closed the
+    /// sheet; the words stand in until the answer's Session is installed, and
+    /// nothing else is read or prepared for it. A failure before filing keeps the
+    /// words and Try again; after the answer, the Task exists, so a failure
+    /// opening it belongs to its workspace. A submitted request whose answer is
+    /// lost hands uncertainty to recovery.
+    func createTask(request: String, wave: WaveSnapshot?, graph: String?, requestID: String) async throws {
         let owner = navigation
+        let starting = StartingTask(id: requestID, request: request, wave: wave, graph: graph)
+        owner.startingTask = starting
         let presentation = owner.paletteGeneration
         let destination = destinationGeneration
+        let created: TaskCreated
         do {
-            let receipt = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
-            Perf.retarget(.startTask, from: "new-task", to: receipt.sessionId ?? receipt.task.id,
-                          owner: owner.performanceOwner)
-            CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
-            if owner.paletteGeneration == presentation {
-                owner.palette = nil
-                if navigation === owner, destinationGeneration == destination {
-                    await openTaskConversation(receipt.task.id)
-                }
-            }
-            try? await confirmWorkUpdate()
+            created = try await query.createTask(request: request, wave: wave?.name, graph: graph, cwd: repoPath, requestID: requestID)
         } catch is SubmittedCreationError {
-            Perf.finish(.startTask, id: "new-task", owner: owner.performanceOwner, outcome: .unmeasured)
+            Perf.finish(.startTask, id: requestID, owner: owner.performanceOwner, outcome: .unmeasured)
             // The saved submission owns recovery. Keeping a submit button here
             // would turn a lost answer into another creation identity.
-            if owner.paletteGeneration == presentation { owner.palette = nil }
+            if owner.startingTask?.id == requestID { owner.startingTask = nil }
+            return
+        } catch {
+            if owner.startingTask?.id == requestID { owner.startingTask?.error = error.localizedDescription }
+            throw error
+        }
+        let receipt = created.receipt
+        Perf.retarget(.startTask, from: requestID, to: receipt.sessionId ?? receipt.task.id,
+                      owner: owner.performanceOwner)
+        CreationRecovery.shared.awaitingPresentation(requestID, of: .task(receipt.task.id))
+        if owner.startingTask?.id == requestID, owner.paletteGeneration == presentation,
+           navigation === owner, destinationGeneration == destination {
+            await openCreatedTask(created)
+        }
+        if owner.startingTask?.id == requestID { owner.startingTask = nil }
+    }
+
+    /// Install a created Task's conversation from the answer: its row selects the
+    /// Task (retained evidence until planning lists it) and its Session opens as
+    /// prepared. Nothing saved can exist
+    /// for a new Task, so its layout starts empty instead of being read. An
+    /// opening failure is its workspace's `conversationError`.
+    private func openCreatedTask(_ created: TaskCreated) async {
+        let row = created.row
+        let found = task(id: row.id) ?? (row.task.waveId.flatMap { taskIndex.waves[$0] }, row)
+        guard let record = created.session, let registry = workspaceRegistry, let repository = workspaceRepository else {
+            openTaskDestination(wave: found.wave, task: found.task)
+            return
+        }
+        let key = workspaceKey(for: .task(id: found.task.id), repository: repository)
+        let workspace = registry.workspace(for: key, title: found.task.task.name, location: record.workspace?.identity)
+        workspace.measurementRepository = repoPath
+        if let paneLayouts { workspace.startNewLayout(layouts: paneLayouts, query: query) }
+        workspace.conversationError = nil
+        let request = UUID()
+        workspace.conversationRequest = request
+        defer { if workspace.conversationRequest == request { workspace.conversationRequest = nil } }
+        let records = [record] + (sessions.value ?? []).filter { $0.id != record.id }
+        if let reason = sessions.failure { sessions = .unavailable(lastGood: records, reason: reason) }
+        else { sessions = .available(records) }
+        let link = TaskLink(issue: found.task.task.identifier, repo: found.task.task.repo, conversation: true)
+        let opening = DesktopOpening(revision: UUID().uuidString, url: link.address, status: .opening, reason: nil)
+        taskOpening = opening
+        openTaskDestination(wave: found.wave, task: found.task, preservingOpening: true)
+        navigation.content = .terminals
+        let destination = LinkedSession(generation: destinationGeneration, record: record, task: found.task,
+                                        location: nil, prepared: true)
+        do {
+            try await installConversation(destination, repository: found.task.task.repo)
+        } catch {
+            if destinationGeneration == destination.generation, workspace.conversationRequest == request {
+                workspace.conversationError = error.localizedDescription
+            }
+            if taskOpening?.revision == opening.revision { taskOpening = nil }
         }
     }
 
@@ -2657,6 +2718,13 @@ final class WorkModel {
     }
 
     var localMachineId: String? { workspaceRegistry?.localMachineId }
+
+    /// `local` when this window's Work runs on this Mac's Machine, `remote` when
+    /// on another; unknown until both are read. Start's timings split by it.
+    var machineKind: String? {
+        guard let observed = observingMachineId, let local = localMachineId else { return nil }
+        return observed == local ? "local" : "remote"
+    }
 
     /// The Machine the target runs on, from planning. A Wave without its own
     /// default runs here; a started Task without one is unknown.

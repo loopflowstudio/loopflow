@@ -74,7 +74,7 @@ pub mod wave_definitions;
 mod wave_lifecycle;
 
 pub use children::ClosedTaskPage;
-pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts};
+pub use graph_inventory::{entry_of, AgentLimitRecovery, GraphExecutionFacts, UnrunGraph};
 pub use project_selection::{ProjectActivation, ProjectReadiness, ProjectReadinessState};
 pub use revisions::{Revisions, StoreRevisions};
 pub use session_events::CurrentConversation;

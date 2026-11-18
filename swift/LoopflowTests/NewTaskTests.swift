@@ -26,9 +26,12 @@ struct NewTaskTests {
             return args.starts(with: ["task"]) ? receipt : repository
         }
         let created = try await query.createTask(request: "-v is ignored", wave: "product", graph: "auto", cwd: "/repo")
-        #expect(created.task.identifier == "LOO-1")
-        #expect(created.graph == "code")
-        #expect(created.sessionId != nil)
+        #expect(created.receipt.task.identifier == "LOO-1")
+        #expect(created.receipt.graph == "code")
+        #expect(created.session?.id == created.receipt.sessionId)
+        #expect(created.session?.openArgv.isEmpty == false)
+        // Until the Task's reading arrives, its row says where it stands.
+        #expect(created.row.setupPosition == "Starting code")
         let shown = try await query.waveGraph(wave: nil, cwd: "/repo")
         #expect(shown.wave == nil)
         #expect(shown.default.name == "code")
@@ -39,9 +42,9 @@ struct NewTaskTests {
             ["task", "create", "--wave", "product", "--graph", "auto", "--run", "--json", "--", "-v is ignored"],
             ["wave", "graph", "show", "--no-wave", "--json"],
         ])
-        // A run that failed after filing reports the Task with no graph or conversation.
-        let failed = try RegistryQuery.decode([TaskCreateReceipt].self, from: fixture("task_create_receipt.json"))[1]
-        #expect(failed.graph == nil && failed.sessionId == nil)
+        // A headless `-b` run answers with no conversation.
+        let batch = try RegistryQuery.decode([TaskCreated].self, from: fixture("task_create_receipt.json"))[1]
+        #expect(batch.receipt.sessionId == nil && batch.session == nil)
         // Every Wave and the repository decode, including a null Wave.
         _ = try RegistryQuery.decode([WaveGraph].self, from: fixture("wave_graph.json"))
     }

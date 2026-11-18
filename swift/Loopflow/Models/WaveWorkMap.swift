@@ -253,6 +253,13 @@ public struct RoadmapTask: Decodable, Sendable, Identifiable, Hashable {
     /// open, and its Session slot offers Start instead.
     public var awaitsStart: Bool { lifecycle == .unstarted }
 
+    /// Where a Task that never ran its Graph stands, as the server reads it:
+    /// starting that Graph, or why its setup stopped.
+    public var setupPosition: String? {
+        guard let execution, [.starting, .blocked].contains(execution.state) else { return nil }
+        return execution.reason
+    }
+
     /// Completion dates may be unknown even when the lifecycle is settled.
     public var historyLabel: String {
         lifecycle == .done && task.completedAt == nil ? "Done · date unavailable" : lifecycle.label

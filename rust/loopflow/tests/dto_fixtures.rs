@@ -1347,17 +1347,32 @@ fn wave_renamed_receipt_round_trips_with_its_leftovers() {
 }
 
 #[test]
-fn task_create_receipt_names_the_graph_and_admitted_conversation_or_a_failed_run() {
+fn task_create_answers_with_the_conversation_record_and_row() {
+    use loopflow::lf::commands::task_create::TaskCreated;
     let json = include_str!("../../../tests/fixtures/dto/task_create_receipt.json");
-    let receipts: Vec<loopflow_execution::engine::creation::TaskCreateReceipt> =
-        serde_json::from_str(json).unwrap();
-    assert_eq!(receipts[0].graph.as_deref(), Some("code"));
-    assert!(receipts[0].session_id.is_some());
-    // The run failed after the Task was filed.
-    assert_eq!(receipts[1].graph, None);
-    assert_eq!(receipts[1].session_id, None);
+    let answers: Vec<TaskCreated> = serde_json::from_str(json).unwrap();
+    let admitted = &answers[0];
+    assert_eq!(admitted.receipt.milestone, "admitted");
+    assert_eq!(admitted.receipt.graph.as_deref(), Some("code"));
+    let session = admitted.session.as_ref().unwrap();
+    assert_eq!(Some(&session.id), admitted.receipt.session_id.as_ref());
+    assert!(!session.open_argv.is_empty());
+    // The row a client selects before planning lists the Task.
+    assert_eq!(answers[0].row.task.id, admitted.receipt.task.id.as_str());
     assert_eq!(
-        serde_json::to_value(&receipts).unwrap(),
+        answers[0].row.section,
+        loopflow_execution::durable::TaskSection::Working
+    );
+    // A headless `-b` run has no conversation.
+    assert_eq!(answers[1].receipt.session_id, None);
+    assert!(answers[1].session.is_none());
+    for key in ["session", "row"] {
+        let mut absent: serde_json::Value = serde_json::from_str(json).unwrap();
+        absent[1].as_object_mut().unwrap().remove(key);
+        assert!(serde_json::from_value::<Vec<TaskCreated>>(absent).is_err());
+    }
+    assert_eq!(
+        serde_json::to_value(&answers).unwrap(),
         serde_json::from_str::<serde_json::Value>(json).unwrap()
     );
 }

@@ -99,7 +99,10 @@ refresh authoritative state before another deliberate edit. The
 defines persistence, receipt lookup, admission budgets and recovery by error scope.
 
 `task.create` shares its creation function and receipt with the CLI, covering
-both new Tasks and Session adoption; `run` requests the Task's Graph launch.
+both new Tasks and Session adoption. With `run`, one transaction records the
+Task, its claim, its Graph and its primary Session; the server starts the held
+conversation and answers. The conversation makes the checkout and starts the
+Graph; tracker sync and the assignee check run after the answer.
 `task.run` and `task.ship` start the same command a terminal would as a plain
 detached process, and answer the typed value that process reports
 (`engine/launch.rs`); the request never carries the run. Desktop's Work operations

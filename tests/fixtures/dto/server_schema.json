@@ -12166,7 +12166,8 @@
       ],
       "type": "object"
     },
-    "TaskCreateReceipt": {
+    "TaskCreated": {
+      "description": "`task.create`'s answer: its receipt, the primary conversation's record and\nthe Task's row in the Work projection's shape, read when answering, so a\nclient selects the Task and opens the conversation before its planning\nsubscription lists it. The stored receipt holds neither.",
       "properties": {
         "graph": {
           "type": [
@@ -12176,6 +12177,19 @@
         },
         "milestone": {
           "type": "string"
+        },
+        "row": {
+          "$ref": "#/$defs/RoadmapTask"
+        },
+        "session": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionRecord"
+            },
+            {
+              "type": "null"
+            }
+          ]
         },
         "session_id": {
           "anyOf": [
@@ -12195,7 +12209,9 @@
         "task",
         "graph",
         "session_id",
-        "milestone"
+        "milestone",
+        "session",
+        "row"
       ],
       "type": "object"
     },
@@ -15724,7 +15740,7 @@
           ],
           "type": "object",
           "x-result": {
-            "$ref": "#/$defs/TaskCreateReceipt"
+            "$ref": "#/$defs/TaskCreated"
           }
         },
         {

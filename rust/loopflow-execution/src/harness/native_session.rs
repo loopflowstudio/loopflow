@@ -30,7 +30,11 @@ pub fn launch_session(
         context_file,
     )?;
     let environment = session_environment(config, context_file)?;
-    run_session_command_with_env(&command, &environment, agent_session, None, capture)
+    let launch_lock = config
+        .launch_lock
+        .as_ref()
+        .and_then(crate::ops::human_session::LaunchLock::take);
+    run_session_command_with_env(&command, &environment, agent_session, launch_lock, capture)
 }
 
 /// Continue a recorded conversation. `named_work` is the resume command's: a
@@ -449,9 +453,6 @@ fn run_native_session(
     progress: &mut crate::startup::Startup,
 ) -> Result<SessionCommandOutcome> {
     let started = std::time::Instant::now();
-    // A connect that exec'd into this launch keeps its Session launch lock held
-    // until the provider is recorded.
-    let launch_lock = launch_lock.or_else(crate::ops::human_session::inherited_launch_lock);
     let attachment = native_provider_attachment(command, environment)?;
     let capture_dir = environment
         .get(crate::session_record::CAPTURE_KEY_ENV)

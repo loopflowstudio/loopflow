@@ -603,15 +603,31 @@ pub(super) fn resolve_upstream_base(
     repo: &Path,
     default_branch: &str,
 ) -> OpsResult<(String, String)> {
-    let base = if default_branch == get_default_branch(repo)? {
+    let base = upstream_base(repo, default_branch)?;
+    crate::git::fetch_tracking_ref(repo, &base)
+        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    resolve_base(repo, default_branch, base)
+}
+
+/// The same base as the last fetch left it.
+pub(super) fn local_upstream_base(
+    repo: &Path,
+    default_branch: &str,
+) -> OpsResult<(String, String)> {
+    resolve_base(repo, default_branch, upstream_base(repo, default_branch)?)
+}
+
+fn upstream_base(repo: &Path, default_branch: &str) -> OpsResult<String> {
+    Ok(if default_branch == get_default_branch(repo)? {
         crate::git::integration_base(repo)?
     } else if has_remote(repo)? {
         format!("origin/{default_branch}")
     } else {
         default_branch.to_string()
-    };
-    crate::git::fetch_tracking_ref(repo, &base)
-        .map_err(|error| task_error(format!("failed to fetch task base: {error}")))?;
+    })
+}
+
+fn resolve_base(repo: &Path, default_branch: &str, base: String) -> OpsResult<(String, String)> {
     let base_ref = if base == default_branch {
         format!("refs/heads/{default_branch}")
     } else {

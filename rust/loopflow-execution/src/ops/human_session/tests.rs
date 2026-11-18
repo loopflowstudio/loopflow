@@ -132,8 +132,8 @@ fn resume_refuses_a_run_and_leaves_its_provider_running() {
                 &(store.sqlite.clone(), session.id.to_string(), first.clone()),
                 crate::session::Holder::Caller,
             )?;
-            let opened = super::open(&store, home, &session.id, false, true, false, false).await;
-            let forked = super::open(&store, home, &session.id, true, true, false, false).await;
+            let opened = super::open(&store, home, &session.id, None, None, false, true, false, false).await;
+            let forked = super::open(&store, home, &session.id, None, None, true, true, false, false).await;
             let running = provider.try_wait()?.is_none();
             provider.kill().await?;
             assert!(running, "resume stopped the Run's provider");
@@ -849,7 +849,18 @@ fn opening_an_admitted_holder_of_unknown_liveness_takes_it_over() {
             "Take over"
         );
 
-        let opened = super::open(&store, repo.path(), &session.id, false, true, false, false).await;
+        let opened = super::open(
+            &store,
+            repo.path(),
+            &session.id,
+            None,
+            None,
+            false,
+            true,
+            false,
+            false,
+        )
+        .await;
         let message = opened.unwrap_err().to_string();
         assert!(
             message.contains("resume was not started"),
@@ -874,7 +885,7 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
     std::fs::write(
         &claude,
         format!(
-            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s' \"$LF_HUMAN_SESSION\" > '{}'\n",
+            "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then exit 0; fi\nprintf '%s ' \"$@\" > '{}'\n",
             received.display()
         ),
     )
@@ -939,16 +950,25 @@ fn resuming_an_ended_conversation_launches_its_provider_as_the_session() {
                 ),
                 super::SessionResumeIntent::Resume
             );
-            super::open(&store, home, &session.id, false, true, false, false)
-                .await
-                .map(|_| session.id.to_string())
+            super::open(
+                &store,
+                home,
+                &session.id,
+                None,
+                None,
+                false,
+                true,
+                false,
+                false,
+            )
+            .await
+            .map(|_| ())
         })
     });
     std::env::set_var("PATH", path);
-    let id = opened.unwrap();
-    let token: super::HumanSessionToken =
-        serde_json::from_str(&std::fs::read_to_string(&received).unwrap()).unwrap();
-    assert_eq!(token, super::HumanSessionToken::Primary { id });
+    opened.unwrap();
+    let argv = std::fs::read_to_string(&received).unwrap();
+    assert!(argv.contains("claude-thread"), "{argv}");
 }
 
 #[test]
@@ -966,12 +986,16 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
+            None,
             false,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(
             first.open_argv,
@@ -1023,12 +1047,16 @@ fn preparing_a_consumed_first_launch_offers_try_again_and_changes_nothing() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
+            None,
             false,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(prepared.action, listed.action);
         let after = store.session(&record.id).await.unwrap().unwrap();
@@ -1056,12 +1084,16 @@ fn recovery_refresh_follows_current_holder_and_history() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
+            None,
             false,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(prepared.action.unwrap().label, "Start conversation");
 
@@ -1095,12 +1127,16 @@ fn recovery_refresh_follows_current_holder_and_history() {
             &store,
             std::path::Path::new("/"),
             &record.id,
+            None,
+            None,
             false,
             false,
             false,
             false,
         )
         .await
+        .unwrap()
+        .prepared()
         .unwrap();
         assert_eq!(prepared.action, refreshed.action);
         assert_eq!(
@@ -1157,12 +1193,16 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 &store,
                 std::path::Path::new("/"),
                 &record.id,
+                None,
+                None,
                 false,
                 false,
                 false,
                 false,
             )
             .await
+            .unwrap()
+            .prepared()
             .unwrap();
             let refreshed = listed_session(&store, &record.id);
             assert_eq!(prepared.action, refreshed.action);
@@ -1178,12 +1218,16 @@ fn recovery_refresh_recognizes_imported_history_before_attachment() {
                 &store,
                 std::path::Path::new("/"),
                 &next.id,
+                None,
+                None,
                 false,
                 false,
                 false,
                 false,
             )
             .await
+            .unwrap()
+            .prepared()
             .unwrap();
             let refreshed = listed_session(&store, &next.id);
             assert_eq!(prepared.action, refreshed.action);
@@ -1345,7 +1389,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Simulate app/server death after the atomic append, before publication.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "interrupted")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, next.captured);
         assert_eq!(recovered.artifact_key.as_deref(), Some(artifact.as_str()));
         assert!(recovered.input_published);
@@ -1468,7 +1513,8 @@ fn creation_retry_reconciles_publication_but_never_repeats_a_stop_or_append() {
         // Publication succeeded but the result was not recorded before exit.
         let recovered = super::new_thread(&store, &record.id, None, false, false, "published")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(recovered.captured, published.captured);
         assert!(recovered.input_published);
         assert_eq!(
@@ -1495,10 +1541,12 @@ fn new_thread_before_a_first_provider_keeps_the_original_prompt_and_retries_once
             .unwrap();
         let first = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         let retry = super::new_thread(&store, &record.id, None, false, false, "first")
             .await
-            .unwrap();
+            .unwrap()
+            .0;
         assert_eq!(first.captured, retry.captured);
         assert_eq!(first.request, retry.request);
         assert!(store

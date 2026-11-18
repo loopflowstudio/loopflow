@@ -108,7 +108,7 @@ impl Table {
                 approve: false,
             },
         )
-        .map(|receipt| receipt.task)
+        .map(|created| created.receipt.task)
     }
 
     fn bind(&self, session: &str, task: &Task) -> anyhow::Result<()> {

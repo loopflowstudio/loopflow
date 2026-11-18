@@ -1122,10 +1122,11 @@ public struct RegistryQuery: Sendable {
     }
 
     /// New Task: Rust files the request in `wave` (nil files it in the
-    /// repository), starts it as `lf task run` does and admits its conversation
-    /// with the request as the first turn. Returns once the Graph registers.
-    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreateReceipt {
-        try Self.decode(TaskCreateReceipt.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
+    /// repository) and admits its conversation with the request as the first
+    /// turn. Returns once both are recorded; the conversation makes the
+    /// checkout and starts the Graph.
+    public func createTask(request: String, wave: String?, graph: String?, cwd: String?, requestID: String = UUID().uuidString) async throws -> TaskCreated {
+        try Self.decode(TaskCreated.self, from: await write(.taskCreate(directory: cwd ?? "/", requestID: requestID,
             title: nil, request: request, wave: wave, graph: graph, session: nil, run: true)))
     }
 
@@ -1342,6 +1343,28 @@ public struct TaskCreateReceipt: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey {
         case task, graph, milestone
         case sessionId = "session_id"
+    }
+}
+
+/// `task.create`'s answer: the receipt, plus the primary conversation's record
+/// and the Task's planning row read when answering. A repeat reads them again;
+/// the stored receipt that `creation.lookup` returns holds neither.
+public struct TaskCreated: Decodable, Sendable {
+    public let receipt: TaskCreateReceipt
+    public let session: SessionRecord?
+    /// The Task's row in the Work projection's shape, so a window selects the
+    /// Task before its planning subscription lists it.
+    public let row: RoadmapTask
+
+    enum CodingKeys: String, CodingKey {
+        case session, row
+    }
+
+    public init(from decoder: Decoder) throws {
+        receipt = try TaskCreateReceipt(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        session = try values.decode(SessionRecord?.self, forKey: .session)
+        row = try values.decode(RoadmapTask.self, forKey: .row)
     }
 }
 

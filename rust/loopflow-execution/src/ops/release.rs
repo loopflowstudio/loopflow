@@ -2463,12 +2463,9 @@ fn classify_release_notes_degradation(err: &CommandError) -> Option<ReleaseNotes
         return Some(ReleaseNotesDegradation::MissingCli);
     }
     if combined.contains("provider usage limit")
-        || combined.contains("usage limit reached")
-        || combined.contains("usage limit has been reached")
-        || combined.contains("you've hit your usage limit")
-        || combined.contains("subscription quota")
-        || combined.contains("quota exceeded")
-        || combined.contains("insufficient_quota")
+        || combined
+            .lines()
+            .any(|line| crate::agent::subscription_limit_text(line).is_some())
     {
         return Some(ReleaseNotesDegradation::Quota);
     }

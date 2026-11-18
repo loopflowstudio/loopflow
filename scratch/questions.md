@@ -12,3 +12,9 @@
 - The brief says LOO-959 "was stacked on LOO-953 from creation". The store and
   process history show it was created unstacked and stacked by hand after a
   steer ("you can stack onto 953 i guess"). Plan treats the hand-stack as the cause.
+- A stacked Task running `lf sync <plain branch>` is still refused. Merging it
+  would make the stacked sync record that branch's tip as the fork
+  (`record_control_task_state`). Docs say it merges without changing the
+  stack; either build that (merge without recording) or narrow the doc line.
+- `lf sync <Task> --plan` plans against the literal argument and records
+  nothing; resolving the Task's branch for the preview is not built.

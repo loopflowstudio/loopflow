@@ -2,9 +2,10 @@
 
 ## Status (2026-11-17, Session lifetime built)
 
-Stacked on LOO-936 (PR #1965, open and unmerged 2026-11-17) and merged with
-main at `2593c489d7`; that merge touched nothing this plan depends on.
-Main since adds #1964 (Task conversation before checkout), no overlap.
+LOO-936 merged as #1965 (`fb14b674c9`) and #1964 with it; synced at
+`ac93e4c0e7`, resolved against the LOO-936 branch history (main's tree
+equals its tip). Still owed: rerun `python3 -I scratch/process_sql_scan.py rust`
+and reconcile the inventory.
 
 Built: slice 2a ("Slice 2a as built", QA in `scratch/qa.html`); the
 renames to `Execution`, `ExecutionResult`, `ExecutionStart`,
@@ -27,8 +28,7 @@ retirement by terminal (Graph runs gain `held_terminal_id`),
 `process_starter`, `run_task_graph`'s parent check (`graph.rs:79`);
 (3) the expand migration's foreign-key rebuild together with stopping the
 journal writer **and the owner liveness pass** (see "Concept review after
-the carrier slices"); (4) slices 4–6. When LOO-936 merges: rebase, rerun
-`python3 -I scratch/process_sql_scan.py rust` and reconcile the inventory.
+the carrier slices"); (4) slices 4–6.
 Quotes and the OS-scan measurement: `questions.md`.
 
 **Session lifetime as built (first cut of slice 3).**

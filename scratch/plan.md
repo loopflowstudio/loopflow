@@ -3,11 +3,12 @@
 ## Outcome
 
 `loopflow-harness` is a new private path crate that depends on
-`loopflow-model` and nothing else in the workspace. It answers one question:
-what does each native client (Claude, Codex, OpenCode, Pi) write, and where?
-It holds the stream decoders and the facts they produce, the transcript
-readers and the `Turn` they produce, where each client keeps its files, and
-the harness identity.
+`loopflow-model` and nothing else in the workspace. It holds what each native
+client (Claude, Codex, OpenCode, Pi) is and writes, as far as that can be said
+without Loopflow's store or the process table: the stream decoders and the
+facts they produce, the transcript readers and the `Turn` they produce, where
+each client keeps its files, and the harness identity with its model names,
+environment variables and sign-in advice.
 
 `loopflow-execution` keeps everything Loopflow does with a harness: launching
 it, recording it, and joining its transcripts to Sessions in the store.
@@ -140,8 +141,9 @@ re-exports nothing from it.
 ## Callers and files outside Rust source
 
 - `Cargo.toml` workspace members; execution, application and test-support manifests
-- `scripts/check_architecture.py:258` and `scripts/check_migrations.py:188` crate tuples; `scripts/test.py` suite reach; `scripts/macos_inputs.py`
-- `scripts/benchmarks/crate-rebuild/probe.py` member list; `run.py` cases
+- `scripts/check_architecture.py` and `scripts/check_migrations.py` crate tuples (done, slice 1)
+- Not yet naming the crate: `scripts/test.py` suite reach, `scripts/macos_inputs.py`,
+  `scripts/benchmarks/crate-rebuild/probe.py` member list, `run.py` cases
 - `AGENTS.md` harness rule path, `rust/loopflow-execution/README.md`,
   `harness/README.md` (its "only harness dispatch" line becomes the two
   views), `docs/dev/{codebase,execution,reference-code}.md`, a new
@@ -335,9 +337,37 @@ measured compile share: `ops` above the rest, not another leaf.
      only `transcript::Calls::add` names both.
    - Application imports changed in 6 files; `history_transcript.rs` is the
      only one that needed more than a path.
-   - `main` and the four open PRs were not rechecked in this pass.
-3. **Measure and document.** `run.py` cases, `results/loo-923.html`, scripts,
-   READMEs and `AGENTS.md` paths.
+   - Rechecked after the slice, 2026-11-18: `origin/main` is still
+     `7bb879aff4`; #1967, #1968, #1972 and #1976 are open.
+3. **Measure and document. Remains.**
+   - `run.py`: cases `harness_format` and `harness_test`, and the harness-hit
+     requirement on `execution` and `storage` (Acceptance check, above).
+     `probe.py`'s member list gains `rust/loopflow-harness`.
+   - `lf task status LOO-921` and `LOO-922` first, then one `run.py` run of
+     base `7bb879aff4` against `HEAD`, written to
+     `scripts/benchmarks/crate-rebuild/results/loo-923.{json,html}`.
+   - `scripts/test.py`: a harness-only change reaches `loopflow-harness`'s
+     tests and execution's harness suites; `scripts/macos_inputs.py` if the
+     Desktop build reads the crate.
+   - Correct the docs written ahead of the code against slices 1 and 2:
+     `recognizes` on `Launcher`, `transcript_home` without a default, a fifth
+     harness failing to compile until it has a launcher, `pi_rpc.py` staying
+     in execution, `transcript::testdata` and `fact::trace` behind
+     `test-support`, the crate's dependency list.
+   - The PR body carries the checks left for gate (clippy over execution and
+     the application, `documented_commands::`, `binary(golden_prompt)`) and
+     which LOO-921/LOO-922 numbers did not exist.
+
+## Seen in review, not changed
+
+- `Harness` carries six methods that are about the client and not about what
+  it writes: `title_args`, `model_rungs`, `sign_in_advice`, `provider_env`,
+  `api_key_env`, `validate_model`. Each has one or two callers, all in
+  execution (`terminal_title`, `agent`, `config`, `provider_auth`). They
+  compile without the store, so the placement rule puts them in the crate;
+  the cost is that an edit to a model rung or a title flag now rebuilds
+  execution from the crate below it. `title_args` is the one that is purely a
+  launch argument and could sit on `Launcher`.
 
 ## After this Task
 

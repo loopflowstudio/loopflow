@@ -2742,7 +2742,11 @@ fn sync_onto_an_open_task_stacks_it_moves_its_pr_and_main_detaches_it() {
 fn publish_keeps_the_prs_base_and_names_a_disagreement() {
     let home = tempfile::TempDir::new().unwrap();
     let repo = TestRepo::new();
-    let _env = EnvGuard::with_lf_home(&[("gh", GH_PR_42)], home.path());
+    let open = "#!/bin/sh\nexit 0\n";
+    let _env = EnvGuard::with_lf_home(
+        &[("gh", GH_PR_42), ("open", open), ("xdg-open", open)],
+        home.path(),
+    );
     let (parent, _parent_path, child, child_path) = parent_and_published_child(&repo, home.path());
     rusqlite::Connection::open(&parent.database)
         .unwrap()

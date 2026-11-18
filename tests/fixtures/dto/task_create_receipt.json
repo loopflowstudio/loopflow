@@ -98,8 +98,7 @@
           "observed_at": null
         },
         "sync": {
-          "connected": false,
-          "changes": []
+          "actions": []
         }
       },
       "reference": {
@@ -225,8 +224,7 @@
           "observed_at": null
         },
         "sync": {
-          "connected": false,
-          "changes": []
+          "actions": []
         }
       },
       "reference": {

@@ -740,14 +740,17 @@ pub(crate) fn scope_graph_default(
     repo: &Path,
     wave: Option<&str>,
 ) -> OpsResult<(String, ConfigSource)> {
-    let layers = crate::config::config_layers(Some(repo), wave).map_err(task_error)?;
-    let resolved = crate::config::settings::resolve_layers(&layers, None).map_err(task_error)?;
+    let resolved = crate::config::resolved(Some(repo), wave).map_err(task_error)?;
     let source = resolved.settings["graph"]
         .selected()
         .expect("graph has a builtin default")
         .source;
     Ok((
-        resolved.config.graph.expect("graph has a builtin default"),
+        resolved
+            .config
+            .graph
+            .clone()
+            .expect("graph has a builtin default"),
         source,
     ))
 }

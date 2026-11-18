@@ -55,3 +55,19 @@
 - **Open:** a personal settings file that fails to load now reports its own
   error variant (`io error: …`) where `PersonalSettings` wrapped it as
   `invalid graph: …`. No test pinned the old text.
+
+## QA (2026-11-18)
+
+- **A bare Task-detail read is one reading for the length of the call**
+  (`observe::reading`). The plan said bare commands compute inline exactly as
+  before; with the per-reading memo deleted that made `lf wave status` about
+  20% slower over 30 Tasks. Within that call each file is read once. Passed
+  over: putting the memo back.
+- **`Derived::GlobalSettings` is a fourth variant.** The plan held placement
+  back until a sample showed it; the sample showed the global file's
+  resolution under Machine names instead (213 samples), not placement.
+- **The global settings slot keeps the error's text**, not `anyhow::Error`
+  (not `Clone`). Every caller already turns it into `StoreError::InvalidData`
+  by its text.
+- **Left to a person:** the `sample` on the real Machine under 40 agents, and
+  Desktop itself. Both QA servers ran in private homes with 30 Tasks.

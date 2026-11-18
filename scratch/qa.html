@@ -1,0 +1,145 @@
+<!doctype html><meta charset="utf-8"><title>LOO-978 QA</title>
+<style>body{font:15px/1.5 -apple-system,sans-serif;max-width:1100px;margin:2em auto;padding:0 1em;color:#222}
+table{border-collapse:collapse;width:100%;margin:1em 0}td,th{border:1px solid #ddd;padding:6px 8px;vertical-align:top;text-align:left}
+code,pre{font:12px/1.4 ui-monospace,monospace;word-break:break-word}pre{background:#f6f6f6;padding:10px;overflow:auto}th{background:#f0f0f0}</style>
+<h1>LOO-978: served reads reuse resolved settings and the skill catalog</h1>
+<p>Run 2026-11-18. Two private Machines under <code>/tmp/lf-qa-978</code>, built by the same script: one repository, Wave
+<code>alpha</code> with its own <code>config.yaml</code>, a repository skill, a personal <code>lf config set agent</code>, 24 Tasks in the Wave and
+6 more adopted into their own worktrees. The <b>branch</b> server ran this branch's release build; the <b>base</b> server ran the installed
+<code>lf 0.16.0+7bb879aff</code>, which is the commit this branch started from. Both were driven over their Unix sockets with the
+documented newline JSON protocol, and through the bare CLI. The scripts are in <code>scratch/qa/</code>.</p>
+
+<h2>What works now</h2>
+<ul>
+<li>Every served answer matches the base build across 48 steps of edits, additions, removals and broken files.</li>
+<li>Under the same write load the branch server used 107% CPU where the base used 181%, and
+<code>validate_value</code> went from 4,261 samples to 17.</li>
+<li>Bare <code>lf wave status</code>, <code>lf wave show</code> and <code>lf task list</code> are no slower than the base.</li>
+<li>A <code>--setting</code> override on one command does not reach the server's shared value.</li>
+</ul>
+
+<h2>What QA found and fixed</h2>
+<table><tr><th>Found</th><th>What it showed</th><th>Fix</th></tr>
+<tr><td>Each Task's default Graph still resolved settings on every read</td>
+<td>First sample of the branch server: 649 samples in <code>resolve_with</code>, 343 of them under <code>ops::task::scope_graph_default</code></td>
+<td><code>scope_graph_default</code> reads <code>config::resolved</code></td></tr>
+<tr><td>The global <code>config.yaml</code> was resolved per call for Machine names</td>
+<td>274 of those samples under <code>config::placement::global_settings_at</code> (ownership, Machine list, local Machine)</td>
+<td>A fourth shared value, <code>Derived::GlobalSettings</code>, with a test</td></tr>
+<tr><td>The bare CLI got slower</td>
+<td><code>lf wave status alpha --json</code> 168 ms against 139 ms on the base; <code>lf task list</code> 172 against 136. The branch deleted a
+per-reading memo, so a bare command resolved once per Task</td>
+<td><code>observe::reading</code>: bare Task details run as one reading for the call. Now 138 and 123 ms</td></tr></table>
+
+<h2>Load: same script against both servers</h2>
+<p><code>python3 scratch/qa/load.py &lt;tag&gt; 20 sample</code>: 8 connections each holding one <code>plan.list</code> and three <code>task.get</code>
+subscriptions, a writer sending <code>task.update</code> about twice a second, and a <code>wave.plan</code> request every 200 ms, for 20 s.
+<code>sample &lt;pid&gt; 5</code> ran during it.</p>
+<pre>base    {"build": "0.16.0+7bb879aff", "seconds": 20.4, "server_cpu_seconds": 37.07, "cpu_percent": 181, "writes": 43,
+         "subscription_readings": 220, "wave.plan_requests": 43, "wave.plan_median_ms": 270, "wave.plan_max_ms": 362, "errors": []}
+branch  {"build": "0.16.0+f27c462ed.dirty", "seconds": 20.3, "server_cpu_seconds": 21.74, "cpu_percent": 107, "writes": 47,
+         "subscription_readings": 256, "wave.plan_requests": 47, "wave.plan_median_ms": 223, "wave.plan_max_ms": 426, "errors": []}</pre>
+<table><tr><th>Samples in 5 s (top-most frame, summed over threads)</th><th>base</th><th>branch before fixes</th><th>branch</th></tr>
+<tr><td><code>settings::resolve_with</code> / <code>resolve_layers</code></td><td>5,548</td><td>649</td><td>28</td></tr>
+<tr><td><code>settings::validate_value</code></td><td>4,261</td><td>306</td><td>17</td></tr>
+<tr><td><code>SkillCatalog</code></td><td>1</td><td>0</td><td>0</td></tr>
+<tr><td><code>settings::outside</code></td><td>0 (inlined)</td><td>66</td><td>51</td></tr>
+<tr><td><code>snapshot_task_detail</code></td><td>5,635</td><td>2,232</td><td>not re-counted</td></tr></table>
+<p>The 28 left are first resolutions after a write changed a checkout's files (planning sync) and placement. The branch server did more
+readings in the same time, so its remaining CPU is SQLite and Git, not configuration.</p>
+<p>Bare CLI, release builds, mean of five runs over 30 Tasks:</p>
+<table><tr><th>Command</th><th>base</th><th>branch before fix</th><th>branch</th></tr>
+<tr><td><code>lf wave status alpha --json</code></td><td>142 ms</td><td>168 ms</td><td>138 ms</td></tr>
+<tr><td><code>lf wave show alpha --json</code></td><td>110 ms</td><td>121 ms</td><td>87 ms</td></tr>
+<tr><td><code>lf task list</code></td><td>149 ms</td><td>172 ms</td><td>123 ms</td></tr></table>
+
+<h2>Scenario 1: edits reach the next read (<code>scen.py</code>)</h2>
+<p>One connection per server, a <code>plan.list</code> subscription held open, and a <code>wave.plan</code> request two seconds after each change.
+Each row is the Wave's agent, each skill's agent, and the harness of all 30 Tasks. Rerun from the start after the fixes.</p>
+<table><tr><th>Step</th><th>Answer</th><th>branch vs base</th></tr><tr><td>personal file</td><td><code>{agent: claude:opus}
+</code></td><td>same</td></tr>
+<tr><td>plan subscription readings at start</td><td><code>1</code></td><td>same</td></tr>
+<tr><td>1 first read</td><td><code>{&quot;agent&quot;: &quot;claude:opus&quot;, &quot;agent_from&quot;: &quot;personal/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;claude:opus&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>1 bare CLI same moment</td><td><code>{&quot;agent&quot;: &quot;claude:opus&quot;, &quot;agent_from&quot;: &quot;personal/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;claude:opus&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>2 config unset agent</td><td><code>/private/tmp/lf-qa-978/X/repo/lf.config.local.yaml: agent unset; NextLaunch</code></td><td>same</td></tr>
+<tr><td>2 after personal unset</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>3 after wave agent edit</td><td><code>{&quot;agent&quot;: &quot;codex:gpt-5&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 6, &quot;codex&quot;: 24}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;codex:gpt-5&quot;}}</code></td><td>same</td></tr>
+<tr><td>3 plan subscription woke</td><td><code>true</code></td><td>same</td></tr>
+<tr><td>4 after repo skill agent edit</td><td><code>{&quot;agent&quot;: &quot;codex:gpt-5&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 6, &quot;codex&quot;: 24}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;codex:gpt-5&quot;}}</code></td><td>same</td></tr>
+<tr><td>5 after adding skill sweep</td><td><code>{&quot;agent&quot;: &quot;codex:gpt-5&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 6, &quot;codex&quot;: 24}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;sweep&quot;: &quot;codex:gpt-5&quot;, &quot;tidy&quot;: &quot;codex:gpt-5&quot;}}</code></td><td>same</td></tr>
+<tr><td>5 skill.list has sweep/tidy</td><td><code>[&quot;sweep&quot;, &quot;tidy&quot;]</code></td><td>same</td></tr>
+<tr><td>6 skill.list after adding scrub</td><td><code>[&quot;scrub&quot;, &quot;sweep&quot;, &quot;tidy&quot;]</code></td><td>same</td></tr>
+<tr><td>6 skill.list after removing scrub</td><td><code>[&quot;sweep&quot;, &quot;tidy&quot;]</code></td><td>same</td></tr>
+<tr><td>7 invalid wave yaml (served)</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;sweep&quot;: &quot;claude:sonnet&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>7 invalid wave yaml (bare)</td><td><code><b>branch:</b> 4 warning lines, then the answer<br><b>base:</b> 28 warning lines, then the answer</code></td><td>differs</td></tr>
+<tr><td>8 unknown harness (served)</td><td><code>{&quot;agent&quot;: &quot;codex&quot;, &quot;agent_from&quot;: &quot;repository/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 6, &quot;codex&quot;: 24}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;sweep&quot;: &quot;claude:haiku&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>8 unknown harness (bare)</td><td><code><b>branch:</b> 7 warning lines, then the answer<br><b>base:</b> 9 warning lines, then the answer</code></td><td>differs</td></tr>
+<tr><td>9 after repair</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;sweep&quot;: &quot;claude:sonnet&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>10 wave agent line removed</td><td><code>{&quot;agent&quot;: &quot;codex&quot;, &quot;agent_from&quot;: &quot;repository/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 6, &quot;codex&quot;: 24}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;sweep&quot;: &quot;claude:haiku&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>10 repo config removed</td><td><code>{&quot;agent&quot;: null, &quot;agent_from&quot;: &quot;builtin/None&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;None&quot;: 24, &quot;claude&quot;: 6}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;}}</code></td><td>same</td></tr>
+<tr><td>10 restored</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>11 bare --setting agent</td><td><code>codex:gpt-5</code></td><td>same</td></tr>
+<tr><td>11 served after someone&#x27;s --setting</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>11 served config.settings agent</td><td><code>claude:sonnet</code></td><td>same</td></tr>
+<tr><td>11 personal set again</td><td><code>{&quot;agent&quot;: &quot;claude:opus&quot;, &quot;agent_from&quot;: &quot;personal/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;claude:opus&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>12 one worktree overrides agent</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;agent_from&quot;: &quot;repository/wave&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>12 restored</td><td><code>{&quot;agent&quot;: &quot;claude:opus&quot;, &quot;agent_from&quot;: &quot;personal/repository&quot;, &quot;graph&quot;: &quot;code&quot;, &quot;ntasks&quot;: 30, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;claude:opus&quot;, &quot;tidy&quot;: &quot;claude:opus&quot;}}</code></td><td>same</td></tr>
+<tr><td>plan subscription readings at end</td><td><code>true</code></td><td>same</td></tr>
+<tr><td>errors on connection</td><td><code>[]</code></td><td>same</td></tr></table>
+<p>The two rows that differ are the bare CLI's stderr: a bad file is warned about once per resolution, and the branch resolves fewer times
+(4 lines against 28, 7 against 9). The answers on stdout match. Over the whole script the branch server wrote 9 warning lines to its
+stderr where the base wrote 154.</p>
+
+<h2>Scenario 2: load errors, a worktree's own file, skills, a Task subscription (<code>scen2.py</code>)</h2>
+<table><tr><th>Step</th><th>Answer</th><th>branch vs base</th></tr><tr><td>0 start</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>1 wt3 wave agent -&gt; codex</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 29, &quot;codex&quot;: 1}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>1 wt3 restored</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>2 unreadable wave file (served)</td><td><code>{&quot;error&quot;: &quot;invalid graph: failed to read /private/tmp/lf-qa-978/X/repo/.lf/wave/alpha/config.yaml: Permission denied (os error 13)&quot;}</code></td><td>same</td></tr>
+<tr><td>2 unreadable wave file (bare)</td><td><code>{&quot;error&quot;: &quot;Error: invalid graph: failed to read /private/tmp/lf-qa-978/X/repo/.lf/wave/alpha/config.yaml: Permission denied (os error 13)&quot;}</code></td><td>same</td></tr>
+<tr><td>2 readable again</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>3 repo config is a list (served)</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;}}</code></td><td>same</td></tr>
+<tr><td>3 repo config is a list (bare)</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;}}</code></td><td>same</td></tr>
+<tr><td>3 served config.settings</td><td><code>[{&quot;occurrence&quot;: null, &quot;settings&quot;: {&quot;agent&quot;: {&quot;candidates&quot;: [{&quot;key&quot;: &quot;agent&quot;, &quot;locator&quot;: &quot;/private/tmp/lf-qa-978/X/repo/.lf/wave/alpha/config.yaml&quot;, &quot;reason&quot;: &quot;selected&quot;, &quot;scope&quot;: &quot;wave&quot;, &quot;source&quot;: &quot;repository&quot;, &quot;target&quot;: {&quot;kind&quot;: &quot;general&quot;}, &quot;value&quot;: &quot;claude:sonnet&quot;}], &quot;value&quot;: &quot;claude:sonnet&quot;}, &quot;agents&quot;: {&quot;candidates&quot;: [{&quot;key&quot;: &quot;agents&quot;, &quot;locator&quot;: &quot;builtin&quot;, &quot;reason&quot;: &quot;selected&quot;, &quot;scope&quot;: &quot;global&quot;, &quot;source&quot;: &quot;built</code></td><td>same</td></tr>
+<tr><td>3 repaired</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>4 unknown graph (served)</td><td><code>{&quot;graph&quot;: &quot;nonesuch&quot;}</code></td><td>same</td></tr>
+<tr><td>4 unknown graph (bare)</td><td><code>{&quot;graph&quot;: &quot;nonesuch&quot;}</code></td><td>same</td></tr>
+<tr><td>4 repaired</td><td><code>{&quot;agent&quot;: &quot;claude:sonnet&quot;, &quot;providers&quot;: {&quot;claude&quot;: 30}, &quot;skill_agents&quot;: {&quot;implement&quot;: &quot;codex&quot;, &quot;tidy&quot;: &quot;claude:sonnet&quot;}}</code></td><td>same</td></tr>
+<tr><td>5 tidy before</td><td><code>[&quot;Tidy the fixture.&quot;]</code></td><td>same</td></tr>
+<tr><td>5 tidy after description edit</td><td><code>[&quot;Scrub every corner.&quot;]</code></td><td>same</td></tr>
+<tr><td>5 tidy restored</td><td><code>[&quot;Tidy the fixture.&quot;]</code></td><td>same</td></tr>
+<tr><td>6 task.get first</td><td><code>{&quot;agent fields&quot;: [&quot;claude&quot;], &quot;errors&quot;: [], &quot;readings&quot;: 1}</code></td><td>same</td></tr>
+<tr><td>6 task.get after its checkout&#x27;s Wave file edit</td><td><code>{&quot;agent fields&quot;: [&quot;codex&quot;], &quot;woke&quot;: true}</code></td><td>same</td></tr>
+<tr><td>errors</td><td><code>[{&quot;code&quot;: &quot;unavailable&quot;, &quot;data&quot;: null, &quot;id&quot;: &quot;q4&quot;, &quot;message&quot;: &quot;invalid graph: failed to read /private/tmp/lf-qa-978/X/repo/.lf/wave/alpha/config.yaml: Permission denied (os error 13)&quot;, &quot;revisions&quot;: null, &quot;type&quot;: &quot;error&quot;}]</code></td><td>same</td></tr></table>
+
+<h2>Scenario 3: the global file (<code>scen3.py</code>)</h2>
+<p>Run after adding the shared global settings. A <code>machines:</code> alias written to <code>$LF_HOME/config.yaml</code> while the server runs.</p>
+<pre>branch  before: served names 'mini': False
+        alias added: served 6 bare 6
+        alias removed: served 0
+base    before: served names 'mini': False
+        alias added: served 6 bare 6
+        alias removed: served 0</pre>
+
+<h2>Checks</h2>
+<pre>cargo test -p loopflow-execution --lib -- observe::tests:: config::placement:: work::wave::setup:: read_stream::tests:: ops::task::tests:: config:: skills::catalog:: store::
+    393 passed
+cargo test -p loopflow --lib lf::commands::waves::                       21 passed
+cargo test -p loopflow --test integration wave_setup_tests::             8 passed
+cargo clippy --all-targets -- -D warnings                                clean</pre>
+
+<h2>Not reached</h2>
+<ul>
+<li><b>The real Machine under 40 agents.</b> Installing a branch build over a server with live Sessions is a person's call. The number to
+take there: <code>sample $(pgrep -f 'lf server run') 3</code> before and after.</li>
+<li><b>Desktop and the phone.</b> Nothing a read returns changed, and the same reads were driven over the socket; the apps were not opened.</li>
+<li><b>A store the size of the real one.</b> 30 Tasks here, about 10,000 recorded there.</li>
+<li><b>A returning Machine.</b> No schema or stored data changes, so the homes were fresh ones.</li>
+</ul>
+
+<h2>Still wrong, worst first</h2>
+<ol>
+<li>A served read that finds a bad setting warns on the server's stderr. The person editing the file in front of Desktop sees the value fall
+back with no reason given. Same on the base; on the plan under "Larger than this Task".</li>
+<li><code>settings::outside()</code> still runs per call (51 samples): it stats each harness name along <code>PATH</code>.</li>
+<li>The bare CLI repeats one warning per resolution: 4 to 7 identical lines for one bad line in one file.</li>
+</ol>

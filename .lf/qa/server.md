@@ -108,3 +108,34 @@ CLI is installed, even for a command-only Graph. Set `CODEX_HOME` and
 conversations' providers by their disposable checkout cwd and stop them with
 their descendants; they are children of the private home's `lf holder run`, so
 stopping the foreground server alone leaves them running.
+
+# Comparing served reads between two builds
+
+Make two private Machines with the same script (a repository, a Wave with its
+own `config.yaml`, Tasks created with `lf task create '<title>' --wave <wave>`,
+a few adopted with `--worktree`), one per binary: the branch build and the
+installed `lf` (`whence -p lf`) as the base. Keep `HOME`, `LF_HOME`,
+`CODEX_HOME` and `CLAUDE_CONFIG_DIR` under `/tmp/lf-qa-*/<tag>/home`. Build the
+branch with `--release` before timing anything: the installed `lf` is a
+release build and a debug server is several times slower.
+
+`wave.plan` is `lf wave status --json` as a request; it has no subscription.
+The reads that subscribe are `plan.list`, `task.get`, `task.status`,
+`session.list`, `session.history`, `repo.tracker`, `task.wait` and the Desktop
+views; anything else answers "has no --subscribe". `subscribe` needs
+`"sender": null` as `request` does. `skill.list` takes `"path": []`, not null.
+
+A settings or skill file edit reaches the next served read after the Local
+refresh, about a second: wait two before asking. Normalize the home path and
+`home_<id>` Machine IDs, then diff each step's answer between the two servers.
+
+For CPU, open several connections holding `plan.list` and `task.get`
+subscriptions, write through `task.update` (`notes`) a few times a second, and
+read `ps -o time= -p <server pid>` before and after; `sample <pid> 5 -file …`
+during. Count a function from the call-graph section by summing the top-most
+frame of each stack that names it: `grep -c` counts lines, not samples. Rust
+v0 symbols are mangled; match `settings14validate_value`, not
+`settings::validate_value`. File warnings go to the server's stderr.
+
+Stop the servers by the PID you recorded, after checking its `LF_HOME` with
+`ps eww -p <pid>`: other worktrees run their own `lf server run`.

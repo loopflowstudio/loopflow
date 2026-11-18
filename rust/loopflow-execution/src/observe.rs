@@ -180,6 +180,11 @@ pub enum Derived {
         wave: Option<String>,
         outside: crate::config::settings::Outside,
     },
+    /// Settings the global `config.yaml` under `home` declares alone.
+    GlobalSettings {
+        home: PathBuf,
+        outside: crate::config::settings::Outside,
+    },
     /// The agent of every skill a Wave's settings name.
     SkillAgents {
         checkout: PathBuf,
@@ -439,6 +444,17 @@ fn scope<T>(reading: Option<Reading>, read: impl FnOnce() -> T) -> T {
 
 pub fn active() -> bool {
     READING.with(|reading| reading.borrow().is_some())
+}
+
+/// Run `read` as one reading: the served reading already active, else one
+/// that lasts for this call, so a bare command observes each fact and
+/// computes each derived value once however often `read` asks.
+pub fn reading<T>(read: impl FnOnce() -> T) -> T {
+    if active() {
+        read()
+    } else {
+        Arc::new(Cache::default()).capture(read).0
+    }
 }
 
 pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
@@ -914,6 +930,24 @@ mod tests {
         cache.refresh_all();
         assert!(!dependencies.changed());
         assert_eq!(cache.computations(|computed| *computed == key), 2);
+    }
+
+    #[test]
+    fn a_bare_reading_computes_a_derived_value_once_and_keeps_nothing() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file");
+        std::fs::write(&path, "before").unwrap();
+        let computed = std::sync::atomic::AtomicUsize::new(0);
+        let text = || {
+            derived(key("bare"), || {
+                computed.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                read_to_string(&path).unwrap()
+            })
+        };
+        assert_eq!(*super::reading(|| (text(), text()).1), "before");
+        assert_eq!(computed.load(std::sync::atomic::Ordering::Relaxed), 1);
+        std::fs::write(&path, "after").unwrap();
+        assert_eq!(*super::reading(text), "after");
     }
 
     #[test]

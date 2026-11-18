@@ -1803,10 +1803,23 @@ async fn snapshot_tasks(
     Ok((details, unavailable_tasks))
 }
 
+/// The details of one reading's Tasks. A bare command reads them as one
+/// reading too, so Tasks that share a checkout resolve its settings once.
+fn snapshot_task_details(
+    store: &SharedStore,
+    requests: Vec<&Task>,
+    probe_pr_empty: bool,
+    shared: &SharedTaskReads,
+) -> Result<Vec<RoadmapTask>> {
+    loopflow_execution::observe::reading(|| {
+        gather_task_details(store, requests, probe_pr_empty, shared)
+    })
+}
+
 /// Each detail waits on fresh Git observations of its own checkout. Gather
 /// them side by side: one after another, those children are most of a
 /// roadmap read. Details and the first error keep their request order.
-fn snapshot_task_details(
+fn gather_task_details(
     store: &SharedStore,
     requests: Vec<&Task>,
     probe_pr_empty: bool,

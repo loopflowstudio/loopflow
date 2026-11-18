@@ -250,6 +250,26 @@ Checks run by this step, all passing:
 For gate/CI: the full matrix; `test(performance_tests::)` and
 `test(documented_commands::)` were not run here.
 
+## What qa changed (2026-11-18)
+
+A `sample` of a branch server under write load still showed 649 samples in
+`resolve_with` against the base's 5,564. Two callers resolved outside the
+shared values, and the bare CLI had become slower. All three are fixed:
+
+- `ops::task::scope_graph_default` (each Task's default Graph, once per Task
+  per reading) resolved its own layers. It reads `config::resolved` now.
+- `config::placement::global_settings_at` (Machine names and aliases, asked
+  by ownership, placement and Machine reads) resolved the global file per
+  call. It is a fourth variant, `Derived::GlobalSettings { home, outside }`.
+- Bare `lf wave status`, `lf wave show` and `lf task list` lost the deleted
+  `waves.rs` memo and resolved once per Task: 168, 121 and 172 ms against the
+  base's 139, 102 and 136 ms over 30 Tasks. `snapshot_task_details` now runs
+  in `observe::reading`, a reading that lasts for the call: 138, 87, 123 ms.
+
+After the fixes, same load: 28 samples in `resolve_with`, 17 in
+`validate_value` (base 4,261), server CPU 107% against 181%. `outside()` is 51
+samples; `resolved_placement` is under 10, so placement stays underived.
+
 ## Larger than this Task
 
 Left on `scratch/concept-review.html`, not built here:

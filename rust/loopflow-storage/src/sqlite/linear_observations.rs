@@ -1,5 +1,5 @@
 //! Retained Linear acquisition evidence, independent of accepted Work and delivery.
-pub use crate::linear_records::revision_nanos;
+pub use crate::planning::revision_nanos;
 use crate::sqlite::{planning_write, SqliteStore};
 use crate::work::edit::WorkValue as Edit;
 use crate::{PlanningState, StoreError, StoreResult};
@@ -31,7 +31,7 @@ impl SqliteStore {
                 rows.collect::<Result<Vec<_>, _>>()?
             };
             for id in ids {
-                planning_write::local(
+                planning_write::tracker(
                     &tx,
                     &crate::work::edit::WorkEdit::for_target(
                         &id,
@@ -40,8 +40,9 @@ impl SqliteStore {
                 )?;
             }
         }
-        let mut query =
-            tx.prepare("SELECT repo,revision FROM pm_items WHERE provider='linear' AND id=?1")?;
+        let mut query = tx.prepare(
+            "SELECT repo,revision FROM pm_items WHERE provider IN ('linear','asana') AND id=?1",
+        )?;
         let rows = query
             .query_map([issue_id], |row| {
                 Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?))
@@ -50,7 +51,7 @@ impl SqliteStore {
         for (repo, cached_revision) in rows {
             let cached = revision_nanos(cached_revision.as_deref())?;
             if removed || revision.is_none() || cached < revision {
-                tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2", params![repo,issue_id])?;
+                tx.execute("UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider IN ('linear','asana') AND id=?2", params![repo,issue_id])?;
             }
         }
         drop(query);
@@ -67,7 +68,7 @@ impl SqliteStore {
         // A null detail response invalidates cached admission, not provider history.
         // Only a complete detail observation can repair it; list omission is ambiguous.
         conn.execute(
-            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider='linear' AND id=?2
+            "UPDATE pm_items SET needs_refresh=1 WHERE repo=?1 AND provider IN ('linear','asana') AND id=?2
             AND observed_at=?3 AND revision IS ?4",
             params![
                 repo,
@@ -97,7 +98,7 @@ impl SqliteStore {
              OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id
              FROM pm_items i LEFT JOIN pm_projects p
              ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
-             WHERE i.repo=?1 AND i.provider='linear' AND (i.id=?2 OR i.identifier=?2)",
+             WHERE i.repo=?1 AND i.provider IN ('linear','asana') AND (i.id=?2 OR i.identifier=?2)",
         )?;
         let rows = query
             .query_map(params![repo, selector], |row| {

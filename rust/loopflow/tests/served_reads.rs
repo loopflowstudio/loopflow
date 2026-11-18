@@ -1307,6 +1307,10 @@ fn server_operations_match_their_lf_commands() {
         | Write::WavePlanBind { .. }
         | Write::WavePlanConnect { .. }
         | Write::WavePlanReteam { .. }
+        // Syncing and answering exchange with the tracker; their spellings
+        // are below and planning_sync_tests answers a lost line through them.
+        | Write::TaskSync { .. }
+        | Write::PlanAnswer { .. }
         | Write::GraphCustomize { .. }
         // Releasing, committing, syncing and creating worktrees change the
         // repository and its remote; their spellings are compared below.
@@ -2102,6 +2106,37 @@ fn spelled(write: &loopflow::lf::commands::write::Write) -> Vec<String> {
                 spelled.extend(words(&["--reason", reason]));
             }
             (path(directory), spelled)
+        }
+        Write::TaskSync {
+            directory,
+            issue,
+            answer,
+        } => {
+            let mut args = words(&["task", "sync", issue]);
+            match answer {
+                Some(loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs) => {
+                    args.push("--keep-theirs".into())
+                }
+                Some(loopflow_execution::store::planning_sync::LostAnswer::UseMine) => {
+                    args.push("--use-mine".into())
+                }
+                None => {}
+            }
+            (path(directory), args)
+        }
+        Write::PlanAnswer {
+            directory,
+            action,
+            answer,
+        } => {
+            let flag = match answer {
+                loopflow_execution::store::planning_sync::LostAnswer::KeepTheirs => "--keep-theirs",
+                loopflow_execution::store::planning_sync::LostAnswer::UseMine => "--use-mine",
+            };
+            (
+                path(directory),
+                words(&["repo", "plan", "answer", action, flag, "--json"]),
+            )
         }
         Write::TaskRun {
             directory,

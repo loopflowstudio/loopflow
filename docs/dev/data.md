@@ -31,7 +31,7 @@ Retired history stores and intermediate branch schemas have no runtime readers.
 | Fact | Owner |
 | --- | --- |
 | Authored goals, memory, Skills, Graphs and code | Repository files and Git |
-| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear, Asana or Notion provider |
+| Saved planning | Local Task and Project rows, exchanged through a Git planning ref or a connected Linear or Asana tracker |
 | Commits, PR heads, checks and merge | Git and GitHub |
 | Actual lf command process, causal parent and observed command outcome | `processes` |
 | The provider's OS process, its served Session, original parent and current attachment | AgentProcess rows in `processes` |

@@ -126,6 +126,9 @@ struct RegistryQueryTests {
         #expect(move.cwd == "/r")
         let stop = ServedWrite.taskHold(directory: "/r", issue: "FIX-1")
         #expect(try object(stop) == object(#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#))
+        let keep = ServedWrite.planAnswer(directory: "/r", action: "a1", answer: .keepTheirs)
+        #expect(try object(keep) == object(#"{"kind":"plan.answer","directory":"/r","action":"a1","answer":"keep_theirs"}"#))
+        #expect(keep.argv == ["repo", "plan", "answer", "a1", "--keep-theirs", "--json"])
         #expect(stop.argv == ["task", "hold", "FIX-1", "--json"])
         let save = ServedWrite.taskSave(directory: "/", issue: "FIX-1", path: "a.txt", revision: "r", content: "text")
         #expect(try object(save) == object(
@@ -344,7 +347,7 @@ struct RegistryQueryTests {
       {
         "id": "project-1",
         "linear_id": null,
-        "sync": {"connected": false, "changes": []},
+        "sync": {"actions": []},
         "slug": "release-feedback",
         "name": "current",
         "workflow": "task-design",
@@ -374,7 +377,7 @@ struct RegistryQueryTests {
           "name": "Wire it",
           "description": "",
           "rank": 1,
-          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"connected": false, "changes": []},
+          "state": "unstarted", "completed_at": null, "due_date": null, "acquisition": {"state": "available", "observed_at": null}, "linear_id": null, "sync": {"actions": []},
           "assignee": null
         },
         "reference": {

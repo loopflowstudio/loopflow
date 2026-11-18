@@ -1,9 +1,9 @@
 //! Linear observations stay adapter-internal; ingestion preserves ordered direction.
-use crate::linear::{LinearComment, LinearIssueObservation};
+use loopflow_storage::planning::{TrackerComment, TrackerObservation};
 use time::OffsetDateTime;
 
-fn edit(revision: &str, title: &str, description: &str) -> LinearIssueObservation {
-    LinearIssueObservation {
+fn edit(revision: &str, title: &str, description: &str) -> TrackerObservation {
+    TrackerObservation {
         revision: revision.into(),
         title: title.into(),
         description: description.into(),
@@ -49,7 +49,7 @@ fn linear_edits_and_comments_stream_into_task_control_exactly_once() {
     );
 
     let mut observation = observation;
-    observation.comments.push(LinearComment {
+    observation.comments.push(TrackerComment {
         id: "c-1".into(),
         revision: Some("2026-07-15T01:00:00.000Z".into()),
         created_at: None,

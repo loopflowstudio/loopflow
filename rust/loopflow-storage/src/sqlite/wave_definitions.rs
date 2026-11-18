@@ -104,6 +104,7 @@ impl SqliteStore {
                         Edit::WaveParent(wave.parent.as_ref().map(ToString::to_string)),
                     ],
                 ),
+                crate::sqlite::planning_write::WriteOrigin::Local,
             )?;
         }
         tx.commit()?;

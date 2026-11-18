@@ -25,7 +25,6 @@ pub mod machine;
 pub mod machine_records;
 pub mod machine_route;
 pub mod naming;
-pub mod notion;
 pub mod observe;
 pub mod ops;
 pub mod os_process;

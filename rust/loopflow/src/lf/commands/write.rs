@@ -228,6 +228,36 @@ writes! {
         None => task::hold(issue, reason.as_deref())?,
     },
 
+    /// `lf task sync <issue> [--keep-theirs | --use-mine]`: exchange the
+    /// Task with its tracker now, first answering every value it lost.
+    /// Answers what the command prints.
+    #[serde(rename = "task.sync")]
+    TaskSync {
+        directory: PathBuf,
+        issue: String,
+        answer: Option<loopflow_execution::store::planning_sync::LostAnswer>,
+    } => String;
+    { issue, answer, .. } => loopflow_execution::ops::task::task_sync(
+        &task_repo(issue)?,
+        issue,
+        *answer,
+    )?,
+
+    /// `lf repo plan answer <action> --keep-theirs | --use-mine`: answer one
+    /// lost line of the directory's repository, whoever owns it. Answers the
+    /// line as it stood.
+    #[serde(rename = "plan.answer")]
+    PlanAnswer {
+        directory: PathBuf,
+        action: String,
+        answer: loopflow_execution::store::planning_sync::LostAnswer,
+    } => loopflow_execution::store::planning_sync::TrackerActionStatus;
+    { directory, action, answer } => loopflow_execution::ops::planning_sync::answer_lost(
+        directory,
+        action,
+        *answer,
+    )?,
+
     /// `lf steer <issue> <message> --json`: direction for the Task's
     /// runs, whoever writes it.
     #[serde(rename = "task.steer")]
@@ -1067,6 +1097,8 @@ macro_rules! directory_of {
             | Write::TaskRun { directory, .. }
             | Write::TaskShip { directory, .. }
             | Write::TaskHold { directory, .. }
+            | Write::TaskSync { directory, .. }
+            | Write::PlanAnswer { directory, .. }
             | Write::TaskSteer { directory, .. }
             | Write::TaskReport { directory, .. }
             | Write::TaskInterrupt { directory, .. }

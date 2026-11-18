@@ -1178,7 +1178,6 @@ impl TaskCommand {
             | Self::Wait { .. } => false,
             Self::Retire { .. } => true,
             Self::Report { .. } => true,
-            Self::Sweep { apply, .. } => *apply,
             Self::Sync { .. }
             | Self::Checkout { .. }
             | Self::Run { .. }
@@ -1321,6 +1320,7 @@ impl RepoCommand {
         match self {
             Self::Plan { cmd, .. } => match cmd {
                 Some(RepoPlanCommand::Key { new, recover }) => *new || recover.is_some(),
+                Some(RepoPlanCommand::Answer { .. }) => true,
                 Some(RepoPlanCommand::Journal { .. }) | None => false,
             },
             Self::Release { cmd } => cmd.changes_work(),
@@ -2160,12 +2160,19 @@ pub enum TaskCommand {
         selection: crate::lf::Selection,
     },
 
-    /// Synchronize a Task with its tracker; the change sent last wins
+    /// Exchange a Task with its tracker now: look for what was sent, resend what it lacks
+    #[command(after_help = "A lost line is a value the tracker kept over yours. \
+--keep-theirs closes every one the Task has; --use-mine saves yours again and sends them. \
+`lf repo plan answer <id>` answers one.")]
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"])))]
     Sync {
         issue: String,
-        /// Retry uncertain saved field/state updates after observing current Linear values
+        /// Keep the tracker's value for each lost line
         #[arg(long)]
-        retry_updates: bool,
+        keep_theirs: bool,
+        /// Save each lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
     },
     /// Ensure tracked Task Work and its worktree without launching a Graph
     Checkout {
@@ -2295,7 +2302,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Unassign the Task: nobody owns it and Linear shows no assignee; nothing
+    /// Unassign the Task: nobody owns it and its tracker shows no assignee; nothing
     /// moves it until someone claims or runs it. History stays intact
     Unassign {
         issue: String,
@@ -2418,7 +2425,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Cancel the Task in Linear and locally, close its PRs and delete its branches
+    /// Cancel the Task in its tracker and locally, close its PRs and delete its branches
     Abandon {
         /// Issue ID or branch; defaults to the Task in this checkout
         issue: Option<String>,
@@ -2427,14 +2434,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[arg(long)]
         json: bool,
     },
-    /// Preview open issues outside current chapters; apply safe cancellations explicitly
-    Sweep {
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Cancel unfinished placed work, clean up delivery, then trash the Linear issue
+    /// Cancel unfinished placed work, clean up delivery, then trash the tracker item
     Delete { issue: String },
     /// Update a Task's title or notes, before or after placement
     Update {
@@ -2520,7 +2520,7 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
 impl TaskCommand {
     pub fn selector(&self) -> Option<&str> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
             | Self::View { issue, .. }
@@ -2555,7 +2555,7 @@ impl TaskCommand {
 
     pub fn selector_mut(&mut self) -> Option<&mut String> {
         match self {
-            Self::List { .. } | Self::Create { .. } | Self::Sweep { .. } => None,
+            Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
             | Self::View { issue, .. }
@@ -2845,6 +2845,20 @@ pub enum RepoPlanCommand {
     },
     /// Show each destination's retained changes, including losing values, without contacting Git
     Journal {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Answer a lost line: keep the tracker's value, or save yours again and send it
+    #[command(group(clap::ArgGroup::new("answer").args(["keep_theirs", "use_mine"]).required(true)))]
+    Answer {
+        /// The line's id, as `lf repo plan` prints it
+        id: String,
+        /// Keep the tracker's value; the line closes
+        #[arg(long)]
+        keep_theirs: bool,
+        /// Save the lost value again, which sends it
+        #[arg(long)]
+        use_mine: bool,
         #[arg(long)]
         json: bool,
     },
@@ -3386,7 +3400,7 @@ mod tests {
             let error = Cli::try_parse_from(["lf", "account", "connect", provider]).unwrap_err();
             assert!(error.to_string().contains(login), "{error}");
         }
-        for service in ["github", "linear", "asana", "notion", "doppler", "opencode"] {
+        for service in ["github", "linear", "asana", "doppler", "opencode"] {
             assert!(Cli::try_parse_from(["lf", "account", "connect", service]).is_ok());
             assert!(Cli::try_parse_from(["lf", "account", "disconnect", service]).is_ok());
         }

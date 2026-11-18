@@ -168,7 +168,7 @@ pub(super) fn after_stop(after: AfterStop) {
             let repo = after.repo.to_string_lossy();
             if tokio::time::timeout(
                 PLANNING_REFRESH,
-                loopflow_execution::ops::linear_observe::sync_repository(&store, &repo),
+                loopflow_execution::ops::tracker_events::sync_repository(&store, &repo),
             )
             .await
             .is_err()

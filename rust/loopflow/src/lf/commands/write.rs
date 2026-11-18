@@ -1254,11 +1254,7 @@ impl Write {
                 run_task,
             )?;
         }
-        super::ssh::prepared_remotely(
-            remote.call()?,
-            &remote.machine,
-            false,
-        )
+        super::ssh::prepared_remotely(remote.call()?, &remote.machine, false)
     }
 
     /// The Session preparation as `lf` spells it. Its local preparation still

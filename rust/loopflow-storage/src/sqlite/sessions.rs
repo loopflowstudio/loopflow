@@ -611,6 +611,23 @@ pub(super) fn complete_primary_session_in(
     Ok(current)
 }
 
+/// A Task's primary when it has one, else `session`: chosen when it is
+/// already one of the Task's conversations, admitted as new otherwise.
+pub(super) fn admit_task_primary_in(
+    conn: &Connection,
+    task: &TaskId,
+    session: &LfSession,
+    caller_process: Option<&loopflow_model::id::LfProcessId>,
+) -> StoreResult<LfSession> {
+    let scope = PrimaryScope::Task(task.clone());
+    if primary_session_in(conn, &scope)?.is_none()
+        && session_in(conn, session.id.as_str())?.is_some()
+    {
+        choose_task_primary_in(conn, task, session.id.as_str())?;
+    }
+    ensure_primary_session_in(conn, &scope, session.clone(), caller_process)
+}
+
 fn ensure_primary_session_in(
     conn: &Connection,
     scope: &PrimaryScope,

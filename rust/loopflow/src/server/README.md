@@ -391,7 +391,8 @@ the phone's `view.select` Task list and its creation destinations all read it.
   function its CLI handler calls and returns the typed value; the CLI prints
   that value with `--json` and renders it as text otherwise. Nothing parses
   standard output. `task.create {directory,request_id,title,request,wave,graph,session,run}`
-  files a Task or adopts the named Session; `run` requests its Graph launch.
+  files a Task or adopts the named Session; `run` admits its conversation,
+  which makes the checkout and starts the Graph after the answer.
   A null `wave` selects the repository. Both paths return the same creation
   receipt, described below. A write whose Work
   lives on another Machine (`task.run`, `task.ship`, `task.hold`,
@@ -1095,11 +1096,26 @@ without age-based pruning; an old ID never becomes a new creation because time
 passed or its resource was removed.
 
 Task creation returns `{task, graph, session_id, milestone}` with or without
-`run`. Milestones distinguish filing, admission and confirmed start. If a launch
-was requested but its registration cannot be confirmed, the result is
-`outcome_unknown` with the Task and `run_requested` milestone. Only a launch
-correlated to this creation can settle that outcome; another current Graph is
-insufficient. Recovery never launches again across that uncertainty.
+`run`, plus the primary Session's record (with `open_argv`) and the Task's `row`
+in the Work projection's shape, read after commit, so a client selects the Task
+and opens the conversation without another read. An admitted Task's row is
+already started (Working when claimed). A repeat reads them again; the receipt
+does not store them.
+
+| Milestone | Means | Repeat |
+| --- | --- | --- |
+| `filed` | Task recorded, no `run` | complete |
+| `admitted` | Task, claim, Graph and primary Session recorded in one transaction; the conversation sets the Task up | complete |
+| `run_requested` | `-b` launch requested, unconfirmed | inspect |
+| `started` | `-b` launch recorded | complete |
+
+`admitted` involves no network and no Git beyond resolving the repository and
+the Graph file. Tracker sync and the assignee check run after the answer under
+the request's trace; their failures are Task events. Setup is the Task's, not
+the receipt's: a conversation opening on a Task that took up its Graph and never
+ran it makes the checkout and starts the Graph, and the receipt only answers
+repeats. The held conversation carries `--request-id`, so its setup steps are
+timed under the creation's request.
 
 `session.new` records its stop and new-thread admission against the same request.
 A completed retry returns the current record for the same Session without

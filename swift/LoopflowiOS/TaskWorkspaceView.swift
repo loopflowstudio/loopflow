@@ -6,7 +6,7 @@ import SwiftUI
 struct TaskWorkspaceView: View {
     let client: RemoteMobileClient
     let feed: TaskFeed
-    let task: WorkViewPlan.Content
+    let task: MobileTask
     let theme: ThemeDefinition
     @Binding var draft: String
     @State private var showsChanges = false
@@ -19,32 +19,36 @@ struct TaskWorkspaceView: View {
             .overlay { NoticeView(center: feed.notices) }
     }
 
+    /// The feed's row for this Task, with pending changes made; a Task opened
+    /// from its creation answer has none until the feed lists it.
+    private var row: WorkViewPlan.Content? {
+        feed.shownRepositories.lazy.flatMap(\.tasks).first { $0.work.id == task.id }
+    }
+
     /// Start a Task not started, Auto-Ship a Working one, stop an Autonomous one.
     @ViewBuilder private var action: some View {
-        if task.states.contains(.autonomous) {
-            Button("Stop Auto-Ship", systemImage: "pause.circle") {
-                feed.request("Stop Auto-Ship", task) { .taskHold(directory: $0, issue: $1) }
-            }
-        } else if task.states.contains(.unstarted) {
-            Button("Start", systemImage: "play.fill") {
-                feed.request("Start", task) {
-                    .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
+        if let row {
+            if row.states.contains(.autonomous) {
+                Button("Stop Auto-Ship", systemImage: "pause.circle") {
+                    feed.request("Stop Auto-Ship", row) { .taskHold(directory: $0, issue: $1) }
                 }
-            }
-        } else if task.states.contains(.working) {
-            Button("Auto-Ship", systemImage: "paperplane") {
-                feed.request("Auto-Ship", task) { .taskShip(directory: $0, issue: $1) }
+            } else if row.states.contains(.unstarted) {
+                Button("Start", systemImage: "play.fill") {
+                    feed.request("Start", row) {
+                        .taskRun(directory: $0, issue: $1, graph: nil, from: nil, agent: nil, approve: false)
+                    }
+                }
+            } else if row.states.contains(.working) {
+                Button("Auto-Ship", systemImage: "paperplane") {
+                    feed.request("Auto-Ship", row) { .taskShip(directory: $0, issue: $1) }
+                }
             }
         }
     }
 
     @ViewBuilder private var content: some View {
-        if task.primarySession == nil {
-            TaskChangesView(client: client, task: task, theme: theme)
-                .navigationTitle(task.title)
-                .navigationBarTitleDisplayMode(.inline)
-        } else {
-            SessionView(client: client, task: task, theme: theme, draft: $draft)
+        if let session = task.primarySession {
+            SessionView(client: client, task: task, session: session, theme: theme, draft: $draft)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
                         Button("Changes", systemImage: "plusminus") { showsChanges = true }
@@ -62,6 +66,10 @@ struct TaskWorkspaceView: View {
                     .tint(theme.palette.accentInk)
                     .presentationDetents([.medium, .large])
                 }
+        } else {
+            TaskChangesView(client: client, task: task, theme: theme)
+                .navigationTitle(task.title)
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 }
@@ -89,7 +97,7 @@ private struct LoadFailure: View {
 /// Files the Task changed from its base, each opening its diff.
 struct TaskChangesView: View {
     let client: RemoteMobileClient
-    let task: WorkViewPlan.Content
+    let task: MobileTask
     let theme: ThemeDefinition
     @State private var changes = Loaded<TaskChangesSnapshot>.loading
 
@@ -127,7 +135,7 @@ struct TaskChangesView: View {
     }
 
     private func load() async {
-        do { changes = .value(try await client.query.taskChanges(issue: task.work.id)) } catch {
+        do { changes = .value(try await client.query.taskChanges(issue: task.id)) } catch {
             changes = .failed(machineConnectionMessage(error))
         }
     }
@@ -142,7 +150,7 @@ struct TaskChangesView: View {
 /// One file as it stands in the Task's checkout.
 struct TaskFileView: View {
     let client: RemoteMobileClient
-    let task: WorkViewPlan.Content
+    let task: MobileTask
     let path: String
     let theme: ThemeDefinition
     @State private var file = Loaded<TaskFileSnapshot>.loading
@@ -174,7 +182,7 @@ struct TaskFileView: View {
     }
 
     private func load() async {
-        do { file = .value(try await client.query.taskFile(issue: task.work.id, path: path)) } catch {
+        do { file = .value(try await client.query.taskFile(issue: task.id, path: path)) } catch {
             file = .failed(machineConnectionMessage(error))
         }
     }
@@ -182,7 +190,7 @@ struct TaskFileView: View {
 
 struct TaskDiffView: View {
     let client: RemoteMobileClient
-    let task: WorkViewPlan.Content
+    let task: MobileTask
     let path: String
     let theme: ThemeDefinition
     @State private var diff = Loaded<TaskDiffSnapshot>.loading
@@ -229,7 +237,7 @@ struct TaskDiffView: View {
     }
 
     private func load() async {
-        do { diff = .value(try await client.query.taskDiff(issue: task.work.id, path: path)) } catch {
+        do { diff = .value(try await client.query.taskDiff(issue: task.id, path: path)) } catch {
             diff = .failed(machineConnectionMessage(error))
         }
     }

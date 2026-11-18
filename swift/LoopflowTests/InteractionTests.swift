@@ -27,6 +27,20 @@ struct InteractionTests {
     }
 
     @Test @MainActor
+    func journalRowsNameTheMachineKindTheReportSplitsBy() throws {
+        let records = InteractionRecords()
+        let interaction = Interaction(name: "start_task", scenario: "new_task_to_typing",
+            input: InteractionInput(uptime: 100, source: .uiKitEvent),
+            context: Interaction.Context(thermalState: 0, liveSessions: nil, repository: "/repo", machine: "remote"),
+            sink: records.append)
+        interaction.finish(.failed)
+        let row = try #require(records.values.last)
+        let json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(row)) as? [String: Any]
+        let context = try #require(json?["context"] as? [String: Any])
+        #expect(context["machine"] as? String == "remote")
+    }
+
+    @Test @MainActor
     func screenFrameRequiresFreshFiniteHostTime() {
         #expect(ScreenFrames.observedTime(presented: 11, acquired: 12, after: 10) == 11)
         #expect(ScreenFrames.observedTime(presented: 9, acquired: 12, after: 10) == nil)

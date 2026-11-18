@@ -2943,8 +2943,7 @@ fn debug_run(task: &GraphTask) -> String {
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let mut out = String::new();
     for sql in [
-        "SELECT json_array(step,run_start,lf_process_id,restarts,restarted_at) FROM task_graphs",
-        "SELECT json_array(p.id,p.pid,p.completed_at,p.outcome,p.exit_code,p.command) FROM processes p WHERE p.id IN (SELECT lf_process_id FROM task_graphs)",
+        "SELECT json_array(step,run_start,lf_process_id,run_pid,restarts,restarted_at) FROM task_graphs",
         "SELECT json_array(lf_process_id,graph,started_at,ended_at,pid,exit_code) FROM graph_processes",
         "SELECT json_array(id,shipped_at) FROM tasks",
     ] {
@@ -2983,8 +2982,7 @@ fn kill_a_carried_run(task: &GraphTask, args: &[&str], carrier: bool, before: im
     let db = rusqlite::Connection::open(task.home.path().join("loopflow.db")).unwrap();
     let pids: Vec<i32> = db
         .prepare(
-            "SELECT p.pid FROM task_graphs t JOIN processes p ON p.id=t.lf_process_id
-             WHERE p.pid IS NOT NULL AND ?1
+            "SELECT run_pid FROM task_graphs WHERE run_pid IS NOT NULL AND ?1
              UNION ALL SELECT pid FROM graph_processes WHERE ended_at IS NULL AND pid IS NOT NULL
              UNION ALL SELECT pid FROM graph_process_steps WHERE ended_at IS NULL AND pid IS NOT NULL",
         )

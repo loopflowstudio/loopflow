@@ -689,7 +689,7 @@ pub(crate) fn restart_runs() -> OpsResult<Option<i64>> {
             };
             if !store
                 .sqlite
-                .count_task_run_restart(&id, Some(&died.carrier), &died.restarts)
+                .count_task_run_restart(&id, Some(&died.carrier), died.restarts.count)
                 .map_err(task_error)?
             {
                 continue;
@@ -767,15 +767,13 @@ async fn restart_ship(
     let Some((task, worktree, agent)) = continuable(store, id, now).await? else {
         return Ok(None);
     };
-    if failure.is_some() {
-        let seen = store.sqlite.task_run_restarts(id).map_err(task_error)?;
-        if !store
+    if failure.is_some()
+        && !store
             .sqlite
-            .count_task_run_restart(id, None, &seen)
+            .count_task_run_restart(id, None, shipping.restarts)
             .map_err(task_error)?
-        {
-            return Ok(None);
-        }
+    {
+        return Ok(None);
     }
     restart_lf_in(
         &worktree,

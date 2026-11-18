@@ -1245,40 +1245,14 @@ fn task_conversation_agent(db: &Path, task: &str) -> Option<(String, Option<i64>
     rusqlite::Connection::open(db)
         .unwrap()
         .query_row(
-            "SELECT s.agent_process_id,p.pid,s.starts_since_turn FROM task_primary_sessions tp
+            "SELECT s.agent_process_id,s.agent_pid,s.starts_since_turn FROM task_primary_sessions tp
              JOIN agent_sessions s ON s.id=tp.session_id
-             JOIN processes p ON p.id=s.agent_process_id
-             WHERE tp.task_id=?1 AND p.completed_at IS NULL",
+             WHERE tp.task_id=?1 AND s.agent_process_id IS NOT NULL AND s.agent_ended_at IS NULL",
             [task],
             |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
         )
         .optional()
         .unwrap()
-}
-
-fn debug_rows(db: &Path, task: &str) -> String {
-    let conn = rusqlite::Connection::open(db).unwrap();
-    let mut out = String::new();
-    for sql in [
-        "SELECT s.id,s.agent_process_id,s.completed_at,s.interactive,s.cwd,s.starts_since_turn,s.last_started_at,s.start_failure,s.held_terminal_id FROM task_primary_sessions tp JOIN agent_sessions s ON s.id=tp.session_id WHERE tp.task_id=?1",
-        "SELECT p.id,p.pid,p.completed_at,p.exit_code,p.command,l.id,l.pid,l.completed_at,l.exit_code,l.command FROM processes p LEFT JOIN processes l ON l.id=p.parent_lf_process_id JOIN agent_sessions s ON s.agent_process_id=p.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
-        "SELECT t.id,t.ended_at,t.exit_code FROM held_terminals t JOIN agent_sessions s ON s.held_terminal_id=t.id JOIN task_primary_sessions tp ON tp.session_id=s.id WHERE tp.task_id=?1",
-    ] {
-        let mut statement = conn.prepare(sql).unwrap();
-        let columns = statement.column_count();
-        let rows: Vec<String> = statement
-            .query_map([task], |row| {
-                Ok((0..columns)
-                    .map(|i| format!("{:?}", row.get::<_, rusqlite::types::Value>(i).unwrap()))
-                    .collect::<Vec<_>>()
-                    .join(" | "))
-            })
-            .unwrap()
-            .map(Result::unwrap)
-            .collect();
-        out.push_str(&format!("{sql}\n{rows:#?}\n"));
-    }
-    out
 }
 
 /// Wait for the Task's conversation to run an agent other than `previous`.
@@ -1297,9 +1271,8 @@ fn next_task_conversation_agent(
         }
         assert!(
             std::time::Instant::now() < deadline,
-            "the conversation did not start after {previous:?}\n{}\n{}",
-            fs::read_to_string(home.join("machine/logs/lf.log")).unwrap_or_default(),
-            debug_rows(db, task)
+            "the conversation did not start after {previous:?}\n{}",
+            fs::read_to_string(home.join("machine/logs/lf.log")).unwrap_or_default()
         );
         std::thread::sleep(std::time::Duration::from_millis(200));
     }

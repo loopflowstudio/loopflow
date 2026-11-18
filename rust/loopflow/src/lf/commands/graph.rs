@@ -897,6 +897,13 @@ impl RunningGraph<'_> {
             tokio::process::Command::new(loopflow_execution::os_process::resolve_lf_binary()?);
         command.current_dir(self.cwd);
         command.env(graph_process::GRAPH_ID_ENV, self.process.as_str());
+        // The step runs as the id this Graph mints and records for it.
+        let run = LfProcessId::default();
+        command.env(
+            loopflow_execution::journal::LF_EXECUTION_ID_ENV,
+            run.as_str(),
+        );
+        let step = (kind != StepKind::Commit).then_some(run);
         command.env(
             loopflow_execution::journal::GRAPH_STEP_ENV,
             if self.task_run.is_some() {
@@ -905,13 +912,6 @@ impl RunningGraph<'_> {
                 "bare"
             },
         );
-        // The step runs as the id this Graph mints and records for it.
-        let run = LfProcessId::default();
-        command.env(
-            loopflow_execution::journal::LF_EXECUTION_ID_ENV,
-            run.as_str(),
-        );
-        let step = (kind != StepKind::Commit).then_some(run);
         command.env_remove(graph_process::TASK_INTERRUPT_CURSOR_ENV);
         if self.launcher.verbose {
             command.arg("--verbose");

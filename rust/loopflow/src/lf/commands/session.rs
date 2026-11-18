@@ -444,15 +444,12 @@ impl SessionFacts {
     /// whether it comes back; `now` only picks "starting" over "starts".
     pub fn conversation_line(&self, task: &str, now: i64) -> String {
         if matches!(self.state, SessionState::Active | SessionState::Detached) {
-            return match self
-                .start
-                .as_ref()
-                .and_then(|start| Some((start.attempts, start.last_started_at.as_deref()?)))
-            {
-                Some((attempts, at)) => {
-                    format!("running (started again {}, attempt {attempts})", clock(at))
-                }
-                None => "running".to_string(),
+            return match &self.start {
+                Some(SessionStarts {
+                    attempts,
+                    last_started_at: Some(at),
+                }) => format!("running (started again {}, attempt {attempts})", clock(at)),
+                _ => "running".to_string(),
             };
         }
         let ending = match &self.ended {
@@ -471,9 +468,15 @@ impl SessionFacts {
                 _ => format!("{ending}; `lf resume --task {task}` opens it"),
             };
         };
-        let reason = outlook.reason.as_deref();
+        let reason = outlook
+            .reason
+            .as_deref()
+            .map_or(String::new(), |reason| format!(" · {reason}"));
         let again = |later: &str, now_doing: &str| match outlook.at.as_deref() {
-            Some(at) if seconds(at).is_some_and(|at| at > now) => {
+            Some(at)
+                if chrono::DateTime::parse_from_rfc3339(at)
+                    .is_ok_and(|at| at.timestamp() > now) =>
+            {
                 format!(" · {later} again {}", clock(at))
             }
             Some(_) => format!(" · {now_doing} again"),
@@ -485,18 +488,12 @@ impl SessionFacts {
                 None => "quit".to_string(),
             },
             SessionOutlookKind::ComingBack => {
-                let failed = reason.map_or(String::new(), |reason| format!(" · {reason}"));
-                format!("{ending}{}{failed}", again("starts", "starting"))
+                format!("{ending}{}{reason}", again("starts", "starting"))
             }
-            SessionOutlookKind::WaitingForYou => {
-                format!(
-                    "{ending}{}",
-                    reason.map_or(String::new(), |reason| format!(" · {reason}"))
-                )
-            }
+            SessionOutlookKind::WaitingForYou => format!("{ending}{reason}"),
             SessionOutlookKind::CouldNotStart => format!(
                 "could not start: {}{}",
-                reason.unwrap_or("no reason recorded"),
+                outlook.reason.as_deref().unwrap_or("no reason recorded"),
                 again("tries", "trying")
             ),
         };
@@ -505,12 +502,6 @@ impl SessionFacts {
         }
         line
     }
-}
-
-fn seconds(rfc3339: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(rfc3339)
-        .ok()
-        .map(|at| at.timestamp())
 }
 
 /// Local `HH:MM` for an RFC 3339 time.
@@ -899,13 +890,7 @@ async fn resume(
     let cwd = std::env::current_dir()?;
     drop(progress);
     if let Some(message) = message {
-        let id = select(&store, &cwd, target).await?;
-        loopflow_execution::ops::recovery::record_start(
-            &store.sqlite,
-            &id.as_str().into(),
-            request_id,
-            time::OffsetDateTime::now_utc().unix_timestamp(),
-        )?;
+        let id = select(&store, &cwd, target, request_id).await?;
         let session = loopflow_execution::ops::human_session::session_by_id(&store, &id)
             .await?
             .context("Session not found")?;
@@ -948,11 +933,13 @@ async fn resume(
     }
 }
 
-/// The conversation `lf resume` run from `directory` selects.
+/// The conversation `lf resume` run from `directory` selects, recorded as
+/// started by a person unless `request_id` is the recovery pass's own.
 async fn select(
     store: &Arc<Store>,
     directory: &Path,
     target: loopflow_execution::ops::human_session::SessionTarget<'_>,
+    request_id: Option<&str>,
 ) -> anyhow::Result<String> {
     let selected =
         loopflow_execution::ops::human_session::select_connection(store, directory, target).await?;
@@ -961,6 +948,12 @@ async fn select(
             "Nothing to resume here; starting a new conversation."
         ));
     }
+    loopflow_execution::ops::recovery::record_start(
+        &store.sqlite,
+        &selected.id.as_str().into(),
+        request_id,
+        time::OffsetDateTime::now_utc().unix_timestamp(),
+    )?;
     Ok(selected.id)
 }
 
@@ -977,13 +970,7 @@ async fn reopen(
     fork: bool,
     json: bool,
 ) -> anyhow::Result<Opening> {
-    let id = select(store, directory, target).await?;
-    loopflow_execution::ops::recovery::record_start(
-        &store.sqlite,
-        &id.as_str().into(),
-        request_id,
-        time::OffsetDateTime::now_utc().unix_timestamp(),
-    )?;
+    let id = select(store, directory, target, request_id).await?;
     loopflow_execution::ops::human_session::open(
         store,
         directory,

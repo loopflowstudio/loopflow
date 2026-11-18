@@ -548,8 +548,7 @@ mod tests {
                     "ship",
                 )
                 .unwrap();
-            let seen = store.task_run_restarts(&task).unwrap();
-            store.count_task_run_restart(&task, None, &seen).unwrap();
+            store.count_task_run_restart(&task, None, 0).unwrap();
             store
                 .ship_task(
                     &task,

@@ -809,6 +809,16 @@ retention; fixture servers and holders left running).
   (`summary_query` gained a correlated subquery), `test(transport::)` and `binary(transport_tests)`
   (the store watch changed), `test(session_cli_tests::)`, `test(lf::tests::)`.
 
+- Compress after slice 7: `count_task_run_restart` takes the seen count (a ship uses the
+  one it already read); one outlook constructor in `session_ending`; `select` records a
+  resume's start; the launch fixtures read `agent_sessions.agent_pid` and
+  `task_graphs.run_pid`, not `processes` (nothing writes it since LOO-953), and
+  `debug_rows` is gone. Passed: storage `sqlite::task_work::`, `query_plans::tests::`;
+  `ops::human_session::tests::` (32), `ship::tests::`; `server::recovery::tests::` (9),
+  `lf::commands::session::tests::` (2), `task_graph_launch_tests::a_task_run_whose_carrier_died`
+  (123 s: a carrier's death is noticed on the minute tick), `…::a_killed_graph`,
+  `context_launch_tests::a_killed_task_conversation`; clippy `--all-targets` clean.
+
 ## Docs
 
 Slice 4 checked these against what shipped (`5adee6450c`): `docs/sessions.md`

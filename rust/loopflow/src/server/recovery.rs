@@ -352,31 +352,30 @@ mod tests {
     }
 
     impl Fixture {
-        fn agent_identity(&self, pid: u32, started_at: i64) {
+        fn execute(&self, sql: &str, params: impl rusqlite::Params) {
             self.store
                 .conn
                 .lock()
                 .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3
-                     WHERE agent_process_id=?1",
-                    params![self.agent, pid, started_at],
-                )
+                .execute(sql, params)
                 .unwrap();
+        }
+
+        fn agent_identity(&self, pid: u32, started_at: i64) {
+            self.execute(
+                "UPDATE agent_sessions SET agent_pid=?2,agent_os_started_at=?3
+                 WHERE agent_process_id=?1",
+                params![self.agent, pid, started_at],
+            );
         }
 
         /// The provider exited with `code`, as the holder's settlement records it.
         fn exited(&self, code: i32) {
-            self.store
-                .conn
-                .lock()
-                .unwrap()
-                .execute(
-                    "UPDATE agent_sessions SET agent_ended_at=?2,agent_exit_code=?3,agent_pid=NULL,
-                         agent_os_started_at=NULL WHERE agent_process_id=?1",
-                    params![self.agent, NOW - 5, code],
-                )
-                .unwrap();
+            self.execute(
+                "UPDATE agent_sessions SET agent_ended_at=?2,agent_exit_code=?3,agent_pid=NULL,
+                     agent_os_started_at=NULL WHERE agent_process_id=?1",
+                params![self.agent, NOW - 5, code],
+            );
         }
 
         /// The requests one pass at `now` starts, with `held` Sessions skipped.
@@ -476,48 +475,30 @@ mod tests {
 
     #[test]
     fn a_closed_task_or_a_conversation_out_of_starts_is_not_started() {
-        let fixture = fixture();
-        fixture.exited(137);
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET starts_since_turn=5,last_started_at=?2 WHERE id=?1",
-                params![fixture.session.as_str(), NOW - 3600],
-            )
-            .unwrap();
-        assert!(fixture.pass(NOW, false).is_empty(), "gave up after 5");
+        let out_of_starts = fixture();
+        out_of_starts.exited(137);
+        out_of_starts.execute(
+            "UPDATE agent_sessions SET starts_since_turn=5,last_started_at=?2 WHERE id=?1",
+            params![out_of_starts.session.as_str(), NOW - 3600],
+        );
+        assert!(out_of_starts.pass(NOW, false).is_empty(), "gave up after 5");
 
-        let fixture = super::tests::fixture();
-        fixture.exited(137);
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
-                params![fixture.task.as_str(), NOW - 60],
-            )
-            .unwrap();
-        assert!(fixture.pass(NOW, false).is_empty(), "abandoned");
+        let abandoned = fixture();
+        abandoned.exited(137);
+        abandoned.execute(
+            "UPDATE tasks SET abandoned_at=?2 WHERE id=?1",
+            params![abandoned.task.as_str(), NOW - 60],
+        );
+        assert!(abandoned.pass(NOW, false).is_empty(), "abandoned");
     }
 
     #[test]
     fn a_prepared_task_conversation_that_never_ran_is_started() {
         let fixture = fixture();
-        fixture
-            .store
-            .conn
-            .lock()
-            .unwrap()
-            .execute(
-                "UPDATE agent_sessions SET agent_process_id=NULL WHERE id=?1",
-                [fixture.session.as_str()],
-            )
-            .unwrap();
+        fixture.execute(
+            "UPDATE agent_sessions SET agent_process_id=NULL WHERE id=?1",
+            [fixture.session.as_str()],
+        );
         assert_eq!(
             fixture.pass(NOW, false),
             [format!("recover:{}:new:1", fixture.session)]
@@ -544,15 +525,11 @@ mod tests {
     fn a_persons_start_counts_the_passs_starts_from_zero() {
         let fixture = fixture();
         fixture.exited(137);
-        {
-            let conn = fixture.store.conn.lock().unwrap();
-            conn.execute(
-                "UPDATE agent_sessions SET starts_since_turn=4,last_started_at=?2,
-                    start_failure='no PTY left' WHERE id=?1",
-                params![fixture.session.as_str(), NOW - 3600],
-            )
-            .unwrap();
-        }
+        fixture.execute(
+            "UPDATE agent_sessions SET starts_since_turn=4,last_started_at=?2,
+                start_failure='no PTY left' WHERE id=?1",
+            params![fixture.session.as_str(), NOW - 3600],
+        );
         // `lf resume` by a person; the pass's own resume carries its request.
         let record = |request: Option<&str>| {
             loopflow_execution::ops::recovery::record_start(

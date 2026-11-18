@@ -539,8 +539,8 @@ fn session_ending(
     if !session.interactive {
         return (None, None, None);
     }
-    let down = state == SessionState::Closed;
-    let ended = session.agent_end.filter(|_| down).and_then(|end| {
+    let closed = state == SessionState::Closed;
+    let ended = session.agent_end.filter(|_| closed).and_then(|end| {
         Some(SessionEnd {
             at: crate::transcript::rfc3339(end.at)?,
             by: if end.by_person() {
@@ -562,28 +562,25 @@ fn session_ending(
     });
     let failure = session.start_failure.as_deref().filter(|_| conversation);
     // One that never had an agent has no liveness to read: it is not Closed.
-    let running = matches!(state, SessionState::Active | SessionState::Detached);
-    let never_ran = session.agent_process_id.is_none() && ended.is_none();
-    if running || (ended.is_none() && failure.is_none()) {
+    if is_running(state) || (ended.is_none() && failure.is_none()) {
         return (ended, start, None);
     }
-    let command = Some(match (&session.task_identifier, session.task_primary) {
+    let command = match (&session.task_identifier, session.task_primary) {
         (Some(task), true) => format!("lf resume --task {task}"),
         _ => format!("lf resume {}", session.id),
-    });
-    let outlook = |kind, at, reason, command| SessionOutlook {
-        kind,
-        at,
-        reason,
-        command,
     };
-    if quit {
-        let quit = outlook(SessionOutlookKind::Quit, None, None, command);
-        return (ended, start, Some(quit));
-    }
-    if !conversation {
-        let waiting = outlook(SessionOutlookKind::WaitingForYou, None, None, command);
-        return (ended, start, Some(waiting));
+    if quit || !conversation {
+        let kind = match quit {
+            true => SessionOutlookKind::Quit,
+            false => SessionOutlookKind::WaitingForYou,
+        };
+        let outlook = SessionOutlook {
+            kind,
+            at: None,
+            reason: None,
+            command: Some(command),
+        };
+        return (ended, start, Some(outlook));
     }
     let left = if attempts >= CONVERSATION_STARTS {
         Some(format!("started {attempts} times"))
@@ -599,36 +596,40 @@ fn session_ending(
         .zip(session.agent_end)
         .filter(|(started, end)| *started >= end.at)
         .map(|(started, _)| started);
-    let at = left.is_none().then(|| {
-        starting
-            .or_else(|| crate::ops::recovery::next_start_at(attempts, session.last_started_at))
-            .or(session.agent_end.map(|end| end.at))
-            .and_then(crate::transcript::rfc3339)
-    });
-    let at = at.flatten();
-    let command = left.as_ref().and(command);
-    let outlook = match (never_ran, left) {
-        (true, _) => outlook(
+    // The server starts it, at `at`, or leaves it to its command.
+    let (at, command) = match left {
+        None => (
+            starting
+                .or_else(|| crate::ops::recovery::next_start_at(attempts, session.last_started_at))
+                .or(session.agent_end.map(|end| end.at))
+                .and_then(crate::transcript::rfc3339),
+            None,
+        ),
+        Some(_) => (None, Some(command)),
+    };
+    let never_ran = session.agent_process_id.is_none() && ended.is_none();
+    let (kind, reason) = match (never_ran, left) {
+        (true, _) => (
             SessionOutlookKind::CouldNotStart,
-            at,
             failure.map(str::to_string),
-            command,
         ),
-        (false, None) => outlook(
+        (false, None) => (
             SessionOutlookKind::ComingBack,
-            at,
             failure.map(|failure| format!("last start failed: {failure}")),
-            None,
         ),
-        (false, Some(left)) => outlook(
+        (false, Some(left)) => (
             SessionOutlookKind::WaitingForYou,
-            None,
             Some(match failure {
                 Some(failure) => format!("{left}; last start failed: {failure}"),
                 None => left,
             }),
-            command,
         ),
+    };
+    let outlook = SessionOutlook {
+        kind,
+        at,
+        reason,
+        command,
     };
     (ended, start, Some(outlook))
 }

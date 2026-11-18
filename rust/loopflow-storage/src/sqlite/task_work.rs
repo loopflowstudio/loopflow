@@ -277,6 +277,23 @@ pub struct TaskRunRestarts {
     pub at: Option<i64>,
 }
 
+fn run_restarts_in(conn: &rusqlite::Connection, task: &TaskId) -> StoreResult<TaskRunRestarts> {
+    use rusqlite::OptionalExtension;
+    Ok(conn
+        .query_row(
+            "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
+            [task.as_str()],
+            |row| {
+                Ok(TaskRunRestarts {
+                    count: row.get(0)?,
+                    at: row.get(1)?,
+                })
+            },
+        )
+        .optional()?
+        .unwrap_or(TaskRunRestarts { count: 0, at: None }))
+}
+
 /// A Task handed off to finish on its own: since when, the process that
 /// approved it, this Machine's run carrying it there, and how many times its
 /// run was carried again since it last finished a step (`task_graphs.restarts`,
@@ -466,14 +483,7 @@ pub(super) fn shipping_in(
         return Ok(None);
     };
     let log = ship_log_in(conn, task)?;
-    let restarts = conn
-        .query_row(
-            "SELECT restarts FROM task_graphs WHERE task_id=?1",
-            [task.as_str()],
-            |row| row.get(0),
-        )
-        .optional()?
-        .unwrap_or(0);
+    let restarts = run_restarts_in(conn, task)?.count;
     Ok(Some(TaskShipping {
         shipped_at,
         approving_session: log
@@ -1192,32 +1202,18 @@ impl SqliteStore {
     /// How many times the Task's run was carried again since it last finished
     /// a step, and when it last was.
     pub fn task_run_restarts(&self, task: &TaskId) -> StoreResult<TaskRunRestarts> {
-        use rusqlite::OptionalExtension;
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        Ok(conn
-            .query_row(
-                "SELECT restarts,restarted_at FROM task_graphs WHERE task_id=?1",
-                [task.as_str()],
-                |row| {
-                    Ok(TaskRunRestarts {
-                        count: row.get(0)?,
-                        at: row.get(1)?,
-                    })
-                },
-            )
-            .optional()?
-            .unwrap_or(TaskRunRestarts { count: 0, at: None }))
+        run_restarts_in(&self.conn.lock().expect("store mutex poisoned"), task)
     }
 
-    /// Count one more start of the Task's run, if it still stands where the
-    /// caller read it. A moving run names the `carrier` that died; a shipping
+    /// Count one more start of the Task's run, if it still stands at the
+    /// `seen` count the caller read. A moving run names the `carrier` that died; a shipping
     /// one is carried by its ship process instead (`None`). Returns false,
     /// writing nothing, when another start or a new carrier came first.
     pub fn count_task_run_restart(
         &self,
         task: &TaskId,
         carrier: Option<&LfProcessId>,
-        seen: &TaskRunRestarts,
+        seen: u32,
     ) -> StoreResult<bool> {
         let conn = self.conn.lock().expect("store mutex poisoned");
         Ok(conn.execute(
@@ -1226,7 +1222,7 @@ impl SqliteStore {
             rusqlite::params![
                 task.as_str(),
                 carrier.map(LfProcessId::as_str),
-                seen.count,
+                seen,
                 crate::rows::now_unix()
             ],
         )? > 0)

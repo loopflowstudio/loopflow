@@ -143,3 +143,10 @@ records a thread with no transcript.
    reaches a provider some other way.
 2. If a cell still sees a marker, follow that path to its spawn and route it
    through the function rather than adding a fourth call.
+
+## Docs
+
+Written ahead of the build: `docs/sessions.md` ("Run one headless", one
+paragraph) and `docs/dev/environment.md` ("The caller's session", the list and
+the passthrough names). Slice 1 keeps the table in step with
+`CALLER_SESSION_ENV`.

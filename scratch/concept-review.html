@@ -33,7 +33,7 @@
   .mark { display: inline-block; font-weight: 600; padding: .05rem .5rem; border-radius: 3px; white-space: nowrap; }
   .yes { color: var(--yes); background: var(--yes-bg); }
   .no { color: var(--no); background: var(--no-bg); }
-  .proposed { color: var(--new); background: var(--new-bg); padding: .05rem .4rem; border-radius: 3px; font-weight: 600; }
+  .proposed, .built { color: var(--new); background: var(--new-bg); padding: .05rem .4rem; border-radius: 3px; font-weight: 600; }
   .legend { color: var(--quiet); font-size: .9rem; }
   .flow { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1rem 0; }
   .flow > div { background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; padding: 1rem 1.1rem; }
@@ -50,14 +50,14 @@
 <body>
 <main>
 
-<h1>A Session read asks the Machine three things. The code should hold exactly those three.</h1>
-<p class="lede">LOO-979, reviewed before anything is built. The area taken: how a Session
-comes to read as running, dead or available, and how a list of Sessions learns
-that this changed. The Task names one slow statement; that statement is one
-third of the read that answers these questions, so the review covers the
-whole read.</p>
-<p class="legend"><span class="proposed">blue</span> marks what the plan
-proposes; everything else exists on <code>origin/main</code> today.</p>
+<h1>A Session read asks the Machine three things. The code now holds exactly those three.</h1>
+<p class="lede">LOO-979, reviewed as built, against <code>main</code>. The area taken: how a
+Session comes to read as running, dead or available, and how a list of
+Sessions learns that this changed. The Task names one slow statement; it is a
+third of the read that answers these questions, so the review covers the whole
+read and every summary drawn from it.</p>
+<p class="legend"><span class="built">blue</span> marks what this branch
+changed; everything else is as on <code>main</code>.</p>
 
 <h2>One interaction, walked</h2>
 <p>Someone has the Session list open. An agent stops calling tools and says
@@ -66,141 +66,134 @@ written. Another agent's process is killed; its Session stops reading as
 running. A third finished yesterday and reads Dead forever.</p>
 <p>To draw that list, a read collects what SQL cannot know
 (<code>SessionProjectionInputs</code>), asks the OS, checks nothing moved
-(<code>pin</code>), then projects. Today the collecting step reads 20,732
-activity rows and 772 Sessions to end up asking the OS about 37 processes and
-registering one wakeup.</p>
+(<code>pin</code>), then projects. On <code>main</code> the collecting step
+read 20,732 activity rows and 772 Sessions to end up asking the OS about 37
+processes and registering one wakeup.</p>
 
 <table>
-<thead><tr><th>Statement</th><th>Rows today</th><th>Time today</th><th>Rows after</th><th>Time after</th></tr></thead>
+<thead><tr><th>Statement</th><th>Rows on main</th><th>Time on main</th><th>Rows here</th><th>Time here</th></tr></thead>
 <tbody>
-<tr><td>Deadlines</td><td class="num">20,732 scanned, 13 kept</td><td class="num">2,443 µs</td><td class="num"><span class="proposed">7</span></td><td class="num"><span class="proposed">17 µs</span></td></tr>
-<tr><td>Identities</td><td class="num">772</td><td class="num">1,630 µs</td><td class="num"><span class="proposed">37</span></td><td class="num"><span class="proposed">29 µs</span></td></tr>
-<tr><td>Graph runs</td><td class="num">803 Sessions probed, 6 kept</td><td class="num">2,093 µs</td><td class="num"><span class="proposed">6</span></td><td class="num"><span class="proposed">3 µs</span></td></tr>
+<tr><td>Deadlines</td><td class="num">20,732 scanned, 11 kept</td><td class="num">2,221 µs</td><td class="num"><span class="built">7</span></td><td class="num"><span class="built">16 µs</span></td></tr>
+<tr><td>Identities</td><td class="num">771</td><td class="num">1,278 µs</td><td class="num"><span class="built">36</span></td><td class="num"><span class="built">27 µs</span></td></tr>
+<tr><td>Graph runs</td><td class="num">every open Session probed, 5 kept</td><td class="num">2,034 µs</td><td class="num"><span class="built">5</span></td><td class="num"><span class="built">3 µs</span></td></tr>
 </tbody>
 </table>
 <p class="legend">Measured 2026-11-18 on this Machine's store, read-only, mean
-of 300 warm runs. The read runs twice per projection.</p>
+of 300 warm runs, after the build. The read runs twice per projection. QA
+compared all 803 open Sessions on a copy of the store under both binaries:
+state, availability, title, Task and terminal fields identical.</p>
 
 <h2>Do the product's concepts and the code's line up?</h2>
 <table>
-<thead><tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong</th></tr></thead>
+<thead><tr><th>What a person knows</th><th>What the code has</th><th>Match</th><th>What is wrong, or what changed</th></tr></thead>
 <tbody>
 <tr>
   <td>A Session's agent is running, dead, or not known.</td>
-  <td><code>ProcessIdentityEvidence</code> on <code>SessionSummary</code>; <code>SessionProjection.evidence</code>, a map filled from <code>identities</code>.</td>
-  <td><span class="mark no">no</span></td>
-  <td>One answer, two origins, carried as one. "Dead because the row says the agent ended" needs no OS, yet 735 of 772 identities are read out, wrapped in <code>RecordedProcess { ended: true }</code> and mapped back in. The field that carries it is called <code>completed_at</code> and holds <code>agent_ended_at</code>.</td>
+  <td><code>ProcessIdentityEvidence</code> on <code>SessionSummary</code>. <span class="built">Dead from <code>agent_ended_at</code> in <code>read_summary</code>; otherwise <code>SessionProjection.evidence</code>, which holds only what the OS was asked.</span></td>
+  <td><span class="mark yes">yes</span></td>
+  <td>Was no: 735 of 772 identities were ended agents carried out of SQL and back in, in a field called <code>completed_at</code> that held <code>agent_ended_at</code>. The field is gone. <code>Reading::acquire</code> writes <code>ended: false</code>, a literal that restates the query; <code>RecordedProcess</code> keeps the field for Graph runs and <code>agent_evidence</code>, so it stays.</td>
 </tr>
 <tr>
   <td>A quiet Session becomes available after two minutes.</td>
-  <td><code>available_sql</code>; <code>deadlines</code>; the <code>observe::deadline</code> fact; the revision trigger on <code>session_activity</code>.</td>
-  <td><span class="mark no">no</span></td>
-  <td>The rule and the time it next changes its answer are separate SQL with different ideas of which rows count. The deadline statement counts every activity row ever written. The trigger writes the 120 a third time, as a literal.</td>
+  <td><code>available_sql</code> and <code>deadlines</code>, <span class="built">joined on one guard, <code>current_agent_activity</code></span>; the <code>observe::deadline</code> fact; the revision trigger on <code>session_activity</code>.</td>
+  <td><span class="mark no">no</span>, smaller</td>
+  <td>The rule and the time its answer next changes now read the same rows. The trigger still writes 120 as its own literal, in a merged migration.</td>
 </tr>
 <tr>
   <td>A Session's Graph is running, finished or failed.</td>
   <td><code>graph_runs</code>, <code>graph_results</code>, <code>GraphProcessSummaryState</code>.</td>
   <td><span class="mark yes">yes</span></td>
-  <td>The concept is right. The all-Sessions statement finds 6 runs by probing every open Session.</td>
+  <td><span class="built">The list reads every unended run</span>; one Session's read keeps its own run. The field's comment says which.</td>
 </tr>
 <tr>
   <td>The list is correct at the moment it is drawn.</td>
   <td><code>pin</code> and <code>is_current</code>: rerun the inputs, compare, restart on a difference.</td>
   <td><span class="mark yes">yes</span></td>
-  <td>Nobody sees it and nobody should. It costs a second read because <code>store_revisions</code> cannot vouch for identity writes.</td>
+  <td>Unchanged, and now about 50 µs a rerun.</td>
 </tr>
 <tr>
   <td>Asking about one Session and asking about all give the same answer.</td>
-  <td><code>session_summary</code> and <code>session_summaries</code>, one predicate each.</td>
-  <td><span class="mark no">no</span></td>
-  <td>A completed Session with an ended agent reads Dead alone and Unknown in the list. The single read also pays for every Session's deadlines.</td>
+  <td><code>session_summary</code> and <code>session_summaries</code>; <span class="built">one route to Dead for both</span>.</td>
+  <td><span class="mark yes">yes</span></td>
+  <td>See the finding below: the two never disagreed where anyone could look.</td>
 </tr>
 </tbody>
 </table>
 
-<h2>The biggest mismatch: an ended agent is asked about anyway</h2>
-<p>The inputs exist to hold what SQL cannot answer. An ended agent is
-something SQL has already answered. Carrying it through the observation step
-is what makes the read proportional to history instead of to what is running,
-and it is why the kickoff plan needed a special case in <code>read_summary</code>
-for the list while the single read kept the old route.</p>
+<h2>The finding from this pass: the plan promised a changed reading that no read can show</h2>
+<p>The plan, <code>scratch/questions.md</code> and the earlier version of this
+page said one reading changes: a finished Session whose agent ended reads Dead
+in the list where it read Unknown. QA could not reach it and filed it as
+unreached.</p>
+<p>It cannot be reached. <code>read_summary</code> has two callers. The list
+(<code>session_summaries_in</code>, also behind Task selections) builds its
+page with <code>inventory_query</code>, whose first clause is
+<code>s.completed_at IS NULL</code>: a finished Session is never in any list.
+The single read said Dead on <code>main</code> through the evidence map and
+says Dead here from the row.</p>
 
 <div class="flow">
   <div>
-    <h3>Today, and in the kickoff plan's single read</h3>
+    <h3>What the plan said</h3>
     <ol>
-      <li>SQL returns every started agent with <code>completed_at</code> (really <code>agent_ended_at</code>).</li>
-      <li><code>Reading::acquire</code> builds <code>RecordedProcess { ended }</code>.</li>
-      <li><code>evidence_by</code> returns Dead before looking at the OS.</li>
-      <li>The map carries Dead back to <code>read_summary</code>.</li>
+      <li>Every summary reads the same, except one.</li>
+      <li>Finished Session, ended agent, in the list: Unknown becomes Dead.</li>
+      <li>QA: not reached.</li>
     </ol>
   </div>
   <div class="after">
-    <h3><span class="proposed">Proposed, for every read</span></h3>
+    <h3><span class="built">What the plan says now</span></h3>
     <ol>
-      <li>SQL returns agents that have not ended. Those are the ones to observe.</li>
-      <li><code>Reading::acquire</code> asks the OS about each.</li>
-      <li><code>read_summary</code> reads <code>agent_ended_at IS NOT NULL</code> from the row: Dead. Otherwise the map; missing means Unknown.</li>
-      <li><code>SessionProcessIdentity.completed_at</code> is deleted.</li>
+      <li>Every summary reads the same. No exception.</li>
+      <li>The PR body claims no change in what anyone reads.</li>
+      <li>Nothing left for QA to reach on this point.</li>
     </ol>
   </div>
 </div>
-
-<p>The same idea settles the other two lists. Deadlines come only from the
-activity row that <code>available_sql</code> would read: an open Session, its
-current agent, not ended. That guard is written once and used by both, so a
-change to who can be available moves the wakeup with it.</p>
-<pre><span class="proposed">proposed</span>
-SELECT DISTINCT act.observed_at + ?1 FROM agent_sessions s
-JOIN session_activity act ON &lt;the guard available_sql opens with&gt;
-WHERE &lt;s.id=?3 | s.agent_process_id IS NOT NULL&gt;
-  AND act.observed_at &gt; ?2 - ?1 ORDER BY 1</pre>
-<p>Graph runs for the list are every unended run. For one Session they stay
-that Session's run, so a single read never asks the OS about every Graph on
-the Machine.</p>
+<p>No code moves. <code>docs/dev/reference-models.md</code> says an ended
+agent is dead by its row "in every read and for a finished Session too", which
+is true of the single read and stays.</p>
 
 <h2>Tested against three paths</h2>
 <table>
-<thead><tr><th>Path</th><th>What must survive</th><th>Holds?</th></tr></thead>
+<thead><tr><th>Path</th><th>What must survive</th><th>Seen</th></tr></thead>
 <tbody>
-<tr><td>Normal: an agent goes quiet.</td><td>The list re-reads at <code>observed_at + 120</code> with no write.</td><td><span class="mark yes">yes</span> The row is its current agent's, so it is in the join.</td></tr>
-<tr><td>Failure: the process is killed with no exit recorded.</td><td>Dead from the OS; views holding the process fact re-read.</td><td><span class="mark yes">yes</span> The agent is unended, so it is still observed.</td></tr>
-<tr><td>Recovery: the Session is resumed with a new agent between observing and projecting.</td><td><code>pin</code> returns nothing and the read starts over.</td><td><span class="mark yes">yes</span> The new agent appears in the rerun; the lists differ.</td></tr>
-<tr><td>Counterexample: a view that only ever woke because an ended agent's activity row produced a deadline.</td><td>Nothing should depend on it.</td><td>None found. Those wakeups stop; the plan names the two tests that cover the real sources.</td></tr>
+<tr><td>Normal: an agent goes quiet.</td><td>The list re-reads at <code>observed_at + 120</code> with no write.</td><td><span class="mark yes">yes</span> QA: available 120 s after the reading, to the second, <code>sessions</code> revision unchanged, inline and over the server's socket.</td></tr>
+<tr><td>Failure: the agent ends inside the quiet window.</td><td>Closed at once, never available, no wakeup owed.</td><td><span class="mark yes">yes</span> QA: one line at exit, nothing at +120 s, both binaries. <code>quiet_deadlines_come_only_from_agents_that_have_not_ended</code>.</td></tr>
+<tr><td>Recovery: a new agent between observing and projecting.</td><td><code>pin</code> returns nothing and the read starts over.</td><td><span class="mark yes">yes</span> <code>a_changed_identity_restarts_acquisition_before_projection</code>. A resumed Session with an old reading and a new agent was not driven by QA; the guard's <code>act.agent_process_id IS s.agent_process_id</code> is what excludes it.</td></tr>
+<tr><td>Counterexample: a view that only woke because an ended agent's activity row produced a deadline.</td><td>Nothing should depend on it.</td><td>None found, in code or in QA's subscriptions.</td></tr>
 </tbody>
 </table>
 
-<h2>What the plan now says</h2>
-<p>Changed by this review: identities are the unended agents in both reads and
-<code>completed_at</code> leaves <code>SessionProcessIdentity</code>; the
-deadline statement shares its guard with <code>available_sql</code>; a test
-shows an ended agent's fresh activity registers no deadline. Kept from the
-kickoff plan: no index on <code>observed_at</code>, every unended Graph run for
-the list, <code>pin</code> unchanged, <code>session_activity</code> joins the
-plan-checked tables, and deadlines first as the slice that shows whether the
-plan check widens the change.</p>
-
 <h2>Larger than this change</h2>
-<p>The 120-second rule lives in <code>available_sql</code>, the deadline
-statement and a literal in <code>store_revision_session_activity_update</code>.
-Making it one thing takes a migration that rebuilds the trigger. The second
-read in <code>pin</code> goes away only if every identity write advances the
-<code>sessions</code> revision, which is also a trigger change. Neither is
-needed at 50 µs a read.</p>
+<p>The 120-second rule still has a third copy, the literal in
+<code>store_revision_session_activity_update</code>; one source takes a
+migration that rebuilds the trigger. The second read in <code>pin</code> goes
+away only if every identity write advances the <code>sessions</code>
+revision, also a trigger change. Neither is needed at 50 µs a read.</p>
+<p><code>selections.rs</code> filters
+<code>session.completed_at.is_none()</code> over a list that
+<code>inventory_query</code> already limited to open Sessions: a check for a
+case that cannot occur. Outside this diff; one line to delete.</p>
+<p>From QA, on <code>main</code> too: any <code>lf</code> read against a copy
+of a Machine's store runs recovery against the real checkouts it names.</p>
 
 <h2>Questions</h2>
 <ol class="q">
-  <li>A completed Session whose agent ended reads Dead in the list, where it read Unknown.
-    <ol><li>Dead everywhere, as chosen.</li><li>Keep Unknown for completed Sessions in the list.</li></ol>
+  <li>The single-Session read no longer returns ended agents and <code>SessionProcessIdentity.completed_at</code> is gone.
+    <ol><li>Keep, as built: one route to Dead.</li><li>Restore the field for the single read.</li></ol>
   </li>
-  <li>The single-Session read stops returning ended agents and the field goes.
-    <ol><li>As chosen: one route to Dead.</li><li>Narrow only the list, as the kickoff plan had it.</li></ol>
-  </li>
-  <li>The quiet rule written three times.
+  <li>The quiet rule's third copy in the trigger.
     <ol><li>Leave it; file nothing.</li><li>File a Task to make the trigger and the rule one source.</li></ol>
   </li>
   <li><code>graph_processes</code> under the query-plan check.
-    <ol><li>Leave it out, as chosen.</li><li>File a Task to measure its indexes and audit Graph statements.</li></ol>
+    <ol><li>Leave it out, as built.</li><li>File a Task to measure its indexes and audit Graph statements.</li></ol>
+  </li>
+  <li>The redundant <code>completed_at</code> filter in <code>selections.rs</code>.
+    <ol><li>Delete it in this PR.</li><li>Leave it for whoever next touches the file.</li></ol>
+  </li>
+  <li><code>INDEXED BY agent_sessions_unended_agent</code> on the list's statements.
+    <ol><li>Keep: the plan test names the driver and the planner cannot drift to <code>open_sessions</code>.</li><li>Drop it and let the planner choose.</li></ol>
   </li>
 </ol>
 

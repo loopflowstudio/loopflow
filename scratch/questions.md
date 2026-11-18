@@ -6,8 +6,11 @@ Made without anyone to ask; each is reversible.
   "if none serves it". The read is driven from `agent_sessions_unended_agent`
   instead, so no index is written on every activity reading.
 - **Identities and Graph runs are narrowed too**, not only deadlines: they
-  were 60% of the read's time. A completed Session with an ended agent then
-  reads Dead in an all-Sessions summary where it read Unknown.
+  were 60% of the read's time. No summary reads differently: the list never
+  holds a finished Session (`inventory_query` opens with
+  `s.completed_at IS NULL`), and the single read said Dead already.
+- **`selections.rs` filters `session.completed_at.is_none()`** over a list
+  that query has already limited to open Sessions. Not touched here.
 - **`graph_processes` stays out of `GROWING`.** Worth its own Task if Graph
   statements should be plan-checked: it needs `graph_processes_unended` and
   `graph_process_steps_*` measured and every traced Graph statement audited.

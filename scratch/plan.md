@@ -13,8 +13,7 @@ Session list; `lf server run` stops spending its busy time here.
 
 Done when the all-Sessions inputs read costs tens of microseconds on a store
 this size, the three statements appear in a query-plan test that fails on a
-scan, and every Session summary reads the same as before, but for the one
-reading named under Identities.
+scan, and every Session summary reads the same as before.
 
 ## What the store showed (2026-11-18, `~/.lf/loopflow.db`, read-only, SQLite 3.51)
 
@@ -104,11 +103,14 @@ read stops returning ended agents too. Passed over: narrowing only the
 all-read, which leaves two ways to learn that an ended agent is Dead (the row
 in one read, `RecordedProcess.ended` in the other).
 
-One reading changes: a completed Session with an ended agent reads Dead in an
-all-Sessions summary where it read Unknown (it was outside
-`completed_at IS NULL`). The single-Session read already said Dead, so the two
-now agree. Passed over: keeping Unknown there with a `completed_at` test in
-`read_summary`.
+No reading changes. An earlier draft of this plan said a completed Session
+with an ended agent would turn from Unknown to Dead in an all-Sessions
+summary. No such summary exists: both callers of `read_summary` were checked
+after the build (concept review, 2026-11-18). The list goes through
+`inventory_query`, which opens with `s.completed_at IS NULL`, so a finished
+Session is never in it; the single read said Dead before, through the map, and
+says Dead now, from the row. The PR body claims no change in what anyone
+reads. QA's "not reached" entry for this reading has nothing to reach.
 
 **Graph runs** for the all-read are every unended run:
 `WHERE g.ended_at IS NULL`, through `graph_processes_unended`. 6 rows, 3 µs.

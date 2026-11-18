@@ -102,7 +102,7 @@ impl EffectiveSetting {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ResolvedSettings {
     pub config: Config,
     pub settings: BTreeMap<String, EffectiveSetting>,
@@ -606,15 +606,52 @@ fn _split_agent_list(values: &mut serde_yaml_ng::Mapping, locator: &str) {
     }
 }
 
+/// What settings resolution reads that is not a file. It is the argument of
+/// [`resolve_with`] and part of a shared value's key, so the key cannot drift
+/// from what the resolution read.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Outside {
+    environment: Value,
+    invocation: Value,
+    sole_harness: Option<&'static str>,
+    pub(super) home: PathBuf,
+    pub(super) remote: Option<String>,
+}
+
+impl Outside {
+    /// A `--setting` override belongs to the command that carries it.
+    pub(super) fn overridden(&self) -> bool {
+        !self.invocation.is_null()
+    }
+}
+
+pub fn outside() -> Result<Outside, LoadError> {
+    Ok(Outside {
+        environment: environment()?,
+        invocation: invocation_values(),
+        sole_harness: super::default_agent(),
+        home: crate::store::lf_home_dir(),
+        remote: super::remote::incoming_text(),
+    })
+}
+
 /// Resolve agent choices before fallbacks; within each key use source, scope, target.
 pub fn resolve_layers(
     layers: &[ConfigDeclarations],
     skill: Option<&Skill>,
 ) -> Result<ResolvedSettings, LoadError> {
+    resolve_with(layers, skill, &outside()?)
+}
+
+pub(super) fn resolve_with(
+    layers: &[ConfigDeclarations],
+    skill: Option<&Skill>,
+    outside: &Outside,
+) -> Result<ResolvedSettings, LoadError> {
     // Each block shares provenance; specificity orders blocks within a source/scope.
     let mut candidates = Vec::new();
     let mut defaults = serde_yaml_ng::to_value(Config::default()).expect("Config serializes");
-    if let Some(agent) = super::default_agent() {
+    if let Some(agent) = outside.sole_harness {
         insert(&mut defaults, &["default_agent"], agent.into());
     }
     insert(
@@ -653,13 +690,13 @@ pub fn resolve_layers(
             source: ConfigSource::Environment,
             scope: SettingScope::Global,
             path: "environment".into(),
-            value: environment()?,
+            value: outside.environment.clone(),
         },
         ConfigDeclarations {
             source: ConfigSource::CommandLine,
             scope: SettingScope::Global,
             path: "CLI".into(),
-            value: invocation_values(),
+            value: outside.invocation.clone(),
         },
     ];
     for layer in layers.iter().chain(&invocation) {

@@ -1,5 +1,6 @@
 //! External facts shared by served reads. Bare reads use the same observers
 //! inline; only a bounded reading scope retains answers and dependencies.
+use std::any::Any;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::io::{self, Read};
@@ -168,23 +169,60 @@ struct Entry {
 
 type SharedEntry = Arc<Mutex<Entry>>;
 
+/// A value computed from observed facts. Each variant is the whole identity
+/// of one computation: everything it reads that is not an observed fact.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum Derived {
+    /// Settings resolved for work in a checkout and Wave.
+    Settings {
+        checkout: Option<PathBuf>,
+        wave: Option<String>,
+        outside: crate::config::settings::Outside,
+    },
+}
+
 /// The entries and revisions read by one invocation, including bounded workers.
 #[derive(Debug, Clone, Default)]
-pub struct Dependencies(Arc<Mutex<HashMap<Fact, (SharedEntry, u64)>>>);
+pub struct Dependencies(Arc<Mutex<Observed>>);
+
+/// A derived value's dependencies are held by reference: using a value costs
+/// one entry here, whatever its computation read.
+#[derive(Debug, Default)]
+struct Observed {
+    facts: HashMap<Fact, (SharedEntry, u64)>,
+    derived: HashMap<Derived, Dependencies>,
+}
 
 impl Dependencies {
     pub fn changed(&self) -> bool {
-        self.0
-            .lock()
-            .expect("observed dependencies")
+        let observed = self.0.lock().expect("observed dependencies");
+        observed
+            .facts
             .values()
             .any(|(entry, revision)| entry.lock().expect("observed fact").revision != *revision)
+            || observed.derived.values().any(Dependencies::changed)
     }
+}
+
+/// One derived value, locked while it is computed so concurrent readings
+/// asking for it compute once.
+#[derive(Debug, Default)]
+struct Slot(Mutex<Option<Computed>>);
+
+#[derive(Debug)]
+struct Computed {
+    value: Arc<dyn Any + Send + Sync>,
+    dependencies: Dependencies,
+    used: SystemTime,
 }
 
 #[derive(Debug, Default)]
 pub struct Cache {
     entries: Mutex<HashMap<Fact, SharedEntry>>,
+    derived: Mutex<HashMap<Derived, Arc<Slot>>>,
+    #[cfg(test)]
+    computations: Mutex<Vec<Derived>>,
 }
 
 static SHARED: LazyLock<Mutex<Weak<Cache>>> = LazyLock::new(Mutex::default);
@@ -210,6 +248,20 @@ impl Cache {
     }
 
     fn refresh(&self, source: Source) {
+        // A value leaves like a fact: nothing holds it and nothing asked lately.
+        self.derived
+            .lock()
+            .expect("derived values")
+            .retain(|_, slot| {
+                Arc::strong_count(slot) > 1
+                    || slot.0.try_lock().map_or(true, |computed| {
+                        computed.as_ref().is_some_and(|computed| {
+                            Arc::strong_count(&computed.dependencies.0) > 1
+                                || computed.used.elapsed().unwrap_or_default()
+                                    < Duration::from_secs(300)
+                        })
+                    })
+            });
         let entries = {
             let mut entries = self.entries.lock().expect("observation cache");
             entries.retain(|_, entry| {
@@ -278,6 +330,7 @@ impl Cache {
                     used: SystemTime::now(),
                 })),
             )])),
+            ..Self::default()
         })
     }
 
@@ -325,9 +378,17 @@ impl Cache {
             .0
             .lock()
             .expect("observed dependencies")
+            .facts
             .entry(fact)
             .or_insert((entry, revision));
         answer
+    }
+
+    /// How many times values matching `key` were computed.
+    #[cfg(test)]
+    pub(crate) fn computations(&self, key: impl Fn(&Derived) -> bool) -> usize {
+        let computations = self.computations.lock().unwrap();
+        computations.iter().filter(|computed| key(computed)).count()
     }
 }
 
@@ -358,6 +419,72 @@ pub fn active() -> bool {
 pub fn inherit<T>(read: impl FnOnce() -> T) -> impl FnOnce() -> T {
     let reading = READING.with(|reading| reading.borrow().clone());
     loopflow_storage::instrumentation::inherit(move || scope(reading, read))
+}
+
+/// `compute`'s result, shared by served readings until a fact it observed
+/// changes. With no reading active it is computed inline and nothing is kept.
+///
+/// `compute` reads observed facts and `key`, nothing else: an input from the
+/// environment, a thread-local or the store that is missing from `key` leaves
+/// the value stale until one of its files changes.
+///
+/// # Panics
+///
+/// When two computations of different types share one `key`.
+pub fn derived<T: Send + Sync + 'static>(key: Derived, compute: impl FnOnce() -> T) -> Arc<T> {
+    let Some(reading) = READING.with(|reading| reading.borrow().clone()) else {
+        return Arc::new(compute());
+    };
+    let slot = reading
+        .cache
+        .derived
+        .lock()
+        .expect("derived values")
+        .entry(key.clone())
+        .or_default()
+        .clone();
+    // A computation that panicked stored nothing; the next caller computes.
+    let mut computed = slot.0.lock().unwrap_or_else(|poisoned| {
+        slot.0.clear_poison();
+        poisoned.into_inner()
+    });
+    if computed
+        .as_ref()
+        .is_none_or(|computed| computed.dependencies.changed())
+    {
+        let dependencies = Dependencies::default();
+        let value = scope(
+            Some(Reading {
+                cache: reading.cache.clone(),
+                dependencies: dependencies.clone(),
+            }),
+            compute,
+        );
+        #[cfg(test)]
+        reading.cache.computations.lock().unwrap().push(key.clone());
+        *computed = Some(Computed {
+            value: Arc::new(value),
+            dependencies,
+            used: SystemTime::now(),
+        });
+    }
+    let computed = computed.as_mut().expect("computed above");
+    computed.used = SystemTime::now();
+    // Keep the first dependencies so a value computed again during the
+    // reading stays visible as a change.
+    reading
+        .dependencies
+        .0
+        .lock()
+        .expect("observed dependencies")
+        .derived
+        .entry(key)
+        .or_insert_with(|| computed.dependencies.clone());
+    computed
+        .value
+        .clone()
+        .downcast()
+        .unwrap_or_else(|_| panic!("a derived key names one type"))
 }
 
 fn read(fact: Fact) -> Answer {
@@ -512,7 +639,7 @@ mod tests {
     use std::sync::Arc;
     use std::time::{Duration, SystemTime};
 
-    use super::{file_bytes, git, inherit, read_to_string, Cache, Source};
+    use super::{derived, file_bytes, git, inherit, read_to_string, Cache, Derived, Source};
     use crate::process::os_process::process_identity_evidence as process;
     use crate::store::ProcessIdentityEvidence;
 
@@ -742,6 +869,104 @@ mod tests {
             ProcessIdentityEvidence::Dead
         );
     }
+    fn key(checkout: &str) -> Derived {
+        Derived::Settings {
+            checkout: Some(checkout.into()),
+            wave: None,
+            outside: crate::config::settings::outside().unwrap(),
+        }
+    }
+
+    #[test]
+    fn a_derived_value_is_shared_until_a_fact_it_read_changes() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file");
+        std::fs::write(&path, "before").unwrap();
+        let cache = Arc::new(Cache::default());
+        let key = key("shared");
+        let text = || derived(key.clone(), || read_to_string(&path).unwrap());
+        let (first, dependencies) = cache.capture(text);
+        let (second, unchanged) = cache.capture(text);
+        assert!(Arc::ptr_eq(&first, &second));
+
+        std::fs::write(&path, "after").unwrap();
+        // No reading is active: computed inline from the file as it is now.
+        assert_eq!(*text(), "after");
+        assert_eq!(*cache.capture(text).0, "before");
+        refresh(&cache);
+        assert!(dependencies.changed() && unchanged.changed());
+        let (third, dependencies) = cache.capture(text);
+        assert_eq!(*third, "after");
+        refresh(&cache);
+        assert!(!dependencies.changed());
+        assert_eq!(cache.computations(|computed| *computed == key), 2);
+    }
+
+    #[test]
+    fn a_fact_under_a_nested_derived_value_wakes_every_reading_above_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file");
+        std::fs::write(&path, "before").unwrap();
+        let cache = Arc::new(Cache::default());
+        let (inner, outer) = (key("inner"), key("outer"));
+        let text = || {
+            derived(outer.clone(), || {
+                let inner = derived(inner.clone(), || read_to_string(&path).unwrap());
+                format!("outer {inner}")
+            })
+        };
+        let (_, computed) = cache.capture(text);
+        let (_, shared) = cache.capture(text);
+        std::fs::write(&path, "after").unwrap();
+        refresh(&cache);
+        assert!(computed.changed(), "the reading that computed both");
+        assert!(shared.changed(), "a reading that was handed the value");
+        assert_eq!(*cache.capture(text).0, "outer after");
+        assert_eq!(cache.computations(|computed| *computed == inner), 2);
+        assert_eq!(cache.computations(|computed| *computed == outer), 2);
+    }
+
+    #[test]
+    fn workers_of_one_reading_compute_a_derived_value_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("file");
+        std::fs::write(&path, "text").unwrap();
+        let cache = Arc::new(Cache::default());
+        let key = key("workers");
+        let (values, dependencies) = cache.capture(|| {
+            std::thread::scope(|scope| {
+                let workers: Vec<_> = (0..4)
+                    .map(|_| {
+                        scope.spawn(inherit(|| {
+                            derived(key.clone(), || read_to_string(&path).unwrap())
+                        }))
+                    })
+                    .collect();
+                workers
+                    .into_iter()
+                    .map(|worker| worker.join().unwrap())
+                    .collect::<Vec<_>>()
+            })
+        });
+        assert!(values.iter().all(|value| Arc::ptr_eq(value, &values[0])));
+        assert_eq!(cache.computations(|computed| *computed == key), 1);
+        std::fs::write(&path, "changed").unwrap();
+        refresh(&cache);
+        assert!(dependencies.changed());
+    }
+
+    #[test]
+    fn a_computation_that_panics_leaves_its_value_to_the_next_caller() {
+        let cache = Arc::new(Cache::default());
+        let key = key("panics");
+        let failed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            cache.capture(|| derived(key.clone(), || -> u32 { panic!("failed computation") }))
+        }));
+        assert!(failed.is_err());
+        assert_eq!(*cache.capture(|| derived(key.clone(), || 7)).0, 7);
+        assert_eq!(*cache.capture(|| derived(key.clone(), || 8)).0, 7);
+    }
+
     fn session_projection_fixture(
         pid: u32,
     ) -> (

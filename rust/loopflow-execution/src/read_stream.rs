@@ -1021,6 +1021,98 @@ mod tests {
     }
 
     #[test]
+    fn readings_share_resolved_settings_until_a_settings_file_changes() {
+        use crate::observe::{Cache, Derived};
+        let _env = loopflow_test_support::env_lock().lock().unwrap();
+        let home = tempfile::tempdir().unwrap();
+        let _home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", home.path().to_str().unwrap());
+        let repo = tempfile::tempdir().unwrap();
+        let shared = repo.path().join(".lf/config.yaml");
+        std::fs::create_dir_all(shared.parent().unwrap()).unwrap();
+        std::fs::write(&shared, "agent: claude\n").unwrap();
+        let agent = {
+            let directory = repo.path().to_owned();
+            move || -> Result<String, crate::error::LoadError> {
+                let config = crate::config::load_wave_config(Some(&directory), None)?;
+                Ok(config.expect("resolved").agent()?.to_owned())
+            }
+        };
+
+        let cache = Cache::shared();
+        let resolutions = || {
+            cache.computations(|key| {
+                matches!(key, Derived::Settings { checkout: Some(path), .. } if path == repo.path())
+            })
+        };
+        let (sender, wakes) = mpsc::channel();
+        let read = agent.clone();
+        let subscription = start_pull(
+            Watch::State,
+            (),
+            move |_, ()| {
+                let agent = read().map_err(anyhow::Error::from);
+                async move { agent }
+            },
+            Box::new(move || {
+                let _ = sender.send(());
+            }),
+            None,
+            false,
+        )
+        .unwrap();
+        let mut checkpoint = 0;
+        let mut forced = |expected: &str| {
+            checkpoint += 1;
+            subscription.checkpoint(checkpoint);
+            let frame = next_frame(&subscription, &wakes);
+            assert_eq!(frame["answers"], checkpoint, "{frame}");
+            assert_eq!(frame["body"], expected, "{frame}");
+        };
+
+        assert_eq!(next_frame(&subscription, &wakes)["body"], "claude");
+        for _ in 0..3 {
+            forced("claude");
+        }
+        assert_eq!(resolutions(), 1, "four readings of unchanged files");
+
+        std::fs::write(&shared, "agent: pi\n").unwrap();
+        assert_eq!(next_frame(&subscription, &wakes)["body"], "pi");
+        forced("pi");
+        assert_eq!(resolutions(), 2, "one edit resolves once more");
+
+        // A file that does not parse reads as it does for a bare command.
+        std::fs::write(&shared, "agent: [\n").unwrap();
+        let bare = agent().unwrap();
+        assert_eq!(bare, "codex", "the only installed harness");
+        assert_eq!(next_frame(&subscription, &wakes)["body"], bare);
+        std::fs::write(&shared, "agent: pi\n").unwrap();
+        assert_eq!(next_frame(&subscription, &wakes)["body"], "pi");
+        forced("pi");
+        let resolved = resolutions();
+        assert_eq!(resolved, 4);
+
+        // An override belongs to its own reading and never enters the shared value.
+        let overridden = crate::config::settings::select_invocation(
+            serde_yaml_ng::from_str("agent: claude").unwrap(),
+        );
+        forced("claude");
+        drop(overridden);
+        forced("pi");
+        assert_eq!(resolutions(), resolved);
+
+        // Another home read through the same cache has its own settings.
+        let other = tempfile::tempdir().unwrap();
+        std::fs::write(other.path().join("config.yaml"), "agent: opencode\n").unwrap();
+        let other_home =
+            crate::config::environment::EnvVarGuard::set("LF_HOME", other.path().to_str().unwrap());
+        forced("opencode");
+        drop(other_home);
+        forced("pi");
+        assert_eq!(resolutions(), resolved + 1);
+    }
+
+    #[test]
     fn a_failing_read_waits_longer_before_each_retry() {
         let read_on = Instant::now();
         let due =

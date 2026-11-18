@@ -13,15 +13,22 @@ fn executable(path: &Path, source: &str) {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
 }
 
+/// The value the matrix gives every caller-session marker in its own
+/// environment, as if `lf` ran from another conversation's shell.
+const CALLER: &str = "caller";
+
 fn providers(home: &Path) {
     let bin = home.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let record = r#"
+    let caller_session = serde_json::to_string(crate::agent::CALLER_SESSION_ENV).unwrap();
+    let record = format!(
+        r#"
 import json, os, sys, uuid
 from pathlib import Path
 with (Path(os.environ["LF_HOME"]) / "matrix-argv.jsonl").open("a") as log:
-    log.write(json.dumps({"args":sys.argv[1:], "managed":"LF_PROVIDER_CONTEXT" in os.environ, "delivery":"LF_CONTEXT_DELIVERY" in os.environ, "opencode":os.environ.get("OPENCODE_CONFIG_CONTENT")}) + "\n")
-"#;
+    log.write(json.dumps({{"args":sys.argv[1:], "managed":"LF_PROVIDER_CONTEXT" in os.environ, "delivery":"LF_CONTEXT_DELIVERY" in os.environ, "opencode":os.environ.get("OPENCODE_CONFIG_CONTENT"), "inherited":[name for name in {caller_session} if os.environ.get(name) == "{CALLER}"], "config_dir":os.environ.get("CLAUDE_CONFIG_DIR")}}) + "\n")
+"#
+    );
     executable(
         &bin.join("claude"),
         &format!(
@@ -85,6 +92,7 @@ fn every_harness_runs_all_four_launch_kinds() {
         "PATH",
         "CODEX_HOME",
         "OPENCODE_CONFIG_CONTENT",
+        "CLAUDE_CONFIG_DIR",
     ]);
     std::env::set_var("LF_BIN", binary);
     std::env::set_var(
@@ -92,6 +100,20 @@ fn every_harness_runs_all_four_launch_kinds() {
         format!("{}:/usr/bin:/bin", home.join("bin").display()),
     );
     let _server = loopflow_test_support::MachineServer::start(binary, home);
+    // From here the test runs as if inside a Claude Code or Codex shell: their
+    // markers must not reach a provider, while a person's own setting does.
+    // lf's markers stay unset: this process is lf and reads them itself.
+    let provider_markers: Vec<&str> = crate::agent::CALLER_SESSION_ENV
+        .iter()
+        .copied()
+        .filter(|name| !name.starts_with("LF_"))
+        .collect();
+    let _caller = crate::test_ambient::EnvGuard::clear(&provider_markers);
+    for name in &provider_markers {
+        std::env::set_var(name, CALLER);
+    }
+    let config_dir = home.join("claude-config");
+    std::env::set_var("CLAUDE_CONFIG_DIR", &config_dir);
 
     for harness in HarnessKind::ALL {
         for (kind, mode, reports) in [
@@ -229,6 +251,16 @@ fn every_harness_runs_all_four_launch_kinds() {
                         settings["permissions"][1]["action"] == "external_directory"
                             && settings["permissions"][1]["effect"] == "deny",
                         "{row}: worktree permissions lost"
+                    );
+                }
+                for command in &commands {
+                    anyhow::ensure!(
+                        command["inherited"].as_array().is_some_and(Vec::is_empty),
+                        "{row}: provider inherited the caller's session: {command}"
+                    );
+                    anyhow::ensure!(
+                        command["config_dir"] == config_dir.to_string_lossy().as_ref(),
+                        "{row}: CLAUDE_CONFIG_DIR did not pass through: {command}"
                     );
                 }
                 let managed = commands.iter().any(|command| command["managed"] == true);

@@ -1729,9 +1729,12 @@ fn only_the_sizing_views_terminal_answers_reach_the_agent() {
     until_owner(&mut first, &second.id);
     // The second view sizes: the first's cursor report is dropped, its keys kept.
     first.input("\x1b[5;5Rfrom-first\n");
-    let items = until_out(&mut second, "line from-first\r");
     // Typing made the first view the sizer, so now the second's is dropped.
-    assert_eq!(events(&items, "owner").pop().unwrap()["viewer"], first.id);
+    // Events follow the output read in the same pass, so the line may come first.
+    until(&mut second, |items| {
+        String::from_utf8_lossy(&out(items)).contains("line from-first\r")
+            && events(items, "owner").last().unwrap()["viewer"] == first.id
+    });
     second.input("\x1b]11;rgb:0000/0000/0000\x1b\\from-second\n");
     until_out(&mut first, "line from-second\r");
     // The second view sizes again: its answer reaches the agent unchanged.

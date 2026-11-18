@@ -18,3 +18,7 @@
   dropped. Reversible before release: a hub-side check could be added later.
 - Concept review: the hub is not a `Tracker` variant and carries every
   `WorkValue` (Waves included), not the Linear action lens.
+- Docs (2026-11-18): Git sharing let a coworker who cloned the repository read
+  and write the plan with no account. The hub is SSH-as-you, so without Linear
+  or Asana the plan is one person's. Docs say "To share a plan with coworkers,
+  use Linear or Asana." Intended, or should a hub admit other people?

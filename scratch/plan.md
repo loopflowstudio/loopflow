@@ -273,3 +273,21 @@ origin, inert; deleting it is one hand-run
 
 Checks: focused Rust tests per slice; `lf repo tracker` on etude before and
 after cutover (gate, by hand); Desktop view tests for the tracker line (CI).
+
+## User docs (written first, 2026-11-18)
+
+`docs/work.md` ("Share the plan", Sync reference, `--subscribe` line),
+`docs/ops.md` (Other machines), `docs/config.md` (Tracker row),
+`docs/glossary.md` (Tracker, Hub, Linear). Choices made while writing:
+`lf repo tracker` heads with `Plan: hub mini. N open.` /
+`Plan: hub mini, unreachable since 14:02. N open.` / `Plan: this Machine (hub)`;
+hub lines are `<task-id>  <field> · queued · <send error>` and
+`wave <name>  <field> · …`; a hub without the repository's checkout keeps sends
+open with "the hub has no checkout". `documented_commands` will flag
+`lf machine hub` until slice 1 adds the command.
+
+Open question: today a coworker who clones a repository shares its Git plan
+with no account. After slice 2, a repository without Linear or Asana shares
+its plan only among one person's Machines (the hub is reached over SSH as
+you). Is losing zero-setup coworker sharing intended, or should a hub admit
+other people?

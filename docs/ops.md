@@ -343,11 +343,14 @@ ssh mini                                        # sign in with the native client
 lf --machine mini task list                      # any command, run there
 lf task move LOO-12 --machine mini               # move a Task there with its Session; you stay its person
 lf --wave product set machine mini               # new Tasks in Wave `product` run there
+lf machine hub mini                              # keep this Machine's plan on mini
 ```
 
 `--machine` runs the whole command on the target, in its saved repository.
 Removing a machine (`lf machine remove mini`) forgets the connection and leaves
 its work running.
+The hub holds the plan your Machines share; see
+[Share the plan](work.md#share-the-plan).
 
 Group machines you own into a pool, and rent more when none is free:
 

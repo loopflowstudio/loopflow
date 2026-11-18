@@ -2,6 +2,9 @@
 
 ## Status (2026-11-18, slices 4, 4b and 5 built; next: slice 4c, then gate)
 
+Realign 2026-11-18: `grep -rn -e '--processes' rust docs swift` and a grep
+for `process.get`/`process.history` return nothing; 4b stands as built.
+
 LOO-936 (#1965), #1964 and LOO-935 (#1958) are merged and synced in. Every
 slice of this PR is built: slice 2a, the owner and carrier slices, the Session
 slices of slice 3, the journal stop, and slices 4, 4b and 5 below. History of each
@@ -85,6 +88,16 @@ in `scripts/test_task_installation.py` (CI).
    install is the failing binary and the provider's `LF_BIN` is
    `/missing/old/lf`, so a step that exits 0 ran the replacement. Delete the
    `processes` reads and the "Reads record no Process" comment.
+   The second proof, `graph_live_across_switch_runs_next_step_on_selected_install`
+   (same file, :184-343), also reads `processes`: the failure dump's
+   `command, exit_code` (:261), each step's `p.command` (:306) and the
+   runner's (:331). Both binaries work there, so exit codes can't tell them
+   apart. Launcher-written evidence replaces the reads: the `git` shim in
+   `tools/` already runs inside each step's `sync --plan`, so it can append
+   `$GRAPH_ID_ENV` and `readlink /proc/$PPID/exe` (Linux-only proof) to a
+   file. Step 1 must name the prior binary and step 2 the replacement;
+   `graph_process_steps.exit_code` gives the exits. The runner keeping its
+   lf needs the same thing one level up, or that assertion goes.
 2. `journal::admit_process`' `eprintln!("Process history unavailable…")` is
    the last user-facing Process name, and it prints on a person's terminal
    for a store lf could not open. Under the recording-gap rule and the quiet

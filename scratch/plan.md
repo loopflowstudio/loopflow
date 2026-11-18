@@ -32,8 +32,8 @@ What people notice:
 | `tasks.planning_rank` vs `pm_items.rank` | 605 | same, and provider rank only seeds new Tasks |
 | `tasks.planning_url/branch_name/team_id` vs `pm_items` | 13 / 19 / 13 | desired vs observed, like title: Git planning writes the branch itself |
 | `tasks.planning_provider_revision` vs `pm_items.revision` | 421 | **true duplicate**: observation bookkeeping |
-| `tasks.issue_title` vs `task_linear_observations.last_title` | 14 | change detector copy |
-| `tasks.issue_title` vs `task_creation_intents.title` | 68 | idempotency-check copy |
+| `tasks.issue_title` vs `task_linear_observations.last_title` | 14 | **not a copy** (slice 3): the definition the agent was last steered with |
+| `tasks.issue_title` vs `task_creation_intents.title` | 68 | **not a copy** (slice 3): the original create request, for callers with no receipt |
 | `projects.project_name` vs `pm_projects.name` | 4 | desired vs observed (same as Tasks) |
 | `task_primary_sessions` row vs its Session's `task_id` | 3 | two homes for "which Task" |
 | `agent_sessions` with no `task_id`, cwd inside a checkout | 2,659 | membership only by path |
@@ -53,8 +53,9 @@ which is which, and what gets removed is the copies inside each side:
 - One rule decides what `tasks` holds: every Task fact a person sees on any
   Machine (title, description, state, rank, URL, branch, team). `pm_items`
   holds what the provider last said about each of them. What leaves `tasks` is
-  bookkeeping about the observation itself: `planning_provider_revision`,
-  `pm_snapshot_synced_at`, and the old `planning_completed` boolean.
+  bookkeeping about the observation itself: `planning_provider_revision`
+  and the old `planning_completed` boolean. (`pm_snapshot_synced_at` stays:
+  slice 3 found it is the stamp of the accepted observation, see below.)
   Counterexample that set the rule: `record_task_branch_in`
   (`children.rs:154-180`) writes `planning_branch_name` when no provider is
   connected, because "Git planning carries the Task's branch, so whoever runs
@@ -66,13 +67,9 @@ which is which, and what gets removed is the copies inside each side:
   within the Project. `pm_projects.task_order_json` is derivable from it
   (`linear_acceptance.rs:470-500` only accepts a list whose every item already
   matches `pm_items`), so it goes.
-- `task_linear_observations.last_title/last_description/last_revision` are a
-  third copy used only to decide whether to steer the agent with a new
-  definition (`children.rs:1100-1116`). `pm_items` already holds the previous
-  observation; the steer compares against it before `put_item` overwrites it.
-- `task_creation_intents.title/description` are read only to check that a
-  repeated create request matches (`children.rs:62-90`). `creation_receipts`
-  already keeps a request fingerprint; the check uses it.
+- `task_linear_observations.last_title/last_description/last_revision` and
+  `task_creation_intents.title/description` looked like copies and are not
+  (slice 3, below): both stay.
 
 ## Inventory (reviewed before code changes)
 
@@ -90,7 +87,7 @@ now, mark `-- leaving: <member> LOO-877` (or the Task named), drop after the
 | workspace_slug, abandon_reason, abandoned_at, completion_request, completion_error, paused, shipped_at | keep | Task lifecycle |
 | planning_url, planning_branch_name, planning_team_id | keep | the Task's URL, branch and team, shown and carried to peers on every Machine; the branch is written by lf under Git planning (`record_task_branch_in`) |
 | planning_provider_revision | **leaving** | the provider's clock for one observation = `pm_items.revision` |
-| pm_snapshot_synced_at | **leaving** | when the provider was last read = `pm_items.observed_at` |
+| pm_snapshot_synced_at | keep | when the observation lf accepted into the Task was read; `tracker_items.observed_at` moves on reads acceptance skips (needs_refresh, unaccepted Project). Display only (`tracker_synced_at`) |
 | planning_completed | **leaving** | old boolean; `planning_state` is set on every row (0 rows rely on the fallback in `TASK_COLUMNS`) |
 | worktree, branch, base_commit, parent_pr_id, checkout_machine_id, primary_session_id, ship_* (6) | already leaving (LOO-935) | finish the reads: `sqlite/processes.rs:350` prune check still reads `tasks.ship_lf_process_id`; `sqlite.rs:379-410` keeps a pre-`task_checkouts` fallback path for old registries — delete it |
 | regressed_in | already leaving (LOO-730) | untouched |
@@ -106,10 +103,12 @@ keeps every column; it belongs with LOO-939 (naming), not here. Noted in
 | `pm_items` | keep | observed Task, merge base. Gains nothing. |
 | `pm_projects` (minus `task_order_json`) | keep | observed Project, merge base |
 | `pm_projects.task_order_json` | **leaving** | observed order = `pm_items` of the Project by `rank`; `observed_order()` (`planning_order.rs:47`) derives it |
-| `projects` provider-only columns (`planning_provider_revision`, `planning_initiatives`, `planning_teams`, `pm_snapshot_synced_at`) | check in slice 3 | same rule as Tasks: a Project fact people see on any Machine stays; bookkeeping about one observation leaves |
-| `task_linear_observations.last_title/last_description/last_revision` | **leaving** | change detector reads the prior `pm_items` row |
+| `projects.planning_provider_revision` | **leaving** | write-only; `tracker_projects.revision` |
+| `projects.planning_initiatives/planning_teams` | keep | exchanged Project facts (`WorkValue::ProjectInitiatives/Teams`) |
+| `projects.pm_snapshot_synced_at` | keep | readiness reads it as the accepted observation: `IS NOT tracker_projects.observed_at` makes the Project unavailable (`project_selection.rs` `readiness_in`) |
+| `task_linear_observations.last_title/last_description/last_revision` | keep | the steer ledger: what the agent was last told. `ingest_task` writes `tracker_items` before `apply_tracker_event` runs (`ops/tracker_events.rs`), and inventory reads rewrite it without steering, so the prior `tracker_items` row is already the new title |
 | `task_linear_observations.last_success_at/degraded_reason/updated_at` | keep | observation health per Task; no other home |
-| `task_creation_intents.title/description` | **leaving** | repeat-check uses `creation_receipts.fingerprint`. The table's export columns and the table itself are LOO-938's (one queue) |
+| `task_creation_intents.title/description` | keep (LOO-938) | the repeat-check's original request; `creation_receipts` exists only for `lf task create`, while `create_task` has ~10 receiptless callers (harness task updates, native sessions, runtime, tracker drain). The table is LOO-938's (one queue) |
 
 ### Order
 
@@ -282,14 +281,11 @@ anti-join. New index `processes(task_id)` partial `WHERE task_id IS NOT NULL`.
   of frozen pairs), `events.rs:362-376` fixture inserts (test-only; the brief's
   "second path"), `processes.rs:347` and `:350` prune clauses.
 - `sqlite.rs:379-410` pre-`task_checkouts` registry fallback.
-- Reads/writes of `tasks.planning_provider_revision/planning_completed/
-  pm_snapshot_synced_at`.
+- Reads/writes of `tasks.planning_provider_revision/planning_completed`,
+  `projects.planning_provider_revision`.
 - `task_orders` and `commit_task_order`/`task_order_inputs`/`task_order_in`,
   `TaskOrder` key's manual position.
 - `pm_projects.task_order_json` reads/writes.
-- `task_linear_observations` title/description/revision columns and
-  `seed_task_linear_observation`'s copy of them.
-- `task_creation_intents.title/description` writes and the comparison.
 
 Survives: every Task's title, description, state, rank, URL, branch,
 every Process/Session association, conflict answers.
@@ -358,10 +354,24 @@ every Process/Session association, conflict answers.
    unguarded so feature unification can't change the CLI. Every later slice
    lands under it: slice 3 marks its columns leaving and the Task tests say
    what still reads them.
-3. **Observation bookkeeping lives in `pm_items`.** Provider revision,
-   synced-at, `planning_completed` leave `tasks`; same check for `projects`.
-   The observation steer compares against `pm_items`; intents' title copy
-   goes.
+3. **Observation bookkeeping.** *Built (`process_task.sql`, commit
+   "A Task is completed when its state says so"). `cargo nextest run -p
+   loopflow-storage --lib`: 391 passed under the guard.* `tasks.planning_completed`,
+   `tasks.planning_provider_revision` and `projects.planning_provider_revision`
+   are leaving. Every read asks `planning_state` (live: `completed` exactly
+   when the boolean is 1; the migration fills the state for any row relying
+   on the old fallback). Released lf and the retirement triggers still read
+   the boolean, so `tasks_completed_follows_state_{insert,update}` keep it
+   equal to the state; a test-side write of the boolean alone is undone by
+   them, which is why fixtures moved to `planning_state`
+   (`saved_selection_work.sql` included). `Disposition` keeps its
+   `planning_completed` key: the Git journal and released peers parse it;
+   the writer stores a stateless completion as `completed`
+   (`released_lf_sees_the_completion_a_state_decides`). Contradicted and
+   kept: the steer ledger, the intent's title copy, both
+   `pm_snapshot_synced_at` (inventory rows above say why). Also repaired:
+   four `admission_lifecycle_tests` expected a Session to stay taskless after
+   its checkout was placed; slice 1's adoption gives it the Task.
 4. **One order.** Working board sorts by rank; tile Move calls `reorder_in`;
    `task_orders` and `task_order_json` leave. Swift Working board test
    updated.

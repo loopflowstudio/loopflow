@@ -53,3 +53,12 @@
   direct read of a leaving FK column passes. Passed over: tracking the
   statement's write target to tell them apart (no statement boundary in the
   authorizer; subselects arrive between the write and the key check).
+- **`Disposition.planning_completed` stays on the wire.** The column left;
+  the exchanged key did not, because the Git journal and released peers
+  require it (DTOs carry no defaults). Chosen: derive it from the state on
+  read, honour it only when no state is given. Removing it needs a release
+  that accepts its absence first; not filed, belongs with LOO-877's drop.
+- **Sync trigger for `planning_completed`.** Chosen over "stop writing":
+  released lf on the same store reads the boolean for status, ownership and
+  retirement, and existing retirement triggers fire on it. Passed over:
+  rewriting those triggers onto `planning_state` now; the contract can.

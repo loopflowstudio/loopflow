@@ -20,7 +20,7 @@ said: `scratch/explore.md`; the review that set the three differences below:
    keeps one cursor into `plan_changes`. `hub_sends` goes; both lines say
    "unsent" and count records.
 3. **The ref names the repository**, so a fresh clone needs no
-   `lf config repo --bind` (slice 2, after one check).
+   `lf config repo --bind` (checked in slice 2).
 
 "Your order of your claimed Tasks" (the design's second order) moves to the
 tracker Task; see Exclusions.
@@ -420,11 +420,6 @@ etude checkout and `lf` version are unknown.
   `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
   ran, clean, 2026-11-18. Slice 2 reruns the hub acceptance test as it
   extends it; the storage tests rerun at gate.
-- Not run, for gate: the rest of `machine_commands::`, `transport::`,
-  `binary(transport_tests)`, `documented_commands::`, `performance_tests::`,
-  and Swift `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
-  (`RepositoryPlan.swift`, `RepositoryPlanView.swift` and three test files
-  changed with the `--json` shape and were not compiled here).
 - Slice 2, run by implement, passed 2026-11-18:
   `cargo test -p loopflow-execution --lib ops::plan_git::`.
   `cargo nextest run -p loopflow --test integration -E 'test(the_later_change_shows_on_both_machines_through_the_hub) | test(dto_fixtures::subscribe_frames)'`
@@ -432,8 +427,6 @@ etude checkout and `lf` version are unknown.
   `cargo nextest run -p loopflow -p loopflow-storage --lib -E 'test(server::schema::tests::) | test(revisions::) | test(migration_runner::)'`
   (one migration test finished at 299 s of nextest's 300 on a loaded
   Machine). `server_schema.json` regenerated.
-- Not compiled here: Swift (`RepositoryPlan.swift` gained `GitCarrier` and
-  `CarrierStanding`; three test files follow).
 - Slice 2's tests ran before main (#1977, Session reads) was merged in at
   `5796dd348b`; the merge touched no plan file. After it,
   `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
@@ -462,9 +455,17 @@ etude checkout and `lf` version are unknown.
   `performance_tests::`, `local_planning::` and the Task launch fixtures
   (placing an unowned Task now exchanges first, which pushes a plan ref to a
   fixture's remote), `migration_runner::` (the ownership trigger is recreated
-  with `seen`), and Swift.
+  with `seen`), and Swift
+  `scripts/test_desktop.sh --filter 'DTOFixtureTests|DesktopHeadlessTests|WorkModelTests'`
+  (`RepositoryPlan.swift`, `RepositoryPlanView.swift` and three test files
+  changed with the `--json` shape, `GitCarrier` and `CarrierStanding`, and
+  were never compiled on this branch).
+- Slice 3's tests ran before main (#1980, Codex usage limit) was merged in at
+  `3f4fde8d14`; the merge touched no plan or ownership file. After it,
+  `cargo check -p loopflow-storage -p loopflow-execution -p loopflow --all-targets`
+  ran clean, 2026-11-18. No test was rerun.
 - Left on the Machine, not started by this pass as far as it can tell: five
   `target/debug/lf server run` processes of this checkout, one to five hours
   old.
-- Next: nothing in this Task's slices. Open choices are in
-  `scratch/questions.md`.
+- Next: nothing in this Task's slices; gate runs the list above. Open choices
+  are in `scratch/questions.md`.

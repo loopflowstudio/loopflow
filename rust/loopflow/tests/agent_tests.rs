@@ -236,6 +236,47 @@ text = 'Fable 5 is currently unavailable. Switch to another model.' if failed el
     }
 }
 
+/// LOO-974's refusal, 2026-11-18, as Codex's app-server words it: the cause
+/// is in `codexErrorInfo`, and the sentence's apostrophe is U+2019.
+#[test]
+fn codex_usage_limit_goes_on_under_the_next_agent() {
+    const REFUSAL: &str = r#"{"message":"You\u2019ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:36 PM.","codexErrorInfo":"usageLimitExceeded","additionalDetails":null,"misalignment":null}"#;
+    let codex = support::codex_socket_script(
+        &r#"#!/bin/sh
+read -r initialize
+echo '{"jsonrpc":"2.0","id":1,"result":{}}'
+read -r initialized
+read -r thread_start
+echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"0197f00d-aaaa-7000-8000-000000000001"}}}'
+read -r turn_start
+echo '{"jsonrpc":"2.0","id":3,"result":{"turn":{"id":"turn"}}}'
+echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"0197f00d-aaaa-7000-8000-000000000001","turn":{"id":"turn","status":"inProgress"}}}'
+echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"0197f00d-aaaa-7000-8000-000000000001","turnId":"turn","error":__REFUSAL__,"willRetry":false}}'
+echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"0197f00d-aaaa-7000-8000-000000000001","turn":{"id":"turn","status":"failed","error":__REFUSAL__}}}'
+if [ -n "$LF_TEST_CODEX_STDIO" ]; then exit 0; fi
+while read -r line; do :; done
+"#
+        .replace("__REFUSAL__", REFUSAL),
+    );
+    let home = TempDir::new().unwrap();
+    let claude = claude_script("text = 'finished on claude'");
+    let _env = EnvGuard::with_lf_home(&[("codex", &codex), ("claude", &claude)], home.path());
+    let _directory = support::InDirectory::enter(home.path());
+    let launch = AgentConfig {
+        agent: loopflow_execution::config::Agent::parse("codex:gpt-6.2-astra").unwrap(),
+        fallback_agents: vec![loopflow_execution::config::Agent::parse("claude:fable").unwrap()],
+        cwd: Some(home.path().to_path_buf()),
+        ..base_launch()
+    };
+    let process = ProcessConfig {
+        wait_for_capacity: true,
+        ..base_process()
+    };
+    let result = run_agent(&launch, &process, HEADLESS).unwrap();
+    assert_eq!(result.exit_code, 0, "{}", result.stderr);
+    assert_eq!(result.stdout, "finished on claude");
+}
+
 #[test]
 fn launch_scopes_process_environment_to_child() {
     let _env = EnvGuard::new(&[(

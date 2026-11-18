@@ -93,9 +93,7 @@ impl SqliteStore {
              i.needs_refresh OR COALESCE(p.membership_unresolved,0) OR COALESCE(p.archived,0)
              OR NOT i.project_id_observed OR i.claimed_project_id IS NOT i.project_id
              OR (i.project_id IS NOT NULL AND p.id IS NULL),
-             EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                    WHERE w.repo=i.repo AND d.issue_id=i.id)
-             OR EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id
+             EXISTS(SELECT 1 FROM pm_issue_changes c WHERE c.issue_id=i.id AND c.removed=1),p.id
              FROM pm_items i LEFT JOIN pm_projects p
              ON p.repo=i.repo AND p.provider=i.provider AND p.id=i.project_id
              WHERE i.repo=?1 AND i.provider IN ('linear','asana') AND (i.id=?2 OR i.identifier=?2)",
@@ -133,11 +131,9 @@ impl SqliteStore {
         )) = rows.into_iter().next()
         else {
             let (removed, changed) = conn.query_row(
-                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1)
-                 OR EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                           WHERE w.repo=?2 AND (d.issue_id=?1 OR d.identifier=?1 COLLATE NOCASE)),
+                "SELECT EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1 AND removed=1),
                  EXISTS(SELECT 1 FROM pm_issue_changes WHERE issue_id=?1)",
-                params![selector, repo],
+                params![selector],
                 |row| Ok((row.get::<_, bool>(0)?, row.get::<_, bool>(1)?)),
             )?;
             return Ok(crate::LinearIssueEvidence {
@@ -244,8 +240,6 @@ impl SqliteStore {
                      WHERE m.wave_id=?1 AND i.repo=?2 AND i.provider=?3 AND i.needs_refresh=0
                      AND p.archived=0 AND p.membership_unresolved=0
                      AND EXISTS(SELECT 1 FROM json_each(p.initiative_ids) WHERE value=?4)
-                     AND NOT EXISTS(SELECT 1 FROM task_deletions d JOIN waves w ON w.id=d.wave_id
-                                    WHERE w.repo=i.repo AND d.issue_id=i.id)
                      ORDER BY m.position,i.id",
                 )?;
                 let issue_claims = query

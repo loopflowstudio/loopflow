@@ -113,7 +113,7 @@ struct SessionChromeProofTests {
         let records = try [record, companion].enumerated().map { index, record in
             var value = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(record)) as? [String: Any])
             value["state"] = "active"
-            value["actions"] = sessionActionFixture(state: "active")
+            value["action"] = sessionActionFixture(state: "active")
             if case .shell(let pane, _) = terminals[index].terminal { value["terminal_ids"] = [pane] }
             return value
         }

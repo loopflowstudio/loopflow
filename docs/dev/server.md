@@ -32,9 +32,9 @@ Connecting a client does not rent a worker, move a Task, or select another provi
 If the server is replaced during an unfinished draft and a running Graph,
 Desktop retains the screen and local reading actions. Native status shows the
 connection recovering; input pauses until the server acknowledges the same
-held terminal. A newer viewer's control claim survives automatic recovery.
-**Move here** explicitly requests control. A lost acknowledgement is never a reason to
-repeat takeover or replay input. **Retry** repairs the connection only.
+held terminal. Other views stay attached and keep typing meanwhile. A lost
+acknowledgement is never a reason to replay input. **Retry** repairs the
+connection only.
 
 The server may become unavailable while execution continues: agents run in a
 holder and Graphs in their own processes. Only a child exit, reported by its
@@ -63,8 +63,8 @@ lf desktop ─ app-owned automation socket ─ windows / panes
 The server owns client admission, revision negotiation, framing, bounded
 delivery and connection diagnostics. Shared commands own resolution, defaults, mutation,
 attribution and recoverable outcomes. Holders own PTYs and the agents on
-them; the server owns each held terminal's screen, views and input/geometry
-claims. Graph processes own Graph execution.
+them; the server owns each held terminal's screen, views and which view sizes
+it. Graph processes own Graph execution.
 CLI operations on a Machine can run without its server; work sent to another
 Machine runs in that Machine's server, reached over SSH through `lf server
 connect`. Desktop owns rendering and UI actions.
@@ -118,8 +118,8 @@ Local peer credentials apply only to the private Unix socket. Remote access need
 its own authenticated admission even over Tailscale. Never forward a trusted local
 socket and treat the proxy's UID as the phone's identity. `lf server connect`
 pipes SSH to the socket because an SSH login is the socket's own OS user. Disabling remote access
-or revoking a client must preserve local access and running agents; client
-credentials grant no permission to disregard another view's control claim.
+or revoking a client must preserve local access and running agents. A client
+the server admits to a held terminal can type into it, like every other view.
 
 ## One namespace in three places
 

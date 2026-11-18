@@ -13,9 +13,10 @@ struct SessionNotRunning: LocalizedError {
 
 /// The phone's hold on one Task's running Session.
 ///
-/// The device touched last has the terminal: opening fits it to the phone and
-/// takes the keyboard. When another device takes it back, this one stops
-/// drawing and waits for **Continue here**. Nothing typed is ever sent twice.
+/// Every device viewing the Session may type; the one touched last sizes the
+/// terminal. Opening fits it to the phone. When another device takes the size,
+/// this one stops drawing and waits for **Continue here**. Nothing typed is
+/// ever sent twice.
 @MainActor
 @Observable
 final class SessionLink {
@@ -120,7 +121,7 @@ final class SessionLink {
         guard state == .elsewhere, let size else { return }
         state = .opening
         do {
-            try attachment?.takeControl(size: size)
+            try attachment?.takeSize(size)
             sentSize = size
         } catch { fail(error.localizedDescription) }
     }
@@ -173,8 +174,8 @@ final class SessionLink {
             if state != .elsewhere { render?(data, false) }
             if let echo { Perf.end(echo) }
             echo = nil
-        case .control(let input, let geometry):
-            state = input && geometry ? .live : .elsewhere
+        case .sizing(let sizing):
+            state = sizing ? .live : .elsewhere
             if state == .live, let size, sentSize != size { fit(columns: size.columns, rows: size.rows) }
         case .ended:
             close()

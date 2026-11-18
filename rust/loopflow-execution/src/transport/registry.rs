@@ -91,8 +91,8 @@ pub struct Start {
 /// The revision of what follows the entrance's answer: the viewer protocol
 /// and the child's control requests. The first exchange itself never changes,
 /// so either side of an install reads the other's revision.
-// Revision 3 also restores paste framing after a lost input claim.
-pub const REVISION: u32 = 3;
+// Revision 4: every view types; attach carries no input claim.
+pub const REVISION: u32 = 4;
 
 /// Where connections to held terminals enter the server.
 pub fn entrance() -> Result<PathBuf> {

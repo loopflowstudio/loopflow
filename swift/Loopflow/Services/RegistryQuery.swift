@@ -11,21 +11,6 @@
 
 import Foundation
 
-public enum SessionOpenIntent: String, Codable, Sendable, CaseIterable {
-    case resume, start, reveal
-
-    var arguments: [String] {
-        switch self {
-        case .resume: []
-        case .start: ["--start-if-free"]
-        case .reveal: ["--reveal-existing"]
-        }
-    }
-
-    /// Every intent flag a prepared command may carry.
-    public static let flags = Set(allCases.flatMap(\.arguments))
-}
-
 /// One `lf` query failed — the subprocess errored, or its JSON didn't decode.
 /// `stdout` is what a failed command printed before it exited, such as the
 /// receipt of a Task filed before its run failed.
@@ -67,7 +52,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
     case machineSelf
     case desktopPortfolio
     case configSettings(directory: String, wave: String?, skill: String?, graph: String?, step: String?)
-    case desktopLayout(directory: String, work: String)
     case repoPeople(directory: String)
     case graphList(directory: String)
     case desktopViewGet(directory: String, expression: String?)
@@ -150,8 +134,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
             return ["config", "settings", "--json"] + (wave.map { ["--wave", $0] } ?? [])
                 + (skill.map { ["--skill", $0] } ?? []) + (graph.map { ["--graph", $0] } ?? [])
                 + (step.map { ["--step", $0] } ?? [])
-        case .desktopLayout(_, let work):
-            return ["desktop", "layout", work]
         case .repoPeople:
             return ["repo", "people", "--json"]
         case .graphList:
@@ -251,8 +233,6 @@ public enum ServedRead: Equatable, Sendable, Encodable {
         case .desktopPortfolio: TaggedFields("desktop.portfolio")
         case .configSettings(let directory, let wave, let skill, let graph, let step):
             TaggedFields("config.settings", ["directory": directory, "wave": wave, "skill": skill, "graph": graph, "step": step])
-        case .desktopLayout(let directory, let work):
-            TaggedFields("desktop.layout", ["directory": directory, "work": work])
         case .repoPeople(let directory): TaggedFields("repo.people", ["directory": directory])
         case .graphList(let directory): TaggedFields("graph.list", ["directory": directory])
         case .desktopViewGet(let directory, let expression):
@@ -334,7 +314,7 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case sessionBind(directory: String, id: String, task: String, preview: Bool)
     /// Start the Session's provider process as its own `lf` process, assigning nothing.
     /// The repository's conversation when it names no Session, Task or Wave.
-    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?, intent: SessionOpenIntent)
+    case sessionResume(directory: String, id: String?, task: String?, wave: String?, agent: String?)
     case sessionNew(directory: String, requestID: String, id: String, agent: String?)
     case waveRename(directory: String, wave: String, name: String)
     case waveRemove(directory: String, wave: String, preview: Bool)
@@ -387,7 +367,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
     case desktopDashboardShow(directory: String, id: String, member: String)
     case desktopDashboardSlots(directory: String, id: String, revision: Int64, slots: String)
     case desktopDashboardMove(directory: String, board: String, member: String, destination: String)
-    case desktopLayoutSave(directory: String, work: String, layout: String)
 
     /// The equivalent `lf` command, without its `--cwd`.
     public var argv: [String] {
@@ -438,8 +417,8 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                     "--sequence", String(sequence)] + argument("--agent-process", agentProcess)
         case .sessionBind(_, let id, let task, let preview):
             return ["session", "bind", "--json", "--task", task] + (preview ? ["--dry-run"] : []) + ["--", id]
-        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
-            return Self.prepared(agent, ["session", "resume"] + intent.arguments + [id].compactMap { $0 }
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
+            return Self.prepared(agent, ["session", "resume"] + [id].compactMap { $0 }
                 + argument("--task", task) + argument("--wave", wave),
                 repo: id == nil && task == nil && wave == nil ? directory : nil)
         case .sessionNew(_, let requestID, let id, let agent):
@@ -488,7 +467,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
             return ["desktop", "dashboard", "slots", "query:" + id, "--revision=\(revision)"]
         case .desktopDashboardMove(_, let board, let member, let destination):
             return ["desktop", "dashboard", "move", "\(board)/\(member)", "--destination", destination]
-        case .desktopLayoutSave(_, let work, _): return ["desktop", "layout", work, "--save"]
         }
     }
 
@@ -577,7 +555,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .sessionStatus(_, _, _, _, _, _, let records):
             (try? JSONEncoder().encode(records)).map { String(decoding: $0, as: UTF8.self) }
         case .desktopDashboardSlots(_, _, _, let slots): slots
-        case .desktopLayoutSave(_, _, let layout): layout
         default: nil
         }
     }
@@ -629,9 +606,9 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
                                             "records": records])
         case .sessionBind(let directory, let id, let task, let preview):
             TaggedFields("session.bind", ["directory": directory, "id": id, "task": task, "preview": preview])
-        case .sessionResume(let directory, let id, let task, let wave, let agent, let intent):
+        case .sessionResume(let directory, let id, let task, let wave, let agent):
             TaggedFields("session.resume", ["directory": directory, "id": id, "task": task, "wave": wave,
-                                            "agent": agent, "intent": intent.rawValue])
+                                            "agent": agent])
         case .sessionNew(let directory, let requestID, let id, let agent):
             TaggedFields("session.new", ["directory": directory, "request_id": requestID, "id": id, "agent": agent])
         case .waveRename(let directory, let wave, let name):
@@ -714,8 +691,6 @@ public enum ServedWrite: Equatable, Sendable, Encodable {
         case .desktopDashboardMove(let directory, let board, let member, let destination):
             TaggedFields("desktop.dashboard.move", ["directory": directory, "board": board, "member": member,
                                        "destination": destination])
-        case .desktopLayoutSave(let directory, let work, let layout):
-            TaggedFields("desktop.layout.save", ["directory": directory, "work": work, "layout": layout])
         }
     }
 
@@ -855,16 +830,6 @@ public struct RegistryQuery: Sendable {
     public func reorderTask(_ task: String, to target: String, repoPath: String) async throws -> [String] {
         try Self.decode([String].self, from: await write(
             .desktopDashboardMove(directory: repoPath, board: "working-tasks", member: "task:" + task, destination: "task:" + target)))
-    }
-
-    public func paneLayout(work: String, repoPath: String) async throws -> WorkPaneLayout? {
-        try Self.decode(WorkPaneLayout?.self, from: await serve(.desktopLayout(directory: repoPath, work: work)))
-    }
-
-    public func savePaneLayout(_ layout: WorkPaneLayout, repoPath: String) async throws -> WorkPaneLayout {
-        let input = String(decoding: try JSONEncoder().encode(layout), as: UTF8.self)
-        return try Self.decode(WorkPaneLayout.self, from: await write(
-            .desktopLayoutSave(directory: repoPath, work: layout.work.selector, layout: input)))
     }
 
     public func portfolio(_ arguments: [String] = []) async throws -> Portfolio {
@@ -1245,46 +1210,32 @@ public struct RegistryQuery: Sendable {
             .sessionList(directory: cwd ?? "/", headless: includingHeadless, after: after, limit: 100, task: nil)))
     }
 
-    /// The repository or Wave's retained conversation; explicit opening only.
+    /// The repository or Wave's retained conversation, created when missing.
     public func ensurePrimarySession(wave: String? = nil, cwd: String) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil, intent: .start)))
+            .sessionResume(directory: cwd, id: nil, task: nil, wave: wave, agent: nil)))
     }
 
-    /// Select the Task's ongoing conversation. Start may create it; reveal
-    /// requires existing history. External ownership offers Take back.
-    public func prepareTaskSession(issue: String, cwd: String?, intent: SessionOpenIntent = .start) async throws -> SessionRecord {
+    /// The Task's ongoing conversation, created when missing.
+    public func prepareTaskSession(issue: String, cwd: String?) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
-            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil, intent: intent)))
+            .sessionResume(directory: cwd ?? "/", id: nil, task: issue, wave: nil, agent: nil)))
     }
 
-    /// Rust's Start after a refused reveal: only an authoritative absence of
-    /// history offers it. A failed Start reports its own failure, and a failed
-    /// read offers nothing.
-    public func startOffer(refused intent: SessionOpenIntent, issue: String, cwd: String) async -> SessionAction? {
-        guard intent == .reveal,
-              let report = try? Self.decode(SessionResumeExplanation.self, from: await run(
-                  ["session", "resume", "--task", issue, "--explain", "--json"], cwd)),
-              report.state == nil, report.action?.intent == .start,
-              report.impediments.isEmpty, report.unavailable.isEmpty else { return nil }
-        return report.actions.first { $0.kind == .open && $0.unavailableReason == nil }
-    }
-
-    /// Prepare without launching. Resume transfers control; Start and reveal never
-    /// replace input. Only Start may create the first provider thread. Naming the
-    /// Session's Task or Wave as `work` makes its `open_argv` resume managed.
+    /// Prepare without launching; `open_argv` views a held terminal, resumes an
+    /// ended Session, or takes over a native client. Naming the Session's Task or
+    /// Wave as `work` makes its `open_argv` resume managed.
     public func prepareSession(
         id: String,
         work: WorkReference? = nil,
         agent: String? = nil,
-        cwd: String? = nil,
-        intent: SessionOpenIntent = .start
+        cwd: String? = nil
     ) async throws -> SessionRecord {
         try Self.decode(SessionRecord.self, from: await write(
             .sessionResume(directory: cwd ?? "/", id: id,
                            task: work?.kind == .task ? work?.id : nil,
                            wave: work?.kind == .wave ? work?.id : nil,
-                           agent: agent, intent: intent)))
+                           agent: agent)))
     }
 
     /// Give one Session a human-assigned name and return the authoritative

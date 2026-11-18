@@ -77,32 +77,10 @@ fn rental_in(conn: &Connection, id: &RentalId) -> StoreResult<Rental> {
 impl SqliteStore {
     // -- Pools -------------------------------------------------------------
 
-    pub fn capacity_created_at(
-        &self,
-    ) -> StoreResult<std::collections::HashMap<(String, String), i64>> {
+    /// A removed pool's Machines stay owned, with no pool.
+    pub fn clear_pool_machines(&self, name: &str) -> StoreResult<()> {
         let conn = self.conn.lock().expect("store mutex poisoned");
-        let mut query = conn.prepare("SELECT 'pool',name,created_at FROM pools UNION ALL SELECT 'ondemand',name,created_at FROM ondemands")?;
-        let rows = query
-            .query_map([], |row| Ok(((row.get(0)?, row.get(1)?), row.get(2)?)))?
-            .collect::<Result<_, _>>()?;
-        Ok(rows)
-    }
-
-    pub fn register_pool(&self, name: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
-            params![name, now_unix()],
-        )?;
-        Ok(())
-    }
-
-    pub fn remove_pool_record(&self, name: &str) -> StoreResult<()> {
-        let mut conn = self.conn.lock().expect("store mutex poisoned");
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        tx.execute("UPDATE pool_machines SET pool=NULL WHERE pool=?1", [name])?;
-        tx.execute("DELETE FROM pools WHERE name=?1", [name])?;
-        tx.commit()?;
+        conn.execute("UPDATE pool_machines SET pool=NULL WHERE pool=?1", [name])?;
         Ok(())
     }
 
@@ -153,12 +131,6 @@ impl SqliteStore {
         )?;
         if rented {
             return Err(invalid("a rented machine has no pool, cost or expiry"));
-        }
-        if let Some(pool) = &ownership.pool {
-            tx.execute(
-                "INSERT OR IGNORE INTO pools(name,created_at) VALUES(?1,?2)",
-                params![pool, now_unix()],
-            )?;
         }
         let known: bool = tx.query_row(
             "SELECT EXISTS(SELECT 1 FROM machines WHERE id=?1)",
@@ -239,23 +211,6 @@ impl SqliteStore {
                 Ok((held.task, since))
             })
             .collect()
-    }
-
-    // -- On-demands ----------------------------------------------------------
-
-    pub fn register_ondemand(&self, ondemand: &OnDemand) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute(
-            "INSERT OR IGNORE INTO ondemands(name,created_at) VALUES(?1,?2)",
-            params![ondemand.name, ondemand.created_at.unix_timestamp()],
-        )?;
-        Ok(())
-    }
-
-    pub fn remove_ondemand_record(&self, name: &str) -> StoreResult<()> {
-        let conn = self.conn.lock().expect("store mutex poisoned");
-        conn.execute("DELETE FROM ondemands WHERE name=?1", [name])?;
-        Ok(())
     }
 
     // -- Rentals -------------------------------------------------------------

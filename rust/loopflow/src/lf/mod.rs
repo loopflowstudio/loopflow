@@ -497,10 +497,8 @@ pub enum Commands {
         #[command(subcommand)]
         cmd: SessionCommand,
     },
-    /// Open one conversation here, in a sibling tab, or focus its existing view
+    /// Open one conversation here, in a sibling tab, or a repository/Wave overview
     Open(commands::open::OpenArgs),
-    /// Open configured Task layouts or a repository/Wave overview
-    Workspace(commands::open::WorkspaceArgs),
     /// Run an inline prompt
     #[command(name = ":")]
     Inline {
@@ -755,13 +753,11 @@ pub enum DesktopCommand {
         #[arg(long, global = true, id = "portfolio_json")]
         json: bool,
     },
-    /// Read a Work's pane intent or a Dashboard's slots as JSON, or save a complete pane record from stdin
+    /// Read a saved Dashboard (its arrangement and slots) as JSON; `lf desktop dashboard slots` replaces the slots
     Layout {
-        /// repository, wave:<durable-id>, task:<durable-id> or query:ID
+        /// query:ID
+        #[arg(value_name = "QUERY")]
         work: String,
-        /// Replace the pane record from JSON on stdin instead of reading it
-        #[arg(long)]
-        save: bool,
     },
 
     /// List the window's Tasks by position (as ⌘1–9 select them) and each Task's panes
@@ -986,9 +982,7 @@ impl DesktopCommand {
     pub fn is_read(&self) -> bool {
         matches!(
             self,
-            Self::View { .. }
-                | Self::Portfolio { cmd: None, .. }
-                | Self::Layout { save: false, .. }
+            Self::View { .. } | Self::Portfolio { cmd: None, .. } | Self::Layout { .. }
         )
     }
 }
@@ -1160,7 +1154,6 @@ impl Commands {
             Self::List { .. } | Self::Help { .. } | Self::Context { .. } => false,
             Self::Ship { .. }
             | Self::Open(_)
-            | Self::Workspace(_)
             | Self::Inline { .. }
             | Self::Scratch { .. }
             | Self::Discord { .. }
@@ -1179,7 +1172,6 @@ impl TaskCommand {
             | Self::Location { .. }
             | Self::WatchFiles { .. }
             | Self::Status { .. }
-            | Self::View { .. }
             | Self::Diff { .. }
             | Self::Changes { .. }
             | Self::Context { .. }
@@ -1609,12 +1601,6 @@ pub enum GraphCommand {
 /// Shared selection, preparation and next-turn options for `resume` and `session new`.
 #[derive(Args, Debug)]
 pub struct SessionConnectionArgs {
-    /// Reveal existing history without replacing another terminal or starting a turn
-    #[arg(long, hide = true, conflicts_with = "message")]
-    pub reveal_existing: bool,
-    /// Start or continue without replacing another terminal's input
-    #[arg(long, hide = true, conflicts_with_all = ["message", "reveal_existing"])]
-    pub start_if_free: bool,
     #[arg(long, conflicts_with = "wave")]
     pub task: Option<String>,
     #[arg(long)]
@@ -1630,17 +1616,6 @@ pub struct SessionConnectionArgs {
 }
 
 impl SessionConnectionArgs {
-    pub fn intent(&self) -> loopflow_execution::session::SessionOpenIntent {
-        use loopflow_execution::session::SessionOpenIntent;
-        if self.reveal_existing {
-            SessionOpenIntent::Reveal
-        } else if self.start_if_free {
-            SessionOpenIntent::Start
-        } else {
-            SessionOpenIntent::Resume
-        }
-    }
-
     /// The Task or Wave this command names, as the flag and value that name
     /// it. Naming one makes the resume managed, as `--task` or `--wave` does
     /// for a launch, also beside a Session id.
@@ -1819,7 +1794,7 @@ pub enum SessionCommand {
     },
     /// Get back to a conversation: this scope's, a Task's, or an exact one
     #[command(
-        after_help = "Reconnects to the running provider or continues its saved thread after safe replacement: a terminal showing it hands it over and says where it went; a dead provider resumes from its history. A live turn or pending request keeps its provider; if attachment fails, resume reports the failure, leaves that work intact and resends no input. Replacing an idle provider discards unsent input, just as quitting it does. With nothing to resume, it starts one.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
+        after_help = "Opens the conversation in this terminal. With none for this scope, it starts one and says so. A conversation running in an lf terminal gains one more view here, and every view types. An ended or crashed one continues its provider thread from history. One running in a client lf can't share is taken over: that client ends, unsent text there is lost, and resume says so. If attachment fails, resume reports the failure, leaves that work intact and resends no input.\n\nOther harness:\n  lf resume -a codex                       continue on Codex, seeded with what the last thread knew\nMoves:\n  lf session move --on claude -a codex      continue Claude Sessions on Codex\n  lf --machine <machine> resume <session>  move only this conversation to another Machine\n  lf task move <task> --machine <machine>  move a Task with its Workflow and Session"
     )]
     Resume {
         /// Session ID, Task identifier, or provider conversation ID; beside
@@ -2358,13 +2333,6 @@ using lf open's ordinary host selection. Preview and --quote open nothing."
         #[command(flatten)]
         selection: crate::lf::Selection,
     },
-    /// Browse the Task brief, workflow and recorded runs without starting work
-    View {
-        issue: Option<String>,
-        /// Print once, including when stdout is a terminal
-        #[arg(long)]
-        once: bool,
-    },
     /// Show this Task's patch
     Diff {
         issue: String,
@@ -2538,7 +2506,6 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -2573,7 +2540,6 @@ impl TaskCommand {
             Self::List { .. } | Self::Create { .. } => None,
             Self::Retire { issue }
             | Self::Status { issue, .. }
-            | Self::View { issue, .. }
             | Self::Abandon { issue, .. }
             | Self::Run { issue, .. }
             | Self::Hold { issue, .. }
@@ -3436,19 +3402,21 @@ mod tests {
     }
 
     #[test]
-    fn conversation_modes_and_workspace_options_have_separate_commands() {
+    fn workspace_options_belong_to_open_and_exclude_one_conversation_modes() {
         for flags in [
             ["--here", "--tab"],
             ["--here", "--focus"],
             ["--tab", "--focus"],
+            ["--workspace", "--here"],
+            ["--workspace", "--tab"],
+            ["--available", "--focus"],
+            ["--available", "--workspace"],
         ] {
             assert!(Cli::try_parse_from(["lf", "open", flags[0], flags[1]]).is_err());
         }
-        for option in ["--available", "--no-focus"] {
-            assert!(Cli::try_parse_from(["lf", "open", option]).is_err());
-            assert!(Cli::try_parse_from(["lf", "workspace", option]).is_ok());
+        for option in ["--workspace", "--available", "--no-focus"] {
+            assert!(Cli::try_parse_from(["lf", "open", option]).is_ok());
         }
-        assert!(Cli::try_parse_from(["lf", "workspace", "--here"]).is_err());
     }
 
     #[test]

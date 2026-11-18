@@ -11,7 +11,6 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 use loopflow_execution::engine::task;
 use loopflow_execution::machine::wire::{Secrets, Selection, Sender};
-use loopflow_execution::session::SessionOpenIntent;
 
 /// Moving a Task changes its Wave membership or its Machine ownership.
 #[derive(Debug, Serialize, schemars::JsonSchema)]
@@ -407,7 +406,6 @@ writes! {
         task: Option<String>,
         wave: Option<String>,
         agent: Option<String>,
-        intent: SessionOpenIntent,
     } => loopflow_execution::ops::human_session::SessionRecord;
     { .. } => self.prepare_session(remote)?,
 
@@ -1040,17 +1038,6 @@ writes! {
         &[("destination".to_owned(), destination.clone())].into(),
     )?,
 
-    /// `lf desktop layout <work> --save`, with `layout` (JSON) on stdin.
-    #[serde(rename = "desktop.layout.save")]
-    DesktopLayoutSave {
-        directory: PathBuf,
-        work: String,
-        layout: String,
-    } => loopflow_storage::work::selection::WorkPaneLayout;
-    { work, layout, .. } => {
-        super::desktop::save_layout(None, directory, work, &mut layout.as_bytes())?
-    },
-
     /// `lf config set <key> <value> <destination flags> --json`: declare a
     /// setting in the destination's file; `value` is YAML.
     #[serde(rename = "config.set")]
@@ -1145,8 +1132,7 @@ macro_rules! directory_of {
             | Write::DesktopDashboardHide { directory, .. }
             | Write::DesktopDashboardShow { directory, .. }
             | Write::DesktopDashboardSlots { directory, .. }
-            | Write::DesktopDashboardMove { directory, .. }
-            | Write::DesktopLayoutSave { directory, .. } => Some(directory),
+            | Write::DesktopDashboardMove { directory, .. } => Some(directory),
             Write::DesktopPortfolioSet { .. }
             | Write::AccountDisconnect { .. }
             | Write::AccountConnect { .. }
@@ -1213,7 +1199,6 @@ impl Write {
             task,
             wave,
             agent,
-            intent,
         } = self
         else {
             return Ok(None);
@@ -1246,7 +1231,6 @@ impl Write {
             },
             wave: wave.clone().or(forward.wave),
             agent: agent.clone(),
-            intent: *intent,
         };
         Remote::new(machine, repository, write, false, None).map(Some)
     }
@@ -1274,13 +1258,6 @@ impl Write {
             remote.call()?,
             &remote.machine,
             false,
-            matches!(
-                self,
-                Self::SessionResume {
-                    intent: SessionOpenIntent::Resume,
-                    ..
-                }
-            ),
         )
     }
 
@@ -1298,7 +1275,6 @@ impl Write {
                 task,
                 wave,
                 agent,
-                intent,
                 ..
             } => {
                 let mut words = Vec::new();
@@ -1309,7 +1285,6 @@ impl Write {
                     words.extend(["--agent", agent]);
                 }
                 words.extend(["session", "resume"]);
-                words.extend(intent.flag());
                 words.extend(id.as_deref());
                 if let Some(task) = task {
                     words.extend(["--task", task]);
@@ -1354,7 +1329,6 @@ impl Write {
         match self {
             Self::TaskSave { content, .. } => Some(content),
             Self::DesktopDashboardSlots { slots, .. } => Some(slots),
-            Self::DesktopLayoutSave { layout, .. } => Some(layout),
             _ => None,
         }
     }
@@ -1537,7 +1511,7 @@ mod tests {
             r#"{"kind":"desktop.dashboard.query","directory":"/r","id":"picked","expression":"-state:done","revision":null}"#,
             r#"{"kind":"task.hold","directory":"/r","issue":"FIX-1","reason":null}"#,
             r#"{"kind":"desktop.portfolio.set","change":{"action":"remove","path":"/r"}}"#,
-            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null,"intent":"resume"}"#,
+            r#"{"kind":"session.resume","directory":"/r","id":null,"task":null,"wave":null,"agent":null}"#,
             r#"{"kind":"session.new","directory":"/r","request_id":"new-thread","id":"session_1","agent":"codex"}"#,
             r#"{"kind":"task.save","directory":"/","issue":"FIX-1","path":"a.txt","revision":"r","content":"text"}"#,
             r#"{"kind":"task.run","directory":"/r","issue":"FIX-1","graph":null,"from":"implement","agent":"claude","approve":false}"#,

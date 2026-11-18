@@ -1788,10 +1788,12 @@ fn deleted_task_status_requires_explicit_history_lookup() {
             [fixture.task.id.as_str()],
         )
         .unwrap();
-    connection.execute(
-            "INSERT INTO task_deletions(wave_id,issue_id,identifier,confirmed_at) VALUES (?1,?2,?3,456)",
-            rusqlite::params![fixture.task.wave_id.as_ref().unwrap().as_str(), fixture.task.linear_id.as_ref().unwrap().as_str(), fixture.task.identifier],
-        ).unwrap();
+    connection
+        .execute(
+            "UPDATE tasks SET planning_deleted_at=456 WHERE id=?1",
+            [fixture.task.id.as_str()],
+        )
+        .unwrap();
     let pr = runtime
         .block_on(fixture.store.active_task_pr(&fixture.task.id))
         .unwrap();

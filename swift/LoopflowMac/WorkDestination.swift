@@ -22,7 +22,6 @@ struct TaskLink: Equatable, Sendable {
     let issue: String
     let repo: String?
     let session: String?
-    let diff: Bool
     let machine: String?
     let repository: String?
     /// Opening its conversation, rather than the Task's details.
@@ -30,12 +29,11 @@ struct TaskLink: Equatable, Sendable {
     /// The public address Rust resolved, when this link arrived as one.
     private let workAddress: String?
 
-    init(issue: String, repo: String?, session: String? = nil, diff: Bool = false, machine: String? = nil,
+    init(issue: String, repo: String?, session: String? = nil, machine: String? = nil,
          repository: String? = nil, conversation: Bool = false, address: String? = nil) {
         self.issue = issue
         self.repo = repo
         self.session = session
-        self.diff = diff
         self.machine = machine
         self.repository = repository
         self.conversation = conversation
@@ -50,14 +48,14 @@ struct TaskLink: Equatable, Sendable {
     /// An external Work link always opens its conversation.
     init?(_ link: WorkLink) {
         guard link.target.kind == .task, let issue = link.target.task else { return nil }
-        self.init(issue: issue, repo: link.target.repositoryPath, session: link.target.session, diff: link.target.diff,
+        self.init(issue: issue, repo: link.target.repositoryPath, session: link.target.session,
                   machine: link.target.executionMachine,
                   repository: link.target.executionMachine == nil ? nil : link.target.repositoryId,
                   conversation: true, address: link.url)
     }
 
     func with(repo: String) -> TaskLink {
-        TaskLink(issue: issue, repo: repo, session: session, diff: diff, machine: machine,
+        TaskLink(issue: issue, repo: repo, session: session, machine: machine,
                  repository: repository, conversation: conversation, address: workAddress)
     }
 

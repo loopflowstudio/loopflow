@@ -43,28 +43,6 @@ pub fn conversation(
     })
 }
 
-/// Whether opening may take control, start a thread, or only reveal history.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, schemars::JsonSchema,
-)]
-#[serde(rename_all = "snake_case")]
-pub enum SessionOpenIntent {
-    Resume,
-    Start,
-    Reveal,
-}
-
-impl SessionOpenIntent {
-    /// The `lf session resume` flag carrying this intent; ordinary resume has none.
-    pub fn flag(self) -> Option<&'static str> {
-        match self {
-            Self::Resume => None,
-            Self::Start => Some("--start-if-free"),
-            Self::Reveal => Some("--reveal-existing"),
-        }
-    }
-}
-
 #[cfg(test)]
 mod title_tests {
     #[test]

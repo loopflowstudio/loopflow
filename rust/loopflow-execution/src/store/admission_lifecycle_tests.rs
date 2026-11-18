@@ -695,8 +695,8 @@ fn competing_session_assignments_bind_only_the_winning_task() {
     .unwrap();
     {
         let conn = store.conn.lock().unwrap();
-        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,worktree,created_at)
-                SELECT ?1,repository_id,project_id,?1,?1,?1,1 FROM tasks WHERE id=?2",
+        conn.execute("INSERT INTO tasks(id,repository_id,project_id,external_issue_id,issue_identifier,created_at)
+                SELECT ?1,repository_id,project_id,?1,?1,1 FROM tasks WHERE id=?2",
                 rusqlite::params![other_task.as_str(), task_id.as_str()]).unwrap();
     }
     let barrier = Arc::new(Barrier::new(2));
